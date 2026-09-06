@@ -47,7 +47,7 @@ import io.mazewall.recover
 import java.nio.charset.StandardCharsets
 import java.util.logging.Logger
 
-private class SyscallArguments(
+internal data class SyscallArguments(
     val pathStr: String?,
     val sockaddrBytes: ByteArray?,
     val dirfd: Int = -100,
@@ -196,9 +196,9 @@ internal class SupervisorSessionHandler(
                     val tid = Tid(pidVal)
                     val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
                     val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
-                    val kind = SupervisorNotificationMachine.classify(nr, traceeArch)
-                    val ppid = getPpid(pidVal)
-                    logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppid, nr=$nr, path=${extracted.pathStr}" }
+                    val header = NotifHeader(nr, tid, traceeArch, archVal, getPpid(pidVal), args)
+                    val kind = SupervisorNotificationMachine.classify(header.nr, header.arch)
+                    logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=${header.ppid}, nr=$nr, path=${extracted.pathStr}" }
 
                     // --- DAEMON-SIDE FAST-PATH BYPASS ---
                     // HAZARD: When the sandboxed thread triggers lazy classloading (e.g., loading IOException
@@ -242,23 +242,14 @@ internal class SupervisorSessionHandler(
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-                    val success = sendRequestToJvm(id, pidVal, archVal, ppid, nr, args, extracted.pathStr, extracted.sockaddrBytes)
+                    val request = JvmVerdictRequest(id, header, extracted.pathStr, extracted.sockaddrBytes)
+                    val success = sendRequestToJvm(request)
                     if (!success) {
                         logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                         return false
                     }
 
-                    val res = readAndHandleJvmResponse(
-                        id,
-                        nr,
-                        args,
-                        extracted.pathStr,
-                        extracted.sockaddrBytes,
-                        extracted.openHow,
-                        resp,
-                        tid,
-                        traceeArch,
-                    )
+                    val res = readAndHandleJvmResponse(SupervisorRouteContext(request, extracted, resp))
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
                 } catch (e: Exception) {
@@ -325,17 +316,8 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    @Suppress("LongParameterList")
-    internal fun sendRequestToJvm(
-        id: Long,
-        pidVal: Int,
-        archVal: Int,
-        ppid: Int,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
-        sockaddrBytes: ByteArray?
-    ): Boolean {
+    internal fun sendRequestToJvm(request: JvmVerdictRequest): Boolean {
+        val (id, header, pathStr, sockaddrBytes) = request
         val sizeOfMeta = SIZE_META + SIZE_INT + SIZE_INT // Include PPID and Arch
         val sizeOfArgHeader = SIZE_ARG_HEADER
         val totalSize = sizeOfMeta + (
@@ -353,10 +335,10 @@ internal class SupervisorSessionHandler(
         var offset = 0L
 
         netBuf.writeLong(offset, id); offset += BYTES_PER_LONG
-        netBuf.writeInt(offset, pidVal); offset += SIZE_INT
-        netBuf.writeInt(offset, archVal); offset += SIZE_INT
-        netBuf.writeInt(offset, ppid); offset += SIZE_INT
-        netBuf.writeInt(offset, nr); offset += SIZE_INT
+        netBuf.writeInt(offset, header.tid.value); offset += SIZE_INT
+        netBuf.writeInt(offset, header.audit); offset += SIZE_INT
+        netBuf.writeInt(offset, header.ppid); offset += SIZE_INT
+        netBuf.writeInt(offset, header.nr); offset += SIZE_INT
 
         if (pathStr != null) {
             netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
@@ -371,7 +353,7 @@ internal class SupervisorSessionHandler(
             ManagedSegment.copy(sockaddrBytes, 0, buf, offset, sockaddrBytes.size)
         } else {
             netBuf.writeInt(offset, MAX_ARGS); offset += SIZE_INT
-            for (arg in args) {
+            for (arg in header.args) {
                 netBuf.writeByte(offset, ARG_TYPE_LONG); offset += SIZE_BYTE
                 netBuf.writeLongUnaligned(offset, arg); offset += BYTES_PER_LONG
             }
@@ -382,31 +364,11 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    @Suppress("LongParameterList")
-    internal fun readAndHandleJvmResponse(
-        id: Long,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
-        sockaddrBytes: ByteArray?,
-        resp: ManagedSegment,
-        tid: Tid,
-        traceeArch: io.mazewall.core.Arch
-    ): Boolean = readAndHandleJvmResponse(id, nr, args, pathStr, sockaddrBytes, null, resp, tid, traceeArch)
-
-    context(arena: NativeArena)
-    @Suppress("LongParameterList")
-    internal fun readAndHandleJvmResponse(
-        id: Long,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
-        sockaddrBytes: ByteArray?,
-        openHow: OpenHow?,
-        resp: ManagedSegment,
-        tid: Tid,
-        traceeArch: io.mazewall.core.Arch
-    ): Boolean {
+    internal fun readAndHandleJvmResponse(context: SupervisorRouteContext): Boolean {
+        val (request, extracted, resp) = context
+        val (id, header, pathStr, sockaddrBytes) = request
+        val (nr, tid, traceeArch, _, _, args) = header
+        val openHow = extracted.openHow
         val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
         pollFd.setFd(socketFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
@@ -477,9 +439,9 @@ internal class SupervisorSessionHandler(
                     true
                 }
                 is SupervisorRoute.InjectFd ->
-                    handleInjectFd(id, nr, args, pathStr, sockaddrBytes, openHow, resp, tid, traceeArch)
+                    handleInjectFd(context)
                 is SupervisorRoute.SecureExec ->
-                    handleSecureExecve(id, nr, args, pathStr, jvmPath, resp, tid, traceeArch)
+                    handleSecureExecve(context, jvmPath)
                 is SupervisorRoute.AskJvm -> {
                     sendSeccompError(id, NativeConstants.EPERM, resp)
                     false
@@ -504,15 +466,12 @@ internal class SupervisorSessionHandler(
      */
     context(arena: NativeArena)
     private fun handleSecureExecve(
-        id: Long,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
+        context: SupervisorRouteContext,
         jvmPath: String?,
-        resp: ManagedSegment,
-        tid: Tid,
-        traceeArch: io.mazewall.core.Arch,
     ): Boolean {
+        val (request, _, resp) = context
+        val (id, header, pathStr) = request
+        val (nr, tid, traceeArch, _, _, args) = header
         fun abort(errno: Int, message: String): Boolean {
             logger.severe(message)
             requestParentRegisterRewrite(tid, -1, 0, 0, 0, 0)
@@ -631,31 +590,11 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena)
-    @Suppress("LongParameterList")
-    internal fun handleInjectFd(
-        id: Long,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
-        sockaddrBytes: ByteArray?,
-        resp: ManagedSegment,
-        tid: Tid,
-        traceeArch: io.mazewall.core.Arch
-    ): Boolean = handleInjectFd(id, nr, args, pathStr, sockaddrBytes, null, resp, tid, traceeArch)
-
-    context(arena: NativeArena)
-    @Suppress("LongParameterList")
-    internal fun handleInjectFd(
-        id: Long,
-        nr: Int,
-        args: LongArray,
-        pathStr: String?,
-        sockaddrBytes: ByteArray?,
-        openHow: OpenHow?,
-        resp: ManagedSegment,
-        tid: Tid,
-        traceeArch: io.mazewall.core.Arch
-    ): Boolean {
+    internal fun handleInjectFd(context: SupervisorRouteContext): Boolean {
+        val (request, extracted, resp) = context
+        val (id, header, pathStr, sockaddrBytes) = request
+        val (nr, tid, traceeArch, _, _, args) = header
+        val openHow = extracted.openHow
         var localFdValue = -1
         var injectFlags = NewFdFlags.NONE
         try {

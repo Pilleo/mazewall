@@ -25,6 +25,76 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+context(arena: io.mazewall.ffi.memory.NativeArena)
+private fun SupervisorSessionHandler.readAndHandleJvmResponse(
+    id: Long,
+    nr: Int,
+    args: LongArray,
+    path: String?,
+    sockaddrBytes: ByteArray?,
+    openHow: OpenHow?,
+    response: io.mazewall.ffi.memory.ManagedSegment,
+    tid: io.mazewall.core.Tid,
+    arch: io.mazewall.core.Arch,
+): Boolean = readAndHandleJvmResponse(
+    SupervisorRouteContext(
+        JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
+        SyscallArguments(path, sockaddrBytes, openHow = openHow),
+        response,
+    ),
+)
+
+context(arena: io.mazewall.ffi.memory.NativeArena)
+private fun SupervisorSessionHandler.handleInjectFd(
+    id: Long,
+    nr: Int,
+    args: LongArray,
+    path: String?,
+    sockaddrBytes: ByteArray?,
+    response: io.mazewall.ffi.memory.ManagedSegment,
+    tid: io.mazewall.core.Tid,
+    arch: io.mazewall.core.Arch,
+): Boolean = handleInjectFd(
+    SupervisorRouteContext(
+        JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
+        SyscallArguments(path, sockaddrBytes),
+        response,
+    ),
+)
+
+context(arena: io.mazewall.ffi.memory.NativeArena)
+private fun SupervisorSessionHandler.handleInjectFd(
+    id: Long,
+    nr: Int,
+    args: LongArray,
+    path: String?,
+    sockaddrBytes: ByteArray?,
+    openHow: OpenHow?,
+    response: io.mazewall.ffi.memory.ManagedSegment,
+    tid: io.mazewall.core.Tid,
+    arch: io.mazewall.core.Arch,
+): Boolean = handleInjectFd(
+    SupervisorRouteContext(
+        JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
+        SyscallArguments(path, sockaddrBytes, openHow = openHow),
+        response,
+    ),
+)
+
+context(arena: io.mazewall.ffi.memory.NativeArena)
+private fun SupervisorSessionHandler.sendRequestToJvm(
+    id: Long,
+    pid: Int,
+    archAudit: Int,
+    ppid: Int,
+    nr: Int,
+    args: LongArray,
+    path: String?,
+    sockaddrBytes: ByteArray?,
+): Boolean = sendRequestToJvm(
+    JvmVerdictRequest(id, NotifHeader(nr, io.mazewall.core.Tid(pid), io.mazewall.core.Arch.current(), archAudit, ppid, args), path, sockaddrBytes),
+)
+
 class SupervisorSessionHandlerTest {
 
     @AfterEach
