@@ -54,6 +54,8 @@ internal sealed interface LandlockState {
      */
     data class Failed(
         val error: Throwable,
+        /** Last successfully entered lifecycle phase before this failure. */
+        val previous: LandlockState? = null,
     ) : LandlockState
 }
 
@@ -136,7 +138,7 @@ internal class LandlockSession(
                 val unsupported = Landlock.handleUnsupportedLandlockOutcome()
                 state = when (unsupported) {
                     is LandlockApplyResult.Rejected -> LandlockState.Failed(
-                        UnsupportedKernelFeatureException(unsupported.reason),
+                        UnsupportedKernelFeatureException(unsupported.reason), state,
                     )
                     else -> LandlockState.Applied
                 }
@@ -163,7 +165,7 @@ internal class LandlockSession(
                             "landlock_create_ruleset",
                             created.errno,
                         )
-                        state = LandlockState.Failed(outcome.toFailure())
+                        state = LandlockState.Failed(outcome.toFailure(), state)
                         return outcome
                     }
                     is LandlockFdOutcome.Ok -> {
@@ -180,7 +182,7 @@ internal class LandlockSession(
                                         "landlock_restrict_self",
                                         restricted.errno,
                                     )
-                                    state = LandlockState.Failed(outcome.toFailure())
+                                    state = LandlockState.Failed(outcome.toFailure(), state)
                                     return outcome
                                 }
                                 is LandlockRestrictOutcome.Ok -> {
@@ -193,7 +195,7 @@ internal class LandlockSession(
             }
             return LandlockApplyResult.Applied
         } catch (t: Throwable) {
-            state = LandlockState.Failed(t)
+            state = LandlockState.Failed(t, state)
             return LandlockApplyResult.Rejected(t.message ?: t.javaClass.name, cause = t)
         }
     }

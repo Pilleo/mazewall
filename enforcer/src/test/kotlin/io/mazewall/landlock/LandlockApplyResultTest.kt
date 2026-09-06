@@ -127,6 +127,19 @@ class LandlockApplyResultTest {
     }
 
     @Test
+    fun `create-ruleset failure retains the lifecycle phase`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(enosysCreateEngine())
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.CreatingRuleset>(failed.previous)
+    }
+
+    @Test
     fun `ContainedExecutors install receipt is not installed when landlock is rejected`(@TempDir dir: Path) {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         Platform.setProvider(MockPlatformProvider())
