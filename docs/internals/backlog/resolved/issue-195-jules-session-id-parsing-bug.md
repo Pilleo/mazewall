@@ -1,7 +1,7 @@
 ---
 title: Fix Jules Session ID Parsing Bug
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:

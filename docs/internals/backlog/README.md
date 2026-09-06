@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 98 | *Total Resolved Issues:* 485
+*Total Active Issues:* 97 | *Total Resolved Issues:* 486
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -11,7 +11,6 @@
 | [issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec](implementation/issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec.md) | Align Codanna document indexing and agentmemory semantic recall on BGE-M3 vector space | medium | testing |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
-| [issue-195-jules-session-id-parsing-bug](issue-195-jules-session-id-parsing-bug.md) | Fix Jules Session ID Parsing Bug | high | orchestrator |
 | [issue-197-graceful-fallback-for-ai-agent-failures](issue-197-graceful-fallback-for-ai-agent-failures.md) | Graceful Fallback for AI Agent Failures | high | orchestrator |
 | [issue-198-auto-closing-linked-github-issues](issue-198-auto-closing-linked-github-issues.md) | Auto-Closing Linked GitHub Issues | high | orchestrator |
 | [issue-202-handle-cli-authentication-failures](issue-202-handle-cli-authentication-failures.md) | Detect and Handle CLI Authentication Failures with Actionable Login Alerts | high | orchestrator |
