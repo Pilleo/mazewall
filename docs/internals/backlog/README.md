@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 105 | *Total Resolved Issues:* 478
+*Total Active Issues:* 101 | *Total Resolved Issues:* 482
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -42,10 +42,6 @@
 | [issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter](issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter.md) | Extend backlog frontmatter with target_symbols and verify.cheap | high | orchestrator |
 | [issue-20260823-181022-diff-escape-pauses-sibling-slots](issue-20260823-181022-diff-escape-pauses-sibling-slots.md) | Pause sibling slots when a PR diff escapes declared target_files | high | orchestrator |
 | [issue-20260823-181023-keep-module-level-exclusive-scheduling](issue-20260823-181023-keep-module-level-exclusive-scheduling.md) | Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel | high | orchestrator |
-| [issue-20260823-212901-document-run-orchestrator-as-the-only-production-loop](issue-20260823-212901-document-run-orchestrator-as-the-only-production-loop.md) | Document run_orchestrator as the only production loop | high | orchestrator |
-| [issue-20260823-212906-default-off-paperclip-agent-dispatch-so-jules-stays-the-work](issue-20260823-212906-default-off-paperclip-agent-dispatch-so-jules-stays-the-work.md) | Default-off Paperclip agent dispatch so Jules stays the worker | high | orchestrator |
-| [issue-20260823-212912-do-not-resolve-markdown-from-paperclip-done-without-orchestr](issue-20260823-212912-do-not-resolve-markdown-from-paperclip-done-without-orchestr.md) | Do not resolve markdown from Paperclip done without orchestrator ResolveTask | high | orchestrator |
-| [issue-20260823-212917-add-operator-dry-run-then-one-issue-ingest-checklist](issue-20260823-212917-add-operator-dry-run-then-one-issue-ingest-checklist.md) | Add operator dry-run then one-issue ingest checklist | high | orchestrator |
 | [issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint](issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint.md) | Gradle 9 Cross-Module Execution-Time Resolution: Canonical Pattern + Build-Script Lint | high | ci |
 | [issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg](issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg.md) | FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep | high | platform |
 | [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |

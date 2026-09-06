@@ -70,6 +70,20 @@ Requires `codanna` on PATH. The same values are written into issue YAML (`target
 
 ## Running the Orchestrator
 
+### How work runs
+
+`./scripts/run_orchestrator.sh` is the production control loop. It starts the Kotlin daemon with `-PincludeOrchestrator=true`; the daemon owns task selection, start approval, Jules dispatch, CI monitoring, review, and the only path that resolves backlog markdown.
+
+Paperclip is an optional board mirror, not a dispatcher. A mirrored card has no agent assignment and must not be assigned while its backlog item has an active orchestrator slot. Jules remains the default worker. Do not schedule `scripts/paperclip_backlog_sync.kts` with cron.
+
+To validate one optional mirror without changing the production loop, keep the daemon running and preview the same eligible backlog data first:
+
+```bash
+kotlin -Xuse-fir-lt=false scripts/paperclip_backlog_sync.kts --dry-run
+```
+
+For one deliberate live mirror, run the same command without `--dry-run`, confirm the resulting `paperclip_issue_id` in the YAML, confirm that the card has no agent run, and leave Jules/CI/merge under the daemon.
+
 Use the provided shell script to run the daemon:
 
 ```bash

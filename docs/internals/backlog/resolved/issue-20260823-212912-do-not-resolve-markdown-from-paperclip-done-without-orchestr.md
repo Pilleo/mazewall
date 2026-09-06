@@ -1,7 +1,7 @@
 ---
 title: "Do not resolve markdown from Paperclip done without orchestrator ResolveTask"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260823-181015"

@@ -1,7 +1,7 @@
 ---
 title: "Default-off Paperclip agent dispatch so Jules stays the worker"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260823-181011"

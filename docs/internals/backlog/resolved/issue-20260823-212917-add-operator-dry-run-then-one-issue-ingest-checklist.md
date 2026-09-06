@@ -1,7 +1,7 @@
 ---
 title: "Add operator dry-run then one-issue ingest checklist"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260823-181011"

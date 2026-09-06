@@ -1,7 +1,7 @@
 ---
 title: "Document run_orchestrator as the only production loop"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260823-181014"
