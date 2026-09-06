@@ -26,6 +26,7 @@ public value class SandboxedPath private constructor(public val value: String) {
         /**
          * Resolves and validates a raw [path] string into a [SandboxedPath].
          *
+         * @param path raw path to normalize and validate.
          * @param allowNonExistent If true, the path is absolute-normalized but existence is not checked.
          *                         Useful for unit tests and base presets.
          * @throws java.io.IOException if the path does not exist and [allowNonExistent] is false.

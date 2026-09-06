@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 115 | *Total Resolved Issues:* 468
+*Total Active Issues:* 113 | *Total Resolved Issues:* 470
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -53,8 +53,6 @@
 | [issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint](issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint.md) | Gradle 9 Cross-Module Execution-Time Resolution: Canonical Pattern + Build-Script Lint | high | ci |
 | [issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg](issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg.md) | FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep | high | platform |
 | [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |
-| [issue-20260825-192935-probe-fix-typo-containment-states-paragraph-spacing-in-readm](issue-20260825-192935-probe-fix-typo-containment-states-paragraph-spacing-in-readm.md) | PROBE: Fix typo 'containment states' paragraph spacing in README quick-start | high | docs |
-| [issue-20260825-192936-probe-add-missing-kdoc-param-tag-to-sandboxedpath-of](issue-20260825-192936-probe-add-missing-kdoc-param-tag-to-sandboxedpath-of.md) | PROBE: Add missing KDoc @param tag to SandboxedPath.of | high | docs |
 | [issue-20260825-195000-tier-e-nice-to-have-1](issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
 | [issue-20260825-195000-tier-e-nice-to-have-2](issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
 | [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |

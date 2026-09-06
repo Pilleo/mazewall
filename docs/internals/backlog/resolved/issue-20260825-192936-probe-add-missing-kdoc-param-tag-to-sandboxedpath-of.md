@@ -1,7 +1,7 @@
 ---
 title: "PROBE: Add missing KDoc @param tag to SandboxedPath.of"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"

@@ -1,7 +1,7 @@
 ---
 title: "PROBE: Fix typo 'containment states' paragraph spacing in README quick-start"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"
