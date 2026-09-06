@@ -13,6 +13,8 @@ import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -117,31 +119,25 @@ public class ProcessBroker(
         val slot =
             idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("timed out waiting for an idle portal worker")
-        var returnedToPool = false
         return try {
             val id = nextId.getAndIncrement()
-            slot.channel.send(PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
-            val (reply, extra) = slot.channel.receive(callTimeoutMs)
-            extra.forEach { sockets.close(it) }
-            check(reply.requestId == id) { "request id mismatch" }
+            val replyFuture = slot.submit(id, PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
+            // The connection has one reader and serialized writes, so it is available
+            // again while this caller waits only for its own request id.
+            returnToPoolOrDestroy(slot)
+            val reply = replyFuture.get(callTimeoutMs, TimeUnit.MILLISECONDS)
             if (reply.kind == PortalKind.ERROR) {
-                returnToPoolOrDestroy(slot)
-                returnedToPool = true
                 throw PortalCallException(reply.payload.toString(StandardCharsets.UTF_8))
             }
             check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
-            returnToPoolOrDestroy(slot)
-            returnedToPool = true
             reply.payload
         } catch (e: PortalCallException) {
-            if (!returnedToPool) {
-                recycleDeadWorker(slot)
-            }
+            idle.remove(slot)
+            recycleDeadWorker(slot)
             throw e
         } catch (e: Exception) {
-            if (!returnedToPool) {
-                recycleDeadWorker(slot)
-            }
+            idle.remove(slot)
+            recycleDeadWorker(slot)
             throw PortalCallException("portal RPC failed", e)
         }
     }
@@ -251,7 +247,7 @@ public class ProcessBroker(
             error("portal worker failed to become ready")
         }
         spawned.incrementAndGet()
-        return register(WorkerSlot(proc, channel, ep, listen)) ?: run {
+        return register(WorkerSlot(proc, channel, ep, listen, sockets).also { it.startReader() }) ?: run {
             // Closed between accept and registration: tear down this worker immediately.
             proc.destroyForcibly()
             ep.close()
@@ -293,5 +289,36 @@ public class ProcessBroker(
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
         val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    )
+        private val sockets: SocketManager,
+    ) {
+        private val pending = ConcurrentHashMap<Int, CompletableFuture<PortalFrame>>()
+        private val writeLock = Any()
+
+        fun startReader() {
+            Thread.ofPlatform().name("portal-response-reader").start {
+                try {
+                    while (true) {
+                        val (frame, fds) = channel.receive()
+                        fds.forEach { sockets.close(it) }
+                        pending.remove(frame.requestId)?.complete(frame)
+                    }
+                } catch (failure: Exception) {
+                    pending.values.forEach { it.completeExceptionally(failure) }
+                    pending.clear()
+                }
+            }
+        }
+
+        fun submit(id: Int, frame: PortalFrame, fds: List<FileDescriptor<*, FdState.Open>>): CompletableFuture<PortalFrame> {
+            val reply = CompletableFuture<PortalFrame>()
+            check(pending.putIfAbsent(id, reply) == null)
+            try {
+                synchronized(writeLock) { channel.send(frame, fds) }
+            } catch (failure: Exception) {
+                pending.remove(id)
+                reply.completeExceptionally(failure)
+            }
+            return reply
+        }
+    }
 }

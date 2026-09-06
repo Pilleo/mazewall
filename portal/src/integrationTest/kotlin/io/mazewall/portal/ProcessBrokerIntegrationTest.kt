@@ -69,6 +69,21 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `one worker serves independent requests concurrently`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        ProcessBroker(poolSize = 1, callTimeoutMs = 5_000).use { broker ->
+            broker.start()
+            val startedAt = System.nanoTime()
+            val a = CompletableFuture.runAsync { broker.sleep(400) }
+            val b = CompletableFuture.runAsync { broker.sleep(400) }
+            a.get(5, TimeUnit.SECONDS)
+            b.get(5, TimeUnit.SECONDS)
+            val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+            assertTrue(elapsedMs < 700, "one concurrent worker should not serialize calls: ${elapsedMs}ms")
+        }
+    }
+
+    @Test
     fun `timeout kills worker and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(poolSize = 1, callTimeoutMs = 800).use { broker ->
@@ -97,12 +112,10 @@ class ProcessBrokerIntegrationTest {
         try {
             // Check out the only worker via a long sleep on a separate thread.
             val inFlight = CompletableFuture.runAsync { broker.sleep(60_000) }
-            // Wait until the slot is actually checked out (idle queue empty).
-            val deadline = System.currentTimeMillis() + 10_000
-            while (broker.idleSize() != 0 && System.currentTimeMillis() < deadline) {
-                Thread.sleep(50)
-            }
-            assertEquals(0, broker.idleSize(), "worker should be checked out by now")
+            // A multiplexed connection remains admissible while requests are in
+            // flight; close must still destroy that live worker.
+            Thread.sleep(100)
+            assertEquals(1, broker.trackedWorkers(), "in-flight worker must remain tracked")
 
             broker.close()
 
