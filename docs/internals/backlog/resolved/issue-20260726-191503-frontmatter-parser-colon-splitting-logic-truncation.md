@@ -1,7 +1,7 @@
 ---
 title: Fix Custom Frontmatter Parser Colon-Splitting Logic Bug
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 component: orchestrator

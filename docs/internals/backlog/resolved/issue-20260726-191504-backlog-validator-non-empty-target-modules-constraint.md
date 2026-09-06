@@ -2,7 +2,7 @@
 title: Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler
   Fallback
 severity: MEDIUM
-status: open
+status: resolved
 priority: high
 dependencies: []
 component: orchestrator

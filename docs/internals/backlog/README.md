@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 101 | *Total Resolved Issues:* 482
+*Total Active Issues:* 99 | *Total Resolved Issues:* 484
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -21,8 +21,6 @@
 | [issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository](issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository.md) | Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration | high | ci |
 | [issue-20260726-191501-safe-atomic-orchestrator-state-properties-persistence](issue-20260726-191501-safe-atomic-orchestrator-state-properties-persistence.md) | Implement Atomic Write-Ahead Pattern for Orchestrator State File Persistence | high | orchestrator |
 | [issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon](issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon.md) | Isolate Orchestrator Git Operations from Main Working Directory using Temporary | high | orchestrator |
-| [issue-20260726-191503-frontmatter-parser-colon-splitting-logic-truncation](issue-20260726-191503-frontmatter-parser-colon-splitting-logic-truncation.md) | Fix Custom Frontmatter Parser Colon-Splitting Logic Bug | high | orchestrator |
-| [issue-20260726-191504-backlog-validator-non-empty-target-modules-constraint](issue-20260726-191504-backlog-validator-non-empty-target-modules-constraint.md) | Enforce Non-Empty Target Modules in Backlog Validator and Safe Empty Scheduler | high | orchestrator |
 | [issue-20260726-205801-orchestrator-serial-merge-queue](issue-20260726-205801-orchestrator-serial-merge-queue.md) | Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races | high | orchestrator |
 | [issue-20260726-205802-orchestrator-working-tree-sanitization-barrier](issue-20260726-205802-orchestrator-working-tree-sanitization-barrier.md) | Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks | high | orchestrator |
 | [issue-20260726-205803-mandatory-orchestrator-issue-creation-gating](issue-20260726-205803-mandatory-orchestrator-issue-creation-gating.md) | Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation | high | orchestrator |
