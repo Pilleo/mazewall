@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 124 | *Total Resolved Issues:* 459
+*Total Active Issues:* 123 | *Total Resolved Issues:* 460
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -103,7 +103,6 @@
 | [issue-014-bpf-disassemblerdumper-for-policy-verification](issue-014-bpf-disassemblerdumper-for-policy-verification.md) | BPF Disassembler/Dumper for Policy Verification | low | enforcer |
 | [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
 | [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
-| [issue-045-standard-java-concurrency-virtual-threads-completablefuture-](issue-045-standard-java-concurrency-virtual-threads-completablefuture-.md) | Standard Java Concurrency (`Virtual Threads`, `CompletableFuture`) trivially | medium | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-070-network-isolation-via-namespaces-clonenewnet](issue-070-network-isolation-via-namespaces-clonenewnet.md) | Network Isolation via Namespaces (`CLONE_NEWNET`) | low | enforcer |
