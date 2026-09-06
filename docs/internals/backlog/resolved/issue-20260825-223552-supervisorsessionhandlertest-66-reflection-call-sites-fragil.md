@@ -1,7 +1,7 @@
 ---
 title: "SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"
@@ -9,6 +9,7 @@ target_modules:
   - ":enforcer"
 target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandlerTest.kt"
+  - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 verify_cheap:
   - "./gradlew :enforcer:test --tests io.mazewall.enforcer.supervisor.SupervisorSessionHandlerTest"
 needs_kernel: false
@@ -43,3 +44,8 @@ tests as direct typed calls, or extract logic into separate testable classes.
 Evidence: MAZ-105 stall (Jules session 3948400735408327018 spent its entire budget fixing
 reflection mismatches instead of doing real work). Also caused the earlier tgidResolver
 signature-change failure that surfaced as "argument type mismatch" at runtime.
+
+**Resolution (2026-09-06):** Verified the five target methods are `internal` and the supervisor
+test source contains no `getDeclaredMethods`, `isAccessible`, or reflective `invoke` calls. The
+tests use direct, typed Kotlin calls. This item had already been completed; it is archived to keep
+the active backlog accurate.

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 93 | *Total Resolved Issues:* 490
+*Total Active Issues:* 92 | *Total Resolved Issues:* 491
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -44,7 +44,6 @@
 | [issue-20260825-195000-tier-e-nice-to-have-1](issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
 | [issue-20260825-195000-tier-e-nice-to-have-2](issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
 | [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
-| [issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil](issue-20260825-223552-supervisorsessionhandlertest-66-reflection-call-sites-fragil.md) | SupervisorSessionHandlerTest: 66 reflection call sites ? fragile, breaks silently on signature changes | high | testing |
 | [issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i](issue-20260826-102607-unify-landlock-descriptive-state-with-type-state-lifecycle-i.md) | Unify Landlock descriptive state with type-state lifecycle in LandlockSession | high | enforcer |
 | [issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re](issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md) | Split SupervisorSessionHandler along SupervisorRoute with request context types | medium | enforcer |
 | [issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera](issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md) | Purge coverage theater tests and strengthen assertion coverage | high | testing |
