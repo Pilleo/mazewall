@@ -95,7 +95,8 @@ def main():
         except Exception:
             pass
 
-    print(json.dumps({"decision": "stop"}))
+    # Codex Stop hooks are observers.  They must not write a decision object to
+    # stdout: any output there is parsed as a Stop-hook control response.
 
 if __name__ == "__main__":
     main()

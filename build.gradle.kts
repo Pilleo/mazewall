@@ -31,21 +31,13 @@ allprojects {
     if (!project.path.startsWith(":demos")) {
         apply(plugin = "org.jlleitschuh.gradle.ktlint")
         configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
-            version.set("1.3.1")
+            version.set("1.7.0")
             verbose.set(true)
             outputToConsole.set(true)
             coloredOutput.set(true)
             reporters {
                 reporter(org.jlleitschuh.gradle.ktlint.reporter.ReporterType.PLAIN)
                 reporter(org.jlleitschuh.gradle.ktlint.reporter.ReporterType.HTML)
-            }
-        }
-        // Disable ktlint formatting/checking tasks because the ktlint engine (even 1.3.1+)
-        // fails to parse Kotlin 2.x context parameters syntax ("context(arena: Arena)").
-        // TODO: Re-enable these tasks once KtLint officially supports named context parameters syntax in Kotlin 2.4+.
-        tasks.configureEach {
-            if (name.contains("ktlint", ignoreCase = true)) {
-                enabled = false
             }
         }
     }
@@ -98,24 +90,35 @@ allprojects {
                 failedTestsOutputs.getOrPut(testId) { StringBuilder() }.append(event.message)
             }
 
-            addTestListener(object : TestListener {
-                override fun beforeSuite(suite: TestDescriptor) {}
-                override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
-                override fun beforeTest(testDescriptor: TestDescriptor) {}
-                override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) {
-                    val testId = "${testDescriptor.className ?: "UnknownClass"}.${testDescriptor.name}"
-                    if (result.resultType == TestResult.ResultType.FAILURE) {
-                        val output = failedTestsOutputs[testId]?.toString()
-                        if (!output.isNullOrBlank()) {
-                            // Using println(Any?) which maps to lifecycle
-                            println("\n=== Captured stdout/stderr for $testId ===")
-                            println(output)
-                            println("===========================================\n")
+            addTestListener(
+                object : TestListener {
+                    override fun beforeSuite(suite: TestDescriptor) {}
+
+                    override fun afterSuite(
+                        suite: TestDescriptor,
+                        result: TestResult,
+                    ) {}
+
+                    override fun beforeTest(testDescriptor: TestDescriptor) {}
+
+                    override fun afterTest(
+                        testDescriptor: TestDescriptor,
+                        result: TestResult,
+                    ) {
+                        val testId = "${testDescriptor.className ?: "UnknownClass"}.${testDescriptor.name}"
+                        if (result.resultType == TestResult.ResultType.FAILURE) {
+                            val output = failedTestsOutputs[testId]?.toString()
+                            if (!output.isNullOrBlank()) {
+                                // Using println(Any?) which maps to lifecycle
+                                println("\n=== Captured stdout/stderr for $testId ===")
+                                println(output)
+                                println("===========================================\n")
+                            }
                         }
+                        failedTestsOutputs.remove(testId)
                     }
-                    failedTestsOutputs.remove(testId)
-                }
-            })
+                },
+            )
         }
     }
 
@@ -151,6 +154,16 @@ allprojects {
 
 tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
     enabled = false
+}
+
+val checkGradleLazyResolution by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
+    commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
+}
+
+tasks.named("check") {
+    dependsOn(checkGradleLazyResolution)
 }
 dependencies {
     testImplementation(kotlin("test"))
@@ -282,10 +295,9 @@ subprojects {
         maxHeapSize.set("1g")
     }
 
-
-tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
-    enabled = false
-}
+    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
+        enabled = false
+    }
     dependencies {
         "spotbugsPlugins"(
             rootProject.extensions
@@ -497,11 +509,14 @@ tasks.register<JavaExec>("runTriage") {
     classpath = files(":profiler:classes", ":profiler:runtimeClasspath")
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
 
-    val testFailures = objects.listProperty<Boolean>().apply {
-        set(provider {
-            subprojects.flatMap { it.tasks.withType<Test>() }.map { it.state.failure != null }
-        })
-    }
+    val testFailures =
+        objects.listProperty<Boolean>().apply {
+            set(
+                provider {
+                    subprojects.flatMap { it.tasks.withType<Test>() }.map { it.state.failure != null }
+                },
+            )
+        }
 
     // Only run this diagnostic triage task if the test execution actually failed.
     onlyIf {
@@ -524,15 +539,21 @@ val gitHooksDir: File by lazy {
     if (dotGit.isDirectory) {
         dotGit.resolve("hooks")
     } else {
-        val worktreeGitDir = File(
-            dotGit.readText().trim().removePrefix("gitdir:").trim(),
-        )
+        val worktreeGitDir =
+            File(
+                dotGit
+                    .readText()
+                    .trim()
+                    .removePrefix("gitdir:")
+                    .trim(),
+            )
         val commonDirRef = worktreeGitDir.resolve("commondir").readText().trim()
-        val commonDir = if (File(commonDirRef).isAbsolute) {
-            File(commonDirRef)
-        } else {
-            worktreeGitDir.resolve(commonDirRef).canonicalFile
-        }
+        val commonDir =
+            if (File(commonDirRef).isAbsolute) {
+                File(commonDirRef)
+            } else {
+                worktreeGitDir.resolve(commonDirRef).canonicalFile
+            }
         commonDir.resolve("hooks")
     }
 }
@@ -557,10 +578,6 @@ tasks.named("check") {
     }
     dependsOn(tasks.named("refactorFirstReport"))
 }
-
-
-
-
 
 // RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
 // file), so the informational report is skipped there; normal checkouts are unaffected.

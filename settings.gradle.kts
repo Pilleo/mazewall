@@ -43,13 +43,14 @@ include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
 
-
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:
 //   ./gradlew :tools:orchestrator:test -PincludeOrchestrator=true
 val includeOrchestrator =
     providers.gradleProperty("includeOrchestrator").orNull == "true" ||
-        providers.environmentVariable("INCLUDE_ORCHESTRATOR").orNull
+        providers
+            .environmentVariable("INCLUDE_ORCHESTRATOR")
+            .orNull
             ?.lowercase()
             .let { it == "true" || it == "1" }
 if (includeOrchestrator) {
