@@ -9,7 +9,7 @@ public class GeneratedServiceFixturePortalStub(
     private val client: PortalClient,
 ) : GeneratedServiceFixture {
     override fun echo(value: String): String =
-        PortalCodec.Reader(client.invoke(1000, PortalCodec.encodeString(value))).string()
+        PortalCodec.Reader(client.invoke(METHOD_ID_ECHO, PortalCodec.encodeString(value))).string()
 }
 
 public class GeneratedServiceFixtureImpl : GeneratedServiceFixture {
@@ -17,7 +17,7 @@ public class GeneratedServiceFixtureImpl : GeneratedServiceFixture {
 }
 
 public object GeneratedServiceFixturePortalDispatcher {
-    public val METHOD_IDS: IntArray = intArrayOf(1000)
+    public val METHOD_IDS: IntArray = intArrayOf(METHOD_ID_ECHO)
 
     public fun handle(
         impl: GeneratedServiceFixture,
@@ -25,8 +25,12 @@ public object GeneratedServiceFixturePortalDispatcher {
         payload: ByteArray,
         granted: List<Capability.ReadFd>,
     ): ByteArray {
-        require(methodId == 1000)
-        require(granted.isEmpty())
-        return PortalCodec.encodeString(impl.echo(PortalCodec.Reader(payload).string()))
+        return when (methodId) {
+            METHOD_ID_ECHO -> PortalCodec.encodeString(impl.echo(PortalCodec.Reader(payload).string()))
+            else -> error("unknown portal method $methodId")
+        }
     }
 }
+
+/** `PortalStubGenerator.methodId(GeneratedServiceFixture, echo)`. */
+private const val METHOD_ID_ECHO: Int = 51_523_398
