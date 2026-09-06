@@ -1,7 +1,7 @@
 ---
 title: Memory Alignment verification for `Layouts.kt` FFM Structures
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:
