@@ -1,7 +1,7 @@
 ---
 title: Unhandled `TSYNC` edge cases during JIT classloading
 severity: HIGH
-status: open
+status: resolved
 priority: medium
 dependencies: []
 target_files:
