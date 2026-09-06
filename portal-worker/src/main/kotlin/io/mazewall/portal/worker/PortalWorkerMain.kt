@@ -9,7 +9,7 @@ import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import kotlin.system.exitProcess
 
@@ -45,8 +45,7 @@ public object PortalWorkerMain {
             createWorkerThreads = {
                 // Threads inherit this startup thread's Landlock restriction. They
                 // must exist before process Seccomp denies subsequent clone calls.
-                requestExecutor = Executors.newFixedThreadPool(workerConcurrency)
-                (requestExecutor as ThreadPoolExecutor).prestartAllCoreThreads()
+                requestExecutor = PortalWorkerExecutor.create(workerConcurrency)
             },
             installProcessContainment = {
                 ContainedExecutors.installOnProcess(
@@ -86,7 +85,8 @@ public object PortalWorkerMain {
                     fds.forEach { sockets.close(it) }
                     continue
                 }
-                requestExecutor.execute {
+                try {
+                    requestExecutor.execute {
                     try {
                         val result = PortalBuiltinDispatch.handle(frame.methodId, frame.payload, fds)
                         synchronized(channel) {
@@ -112,6 +112,14 @@ public object PortalWorkerMain {
                         }
                     } finally {
                         fds.forEach { sockets.close(it) }
+                    }
+                    }
+                } catch (_: RejectedExecutionException) {
+                    fds.forEach { sockets.close(it) }
+                    synchronized(channel) {
+                        channel.send(
+                            PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, "worker request queue is full".toByteArray(StandardCharsets.UTF_8), 0),
+                        )
                     }
                 }
             }
