@@ -88,6 +88,8 @@ WP-10 → {WP-11 → WP-12}, WP-13; WP-14 after WP-10; WP-15 last.
   every step.
 * Any kernel-behavior discovery gets its own backlog issue immediately (house rule).
 
+**Needed:** Implement the work packages in the documented dependency order and satisfy each named gate before progressing to the next stage.
+
 ## ❓ Open Questions
 
 Tracked in the design doc §12 (public surface placement, Kubescape kernel baseline, UNKNOWN

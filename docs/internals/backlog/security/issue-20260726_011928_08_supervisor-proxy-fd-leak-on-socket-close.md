@@ -1,5 +1,6 @@
 ---
 title: SupervisorDaemonEngine fd leak when handleActiveListener throws
+severity: MEDIUM
 type: issue
 status: open
 priority: medium
@@ -18,7 +19,7 @@ paperclip_identifier: MAZ-746
 
 # Issue: `SupervisorDaemonEngine` fails to close listener FDs on exception
 
-## Context
+**Context:**
 The `SupervisorDaemonEngine` manages seccomp NOTIF file descriptors sent over UNIX sockets via `SCM_RIGHTS`.
 
 ## The Bug
@@ -27,5 +28,5 @@ If `handleActiveListener` throws an exception, or if `readAndHandleJvmResponse` 
 
 In `SupervisorDaemonEngine.kt` (or wherever `handleNewConnection` or `handleActiveListener` is), the `fds` array contains kernel file descriptors. If the JVM loop terminates or a thread is interrupted, the OS keeps those FDs open until the daemon process exits. If the daemon process is long-lived and processes multiple connections or restarts internal loops, it will leak FDs until it hits `ulimit -n` and crashes.
 
-## Recommendation
+**Needed:**
 Implement a strictly scoped `try-finally` block around the extraction and usage of FDs received from `recvmsg`. Ensure that `FileDescriptor` abstractions (if used here) are properly closed (`socketManager.close()`) even when `processNotification` or `handleActiveListener` throws.

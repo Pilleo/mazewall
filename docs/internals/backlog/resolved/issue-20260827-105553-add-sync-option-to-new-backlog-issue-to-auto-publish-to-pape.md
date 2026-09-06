@@ -1,7 +1,7 @@
 ---
 title: "Add sync option to new_backlog_issue to auto-publish to Paperclip"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"

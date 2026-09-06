@@ -1,5 +1,6 @@
 ---
 title: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception
+severity: MEDIUM
 type: issue
 status: open
 priority: medium
@@ -19,7 +20,7 @@ paperclip_identifier: MAZ-720
 
 # Issue: `JvmFloorWorkload` Background OS Thread Leak
 
-## Context
+**Context:**
 `JvmFloorWorkload` executes various background operations (Loom carrier threads, GC threads) to trigger JVM internal syscalls like `mprotect`, `futex`, etc.
 
 ## The Bug
@@ -27,5 +28,5 @@ The operations are submitted to an executor or run in a background loop that cat
 
 If it spins quickly ignoring interruptions during a shutdown, it leaks the background thread and increases CPU utilization to 100%.
 
-## Recommendation
+**Needed:**
 Audit `JvmFloorWorkload` to ensure it properly checks `Thread.currentThread().isInterrupted` and exits cleanly instead of infinitely catching and spinning on exceptions during teardown.

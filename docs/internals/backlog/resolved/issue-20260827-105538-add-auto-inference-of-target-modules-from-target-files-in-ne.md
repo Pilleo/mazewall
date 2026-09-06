@@ -1,7 +1,7 @@
 ---
 title: "Add auto-inference of target_modules from target_files in new_backlog_issue"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"

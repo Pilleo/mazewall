@@ -1,5 +1,6 @@
 ---
 title: IterativeProfiler can exhaust thread pools on recursive containerization limits
+severity: MEDIUM
 type: issue
 status: open
 priority: medium
@@ -18,11 +19,11 @@ paperclip_identifier: MAZ-747
 
 # Issue: `IterativeProfiler` Thread Exhaustion
 
-## Context
+**Context:**
 `IterativeProfiler` repeatedly reruns tasks until they no longer fail with `SecurityException` due to seccomp/Landlock denials.
 
 ## The Bug
 When `IterativeProfiler.profile` wraps a block and runs it on a standard JVM thread pool, the block will fail, triggering an iterative loop. If the target operation is a highly concurrent operation spawning thousands of threads, the profiling retry loop could exponentially multiply the number of threads. This can cause Thread Pool Exhaustion (`OutOfMemoryError: unable to create new native thread`).
 
-## Recommendation
+**Needed:**
 Implement a backoff mechanism or enforce a strict max iteration limit for `IterativeProfiler` to prevent it from spinning indefinitely or spawning too many recursive tasks.

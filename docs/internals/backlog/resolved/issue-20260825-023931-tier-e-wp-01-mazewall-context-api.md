@@ -1,7 +1,7 @@
 ---
 title: "Tier E WP-01: In-memory MazewallContext API (explicit scopes, guards)"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: high
 component: "platform"
 target_modules:

@@ -1,7 +1,7 @@
 ---
 title: "Promote shared test fixture source and deduplicate test guards and fakes"
 severity: "LOW"
-status: "done"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260826-180041"

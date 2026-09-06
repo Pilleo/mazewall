@@ -15,7 +15,7 @@ paperclip_issue_id: 3fb3b2dc-1c11-44bc-a6c2-9bbcb535b693
 paperclip_identifier: MAZ-199
 ---
 
-### Context
+**Context:**
 Initial attempt to expand the JVM invariant syscall floor (PR #98) identified several critical mapping and stability issues. The JVM requires a much larger set of syscalls for modern features (Loom, ZGC) and networking. Additionally, 64-bit register garbage causes BPF inspection failures.
 
 ### Problems Found
@@ -24,7 +24,7 @@ Initial attempt to expand the JVM invariant syscall floor (PR #98) identified se
 3. **Register Garbage**: 64-bit equality checks in BPF fail on 32-bit arguments (ioctl, prctl) due to high-word garbage.
 4. **Brittle Tests**: `BpfFilterTest` asserts exact instruction sequences which break under BPF optimization.
 
-### Needed
+**Needed:**
 - Fix the multi-stage mapping in `Syscall.kt`.
 - Implement `ArgCheck.EqualsAny32` and update `BpfFilter` to use it for 32-bit arguments.
 - Expand `jvmCriticalNrs` and `jvmDefaultAllowedNrs` sets in `BpfFilter.kt`.
