@@ -1,11 +1,38 @@
 package io.mazewall.profiler.attribution
 
+/** Opaque session-local identity of the Java execution that entered an invocation. */
+@JvmInline
+public value class ExecutionId(
+    public val value: Long,
+) {
+    init {
+        require(value > 0) { "execution id must be positive" }
+    }
+}
+
+/** Whether a logical execution is a traditional platform thread or a Loom virtual thread. */
+public enum class ExecutionKind {
+    PLATFORM,
+    VIRTUAL,
+}
+
+/**
+ * Logical Java execution identity, intentionally separate from the carrier task in a syscall event.
+ *
+ * The ID is allocated by the agent for this profile session and is not a Java thread ID or name.
+ */
+public data class ExecutionContext(
+    val executionId: ExecutionId,
+    val kind: ExecutionKind,
+)
+
 /** Native-agent definition of the stack captured for one invocation. */
 public data class InvocationDefinition(
     val invocationId: InvocationId,
     val parentInvocationId: InvocationId?,
     val stackTraceId: StackTraceId?,
     val captureFailure: CaptureFailure? = null,
+    val executionContext: ExecutionContext? = null,
 ) {
     init {
         require((stackTraceId == null) == (captureFailure != null)) {
@@ -18,6 +45,7 @@ public enum class CaptureFailure {
     STACK_WALK_FAILED,
     STACK_TRUNCATED_REJECTED,
     UNSUPPORTED_EXECUTION,
+    EXECUTION_IDENTITY_CHANGED,
 }
 
 public enum class ResolutionStatus {
@@ -27,6 +55,7 @@ public enum class ResolutionStatus {
     NO_ACTIVE_INVOCATION,
     INVALID_KERNEL_ATTRIBUTION,
     TRUNCATED_STACK,
+    EXECUTION_IDENTITY_UNRESOLVED,
 }
 
 /** A syscall after its invocation and stack references have been resolved, or explicitly failed. */
@@ -34,6 +63,7 @@ public data class ResolvedSyscall(
     val observation: SyscallAttribution,
     val stackDefinition: StackDefinition?,
     val resolutionStatus: ResolutionStatus,
+    val executionContext: ExecutionContext? = null,
 )
 
 /** Session-level evidence that collection was complete enough for the claimed output. */
@@ -41,6 +71,10 @@ public data class SessionIntegrity(
     val observedLosses: Long = 0,
     val attributionFailures: Long = 0,
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
+    /** Native proxy intervals entered by virtual threads; these pin the carrier by JVM contract. */
+    val virtualPinnedScopes: Long = 0,
+    /** Sum of measured virtual native-proxy duration, for operational overhead reporting. */
+    val virtualPinnedNanos: Long = 0,
 ) {
     public val guarantee: CaptureGuarantee
         get() = when {
@@ -73,12 +107,16 @@ public class AttributionCollector(
     private val emittedCoverageEdges = mutableSetOf<CoverageEdge>()
     private var losses: Long = 0
     private var failures: Long = 0
+    private var virtualPinnedScopes: Long = 0
+    private var virtualPinnedNanos: Long = 0
 
     public val integrity: SessionIntegrity
         get() = SessionIntegrity(
             observedLosses = losses,
             attributionFailures = failures,
             emissionMode = emissionMode,
+            virtualPinnedScopes = virtualPinnedScopes,
+            virtualPinnedNanos = virtualPinnedNanos,
         )
 
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
@@ -121,6 +159,16 @@ public class AttributionCollector(
         losses = Math.addExact(losses, count)
     }
 
+    /** Adds terminal agent telemetry; it is diagnostic and never repairs attribution completeness. */
+    public fun recordVirtualPinnedIntervals(
+        scopes: Long,
+        nanos: Long,
+    ) {
+        require(scopes >= 0 && nanos >= 0) { "virtual pin telemetry must be non-negative" }
+        virtualPinnedScopes = Math.addExact(virtualPinnedScopes, scopes)
+        virtualPinnedNanos = Math.addExact(virtualPinnedNanos, nanos)
+    }
+
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> =
         pendingByInvocation.entries
@@ -142,11 +190,19 @@ public class AttributionCollector(
         val stack = invocation.stackTraceId?.let(stacks::get)
         if (stack == null) return emptyList()
         pendingByInvocation.remove(invocationId)
-        val status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
+        var status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
             failures = Math.addExact(failures, pending.size.toLong())
             ResolutionStatus.TRUNCATED_STACK
         } else {
             ResolutionStatus.RESOLVED
+        }
+        if (
+            status == ResolutionStatus.RESOLVED &&
+            invocation.executionContext == null &&
+            pending.any { it.captureFlags and VIRTUAL_THREAD_CAPTURE_FLAG != 0 }
+        ) {
+            failures = Math.addExact(failures, pending.size.toLong())
+            status = ResolutionStatus.EXECUTION_IDENTITY_UNRESOLVED
         }
         return pending.mapNotNull { observation ->
             if (
@@ -156,7 +212,7 @@ public class AttributionCollector(
             ) {
                 null
             } else {
-                ResolvedSyscall(observation, stack, status)
+                ResolvedSyscall(observation, stack, status, invocation.executionContext)
             }
         }
     }
@@ -166,4 +222,8 @@ public class AttributionCollector(
         val syscallNumber: Int,
         val captureFlags: Int,
     )
+
+    private companion object {
+        const val VIRTUAL_THREAD_CAPTURE_FLAG = 1
+    }
 }

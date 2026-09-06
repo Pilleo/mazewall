@@ -58,10 +58,24 @@ silently applying HotSpot signatures to another JVM would be memory-unsafe. The 
 register layouts and syscall numbers are x86_64-only. AArch64 requires a separately verified
 program builder before it can be claimed supported.
 
-Virtual threads are supported as an experimental attribution mode on JDK 25: the agent asks the
-current `Thread` whether it is virtual, JVMTI captures its continuation-aware logical frames, and
-the marker propagates `FLAG_VTHREAD_EXPERIMENTAL`. A session never silently claims platform-thread
-quality for those observations.
+Virtual threads are first-class Tier E executions on supported JVMs (validated on JDK 25): the
+agent obtains the current `jthread`, reads `Thread.isVirtual()` and `Thread.threadId()`, and assigns an opaque,
+session-local `ExecutionId`. Every resolved syscall retains both the carrier `TaskIdentity` from
+eBPF and the logical `ExecutionContext { ExecutionId, VIRTUAL }` from the exact native boundary;
+thread names and raw Java thread IDs are never exported. The JVMTI virtual-thread-end callback
+retires the private ID lookup, so a later JVM reuse of a Java thread ID cannot reuse an old logical
+execution identity.
+
+The proxy is intentionally exact and therefore pins a virtual thread during the native interval.
+Tier E reports the count and total duration of those intervals in `SessionIntegrity`; they are
+overhead telemetry, not an attribution shortcut. There is no portable JVMTI mount/unmount event
+stream on which to base a non-pinning carrier-to-virtual-thread join. A different current logical
+execution observed in a carrier-local nested scope clears attribution and makes the session
+incomplete rather than restoring a stale context.
+
+The agent-definition protocol is version 2. Its reader accepts version 1 artifacts for offline
+compatibility, but a version 1 event marked virtual has no execution identity and is terminally
+`EXECUTION_IDENTITY_UNRESOLVED`, never a resolved virtual attribution.
 
 ### 1.1.1 Stack-walk API status and adoption rule
 
@@ -211,8 +225,9 @@ incomplete evidence.  It is never an enforcement or policy-generation input.
 3. **Fail UNKNOWN, never guess.** Missing registration, storage-create failure, ring-buffer
    drop, pre-attach window, post-detach residue — every uncertain case yields `UNKNOWN`,
    never "nearest context" or timestamp inference.
-4. **Virtual-thread claims are explicit.** They carry an experimental flag and have their own
-   correctness gate; no seccomp filter is installed on a carrier.
+4. **Virtual-thread ownership is explicit.** A resolved Tier E event carries an opaque logical
+   execution identity separate from its carrier task. A mismatch fails unknown; no seccomp filter
+   is installed on a carrier.
 5. **One BPF map set per session epoch.** Maps are never recycled across sessions. Task
    local storage is scoped per-map instance, so a fresh session observes no stale values.
 6. **No bpffs pinning in v1.** The daemon owns all map/link FDs. Daemon death detaches
@@ -517,7 +532,7 @@ Non-refactor rule: leave the `TraceEvent` / `SyscallEvent` / `ProfileObservation
 | 2 | Pre-attach window: scopes entered before attach emit UNKNOWN | fail-unknown | documented accepted behavior |
 | 3 | Stale-positive after detach mid-scope (see §5) | bounded | session-epoch reader contract; per-map scoping kills cross-epoch leakage |
 | 4 | Wrong-binary misfire (probing stale `.so` copy) | benign (silent UNKNOWN) but confusing | `/proc/<pid>/maps` inode + build-id verification, loud failure |
-| 5 | Virtual threads: carrier retains context across unmount mid-scope → sibling vthread inherits label (**wrong fact**) | unacceptable | fail-closed `IllegalStateException` on `isVirtual()` inside `withContext` |
+| 5 | Virtual threads: carrier-local nesting is observed with a different logical execution | unacceptable | clear the marker and registry; count a scope failure; never restore the prior invocation |
 | 6 | Task-storage creation failure under pressure | fail-unknown | count and emit nothing |
 | 7 | Arch-specific argument registers (x86_64 `di` / arm64 `x0`) | minor | eliminated in the USDT variant (`bpf_usdt_readarg`); compile-time per-arch BPF source remains the plain-uprobe bring-up fallback |
 | 8 | Ring-buffer drops | data loss, never corruption | drop counter per nr; `drainComplete=false`; never compile BoB |

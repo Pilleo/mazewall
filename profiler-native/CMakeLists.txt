@@ -47,6 +47,15 @@ set_tests_properties(
     PROPERTIES PASS_REGULAR_EXPRESSION "proxied-binds=[1-9][0-9]* stack-captures=[1-9][0-9]*"
 )
 
+add_test(
+    NAME agent_virtual_smoke_test
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 virtual 20
+)
+set_tests_properties(
+    agent_virtual_smoke_test
+    PROPERTIES PASS_REGULAR_EXPRESSION "proxied-binds=[1-9][0-9]* stack-captures=[1-9][0-9]*"
+)
+
 # The standalone workload is also the no-profiler timing control used by the
 # privileged Tier E performance measurement.
 add_test(
