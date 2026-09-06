@@ -8,6 +8,42 @@ import kotlin.test.assertEquals
 
 class AgentDefinitionFileTest {
     @Test
+    fun `decodes version two virtual execution identity`() {
+        val invocation = payload {
+            putLong(9)
+            putLong(0)
+            putInt(7)
+            put(0)
+            putLong(42)
+        }
+        val execution = payload {
+            putLong(42)
+            put(1)
+        }
+        val stats = payload {
+            putLong(0)
+            putLong(0)
+            putLong(3)
+            putLong(99)
+        }
+        val file = ByteArrayOutputStream()
+            .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(2, 0))
+                record(4, execution)
+                record(2, invocation)
+                record(3, stats)
+            }.toByteArray()
+
+        val contents = AgentDefinitionFile.decode(file)
+
+        assertEquals(listOf(ExecutionContext(ExecutionId(42), ExecutionKind.VIRTUAL)), contents.executions)
+        assertEquals(contents.executions.single(), contents.invocations.single().executionContext)
+        assertEquals(3, contents.virtualPinnedScopes)
+        assertEquals(99, contents.virtualPinnedNanos)
+    }
+
+    @Test
     fun `decodes stack and invocation records`() {
         val stack = payload {
             putInt(7)

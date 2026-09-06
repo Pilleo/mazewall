@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.stress
 
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.profiler.attribution.ExecutionKind
 import io.mazewall.profiler.attribution.ResolutionStatus
 import io.mazewall.profiler.attribution.TierEEmissionMode
 import io.mazewall.profiler.attribution.TierEOptions
@@ -93,12 +94,17 @@ public object TierEKernelSmoke {
                 "$wronglyAttributedUnlinks unlink syscalls were assigned a non-deletion stack"
             }
             if (args.getOrNull(4) == "virtual") {
+                val virtualResolved = profile.syscalls.filter { it.resolutionStatus == ResolutionStatus.RESOLVED }
                 check(
-                    profile.syscalls
-                        .filter { it.resolutionStatus == ResolutionStatus.RESOLVED }
-                    .all { it.observation.captureFlags and 1 != 0 },
+                    virtualResolved.all { it.observation.captureFlags and 1 != 0 },
                 ) {
-                    "virtual-thread observations were not marked experimental"
+                    "virtual-thread observations were not marked as virtual"
+                }
+                check(virtualResolved.all { it.executionContext?.kind == ExecutionKind.VIRTUAL }) {
+                    "virtual-thread observations lost their logical execution identity"
+                }
+                check(profile.integrity.virtualPinnedScopes > 0) {
+                    "virtual-thread proxy intervals did not report their pinning cost"
                 }
             }
         } catch (failure: Throwable) {

@@ -12,6 +12,11 @@ public object AgentDefinitionFile {
         val stacks: List<StackDefinition>,
         val invocations: List<InvocationDefinition>,
         val agentLosses: Long,
+        val executions: List<ExecutionContext> = emptyList(),
+        /** Number of virtual-thread native proxy intervals; every one pins its carrier. */
+        val virtualPinnedScopes: Long = 0,
+        /** Sum of native proxy interval durations, measured by the in-process agent. */
+        val virtualPinnedNanos: Long = 0,
     )
 
     public fun read(path: Path): Contents = decode(Files.readAllBytes(path))
@@ -20,11 +25,15 @@ public object AgentDefinitionFile {
         val input = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         require(input.remaining() >= HEADER_SIZE) { "agent definition file is shorter than its header" }
         require(ByteArray(4).also(input::get).contentEquals(MAGIC)) { "invalid agent definition magic" }
-        require(input.get() == VERSION) { "unsupported agent definition version" }
+        val version = input.get().toInt() and 0xff
+        require(version in setOf(VERSION_1, VERSION_2)) { "unsupported agent definition version" }
         require(input.get() == 0.toByte()) { "agent definition reserved byte is non-zero" }
         val stacks = mutableListOf<StackDefinition>()
         val invocations = mutableListOf<InvocationDefinition>()
+        val executions = mutableMapOf<ExecutionId, ExecutionContext>()
         var agentLosses = 0L
+        var virtualPinnedScopes = 0L
+        var virtualPinnedNanos = 0L
         while (input.hasRemaining()) {
             require(input.remaining() >= RECORD_HEADER_SIZE) { "truncated agent definition record header" }
             val type = input.get().toInt() and 0xff
@@ -33,10 +42,21 @@ public object AgentDefinitionFile {
             val payload = input.slice().order(ByteOrder.LITTLE_ENDIAN).apply { limit(length) }
             when (type) {
                 STACK_RECORD -> stacks += decodeStack(payload)
-                INVOCATION_RECORD -> invocations += decodeInvocation(payload)
+                INVOCATION_RECORD -> invocations += decodeInvocation(payload, version, executions)
+                EXECUTION_RECORD -> {
+                    require(version >= VERSION_2) { "execution record requires definition version 2" }
+                    val execution = decodeExecution(payload)
+                    require(executions.putIfAbsent(execution.executionId, execution) == null) {
+                        "duplicate execution id ${execution.executionId.value}"
+                    }
+                }
                 STATS_RECORD -> {
-                    require(payload.remaining() == 16) { "invalid agent stats record" }
+                    require(payload.remaining() in setOf(16, 32)) { "invalid agent stats record" }
                     agentLosses = Math.addExact(payload.long, payload.long)
+                    if (payload.hasRemaining()) {
+                        virtualPinnedScopes = payload.long
+                        virtualPinnedNanos = payload.long
+                    }
                 }
                 else -> throw IllegalArgumentException("unknown agent definition record type $type")
             }
@@ -45,7 +65,14 @@ public object AgentDefinitionFile {
         }
         require(stacks.map { it.stackTraceId }.toSet().size == stacks.size) { "duplicate stack trace id" }
         require(invocations.map { it.invocationId }.toSet().size == invocations.size) { "duplicate invocation id" }
-        return Contents(stacks, invocations, agentLosses)
+        return Contents(
+            stacks = stacks,
+            invocations = invocations,
+            agentLosses = agentLosses,
+            executions = executions.values.toList(),
+            virtualPinnedScopes = virtualPinnedScopes,
+            virtualPinnedNanos = virtualPinnedNanos,
+        )
     }
 
     private fun decodeStack(payload: ByteBuffer): StackDefinition {
@@ -73,7 +100,11 @@ public object AgentDefinitionFile {
         return StackDefinition(id, frames, quality)
     }
 
-    private fun decodeInvocation(payload: ByteBuffer): InvocationDefinition {
+    private fun decodeInvocation(
+        payload: ByteBuffer,
+        version: Int,
+        executions: Map<ExecutionId, ExecutionContext>,
+    ): InvocationDefinition {
         val invocationId = InvocationId(payload.long)
         val parent = payload.long.takeIf { it != 0L }?.let(::InvocationId)
         val stackId = payload.int
@@ -86,10 +117,29 @@ public object AgentDefinitionFile {
             1 -> CaptureFailure.STACK_WALK_FAILED
             2 -> CaptureFailure.STACK_TRUNCATED_REJECTED
             3 -> CaptureFailure.UNSUPPORTED_EXECUTION
+            4 -> CaptureFailure.EXECUTION_IDENTITY_CHANGED
             else -> throw IllegalArgumentException("invalid invocation capture failure")
         }
-        return InvocationDefinition(invocationId, parent, stackId, failure)
+        val execution = if (version >= VERSION_2) {
+            payload.long
+                .takeIf { it != 0L }
+                ?.let(::ExecutionId)
+                ?.let { requireNotNull(executions[it]) { "invocation references unknown execution ${it.value}" } }
+        } else {
+            null
+        }
+        return InvocationDefinition(invocationId, parent, stackId, failure, execution)
     }
+
+    private fun decodeExecution(payload: ByteBuffer): ExecutionContext =
+        ExecutionContext(
+            executionId = ExecutionId(payload.long),
+            kind = when (payload.get().toInt()) {
+                0 -> ExecutionKind.PLATFORM
+                1 -> ExecutionKind.VIRTUAL
+                else -> throw IllegalArgumentException("invalid execution kind")
+            },
+        )
 
     private fun ByteBuffer.string(): String {
         val length = short.toInt() and 0xffff
@@ -104,9 +154,11 @@ public object AgentDefinitionFile {
 
     private const val HEADER_SIZE = 6
     private const val RECORD_HEADER_SIZE = 5
-    private const val VERSION: Byte = 1
+    private const val VERSION_1 = 1
+    private const val VERSION_2 = 2
     private const val STACK_RECORD = 1
     private const val INVOCATION_RECORD = 2
     private const val STATS_RECORD = 3
+    private const val EXECUTION_RECORD = 4
     private val MAGIC = "MZSD".toByteArray(StandardCharsets.US_ASCII)
 }

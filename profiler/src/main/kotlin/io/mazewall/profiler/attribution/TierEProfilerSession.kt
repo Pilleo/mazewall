@@ -49,6 +49,7 @@ public class TierEProfilerSession(
         poll()
         val definitions = AgentDefinitionFile.read(definitionFile)
         if (definitions.agentLosses > 0) collector.recordLoss(definitions.agentLosses)
+        collector.recordVirtualPinnedIntervals(definitions.virtualPinnedScopes, definitions.virtualPinnedNanos)
         definitions.stacks.forEach { resolved += collector.accept(it) }
         definitions.invocations.forEach { resolved += collector.accept(it) }
         resolved += collector.finish()

@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -31,11 +32,14 @@ std::atomic<std::uint64_t> proxied_bind_count{0};
 std::atomic<std::uint64_t> stack_capture_count{0};
 std::atomic<std::uint64_t> stack_capture_failures{0};
 std::atomic<std::uint64_t> scope_failures{0};
+std::atomic<std::uint64_t> virtual_pinned_scopes{0};
+std::atomic<std::uint64_t> virtual_pinned_nanos{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
 std::atomic<jmethodID> thread_is_virtual{nullptr};
+std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
 
@@ -62,6 +66,29 @@ struct InvocationDefinition final {
     std::uint64_t parent_id = 0;
     std::uint32_t stack_id = 0;
     std::uint8_t failure = 0;
+    std::uint64_t execution_id = 0;
+};
+
+enum class ExecutionKind : std::uint8_t {
+    platform = 0,
+    virtual_thread = 1,
+};
+
+struct ExecutionDefinition final {
+    std::uint64_t id = 0;
+    ExecutionKind kind = ExecutionKind::platform;
+};
+
+struct ExecutionContext final {
+    std::uint64_t id = 0;
+    ExecutionKind kind = ExecutionKind::platform;
+
+    [[nodiscard]] bool valid() const noexcept { return id != 0; }
+};
+
+struct ExecutionEntry final {
+    ExecutionContext context{};
+    jweak thread = nullptr;
 };
 
 enum class EmissionMode : std::uint8_t {
@@ -95,13 +122,16 @@ struct RawStackHash final {
 };
 
 struct CanonicalContext final {
-    std::uint64_t id = 0;
+    std::uint32_t stack_id = 0;
     std::vector<jweak> class_guards;
 };
 
 std::mutex definitions_mutex;
 std::vector<LogicalStack> logical_stacks;
 std::vector<InvocationDefinition> invocation_definitions;
+std::vector<ExecutionDefinition> execution_definitions;
+std::unordered_map<jlong, ExecutionEntry> executions_by_java_thread_id;
+std::atomic<std::uint64_t> next_execution_id{1};
 std::unordered_map<RawStack, CanonicalContext, RawStackHash> canonical_contexts;
 EmissionMode emission_mode = EmissionMode::full_stream;
 
@@ -170,11 +200,64 @@ void record_invocation(InvocationDefinition definition) {
     invocation_definitions.push_back(definition);
 }
 
+ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
+    if (env == nullptr || thread == nullptr) return {};
+    auto is_virtual = thread_is_virtual.load(std::memory_order_acquire);
+    auto java_thread_id = thread_id.load(std::memory_order_acquire);
+    if (is_virtual == nullptr || java_thread_id == nullptr) {
+        jclass thread_class = env->GetObjectClass(thread);
+        if (thread_class == nullptr) return {};
+        is_virtual = env->GetMethodID(thread_class, "isVirtual", "()Z");
+        java_thread_id = env->GetMethodID(thread_class, "threadId", "()J");
+        env->DeleteLocalRef(thread_class);
+        if (is_virtual != nullptr) thread_is_virtual.store(is_virtual, std::memory_order_release);
+        if (java_thread_id != nullptr) thread_id.store(java_thread_id, std::memory_order_release);
+    }
+    if (is_virtual == nullptr || java_thread_id == nullptr) return {};
+    const auto virtual_thread = env->CallBooleanMethod(thread, is_virtual) == JNI_TRUE;
+    const auto id = env->CallLongMethod(thread, java_thread_id);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return {};
+    }
+    if (id <= 0) return {};
+    const auto kind = virtual_thread ? ExecutionKind::virtual_thread : ExecutionKind::platform;
+    std::lock_guard lock(definitions_mutex);
+    if (const auto existing = executions_by_java_thread_id.find(id); existing != executions_by_java_thread_id.end()) {
+        if (env->IsSameObject(existing->second.thread, thread) == JNI_TRUE) return existing->second.context;
+        if (existing->second.thread != nullptr) env->DeleteWeakGlobalRef(existing->second.thread);
+        executions_by_java_thread_id.erase(existing);
+    }
+    const auto execution_id = next_execution_id.fetch_add(1, std::memory_order_relaxed);
+    if (execution_id == 0) return {};
+    const ExecutionContext context{execution_id, kind};
+    const auto guard = env->NewWeakGlobalRef(thread);
+    if (guard == nullptr) return {};
+    executions_by_java_thread_id.emplace(id, ExecutionEntry{context, guard});
+    execution_definitions.push_back(ExecutionDefinition{execution_id, kind});
+    return context;
+}
+
+void JNICALL on_virtual_thread_end(jvmtiEnv*, JNIEnv* env, jthread thread) noexcept {
+    auto method = thread_id.load(std::memory_order_acquire);
+    if (method == nullptr) return;
+    const auto id = env->CallLongMethod(thread, method);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return;
+    }
+    std::lock_guard lock(definitions_mutex);
+    const auto found = executions_by_java_thread_id.find(id);
+    if (found == executions_by_java_thread_id.end() || env->IsSameObject(found->second.thread, thread) != JNI_TRUE) return;
+    if (found->second.thread != nullptr) env->DeleteWeakGlobalRef(found->second.thread);
+    executions_by_java_thread_id.erase(found);
+}
+
 void release_guards(JNIEnv* env, const std::vector<jweak>& guards) {
     for (const auto guard : guards) if (guard != nullptr) env->DeleteWeakGlobalRef(guard);
 }
 
-std::uint64_t find_canonical_context(JNIEnv* env, const RawStack& stack) {
+std::uint32_t find_canonical_stack(JNIEnv* env, const RawStack& stack) {
     std::lock_guard lock(definitions_mutex);
     const auto found = canonical_contexts.find(stack);
     if (found == canonical_contexts.end()) return 0;
@@ -185,17 +268,16 @@ std::uint64_t find_canonical_context(JNIEnv* env, const RawStack& stack) {
             return 0;
         }
     }
-    return found->second.id;
+    return found->second.stack_id;
 }
 
-std::uint64_t remember_canonical_context(JNIEnv* env, const RawStack& stack, std::uint64_t candidate, std::vector<jweak> guards) {
+void remember_canonical_context(JNIEnv* env, const RawStack& stack, std::uint32_t stack_id, std::vector<jweak> guards) {
     std::lock_guard lock(definitions_mutex);
     if (const auto found = canonical_contexts.find(stack); found != canonical_contexts.end()) {
         release_guards(env, guards);
-        return found->second.id;
+        return;
     }
-    canonical_contexts.emplace(stack, CanonicalContext{candidate, std::move(guards)});
-    return candidate;
+    canonical_contexts.emplace(stack, CanonicalContext{stack_id, std::move(guards)});
 }
 
 using UnixOpen0 = jint(JNICALL*)(JNIEnv*, jclass, jlong, jint, jint);
@@ -226,6 +308,8 @@ thread_local mazewall::profiler::InvocationRegistry invocation_registry;
 class InvocationScope final {
 public:
     explicit InvocationScope(JNIEnv* env) noexcept {
+        current_env_ = env;
+        scope_started_ = std::chrono::steady_clock::now();
         if (invocation_ids_exhausted.load(std::memory_order_relaxed)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             mazewall_stack_marker(0, 0);
@@ -239,7 +323,22 @@ public:
             return;
         }
         const auto id = (static_cast<std::uint64_t>(session_tag) << 32) | counter;
-        scope_ = invocation_registry.enter(id);
+        jthread current_thread = nullptr;
+        if (global_jvmti == nullptr || global_jvmti->GetCurrentThread(&current_thread) != JVMTI_ERROR_NONE || current_thread == nullptr) {
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+            mazewall_stack_marker(0, 0);
+            return;
+        }
+        execution_ = execution_context(env, current_thread);
+        env->DeleteLocalRef(current_thread);
+        if (!execution_.valid()) {
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+            mazewall_stack_marker(0, 0);
+            return;
+        }
+        flags_ = execution_.kind == ExecutionKind::virtual_thread ? 1U : 0U;
+        virtual_scope_ = execution_.kind == ExecutionKind::virtual_thread;
+        scope_ = invocation_registry.enter(id, execution_.id);
         // Clear the parent's attribution before JVMTI work. Any agent-internal
         // syscall is therefore UNKNOWN rather than incorrectly assigned.
         mazewall_stack_marker(0, 0);
@@ -254,7 +353,7 @@ public:
             return;
         }
         if (capture.new_context) {
-            record_invocation(InvocationDefinition{scope_.id, scope_.parent_id, capture.stack_id, capture.failure});
+            record_invocation(InvocationDefinition{scope_.id, scope_.parent_id, capture.stack_id, capture.failure, execution_.id});
         }
         mazewall_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
     }
@@ -263,10 +362,25 @@ public:
         mazewall_stack_marker(0, 0);
         if (!scope_.valid()) {
             mazewall_stack_marker(invocation_registry.current_id(), flags_);
+            record_virtual_duration();
+            return;
+        }
+        jthread current_thread = nullptr;
+        const auto current_execution =
+            global_jvmti != nullptr && global_jvmti->GetCurrentThread(&current_thread) == JVMTI_ERROR_NONE
+                ? execution_context_from_current(current_thread)
+                : ExecutionContext{};
+        if (current_thread != nullptr) current_env_->DeleteLocalRef(current_thread);
+        if (!current_execution.valid() || current_execution.id != execution_.id ||
+            !invocation_registry.matches_current_execution(execution_.id)) {
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+            invocation_registry.invalidate();
+            record_virtual_duration();
             return;
         }
         const bool restored = invocation_registry.leave(scope_);
         mazewall_stack_marker(restored ? invocation_registry.current_id() : 0, flags_);
+        record_virtual_duration();
     }
 
 private:
@@ -276,6 +390,18 @@ private:
         std::uint64_t context_id = 0;
         bool new_context = false;
     };
+
+    ExecutionContext execution_context_from_current(jthread thread) noexcept {
+        return execution_context(current_env_, thread);
+    }
+
+    void record_virtual_duration() noexcept {
+        if (!virtual_scope_) return;
+        const auto elapsed = std::chrono::steady_clock::now() - scope_started_;
+        const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+        virtual_pinned_scopes.fetch_add(1, std::memory_order_relaxed);
+        virtual_pinned_nanos.fetch_add(static_cast<std::uint64_t>(nanos > 0 ? nanos : 0), std::memory_order_relaxed);
+    }
 
     Capture capture_stack(JNIEnv* env, std::uint64_t proposed_context_id) noexcept {
         if (global_jvmti == nullptr) {
@@ -288,19 +414,10 @@ private:
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return {};
         }
-        auto is_virtual = thread_is_virtual.load(std::memory_order_acquire);
-        if (is_virtual == nullptr) {
-            jclass thread_class = env->GetObjectClass(current_thread);
-            if (thread_class != nullptr) {
-                is_virtual = env->GetMethodID(thread_class, "isVirtual", "()Z");
-                env->DeleteLocalRef(thread_class);
-                if (is_virtual != nullptr) thread_is_virtual.store(is_virtual, std::memory_order_release);
-            }
-        }
-        if (is_virtual != nullptr && env->CallBooleanMethod(current_thread, is_virtual) == JNI_TRUE) flags_ |= 1;
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            flags_ = 0;
+        if (execution_context(env, current_thread).id != execution_.id) {
+            stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
+            env->DeleteLocalRef(current_thread);
+            return Capture{0, 4, 0, false};
         }
 
         std::array<jvmtiFrameInfo, 129> frames{};
@@ -329,10 +446,10 @@ private:
             raw.frames.push_back(RawFrame{reinterpret_cast<std::uintptr_t>(frames[index].method), static_cast<std::int64_t>(frames[index].location)});
         }
         if (!truncated && emission_mode == EmissionMode::unique_stack_syscall) {
-            if (const auto existing = find_canonical_context(env, raw); existing != 0) {
+            if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
                 env->DeleteLocalRef(current_thread);
                 stack_capture_count.fetch_add(1, std::memory_order_relaxed);
-                return Capture{0, 0, existing, false};
+                return Capture{existing, 0, proposed_context_id, true};
             }
         }
         std::vector<LogicalFrame> logical;
@@ -361,8 +478,10 @@ private:
         }
         stack_capture_count.fetch_add(1, std::memory_order_relaxed);
         if (!truncated && emission_mode == EmissionMode::unique_stack_syscall) {
-            const auto context_id = remember_canonical_context(env, raw, proposed_context_id, std::move(class_guards));
-            if (context_id != proposed_context_id) return Capture{0, 0, context_id, false};
+            // A canonical stack is reusable, but an InvocationId is not: it carries the
+            // opaque logical execution owner. Reusing an invocation from another virtual
+            // thread would turn a correct stack match into wrong thread attribution.
+            remember_canonical_context(env, raw, stack_id, std::move(class_guards));
         } else {
             release_guards(env, class_guards);
         }
@@ -370,7 +489,11 @@ private:
     }
 
     mazewall::profiler::InvocationRegistry::Scope scope_{};
+    JNIEnv* current_env_ = nullptr;
+    ExecutionContext execution_{};
     std::uint32_t flags_ = 0;
+    std::chrono::steady_clock::time_point scope_started_{};
+    bool virtual_scope_ = false;
 };
 
 jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags, jint mode) {
@@ -503,17 +626,20 @@ bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     jvmtiCapabilities capabilities{};
     capabilities.can_generate_native_method_bind_events = 1;
     capabilities.can_tag_objects = 1;
+    capabilities.can_support_virtual_threads = 1;
     if (jvmti->AddCapabilities(&capabilities) != JVMTI_ERROR_NONE) {
         return false;
     }
 
     jvmtiEventCallbacks callbacks{};
     callbacks.NativeMethodBind = on_native_method_bind;
+    callbacks.VirtualThreadEnd = on_virtual_thread_end;
     if (jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
         return false;
     }
 
-    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE;
+    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE &&
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VIRTUAL_THREAD_END, nullptr) == JVMTI_ERROR_NONE;
 }
 
 template<typename T>
@@ -545,7 +671,7 @@ bool write_definitions() noexcept {
         std::ofstream stream(definitions_path, std::ios::binary | std::ios::trunc);
         if (!stream) return false;
         stream.write("MZSD", 4);
-        stream.put(1);
+        stream.put(2);
         stream.put(0);
         std::lock_guard lock(definitions_mutex);
         for (const auto& stack : logical_stacks) {
@@ -563,17 +689,26 @@ bool write_definitions() noexcept {
             }
             append_record(stream, 1, payload);
         }
+        for (const auto& execution : execution_definitions) {
+            std::vector<std::uint8_t> payload;
+            append_le<std::uint64_t>(payload, execution.id);
+            payload.push_back(static_cast<std::uint8_t>(execution.kind));
+            append_record(stream, 4, payload);
+        }
         for (const auto& invocation : invocation_definitions) {
             std::vector<std::uint8_t> payload;
             append_le<std::uint64_t>(payload, invocation.id);
             append_le<std::uint64_t>(payload, invocation.parent_id);
             append_le<std::uint32_t>(payload, invocation.stack_id);
             payload.push_back(invocation.failure);
+            append_le<std::uint64_t>(payload, invocation.execution_id);
             append_record(stream, 2, payload);
         }
         std::vector<std::uint8_t> stats;
         append_le<std::uint64_t>(stats, stack_capture_failures.load(std::memory_order_relaxed));
         append_le<std::uint64_t>(stats, scope_failures.load(std::memory_order_relaxed));
+        append_le<std::uint64_t>(stats, virtual_pinned_scopes.load(std::memory_order_relaxed));
+        append_le<std::uint64_t>(stats, virtual_pinned_nanos.load(std::memory_order_relaxed));
         append_record(stream, 3, stats);
         stream.flush();
         return stream.good();

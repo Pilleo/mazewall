@@ -18,4 +18,10 @@ int main() {
     if (!registry.leave(outer) || registry.current_id() != 0) return 5;
 
     if (registry.leave(outer)) return 6;
+
+    auto virtual_scope = registry.enter(404, 77);
+    if (!virtual_scope.valid() || !registry.matches_current_execution(77)) return 7;
+
+    const auto leaked_carrier_scope = registry.enter(505, 88);
+    if (leaked_carrier_scope.valid() || registry.current_id() != 0) return 8;
 }
