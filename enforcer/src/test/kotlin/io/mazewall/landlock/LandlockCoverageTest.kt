@@ -158,18 +158,34 @@ class LandlockCoverageTest {
     }
 
     @Test
-    fun `test restrictSelf coverage`() {
-        val mock = SupportedLandlockMock()
+    fun `restrictSelf uses TSYNC only for process-wide containment`() {
+        val restrictFlags = mutableListOf<Long>()
+        val mock = object : SupportedLandlockMock() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
+                    restrictFlags += (a2 as io.mazewall.core.NativeArg.LongArg).value
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        }
         LinuxNative.setEngine(mock)
 
-        // Default
         LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf()
-
-        // Thread-scoped
         LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(false)
-
-        // Process-wide
         LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(true)
+
+        assertEquals(
+            listOf(0L, 0L, 1L shl 3),
+            restrictFlags,
+        )
     }
 
     @Test

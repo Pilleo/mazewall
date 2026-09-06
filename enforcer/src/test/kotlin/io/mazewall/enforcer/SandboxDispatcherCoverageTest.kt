@@ -1,14 +1,11 @@
 package io.mazewall.enforcer
 
 import io.mazewall.Policy
-import io.mazewall.Platform
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import kotlin.test.assertFailsWith
 import java.util.concurrent.Callable
 import kotlin.test.assertEquals
 import io.mazewall.enforcer.api.SandboxDispatcher
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @Suppress("DEPRECATION")
@@ -36,9 +33,10 @@ class SandboxDispatcherCoverageTest {
     }
 
     @Test
-    fun testShutdownAll() {
-        SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
+    fun `shutdownAll terminates cached pools`() {
+        val pool = SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
         SandboxDispatcher.shutdownAll()
+        assertTrue(pool.isShutdown)
     }
 
     @Test
