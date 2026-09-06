@@ -72,6 +72,23 @@ v1 forbids worker → broker FDs (confused deputy). Return values are data only.
 
 Timeouts kill/restart the **worker process**. Do not `Thread.interrupt()` the broker.
 
+## Managed-service runtime contract
+
+`Portal.start(Service::class.java, PortalWorkerConfig(...)).api` is the application
+entry point. It starts one long-lived worker JVM per service; `concurrency` controls
+its prestarted platform-thread executor (default four) and the bounded admission
+queue has the same capacity. A saturated queue returns a request-correlated error.
+
+The broker multiplexes request ids over its one connection: one reader owns response
+frames and complete writes are serialized. A post-admission timeout or transport
+failure fails every active request on that connection, kills that worker, and starts
+one replacement for later calls. Requests are never replayed.
+
+Service implementations are shared by all worker threads and therefore must be
+thread-safe. `Capability.ReadFd` is a one-shot broker-to-worker grant; it may be
+attached to exactly one request. The worker closes every received descriptor after
+that request completes or is rejected.
+
 ## Reuse (already in tree)
 
 | Primitive | Role |

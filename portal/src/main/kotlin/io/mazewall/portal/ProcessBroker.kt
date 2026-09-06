@@ -11,6 +11,7 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.core.close
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CompletableFuture
@@ -127,6 +128,9 @@ public class ProcessBroker(
         return try {
             val id = nextId.getAndIncrement()
             val replyFuture = slot.submit(id, PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
+            // SCM_RIGHTS has copied the grant into the worker's receive queue; the
+            // broker must not retain the original capability after transfer.
+            fds.forEach { it.close() }
             // The connection has one reader and serialized writes, so it is available
             // again while this caller waits only for its own request id.
             returnToPoolOrDestroy(slot)
