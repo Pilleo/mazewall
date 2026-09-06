@@ -1,7 +1,7 @@
 ---
 title: Network Isolation via Namespaces (`CLONE_NEWNET`)
 severity: ENHANCEMENT
-status: open
+status: resolved
 priority: low
 dependencies: []
 target_files:

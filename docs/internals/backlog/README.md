@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 107 | *Total Resolved Issues:* 476
+*Total Active Issues:* 106 | *Total Resolved Issues:* 477
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -93,7 +93,6 @@
 | [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
-| [issue-070-network-isolation-via-namespaces-clonenewnet](issue-070-network-isolation-via-namespaces-clonenewnet.md) | Network Isolation via Namespaces (`CLONE_NEWNET`) | low | enforcer |
 | [issue-162-memory-alignment-verification-for-layoutskt-ffm-structures](issue-162-memory-alignment-verification-for-layoutskt-ffm-structures.md) | Memory Alignment verification for `Layouts.kt` FFM Structures | high | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
 | [issue-20260808-032520-owned-contained-executor-lifecycle](issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
