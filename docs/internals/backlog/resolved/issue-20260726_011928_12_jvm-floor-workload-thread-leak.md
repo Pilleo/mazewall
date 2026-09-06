@@ -2,7 +2,7 @@
 title: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception
 severity: MEDIUM
 type: issue
-status: open
+status: resolved
 priority: medium
 labels:
 - security

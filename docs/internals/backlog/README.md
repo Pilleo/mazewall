@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 121 | *Total Resolved Issues:* 462
+*Total Active Issues:* 120 | *Total Resolved Issues:* 463
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -98,7 +98,6 @@
 | [issue-075-jvm-invariant-syscall-floor-is-incomplete](issue-075-jvm-invariant-syscall-floor-is-incomplete.md) | \U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete | medium | enforcer |
 | [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md) | \U0001F7E2 [WONTFIX]: Permanent thread pool contamination, classloader leaks,\ | medium | enforcer |
 | [issue-103-containedexecutors-thread-local-state-persistence-and-poison](issue-103-containedexecutors-thread-local-state-persistence-and-poison.md) | \U0001F7E2 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence\ | medium | enforcer |
-| [issue-20260726_011928_12_jvm-floor-workload-thread-leak](issue-20260726_011928_12_jvm-floor-workload-thread-leak.md) | JvmFloorWorkload OS Thread leak due to infinite retry loop on exception | medium | enforcer |
 | [issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil](issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md) | Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State | low | enforcer |
 | [issue-014-bpf-disassemblerdumper-for-policy-verification](issue-014-bpf-disassemblerdumper-for-policy-verification.md) | BPF Disassembler/Dumper for Policy Verification | low | enforcer |
 | [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
