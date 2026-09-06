@@ -2,7 +2,7 @@
 title: "\U0001F7E2 [WONTFIX]: `ContainedExecutors` Thread-Local State Persistence\
   \ and Poisoning"
 severity: MEDIUM
-status: open
+status: resolved
 priority: medium
 dependencies: []
 target_files:
