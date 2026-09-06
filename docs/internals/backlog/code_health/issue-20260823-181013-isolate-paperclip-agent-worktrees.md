@@ -13,8 +13,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: d94dd854-f783-4bd3-85cc-453955f76581
-paperclip_identifier: MAZ-662
+paperclip_issue_id: "41077bc0-da73-4cd7-8fc2-f93066f75e27"
+paperclip_identifier: "MAZ-1084"
 ---
 
 # 🔴 [Severity: HIGH]: Do not run Paperclip coding agents on the shared jseccomp working tree

@@ -13,8 +13,8 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/OrchestratorPromptsTest.kt"
 effort: "small"
 autonomy: "supervised"
-paperclip_issue_id: 12b4d350-1ab6-4ae4-8931-681ea460e57a
-paperclip_identifier: MAZ-651
+paperclip_issue_id: "408780b6-332c-4df0-b389-369d33dbe41d"
+paperclip_identifier: "MAZ-1077"
 ---
 
 # 🔴 [Severity: HIGH]: Add Mandatory Origin Master Rebase Prompt Instructions in Jules Retry and Feedback Prompts

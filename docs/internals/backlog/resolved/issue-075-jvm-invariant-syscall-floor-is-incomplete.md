@@ -1,7 +1,7 @@
 ---
 title: "\U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete"
 severity: MEDIUM
-status: open
+status: resolved
 priority: medium
 dependencies: []
 target_files:

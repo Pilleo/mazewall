@@ -48,15 +48,8 @@ app → generated stub
 Spawn workers **before** the broker calls `installOnProcess`. Children inherit seccomp; `SupervisorDaemonManager.refuseSpawnIfParentIsFiltered()` already encodes this.
 
 Worker first lines after IPC connect:
-1. `ContainedExecutors.installOnCurrentThread(ProcessPolicies.workerFilesystem)` — Landlock allowlist of `java.home` and classpath entries only. `allowJvmClasspath()` is `ThreadLocalOnly` (no ABI v8 TSYNC on existing helper threads). Fail closed if Landlock is unsupported. Extra readable paths are deferred.
-2. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
-3. Reflectively register generated dispatchers and only then print the ready sentinel. A malformed declaration aborts startup; it is never skipped.
-
-Before step 2, the startup thread prestarts the configured bounded platform-thread
-executor. Those threads inherit the startup thread's Landlock restriction; no
-worker threads may be created after Seccomp denies `clone`. One reader owns the
-socket framing and submits requests to the executor; response-frame writes are
-serialized on that same connection.
+1. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
+2. `ContainedExecutors.installOnCurrentThread(ProcessPolicies.workerFilesystem)` — Landlock allowlist of `java.home` and classpath entries only. `allowJvmClasspath()` is `ThreadLocalOnly` (no ABI v8 TSYNC on existing helper threads). Fail closed if Landlock is unsupported. Extra readable paths are deferred.
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
@@ -71,23 +64,6 @@ Capabilities: broker opens with `openat2` + `RESOLVE_BENEATH`, then `sendDescrip
 v1 forbids worker → broker FDs (confused deputy). Return values are data only.
 
 Timeouts kill/restart the **worker process**. Do not `Thread.interrupt()` the broker.
-
-## Managed-service runtime contract
-
-`Portal.start(Service::class.java, PortalWorkerConfig(...)).api` is the application
-entry point. It starts one long-lived worker JVM per service; `concurrency` controls
-its prestarted platform-thread executor (default four) and the bounded admission
-queue has the same capacity. A saturated queue returns a request-correlated error.
-
-The broker multiplexes request ids over its one connection: one reader owns response
-frames and complete writes are serialized. A post-admission timeout or transport
-failure fails every active request on that connection, kills that worker, and starts
-one replacement for later calls. Requests are never replayed.
-
-Service implementations are shared by all worker threads and therefore must be
-thread-safe. `Capability.ReadFd` is a one-shot broker-to-worker grant; it may be
-attached to exactly one request. The worker closes every received descriptor after
-that request completes or is rejected.
 
 ## Reuse (already in tree)
 

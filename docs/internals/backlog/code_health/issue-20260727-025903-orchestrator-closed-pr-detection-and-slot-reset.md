@@ -14,8 +14,8 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/StateHandlerTest.kt"
 effort: "small"
 autonomy: "supervised"
-paperclip_issue_id: 3608d647-8a76-4f54-a3bd-f6cbf200d19a
-paperclip_identifier: MAZ-649
+paperclip_issue_id: "aa0620cd-2f9b-422f-be36-d105d2eb0476"
+paperclip_identifier: "MAZ-1075"
 ---
 
 # 🟡 [Severity: MEDIUM]: Detect Closed Pull Requests and Suppress Conflict Alarm Spam in Orchestrator

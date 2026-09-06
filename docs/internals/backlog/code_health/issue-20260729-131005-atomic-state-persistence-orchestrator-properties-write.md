@@ -11,8 +11,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
 effort: "small"
 autonomy: "autonomous"
-paperclip_issue_id: 209673d4-90b2-4449-8f80-62e800b789e1
-paperclip_identifier: MAZ-652
+paperclip_issue_id: "ef6a681d-5e77-4b13-8f94-2bad5a8a406e"
+paperclip_identifier: "MAZ-1078"
 ---
 
 # 🟠 [Severity: MEDIUM]: Atomic Properties State File Writing in Orchestrator to Prevent Corruption

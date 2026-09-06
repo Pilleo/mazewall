@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 88 | *Total Resolved Issues:* 495
+*Total Active Issues:* 82 | *Total Resolved Issues:* 501
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -38,7 +38,6 @@
 | [issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter](issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter.md) | Extend backlog frontmatter with target_symbols and verify.cheap | high | orchestrator |
 | [issue-20260823-181022-diff-escape-pauses-sibling-slots](issue-20260823-181022-diff-escape-pauses-sibling-slots.md) | Pause sibling slots when a PR diff escapes declared target_files | high | orchestrator |
 | [issue-20260823-181023-keep-module-level-exclusive-scheduling](issue-20260823-181023-keep-module-level-exclusive-scheduling.md) | Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel | high | orchestrator |
-| [issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint](issue-20260824-011701-gradle9-cross-module-resolution-pattern-and-lint.md) | Gradle 9 Cross-Module Execution-Time Resolution: Canonical Pattern + Build-Script Lint | high | ci |
 | [issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg](issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg.md) | FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep | high | platform |
 | [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |
 | [issue-20260825-195000-tier-e-nice-to-have-1](issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
@@ -73,7 +72,6 @@
 | [issue-20260825-023945-tier-e-wp-15-kubescape-poc](issue-20260825-023945-tier-e-wp-15-kubescape-poc.md) | Tier E WP-15: Kubescape node-agent integration PoC | low | profiler |
 | [issue-20260825-193100-tier-e-r4-doctor-preflight](issue-20260825-193100-tier-e-r4-doctor-preflight.md) | Tier E R4: tier-e-doctor environment preflight | high | ebpf-prototype |
 | [issue-059-iterativeprofiler-context-loss-via-thread-creation](issue-059-iterativeprofiler-context-loss-via-thread-creation.md) | `IterativeProfiler` Context Loss via thread creation | high | profiler |
-| [issue-075-jvm-invariant-syscall-floor-is-incomplete](issue-075-jvm-invariant-syscall-floor-is-incomplete.md) | \U0001F7E1 [DEFERRED \u2014 Medium]: JVM Invariant Syscall Floor is Incomplete | medium | enforcer |
 | [issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil](issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md) | Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State | low | enforcer |
 | [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
 | [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
@@ -88,11 +86,7 @@
 | [issue-043-phantom-types-for-context-aware-capability-tokens](issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
 | [issue-061-manual-ffm-layout-maintenance-and-drift-risk](issue-061-manual-ffm-layout-maintenance-and-drift-risk.md) | Manual FFM Layout Maintenance and Drift Risk | medium | enforcer |
 | [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |
-| [issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy](issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md) | KtLint parser fails on Kotlin 2.x named context parameters syntax | medium | testing |
 | [issue-20260726-0135-refactor-profiler-classes-for-testability](issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
-| [issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet](issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md) | Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET | medium | enforcer |
-| [issue-20260824-011658-argcheck-differential-fuzzing](issue-20260824-011658-argcheck-differential-fuzzing.md) | Differential Fuzzing of ArgCheck Semantics vs Real Kernel (EqualsAny32/MaskEquals) | medium | testing |
-| [issue-20260824-171500-hybrid-loop-unverified-agent-commits](issue-20260824-171500-hybrid-loop-unverified-agent-commits.md) | Vibe agent's commit-gate implementation broke CI entry point; claimed ingest work was never committed | high | testing |
 | [issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling](issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md) | Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root | medium | ebpf-prototype |
 | [issue-20260825-191000-ringbuf-rw-data-mapping-eperm](issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md) | BPF ringbuf data area cannot be mapped writable on current kernels | medium | tier-e |
 | [issue-20260825-193000-tier-e-r3-golden-protocol-conformance](issue-20260825-193000-tier-e-r3-golden-protocol-conformance.md) | Tier E R3: golden-file protocol conformance suite | medium | tier-e |

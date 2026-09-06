@@ -13,8 +13,8 @@ target_files:
   - "build.gradle.kts"
 effort: "medium"
 autonomy: "autonomous"
-paperclip_issue_id: d9dde22c-4cc8-45eb-9259-770dbbf7563c
-paperclip_identifier: MAZ-654
+paperclip_issue_id: "ca262b38-cd1e-49aa-9a20-291f36ebcf43"
+paperclip_identifier: "MAZ-1080"
 ---
 
 # 🟢 [Severity: LOW]: Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups

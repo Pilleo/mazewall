@@ -13,8 +13,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 4ef29b66-966e-48ac-8f15-383bf5456c32
-paperclip_identifier: MAZ-648
+paperclip_issue_id: "84098eaf-679b-470b-8f0e-4cb28e717fc6"
+paperclip_identifier: "MAZ-1074"
 ---
 
 # 🟡 [Severity: MEDIUM]: GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN

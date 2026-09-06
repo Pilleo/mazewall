@@ -1,7 +1,7 @@
 ---
 title: "Gradle 9 Cross-Module Execution-Time Resolution: Canonical Pattern + Build-Script Lint"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "ci"
 target_modules:

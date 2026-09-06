@@ -166,4 +166,15 @@ Raw FFM code is split across two modules by OWNERSHIP OF ABSTRACTION LEVEL, not 
 
 
 
+# Gradle cross-module worker classpaths
+
+Worker JVM classpaths must be represented by a resolvable `Configuration` consumed through an
+`@Classpath` `CommandLineArgumentProvider`. Convert it to `asPath` only from `asArguments()`,
+which Gradle invokes at task execution time. Keep an explicit dependency on the producer's `jar`
+or `classes` task. Do not resolve a configuration from `systemProperty`, a top-level value, or a
+configuration-cache provider: those forms either resolve too early or lose producer dependencies.
+
+`scripts/check_gradle_lazy_resolution.sh` guards `.asPath` and `.singleFile` uses in build scripts.
+When generating Kotlin build scripts through a shell heredoc, use the correct dollar escaping and
+then inspect the result with `grep -F '${' <file>` so interpolations have not been written literally.
 

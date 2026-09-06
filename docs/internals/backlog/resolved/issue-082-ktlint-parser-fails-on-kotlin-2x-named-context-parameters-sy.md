@@ -1,7 +1,7 @@
 ---
 title: KtLint parser fails on Kotlin 2.x named context parameters syntax
 severity: MEDIUM
-status: open
+status: resolved
 priority: medium
 dependencies: []
 target_files:

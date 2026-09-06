@@ -873,10 +873,12 @@ class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentVio
 }
 class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
   + {static}SandboxDispatcher INSTANCE
+  + {static}int MAX_CACHED_POOLS
   __
   + {static}T execute(Policy<?, ?>, Callable<T>)
   +T executeBlock(Policy<?, ?>, Function0<? extends T>)
   +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
+  +List<ExecutorService> cachedPoolsForTest()
   + {static}void shutdownAll()
 }
 class "SandboxDispatcherCoroutinesKt" as io.mazewall.enforcer.api.SandboxDispatcherCoroutinesKt {
@@ -931,12 +933,6 @@ class "JvmFloorPresets" as io.mazewall.enforcer.engine.JvmFloorPresets {
   +Syscall[] getTHREAD_COORDINATION_CLOSURE()
   +Syscall[] getNETWORK_STABILITY_FLOOR()
   +Syscall[] fullJvmFloor()
-}
-class "JvmFloorWorkload" as io.mazewall.enforcer.engine.JvmFloorWorkload {
-  + {static}JvmFloorWorkload INSTANCE
-  __
-  +void run()
-  + {static}void main(String[])
 }
 class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecutorWrapper {
   +void execute(Runnable)
@@ -1026,8 +1022,8 @@ class "OpenHow" as io.mazewall.enforcer.supervisor.OpenHow {
 class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
   + {static}PendingSpawnRegistry INSTANCE
   __
-  +void register(int, List<StackTraceElement>)
-  +List<StackTraceElement> get(int)
+  +void register(int, List<StackTraceElement>, long)
+  +List<StackTraceElement> get(int, long)
   +void remove(int)
 }
 class "ProcFsInspector" as io.mazewall.enforcer.supervisor.ProcFsInspector {
@@ -1975,6 +1971,7 @@ interface "SeccompEngine" as io.mazewall.seccomp.SeccompEngine<S extends EngineS
   + {abstract}boolean isSupported()
 }
 interface "SeccompInstallationState" as io.mazewall.seccomp.SeccompInstallationState {
+  + {abstract}int getRank()
 }
 class "SocketAddressFamilyInspector" as io.mazewall.seccomp.SocketAddressFamilyInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
@@ -2072,7 +2069,6 @@ io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecut
 io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
 io.mazewall.enforcer.api.ContainmentViolationException -u-|> io.mazewall.enforcer.ContainmentViolationException
-io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
@@ -2080,7 +2076,6 @@ io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnos
 io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnostics.DiagnosticEventListener
 io.mazewall.enforcer.engine.FilterInstallationPlanner --> io.mazewall.enforcer.engine.FilterInstallationPlanner
 io.mazewall.enforcer.engine.JvmFloorPresets --> io.mazewall.enforcer.engine.JvmFloorPresets
-io.mazewall.enforcer.engine.JvmFloorWorkload --> io.mazewall.enforcer.engine.JvmFloorWorkload
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
@@ -2107,7 +2102,6 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.Sock
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.SocketManager
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorContext
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 io.mazewall.enforcer.supervisor.SupervisorFastPath --> io.mazewall.enforcer.supervisor.SupervisorFastPath

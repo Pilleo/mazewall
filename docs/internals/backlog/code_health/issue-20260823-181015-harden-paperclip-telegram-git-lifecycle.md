@@ -12,8 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: e40bebc9-e4b4-4797-a623-8bd3d110031e
-paperclip_identifier: MAZ-664
+paperclip_issue_id: "d9ab0889-e165-4ec6-be82-7708aa7563d5"
+paperclip_identifier: "MAZ-1086"
 ---
 
 # 🔴 [Severity: HIGH]: Harden Paperclip Telegram done-hook: no rebase of the operator working tree

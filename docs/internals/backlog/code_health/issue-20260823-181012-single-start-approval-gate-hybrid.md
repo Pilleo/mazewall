@@ -15,8 +15,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: ecd2422d-397e-4f9c-804f-56e00abd0070
-paperclip_identifier: MAZ-661
+paperclip_issue_id: "a1622804-e61c-4b95-9ab8-2cbd537de34f"
+paperclip_identifier: "MAZ-1083"
 ---
 
 # 🟡 [Severity: MEDIUM]: One start-approval gate for hybrid Paperclip + orchestrator loop

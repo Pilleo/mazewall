@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: large
-paperclip_issue_id: 09d237f2-84dc-4a0b-9688-b00ec5b1239b
-paperclip_identifier: MAZ-753
+paperclip_issue_id: "be63aa78-63ff-48ac-84d5-107505d60a4c"
+paperclip_identifier: "MAZ-1119"
 ---
 
 # 🔴 [Severity: LOW]: Architectural DIP (Dependency Inversion) Violations in Native Scopes

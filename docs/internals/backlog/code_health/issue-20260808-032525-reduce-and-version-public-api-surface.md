@@ -16,8 +16,8 @@ target_files:
 effort: "huge"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: e83846e1-dbe4-41ff-b23a-f6814256ef56
-paperclip_identifier: MAZ-656
+paperclip_issue_id: "e342490a-9637-4c22-934b-5f089dbeb2c5"
+paperclip_identifier: "MAZ-1082"
 ---
 
 # 🟡 [Severity: MEDIUM]: Reduce and Version the Supported Public API Surface

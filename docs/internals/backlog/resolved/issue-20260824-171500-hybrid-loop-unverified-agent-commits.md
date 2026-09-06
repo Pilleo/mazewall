@@ -1,7 +1,7 @@
 ---
 title: "Vibe agent's commit-gate implementation broke CI entry point; claimed ingest work was never committed"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 component: "testing"
 target_modules: [":enforcer"]

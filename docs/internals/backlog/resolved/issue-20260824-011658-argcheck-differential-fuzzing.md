@@ -1,7 +1,7 @@
 ---
 title: "Differential Fuzzing of ArgCheck Semantics vs Real Kernel (EqualsAny32/MaskEquals)"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "testing"
 target_modules:
