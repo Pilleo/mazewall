@@ -103,6 +103,36 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
+    fun `terminal routes emit exactly one response and defer nonterminal routes`() {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            var continuations = 0
+            val aborts = mutableListOf<Int>()
+            val routes = SupervisorTerminalRoutes(object : SupervisorResponseSender {
+                override fun continueNotification(id: Long, response: io.mazewall.ffi.memory.ManagedSegment) {
+                    continuations++
+                }
+
+                override fun abortNotification(id: Long, errno: Int, response: io.mazewall.ffi.memory.ManagedSegment) {
+                    aborts += errno
+                }
+            })
+            val context = SupervisorRouteContext(
+                JvmVerdictRequest(42, NotifHeader(0, io.mazewall.core.Tid(7), io.mazewall.core.Arch.current(), io.mazewall.core.Arch.current().audit, 1, LongArray(6)), null, null),
+                SyscallArguments(null, null),
+                arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP),
+            )
+
+            assertTrue(routes.execute(SupervisorRoute.Continue, context) == true)
+            assertTrue(routes.execute(SupervisorRoute.Abort(13, "deny"), context) == true)
+            assertEquals(1, continuations)
+            assertEquals(listOf(13), aborts)
+            assertEquals(null, routes.execute(SupervisorRoute.AskJvm, context))
+            assertEquals(1, continuations)
+            assertEquals(listOf(13), aborts)
+        }
+    }
+
+    @Test
     fun `readAndHandleJvmResponse closes supervisor socket when the frame stalls after one byte`() {
         var socketClosed = false
         val mockSocketManager = object : io.mazewall.core.SocketManager {

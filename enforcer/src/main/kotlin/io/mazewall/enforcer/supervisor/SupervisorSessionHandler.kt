@@ -82,6 +82,12 @@ internal class SupervisorSessionHandler(
 ) : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
 
     private val reader = NotificationReader(engine, logger)
+    private val terminalRoutes = SupervisorTerminalRoutes(object : SupervisorResponseSender {
+        override fun continueNotification(id: Long, response: ManagedSegment) = sendSeccompContinue(id, response)
+
+        override fun abortNotification(id: Long, errno: Int, response: ManagedSegment) =
+            sendSeccompError(id, errno, response)
+    })
 
     context(arena: io.mazewall.ffi.memory.NativeArena)
     override fun processNotification(
@@ -224,15 +230,17 @@ internal class SupervisorSessionHandler(
                             throw e
                         }
                     }
+                    val request = JvmVerdictRequest(id, header, extracted.pathStr, extracted.sockaddrBytes)
+                    val routeContext = SupervisorRouteContext(request, extracted, resp)
                     when (val route = SupervisorNotificationMachine.evaluateFastPath(kind, resolvedPath, extracted.pathStr)) {
                         is SupervisorRoute.Continue -> {
-                            sendSeccompContinue(id, resp)
+                            terminalRoutes.execute(route, routeContext)
                             logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue resolved=$resolvedPathStr" }
                             return true
                         }
                         is SupervisorRoute.Abort -> {
                             logger.severe { "[SUPERVISOR-DEBUG] ${route.reason}" }
-                            sendSeccompError(id, route.errno, resp)
+                            terminalRoutes.execute(route, routeContext)
                             return true
                         }
                         is SupervisorRoute.AskJvm -> { }
@@ -242,14 +250,13 @@ internal class SupervisorSessionHandler(
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
-                    val request = JvmVerdictRequest(id, header, extracted.pathStr, extracted.sockaddrBytes)
                     val success = sendRequestToJvm(request)
                     if (!success) {
                         logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
                         return false
                     }
 
-                    val res = readAndHandleJvmResponse(SupervisorRouteContext(request, extracted, resp))
+                    val res = readAndHandleJvmResponse(routeContext)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
                 } catch (e: Exception) {
@@ -431,11 +438,11 @@ internal class SupervisorSessionHandler(
             }
             return when (val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)) {
                 is SupervisorRoute.Abort -> {
-                    sendSeccompError(id, route.errno, resp)
+                    terminalRoutes.execute(route, context)
                     true
                 }
                 is SupervisorRoute.Continue -> {
-                    sendSeccompContinue(id, resp)
+                    terminalRoutes.execute(route, context)
                     true
                 }
                 is SupervisorRoute.InjectFd ->
