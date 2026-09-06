@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 92 | *Total Resolved Issues:* 491
+*Total Active Issues:* 91 | *Total Resolved Issues:* 492
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -94,7 +94,6 @@
 | [issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy](issue-082-ktlint-parser-fails-on-kotlin-2x-named-context-parameters-sy.md) | KtLint parser fails on Kotlin 2.x named context parameters syntax | medium | testing |
 | [issue-20260726-0135-refactor-profiler-classes-for-testability](issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
 | [issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet](issue-20260726-024700-hardware-aware-ci-test-suite-and-fallback-assertions-for-intel-cet.md) | Hardware-Aware CI Test Suite and Graceful Fallback Assertions for Intel CET | medium | enforcer |
-| [issue-20260823-141500-brittle-bpf-layout-assertions](issue-20260823-141500-brittle-bpf-layout-assertions.md) | Brittle Instruction-Layout Assertions in BpfFilterTest (Adjacent-Pair Scans) | medium | enforcer |
 | [issue-20260824-011658-argcheck-differential-fuzzing](issue-20260824-011658-argcheck-differential-fuzzing.md) | Differential Fuzzing of ArgCheck Semantics vs Real Kernel (EqualsAny32/MaskEquals) | medium | testing |
 | [issue-20260824-171500-hybrid-loop-unverified-agent-commits](issue-20260824-171500-hybrid-loop-unverified-agent-commits.md) | Vibe agent's commit-gate implementation broke CI entry point; claimed ingest work was never committed | high | testing |
 | [issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling](issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md) | Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root | medium | ebpf-prototype |

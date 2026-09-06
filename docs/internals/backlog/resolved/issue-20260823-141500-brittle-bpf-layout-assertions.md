@@ -1,7 +1,7 @@
 ---
 title: "Brittle Instruction-Layout Assertions in BpfFilterTest (Adjacent-Pair Scans)"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 target_modules:
@@ -33,3 +33,9 @@ to use the `evalBPF` simulator; other tests may share the pattern.
    extracting it to a test fixture so integration tests can reuse it.
 3. Optional: add golden-stream regression snapshots only where layout itself is the contract (e.g.
    BST shape tests), clearly labeled as such.
+
+**Resolution (2026-09-06):** Audited `BpfFilterTest` and the surrounding BPF tests. The reported
+adjacency scan is absent; policy verdict tests use `evalBpf`, which delegates to the shared
+`BpfSimulator`. Remaining raw-stream assertions verify intentional bytecode-layout contracts
+(architecture guard, common RET target, jump encoding, and argument-inspection instruction
+emission), so replacing them with syscall-number simulation would weaken their coverage.
