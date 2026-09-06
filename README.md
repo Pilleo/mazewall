@@ -3,7 +3,7 @@
 [![CI](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml/badge.svg)](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml)
 [![JitPack](https://jitpack.io/v/Pilleo/mazewall.svg)](https://jitpack.io/#Pilleo/mazewall)
 
-**Per-thread,process kernel-enforced  syscall sandboxing for JVM applications. Container-like sandoboxing for your methods **
+**Linux kernel-enforced syscall and filesystem restrictions for selected JVM worker threads.**
 
 > [!NOTE]
 > **Pre-Alpha.** Core enforcement and profiling work end-to-end. API is unstable and known issues are actively tracked. If you're evaluating this for your stack or want to contribute, [open a discussion](https://github.com/Pilleo/mazewall/discussions).
@@ -16,7 +16,7 @@ If your JVM service handles **untrusted input** — XML, YAML, PDF, SQL, user-up
 
 A successful exploit in your YAML importer is a successful exploit of your entire process.
 
-mazewall lets you wrap those risky code paths in **kernel-enforced behavioral contracts** so that even a fully successful exploit can't reach the network, spawn a shell, or write outside its declared scope.
+mazewall lets you wrap trusted code that processes risky input in **kernel-enforced behavioral contracts**. On a contained worker, configured syscalls and filesystem accesses are denied by the Linux kernel. This limits direct data-plane attacks; it does not isolate arbitrary hostile Java code or remove capabilities already present elsewhere in the JVM.
 
 ---
 
@@ -67,9 +67,9 @@ PDF Generator Pool    → no exec, no network, no filesystem writes   [kernel-en
 XML Importer Pool     → no exec, no network, read /app/schemas only [kernel-enforced]
 ```
 
-If the YAML importer is compromised, it hits a kernel wall. There is no shell to spawn. There is no socket to call home on. The blast radius is limited to exactly what you declared.
+If trusted parsing code attempts a configured-forbidden syscall, the kernel denies it on that worker. The result is a smaller direct syscall and filesystem-access surface for that workload. The boundary does not prevent a Java-code-execution attacker from hopping to an unrestricted executor, using an inherited file descriptor, or accessing shared JVM memory.
 
-The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker uses, applied from inside the JVM, **without root privileges or native C dependencies**. Once installed, no JVM vulnerability can remove it.
+The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker uses, applied from inside the JVM, **without root privileges or native C dependencies**. A thread cannot remove an installed Seccomp filter; this monotonicity does not constrain unrestricted sibling threads.
 
 ```kotlin
 val safe = ContainedExecutors.wrap(
@@ -90,7 +90,7 @@ That's the whole API for most use cases.
 
 The biggest concern people raise: *"How do I know which syscalls my code actually needs?"*
 
-You don't need to know. The `:profiler` module observes your workload during a test run and **generates the exact policy for you**:
+The `:profiler` module observes your workload during a test run and **generates a policy candidate from the behavior it sees**:
 
 ```kotlin
 val result = Profiler.profile {
@@ -108,7 +108,7 @@ println(result.behavior.toDsl(allowIncomplete = true))
 //     .build()
 ```
 
-Paste the output, wrap your executor — done. No manual BPF assembly, no trial-and-error deadlocks.
+Treat generated output as a policy candidate: validate it against representative normal and failure workloads before enforcing it. Profiling cannot observe every future execution path, dependency upgrade, or deployment environment.
 
 This observe → generate → enforce workflow is the foundation of [SBoB (Software Bill of Behavior)](docs/presentation/article1-threat-model.md) — a behavioral contract that travels alongside your application, analogous to an SBOM for composition but capturing *what your code is allowed to do at runtime*, not just what it contains.
 
@@ -155,12 +155,12 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 
 ## How It Works (in plain terms)
 
-mazewall uses two Linux kernel features that have been in Docker since 2014:
+mazewall combines two Linux kernel features with different histories and deployment models:
 
 | Kernel feature | What it does | Docker equivalent |
 |---|---|---|
-| **Seccomp-BPF** | Blocks specific syscalls per thread | `--security-opt seccomp=profile.json` |
-| **Landlock LSM** | Restricts filesystem paths per thread | `--read-only` + bind mounts |
+| **Seccomp-BPF** | Blocks specific syscalls per thread | Container runtimes commonly apply process-wide Seccomp profiles |
+| **Landlock LSM** | Restricts filesystem paths per thread | Similar goal to read-only filesystems and bind mounts, but a separate Linux LSM introduced in 2021 |
 
 The difference: Docker applies these at the *container* (process) level. mazewall applies them at the *thread* (executor) level, from inside the JVM, without root privileges and without a native C dependency.
 
@@ -182,7 +182,7 @@ In addition to static system call blocking, `mazewall` supports **Stacktrace-Enf
 |---|---|---|---|
 | `Policy.NO_EXEC_HOTSPOT` | `execve`, `execveat`, `memfd_create` (JIT `mmap(PROT_EXEC)` allowed) | No shell / memfd; HotSpot can still compile | Process-wide startup on a JIT JVM — install this first |
 | `Policy.NO_EXEC` | Same syscalls **plus** `PROT_EXEC` mmap/mprotect denies | W^X-style; can fatal HotSpot if installed process-wide | AOT / no further code generation only |
-| `Policy.NO_NETWORK` | `connect`, `socket`, `sendmsg`, `io_uring_*` | Cannot call the network under any circumstances | XML/YAML/CSV parsers, file format processors |
+| `Policy.NO_NETWORK` | `connect`, `socket`, `sendmsg`, `io_uring_*` | Denies creation and connection of new sockets on the contained thread | XML/YAML/CSV parsers, file format processors |
 | `Policy.PURE_COMPUTE` | Exec + network + filesystem writes + `mmap(PROT_EXEC)`, with JVM classpath auto-whitelisted | Reads code, touches nothing else | Image processing, crypto, ML inference |
 | `Policy.PURE_COMPUTE_UNSAFE` | Same as above, without the JVM classpath whitelist | Strictest possible — may crash on lazy classloading | Pre-warmed, fully initialized workers only |
 
@@ -198,6 +198,7 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 | Auto-generate a policy from my workload | [profiler/README.md](profiler/README.md) |
 | See it block real CVEs (Log4Shell, SSRF, XXE) | [Demo README](demos/vulnerable-web-app/README.md) |
 | Understand the threat model and what it can't stop | [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) |
+| Reproduce the documented demonstrations | [docs/REPRODUCING_RESULTS.md](docs/REPRODUCING_RESULTS.md) |
 | Read the deep-dive article series | [Article series](#article-series) |
 | Contribute or modify the codebase | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
@@ -205,18 +206,16 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 
 ## Project Modules
 
-| Module | Purpose | Use in production? |
+| Module | Purpose | Status |
 |---|---|---|
-| `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | ✅ Yes (pre-alpha) |
-| `:profiler` | Developer tool — profiles a workload and generates a minimal policy | 🔬 Dev/test only |
+| `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | Experimental; evaluate only with an explicit threat-model and supported-platform review |
+| `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery; generated policies require validation |
 | `:demos:cli-demo` | Interactive CLI exploits showcase | 🚫 Demo only |
-| `:demos:vulnerable-app` | Spring Boot CVE demo (Log4Shell, SSRF, XXE…) | 🚫 Demo only |
+| `:demos:vulnerable-web-app` | Spring Boot CVE demo (Log4Shell, SSRF, XXE…) | 🚫 Demo only |
 
 ---
 
-The library is actively developed. Core sandboxing (`NO_EXEC`, `NO_NETWORK`, `PURE_COMPUTE`) and the profiler workflow are functional and tested via automated CI. Known issues and open bugs are tracked in the [`docs/internals/backlog/`](docs/internals/backlog/README.md) directory.
-
-API and behavior **will change**. If you're evaluating this for production use, follow the repo and check the backlog.
+The library is actively developed. Core sandboxing (`NO_EXEC`, `NO_NETWORK`, `PURE_COMPUTE`) and the profiler workflow have automated test coverage, but APIs and behavior can change. Before evaluating it in an application, reproduce the relevant demonstrations, use dedicated platform-thread pools, install the process-wide baseline first, and review the [threat model](docs/internals/designs/core/security-considerations.md) and [backlog](docs/internals/backlog/README.md).
 
 ---
 

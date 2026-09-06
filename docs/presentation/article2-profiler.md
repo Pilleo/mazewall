@@ -220,7 +220,7 @@ Enforcing these restrictions raises several systems-level questions: How does a 
 In **Part 3**, we will look under the hood of mazewall to examine the mechanics of JVM thread containment.
 
 > [!TIP]
-> **Try this now:** Run the mazewall profiler demo on the vulnerable-app code under local integration tests to see how the generated policy changes between basic HTTP runs and database-heavy transactions.
+> **Try this now:** Run the mazewall profiler demo on the `vulnerable-web-app` code under local integration tests to see how the generated policy candidate changes between basic HTTP runs and database-heavy transactions.
 
 ---
 
@@ -229,4 +229,3 @@ In **Part 3**, we will look under the hood of mazewall to examine the mechanics 
 [^strace]: strace(1) manual page. https://man7.org/linux/man-pages/man1/strace.1.html
 [^inspektor]: Inspektor Gadget: eBPF-based debugging and observability tool. https://www.inspektor-gadget.io/
 [^iouring]: io_uring LWN introduction by Jonathan Corbet. https://lwn.net/Articles/776703/
-

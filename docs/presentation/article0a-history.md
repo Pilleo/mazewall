@@ -144,7 +144,7 @@ A fair question at this point: if Docker already applies a Seccomp profile to ev
 
 ## 2021: The Filesystem Gets the Same Treatment
 
-In 2021, Linux 5.13 introduced **Landlock** — a complement to Seccomp that applies the same principle to filesystem and network access. Where Seccomp filters system call numbers, Landlock enforces path-based rules: a process (or thread) can declare that it should only be able to read from specific directories, write to others, and connect to specific ports. The kernel enforces these rules at the inode level, after path resolution, avoiding time-of-check/time-of-use races.
+In 2021, Linux 5.13 introduced **Landlock** — a complement to Seccomp for filesystem access control. Where Seccomp filters system call numbers, Landlock enforces filesystem rules: a process (or thread) can declare that it should only be able to read from specific directories or write to others. The kernel enforces these rules at the inode level, after path resolution, avoiding time-of-check/time-of-use races. TCP `bind` and `connect` port restrictions arrived later with Landlock ABI 4 in Linux 6.7; they are not general network access control.
 
 Like Seccomp, Landlock is *unprivileged*: any application can restrict itself without root access. Like Seccomp, a Landlock ruleset cannot be loosened once installed. The kernel treats it as a one-way lock.
 

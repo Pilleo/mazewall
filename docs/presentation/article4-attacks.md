@@ -313,7 +313,7 @@ flowchart TD
 
 
 ### 🔥 RED ZONES (High Risk / Must Sandbox)
-These are the most vulnerable parts of an application. They should *always* be wrapped in a restricted thread pool (e.g., `Policy.PURE_COMPUTE_UNSAFE`).
+These are high-risk parts of an application and strong candidates for a dedicated restricted thread pool. Select and validate a policy for the workload; `Policy.PURE_COMPUTE_UNSAFE` can break lazy class loading and is appropriate only when that constraint has been verified.
 *   **Deserializers:** Jackson, Gson, SnakeYAML, XStream. (Risk: RCE via gadget chains, memory exhaustion).
 *   **Document/Media Parsers:** XML (SAX/DOM), PDF generation, Image processing libraries. (Risk: XXE, SSRF, native memory corruption).
 *   **Template Engines:** Spring Expression Language (SpEL), Velocity, FreeMarker. (Risk: Server-Side Template Injection / SSTI).
