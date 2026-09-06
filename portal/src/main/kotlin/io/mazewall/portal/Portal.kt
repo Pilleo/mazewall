@@ -18,7 +18,7 @@ public object Portal {
                 callTimeoutMs = config.callTimeout.toMillis(),
                 workerClasspath = config.classpath.joinToString(File.pathSeparator),
                 workerMaxHeap = config.maxHeap,
-                startupTimeoutSeconds = (config.startupTimeout.toMillis() + 999) / 1_000,
+                startupTimeoutMillis = config.startupTimeout.toMillis(),
                 workerExtraJvmArgs =
                     listOf(
                         "-Dio.mazewall.portal.worker.concurrency=${config.concurrency}",

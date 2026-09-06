@@ -31,14 +31,14 @@ public class ProcessBroker(
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = "",
     private val workerMaxHeap: String = "64m",
-    private val startupTimeoutSeconds: Long = 30,
+    private val startupTimeoutMillis: Long = 30_000,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
 ) : PortalClient, AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
         require(workerMaxHeap.isNotBlank()) { "portal worker max heap is required" }
-        require(startupTimeoutSeconds >= 1) { "portal worker startup timeout must be positive" }
+        require(startupTimeoutMillis >= 1) { "portal worker startup timeout must be positive" }
     }
 
     public companion object {
@@ -195,7 +195,7 @@ public class ProcessBroker(
     }
 
     private fun spawnWorker(): WorkerSlot {
-        val startupDeadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(startupTimeoutSeconds)
+        val startupDeadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(startupTimeoutMillis)
         val ep = PrivateUnixEndpoint.create(launcher, "mazewall-portal-", "portal.sock")
         val listen = sockets.createUnixServer(ep.path)
         val spec =
@@ -269,13 +269,16 @@ public class ProcessBroker(
             error("portal worker failed to become ready")
         }
         spawned.incrementAndGet()
-        return register(WorkerSlot(proc, channel, ep, listen, sockets).also { it.startReader() }) ?: run {
+        val slot = WorkerSlot(proc, channel, ep, listen, sockets)
+        val registered = register(slot) ?: run {
             // Closed between accept and registration: tear down this worker immediately.
             proc.destroyForcibly()
             ep.close()
             sockets.close(listen)
             error("broker closed during worker spawn")
         }
+        registered.startReader()
+        return registered
     }
 
     private fun failConnection(dead: WorkerSlot, cause: Throwable) {
