@@ -343,6 +343,9 @@ subprojects {
             "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
             "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
             "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
+            // Privileged standalone acceptance executables are exercised by
+            // the Docker kernel gate, not by in-process JaCoCo unit tests.
+            "**/io/mazewall/profiler/tierE/stress/*",
             "**/io/mazewall/orchestrator/OrchestratorDaemonKt*",
             "**/io/mazewall/orchestrator/RealGitHubClient*",
             "**/io/mazewall/orchestrator/RealJulesClient*",

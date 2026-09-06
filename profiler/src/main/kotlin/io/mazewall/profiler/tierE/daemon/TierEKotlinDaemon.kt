@@ -1,6 +1,8 @@
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.profiler.attribution.TierEEmissionMode
+import io.mazewall.profiler.attribution.TierEOptions
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -18,7 +20,7 @@ import kotlin.system.exitProcess
  * Listens on a unix domain socket (abstract namespace), accepts ATTACH/DETACH/SET_CONTEXT
  * commands from privileged clients, and drives [TierEbpfEngine] directly.
  *
- * No C code. No libbpf. No marker library. No uprobe.
+ * The native JVMTI agent supplies the marker uprobe and logical stack dictionary.
  */
 public fun main() {
     if (!runningAsRoot()) {
@@ -79,26 +81,26 @@ private fun handleCommand(
         "ATTACH" -> {
             val pid = parts.getOrNull(1)?.toIntOrNull()
                 ?: return "ERR bad pid"
+            if (parts.getOrNull(2)?.lowercase() != "uprobe") return "ERR only uprobe mode is implemented"
+            val agent = parts.getOrNull(3)?.let(Path::of) ?: return "ERR missing agent path"
+            val offset = parts.getOrNull(4)?.removePrefix("0x")?.toLongOrNull(16)
+                ?: return "ERR bad marker offset"
+            val sessionTag = parts.getOrNull(5)?.removePrefix("0x")?.toIntOrNull(16)
+                ?: return "ERR bad session tag"
+            val emissionMode = when (parts.getOrNull(6) ?: "full-stream") {
+                "full-stream" -> TierEEmissionMode.FULL_STREAM
+                "unique-stack-syscall" -> TierEEmissionMode.UNIQUE_STACK_SYSCALL
+                else -> return "ERR bad emission mode"
+            }
             current()?.close()
             val eng = TierEbpfEngine(RealNativeEngine)
             try {
-                eng.install(pid)
+                eng.install(pid, sessionTag, TierEOptions(emissionMode))
+                eng.attachMarker(pid, agent, offset)
                 setCurrent(eng)
                 "OK attached pid=$pid"
             } catch (t: Throwable) {
                 runCatching { eng.close() }
-                "ERR ${t.message}"
-            }
-        }
-        "SET_CTX" -> {
-            val tid = parts.getOrNull(1)?.toIntOrNull()
-            val ctxId = parts.getOrNull(2)?.toLongOrNull()?.toInt()
-            if (tid == null || ctxId == null) return "ERR bad args"
-            val eng = current() ?: return "ERR not attached"
-            try {
-                eng.setContext(tid, ctxId)
-                "OK ctx tid=$tid id=$ctxId"
-            } catch (t: Throwable) {
                 "ERR ${t.message}"
             }
         }
@@ -107,7 +109,8 @@ private fun handleCommand(
             setCurrent(null)
             "OK detached"
         }
-        "STATUS" -> "OK engine=${if (current() != null) "active" else "idle"}"
+        "STATUS" -> current()?.let { "OK engine=active queued=${it.drainEvents().size} lost=${it.readLossCount()}" }
+            ?: "OK engine=idle"
         else -> "ERR unknown command"
     }
 }

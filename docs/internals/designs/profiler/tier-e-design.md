@@ -1,7 +1,7 @@
 # Tier E — eBPF Semantic Enrichment: Technical Design Document
 
-**Status:** APPROVED (architecture locked 2026-08-25)
-**Component:** `:platform`, `:profiler`, `ebpf-prototype/`
+**Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend, 2026-09-06)
+**Component:** `:platform`, `:profiler`, `profiler-native/`
 **Related:** [profiler-design.md](profiler-design.md) (Tiers P/S/A), [security-considerations.md](../core/security-considerations.md) (Shared-Memory ACE threat model)
 **Work packages:** [docs/internals/backlog/implementation/issue-20260825-*tier-e*.md](../../backlog/implementation/)
 
@@ -15,6 +15,147 @@ declaration into BPF task-local storage; a `sys_enter` tracepoint program reads 
 syscall entry and emits attributed events. The result is a per-syscall answer to
 *"which application-level operation caused this?"* — with **no JVM suspension, no
 USER_NOTIF round-trips, and no per-syscall Java work**.
+
+### 1.1 InvocationId stack backend (supersedes ContextId)
+
+The implementation no longer treats an application label as the canonical attribution. A JVMTI
+native-method proxy synchronously captures the current logical Java stack, interns it, allocates a
+session-qualified `InvocationId`, and calls:
+
+```c
+mazewall_stack_marker(uint64_t invocation_id, uint32_t flags)
+```
+
+The marker uprobe writes `{invocation_id, sequence, flags}` to BTF-typed task storage. The raw
+`sys_enter` program reads that exact task's value and emits an 88-byte record containing kernel
+time, TGID/TID, syscall number, six arguments, invocation ID, sequence, and flags. Userspace joins
+the event to the agent dictionary by ID only. Timestamp-nearest correlation and reuse of a previous
+stack are forbidden.
+
+Both system-wide BPF entry points compare the current TGID with the immutable session target
+before reading or writing task storage. The dynamic uprobe PMU uses libbpf's single global event
+form (CPU 0, PID -1); experimentally, opening the local trace-uprobe event on every CPU duplicated
+every hit. TGID filtering in the BPF program rejects other processes even if they map the same
+agent library and use the same session tag. The kernel gate pins the target away from CPU 0 to
+verify that this dynamic-probe form still observes migrated execution.
+
+The raw tracepoint emits every syscall made by the target after attachment. When task storage has
+no active invocation, it emits `InvocationId=0`, which userspace resolves to
+`NO_ACTIVE_INVOCATION` and marks incomplete. This makes agent-internal calls, pre-marker calls,
+unsupported native bindings, and missed marker transitions visible instead of silently dropping
+them. Completeness is therefore a strict claim; useful attributed subsets can still have zero
+wrong attribution while the overall run remains explicitly incomplete.
+
+The JVM API is doing the stack walk, not eBPF. Consequently inlined Java calls are represented by
+the logical JVMTI stack rather than a native PC-only unwind. A bounded 129-frame request detects
+depth truncation explicitly; capture failure, truncation, argument-read failure, ring loss, marker
+failure, scope overflow, and unresolved dictionary IDs all make session integrity incomplete.
+
+The current native interception manifest is HotSpot/OpenJDK-specific because it proxies exact
+internal JDK native method names and ABIs. The stack/dictionary protocol and Kotlin session model
+are JVM-neutral JVMTI concepts. Supporting OpenJ9 requires a separately tested binding manifest;
+silently applying HotSpot signatures to another JVM would be memory-unsafe. The current eBPF
+register layouts and syscall numbers are x86_64-only. AArch64 requires a separately verified
+program builder before it can be claimed supported.
+
+Virtual threads are supported as an experimental attribution mode on JDK 25: the agent asks the
+current `Thread` whether it is virtual, JVMTI captures its continuation-aware logical frames, and
+the marker propagates `FLAG_VTHREAD_EXPERIMENTAL`. A session never silently claims platform-thread
+quality for those observations.
+
+### 1.1.1 Stack-walk API status and adoption rule
+
+`JVMTI GetStackTrace` is the current exact-stack backend. It is a supported JVM TI operation that
+returns logical `{jmethodID, BCI}` frames, including the JVM's view of inlined calls; it is safe to
+call synchronously from the native binding proxy, but it is not a low-latency API. Method/class
+names and descriptors are resolved lazily outside the exact key where possible.
+
+The following are **not** replacements in the current implementation:
+
+* Java `StackWalker` is a current-thread Java API. Calling it from a JNI callback adds a native to
+  Java transition and Java frame/object materialization; it does not provide a lower-level,
+  syscall-correlated fast path.
+* `AsyncGetCallTrace` is an exported HotSpot-private symbol, not a supported JVM TI API. Its
+  historical failure modes rule it out for an attribution backend that must report unknown rather
+  than attach a wrong stack.
+* JDK 25's experimental JFR CPU-time profiler can collect asynchronous sample stacks, but sampling
+  is not a one-for-one syscall attribution protocol and cannot replace the explicit
+  `InvocationId` handoff.
+
+JEP 435's proposed asynchronous stack-trace API is the intended future direction, but it has not
+become a released API. As of 2026-01 the OpenJDK work is explicitly a proof of concept: one design
+delivers the result as an asynchronous JFR event with caller `user_data`, and another uses JVMTI
+callbacks. Tier E must not depend on either design until it is released and has passed the Tier E
+differential suite. At that point, add it as an optional HotSpot backend behind the existing
+dictionary model; require zero wrong pairings across compilation, deoptimization, class unloading,
+and virtual-thread tests before changing the default.
+
+References: [JVM TI stack-frame specification](https://docs.oracle.com/en/java/javase/25/docs/specs/jvmti.html),
+[StackWalker API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/StackWalker.html),
+and [OpenJDK asynchronous stack-walker RFC](https://www.mail-archive.com/serviceability-dev@openjdk.org/msg26652.html).
+
+Definitions are currently persisted when the target JVM unloads the agent. This keeps dictionary
+I/O off attributed target threads and permits delayed resolution, but a crash leaves IDs unresolved
+and therefore makes the run incomplete. A production Kubescape integration should replace the file
+transport with a bounded asynchronous channel while preserving the same binary records and
+fail-incomplete semantics.
+
+The privileged differential acceptance gate runs the same timed file-workload body through Tier E
+and the existing USER_NOTIF stack oracle. It requires `wrong=0`, `lost=0`, at least five resolved
+workload syscalls per iteration, and fails unless Tier E is faster. On the 2026-09-06 Docker gate
+(100 iterations), Tier E took 110,216,326 ns and USER_NOTIF took 308,617,796 ns (2.80x speedup).
+These numbers are evidence for that environment, not a portable performance guarantee.
+
+### 1.2 No-profiler control measurement
+
+The Tier E-vs-USER_NOTIF comparison alone is not a measure of application overhead.  On
+2026-09-06, the same file workload (1,000 write/read iterations, JDK 25 Graal, privileged
+Docker with host PID namespace, target pinned to CPU 11) was measured from immediately before
+the workload body to immediately after it.  JVM launch and Tier E attach time were excluded.
+
+| Mode | Samples | Median workload time | Change from no profiler |
+|---|---:|---:|---:|
+| No profiler | 7 | 405.7 ms | baseline |
+| Tier E (JVMTI native binding + uprobe + eBPF) | 7 | 839.6 ms | +107% (2.07x) |
+| Tier S (`USER_NOTIF` oracle) | 3 | 3,158.5 ms | +679% (7.79x) |
+
+All Tier E samples had `wrong=0` and `lost=0`; they produced 5,014 resolved observations per
+run.  Tier E was 3.76x faster than the median USER_NOTIF sample, but it is **not low-overhead
+yet** for syscall-dense work.  The Tier E samples ranged from 670.4 ms to 1,847.1 ms, so these
+are diagnostic host measurements rather than a performance commitment.  The remaining work in
+WP-12 is still required before making service-level throughput or latency claims.
+
+### 1.3 Performance roadmap
+
+The following order preserves Tier E's core guarantee: no observation may be assigned a stack
+unless that exact logical stack has been proven at the corresponding native boundary.
+
+1. **Reuse exact raw-stack keys in full-stream mode.** After every synchronous `GetStackTrace`, a
+   stable `(jmethodID, BCI)[]` key can reuse an existing `StackTraceId` while the session still
+   allocates a fresh `InvocationId` and emits every syscall. This removes repeated method-name,
+   descriptor, and class-signature resolution without changing full-stream cardinality. Cache
+   entries must retain weak class guards and be invalidated after class unloading.
+2. **Make the unavoidable capture path allocation-free.** Reuse native frame and raw-key buffers
+   per thread. This may reduce agent-side allocation, hashing, and locking, but cannot remove the
+   HotSpot logical stack walk that proves the key.
+3. **Offer an explicit reduced-payload coverage mode.** A coverage-only report may request only a
+   syscall number and canonical stack edge, avoiding six-register argument capture where callers
+   do not need representative arguments. It must not claim a full stream. Unknown/unmarked
+   activity must remain visible as an integrity failure, either as events or as a clearly reported
+   aggregate counter.
+4. **Evaluate a lower-cost marker transport.** A USDT marker or another verified lower-overhead
+   transport can reduce the four current marker transitions around each native scope. It must
+   retain the same per-thread state transitions and binary/attachment verification as the uprobe
+   path.
+5. **Evaluate scoped tracepoint attachment for node scale.** Per-platform-TID perf tracepoints
+   could avoid running the system-wide raw-tracepoint filter for unrelated host processes. This is
+   an operational-cost optimization only; it must correctly track JVM thread lifecycle and carrier
+   threads before it can replace the current global attachment.
+
+Rejected shortcuts: Java `StackWalker`, `AsyncGetCallTrace`, a timestamp join, a per-method shadow
+stack, and skipping `GetStackTrace` based only on prior history. Each either adds cost, lacks a
+supported correctness contract, or cannot prove that a repeated raw key represents the current
+logical stack.
 
 The end state is deliberately shaped for later reimplementation inside Kubescape's
 node-agent:
@@ -42,22 +183,36 @@ openat("/tmp/in.pdf")             sys_enter raw tracepoint
 | P | eBPF tracepoints / strace descendant | host root / rootful container | raw syscall stream | complete, unattributed |
 | S | Out-of-process `USER_NOTIF` supervisor | unprivileged target | exact syscalls + JVM stacks | complete, slow, suspends tracee |
 | A | Iterative deny-and-retry | zero privilege | Landlock paths + syscalls | converges over N runs |
-| **E** | **uprobe marker → task storage → `sys_enter`** | **privileged daemon; target stays unprivileged** | **attributed syscall events** | **attribution-complete; event-stream lossy (ringbuf)** |
+| **E** | **JVMTI logical stack → InvocationId uprobe → task storage → `sys_enter`** | **privileged collector; target agent stays unprivileged** | **syscall + canonical Java stack ID** | **complete only when every explicit integrity counter is zero** |
 
-Tier E does not replace S or P. It is the **enrichment layer**: coarse semantic truth at full
-speed. Exact stacks and policy-grade completeness remain Tier S's job.
+Tier E does not replace policy-grade Tier S. It is a profiling/attribution backend: exact logical
+stacks for covered native bindings, with explicit UNKNOWN/incomplete results outside that coverage.
+
+### 2.1 Optional unique-edge emission
+
+`TierEEmissionMode.FULL_STREAM` is the default.  The opt-in
+`UNIQUE_STACK_SYSCALL` mode still proves the complete logical stack at every proxied native
+boundary using the JVMTI `(jmethodID, BCI)` sequence, but it reuses a canonical stack context
+after an exact match.  The kernel then emits only the first observed `(canonical stack, syscall
+number)` pair from its session-local LRU cache.  Cache eviction or concurrent first use may
+re-emit an edge; they never suppress a new one.
+
+This mode is a unique-edge coverage report: arguments are representative of the first retained
+observation, event counts are unavailable, and it must not claim `FULL_STREAM` completeness.
+Unmarked syscalls, failed stack capture, argument-read failures, and ring loss remain explicit
+incomplete evidence.  It is never an enforcement or policy-generation input.
 
 ## 3. Invariants (non-negotiable, enforced by review and where possible by types)
 
 1. **Profiling/enrichment/detection hints only.** Never an enforcement input.
    Enforcement remains seccomp/Landlock + `USER_NOTIF`/`ADDFD`.
-2. **Context metadata is tracee-controlled and therefore forgeable.** `ContextId` carries an
-   `UNTRUSTED ATTRIBUTION METADATA` contract on the type itself.
+2. **Stack metadata is tracee-controlled and therefore forgeable.** Invocation and dictionary
+   records are `UNTRUSTED ATTRIBUTION METADATA` and are never policy inputs.
 3. **Fail UNKNOWN, never guess.** Missing registration, storage-create failure, ring-buffer
    drop, pre-attach window, post-detach residue — every uncertain case yields `UNKNOWN`,
    never "nearest context" or timestamp inference.
-4. **Platform threads only.** Virtual threads are rejected fail-closed inside
-   `MazewallContext` (Loom carrier-poisoning doctrine, see profiler-design.md §1).
+4. **Virtual-thread claims are explicit.** They carry an experimental flag and have their own
+   correctness gate; no seccomp filter is installed on a carrier.
 5. **One BPF map set per session epoch.** Maps are never recycled across sessions. Task
    local storage is scoped per-map instance, so a fresh session observes no stale values.
 6. **No bpffs pinning in v1.** The daemon owns all map/link FDs. Daemon death detaches
@@ -72,6 +227,11 @@ speed. Exact stacks and policy-grade completeness remain Tier S's job.
    mandatory; any drop ⇒ `drainComplete = false` in the collector drain.
 
 ## 4. Architecture
+
+> The ContextId/USDT material below records the earlier Tier E design. For the implemented stack
+> backend, substitute `InvocationId` for `ContextId`, `mazewall_stack_marker` for the context probe,
+> and the native JVMTI dictionary described in §1.1. The current implementation uses a plain symbol
+> uprobe because its dependency-free Kotlin loader resolves the ELF dynamic symbol directly.
 
 ### 4.1 The handoff primitive
 
@@ -463,3 +623,58 @@ sample code: github.com/oracle-samples/linux-blog-sample-code (branch
 (reference-only by default).
 
 ---
+
+## Appendix C. JVMTI native-method event backend (investigated, not enabled)
+
+JVM TI `MethodEntry` and `MethodExit` are generated for Java methods **including native
+methods**. This makes a generic native-boundary backend technically possible without an
+OpenJDK-specific `NativeMethodBind` proxy manifest:
+
+```text
+MethodEntry(native Java method)
+  → synchronously GetStackTrace + intern InvocationId + marker(id)
+native code runs; sys_enter records id
+MethodExit(native Java method)
+  → marker(parent-or-zero)
+```
+
+This is exact at the same Java-to-native boundary as the binding-proxy backend. In particular,
+the captured stack is a JVM logical stack, so inlined Java frames are represented by JVM TI
+rather than guessed from a native PC. Native method exits are delivered on both normal and
+exceptional returns, allowing the scope to be cleared without timestamp correlation.
+
+It is intentionally not a supported Tier E backend today. JVM TI only exposes the event switch
+globally: the callback must receive every Java method entry/exit before it can reject
+non-native methods. The JVM TI specification explicitly warns that enabling these events can
+significantly degrade performance and recommends bytecode instrumentation for performance
+critical use ([JVM TI 25 — Method Entry and Method Exit](https://docs.oracle.com/en/java/javase/25/docs/specs/jvmti.html)).
+
+The local controlled workload measured that cost directly. For ten file write/read iterations,
+the generic event implementation captured 20,287 native entries and produced 180 resolved
+syscalls with zero wrong attribution and zero kernel loss, but took **742,987,879 ns**. The
+equivalent USER_NOTIF oracle took **264,645,705 ns**. It is therefore about 2.8× slower than
+the oracle here, while the native-binding proxy remains faster than the oracle. These are
+environment-specific measurements, but enough to reject MethodEntry/MethodExit as the default.
+
+This remains useful future work in three situations:
+
+1. a diagnostic-only, explicitly slow fallback where JVM-neutral native-boundary coverage is
+   more valuable than throughput;
+2. a correctness oracle for a generated-wrapper backend; and
+3. a development aid for discovering missing binding-manifest entries.
+
+The viable generic fast direction is **selective instrumentation of native call boundaries**:
+rewrite or generate wrappers only around native invocations, invoke the same marker around the
+call in a `try/finally`, and retain the current `InvocationId → dictionary` protocol. Such a
+backend must be separately designed and benchmarked; it cannot be substituted by enabling
+global MethodEntry/MethodExit events.
+
+### C.1 PID namespace requirement for kernel gates
+
+`bpf_get_current_pid_tgid()` uses the kernel's initial PID namespace identity. Consequently the
+TGID installed in the BPF target map must be the target's host PID. A collector running in a
+separate PID namespace cannot pass its namespace-local `Process.pid()` and expect target
+matches. The privileged Docker gate must run with `--pid=host` (or receive the host PID from the
+container runtime); otherwise both marker and syscall programs correctly reject the target and
+the result is zero observations. This is a fail-unknown condition, never a reason to remove the
+TGID guard.

@@ -1,4 +1,42 @@
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
 import java.math.BigDecimal
+import javax.inject.Inject
+
+abstract class GenerateInvocationStateBtf
+    @Inject
+    constructor(
+        private val execOperations: ExecOperations,
+    ) : DefaultTask() {
+        @get:InputFile abstract val source: RegularFileProperty
+
+        @get:OutputFile abstract val objectFile: RegularFileProperty
+
+        @get:OutputFile abstract val resource: RegularFileProperty
+
+        @TaskAction
+        fun generate() {
+            objectFile
+                .get()
+                .asFile.parentFile
+                .mkdirs()
+            resource
+                .get()
+                .asFile.parentFile
+                .mkdirs()
+            execOperations.exec {
+                commandLine("clang", "-target", "bpf", "-g", "-O2", "-c", source.get().asFile.absolutePath, "-o", objectFile.get().asFile.absolutePath)
+            }
+            execOperations.exec {
+                commandLine("llvm-objcopy", "--dump-section", ".BTF=${resource.get().asFile.absolutePath}", objectFile.get().asFile.absolutePath)
+            }
+        }
+    }
 
 plugins {
     kotlin("jvm")
@@ -13,7 +51,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("io.mazewall.profiler.tierE.daemon.TierEDaemonKt")
+    mainClass.set("io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt")
     applicationName = "tier-e-daemon"
     applicationDefaultJvmArgs =
         listOf(
@@ -24,6 +62,9 @@ application {
 }
 
 sourceSets {
+    main {
+        resources.srcDir(layout.buildDirectory.dir("generated/resources"))
+    }
     test {
         java.srcDir(rootProject.file("src/sharedTest/kotlin"))
     }
@@ -32,6 +73,17 @@ sourceSets {
         compileClasspath += main.get().output + test.get().output
         runtimeClasspath += main.get().output + test.get().output
     }
+}
+
+val generateInvocationStateBtf =
+    tasks.register<GenerateInvocationStateBtf>("generateInvocationStateBtf") {
+        source.set(layout.projectDirectory.file("src/main/c/btf/invocation_state.c"))
+        objectFile.set(layout.buildDirectory.file("generated/btf/invocation_state.o"))
+        resource.set(layout.buildDirectory.file("generated/resources/btf/invocation_state.btf"))
+    }
+
+tasks.named("processResources") {
+    dependsOn(generateInvocationStateBtf)
 }
 
 // Associate integration tests with main and test to allow accessing internal members and test utilities
@@ -195,6 +247,7 @@ classDiagrams {
 }
 
 tasks.named("generateClassDiagrams") {
+    dependsOn(generateInvocationStateBtf)
     val pumlFile = file("$rootDir/docs/diagrams/profiler_class_diagram.puml")
     val svgFile = file("$rootDir/docs/diagrams/profiler_class_diagram.svg")
 

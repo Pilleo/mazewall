@@ -1,6 +1,7 @@
 # Mazewall Backlog Index
 
 *Total Active Issues:* 82 | *Total Resolved Issues:* 501
+*Total Active Issues:* 87 | *Total Resolved Issues:* 496
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
