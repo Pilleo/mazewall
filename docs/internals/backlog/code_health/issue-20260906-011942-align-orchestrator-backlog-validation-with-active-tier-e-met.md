@@ -24,6 +24,9 @@ autonomy: "supervised"
 open_questions: false
 review_verdict: approved
 has_side_effects: true
+
+paperclip_issue_id: "f315fb73-af87-487c-abd2-5f343fde40f7"
+paperclip_identifier: "MAZ-1068"
 ---
 
 # 🟡 [Severity: MEDIUM]: Align orchestrator backlog validation with active Tier-E metadata
