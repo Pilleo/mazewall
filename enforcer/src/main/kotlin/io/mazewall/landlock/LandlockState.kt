@@ -105,6 +105,10 @@ internal sealed interface LandlockLifecycle {
         val ruleset: LandlockRuleset<RulesetState.Building>,
     ) : LandlockLifecycle {
         override val diagnosticState: LandlockState = LandlockState.Enforcing(ruleset.fd)
+
+        fun tryRestrictSelf(processWide: Boolean = false): LandlockRestrictOutcome =
+            Landlock.tryEnforceRuleset(ruleset, processWide)
+
         fun restrictSelf(processWide: Boolean = false): Restricted {
             Landlock.enforceRuleset(ruleset, processWide)
             return Restricted
@@ -181,7 +185,7 @@ internal class LandlockSession(
 
                             val added = lifecycle.addRules(arena)
                             state = added.diagnosticState
-                            when (val restricted = Landlock.tryEnforceRuleset(ruleset, processWide)) {
+                            when (val restricted = added.tryRestrictSelf(processWide)) {
                                 is LandlockRestrictOutcome.Err -> {
                                     val outcome = Landlock.classifyLandlockErrno(
                                         "landlock_restrict_self",

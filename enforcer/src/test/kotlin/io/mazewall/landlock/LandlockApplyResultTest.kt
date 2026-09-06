@@ -82,6 +82,32 @@ class LandlockApplyResultTest {
     }
 
     @Test
+    fun `rules-added lifecycle transition returns restrict-self failure`() {
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
+                    return LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val result = LandlockLifecycle.RulesAdded(ruleset).tryRestrictSelf()
+
+        val error = assertIs<LandlockRestrictOutcome.Err>(result)
+        assertEquals(NativeConstants.EPERM, error.errno)
+    }
+
+    @Test
     fun `tryApplyRuleset maps ENOSYS create to Rejected when fallback is FAIL`() {
         System.setProperty("io.mazewall.fallback", "FAIL")
         Platform.setProvider(MockPlatformProvider())
@@ -137,6 +163,61 @@ class LandlockApplyResultTest {
 
         val failed = assertIs<LandlockState.Failed>(session.state)
         assertIs<LandlockState.CreatingRuleset>(failed.previous)
+    }
+
+    @Test
+    fun `add-rule failure retains the configuring lifecycle phase`(@TempDir dir: Path) {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = when (nr) {
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_ADD_RULE_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val policy = Policy.builder().allowFsRead(dir.toString()).build().definition
+        val session = LandlockSession(policy)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.ConfiguringRuleset>(failed.previous)
+    }
+
+    @Test
+    fun `restrict-self failure retains the enforcing lifecycle phase`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = when (nr) {
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_RESTRICT_SELF_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.Enforcing>(failed.previous)
     }
 
     @Test

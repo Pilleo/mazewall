@@ -1,7 +1,7 @@
 ---
 title: "Unify Landlock descriptive state with type-state lifecycle in LandlockSession"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
