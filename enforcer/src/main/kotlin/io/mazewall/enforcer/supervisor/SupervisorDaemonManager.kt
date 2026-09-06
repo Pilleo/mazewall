@@ -1,14 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
-import io.mazewall.seccomp.SeccompInstallationState
 import io.mazewall.core.JavaAgentSelection
 import io.mazewall.core.JvmChildProcess
 import io.mazewall.core.JvmChildSpec
@@ -17,9 +10,15 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.getFdOrThrow
+import io.mazewall.seccomp.SeccompInstallationState
 import java.io.IOException
 import java.nio.file.Path
 import java.util.logging.Logger
@@ -40,14 +39,21 @@ public data class SupervisorContext(
 public class SupervisorDaemonManager(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
-    private val processLauncher: ProcessLauncher = RealProcessLauncher
+    private val processLauncher: ProcessLauncher = RealProcessLauncher,
 ) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)
     private val daemonLock = Any()
+
     private sealed interface DaemonHandle {
         data object NotStarted : DaemonHandle
-        data class Running(val context: SupervisorContext) : DaemonHandle
-        data class Defunct(val context: SupervisorContext) : DaemonHandle
+
+        data class Running(
+            val context: SupervisorContext,
+        ) : DaemonHandle
+
+        data class Defunct(
+            val context: SupervisorContext,
+        ) : DaemonHandle
     }
 
     private var daemonHandle: DaemonHandle = DaemonHandle.NotStarted
@@ -111,7 +117,10 @@ public class SupervisorDaemonManager(
     }
 
     /** Marks the current daemon dead exactly once, emits diagnostics, then applies the fail-closed policy. */
-    private fun markDefunct(context: SupervisorContext, exitCode: Int) {
+    private fun markDefunct(
+        context: SupervisorContext,
+        exitCode: Int,
+    ) {
         val current = daemonHandle
         if (current !is DaemonHandle.Running || current.context.daemonProcess != context.daemonProcess) return
         daemonHandle = DaemonHandle.Defunct(context)
@@ -188,7 +197,8 @@ public class SupervisorDaemonManager(
         val daemonPid = daemonProcess.pid()
 
         val prctlRes = engine.process.prctl(
-            io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+            io.mazewall.core.PrctlCommand
+                .SetPtracer(daemonPid),
         )
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
@@ -261,7 +271,10 @@ public class SupervisorDaemonManager(
      * (issue-20260823-172000). Sleep-based waiting is replaced by a liveness poll so shutdown
      * success is observable and fast daemons are not delayed by a fixed 100ms.
      */
-    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
+    private fun triggerDaemonShutdown(
+        socketPath: String,
+        process: Process,
+    ) {
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)

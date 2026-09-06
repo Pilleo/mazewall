@@ -7,7 +7,6 @@ import kotlin.test.*
 
 @Isolated
 class PlatformProviderTest {
-
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()

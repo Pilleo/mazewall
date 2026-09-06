@@ -9,8 +9,8 @@ import io.mazewall.Policy
 import io.mazewall.PolicyCompilationCache
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.seccomp.PureJavaBpfEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -35,9 +35,11 @@ class InstallationReceiptSupervisorSessionTest {
                 }
             }
         }
-        LinuxNative.setEngine(MockNativeEngine(process = process).apply {
+        LinuxNative.setEngine(
+            MockNativeEngine(process = process).apply {
             onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
-        })
+        },
+        )
     }
 
     @AfterEach

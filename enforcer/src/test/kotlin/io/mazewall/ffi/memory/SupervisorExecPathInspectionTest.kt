@@ -9,10 +9,10 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.enforcer.supervisor.SupervisorSessionHandler
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.lang.foreign.MemorySegment
+import java.lang.foreign.ValueLayout
 
 class SupervisorExecPathInspectionTest {
     @Test
@@ -40,14 +40,15 @@ class SupervisorExecPathInspectionTest {
         try {
             LinuxNative.setEngine(mockEngine)
             val handler = SupervisorSessionHandler(
-                FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
             val method = SupervisorSessionHandler::class.java.declaredMethods.first {
                 it.name.startsWith("extractNotificationArgs") && !it.name.contains("$") && it.parameterCount >= 4
             }
             method.isAccessible = true
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
             NativeArena.ofConfined().use { arena ->
                 val args = LongArray(6).apply { this[0] = 0x1000L }
                 val paramTypes = method.parameterTypes

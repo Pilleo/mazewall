@@ -1,17 +1,16 @@
 package io.mazewall
 
+import io.mazewall.LinuxNative.SyscallHandledState
+import io.mazewall.LinuxNative.SyscallResult
+import io.mazewall.core.Arch
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readLong
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.LinuxNative.SyscallHandledState
 import java.util.logging.Logger
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
@@ -188,7 +187,8 @@ public object Platform {
         get() =
             isLinux &&
                 try {
-                    io.mazewall.core.Arch.current() == io.mazewall.core.Arch.AMD64
+                    io.mazewall.core.Arch
+                        .current() == io.mazewall.core.Arch.AMD64
                 } catch (e: UnsupportedOperationException) {
                     false
                 }

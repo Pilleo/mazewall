@@ -41,7 +41,6 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                         NativeArg.NullArg,
                     )
 
-
                     if (sendRes is LinuxNative.SyscallResult.Error) {
                         if (sendRes.errno != 1) { // 1 is EPERM (seccomp block)
                             throw IllegalStateException("SECURITY BYPASS: sendmmsg reached the kernel! Errno was ${sendRes.errno} instead of EPERM(1)")

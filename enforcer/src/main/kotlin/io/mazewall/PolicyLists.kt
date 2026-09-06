@@ -125,7 +125,10 @@ public class AllowListSpec internal constructor(
             .builder()
             .defaultAction(SeccompAction.ACT_ERRNO())
             .forRuntime(runtime)
-            .allow(*io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor())
+            .allow(
+                *io.mazewall.enforcer.engine.JvmFloorPresets
+                .fullJvmFloor(),
+            )
 
     public val mode: PolicyMode = PolicyMode.ALLOW_LIST
 

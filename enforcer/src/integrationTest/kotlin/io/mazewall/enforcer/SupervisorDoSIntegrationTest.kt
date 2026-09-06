@@ -12,7 +12,6 @@ import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class SupervisorDoSIntegrationTest {
-
     @Test
     fun testBoundedThreadCreation() {
         if (!System.getProperty("os.name").equals("Linux", ignoreCase = true)) return
@@ -41,12 +40,13 @@ class SupervisorDoSIntegrationTest {
             // MAX_CONNECTIONS is 200. Baseline is around 20. Total should be around 220.
             // We'll allow a margin.
             val maxExpected = 200 + baselineThreads + 10
-            assertTrue(currentThreads <= maxExpected,
-                "Thread count should be bounded. Expected at most $maxExpected, got $currentThreads")
-
+            assertTrue(
+                currentThreads <= maxExpected,
+                "Thread count should be bounded. Expected at most $maxExpected, got $currentThreads",
+            )
         } finally {
             connections.forEach {
-                LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(it))
+                LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.UnixSocket>(it))
             }
             SupervisorDaemonManager.getInstance().stop()
         }

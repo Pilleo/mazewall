@@ -8,7 +8,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
 class BpfStaticVerifierTest {
-
     @Test
     fun `valid program verifies successfully`() {
         val program = BpfProgram.dsl(Arch.AMD64) {
@@ -49,7 +48,7 @@ class BpfStaticVerifierTest {
         }
         assertEquals(
             "BPF verification failed: program size (${excessiveInstructions.size}) exceeds limit of ${NativeConstants.BPF_MAXINSNS} instructions",
-            exception.message
+            exception.message,
         )
     }
 
@@ -59,7 +58,7 @@ class BpfStaticVerifierTest {
         // Index 1: Ret
         val instructions = listOf(
             BpfInstruction.Jmp(0x15.toShort(), 5.toShort(), 0.toShort(), 0),
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
@@ -80,7 +79,7 @@ class BpfStaticVerifierTest {
     fun `program with fallthrough off the end throws verification exception`() {
         // Index 0: Ld (falls through to index 1, which is out of bounds)
         val instructions = listOf(
-            BpfInstruction.Ld(0x20.toShort(), 0)
+            BpfInstruction.Ld(0x20.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
@@ -107,7 +106,7 @@ class BpfStaticVerifierTest {
 
         val instructions = listOf(
             jmp,
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
@@ -135,7 +134,7 @@ class BpfStaticVerifierTest {
 
         val instructions = listOf(
             jmp,
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {

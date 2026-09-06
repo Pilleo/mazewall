@@ -19,7 +19,8 @@ internal object ProcFsInspector {
                     }
                 }
             }
-        } catch (ignored: Exception) {}
+        } catch (ignored: Exception) {
+            }
         return tid
     }
 
@@ -38,7 +39,8 @@ internal object ProcFsInspector {
                     return parts[2].toInt()
                 }
             }
-        } catch (ignored: Exception) {}
+        } catch (ignored: Exception) {
+            }
         return 0
     }
 }

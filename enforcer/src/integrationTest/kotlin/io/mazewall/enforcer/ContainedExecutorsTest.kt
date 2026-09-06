@@ -5,9 +5,12 @@ import io.mazewall.IsolatedProcessTester
 import io.mazewall.NeedsFreshJvm
 import io.mazewall.Platform
 import io.mazewall.Policy
-import io.mazewall.compile
 import io.mazewall.PolicyScope
-import io.mazewall.core.Syscall
+import io.mazewall.compile
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -15,10 +18,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import org.junit.jupiter.api.Assumptions.assumeFalse
 
 @NeedsFreshJvm
 class ContainedExecutorsTest : BaseIntegrationTest() {
@@ -100,8 +99,22 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         try {
             val future = executor.submit(
                 java.util.concurrent.Callable {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp", true)).build())
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp/foo", true)).build())
+                ContainedExecutors.installOnCurrentThread(
+                    Policy
+                        .builder()
+                        .allowFsRead(
+                        io.mazewall.core.SandboxedPath
+                    .of("/tmp", true),
+                    ).build(),
+                )
+                ContainedExecutors.installOnCurrentThread(
+                    Policy
+                        .builder()
+                        .allowFsRead(
+                        io.mazewall.core.SandboxedPath
+                    .of("/tmp/foo", true),
+                    ).build(),
+                )
                 "success"
             },
             )
@@ -136,8 +149,22 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val future = executor.submit {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp", true)).build())
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp-foo", true)).build())
+                ContainedExecutors.installOnCurrentThread(
+                    Policy
+                        .builder()
+                        .allowFsRead(
+                        io.mazewall.core.SandboxedPath
+                    .of("/tmp", true),
+                    ).build(),
+                )
+                ContainedExecutors.installOnCurrentThread(
+                    Policy
+                        .builder()
+                        .allowFsRead(
+                        io.mazewall.core.SandboxedPath
+                    .of("/tmp-foo", true),
+                    ).build(),
+                )
             }
             try {
                 future.get()
@@ -257,7 +284,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                 @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
-                val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+                val strerror13 = io.mazewall.ffi.memory
+                    .getSystemStrerror(13)
                 val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
                 if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
                     throw e
@@ -271,7 +299,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             assertTrue(
                 ex.message!!.contains("Process-wide Landlock") ||
                 ex.message!!.contains("does not support Landlock") ||
-                ex is io.mazewall.UnsupportedKernelFeatureException
+                ex is io.mazewall.UnsupportedKernelFeatureException,
             )
         }
     }
@@ -280,7 +308,6 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     fun `installOnProcess rejects policies with Landlock requirement on unsupported kernels`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessRejectsPoliciesWithLandlockRequirement")
     }
-
 
     @Test
     fun `test hierarchical Landlock stacking success`() {
@@ -304,8 +331,18 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
     @Test
     fun `installOnCurrentThread accepts both process-wide and thread-local policies`() {
-        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.Compiled> = Policy.builder().allowFsRead("/tmp").build().compile(io.mazewall.core.Arch.current())
-        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.Compiled> = Policy.builder().build().compile(io.mazewall.core.Arch.current())
+        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.Compiled> = Policy
+            .builder()
+            .allowFsRead("/tmp")
+            .build()
+            .compile(
+                io.mazewall.core.Arch
+                .current(),
+            )
+        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.Compiled> = Policy.builder().build().compile(
+            io.mazewall.core.Arch
+            .current(),
+        )
 
         val list = listOf<Policy<*, io.mazewall.Compiled>>(threadLocalPolicy, processWidePolicy)
         assertEquals(2, list.size)

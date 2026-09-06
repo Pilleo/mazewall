@@ -17,12 +17,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
-import kotlin.test.assertFailsWith
 import kotlin.test.assertContains
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 class LandlockApplyResultTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -75,7 +74,7 @@ class LandlockApplyResultTest {
             }
         })
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val result = Landlock.tryEnforceRuleset(ruleset, false)
         val error = assertIs<LandlockRestrictOutcome.Err>(result)
         assertEquals(NativeConstants.EPERM, error.errno)
@@ -100,7 +99,7 @@ class LandlockApplyResultTest {
             }
         })
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val result = LandlockLifecycle.RulesAdded(ruleset).tryRestrictSelf()
 
         val error = assertIs<LandlockRestrictOutcome.Err>(result)
@@ -127,14 +126,20 @@ class LandlockApplyResultTest {
     }
 
     @Test
-    fun `applyRuleset still fail-closes by unpacking tryApplyRuleset`(@TempDir dir: Path) {
+    fun `applyRuleset still fail-closes by unpacking tryApplyRuleset`(
+        @TempDir dir: Path,
+    ) {
         System.setProperty("io.mazewall.fallback", "FAIL")
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(enosysCreateEngine())
 
         assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.applyRuleset(
-                Policy.builder().allowFsRead(dir.toString()).build().definition,
+                Policy
+                    .builder()
+                    .allowFsRead(dir.toString())
+                    .build()
+                    .definition,
             )
         }
     }
@@ -166,7 +171,9 @@ class LandlockApplyResultTest {
     }
 
     @Test
-    fun `add-rule failure retains the configuring lifecycle phase`(@TempDir dir: Path) {
+    fun `add-rule failure retains the configuring lifecycle phase`(
+        @TempDir dir: Path,
+    ) {
         System.setProperty("io.mazewall.fallback", "FAIL")
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(object : MockNativeEngine() {
@@ -178,14 +185,19 @@ class LandlockApplyResultTest {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = when (nr) {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                when (nr) {
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
                 NativeConstants.LANDLOCK_ADD_RULE_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
                 else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         })
 
-        val policy = Policy.builder().allowFsRead(dir.toString()).build().definition
+        val policy = Policy
+            .builder()
+            .allowFsRead(dir.toString())
+            .build()
+            .definition
         val session = LandlockSession(policy)
         assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
 
@@ -206,7 +218,8 @@ class LandlockApplyResultTest {
                 a4: io.mazewall.core.NativeArg,
                 a5: io.mazewall.core.NativeArg,
                 a6: io.mazewall.core.NativeArg,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = when (nr) {
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                when (nr) {
                 NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
                 NativeConstants.LANDLOCK_RESTRICT_SELF_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
                 else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
@@ -221,7 +234,9 @@ class LandlockApplyResultTest {
     }
 
     @Test
-    fun `ContainedExecutors install receipt is not installed when landlock is rejected`(@TempDir dir: Path) {
+    fun `ContainedExecutors install receipt is not installed when landlock is rejected`(
+        @TempDir dir: Path,
+    ) {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(enosysCreateEngine())
@@ -234,7 +249,8 @@ class LandlockApplyResultTest {
         }
     }
 
-    private fun enosysCreateEngine(): MockNativeEngine = object : MockNativeEngine() {
+    private fun enosysCreateEngine(): MockNativeEngine =
+        object : MockNativeEngine() {
         override fun syscall(
             nr: Long,
             a1: io.mazewall.core.NativeArg,

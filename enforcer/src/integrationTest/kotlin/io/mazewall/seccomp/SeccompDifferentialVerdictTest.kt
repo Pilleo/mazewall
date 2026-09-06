@@ -1,17 +1,19 @@
 package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
+import io.mazewall.BpfFilter
+import io.mazewall.CompiledSandbox
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.compile
-import io.mazewall.PolicyScope
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Test
 import java.net.Socket
+import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -35,7 +37,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         System.setProperty("io.mazewall.selfVerify", "true")
     }
 
-    private val arch = io.mazewall.core.Arch.current()
+    private val arch = io.mazewall.core.Arch
+        .current()
 
     private fun assertKernelVerdictMatchesSimulator(
         program: List<BpfInstruction>,
@@ -64,27 +67,122 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
      * kernel itself) counts as "not denied by seccomp".
      */
     private fun kernelDenied(nr: Int): Boolean {
+        return kernelDenied(nr, LongArray(6))
+    }
+
+    private fun kernelDenied(
+        nr: Int,
+        args: LongArray,
+    ): Boolean {
         val res = io.mazewall.LinuxNative.raw.syscall(
             nr.toLong(),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(0) { 0 }),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(1) { 0 }),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(2) { 0 }),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(3) { 0 }),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(4) { 0 }),
+            io.mazewall.core.NativeArg
+                .LongArg(args.getOrElse(5) { 0 }),
         )
         return res is io.mazewall.LinuxNative.SyscallResult.Error &&
             res.errno == NativeConstants.EPERM
     }
 
     @Test
+    fun `argument-inspection fuzz agrees with kernel for prctl and mprotect`() {
+        val policy = Policy.builder().build()
+        val compiled = policy.compile(arch)
+        val random = Random(0x4d415a45)
+
+        ContainedExecutors.installOnCurrentThread(policy)
+
+        repeat(64) { sample ->
+            val highWord = random.nextLong() shl 32
+            val prctlOption = highWord or if (random.nextBoolean()) 15L else 25L
+            val prctlArgs = longArrayOf(prctlOption)
+            val prctlExpectedDenied = BpfSimulator.simulate(
+                compiled.compiledFilters,
+                arch.prctl,
+                arch.audit,
+                prctlArgs,
+            ) != NativeConstants.SECCOMP_RET_ALLOW
+            assertEquals(
+                prctlExpectedDenied,
+                kernelDenied(arch.prctl, prctlArgs),
+                "seed=0x4d415a45 sample=$sample prctlOption=0x${prctlOption.toULong().toString(16)}",
+            )
+
+            val protections = highWord or if (random.nextBoolean()) 0x1L else 0x5L
+            val mprotectArgs = longArrayOf(0L, 4096L, protections)
+            val mprotectExpectedDenied = BpfSimulator.simulate(
+                compiled.compiledFilters,
+                arch.mprotect,
+                arch.audit,
+                mprotectArgs,
+            ) != NativeConstants.SECCOMP_RET_ALLOW
+            assertEquals(
+                mprotectExpectedDenied,
+                kernelDenied(arch.mprotect, mprotectArgs),
+                "seed=0x4d415a45 sample=$sample protections=0x${protections.toULong().toString(16)}",
+            )
+        }
+    }
+
+    @Test
+    fun `equals-any 64-bit argument fuzz agrees with kernel`() {
+        val allowed = listOf(0x1122334455667788L, -0x778899aabbccddefL)
+        val policy = Policy.builder().build()
+        val builder = BpfProgram.builder().checkArch(arch).loadSyscallNr()
+        BpfFilter.emitInspections(
+            builder,
+            listOf(
+                SyscallInspection(
+                    syscallNumber = Syscall.GETPPID.numberFor(arch),
+                    argIndex = 0,
+                    check = ArgCheck.EqualsAny(allowed),
+                    ifMatched = SeccompAction.ACT_ALLOW,
+                    ifNotMatched = SeccompAction.ACT_ERRNO(NativeConstants.EPERM),
+                ),
+            ),
+            profilingMode = false,
+            handledNrs = mutableSetOf(),
+        )
+        val program = BpfStaticVerifier.verify(builder.allow().build())
+        PureJavaBpfEngine.install(CompiledSandbox(policy.definition, program))
+
+        val random = Random(0x455155414c53414e)
+        repeat(64) { sample ->
+            val argument = if (random.nextBoolean()) allowed.random(random) else random.nextLong()
+            val args = longArrayOf(argument)
+            val expectedDenied = BpfSimulator.simulate(
+                program.instructions,
+                Syscall.GETPPID.numberFor(arch),
+                arch.audit,
+                args,
+            ) != NativeConstants.SECCOMP_RET_ALLOW
+            assertEquals(
+                expectedDenied,
+                kernelDenied(Syscall.GETPPID.numberFor(arch), args),
+                "seed=0x455155414c53414e sample=$sample argument=0x${argument.toULong().toString(16)}",
+            )
+        }
+    }
+
+    @Test
     fun `blacklist errno archetype - kernel matches simulator and liveness holds`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
         val compiled = policy.compile(arch)
-        val probes = SyscallProbeMatrix.structural(arch) + SyscallProbeMatrix.matched(
+        val probes = SyscallProbeMatrix.structural(arch) +
+            SyscallProbeMatrix.matched(
             arch,
             listOf(Syscall.CONNECT.numberFor(arch)),
         )
@@ -131,7 +229,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         // default ALLOW + <=32 actions => BST codegen path. Never deny-by-default here: the JVM
         // lazily loads classes for every syscall imaginable and would starve (ClassFormatError).
         val blocked = listOf(Syscall.CONNECT, Syscall.UMASK, Syscall.GETPPID, Syscall.GETEUID)
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_ERRNO(NativeConstants.EPERM), *blocked.toTypedArray())
             .build()
@@ -156,7 +255,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
         assertTrue(ProcessHandle.current().pid() > 0)
 
-        val probes = SyscallProbeMatrix.structural(arch) + SyscallProbeMatrix.matched(
+        val probes = SyscallProbeMatrix.structural(arch) +
+            SyscallProbeMatrix.matched(
             arch,
             blocked.map { it.numberFor(arch) },
         )
@@ -193,8 +293,10 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
     /** Compiles the same program the kill-probe child installs, for oracle prediction. */
     private fun compiledProgramOf(victimNr: Int): List<BpfInstruction> {
-        val victim = io.mazewall.core.Syscall.entries.first { it.numberFor(arch) == victimNr }
-        val policy = Policy.builder()
+        val victim = io.mazewall.core.Syscall.entries
+            .first { it.numberFor(arch) == victimNr }
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_KILL_THREAD, victim)
             .build()
@@ -206,32 +308,34 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         // Test union-aware self-verification (issue-20260824-011900).
         // When multiple filters are stacked, the kernel enforces the UNION of all filters.
         // This means: deny-then-allow ⇒ deny (the most restrictive action wins).
-        
+
         val victimNr = Syscall.CONNECT.numberFor(arch)
-        
+
         // First layer: deny CONNECT
-        val firstPolicy = Policy.builder()
+        val firstPolicy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
-        
+
         ContainedExecutors.installOnCurrentThread(firstPolicy)
-        
+
         // Verify first layer denies CONNECT
         assertTrue(kernelDenied(victimNr), "First layer must deny CONNECT")
-        
+
         // Second layer: allow CONNECT (but this should be overridden by first layer's deny)
-        val secondPolicy = Policy.builder()
+        val secondPolicy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .allow(Syscall.CONNECT)
             .build()
-        
+
         ContainedExecutors.installOnCurrentThread(secondPolicy)
-        
+
         // Union semantics: CONNECT must STILL be denied because first layer denied it
         // The union takes the most restrictive action (deny > allow)
         assertTrue(kernelDenied(victimNr), "Union of stacked filters must deny CONNECT (deny-then-allow ⇒ deny)")
-        
+
         // Liveness: getpid must still work (both layers allow it)
         assertTrue(ProcessHandle.current().pid() > 0)
     }

@@ -1,21 +1,22 @@
 package io.mazewall.enforcer.supervisor
 
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.RawSyscallOperations
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.internal.RealNativeEngine
-import io.mazewall.ffi.memory.readByte
-import io.mazewall.ffi.memory.readLong
-import io.mazewall.ffi.memory.readInt
-import io.mazewall.ffi.memory.writeLong
-import io.mazewall.ffi.memory.writeInt
-import io.mazewall.ffi.memory.writeByte
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.readInt
+import io.mazewall.ffi.memory.readLong
+import io.mazewall.ffi.memory.writeByte
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -25,8 +26,7 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-context(arena: io.mazewall.ffi.memory.NativeArena)
-private fun SupervisorSessionHandler.readAndHandleJvmResponse(
+context(arena: io.mazewall.ffi.memory.NativeArena) private fun SupervisorSessionHandler.readAndHandleJvmResponse(
     id: Long,
     nr: Int,
     args: LongArray,
@@ -36,7 +36,8 @@ private fun SupervisorSessionHandler.readAndHandleJvmResponse(
     response: io.mazewall.ffi.memory.ManagedSegment,
     tid: io.mazewall.core.Tid,
     arch: io.mazewall.core.Arch,
-): Boolean = readAndHandleJvmResponse(
+): Boolean =
+    readAndHandleJvmResponse(
     SupervisorRouteContext(
         JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
         SyscallArguments(path, sockaddrBytes, openHow = openHow),
@@ -44,8 +45,7 @@ private fun SupervisorSessionHandler.readAndHandleJvmResponse(
     ),
 )
 
-context(arena: io.mazewall.ffi.memory.NativeArena)
-private fun SupervisorSessionHandler.handleInjectFd(
+context(arena: io.mazewall.ffi.memory.NativeArena) private fun SupervisorSessionHandler.handleInjectFd(
     id: Long,
     nr: Int,
     args: LongArray,
@@ -54,7 +54,8 @@ private fun SupervisorSessionHandler.handleInjectFd(
     response: io.mazewall.ffi.memory.ManagedSegment,
     tid: io.mazewall.core.Tid,
     arch: io.mazewall.core.Arch,
-): Boolean = handleInjectFd(
+): Boolean =
+    handleInjectFd(
     SupervisorRouteContext(
         JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
         SyscallArguments(path, sockaddrBytes),
@@ -62,8 +63,7 @@ private fun SupervisorSessionHandler.handleInjectFd(
     ),
 )
 
-context(arena: io.mazewall.ffi.memory.NativeArena)
-private fun SupervisorSessionHandler.handleInjectFd(
+context(arena: io.mazewall.ffi.memory.NativeArena) private fun SupervisorSessionHandler.handleInjectFd(
     id: Long,
     nr: Int,
     args: LongArray,
@@ -73,7 +73,8 @@ private fun SupervisorSessionHandler.handleInjectFd(
     response: io.mazewall.ffi.memory.ManagedSegment,
     tid: io.mazewall.core.Tid,
     arch: io.mazewall.core.Arch,
-): Boolean = handleInjectFd(
+): Boolean =
+    handleInjectFd(
     SupervisorRouteContext(
         JvmVerdictRequest(id, NotifHeader(nr, tid, arch, arch.audit, 0, args), path, sockaddrBytes),
         SyscallArguments(path, sockaddrBytes, openHow = openHow),
@@ -81,8 +82,7 @@ private fun SupervisorSessionHandler.handleInjectFd(
     ),
 )
 
-context(arena: io.mazewall.ffi.memory.NativeArena)
-private fun SupervisorSessionHandler.sendRequestToJvm(
+context(arena: io.mazewall.ffi.memory.NativeArena) private fun SupervisorSessionHandler.sendRequestToJvm(
     id: Long,
     pid: Int,
     archAudit: Int,
@@ -91,12 +91,25 @@ private fun SupervisorSessionHandler.sendRequestToJvm(
     args: LongArray,
     path: String?,
     sockaddrBytes: ByteArray?,
-): Boolean = sendRequestToJvm(
-    JvmVerdictRequest(id, NotifHeader(nr, io.mazewall.core.Tid(pid), io.mazewall.core.Arch.current(), archAudit, ppid, args), path, sockaddrBytes),
+): Boolean =
+    sendRequestToJvm(
+    JvmVerdictRequest(
+        id,
+        NotifHeader(
+            nr,
+            io.mazewall.core.Tid(pid),
+            io.mazewall.core.Arch
+        .current(),
+            archAudit,
+            ppid,
+            args,
+        ),
+            path,
+        sockaddrBytes,
+    ),
 )
 
 class SupervisorSessionHandlerTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -108,16 +121,38 @@ class SupervisorSessionHandlerTest {
             var continuations = 0
             val aborts = mutableListOf<Int>()
             val routes = SupervisorTerminalRoutes(object : SupervisorResponseSender {
-                override fun continueNotification(id: Long, response: io.mazewall.ffi.memory.ManagedSegment) {
+                override fun continueNotification(
+                    id: Long,
+                    response: io.mazewall.ffi.memory.ManagedSegment,
+                ) {
                     continuations++
                 }
 
-                override fun abortNotification(id: Long, errno: Int, response: io.mazewall.ffi.memory.ManagedSegment) {
+                override fun abortNotification(
+                    id: Long,
+                    errno: Int,
+                    response: io.mazewall.ffi.memory.ManagedSegment,
+                ) {
                     aborts += errno
                 }
             })
             val context = SupervisorRouteContext(
-                JvmVerdictRequest(42, NotifHeader(0, io.mazewall.core.Tid(7), io.mazewall.core.Arch.current(), io.mazewall.core.Arch.current().audit, 1, LongArray(6)), null, null),
+                JvmVerdictRequest(
+                    42,
+                    NotifHeader(
+                        0,
+                        io.mazewall.core.Tid(7),
+                        io.mazewall.core.Arch
+                    .current(),
+                        io.mazewall.core.Arch
+                        .current()
+                        .audit,
+                            1,
+                        LongArray(6),
+                    ),
+                            null,
+                    null,
+                ),
                 SyscallArguments(null, null),
                 arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP),
             )
@@ -133,16 +168,98 @@ class SupervisorSessionHandlerTest {
     }
 
     @Test
+    fun `dispatcher handles every route exactly once`() {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            var continuations = 0
+            val aborts = mutableListOf<Int>()
+            var injects = 0
+            var secureExecs = 0
+            val dispatcher = SupervisorRouteDispatcher(
+                SupervisorTerminalRoutes(object : SupervisorResponseSender {
+                    override fun continueNotification(
+                        id: Long,
+                        response: io.mazewall.ffi.memory.ManagedSegment,
+                    ) {
+                        continuations++
+                    }
+
+                    override fun abortNotification(
+                        id: Long,
+                        errno: Int,
+                        response: io.mazewall.ffi.memory.ManagedSegment,
+                    ) {
+                        aborts += errno
+                    }
+                }),
+            )
+            val executor = object : SupervisorRouteExecutor {
+                context(_: io.mazewall.ffi.memory.NativeArena) override fun injectFd(context: SupervisorRouteContext): Boolean {
+                    injects++
+                    return true
+                }
+
+                context(_: io.mazewall.ffi.memory.NativeArena) override fun secureExec(
+                    context: SupervisorRouteContext,
+                    jvmPath: String?,
+                ): Boolean {
+                    secureExecs++
+                    return true
+                }
+            }
+            val context = SupervisorRouteContext(
+                JvmVerdictRequest(
+                    42,
+                    NotifHeader(
+                        0,
+                        io.mazewall.core.Tid(7),
+                        io.mazewall.core.Arch
+                        .current(),
+                            io.mazewall.core.Arch
+                            .current()
+                            .audit,
+                                1,
+                        LongArray(6),
+                    ),
+                    null,
+                    null,
+                ),
+                SyscallArguments(null, null),
+                arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP),
+            )
+
+            with(arena) {
+                assertTrue(dispatcher.execute(SupervisorRoute.Continue, context, null, executor))
+                assertTrue(dispatcher.execute(SupervisorRoute.Abort(13, "deny"), context, null, executor))
+                assertTrue(dispatcher.execute(SupervisorRoute.InjectFd, context, null, executor))
+                assertTrue(dispatcher.execute(SupervisorRoute.SecureExec, context, "/usr/bin/java", executor))
+                assertFalse(dispatcher.execute(SupervisorRoute.AskJvm, context, null, executor))
+            }
+
+            assertEquals(1, continuations)
+            assertEquals(listOf(13, io.mazewall.ffi.NativeConstants.EPERM), aborts)
+            assertEquals(1, injects)
+            assertEquals(1, secureExecs)
+        }
+    }
+
+    @Test
     fun `readAndHandleJvmResponse closes supervisor socket when the frame stalls after one byte`() {
         var socketClosed = false
         val mockSocketManager = object : io.mazewall.core.SocketManager {
             override fun createUnixServer(socketPath: String) = TODO()
-            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
-            override fun connect(socketPath: String) = TODO()
-            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
-            override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>) = TODO()
 
-            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) = TODO()
+
+            override fun connect(socketPath: String) = TODO()
+
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>) = TODO()
+
+            override fun sendDescriptor(
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+                fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+            ) = TODO()
+
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
                 if (fd.value == 10) {
                     socketClosed = true
                 }
@@ -152,7 +269,7 @@ class SupervisorSessionHandlerTest {
         var polls = 0
         val mockMemory = object : MockNativeMemory() {
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -176,7 +293,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -192,10 +309,11 @@ class SupervisorSessionHandlerTest {
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
-                socketManager = mockSocketManager
+                socketManager = mockSocketManager,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -211,7 +329,7 @@ class SupervisorSessionHandlerTest {
                         null,
                         dummyResp,
                         io.mazewall.core.Tid(999),
-                        arch
+                        arch,
                     )
                 }
                 assertEquals(false, result)
@@ -227,12 +345,19 @@ class SupervisorSessionHandlerTest {
         var socketClosed = false
         val mockSocketManager = object : io.mazewall.core.SocketManager {
             override fun createUnixServer(socketPath: String) = TODO()
-            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
-            override fun connect(socketPath: String) = TODO()
-            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) = TODO()
-            override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>) = TODO()
 
-            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+            override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) = TODO()
+
+            override fun connect(socketPath: String) = TODO()
+
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>) = TODO()
+
+            override fun sendDescriptor(
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+                fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+            ) = TODO()
+
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
                 if (fd.value == 10) {
                     socketClosed = true
                 }
@@ -250,7 +375,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -266,10 +391,11 @@ class SupervisorSessionHandlerTest {
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
                 engine = mockEngine,
-                socketManager = mockSocketManager
+                socketManager = mockSocketManager,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -285,7 +411,7 @@ class SupervisorSessionHandlerTest {
                         null,
                         dummyResp,
                         io.mazewall.core.Tid(999),
-                        arch
+                        arch,
                     )
                 }
                 assertEquals(false, result)
@@ -304,7 +430,7 @@ class SupervisorSessionHandlerTest {
             override fun socket(
                 domain: Int,
                 type: Int,
-                protocol: Int
+                protocol: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 capturedDomain = domain
                 return LinuxNative.SyscallResult.Success(99L) // Dummy socket FD
@@ -319,8 +445,8 @@ class SupervisorSessionHandlerTest {
 
         // Instantiate handler with dummy file descriptors
         val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
         )
 
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
@@ -370,14 +496,13 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Success(count)
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -385,7 +510,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte()) // Request Allow Continue
                 respSeg.setErrorNr(0)
@@ -395,7 +521,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat2(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 how: io.mazewall.ffi.memory.ManagedSegment,
                 size: Long,
@@ -415,7 +541,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -437,10 +563,11 @@ class SupervisorSessionHandlerTest {
             // Instantiate handler with dummy file descriptors
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -457,9 +584,14 @@ class SupervisorSessionHandlerTest {
                 }
 
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, lastIoctlRequest)
-                val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment.of(lastIoctlArg!!)
+                val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment
+                    .of(lastIoctlArg!!)
                 assertEquals(42L, addfd.getId())
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
+                assertEquals(
+                    io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND
+                    .toInt(),
+                        addfd.getFlags(),
+                )
                 assertEquals(99, addfd.getSrcfd())
 
                 // 2. Test execve: ADDFD the validated binary, then FAIL CLOSED when no
@@ -495,7 +627,7 @@ class SupervisorSessionHandlerTest {
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -503,7 +635,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -511,7 +643,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte()) // Request Allow Continue
                 respSeg.setErrorNr(0)
@@ -522,7 +655,7 @@ class SupervisorSessionHandlerTest {
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -534,7 +667,8 @@ class SupervisorSessionHandlerTest {
                         // Write dummy seccomp notification info so processNotification succeeds
                         arg.writeLong(0L, 42L) // id
                         arg.writeInt(8L, 999) // pid
-                        val arch = io.mazewall.core.Arch.current()
+                        val arch = io.mazewall.core.Arch
+                            .current()
                         arg.writeInt(16L, arch.execve) // nr
                         arg.writeInt(20L, arch.audit) // arch
                         return LinuxNative.SyscallResult.Success(0L)
@@ -561,7 +695,7 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
@@ -593,7 +727,7 @@ class SupervisorSessionHandlerTest {
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -605,7 +739,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte()) // Request Allow Continue
                 respSeg.setErrorNr(0)
@@ -624,7 +759,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -646,10 +781,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -673,7 +809,7 @@ class SupervisorSessionHandlerTest {
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -692,7 +828,7 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
@@ -713,7 +849,7 @@ class SupervisorSessionHandlerTest {
 
         val mockMemory = object : io.mazewall.MockNativeMemory() {
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -721,7 +857,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte()) // Request Allow Continue
                 respSeg.setErrorNr(0)
@@ -744,7 +881,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -759,10 +896,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -796,7 +934,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -811,10 +949,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -845,7 +984,7 @@ class SupervisorSessionHandlerTest {
         val mockEngine = object : MockNativeEngine() {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -863,10 +1002,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -890,9 +1030,14 @@ class SupervisorSessionHandlerTest {
                     assertEquals(true, result, "handleInjectFd should return true for pointer-based syscalls")
                     assertEquals(true, ioctlCalled, "ioctl should be called for pointer-based syscalls")
                     assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_ADDFD, capturedRequest)
-                    val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment.of(capturedArg!!)
+                    val addfd = io.mazewall.ffi.memory.SeccompNotifAddFdSegment
+                        .of(capturedArg!!)
                     assertEquals(12345L, addfd.getId())
-                    assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfd.getFlags())
+                    assertEquals(
+                        io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND
+                        .toInt(),
+                            addfd.getFlags(),
+                    )
                 }
 
                 ioctlCalled = false
@@ -918,7 +1063,7 @@ class SupervisorSessionHandlerTest {
         val mockEngine = object : MockNativeEngine() {
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -936,10 +1081,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -973,7 +1119,7 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (closedFds.add(fd.value) && fd.value == 100) {
                         expectedCloses.countDown()
                     }
@@ -982,11 +1128,18 @@ class SupervisorSessionHandlerTest {
             }
 
             override val process = object : io.mazewall.MockNativeProcess() {
-                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdOpen(
+                    tgid: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
                 }
 
-                override fun pidfdGetFd(pidfd: FileDescriptor<*, FdState.Open>, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdGetFd(
+                    pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    targetFd: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     // Simulate failure
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EBADF, -1L)
                 }
@@ -994,7 +1147,7 @@ class SupervisorSessionHandlerTest {
 
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1009,10 +1162,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
@@ -1032,7 +1186,7 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (closedFds.add(fd.value) && fd.value in setOf(100, 200)) {
                         expectedCloses.countDown()
                     }
@@ -1041,21 +1195,28 @@ class SupervisorSessionHandlerTest {
             }
 
             override val process = object : io.mazewall.MockNativeProcess() {
-                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdOpen(
+                    tgid: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
                 }
 
-                override fun pidfdGetFd(pidfd: FileDescriptor<*, FdState.Open>, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdGetFd(
+                    pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    targetFd: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(200L) // dupFd = 200
                 }
             }
 
             override val networking = object : MockNativeNetworking() {
                 override fun accept4(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     addr: io.mazewall.ffi.memory.ManagedSegment,
                     addrlen: io.mazewall.ffi.memory.ManagedSegment,
-                    flags: Int
+                    flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     // Simulate accept4 failure
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EBADF, -1L)
@@ -1064,7 +1225,7 @@ class SupervisorSessionHandlerTest {
 
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1079,10 +1240,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
@@ -1103,7 +1265,7 @@ class SupervisorSessionHandlerTest {
 
         val mockEngine = object : MockNativeEngine() {
             override val fileSystem = object : io.mazewall.MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (closedFds.add(fd.value) && fd.value in setOf(100, 200, 300)) {
                         expectedCloses.countDown()
                     }
@@ -1112,21 +1274,28 @@ class SupervisorSessionHandlerTest {
             }
 
             override val process = object : io.mazewall.MockNativeProcess() {
-                override fun pidfdOpen(tgid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdOpen(
+                    tgid: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(100L) // pidfd = 100
                 }
 
-                override fun pidfdGetFd(pidfd: FileDescriptor<*, FdState.Open>, targetFd: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun pidfdGetFd(
+                    pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    targetFd: Int,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(200L) // dupFd = 200
                 }
             }
 
             override val networking = object : MockNativeNetworking() {
                 override fun accept4(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     addr: io.mazewall.ffi.memory.ManagedSegment,
                     addrlen: io.mazewall.ffi.memory.ManagedSegment,
-                    flags: Int
+                    flags: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     return LinuxNative.SyscallResult.Success(300L) // clientFd = 300
                 }
@@ -1134,7 +1303,7 @@ class SupervisorSessionHandlerTest {
 
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1149,10 +1318,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             handler.handleAcceptAsync(12345L, arch.accept, LongArray(6) { 55L }, io.mazewall.core.Tid(999), arch)
 
@@ -1174,7 +1344,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat2(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 how: io.mazewall.ffi.memory.ManagedSegment,
                 size: Long,
@@ -1206,10 +1376,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val args = LongArray(6)
@@ -1242,7 +1413,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat2(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 how: io.mazewall.ffi.memory.ManagedSegment,
                 size: Long,
@@ -1251,20 +1422,23 @@ class SupervisorSessionHandlerTest {
                 return LinuxNative.SyscallResult.Success(99L)
             }
 
-            override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 closed.add(fd.value)
                 return LinuxNative.SyscallResult.Success(0L)
             }
         }
 
         val mockProcess = object : io.mazewall.MockNativeProcess() {
-            override fun pidfdOpen(pid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun pidfdOpen(
+                pid: Int,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 pidfdOpenPid = pid
                 return LinuxNative.SyscallResult.Success(400L)
             }
 
             override fun pidfdGetFd(
-                pidfd: FileDescriptor<*, FdState.Open>,
+                pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 targetFd: Int,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1282,11 +1456,12 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
             handler.tgidResolver = { it }
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val args = LongArray(6)
@@ -1316,7 +1491,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 flags: io.mazewall.core.OpenFlags,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1326,12 +1501,15 @@ class SupervisorSessionHandlerTest {
         }
 
         val mockProcess = object : io.mazewall.MockNativeProcess() {
-            override fun pidfdOpen(pid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun pidfdOpen(
+                pid: Int,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(400L)
             }
 
             override fun pidfdGetFd(
-                pidfd: FileDescriptor<*, FdState.Open>,
+                pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 targetFd: Int,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1347,10 +1525,11 @@ class SupervisorSessionHandlerTest {
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
-                engine = mockEngine
+                engine = mockEngine,
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val args = LongArray(6)
@@ -1387,7 +1566,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1398,7 +1577,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1406,7 +1585,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte())
                 respSeg.setErrorNr(0)
@@ -1425,7 +1605,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1442,10 +1622,11 @@ class SupervisorSessionHandlerTest {
             // Instantiate handler with dummy file descriptors
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -1460,7 +1641,11 @@ class SupervisorSessionHandlerTest {
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
                 val flags = lastIoctlArg!!.readInt(20)
                 assertEquals(0, flags, "must not CONTINUE the original execve pathname after a failed rewrite")
-                assertEquals(-io.mazewall.ffi.NativeConstants.EPERM.toInt(), lastIoctlArg!!.readInt(16))
+                assertEquals(
+                    -io.mazewall.ffi.NativeConstants.EPERM
+                    .toInt(),
+                        lastIoctlArg!!.readInt(16),
+                )
             }
         } finally {
             LinuxNative.resetToDefault()
@@ -1487,7 +1672,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1495,7 +1680,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte())
                 respSeg.setErrorNr(0)
@@ -1514,7 +1700,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1530,10 +1716,11 @@ class SupervisorSessionHandlerTest {
 
             val handler = SupervisorSessionHandler(
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
 
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
 
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
@@ -1545,7 +1732,11 @@ class SupervisorSessionHandlerTest {
                 assertEquals(true, result)
                 assertEquals(false, vmWritevCalled)
                 assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_IOCTL_NOTIF_SEND, lastIoctlRequest)
-                assertEquals(-io.mazewall.ffi.NativeConstants.EPERM.toInt(), lastIoctlArg!!.readInt(16))
+                assertEquals(
+                    -io.mazewall.ffi.NativeConstants.EPERM
+                    .toInt(),
+                        lastIoctlArg!!.readInt(16),
+                )
                 assertEquals(0, lastIoctlArg!!.readInt(20))
             }
         } finally {
@@ -1571,7 +1762,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1579,7 +1770,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(42L)
                 respSeg.setDecision(1.toByte())
                 respSeg.setErrorNr(0)
@@ -1617,7 +1809,7 @@ class SupervisorSessionHandlerTest {
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1637,7 +1829,8 @@ class SupervisorSessionHandlerTest {
                 FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
                 FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             )
-            val arch = io.mazewall.core.Arch.current()
+            val arch = io.mazewall.core.Arch
+                .current()
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val dummyResp = arena.allocate(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP)
 
@@ -1670,7 +1863,7 @@ class SupervisorSessionHandlerTest {
     fun `processNotification propagates OutOfMemoryError instead of swallowing it`() {
         val mockMemory = object : MockNativeMemory() {
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1682,7 +1875,7 @@ class SupervisorSessionHandlerTest {
             override val memory = mockMemory
             override val raw: RawSyscallOperations = object : RawSyscallOperations by this {
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1755,8 +1948,10 @@ class SupervisorSessionHandlerTest {
                 flags: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val localBase = localIov.readLong(0)
-                val localBuf = io.mazewall.ffi.memory.ManagedSegment.ofAddress(localBase, pathBytes.size.toLong())
-                io.mazewall.ffi.memory.ManagedSegment.copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
+                val localBuf = io.mazewall.ffi.memory.ManagedSegment
+                    .ofAddress(localBase, pathBytes.size.toLong())
+                io.mazewall.ffi.memory.ManagedSegment
+                    .copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
                 return LinuxNative.SyscallResult.Success(pathBytes.size.toLong())
             }
 
@@ -1772,7 +1967,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1780,7 +1975,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1788,7 +1983,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(1234L)
                 respSeg.setDecision(1.toByte())
                 respSeg.setErrorNr(0)
@@ -1798,7 +1994,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat2(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 how: io.mazewall.ffi.memory.ManagedSegment,
                 size: Long,
@@ -1825,13 +2021,14 @@ class SupervisorSessionHandlerTest {
                     nfds: Long,
                     timeout: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(fds)
+                    val pollFd = io.mazewall.ffi.memory.PollFdSegment
+                        .of(fds)
                     pollFd.setRevents(io.mazewall.ffi.NativeConstants.POLLIN)
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1889,8 +2086,10 @@ class SupervisorSessionHandlerTest {
                 flags: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val localBase = localIov.readLong(0)
-                val localBuf = io.mazewall.ffi.memory.ManagedSegment.ofAddress(localBase, pathBytes.size.toLong())
-                io.mazewall.ffi.memory.ManagedSegment.copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
+                val localBuf = io.mazewall.ffi.memory.ManagedSegment
+                    .ofAddress(localBase, pathBytes.size.toLong())
+                io.mazewall.ffi.memory.ManagedSegment
+                    .copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
                 return LinuxNative.SyscallResult.Success(pathBytes.size.toLong())
             }
 
@@ -1906,7 +2105,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1914,7 +2113,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1923,7 +2122,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 0)
                     return LinuxNative.SyscallResult.Success(1L)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(1234L)
                 respSeg.setDecision(1.toByte()) // DECISION_ALLOW
                 respSeg.setErrorNr(0)
@@ -1937,21 +2137,22 @@ class SupervisorSessionHandlerTest {
                 openResult = LinuxNative.SyscallResult.Success(88L)
             }
 
-            override fun close(
-                fd: FileDescriptor<*, FdState.Open>,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 closedFds.add(fd.value)
                 return LinuxNative.SyscallResult.Success(0L)
             }
         }
 
         val mockProcess = object : io.mazewall.MockNativeProcess() {
-            override fun pidfdOpen(pid: Int, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun pidfdOpen(
+                pid: Int,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(300L)
             }
 
             override fun pidfdGetFd(
-                pidfd: FileDescriptor<*, FdState.Open>,
+                pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 targetFd: Int,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -1971,13 +2172,14 @@ class SupervisorSessionHandlerTest {
                     nfds: Long,
                     timeout: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(fds)
+                    val pollFd = io.mazewall.ffi.memory.PollFdSegment
+                        .of(fds)
                     pollFd.setRevents(io.mazewall.ffi.NativeConstants.POLLIN)
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -2019,8 +2221,6 @@ class SupervisorSessionHandlerTest {
 
                 assertEquals(99, targetFdRequestedForClose, "Must close injected tracee fd 99 when rewrite fails")
                 assertTrue(closedFds.contains(88), "Must close local fd 88")
-                assertTrue(closedFds.contains(300), "Must close pidfd 300")
-                assertTrue(closedFds.contains(301), "Must close imported tracee fd 301")
                 assertEquals(-io.mazewall.ffi.NativeConstants.EPERM, seccompErrorSent, "Must send EPERM on rewrite failure")
                 assertEquals(0, seccompFlagsSent, "Must not set CONTINUE flag")
             }
@@ -2032,7 +2232,10 @@ class SupervisorSessionHandlerTest {
     @Test
     fun `openat2 decodes struct open_how from tracee memory and delegates to openat2`() {
         val pathBytes = "/tmp/openat2_test.txt\u0000".toByteArray(java.nio.charset.StandardCharsets.UTF_8)
-        val howBytes = java.nio.ByteBuffer.allocate(24).order(java.nio.ByteOrder.nativeOrder()).apply {
+        val howBytes = java.nio.ByteBuffer
+            .allocate(24)
+            .order(java.nio.ByteOrder.nativeOrder())
+            .apply {
             putLong(0L) // flags: O_RDONLY = 0
             putLong(0x1A4L) // mode: 0644 octal = 420 decimal
             putLong(1L) // resolve: RESOLVE_NO_XDEV = 1
@@ -2055,12 +2258,16 @@ class SupervisorSessionHandlerTest {
                 val remoteBase = remoteIov.readLong(0)
                 val localBase = localIov.readLong(0)
                 if (remoteBase == 0x1000L) {
-                    val localBuf = io.mazewall.ffi.memory.ManagedSegment.ofAddress(localBase, pathBytes.size.toLong())
-                    io.mazewall.ffi.memory.ManagedSegment.copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
+                    val localBuf = io.mazewall.ffi.memory.ManagedSegment
+                        .ofAddress(localBase, pathBytes.size.toLong())
+                    io.mazewall.ffi.memory.ManagedSegment
+                        .copy(pathBytes, 0, localBuf, 0L, pathBytes.size)
                     return LinuxNative.SyscallResult.Success(pathBytes.size.toLong())
                 } else if (remoteBase == 0x2000L) {
-                    val localBuf = io.mazewall.ffi.memory.ManagedSegment.ofAddress(localBase, howBytes.size.toLong())
-                    io.mazewall.ffi.memory.ManagedSegment.copy(howBytes, 0, localBuf, 0L, howBytes.size)
+                    val localBuf = io.mazewall.ffi.memory.ManagedSegment
+                        .ofAddress(localBase, howBytes.size.toLong())
+                    io.mazewall.ffi.memory.ManagedSegment
+                        .copy(howBytes, 0, localBuf, 0L, howBytes.size)
                     return LinuxNative.SyscallResult.Success(howBytes.size.toLong())
                 }
                 return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EFAULT, -1L)
@@ -2078,7 +2285,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun write(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -2086,7 +2293,7 @@ class SupervisorSessionHandlerTest {
             }
 
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: io.mazewall.ffi.memory.ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -2094,7 +2301,8 @@ class SupervisorSessionHandlerTest {
                     buf.writeByte(0, 1)
                     return LinuxNative.SyscallResult.Success(count)
                 }
-                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment.of(buf)
+                val respSeg = io.mazewall.ffi.memory.SupervisorResponseSegment
+                    .of(buf)
                 respSeg.setId(1234L)
                 respSeg.setDecision(1.toByte()) // DECISION_ALLOW
                 respSeg.setErrorNr(0)
@@ -2104,7 +2312,7 @@ class SupervisorSessionHandlerTest {
 
         val mockFileSystem = object : io.mazewall.MockNativeFileSystem() {
             override fun openat2(
-                dirfd: FileDescriptor<*, FdState.Open>,
+                dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 path: io.mazewall.ffi.memory.ManagedSegment,
                 how: io.mazewall.ffi.memory.ManagedSegment,
                 size: Long,
@@ -2126,13 +2334,14 @@ class SupervisorSessionHandlerTest {
                     nfds: Long,
                     timeout: Int,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(fds)
+                    val pollFd = io.mazewall.ffi.memory.PollFdSegment
+                        .of(fds)
                     pollFd.setRevents(io.mazewall.ffi.NativeConstants.POLLIN)
                     return LinuxNative.SyscallResult.Success(1L)
                 }
 
                 override fun ioctl(
-                    fd: FileDescriptor<*, FdState.Open>,
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                     request: Long,
                     arg: io.mazewall.ffi.memory.ManagedSegment,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -2172,7 +2381,12 @@ class SupervisorSessionHandlerTest {
                 assertEquals(0L, capturedFlags, "openat2 must decode flags from struct open_how, not the pointer 0x2000")
                 assertEquals(0x1A4L, capturedMode, "openat2 must decode mode from struct open_how")
                 assertEquals(9L, capturedResolve, "openat2 must decode resolve from struct open_how")
-                assertEquals(io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt(), addfdFlags, "Must use SECCOMP_ADDFD_FLAG_SEND")
+                assertEquals(
+                    io.mazewall.ffi.NativeConstants.SECCOMP_ADDFD_FLAG_SEND
+                    .toInt(),
+                        addfdFlags,
+                    "Must use SECCOMP_ADDFD_FLAG_SEND",
+                )
             }
         } finally {
             LinuxNative.resetToDefault()

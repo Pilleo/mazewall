@@ -22,7 +22,6 @@ import kotlin.test.assertTrue
  * filter semantics — kernel-vs-oracle truth is covered by SeccompDifferentialVerdictTest.
  */
 class InstallSelfVerifierTest {
-
     private val arch = Arch.AMD64
 
     @BeforeEach
@@ -41,11 +40,19 @@ class InstallSelfVerifierTest {
     private fun blacklistProgram(): BpfProgram<BpfStatus.Verified> =
         BpfFilter.build(
             arch,
-            Policy.builder().defaultAction(SeccompAction.ACT_ALLOW).block(Syscall.CONNECT).build().definition,
+            Policy
+                .builder()
+                .defaultAction(SeccompAction.ACT_ALLOW)
+                .block(Syscall.CONNECT)
+                .build()
+                .definition,
         )
 
     /** Kernel emulation: oracle verdict → ALLOW becomes success; ERRNO-class becomes its errno. */
-    private fun oracleMock(program: BpfProgram<BpfStatus.Verified>, override: (Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? = { null }): MockNativeEngine {
+    private fun oracleMock(
+        program: BpfProgram<BpfStatus.Verified>,
+        override: (Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>? = { null },
+    ): MockNativeEngine {
         val engine = MockNativeEngine()
         engine.onSyscall = { nr, _, _, _, _, _, _ ->
             override(nr.toInt()) ?: run {
@@ -97,7 +104,10 @@ class InstallSelfVerifierTest {
     fun `memoized per program identity`() {
         val program = blacklistProgram()
         var probeCount = 0
-        oracleMock(program) { _ -> probeCount++; null }
+        oracleMock(program) { _ ->
+            probeCount++
+            null
+        }
 
         InstallSelfVerifier.verify(program, arch)
         val afterFirst = probeCount
@@ -139,7 +149,10 @@ class InstallSelfVerifierTest {
         System.setProperty("io.mazewall.selfVerify", "false")
         var probeCount = 0
         val engine = MockNativeEngine()
-        engine.onSyscall = { _, _, _, _, _, _, _ -> probeCount++; LinuxNative.SyscallResult.Success(1) }
+        engine.onSyscall = { _, _, _, _, _, _, _ ->
+            probeCount++
+            LinuxNative.SyscallResult.Success(1)
+        }
         LinuxNative.setEngine(engine)
 
         InstallSelfVerifier.verify(blacklistProgram(), arch)

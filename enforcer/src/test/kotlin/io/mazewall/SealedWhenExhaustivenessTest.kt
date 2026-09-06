@@ -12,7 +12,6 @@ import kotlin.io.path.readText
  * transition machines so a new `else ->` cannot hide an unhandled sealed variant.
  */
 class SealedWhenExhaustivenessTest {
-
     @Test
     fun `pure machines do not use else branches`() {
         val roots = listOf(

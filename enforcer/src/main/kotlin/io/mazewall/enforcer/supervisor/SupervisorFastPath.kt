@@ -18,8 +18,13 @@ internal object SupervisorFastPath {
      * Best-effort realpath of [pathStr] relative to the tracee's [dirfd]. Returns null when the
      * base /proc handle is gone — callers must fail closed and deny.
      */
-    fun resolveAbsolutePath(pid: Int, dirfd: Int, pathStr: String): Path? {
-        val path = java.nio.file.Paths.get(pathStr)
+    fun resolveAbsolutePath(
+        pid: Int,
+        dirfd: Int,
+        pathStr: String,
+    ): Path? {
+        val path = java.nio.file.Paths
+            .get(pathStr)
         if (path.isAbsolute) {
             try {
                 return BypassPaths.toRealPathWithFallback(path)
@@ -34,9 +39,15 @@ internal object SupervisorFastPath {
         }
         try {
             val baseDir = if (dirfd == AT_FDCWD) {
-                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/cwd"))
+                BypassPaths.toRealPathWithFallback(
+                    java.nio.file.Paths
+                    .get("/proc/$pid/cwd"),
+                )
             } else {
-                BypassPaths.toRealPathWithFallback(java.nio.file.Paths.get("/proc/$pid/fd/$dirfd"))
+                BypassPaths.toRealPathWithFallback(
+                    java.nio.file.Paths
+                    .get("/proc/$pid/fd/$dirfd"),
+                )
             }
             return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
         } catch (e: java.nio.file.NoSuchFileException) {

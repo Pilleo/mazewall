@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PolicyBuilderContractTest {
-
     @Test
     fun `fluent methods return same instance`() {
         val b = Policy.builder()
@@ -29,7 +28,7 @@ class PolicyBuilderContractTest {
         assertTrue(
             !def1.syscallActions.containsKey(Syscall.CONNECT) ||
                 def1.syscallActions[Syscall.CONNECT] != SeccompAction.ACT_ERRNO(),
-            "def1 should not have CONNECT from post-build mutation"
+            "def1 should not have CONNECT from post-build mutation",
         )
     }
 

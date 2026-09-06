@@ -12,7 +12,8 @@ class PureJavaBpfEngineBypassTest {
     fun `direct state machine calls throw IllegalStateException from virtual thread`() {
         val virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()
 
-        virtualThreadExecutor.submit {
+        virtualThreadExecutor
+            .submit {
             val built = SeccompInstallationState.FilterBuilt(io.mazewall.ffi.memory.ManagedSegment.NULL)
             assertFailsWith<IllegalStateException> {
                 built.lockPrivileges()
@@ -25,7 +26,8 @@ class PureJavaBpfEngineBypassTest {
         val policy = Policy.PURE_COMPUTE_UNSAFE.definition.compile(Arch.current())
         val virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()
 
-        virtualThreadExecutor.submit {
+        virtualThreadExecutor
+            .submit {
             assertFailsWith<IllegalStateException> {
                 PureJavaBpfEngine.install(policy)
             }

@@ -17,7 +17,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class HighConcurrencyInstallationTest {
-
     @BeforeEach
     fun setup() {
         val mockProcess = object : io.mazewall.MockNativeProcess() {

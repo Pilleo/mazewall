@@ -17,16 +17,22 @@ import io.mazewall.LinuxNative
 object SeccompKillProbeChild {
     @JvmStatic
     fun main(args: Array<String>) {
-        val arch = io.mazewall.core.Arch.current()
+        val arch = io.mazewall.core.Arch
+            .current()
         val victimNr = args[0].toInt()
 
-        val policy = io.mazewall.Policy.builder()
+        val policy = io.mazewall.Policy
+            .builder()
             .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
-            .addAction(io.mazewall.core.SeccompAction.ACT_KILL_THREAD, io.mazewall.core.Syscall.entries.first { it.numberFor(arch) == victimNr })
-            .build()
+            .addAction(
+                io.mazewall.core.SeccompAction.ACT_KILL_THREAD,
+                io.mazewall.core.Syscall.entries
+                .first { it.numberFor(arch) == victimNr },
+            ).build()
 
         // Thread-scoped, non-supervised: no daemon involvement.
-        io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(policy)
+        io.mazewall.enforcer.api.ContainedExecutors
+            .installOnCurrentThread(policy)
 
         // Post-install liveness: benign syscall must succeed (issue-20260823-171500).
         val pid = ProcessHandle.current().pid()
@@ -35,12 +41,18 @@ object SeccompKillProbeChild {
         // Deliberately trigger the killed syscall. If we survive, enforcement failed.
         val res = LinuxNative.raw.syscall(
             victimNr.toLong(),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
-            io.mazewall.core.NativeArg.LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
+            io.mazewall.core.NativeArg
+                .LongArg(0),
         )
         println("PROBE_SURVIVED res=$res")
         println("PROBE_OK")

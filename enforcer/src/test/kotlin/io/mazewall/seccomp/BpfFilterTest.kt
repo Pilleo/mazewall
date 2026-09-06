@@ -56,7 +56,12 @@ class BpfFilterTest {
 
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
+        val policy = Policy
+            .builder()
+            .defaultAction(
+            io.mazewall.core.SeccompAction
+            .ACT_ERRNO(),
+        ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code)
@@ -68,8 +73,10 @@ class BpfFilterTest {
         val policy =
             Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
-                .allow(Syscall.READ)
+                .defaultAction(
+                    io.mazewall.core.SeccompAction
+                    .ACT_ERRNO(),
+                ).allow(Syscall.READ)
                 .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
@@ -90,7 +97,12 @@ class BpfFilterTest {
 
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
-        val policy = Policy.builder().defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO()).build()
+        val policy = Policy
+            .builder()
+            .defaultAction(
+            io.mazewall.core.SeccompAction
+            .ACT_ERRNO(),
+        ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val clone3Nr = arch.clone3
@@ -199,7 +211,8 @@ class BpfFilterTest {
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
@@ -234,7 +247,8 @@ class BpfFilterTest {
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
@@ -265,7 +279,8 @@ class BpfFilterTest {
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
@@ -296,7 +311,8 @@ class BpfFilterTest {
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
         val handled = mutableSetOf<Int>()
@@ -326,7 +342,8 @@ class BpfFilterTest {
         val sys4 = Syscall.GETGID
         val sys5 = Syscall.GETEGID
 
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .block(sys1, sys2, sys3, sys4, sys5)
             .build()
 
@@ -364,7 +381,10 @@ class BpfFilterTest {
      * Delegates to the platform reference interpreter — the single semantic oracle shared by
      * unit tests, differential kernel tests, and :profiler (issue-20260823-171500/172100).
      */
-    private fun evalBpf(instructions: List<BpfInstruction>, syscallNr: Int): Int =
+    private fun evalBpf(
+        instructions: List<BpfInstruction>,
+        syscallNr: Int,
+    ): Int =
         requireNotNull(BpfSimulator.simulate(instructions, syscallNr, arch)) {
             "Compiled program fell through without RET for nr=$syscallNr"
         }
@@ -374,11 +394,16 @@ class BpfFilterTest {
         // issue-20260726_011928_05: compile-time acknowledgment for the TOCTOU-prone flag.
         val records = mutableListOf<java.util.logging.LogRecord>()
         val handler = object : java.util.logging.Handler() {
-            override fun publish(r: java.util.logging.LogRecord) { records += r }
+            override fun publish(r: java.util.logging.LogRecord) {
+                records += r
+            }
+
             override fun flush() {}
+
             override fun close() {}
         }
-        val root = java.util.logging.Logger.getLogger("")
+        val root = java.util.logging.Logger
+            .getLogger("")
         root.addHandler(handler)
         try {
             val policy = Policy.builder().allowUnsafePrctl().build()
@@ -393,7 +418,8 @@ class BpfFilterTest {
     fun `JA instructions encode skip count in k with zero jt and jf`() {
         // Regression: classic BPF JA jumps by K. Emitting the offset in jt (with k=0) makes the
         // filter fall through into the next RET block for every syscall.
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
@@ -409,7 +435,8 @@ class BpfFilterTest {
 
     @Test
     fun `blacklist policy compiled with BST contains greater-than comparisons and routes correctly`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .build()
@@ -444,6 +471,8 @@ class BpfFilterTest {
             val rtSigprocmaskNr = Syscall.RT_SIGPROCMASK.numberFor(a)
             val rtSigactionNr = Syscall.RT_SIGACTION.numberFor(a)
             val rtSigreturnNr = Syscall.RT_SIGRETURN.numberFor(a)
+            val mmapNr = Syscall.MMAP.numberFor(a)
+            val mprotectNr = Syscall.MPROTECT.numberFor(a)
 
             if (rtSigprocmaskNr >= 0) {
                 assertTrue(criticalNrs.contains(rtSigprocmaskNr), "JVM critical NRs for $a must contain rt_sigprocmask")
@@ -453,6 +482,12 @@ class BpfFilterTest {
             }
             if (rtSigreturnNr >= 0) {
                 assertTrue(criticalNrs.contains(rtSigreturnNr), "JVM critical NRs for $a must contain rt_sigreturn")
+            }
+            if (mmapNr >= 0) {
+                assertTrue(criticalNrs.contains(mmapNr), "JVM critical NRs for $a must contain mmap")
+            }
+            if (mprotectNr >= 0) {
+                assertTrue(criticalNrs.contains(mprotectNr), "JVM critical NRs for $a must contain mprotect")
             }
 
             // arch_prctl must be whitelisted on every architecture that provides it (x86_64 only).
@@ -467,7 +502,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ACT_TRACE dynamic action compilation and evaluation`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .addAction(SeccompAction.ACT_TRACE(1234), Syscall.EXECVE)
             .addAction(SeccompAction.ACT_TRACE(5678), Syscall.MEMFD_CREATE)
             .build()
@@ -482,7 +518,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ACT_ERRNO dynamic action compilation with custom errno`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .addAction(SeccompAction.ACT_ERRNO(99), Syscall.OPEN)
             .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -493,7 +530,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ioctl is whitelisted in profilingMode`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .block(Syscall.IOCTL)
             .build()
         val filter = BpfFilter.build(arch, policy.definition, profilingMode = true).instructions
@@ -547,7 +585,8 @@ class BpfFilterTest {
     fun `EqualsAny32 ignores high-word garbage on int arguments`() {
         // issue-075 problem 3: int ABI args (prctl option, socket family) may carry garbage in
         // the high 32 bits of the u64 seccomp_data slot; only the low word is meaningful.
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
         val inspections = listOf(

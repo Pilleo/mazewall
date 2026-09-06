@@ -1,16 +1,15 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.PolicyDefinition
 import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**
@@ -25,7 +24,7 @@ internal data class ContainerState(
     val engineState: SeccompInstallationState = SeccompInstallationState.Uninitialized,
     val allowsMmapExec: Boolean = true,
     val allowsNonThreadClone: Boolean = true,
-    val allowsUnsafePrctl: Boolean = true
+    val allowsUnsafePrctl: Boolean = true,
 ) {
     /** Returns true if the given [syscall] is unconditionally allowed by this state. */
     fun isSyscallAllowed(syscall: Syscall): Boolean {
@@ -42,7 +41,10 @@ internal data class ContainerState(
      * corresponding action from [syscallActions] or [defaultAction]. If not found (e.g.,
      * synthetic syscall numbers), returns [defaultAction].
      */
-    fun getEffectiveAction(nr: Int, arch: Arch): SeccompAction {
+    fun getEffectiveAction(
+        nr: Int,
+        arch: Arch,
+    ): SeccompAction {
         for (syscall in Syscall.entries) {
             if (syscall.numberFor(arch) == nr) {
                 return syscallActions[syscall] ?: defaultAction
@@ -54,7 +56,7 @@ internal data class ContainerState(
     fun withNewSeccompPolicy(
         toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
-        newDefaultAction: SeccompAction
+        newDefaultAction: SeccompAction,
     ): ContainerState {
         val mergedActions = syscallActions.toMutableMap()
         for ((sys, action) in newBlocks) {
@@ -81,14 +83,13 @@ internal data class ContainerState(
             allowedSyscalls = nextAllowedSyscalls,
             allowsMmapExec = allowsMmapExec && toInstall.allowMmapExec,
             allowsNonThreadClone = allowsNonThreadClone && toInstall.allowNonThreadClone,
-            allowsUnsafePrctl = allowsUnsafePrctl && toInstall.allowUnsafePrctl
+            allowsUnsafePrctl = allowsUnsafePrctl && toInstall.allowUnsafePrctl,
         )
     }
 
-    fun withLandlockPolicy(
-        policy: PolicyDefinition<*>
-    ): ContainerState = copy(
-        landlockPolicy = policy
+    fun withLandlockPolicy(policy: PolicyDefinition<*>): ContainerState =
+        copy(
+        landlockPolicy = policy,
     )
 
     fun withEngineState(next: SeccompInstallationState): ContainerState = copy(engineState = next)

@@ -4,16 +4,27 @@ import io.mazewall.ffi.memory.ManagedSegment
 
 /** Emits the one terminal response required for routes that do not need supervisor I/O. */
 internal interface SupervisorResponseSender {
-    fun continueNotification(id: Long, response: ManagedSegment)
+    fun continueNotification(
+        id: Long,
+        response: ManagedSegment,
+    )
 
-    fun abortNotification(id: Long, errno: Int, response: ManagedSegment)
+    fun abortNotification(
+        id: Long,
+        errno: Int,
+        response: ManagedSegment,
+    )
 }
 
 /** Executes terminal route decisions without exposing seccomp response mechanics to the router. */
 internal class SupervisorTerminalRoutes(
     private val sender: SupervisorResponseSender,
 ) {
-    fun execute(route: SupervisorRoute, context: SupervisorRouteContext): Boolean? = when (route) {
+    fun execute(
+        route: SupervisorRoute,
+        context: SupervisorRouteContext,
+    ): Boolean? =
+        when (route) {
         is SupervisorRoute.Continue -> {
             sender.continueNotification(context.request.id, context.response)
             true
@@ -28,7 +39,10 @@ internal class SupervisorTerminalRoutes(
         -> null
     }
 
-    fun abort(context: SupervisorRouteContext, errno: Int): Boolean {
+    fun abort(
+        context: SupervisorRouteContext,
+        errno: Int,
+    ): Boolean {
         sender.abortNotification(context.request.id, errno, context.response)
         return false
     }

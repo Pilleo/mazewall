@@ -1,11 +1,10 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
+import io.mazewall.enforcer.state.*
 import java.io.IOException
 import kotlin.system.exitProcess
 
@@ -18,12 +17,14 @@ public object SupervisorDaemon {
     @JvmStatic
     public fun main(args: Array<String>) {
         try {
-            val rootLogger = java.util.logging.Logger.getLogger("")
+            val rootLogger = java.util.logging.Logger
+                .getLogger("")
             rootLogger.level = java.util.logging.Level.ALL
             for (handler in rootLogger.handlers) {
                 handler.level = java.util.logging.Level.ALL
             }
-        } catch (ignored: Exception) {}
+        } catch (ignored: Exception) {
+            }
 
         if (args.isEmpty()) {
             System.err.println("Usage: SupervisorDaemon <socket_path>")
@@ -33,7 +34,7 @@ public object SupervisorDaemon {
         val engine = SupervisorDaemonEngine(socketPath)
 
         Runtime.getRuntime().addShutdownHook(
-            Thread { engine.triggerGlobalShutdown("JVM Shutdown Hook") }
+            Thread { engine.triggerGlobalShutdown("JVM Shutdown Hook") },
         )
 
         Thread {

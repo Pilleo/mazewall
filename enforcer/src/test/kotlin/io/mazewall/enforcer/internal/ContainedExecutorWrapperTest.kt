@@ -5,14 +5,13 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import java.nio.file.AccessDeniedException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.nio.file.AccessDeniedException
 
 @EnabledIfLinuxAndSupported
 class ContainedExecutorWrapperTest {
-
     val policyDefinition = PolicyDefinition<io.mazewall.PolicyScope.ProcessWideSafe>()
 
     @Test
@@ -135,7 +134,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val futures = wrapper.invokeAll(callables)
@@ -154,7 +153,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val futures = wrapper.invokeAll(callables, 1, TimeUnit.SECONDS)
@@ -173,7 +172,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val result = wrapper.invokeAny(callables)
@@ -190,7 +189,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val result = wrapper.invokeAny(callables, 1, TimeUnit.SECONDS)

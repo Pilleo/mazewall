@@ -4,12 +4,12 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.PolicyState
 import io.mazewall.RealPlatformProvider
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.PolicyState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.assertThrows
@@ -18,7 +18,6 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
 
 class InstallationReceiptMatrixTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -99,10 +98,12 @@ class InstallationReceiptMatrixTest {
 
         val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
+
             override fun getLandlockAbiVersion(): Int = 5
+
             override fun hasKernelSeccompSupport(): Boolean = true
-            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(22, -1L)
+
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1L)
         }
         Platform.setProvider(mockPlatform)
 
@@ -123,7 +124,12 @@ class InstallationReceiptMatrixTest {
             }
         }
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (scenario.seccompError != null && nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
+            if (scenario.seccompError != null &&
+                nr == io.mazewall.core.Arch
+                .current()
+                .seccompSyscallNumber
+                .toLong()
+            ) {
                 LinuxNative.SyscallResult.Error(scenario.seccompError, -1L)
             } else {
                 LinuxNative.SyscallResult.Success(0L)

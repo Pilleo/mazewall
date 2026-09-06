@@ -1,4 +1,5 @@
 @file:JvmName("Mazewall")
+
 package io.mazewall
 
 import io.mazewall.core.Syscall
@@ -53,7 +54,6 @@ import java.util.function.Supplier
  * }</pre>
  */
 
-// Presets
 @JvmField
 public val PURE_COMPUTE: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = Policy(PolicyPresets.PURE_COMPUTE)
 
@@ -122,6 +122,7 @@ public fun combine(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompil
 }
 
 // Installation & Assessment
+
 /**
  * Installs the given policy on the current thread.
  *
@@ -151,7 +152,10 @@ public fun installOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationRe
  * @return An [InstallationReceipt] describing the installation result
  * @throws IllegalStateException if called from a virtual thread
  */
-public fun installOnCurrentThread(policy: Policy<*, Uncompiled>, scopingPolicy: StacktraceScopingPolicy): InstallationReceipt {
+public fun installOnCurrentThread(
+    policy: Policy<*, Uncompiled>,
+    scopingPolicy: StacktraceScopingPolicy,
+): InstallationReceipt {
     return ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
 }
 
@@ -224,6 +228,7 @@ public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompile
 }
 
 // Contained execution
+
 /**
  * Executes the given task in a contained sandbox with the specified policy.
  *
@@ -240,7 +245,10 @@ public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompile
  * @return The result of the task
  * @throws RuntimeException if the task throws an exception or violates the containment policy
  */
-public fun <T> runContained(policy: Policy<*, *>, task: Callable<T>): T {
+public fun <T> runContained(
+    policy: Policy<*, *>,
+    task: Callable<T>,
+): T {
     return try {
         SandboxDispatcher.execute(policy, task)
     } catch (e: java.util.concurrent.ExecutionException) {
@@ -260,7 +268,10 @@ public fun <T> runContained(policy: Policy<*, *>, task: Callable<T>): T {
  * @return The result of the task
  * @throws RuntimeException if the task throws an exception or violates the containment policy
  */
-public fun <T> runContained(policy: Policy<*, *>, task: Supplier<T>): T {
+public fun <T> runContained(
+    policy: Policy<*, *>,
+    task: Supplier<T>,
+): T {
     return runContained(policy, Callable { task.get() })
 }
 
@@ -271,14 +282,21 @@ public fun <T> runContained(policy: Policy<*, *>, task: Supplier<T>): T {
  * @param task The task to execute
  * @throws RuntimeException if the task throws an exception or violates the containment policy
  */
-public fun runContained(policy: Policy<*, *>, task: Runnable) {
-    runContained(policy, Callable {
+public fun runContained(
+    policy: Policy<*, *>,
+    task: Runnable,
+) {
+    runContained(
+        policy,
+        Callable {
         task.run()
         null
-    })
+    },
+    )
 }
 
 // Contained Executor Wrappers & Factories
+
 /**
  * Wraps an existing executor service so that all tasks submitted to it run under the specified policy.
  *
@@ -307,7 +325,10 @@ public fun wrapContainedExecutor(
  * @param policies The policies to combine and apply to all tasks
  * @return A new ExecutorService that enforces the combined policy on all submitted tasks
  */
-public fun wrapExecutor(delegate: ExecutorService, vararg policies: Policy<*, Uncompiled>): ExecutorService {
+public fun wrapExecutor(
+    delegate: ExecutorService,
+    vararg policies: Policy<*, Uncompiled>,
+): ExecutorService {
     return ContainedExecutors.wrap(delegate, *policies)
 }
 
@@ -318,7 +339,10 @@ public fun wrapExecutor(delegate: ExecutorService, vararg policies: Policy<*, Un
  * @param policies The policies to combine and apply to all tasks
  * @return A new ExecutorService that enforces the combined policy on all submitted tasks
  */
-public fun wrap(delegate: ExecutorService, vararg policies: Policy<*, Uncompiled>): ExecutorService {
+public fun wrap(
+    delegate: ExecutorService,
+    vararg policies: Policy<*, Uncompiled>,
+): ExecutorService {
     return ContainedExecutors.wrap(delegate, *policies)
 }
 
@@ -335,8 +359,7 @@ public fun wrap(delegate: ExecutorService, vararg policies: Policy<*, Uncompiled
  * @param policy The policy to apply to all tasks
  * @return A new single-thread ExecutorService with the policy installed
  */
-public fun newContainedSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService =
-    ContainedExecutors.newSingleThreadExecutor(policy)
+public fun newContainedSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService = ContainedExecutors.newSingleThreadExecutor(policy)
 
 /**
  * Creates a new fixed thread pool where all tasks run under the specified policy.
@@ -348,8 +371,10 @@ public fun newContainedSingleThreadExecutor(policy: Policy<*, Uncompiled>): Exec
  * @param policy The policy to apply to all tasks
  * @return A new fixed-thread-pool ExecutorService with the policy installed on each thread
  */
-public fun newContainedFixedThreadPool(nThreads: Int, policy: Policy<*, Uncompiled>): ExecutorService =
-    ContainedExecutors.newFixedThreadPool(nThreads, policy)
+public fun newContainedFixedThreadPool(
+    nThreads: Int,
+    policy: Policy<*, Uncompiled>,
+): ExecutorService = ContainedExecutors.newFixedThreadPool(nThreads, policy)
 
 /**
  * Creates a new cached thread pool where all tasks run under the specified policy.
@@ -361,5 +386,4 @@ public fun newContainedFixedThreadPool(nThreads: Int, policy: Policy<*, Uncompil
  * @param policy The policy to apply to all tasks
  * @return A new cached-thread-pool ExecutorService with the policy installed on each thread
  */
-public fun newContainedCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService =
-    ContainedExecutors.newCachedThreadPool(policy)
+public fun newContainedCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService = ContainedExecutors.newCachedThreadPool(policy)

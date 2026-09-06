@@ -3,6 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -26,7 +27,7 @@ class SeccompSessionHandlerTest {
         var readCalls = 0
         val memory = object : MockNativeMemory() {
             override fun read(
-                fd: FileDescriptor<*, FdState.Open>,
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: ManagedSegment,
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -40,17 +41,16 @@ class SeccompSessionHandlerTest {
         }
         val engine = MockNativeEngine(memory = memory)
         val notifHandler = object : SeccompNotifHandler {
-            context(arena: NativeArena)
-            override fun processNotification(
+            context(arena: NativeArena) override fun processNotification(
                 notif: ManagedSegment,
                 resp: ManagedSegment,
-                listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+                listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ): NotifResult = NotifResult.HANDLED
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = notifHandler,
             engine = engine,
         )

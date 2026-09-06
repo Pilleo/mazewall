@@ -6,9 +6,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
-import io.mazewall.core.NativeArg
 import org.junit.jupiter.api.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -17,7 +15,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testPrctlGetSeccomp() {
         val result =
         LinuxNative.process.prctl(
-            io.mazewall.core.PrctlCommand.GetSeccomp
+            io.mazewall.core.PrctlCommand.GetSeccomp,
         )
 
         // Usually returns 0 or 2, unless error
@@ -40,7 +38,8 @@ class LinuxNativeTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun testBasicSyscalls() = nativeScope {
+    fun testBasicSyscalls() =
+        nativeScope {
         // test open/close/read/write on a temp file
         val tempFile =
             java.nio.file.Files
@@ -94,9 +93,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
                 val addr = allocate(16) // struct sockaddr_in
 
 LinuxNative.networking.bind(fd, addr, 16)
-
             }
-
 
 LinuxNative.networking.listen(fd, 5)
 
@@ -105,19 +102,21 @@ LinuxNative.networking.listen(fd, 5)
     }
 
     @Test
-    fun testSocketpair() = nativeScope {
+    fun testSocketpair() =
+        nativeScope {
         val fds = allocate(8)
         val result =
         LinuxNative.networking.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
 
         if (result is LinuxNative.SyscallResult.Success) {
-            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.readInt(0)))
-            LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(fds.readInt(4)))
+            LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.Generic>(fds.readInt(0)))
+            LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.Generic>(fds.readInt(4)))
         }
     }
 
     @Test
-    fun testProcessVmReadv() = nativeScope {
+    fun testProcessVmReadv() =
+        nativeScope {
         // Try reading from our own memory
         val localBuf = allocate(10)
         localBuf.writeByte(0, 123)
@@ -144,7 +143,6 @@ LinuxNative.memory.processVmReadv(
     1,
     0, // flags
 )
-
     }
 
     @Test
@@ -170,7 +168,8 @@ LinuxNative.memory.processVmReadv(
     }
 
     @Test
-    fun testReadlink() = nativeScope {
+    fun testReadlink() =
+        nativeScope {
         val path = allocateFrom("/proc/self/exe")
         val buffer = allocate(1024)
         val result =
@@ -180,7 +179,8 @@ LinuxNative.memory.processVmReadv(
     }
 
     @Test
-    fun testPoll() = nativeScope {
+    fun testPoll() =
+        nativeScope {
         val pollFd = PollFdSegment.of(allocate(Layouts.POLLFD))
         pollFd.setFd(-1) // Invalid FD
         pollFd.setEvents(NativeConstants.POLLIN)

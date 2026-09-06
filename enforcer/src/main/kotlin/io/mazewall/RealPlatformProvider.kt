@@ -1,12 +1,11 @@
 package io.mazewall
 
+import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import java.io.File
 
@@ -16,14 +15,20 @@ internal object RealPlatformProvider : PlatformProvider {
     internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
 
     override fun getOsName(): String = System.getProperty("os.name") ?: "Unknown"
+
     override fun getOsVersion(): String = System.getProperty("os.version") ?: "Unknown"
+
     override fun getOsArch(): String = System.getProperty("os.arch") ?: "Unknown"
 
     override fun hasKernelSeccompSupport(): Boolean =
-        if (!getOsName().equals("Linux", ignoreCase = true)) false
-        else LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            false
+        } else {
+            LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
+        }
 
-    override fun getSeccompMode(): SeccompMode = try {
+    override fun getSeccompMode(): SeccompMode =
+        try {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             SeccompMode.Disabled
         } else {
@@ -45,10 +50,14 @@ internal object RealPlatformProvider : PlatformProvider {
     }
 
     override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        if (!getOsName().equals("Linux", ignoreCase = true)) LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
-        else LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
+        } else {
+            LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
+        }
 
-    override fun isNoNewPrivsEnabled(): Boolean = try {
+    override fun isNoNewPrivsEnabled(): Boolean =
+        try {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             false
         } else {
@@ -85,9 +94,14 @@ internal object RealPlatformProvider : PlatformProvider {
         }
     }
 
-    override fun getLandlockAbiVersion(): Int = try {
-        if (!getOsName().equals("Linux", ignoreCase = true)) 0
-        else io.mazewall.landlock.Landlock.getAbiVersion()
+    override fun getLandlockAbiVersion(): Int =
+        try {
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            0
+        } else {
+            io.mazewall.landlock.Landlock
+                .getAbiVersion()
+        }
     } catch (e: UnsupportedOperationException) {
         0
     } catch (e: IllegalStateException) {
@@ -134,14 +148,17 @@ internal object RealPlatformProvider : PlatformProvider {
     private fun probeSeccompFlag(flag: Long): Boolean {
         if (!getOsName().equals("Linux", ignoreCase = true)) return false
         val arch = try {
-            io.mazewall.core.Arch.current()
+            io.mazewall.core.Arch
+                .current()
         } catch (e: UnsupportedOperationException) {
             return false
         }
         val res = LinuxNative.raw.syscall(
             arch.seccompSyscallNumber.toLong(),
-            io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-            io.mazewall.core.NativeArg.LongArg(flag),
+            io.mazewall.core.NativeArg
+                .LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+            io.mazewall.core.NativeArg
+                .LongArg(flag),
             io.mazewall.core.NativeArg.NullArg, // Trigger EFAULT on valid flags
         )
         // EFAULT (14) means the kernel recognized the flag and tried to read the NULL program.

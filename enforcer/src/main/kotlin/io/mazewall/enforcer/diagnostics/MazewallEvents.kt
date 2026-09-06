@@ -18,23 +18,39 @@ object MazewallEvents {
         val timestampMillis: Long
     }
 
-    data class DaemonExited(val pid: Long, val exitCode: Int, val lastLogLines: List<String>) : Event {
+    data class DaemonExited(
+        val pid: Long,
+        val exitCode: Int,
+        val lastLogLines: List<String>,
+    ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class FallbackEngaged(val behaviorName: String, val reason: String) : Event {
+    data class FallbackEngaged(
+        val behaviorName: String,
+        val reason: String,
+    ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class LandlockApplied(val processWide: Boolean, val abiVersion: Int) : Event {
+    data class LandlockApplied(
+        val processWide: Boolean,
+        val abiVersion: Int,
+    ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class CetOutcome(val armed: Boolean, val detail: String) : Event {
+    data class CetOutcome(
+        val armed: Boolean,
+        val detail: String,
+    ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class SelfVerificationResult(val passed: Boolean, val detail: String) : Event {
+    data class SelfVerificationResult(
+        val passed: Boolean,
+        val detail: String,
+    ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 

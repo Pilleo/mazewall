@@ -6,8 +6,8 @@ import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import org.junit.jupiter.api.Test
 import java.net.ServerSocket
 import java.net.Socket
@@ -17,12 +17,13 @@ import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
-
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().stop()
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+                .getInstance()
+                .stop()
         }
     }
 
@@ -38,7 +39,7 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
         val scopingPolicy = object : StacktraceScopingPolicy {
             override val handlers = mapOf<Syscall, ScopingHandler>(
                 Syscall.ACCEPT to { tid, args, stack -> authorize(stack) },
-                Syscall.ACCEPT4 to { tid, args, stack -> authorize(stack) }
+                Syscall.ACCEPT4 to { tid, args, stack -> authorize(stack) },
             )
 
             private fun authorize(stack: List<StackTraceElement>): Boolean {
@@ -53,7 +54,8 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
         }
 
         // We block socket actions in the thread filter, forcing them to be supervised
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .allowJvmClasspath()
             .block(Syscall.ACCEPT, Syscall.ACCEPT4)
@@ -65,7 +67,10 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
         try {
             val acceptFuture = containedExecutor.submit<String> {
                 System.err.println("[TEST-TRACEE] Lambda started. Creating LegitContext...")
-                class LegitContext(val ss: ServerSocket) {
+
+                class LegitContext(
+                    val ss: ServerSocket,
+                ) {
                     fun run(): String {
                         System.err.println("[TEST-TRACEE] LegitContext.run() started. Calling ss.accept()...")
                         val client = ss.accept()

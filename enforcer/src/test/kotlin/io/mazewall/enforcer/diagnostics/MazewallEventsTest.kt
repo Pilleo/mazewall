@@ -8,7 +8,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MazewallEventsTest {
-
     @AfterEach
     fun tearDown() {
         MazewallEvents.clear()

@@ -2,14 +2,14 @@ package io.mazewall.enforcer
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
 import io.mazewall.Platform
 import io.mazewall.PlatformProvider
+import io.mazewall.Policy
 import io.mazewall.RealPlatformProvider
 import io.mazewall.core.SandboxedPath
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -22,10 +22,8 @@ import kotlin.test.assertFailsWith
  * permissions would expand.
  */
 class LandlockSubsetRealpathTest {
-
     @TempDir
     lateinit var tempDir: java.nio.file.Path
-
 
     @AfterEach
     fun tearDown() {
@@ -37,10 +35,12 @@ class LandlockSubsetRealpathTest {
     private fun installMockEnvironment() {
         val mockPlatform = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
+
             override fun getLandlockAbiVersion(): Int = 5
+
             override fun hasKernelSeccompSupport(): Boolean = true
-            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(22, -1)
+
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
         }
         Platform.setProvider(mockPlatform)
         val mockProcess = object : io.mazewall.MockNativeProcess() {
@@ -62,12 +62,12 @@ class LandlockSubsetRealpathTest {
         Files.createSymbolicLink(link, realDir)
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(realDir.toString()).build()
+            Policy.threadLocalBuilder().allowFsRead(realDir.toString()).build(),
         )
 
         // Same dentry spelled through the symlink: must NOT be treated as permission expansion.
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(link.toString()).build()
+            Policy.threadLocalBuilder().allowFsRead(link.toString()).build(),
         )
     }
 
@@ -77,12 +77,12 @@ class LandlockSubsetRealpathTest {
         val allowed = Files.createDirectories(tempDir.resolve("allowed"))
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(allowed.toString()).build()
+            Policy.threadLocalBuilder().allowFsRead(allowed.toString()).build(),
         )
 
         val expansion = assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(
-                Policy.threadLocalBuilder().allowFsRead(tempDir.toString()).build()
+                Policy.threadLocalBuilder().allowFsRead(tempDir.toString()).build(),
             )
         }
         assert(expansion.message!!.contains("Cannot expand"))

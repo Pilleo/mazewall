@@ -4,8 +4,8 @@ import io.mazewall.LinuxNative
 import io.mazewall.core.Arch
 import io.mazewall.core.NativeArg
 import io.mazewall.core.SeccompAction
-import io.mazewall.ffi.NativeConstants
 import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.ffi.NativeConstants
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -53,7 +53,6 @@ internal object InstallSelfVerifier {
         return LinuxNative.isRealEngineActive()
     }
 
-
     /**
      * Pre-loads every class/method self-verification touches (including Kotlin `buildList`
      * machinery and its transitive JDK exceptions) so nothing is lazily classloaded AFTER a
@@ -86,16 +85,16 @@ internal object InstallSelfVerifier {
         program: BpfProgram<BpfStatus.Verified>,
         arch: Arch,
         priorFilterDepth: Int = 0,
-        mergedState: ContainerState? = null
+        mergedState: ContainerState? = null,
     ) {
         val instructions = program.instructions
         if (!isEnabled()) return
-        
+
         // Memoize only after every check passes: a cached entry from a failed
         // verification would turn all later installs of the same program into an
         // unchecked path (fail-closed rule).
         if (verifiedPrograms.containsKey(instructions)) return
-        
+
         if (priorFilterDepth > 0) {
             // Stacked filters: the kernel enforces the UNION of all programs.
             // Use union-aware verification if merged state is provided.
@@ -121,8 +120,12 @@ internal object InstallSelfVerifier {
 
         val pid = LinuxNative.raw.syscall(
             livenessNr.toLong(),
-            NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
-            NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
+            NativeArg.LongArg(0),
         )
         check(pid is LinuxNative.SyscallResult.Success && pid.value > 0) {
             "Post-install liveness failed: $pid"
@@ -142,13 +145,20 @@ internal object InstallSelfVerifier {
         verifiedPrograms.putIfAbsent(instructions, Unit)
     }
 
-    private fun verifyDeniedProbes(instructions: List<BpfInstruction>, arch: Arch) {
+    private fun verifyDeniedProbes(
+        instructions: List<BpfInstruction>,
+        arch: Arch,
+    ) {
         val deniedNrs = deniedProbeNrs(instructions, arch)
         for ((nr, expectedErrno) in deniedNrs) {
             val res = LinuxNative.raw.syscall(
                 nr.toLong(),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
             )
             val actualErrno = (res as? LinuxNative.SyscallResult.Error)?.errno
             if (actualErrno != expectedErrno) {
@@ -169,14 +179,14 @@ internal object InstallSelfVerifier {
 
     /**
      * Union-aware verification for stacked seccomp filters (issue-20260824-011900).
-     * 
+     *
      * When multiple filters are stacked on a thread, the kernel enforces the UNION of all filters.
      * This method verifies the installed program by checking that:
      * 1. Syscalls denied by ANY layer (including prior filters) remain denied
      * 2. Syscalls allowed by ALL layers (including the new program) are allowed
-     * 
+     *
      * Uses [mergedState] which contains the cumulative effect of all stacked filters.
-     * 
+     *
      * @param instructions The BPF instructions of the newly installed program
      * @param arch The architecture
      * @param mergedState The merged container state representing the union of all stacked filters
@@ -186,20 +196,24 @@ internal object InstallSelfVerifier {
         instructions: List<BpfInstruction>,
         arch: Arch,
         mergedState: ContainerState,
-        priorFilterDepth: Int
+        priorFilterDepth: Int,
     ) {
         // Perform union-aware verification:
         // 1. Liveness probe (getpid) - must be allowed by ALL layers including merged state
         val livenessNr = arch.getpid
         val effectiveLivenessAction = mergedState.getEffectiveAction(livenessNr, arch)
         val expectedLivenessCode = effectiveLivenessAction.toKernelReturnCode()
-        
+
         if (expectedLivenessCode == NativeConstants.SECCOMP_RET_ALLOW) {
             // Liveness probe should succeed under merged policy
             val pid = LinuxNative.raw.syscall(
                 livenessNr.toLong(),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
             )
             check(pid is LinuxNative.SyscallResult.Success && pid.value > 0) {
                 "Union-aware liveness failed: $pid (merged state predicted ALLOW)"
@@ -210,10 +224,10 @@ internal object InstallSelfVerifier {
             markVerified(instructions)
             return
         }
-        
+
         // 2. Verify denied probes based on union semantics
         verifyDeniedProbesWithUnion(instructions, arch, mergedState)
-        
+
         markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
@@ -225,10 +239,10 @@ internal object InstallSelfVerifier {
 
     /**
      * Union-aware denied probe verification.
-     * 
-     * For stacked filters, we verify that syscalls denied by the UNION (merged state) 
+     *
+     * For stacked filters, we verify that syscalls denied by the UNION (merged state)
      * produce the expected errno when probed against the kernel.
-     * 
+     *
      * @param instructions The BPF instructions of the newly installed program
      * @param arch The architecture
      * @param mergedState The merged container state
@@ -236,14 +250,18 @@ internal object InstallSelfVerifier {
     private fun verifyDeniedProbesWithUnion(
         instructions: List<BpfInstruction>,
         arch: Arch,
-        mergedState: ContainerState
+        mergedState: ContainerState,
     ) {
         val deniedNrs = deniedProbeNrsWithUnion(instructions, arch, mergedState)
         for ((nr, expectedErrno) in deniedNrs) {
             val res = LinuxNative.raw.syscall(
                 nr.toLong(),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
-                NativeArg.LongArg(0), NativeArg.LongArg(0), NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
+                NativeArg.LongArg(0),
             )
             val actualErrno = (res as? LinuxNative.SyscallResult.Error)?.errno
             if (actualErrno != expectedErrno) {
@@ -264,10 +282,10 @@ internal object InstallSelfVerifier {
 
     /**
      * Union-aware denied probe NR selection.
-     * 
+     *
      * Selects syscall NRs that should be denied by the UNION of all stacked filters.
      * A syscall is denied if the merged state's effective action is ERRNO-class.
-     * 
+     *
      * @param instructions The BPF instructions of the newly installed program
      * @param arch The architecture
      * @param mergedState The merged container state
@@ -286,8 +304,10 @@ internal object InstallSelfVerifier {
         // Policy-matched NRs from the current program
         val auditTokens = setOf(Arch.AMD64.audit, Arch.AARCH64.audit)
         for (inst in instructions) {
-            if (inst is BpfInstruction.Jmp && inst.code == JEQ_OPCODE &&
-                inst.k in 0..MAX_PLAUSIBLE_NR && inst.k !in auditTokens
+            if (inst is BpfInstruction.Jmp &&
+                inst.code == JEQ_OPCODE &&
+                inst.k in 0..MAX_PLAUSIBLE_NR &&
+                inst.k !in auditTokens
             ) {
                 candidates.add(inst.k)
             }
@@ -298,10 +318,10 @@ internal object InstallSelfVerifier {
             // Use merged state to get the effective action for union-aware verification
             val effectiveAction = mergedState.getEffectiveAction(nr, arch)
             val actionCode = effectiveAction.toKernelReturnCode()
-            
+
             // Skip arg-inspected syscalls (same reasoning as non-union verification)
             if (isArgInspected(instructions, nr)) continue
-            
+
             // Check if this is an ERRNO-class action (denied)
             if ((actionCode ushr 16) == (NativeConstants.SECCOMP_RET_ERRNO ushr 16)) {
                 out += nr to (actionCode and 0xFFFF)
@@ -328,8 +348,10 @@ internal object InstallSelfVerifier {
         // plausible syscall-NR range and exclude architecture audit tokens.
         val auditTokens = setOf(Arch.AMD64.audit, Arch.AARCH64.audit)
         for (inst in instructions) {
-            if (inst is BpfInstruction.Jmp && inst.code == JEQ_OPCODE &&
-                inst.k in 0..MAX_PLAUSIBLE_NR && inst.k !in auditTokens
+            if (inst is BpfInstruction.Jmp &&
+                inst.code == JEQ_OPCODE &&
+                inst.k in 0..MAX_PLAUSIBLE_NR &&
+                inst.k !in auditTokens
             ) {
                 candidates.add(inst.k)
             }
@@ -362,7 +384,10 @@ internal object InstallSelfVerifier {
      * seccomp_data.args — i.e. the filter inspects syscall arguments, so a zero-arg probe would
      * fabricate a verdict.
      */
-    internal fun isArgInspected(instructions: List<BpfInstruction>, nr: Int): Boolean {
+    internal fun isArgInspected(
+        instructions: List<BpfInstruction>,
+        nr: Int,
+    ): Boolean {
         val idx = instructions.indexOfFirst {
             it is BpfInstruction.Jmp && it.code == JEQ_OPCODE && it.k == nr
         }

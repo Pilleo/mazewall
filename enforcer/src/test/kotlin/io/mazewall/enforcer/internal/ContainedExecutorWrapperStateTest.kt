@@ -5,11 +5,11 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.RealPlatformProvider
+import io.mazewall.core.SeccompAction
+import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 
 class ContainedExecutorWrapperStateTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -35,8 +34,11 @@ class ContainedExecutorWrapperStateTest {
 
         val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
+
             override fun getLandlockAbiVersion(): Int = 5
+
             override fun hasKernelSeccompSupport(): Boolean = true
+
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                 LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
         }
@@ -44,7 +46,11 @@ class ContainedExecutorWrapperStateTest {
 
         val mockEngine = MockNativeEngine()
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
+            if (nr == io.mazewall.core.Arch
+                .current()
+                .seccompSyscallNumber
+                .toLong()
+            ) {
                 LinuxNative.SyscallResult.Success(0L)
             } else {
                 LinuxNative.SyscallResult.Success(0L)
@@ -65,23 +71,28 @@ class ContainedExecutorWrapperStateTest {
 
         // Get depth from worker thread (need to capture it inside the task)
         var depthAfterTask1: Int = -1
-        val future2 = wrapper.submit(Runnable {
+        val future2 = wrapper.submit(
+            Runnable {
             depthAfterTask1 = ContainmentStateRegistry.threadState.filterDepth
-        })
+        },
+        )
         future2.get()
 
         // Second task to verify depth doesn't increase
         var depthAfterTask2: Int = -1
-        val future3 = wrapper.submit(Runnable {
+        val future3 = wrapper.submit(
+            Runnable {
             depthAfterTask2 = ContainmentStateRegistry.threadState.filterDepth
-        })
+        },
+        )
         future3.get()
 
         // Depth should be the same after task 2 as after task 1 (not increased)
         assertEquals(
-            depthAfterTask1, depthAfterTask2,
+            depthAfterTask1,
+            depthAfterTask2,
             "Filter depth should not increase between successful tasks on the same worker thread. " +
-                "After task 1: $depthAfterTask1, after task 2: $depthAfterTask2"
+                "After task 1: $depthAfterTask1, after task 2: $depthAfterTask2",
         )
 
         delegate.shutdown()
@@ -94,8 +105,11 @@ class ContainedExecutorWrapperStateTest {
 
         val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
+
             override fun getLandlockAbiVersion(): Int = 5
+
             override fun hasKernelSeccompSupport(): Boolean = true
+
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                 LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
         }
@@ -128,8 +142,11 @@ class ContainedExecutorWrapperStateTest {
     fun `failed install before receipt still rewinds`() {
         val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
+
             override fun getLandlockAbiVersion(): Int = 5
+
             override fun hasKernelSeccompSupport(): Boolean = true
+
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                 LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
         }
@@ -138,7 +155,11 @@ class ContainedExecutorWrapperStateTest {
         val mockEngine = MockNativeEngine()
         // Mock seccomp syscall to fail with EINVAL (22)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch.current().seccompSyscallNumber.toLong()) {
+            if (nr == io.mazewall.core.Arch
+                .current()
+                .seccompSyscallNumber
+                .toLong()
+            ) {
                 LinuxNative.SyscallResult.Error(22, -1)
             } else {
                 LinuxNative.SyscallResult.Success(0L)
@@ -166,8 +187,9 @@ class ContainedExecutorWrapperStateTest {
 
         // After failed install (receipt == null), threadState should be restored to initial
         assertEquals(
-            initialState, ContainmentStateRegistry.threadState,
-            "Thread state should be restored to initial state after failed install"
+            initialState,
+            ContainmentStateRegistry.threadState,
+            "Thread state should be restored to initial state after failed install",
         )
 
         delegate.shutdown()

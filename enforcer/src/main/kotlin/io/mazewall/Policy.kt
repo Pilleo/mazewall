@@ -1,15 +1,13 @@
 package io.mazewall
-import io.mazewall.enforcer.api.ContainedExecutors
-
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-
 import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.seccomp.DefaultSyscallInspectionPipeline
 import io.mazewall.seccomp.SyscallInspectionPipeline
@@ -33,6 +31,7 @@ public sealed interface PolicyScope {
  */
 public sealed interface PolicyState {
     public interface Uncompiled : PolicyState
+
     public interface Compiled : PolicyState
 }
 
@@ -64,6 +63,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
     public val syscallActions: Map<Syscall, SeccompAction> get() = definition.syscallActions
     public val allowMmapExec: Boolean get() = definition.allowMmapExec
     public val allowNonThreadClone: Boolean get() = definition.allowNonThreadClone
+
     /** Inspectable argument-inspection flags (JIT vs W^X, clone, prctl). */
     public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(definition)
 
@@ -176,9 +176,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
          * Does not expand permissions already installed in the kernel.
          */
         @JvmStatic
-        public fun <S : PolicyScope> restrictFurtherWith(
-            vararg policies: Policy<out S, Uncompiled>,
-        ): Policy<S, Uncompiled> {
+        public fun <S : PolicyScope> restrictFurtherWith(vararg policies: Policy<out S, Uncompiled>): Policy<S, Uncompiled> {
             val defs = policies.map { it.definition }.toTypedArray()
             return Policy(PolicyDefinition.combine(*defs))
         }
@@ -212,10 +210,11 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
 
         internal fun <S : PolicyScope> compile(
             policy: Policy<S, Uncompiled>,
-            filters: List<BpfInstruction>
-        ): Policy<S, Compiled> = Policy<S, Compiled>(
+            filters: List<BpfInstruction>,
+        ): Policy<S, Compiled> =
+            Policy<S, Compiled>(
             definition = policy.definition,
-            compiledFiltersField = filters
+            compiledFiltersField = filters,
         )
     }
 
@@ -223,19 +222,23 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
      * Legacy builder to maintain API compatibility.
      */
     public class Builder<S : PolicyScope> internal constructor(
-        private val internalBuilder: PolicyBuilder<S>
+        private val internalBuilder: PolicyBuilder<S>,
     ) {
         public fun defaultAction(action: SeccompAction): Builder<S> {
             internalBuilder.defaultAction(action)
             return this
         }
 
-        public fun addAction(action: SeccompAction, vararg syscalls: Syscall): Builder<S> {
+        public fun addAction(
+            action: SeccompAction,
+            vararg syscalls: Syscall,
+        ): Builder<S> {
             internalBuilder.addAction(action, *syscalls)
             return this
         }
 
         public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
+
         public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
         /**
@@ -255,20 +258,15 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
         // Soundness note (issue-20260823-135554): FS-adding methods return a NEW wrapper around
         // the copy-on-promoted internal builder. The receiver is never re-typed via unchecked
         // casts, so aliasing cannot contradict a builder's declared scope.
-        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> =
-            Builder(internalBuilder.allowFsRead(path))
+        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
-            Builder(internalBuilder.allowFsRead(path))
+        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsRead(path))
 
-        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> =
-            Builder(internalBuilder.allowJvmClasspath())
+        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowJvmClasspath())
 
-        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> =
-            Builder(internalBuilder.allowFsWrite(path))
+        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsWrite(path))
 
-        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> =
-            Builder(internalBuilder.allowFsWrite(path))
+        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsWrite(path))
 
         /**
          * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer
@@ -337,22 +335,17 @@ internal fun <S : PolicyScope> Policy<S, Uncompiled>.compile(arch: Arch): Policy
  * Composes two [PolicyScope.ProcessWideSafe] policies (intersection / restrict-further).
  */
 @JvmName("plusProcessWide")
-public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(
-    other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>
-): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy.restrictFurtherWith(this, other)
+public operator fun Policy<PolicyScope.ProcessWideSafe, Uncompiled>.plus(other: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
+    Policy.restrictFurtherWith(this, other)
 
 /** Restrictive composition; same as [Policy.restrictFurtherWith]. */
-public fun <S : PolicyScope> Policy<S, Uncompiled>.restrictFurtherWith(
-    other: Policy<out S, Uncompiled>,
-): Policy<S, Uncompiled> = Policy.restrictFurtherWith(this, other)
+public fun <S : PolicyScope> Policy<S, Uncompiled>.restrictFurtherWith(other: Policy<out S, Uncompiled>): Policy<S, Uncompiled> = Policy.restrictFurtherWith(this, other)
 
 /**
  * Composes a policy with a thread-local policy.
  */
 @JvmName("plusThreadLocal")
-public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(
-    other: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
-): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(other: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
     @Suppress("UNCHECKED_CAST")
     return Policy.combine(this, other) as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
 }
@@ -361,5 +354,6 @@ public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(
  * Installs this policy on the current thread.
  */
 public fun <S : PolicyScope> Policy<S, Uncompiled>.install(): io.mazewall.InstallationReceipt {
-    return io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(this.definition)
+    return io.mazewall.enforcer.api.ContainedExecutors
+        .installOnCurrentThread(this.definition)
 }

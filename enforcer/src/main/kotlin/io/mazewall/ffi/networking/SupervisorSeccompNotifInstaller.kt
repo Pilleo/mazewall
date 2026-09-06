@@ -1,25 +1,25 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.BpfNativeCache
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.core.close
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.seccomp.*
-import io.mazewall.ffi.memory.ConfinedSegment
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
@@ -40,15 +40,18 @@ public object SupervisorSeccompNotifInstaller {
         connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
         onFilterApplied: () -> Unit = {},
-        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
     ) {
         if (!Platform.featureMatrix.seccompUserNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
         }
 
         // Mandatory for non-privileged seccomp
-        LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
-            .getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
+        LinuxNative.process
+            .prctl(
+                io.mazewall.core.PrctlCommand
+                .SetNoNewPrivs(true),
+            ).getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 
         val arch = Arch.current()
 
@@ -64,8 +67,8 @@ public object SupervisorSeccompNotifInstaller {
         // Coordination structures
         val installLatch = CountDownLatch(1)
         val proceedLatch = CountDownLatch(1)
-        val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>> =
-            AtomicReference(FileDescriptor.seccompNotif(-1))
+        val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>> =
+            AtomicReference(FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1))
         val setupError = AtomicReference<Throwable?>()
 
         // Coordinator thread spawned BEFORE the seccomp filter is active.

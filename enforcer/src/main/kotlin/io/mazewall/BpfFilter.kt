@@ -1,18 +1,20 @@
 package io.mazewall
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.seccomp.*
 import java.util.logging.Logger
+
+// @ref: docs/internals/designs/enforcer/containment-design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
+// @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 
 /**
  * Builds seccomp-bpf programs using a robust strictly-forward linear scan approach.
@@ -23,8 +25,6 @@ import java.util.logging.Logger
  * allowing new inspections (e.g., for `openat2`) to be added to the BPF build loop
  * without modifying the core [BpfFilter] logic.
  */
-// @ref: docs/internals/designs/enforcer/containment-design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
-// @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)
 
@@ -75,7 +75,7 @@ object BpfFilter {
                 UnsafePrctlInspector(),
                 Clone3Inspector(),
                 SocketAddressFamilyInspector(),
-            )
+            ),
         )
     }
 
@@ -152,7 +152,8 @@ object BpfFilter {
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
 
         // 1. Initialize Builder and enforce sequence: Arch Check -> Load NR
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
 
@@ -164,7 +165,7 @@ object BpfFilter {
             jvmCriticalNrs,
             allowMmapExec,
             allowNonThreadClone,
-            allowUnsafePrctl
+            allowUnsafePrctl,
         )
 
         // Collect and emit all argument-based inspections
@@ -351,7 +352,8 @@ object BpfFilter {
         }
 
         // Group by nativeAction and ensure deterministic order by sorting keys and values
-        val groups = actionsToEmit.groupBy { it.second }
+        val groups = actionsToEmit
+            .groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
             .toSortedMap()
 

@@ -1,10 +1,10 @@
 package io.mazewall.seccomp
 import io.mazewall.BaseIntegrationTest
+import io.mazewall.CompiledSandbox
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.compile
-import io.mazewall.CompiledSandbox
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector

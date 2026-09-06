@@ -265,12 +265,14 @@ class MmapProtectionTest : BaseIntegrationTest() {
                         val res =
                         io.mazewall.LinuxNative.raw.syscall(
                             nr.toLong(),
-                            io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(addr)),
-                            io.mazewall.core.NativeArg.LongArg(4096L),
-                            io.mazewall.core.NativeArg.LongArg((PROT_READ or PROT_EXEC).toLong()),
+                            io.mazewall.core.NativeArg
+                                .MemoryArg(ConfinedSegment(addr)),
+                            io.mazewall.core.NativeArg
+                                .LongArg(4096L),
+                            io.mazewall.core.NativeArg
+                                .LongArg((PROT_READ or PROT_EXEC).toLong()),
                             io.mazewall.core.NativeArg.NullArg,
                         )
-
 
                         when (res) {
                             is io.mazewall.LinuxNative.SyscallResult.Error -> {

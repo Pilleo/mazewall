@@ -1,26 +1,30 @@
 package io.mazewall
 
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.MethodSource
-import io.mazewall.ffi.IoctlCommand
-import io.mazewall.ffi.IoctlPayload
-import io.mazewall.ffi.typed
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.ForeignFdGuard
 import io.mazewall.core.close
+import io.mazewall.ffi.IoctlCommand
+import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.typed
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
 
+@ExtendWith(ForeignFdGuard::class)
 class NativeEngineTest {
     companion object {
         @JvmStatic
-        fun ioctlCommands() = listOf(
+        fun ioctlCommands() =
+            listOf(
             IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
             IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND,
-            IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD
+            IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD,
         )
     }
 
@@ -58,7 +62,10 @@ class NativeEngineTest {
 
         LinuxNative.setEngine(mock)
 
-        val result = LinuxNative.process.prctl(io.mazewall.core.PrctlCommand.SetNoNewPrivs(true))
+        val result = LinuxNative.process.prctl(
+            io.mazewall.core.PrctlCommand
+            .SetNoNewPrivs(true),
+        )
         assertEquals(42L, result.getOrThrow("test"))
     }
 
@@ -91,7 +98,8 @@ class NativeEngineTest {
             // Smart cast allows accessing .value directly on successResult
             assertEquals("test-value", successResult.value)
         } else {
-            org.junit.jupiter.api.Assertions.fail("Expected success")
+            org.junit.jupiter.api.Assertions
+                .fail("Expected success")
         }
 
         val failureResult: LinuxNative.SyscallResult<String, LinuxNative.SyscallHandledState.Unhandled> =
@@ -101,14 +109,14 @@ class NativeEngineTest {
             // Smart cast allows accessing .errno directly on failureResult
             assertEquals(5, failureResult.errno)
         } else {
-            org.junit.jupiter.api.Assertions.fail("Expected failure")
+            org.junit.jupiter.api.Assertions
+                .fail("Expected failure")
         }
     }
 
     @Test
-    fun `poll delegates to engine without rejecting retired fd integer`() {
-        val fd = FileDescriptor.adopt(97, FileDescriptorRole.Generic)
-        fd.close()
+    fun `poll delegates to engine with a borrowed descriptor`() {
+        val fd = FileDescriptor.generic(97)
         val mock = MockNativeEngine()
         var polled = false
         mock.onPoll = { _: io.mazewall.ffi.memory.ManagedSegment, _: Long, _: Int ->

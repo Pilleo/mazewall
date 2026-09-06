@@ -15,7 +15,6 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 class ResolveAbsolutePathTest {
-
     @Test
     fun `proc and sys paths remain subject to supervisor policy evaluation`() {
         assertFalse(BypassPaths.isBypassPath(Paths.get("/proc/self/environ")))
@@ -31,7 +30,6 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
-
         val nonExistentPath = "/tmp/this/path/does/not/exist/at/all/12345"
 
         // FIXED BEHAVIOR: resolveAbsolutePath now returns a securely canonicalized non-null Path using toRealPathWithFallback,
@@ -44,7 +42,6 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent path in safeBypassPaths`() {
-
         val result = SupervisorFastPath.resolveAbsolutePath(0, -100, "build/non-existent-file-12345") as Path?
         assertNotNull(result)
         // With AT_FDCWD, the code queries baseDir = /proc/0/cwd, which points to the current working directory.
@@ -56,8 +53,8 @@ class ResolveAbsolutePathTest {
     @Test
     fun `unresolvable relative path is not remapped onto a daemon bypass root`() {
         val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
         )
 
         val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, 999, "build/secret") as Path?
@@ -67,29 +64,30 @@ class ResolveAbsolutePathTest {
         }
         val bypass = handler.resolveBypassPath(resolvedPath)
         assertNull(bypass)
-        assertFalse(BypassPaths.safeBypassPaths.any { root ->
+        assertFalse(
+            BypassPaths.safeBypassPaths.any { root ->
             resolvedPath.normalize().startsWith(root.normalize())
-        })
+        },
+        )
     }
 
     @Test
     fun `relative bypass path is matched only after tracee dirfd resolution`() {
         val handler = SupervisorSessionHandler(
-            FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(-1)
+            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(-1),
+            FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
         )
         val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
         val tracee = ProcessBuilder(
             "bash",
             "-c",
-            "exec 9<\"$traceeDirectory\"; echo $$; sleep 30"
+            "exec 9<\"$traceeDirectory\"; echo $$; sleep 30",
         ).redirectErrorStream(true).start()
 
         try {
             val traceePid = tracee.inputReader().readLine().toInt()
             val resolvedPath =
                 SupervisorFastPath.resolveAbsolutePath(traceePid, 9, "build/secret") as Path
-
 
             // "build" is beneath the daemon working directory and is normally bypassed. It must not
             // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.

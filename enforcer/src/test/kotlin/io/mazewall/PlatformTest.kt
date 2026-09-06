@@ -72,17 +72,31 @@ class PlatformTest {
     fun `test Platform validations throw on non-Linux mock`() {
         val mockProvider = object : PlatformProvider {
             override fun getOsName(): String = "macOS"
+
             override fun getOsVersion(): String = "14.0"
+
             override fun getOsArch(): String = "aarch64"
+
             override fun hasKernelSeccompSupport(): Boolean = false
+
             override fun getSeccompMode(): SeccompMode = SeccompMode.Disabled
-            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> = io.mazewall.LinuxNative.SyscallResult.Error(38, -1)
+
+            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.LinuxNative.SyscallResult
+                .Error(38, -1)
+
             override fun isNoNewPrivsEnabled(): Boolean = false
+
             override fun getYamaPtraceScope(): YamaPtraceScope = YamaPtraceScope.Unavailable
+
             override fun getLandlockAbiVersion(): Int = 0
+
             override fun probeSeccompTsync(): Boolean = false
+
             override fun probeSeccompUserNotif(): Boolean = false
+
             override fun probeCetSupported(): Boolean = false
+
             override fun isContainer(): Boolean = false
         }
 

@@ -2,19 +2,18 @@ package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
-import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.Platform
 import io.mazewall.PlatformProvider
+import io.mazewall.Policy
 import io.mazewall.SeccompMode
 import io.mazewall.YamaPtraceScope
+import io.mazewall.ffi.internal.RealNativeEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class LandlockExceptionSafetyTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -23,17 +22,29 @@ class LandlockExceptionSafetyTest {
 
     object MockPlatformProvider : PlatformProvider {
         override fun getOsName(): String = "Linux"
+
         override fun getOsVersion(): String = "5.15.0"
+
         override fun getOsArch(): String = "amd64"
+
         override fun hasKernelSeccompSupport(): Boolean = true
+
         override fun getSeccompMode(): SeccompMode = SeccompMode.Disabled
+
         override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
+
         override fun isNoNewPrivsEnabled(): Boolean = false
+
         override fun getYamaPtraceScope(): YamaPtraceScope = YamaPtraceScope.Classic
+
         override fun getLandlockAbiVersion(): Int = 5
+
         override fun probeSeccompTsync(): Boolean = true
+
         override fun probeSeccompUserNotif(): Boolean = true
+
         override fun probeCetSupported(): Boolean = false
+
         override fun isContainer(): Boolean = false
     }
 

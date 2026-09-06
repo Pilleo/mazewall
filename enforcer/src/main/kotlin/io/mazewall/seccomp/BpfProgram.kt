@@ -1,15 +1,14 @@
 package io.mazewall.seccomp
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.BpfFilter
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import java.util.function.Consumer
 import java.util.function.Function
@@ -35,8 +34,7 @@ public class BpfLabel private constructor(
     private val owner: Any,
     private val serial: Int,
 ) {
-    override fun equals(other: Any?): Boolean =
-        other is BpfLabel && owner === other.owner && serial == other.serial
+    override fun equals(other: Any?): Boolean = other is BpfLabel && owner === other.owner && serial == other.serial
 
     override fun hashCode(): Int = 31 * System.identityHashCode(owner) + serial
 
@@ -45,7 +43,11 @@ public class BpfLabel private constructor(
     internal fun issuedBy(owner: Any): Boolean = this.owner === owner
 
     internal companion object {
-        fun issue(name: String, owner: Any, serial: Int): BpfLabel = BpfLabel(name, owner, serial)
+        fun issue(
+            name: String,
+            owner: Any,
+            serial: Int,
+        ): BpfLabel = BpfLabel(name, owner, serial)
     }
 }
 
@@ -62,7 +64,8 @@ public class BpfProgram<out S : BpfStatus>(
      * Unknown opcodes are retained as raw fields so the output never misrepresents a filter.
      */
     public fun disassemble(): String =
-        instructions.mapIndexed { index, instruction ->
+        instructions
+            .mapIndexed { index, instruction ->
             "${index.toString().padStart(4, '0')}: ${instruction.disassemblyMnemonic()}"
         }.joinToString("\n")
 
@@ -77,7 +80,7 @@ public class BpfProgram<out S : BpfStatus>(
         @JvmStatic
         public fun dsl(
             arch: Arch,
-            block: Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>>
+            block: Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>>,
         ): BpfProgram<BpfStatus.Unverified> {
             val active = builder()
                 .checkArch(arch)
@@ -92,7 +95,7 @@ public class BpfProgram<out S : BpfStatus>(
          */
         public inline fun dsl(
             arch: Arch,
-            block: BpfBuilder<BpfState.Active>.() -> BpfBuilder<BpfState.Terminated>
+            block: BpfBuilder<BpfState.Active>.() -> BpfBuilder<BpfState.Terminated>,
         ): BpfProgram<BpfStatus.Unverified> =
             builder()
                 .checkArch(arch)
@@ -120,8 +123,7 @@ private fun BpfInstruction.disassemblyMnemonic(): String =
             }
     }
 
-private fun BpfInstruction.rawDisassembly(): String =
-    "raw(code=0x${code.toInt().and(0xffff).toString(16)}, jt=$jt, jf=$jf, k=0x${k.toUInt().toString(16)})"
+private fun BpfInstruction.rawDisassembly(): String = "raw(code=0x${code.toInt().and(0xffff).toString(16)}, jt=$jt, jf=$jf, k=0x${k.toUInt().toString(16)})"
 
 private fun Short.relativeOffset(): String = if (this >= 0) "+$this" else toString()
 
@@ -150,7 +152,8 @@ public sealed interface BpfState {
  */
 public class BpfBuilder<out S : BpfState> internal constructor(
     internal val ops: MutableList<BpfMacro>,
-    internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger(0),
+    internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic
+        .AtomicInteger(0),
     internal val labelOwner: Any = Any(),
 ) {
     public fun nextLabel(prefix: String): BpfLabel {
@@ -162,14 +165,16 @@ public class BpfBuilder<out S : BpfState> internal constructor(
         return nextLabel(prefix)
     }
 
-    internal fun requireIssued(label: BpfLabel, usage: String) {
+    internal fun requireIssued(
+        label: BpfLabel,
+        usage: String,
+    ) {
         require(label.issuedBy(labelOwner)) {
             "BPF label '${label.name}' was not issued by this builder ($usage)"
         }
     }
 
-    internal fun <T : BpfState> continueAs(): BpfBuilder<T> =
-        BpfBuilder(ops, labelCounter, labelOwner)
+    internal fun <T : BpfState> continueAs(): BpfBuilder<T> = BpfBuilder(ops, labelCounter, labelOwner)
 }
 
 /**
@@ -221,7 +226,7 @@ public fun BpfBuilder<BpfState.Active>.notifyUser(): BpfBuilder<BpfState.Termina
  */
 public fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
-    block: BpfBuilder<BpfState.Active>.() -> Unit
+    block: BpfBuilder<BpfState.Active>.() -> Unit,
 ): BpfBuilder<BpfState.Active> {
     val skipLabel = nextLabel("skip")
     jumpIfEqual(nr, jf = skipLabel)
@@ -233,7 +238,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 /** Java-compatible version of [expect]. */
 public fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
-    block: Consumer<BpfBuilder<BpfState.Active>>
+    block: Consumer<BpfBuilder<BpfState.Active>>,
 ): BpfBuilder<BpfState.Active> {
     val skipLabel = nextLabel("skip")
     jumpIfEqual(nr, jf = skipLabel)
@@ -246,7 +251,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 public fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
-    block: BpfBuilder<BpfState.Active>.() -> Unit
+    block: BpfBuilder<BpfState.Active>.() -> Unit,
 ): BpfBuilder<BpfState.Active> {
     val nr = syscall.numberFor(arch)
     if (nr >= 0) expect(nr, block)
@@ -257,7 +262,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 public fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
-    block: Consumer<BpfBuilder<BpfState.Active>>
+    block: Consumer<BpfBuilder<BpfState.Active>>,
 ): BpfBuilder<BpfState.Active> {
     val nr = syscall.numberFor(arch)
     if (nr >= 0) expect(nr, block)
@@ -272,7 +277,7 @@ public fun BpfBuilder<BpfState.Active>.loadAbsolute(offset: Int): BpfBuilder<Bpf
 public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
     k: Int,
     jt: BpfLabel? = null,
-    jf: BpfLabel? = null
+    jf: BpfLabel? = null,
 ): BpfBuilder<BpfState.Active> {
     jt?.let { requireIssued(it, "jumpIfEqual jt") }
     jf?.let { requireIssued(it, "jumpIfEqual jf") }
@@ -283,7 +288,7 @@ public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
 public fun BpfBuilder<BpfState.Active>.jumpIfSet(
     k: Int,
     jt: BpfLabel? = null,
-    jf: BpfLabel? = null
+    jf: BpfLabel? = null,
 ): BpfBuilder<BpfState.Active> {
     jt?.let { requireIssued(it, "jumpIfSet jt") }
     jf?.let { requireIssued(it, "jumpIfSet jf") }
@@ -294,7 +299,7 @@ public fun BpfBuilder<BpfState.Active>.jumpIfSet(
 public fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
     k: Int,
     jt: BpfLabel? = null,
-    jf: BpfLabel? = null
+    jf: BpfLabel? = null,
 ): BpfBuilder<BpfState.Active> {
     jt?.let { requireIssued(it, "jumpIfGreaterThan jt") }
     jf?.let { requireIssued(it, "jumpIfGreaterThan jf") }
@@ -439,12 +444,41 @@ private const val BPF_JMP_JA: Short = 0x05
  * Intermediate symbolic representation of BPF instructions before label resolution.
  */
 internal sealed interface BpfMacro {
-    data class LoadAbsolute(val offset: Int) : BpfMacro
-    data class JumpIfEqual(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
-    data class JumpIfSet(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
-    data class JumpIfGreaterThan(val k: Int, val jt: BpfLabel? = null, val jf: BpfLabel? = null) : BpfMacro
-    data class JumpUnconditional(val target: BpfLabel) : BpfMacro
-    data class And(val k: Int) : BpfMacro
-    data class Ret(val action: Int) : BpfMacro
-    data class Label(val label: BpfLabel) : BpfMacro
+    data class LoadAbsolute(
+        val offset: Int,
+    ) : BpfMacro
+
+    data class JumpIfEqual(
+        val k: Int,
+        val jt: BpfLabel? = null,
+        val jf: BpfLabel? = null,
+    ) : BpfMacro
+
+    data class JumpIfSet(
+        val k: Int,
+        val jt: BpfLabel? = null,
+        val jf: BpfLabel? = null,
+    ) : BpfMacro
+
+    data class JumpIfGreaterThan(
+        val k: Int,
+        val jt: BpfLabel? = null,
+        val jf: BpfLabel? = null,
+    ) : BpfMacro
+
+    data class JumpUnconditional(
+        val target: BpfLabel,
+    ) : BpfMacro
+
+    data class And(
+        val k: Int,
+    ) : BpfMacro
+
+    data class Ret(
+        val action: Int,
+    ) : BpfMacro
+
+    data class Label(
+        val label: BpfLabel,
+    ) : BpfMacro
 }

@@ -4,7 +4,6 @@ import io.mazewall.BaseIntegrationTest
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
-import io.mazewall.core.NativeArg
 import io.mazewall.core.PrctlCommand
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
@@ -28,7 +27,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                     Callable {
                         val r =
                         LinuxNative.process.prctl(
-                            PrctlCommand.SetPdeathsig(15L)
+                            PrctlCommand.SetPdeathsig(15L),
                         )
 
                         if (r is LinuxNative.SyscallResult.Error && r.errno != 1) {
@@ -66,7 +65,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                     Callable {
                         val r =
                         LinuxNative.process.prctl(
-                            PrctlCommand.CapAmbient(2L, 15L)
+                            PrctlCommand.CapAmbient(2L, 15L),
                         )
 
                         if (r is LinuxNative.SyscallResult.Error) {

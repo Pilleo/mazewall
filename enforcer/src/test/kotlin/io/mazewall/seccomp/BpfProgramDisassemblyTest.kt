@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class BpfProgramDisassemblyTest {
-
     @Test
     fun `disassemble renders indexed classic BPF mnemonics`() {
         val program = BpfProgram<BpfStatus.Unverified>(

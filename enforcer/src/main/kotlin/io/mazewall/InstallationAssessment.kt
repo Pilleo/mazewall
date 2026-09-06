@@ -75,13 +75,17 @@ public object InstallationAssessor {
             stages.add(InstallationStage.PLATFORM)
         }
 
-        val matrix = if (Platform.isLinux) Platform.featureMatrix else KernelFeatureMatrix(
+        val matrix = if (Platform.isLinux) {
+            Platform.featureMatrix
+        } else {
+            KernelFeatureMatrix(
             seccompSupported = false,
             seccompTsyncSupported = false,
             seccompUserNotifSupported = false,
             landlockAbiVersion = 0,
             cetSupported = false,
         )
+        }
         if (!Platform.isSupported()) {
             reasons.add("seccomp is not available or sanity check failed")
             stages.add(InstallationStage.SECCOMP)

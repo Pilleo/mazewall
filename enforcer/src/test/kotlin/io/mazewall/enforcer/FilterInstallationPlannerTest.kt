@@ -3,13 +3,13 @@ package io.mazewall.enforcer
 import io.mazewall.Policy
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.engine.FilterInstallationPlanner
+import io.mazewall.enforcer.state.ContainerState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 class FilterInstallationPlannerTest {
     @Test
@@ -80,7 +80,7 @@ class FilterInstallationPlannerTest {
         }
         assertTrue(
             exception.message?.contains("32") == true,
-            "Exception message should mention 32, got: ${exception.message}"
+            "Exception message should mention 32, got: ${exception.message}",
         )
     }
 

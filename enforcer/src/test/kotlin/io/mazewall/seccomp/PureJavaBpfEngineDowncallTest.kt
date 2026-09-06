@@ -17,7 +17,6 @@ import kotlin.test.assertTrue
  */
 @Isolated
 class PureJavaBpfEngineDowncallTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()

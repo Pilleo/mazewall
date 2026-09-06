@@ -74,7 +74,10 @@ public class JavaPolicyBuilder(
         return this
     }
 
-    public fun addAction(action: SeccompAction, vararg syscalls: Syscall): JavaPolicyBuilder {
+    public fun addAction(
+        action: SeccompAction,
+        vararg syscalls: Syscall,
+    ): JavaPolicyBuilder {
         builder.addAction(action, *syscalls)
         return this
     }

@@ -1,11 +1,10 @@
 package io.mazewall.enforcer.diagnostics
 
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
+import io.mazewall.enforcer.state.*
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.util.ServiceLoader
@@ -19,13 +18,15 @@ fun interface ViolationMatcher {
     fun matches(t: Throwable): Boolean
 }
 
-class ContainmentViolationDetector @JvmOverloads constructor(
+class ContainmentViolationDetector
+    @JvmOverloads
+    constructor(
     private val customMatchers: List<ViolationMatcher> = emptyList(),
     private val useDefaults: Boolean = true,
     private val classLoader: ClassLoader? = Thread.currentThread().contextClassLoader ?: ContainmentViolationDetector::class.java.classLoader,
     private val loadServices: Boolean = true,
     private val initialCustomPhrases: List<String> = emptyList(),
-    private val initialCustomRegexes: List<Regex> = emptyList()
+    private val initialCustomRegexes: List<Regex> = emptyList(),
 ) {
     private val logger = Logger.getLogger(ContainmentViolationDetector::class.java.name)
     private val MATCHERS = CopyOnWriteArrayList<ViolationMatcher>()
@@ -62,7 +63,10 @@ class ContainmentViolationDetector @JvmOverloads constructor(
      * Logs at FINE that a message-heuristic fallback decided a violation. Operators aggregating
      * these logs can detect JDK/locale drift before it breaks detection.
      */
-    private fun logFallback(strategy: String, t: Throwable) {
+    private fun logFallback(
+        strategy: String,
+        t: Throwable,
+    ) {
         logger.fine(
             "[VIOLATION-FALLBACK] strategy=$strategy type=${t.javaClass.name} " +
                 "msg='${t.message?.take(120)}' — prefer structured errno/syscallNr reporting " +
@@ -222,8 +226,10 @@ class ContainmentViolationDetector @JvmOverloads constructor(
             val list = mutableListOf<String>()
             DENIED_PHRASES.forEach { list.add(Regex.escape(it)) }
 
-            val strerror1 = io.mazewall.ffi.memory.getSystemStrerror(1)
-            val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+            val strerror1 = io.mazewall.ffi.memory
+                .getSystemStrerror(1)
+            val strerror13 = io.mazewall.ffi.memory
+                .getSystemStrerror(13)
             if (strerror1 != null && strerror1.isNotEmpty()) list.add(Regex.escape(strerror1))
             if (strerror13 != null && strerror13.isNotEmpty()) list.add(Regex.escape(strerror13))
 

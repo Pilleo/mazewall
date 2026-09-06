@@ -1,27 +1,28 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
+import io.mazewall.enforcer.state.*
 
 public sealed interface ScopingValidationState {
-
     public class SafeToValidate private constructor(
         public val rawStack: Array<StackTraceElement>,
         public val nr: Int,
-        public val argsList: List<Any>
+        public val argsList: List<Any>,
     ) : ScopingValidationState {
         internal companion object {
-            fun create(rawStack: Array<StackTraceElement>, nr: Int, argsList: List<Any>) =
-                SafeToValidate(rawStack, nr, argsList)
+            fun create(
+                rawStack: Array<StackTraceElement>,
+                nr: Int,
+                argsList: List<Any>,
+            ) = SafeToValidate(rawStack, nr, argsList)
         }
     }
 }
 
 public object JvmStackInspector {
-
     /**
      * Inspects the target thread's stack trace and returns the appropriate type-state.
      *
@@ -30,7 +31,7 @@ public object JvmStackInspector {
     public fun inspect(
         nr: Int,
         argsList: List<Any>,
-        targetThread: Thread?
+        targetThread: Thread?,
     ): ScopingValidationState {
         val rawStack = targetThread?.stackTrace ?: emptyArray()
         return ScopingValidationState.SafeToValidate.create(rawStack, nr, argsList)

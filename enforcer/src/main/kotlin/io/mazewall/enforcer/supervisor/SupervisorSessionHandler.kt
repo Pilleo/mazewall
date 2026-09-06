@@ -1,15 +1,8 @@
 package io.mazewall.enforcer.supervisor
 
-import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
 import io.mazewall.LinuxNative
-import io.mazewall.platform.seccomp.SupervisedKind
-import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.core.Deadline
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -18,21 +11,26 @@ import io.mazewall.core.NewFdFlags
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
-import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.NativeConstants
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.IoctlPayload
-import io.mazewall.ffi.typed
+import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.IovecSegment
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
-import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.IovecSegment
-import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
-import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.native
+import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.native
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readLong
@@ -42,7 +40,10 @@ import io.mazewall.ffi.memory.writeIntUnaligned
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeLongUnaligned
 import io.mazewall.ffi.networking.NetworkOrderBuffer
+import io.mazewall.ffi.typed
 import io.mazewall.onSuccess
+import io.mazewall.platform.seccomp.SupervisedKind
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.recover
 import java.nio.charset.StandardCharsets
 import java.util.logging.Logger
@@ -57,45 +58,66 @@ internal data class SyscallArguments(
 private fun Logger.info(msg: () -> String) {
     System.err.println("[SUPERVISOR-INFO] ${msg()}")
 }
+
 private fun Logger.warning(msg: () -> String) {
     System.err.println("[SUPERVISOR-WARN] ${msg()}")
 }
+
 private fun Logger.warning(msg: String) {
     System.err.println("[SUPERVISOR-WARN] $msg")
 }
+
 private fun Logger.severe(msg: () -> String) {
     System.err.println("[SUPERVISOR-SEVERE] ${msg()}")
 }
+
 private fun Logger.severe(msg: String) {
     System.err.println("[SUPERVISOR-SEVERE] $msg")
 }
-private fun Logger.log(level: java.util.logging.Level, msg: String, t: Throwable) {
+
+private fun Logger.log(
+    level: java.util.logging.Level,
+    msg: String,
+    t: Throwable,
+) {
     System.err.println("[SUPERVISOR-$level] $msg")
     t.printStackTrace()
 }
 
 internal class SupervisorSessionHandler(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val engine: io.mazewall.NativeEngine = io.mazewall.LinuxNative,
-    private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager
+    private val socketManager: io.mazewall.core.SocketManager = io.mazewall.core.RealSocketManager,
 ) : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
-
     private val reader = NotificationReader(engine, logger)
     private val terminalRoutes = SupervisorTerminalRoutes(object : SupervisorResponseSender {
-        override fun continueNotification(id: Long, response: ManagedSegment) = sendSeccompContinue(id, response)
+        override fun continueNotification(
+            id: Long,
+            response: ManagedSegment,
+        ) = sendSeccompContinue(id, response)
 
-        override fun abortNotification(id: Long, errno: Int, response: ManagedSegment) =
-            sendSeccompError(id, errno, response)
+        override fun abortNotification(
+            id: Long,
+            errno: Int,
+            response: ManagedSegment,
+        ) = sendSeccompError(id, errno, response)
     })
     private val routeDispatcher = SupervisorRouteDispatcher(terminalRoutes)
+    private val routeExecutor = object : SupervisorRouteExecutor {
+        context(arena: NativeArena) override fun injectFd(context: SupervisorRouteContext): Boolean = handleInjectFd(context)
 
-    context(arena: io.mazewall.ffi.memory.NativeArena)
-    override fun processNotification(
+        context(arena: NativeArena) override fun secureExec(
+            context: SupervisorRouteContext,
+            jvmPath: String?,
+        ): Boolean = handleSecureExecve(context, jvmPath)
+    }
+
+    context(arena: io.mazewall.ffi.memory.NativeArena) override fun processNotification(
         notif: io.mazewall.ffi.memory.ManagedSegment,
         resp: io.mazewall.ffi.memory.ManagedSegment,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ): io.mazewall.platform.seccomp.daemon.NotifResult {
         return if (processNotification(notif, resp)) {
             io.mazewall.platform.seccomp.daemon.NotifResult.HANDLED
@@ -109,7 +131,6 @@ internal class SupervisorSessionHandler(
 
         private const val POLL_TIMEOUT_MS = 30000
         private const val AT_FDCWD = -100
-
 
         // Argument types
         private const val ARG_TYPE_LONG: Byte = 0
@@ -156,14 +177,12 @@ internal class SupervisorSessionHandler(
          * and build/coverage directories. Because these syscalls bypass the JVM listener entirely,
          * no dynamic class loading is triggered during vulnerable tracee states.
          */
-
     }
 
-    context(arena: NativeArena)
-    fun handleActiveListener(
+    context(arena: NativeArena) fun handleActiveListener(
         pollFds: ManagedSegment,
         notif: ManagedSegment,
-        resp: ManagedSegment
+        resp: ManagedSegment,
     ): LoopAction {
         val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
         val socketRevents = pfd2.getRevents().toInt()
@@ -189,10 +208,14 @@ internal class SupervisorSessionHandler(
     }
 
     @Suppress("SwallowedException")
-    internal fun processNotification(notif: ManagedSegment, resp: ManagedSegment): Boolean {
+    internal fun processNotification(
+        notif: ManagedSegment,
+        resp: ManagedSegment,
+    ): Boolean {
         return NativeArena.ofConfined().use { notificationArena ->
             with(notificationArena) {
-                val parsed = io.mazewall.platform.seccomp.SeccompNotifications.read(notif)
+                val parsed = io.mazewall.platform.seccomp.SeccompNotifications
+                    .read(notif)
                 val id = parsed.id
                 try {
                     val pidVal = parsed.pid
@@ -201,7 +224,8 @@ internal class SupervisorSessionHandler(
                     val args = parsed.args
 
                     val tid = Tid(pidVal)
-                    val traceeArch = io.mazewall.core.Arch.fromAudit(archVal)
+                    val traceeArch = io.mazewall.core.Arch
+                        .fromAudit(archVal)
                     val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
                     val header = NotifHeader(nr, tid, traceeArch, archVal, getPpid(pidVal), args)
                     val kind = SupervisorNotificationMachine.classify(header.nr, header.arch)
@@ -273,8 +297,12 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    context(arena: NativeArena)
-    private fun extractNotificationArgs(nr: Int, tid: Tid, args: LongArray, arch: io.mazewall.core.Arch): SyscallArguments {
+    context(arena: NativeArena) private fun extractNotificationArgs(
+        nr: Int,
+        tid: Tid,
+        args: LongArray,
+        arch: io.mazewall.core.Arch,
+    ): SyscallArguments {
         var pathStr: String? = null
         var sockaddrBytes: ByteArray? = null
         var dirfd = AT_FDCWD
@@ -292,7 +320,9 @@ internal class SupervisorSessionHandler(
                 pathStr = readStringFromProcess(tid, args[1])
                 val howBytes = readBytesFromProcess(tid, args[2], Layouts.OPEN_HOW_SIZE.toInt())
                 if (howBytes != null && howBytes.size >= Layouts.OPEN_HOW_SIZE.toInt()) {
-                    val buf = java.nio.ByteBuffer.wrap(howBytes).order(java.nio.ByteOrder.nativeOrder())
+                    val buf = java.nio.ByteBuffer
+                        .wrap(howBytes)
+                        .order(java.nio.ByteOrder.nativeOrder())
                     val flags = buf.getLong(Layouts.OPEN_HOW_FLAGS_OFFSET.toInt())
                     val mode = buf.getLong(Layouts.OPEN_HOW_MODE_OFFSET.toInt())
                     val resolve = buf.getLong(Layouts.OPEN_HOW_RESOLVE_OFFSET.toInt())
@@ -323,12 +353,12 @@ internal class SupervisorSessionHandler(
         return resolvedPath.takeIf(BypassPaths::isBypassPath)
     }
 
-    context(arena: NativeArena)
-    internal fun sendRequestToJvm(request: JvmVerdictRequest): Boolean {
+    context(arena: NativeArena) internal fun sendRequestToJvm(request: JvmVerdictRequest): Boolean {
         val (id, header, pathStr, sockaddrBytes) = request
         val sizeOfMeta = SIZE_META + SIZE_INT + SIZE_INT // Include PPID and Arch
         val sizeOfArgHeader = SIZE_ARG_HEADER
-        val totalSize = sizeOfMeta + (
+        val totalSize = sizeOfMeta +
+            (
             if (pathStr != null) {
                 sizeOfArgHeader + pathStr.toByteArray(StandardCharsets.UTF_8).size
             } else if (sockaddrBytes != null) {
@@ -342,37 +372,51 @@ internal class SupervisorSessionHandler(
         val netBuf = NetworkOrderBuffer(buf.native)
         var offset = 0L
 
-        netBuf.writeLong(offset, id); offset += BYTES_PER_LONG
-        netBuf.writeInt(offset, header.tid.value); offset += SIZE_INT
-        netBuf.writeInt(offset, header.audit); offset += SIZE_INT
-        netBuf.writeInt(offset, header.ppid); offset += SIZE_INT
-        netBuf.writeInt(offset, header.nr); offset += SIZE_INT
+        netBuf.writeLong(offset, id)
+        offset += BYTES_PER_LONG
+        netBuf.writeInt(offset, header.tid.value)
+        offset += SIZE_INT
+        netBuf.writeInt(offset, header.audit)
+        offset += SIZE_INT
+        netBuf.writeInt(offset, header.ppid)
+        offset += SIZE_INT
+        netBuf.writeInt(offset, header.nr)
+        offset += SIZE_INT
 
         if (pathStr != null) {
-            netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
-            netBuf.writeByte(offset, ARG_TYPE_STRING); offset += SIZE_BYTE
+            netBuf.writeInt(offset, ONE_ARG)
+            offset += SIZE_INT
+            netBuf.writeByte(offset, ARG_TYPE_STRING)
+            offset += SIZE_BYTE
             val bytes = pathStr.toByteArray(StandardCharsets.UTF_8)
-            netBuf.writeIntUnaligned(offset, bytes.size); offset += SIZE_INT
+            netBuf.writeIntUnaligned(offset, bytes.size)
+            offset += SIZE_INT
             ManagedSegment.copy(bytes, 0, buf, offset, bytes.size)
         } else if (sockaddrBytes != null) {
-            netBuf.writeInt(offset, ONE_ARG); offset += SIZE_INT
-            netBuf.writeByte(offset, ARG_TYPE_SOCKADDR); offset += SIZE_BYTE
-            netBuf.writeIntUnaligned(offset, sockaddrBytes.size); offset += SIZE_INT
+            netBuf.writeInt(offset, ONE_ARG)
+            offset += SIZE_INT
+            netBuf.writeByte(offset, ARG_TYPE_SOCKADDR)
+            offset += SIZE_BYTE
+            netBuf.writeIntUnaligned(offset, sockaddrBytes.size)
+            offset += SIZE_INT
             ManagedSegment.copy(sockaddrBytes, 0, buf, offset, sockaddrBytes.size)
         } else {
-            netBuf.writeInt(offset, MAX_ARGS); offset += SIZE_INT
+            netBuf.writeInt(offset, MAX_ARGS)
+            offset += SIZE_INT
             for (arg in header.args) {
-                netBuf.writeByte(offset, ARG_TYPE_LONG); offset += SIZE_BYTE
-                netBuf.writeLongUnaligned(offset, arg); offset += BYTES_PER_LONG
+                netBuf.writeByte(offset, ARG_TYPE_LONG)
+                offset += SIZE_BYTE
+                netBuf.writeLongUnaligned(offset, arg)
+                offset += BYTES_PER_LONG
             }
         }
 
-        val writeRes = io.mazewall.core.SocketIo.writeFully(engine.memory, socketFd, buf, totalSize.toLong())
+        val writeRes = io.mazewall.core.SocketIo
+            .writeFully(engine.memory, socketFd, buf, totalSize.toLong())
         return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
-    context(arena: NativeArena)
-    internal fun readAndHandleJvmResponse(context: SupervisorRouteContext): Boolean {
+    context(arena: NativeArena) internal fun readAndHandleJvmResponse(context: SupervisorRouteContext): Boolean {
         val (request, extracted, resp) = context
         val (id, header, pathStr, sockaddrBytes) = request
         val (nr, tid, traceeArch, _, _, args) = header
@@ -395,10 +439,13 @@ internal class SupervisorSessionHandler(
         }
 
         if (count <= 0) {
-            logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation timed out or failed after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.")
+            logger.severe(
+                "[SUPERVISOR-DIAGNOSTIC] JVM validation timed out or failed after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.",
+            )
             try {
                 socketManager.close(socketFd)
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                }
             sendSeccompError(id, NativeConstants.EPERM, resp)
             return false
         }
@@ -412,10 +459,13 @@ internal class SupervisorSessionHandler(
             deadline,
         ) { timeoutMs -> engine.raw.poll(pollFdManaged, 1L, timeoutMs) }
         if (readRes is LinuxNative.SyscallResult.Error && readRes.errno == NativeConstants.ETIMEDOUT) {
-            logger.severe("[SUPERVISOR-DIAGNOSTIC] JVM validation frame timed out after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.")
+            logger.severe(
+                "[SUPERVISOR-DIAGNOSTIC] JVM validation frame timed out after ${durationMs}ms (syscall nr=$nr, path=$pathStr, id=$id). Closing socket to prevent desynchronization and returning EPERM.",
+            )
             try {
                 socketManager.close(socketFd)
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                }
             sendSeccompError(id, NativeConstants.EPERM, resp)
             return false
         }
@@ -441,8 +491,7 @@ internal class SupervisorSessionHandler(
                 SupervisorNotificationMachine.evaluateJvm(kind, verdict),
                 context,
                 jvmPath,
-                injectFd = { handleInjectFd(it) },
-                secureExec = { routeContext, path -> handleSecureExecve(routeContext, path) },
+                routeExecutor,
             )
         } else {
             sendSeccompError(id, NativeConstants.EPERM, resp)
@@ -461,15 +510,18 @@ internal class SupervisorSessionHandler(
      * attribution preserved for the resulting violation. USER_NOTIF CONTINUE on the original
      * pathname is never used: a sibling can mutate the buffer after write-back.
      */
-    context(arena: NativeArena)
-    private fun handleSecureExecve(
+    context(arena: NativeArena) private fun handleSecureExecve(
         context: SupervisorRouteContext,
         jvmPath: String?,
     ): Boolean {
         val (request, _, resp) = context
         val (id, header, pathStr) = request
         val (nr, tid, traceeArch, _, _, args) = header
-        fun abort(errno: Int, message: String): Boolean {
+
+        fun abort(
+            errno: Int,
+            message: String,
+        ): Boolean {
             logger.severe(message)
             requestParentRegisterRewrite(tid, -1, 0, 0, 0, 0)
             sendSeccompError(id, errno, resp)
@@ -499,7 +551,11 @@ internal class SupervisorSessionHandler(
             addfd.setId(id)
             addfd.setFlags(0)
             addfd.setSrcfd(localFd)
-            addfd.setNewfdFlags(io.mazewall.core.NewFdFlags.forExec().value)
+            addfd.setNewfdFlags(
+                io.mazewall.core.NewFdFlags
+                .forExec()
+                .value,
+            )
             val addfdRes = engine.raw.ioctl(
                 listenerFd,
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD,
@@ -550,8 +606,7 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    context(arena: NativeArena)
-    private fun requestParentRegisterRewrite(
+    context(arena: NativeArena) private fun requestParentRegisterRewrite(
         tid: Tid,
         injectedFd: Int,
         emptyPathAddr: Long,
@@ -567,7 +622,8 @@ internal class SupervisorSessionHandler(
         net.writeLong(24, envp)
         net.writeLong(32, execveatNr)
         net.writeLong(40, tid.value.toLong())
-        val writeRes = io.mazewall.core.SocketIo.writeFully(engine.memory, socketFd, buf, 48)
+        val writeRes = io.mazewall.core.SocketIo
+            .writeFully(engine.memory, socketFd, buf, 48)
         if (writeRes is LinuxNative.SyscallResult.Error) {
             return false
         }
@@ -586,8 +642,7 @@ internal class SupervisorSessionHandler(
         return readRes is LinuxNative.SyscallResult.Success && ack.readByte(0) == 1.toByte()
     }
 
-    context(arena: NativeArena)
-    internal fun handleInjectFd(context: SupervisorRouteContext): Boolean {
+    context(arena: NativeArena) internal fun handleInjectFd(context: SupervisorRouteContext): Boolean {
         val (request, extracted, resp) = context
         val (id, header, pathStr, sockaddrBytes) = request
         val (nr, tid, traceeArch, _, _, args) = header
@@ -654,7 +709,9 @@ internal class SupervisorSessionHandler(
                 } else {
                     val errno = (ioctlRes as LinuxNative.SyscallResult.Error<*>).errno
                     if (errno == NativeConstants.EBADF) {
-                        logger.severe { "[SUPERVISOR-SECURITY] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed with EBADF (listenerFd=${listenerFd.value}, srcfd=$localFdValue). Target thread state or file descriptor invalid." }
+                        logger.severe {
+                            "[SUPERVISOR-SECURITY] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed with EBADF (listenerFd=${listenerFd.value}, srcfd=$localFdValue). Target thread state or file descriptor invalid."
+                        }
                     } else {
                         logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed with errno $errno. Sending EPERM." }
                     }
@@ -676,8 +733,7 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    context(arena: NativeArena)
-    internal fun openFileInSupervisor(
+    context(arena: NativeArena) internal fun openFileInSupervisor(
         nr: Int,
         args: LongArray,
         pathStr: String,
@@ -685,8 +741,7 @@ internal class SupervisorSessionHandler(
         tid: Tid,
     ): Int = openFileInSupervisor(nr, args, pathStr, arch, tid, null)
 
-    context(arena: NativeArena)
-    internal fun openFileInSupervisor(
+    context(arena: NativeArena) internal fun openFileInSupervisor(
         nr: Int,
         args: LongArray,
         pathStr: String,
@@ -698,24 +753,25 @@ internal class SupervisorSessionHandler(
         return openFileInSupervisor(req, tid)
     }
 
-    context(arena: NativeArena)
-    internal fun openFileInSupervisor(
+    context(arena: NativeArena) internal fun openFileInSupervisor(
         req: SupervisedOpen,
         tid: Tid,
     ): Int {
         val howSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
 
-        val flags = when(req) {
+        val flags = when (req) {
             is SupervisedOpen.Open -> req.flags.value.toLong()
             is SupervisedOpen.OpenAt -> req.flags.value.toLong()
-            is SupervisedOpen.OpenAt2 -> req.how.flags.value.toLong()
+            is SupervisedOpen.OpenAt2 ->
+                req.how.flags.value
+                .toLong()
         }
-        val mode = when(req) {
+        val mode = when (req) {
             is SupervisedOpen.Open -> req.mode.toLong()
             is SupervisedOpen.OpenAt -> req.mode.toLong()
             is SupervisedOpen.OpenAt2 -> req.how.mode
         }
-        val resolve = when(req) {
+        val resolve = when (req) {
             is SupervisedOpen.OpenAt2 -> req.how.resolve or NativeConstants.RESOLVE_BENEATH.toLong()
             else -> 0L
         }
@@ -724,7 +780,7 @@ internal class SupervisorSessionHandler(
         howSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, mode)
         howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve)
 
-        val (isAbsolute, traceeDirfd) = when(req) {
+        val (isAbsolute, traceeDirfd) = when (req) {
             is SupervisedOpen.Open -> true to FileDescriptor.AT_FDCWD.value
             is SupervisedOpen.OpenAt -> req.path.startsWith("/") to req.dirfd
             is SupervisedOpen.OpenAt2 -> req.path.startsWith("/") to req.dirfd
@@ -738,8 +794,8 @@ internal class SupervisorSessionHandler(
                     FileDescriptor.AT_FDCWD,
                     pathSeg,
                     howSeg,
-                    Layouts.OPEN_HOW_SIZE
-                )
+                    Layouts.OPEN_HOW_SIZE,
+                ),
             )
         } else {
             val importedFd = importTraceeFd(tid, traceeDirfd)
@@ -750,14 +806,17 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    private fun importTraceeFd(tid: Tid, traceeDirfd: Int): Int {
+    private fun importTraceeFd(
+        tid: Tid,
+        traceeDirfd: Int,
+    ): Int {
         if (traceeDirfd == FileDescriptor.AT_FDCWD.value) {
             val cwdPath = "/proc/${getTgid(tid.value)}/cwd"
             val fd = NativeArena.ofConfined().use { arena ->
                 engine.fileSystem.open(
                     arena.allocateFrom(cwdPath),
                     io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_DIRECTORY),
-                    0
+                    0,
                 )
             }
             if (fd is LinuxNative.SyscallResult.Success) {
@@ -788,8 +847,7 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    context(arena: NativeArena)
-    internal fun connectSocketInSupervisor(sockaddrBytes: ByteArray): Int {
+    context(arena: NativeArena) internal fun connectSocketInSupervisor(sockaddrBytes: ByteArray): Int {
         val domain = if (sockaddrBytes.size >= 2) {
             (sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)
         } else {
@@ -812,7 +870,7 @@ internal class SupervisorSessionHandler(
             val res = engine.networking.connect(
                 FileDescriptor.adopt(socketRes, FileDescriptorRole.UnixSocket),
                 addr,
-                sockaddrBytes.size
+                sockaddrBytes.size,
             )
             when (res) {
                 is LinuxNative.SyscallResult.Success -> 0
@@ -827,14 +885,14 @@ internal class SupervisorSessionHandler(
     }
 
     private fun closeLocalFd(fd: Int) {
-        val token = FileDescriptor.generic(fd)
+        val token = FileDescriptor.adopt(fd, FileDescriptorRole.Generic)
         if (token.isLiveForIo()) {
             engine.fileSystem.close(token)
         }
     }
 
     private inner class SafeLocalFd(
-        val handle: FileDescriptor<*, FdState.Open>,
+        val handle: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     ) : AutoCloseable {
         constructor(fd: Int) : this(FileDescriptor.adopt(fd, FileDescriptorRole.Generic))
 
@@ -851,17 +909,35 @@ internal class SupervisorSessionHandler(
         SupervisorResponseWriter(engine, listenerFd)
     }
 
-    private fun sendSeccompContinue(id: Long, resp: ManagedSegment) = responseWriter.sendContinue(id, resp)
-    private fun sendSeccompSuccess(id: Long, valVal: Long, resp: ManagedSegment) = responseWriter.sendSuccess(id, valVal, resp)
-    private fun sendSeccompError(id: Long, errorNr: Int, resp: ManagedSegment) = responseWriter.sendError(id, errorNr, resp)
+    private fun sendSeccompContinue(
+        id: Long,
+        resp: ManagedSegment,
+    ) = responseWriter.sendContinue(id, resp)
 
-    context(arena: NativeArena)
-    private fun readStringFromProcess(tid: Tid, remoteAddr: Long): String? {
-        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readString(tid, remoteAddr, MAX_PATH_LEN)
+    private fun sendSeccompSuccess(
+        id: Long,
+        valVal: Long,
+        resp: ManagedSegment,
+    ) = responseWriter.sendSuccess(id, valVal, resp)
+
+    private fun sendSeccompError(
+        id: Long,
+        errorNr: Int,
+        resp: ManagedSegment,
+    ) = responseWriter.sendError(id, errorNr, resp)
+
+    context(arena: NativeArena) private fun readStringFromProcess(
+        tid: Tid,
+        remoteAddr: Long,
+    ): String? {
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+            .readString(tid, remoteAddr, MAX_PATH_LEN)
     }
 
-    context(arena: NativeArena)
-    private fun readExecPath(tid: Tid, remoteAddr: Long): String? {
+    context(arena: NativeArena) private fun readExecPath(
+        tid: Tid,
+        remoteAddr: Long,
+    ): String? {
         return try {
             readStringFromProcess(tid, remoteAddr)
         } catch (e: ContainmentViolationException) {
@@ -870,9 +946,13 @@ internal class SupervisorSessionHandler(
         }
     }
 
-    context(arena: NativeArena)
-    private fun readBytesFromProcess(tid: Tid, remoteAddr: Long, len: Int): ByteArray? {
-        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, remoteAddr, len)
+    context(arena: NativeArena) private fun readBytesFromProcess(
+        tid: Tid,
+        remoteAddr: Long,
+        len: Int,
+    ): ByteArray? {
+        return io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+            .readBytes(tid, remoteAddr, len)
     }
 
     /**
@@ -884,7 +964,10 @@ internal class SupervisorSessionHandler(
 
     private fun getTgid(tid: Int): Int = tgidResolver(tid)
 
-    private fun closeTraceeFd(tid: Tid, traceeFd: Int) {
+    private fun closeTraceeFd(
+        tid: Tid,
+        traceeFd: Int,
+    ) {
         if (traceeFd < 0) return
         val tgid = getTgid(tid.value)
         val pidfdRes = engine.process.pidfdOpen(tgid, 0)
@@ -896,7 +979,7 @@ internal class SupervisorSessionHandler(
             }
         }
         SafeLocalFd(pidfdVal).use { pidfdSafe ->
-            val pidfd = FileDescriptor.pid(pidfdSafe.fd)
+            val pidfd = FileDescriptor.adopt(pidfdSafe.fd, FileDescriptorRole.Pid)
             val dupRes = engine.process.pidfdGetFd(pidfd, traceeFd, 0)
             val dupFd = when (dupRes) {
                 is LinuxNative.SyscallResult.Success -> dupRes.value.toInt()
@@ -906,7 +989,7 @@ internal class SupervisorSessionHandler(
                 }
             }
             SafeLocalFd(dupFd).use { dupFdSafe ->
-                engine.fileSystem.close(FileDescriptor.generic(dupFdSafe.fd))
+                engine.fileSystem.close(dupFdSafe.handle)
             }
         }
     }
@@ -918,7 +1001,7 @@ internal class SupervisorSessionHandler(
         nr: Int,
         args: LongArray,
         tid: Tid,
-        traceeArch: io.mazewall.core.Arch
+        traceeArch: io.mazewall.core.Arch,
     ) {
         Thread {
             try {
@@ -966,7 +1049,7 @@ internal class SupervisorSessionHandler(
                                         dupFdSafe.handle,
                                         localAddr,
                                         localAddrLen,
-                                        flags
+                                        flags,
                                     )
 
                                 val clientFd = when (acceptRes) {
@@ -983,7 +1066,8 @@ internal class SupervisorSessionHandler(
                                     val traceeAddrLenPtr = args[2]
                                     if (traceeAddrPtr != 0L && traceeAddrLenPtr != 0L) {
                                         val actualLen = localAddrLen.readInt(0)
-                                        val traceeAddrLenBytes = io.mazewall.ffi.memory.SupervisorProcessMemoryReader.readBytes(tid, traceeAddrLenPtr, 4)
+                                        val traceeAddrLenBytes = io.mazewall.ffi.memory.SupervisorProcessMemoryReader
+                                            .readBytes(tid, traceeAddrLenPtr, 4)
                                         val traceeAddrLen = if (traceeAddrLenBytes != null && traceeAddrLenBytes.size >= 4) {
                                             (traceeAddrLenBytes[0].toInt() and 0xFF) or
                                             ((traceeAddrLenBytes[1].toInt() and 0xFF) shl 8) or
@@ -997,16 +1081,18 @@ internal class SupervisorSessionHandler(
                                         if (writeLen > 0) {
                                             val addrBytes = ByteArray(writeLen)
                                             ManagedSegment.copy(localAddr, 0L, addrBytes, 0, writeLen)
-                                            io.mazewall.ffi.memory.SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrPtr, addrBytes)
+                                            io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
+                                                .writeBytes(tid, traceeAddrPtr, addrBytes)
                                         }
 
                                         val lenBytes = byteArrayOf(
                                             (actualLen and 0xFF).toByte(),
                                             ((actualLen shr 8) and 0xFF).toByte(),
                                             ((actualLen shr 16) and 0xFF).toByte(),
-                                            ((actualLen shr 24) and 0xFF).toByte()
+                                            ((actualLen shr 24) and 0xFF).toByte(),
                                         )
-                                        io.mazewall.ffi.memory.SupervisorProcessMemoryWriter.writeBytes(tid, traceeAddrLenPtr, lenBytes)
+                                        io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
+                                            .writeBytes(tid, traceeAddrLenPtr, lenBytes)
                                     }
 
                                     // Inject accepted FD
@@ -1046,7 +1132,8 @@ internal class SupervisorSessionHandler(
                     NativeArena.ofConfined().use { arena ->
                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                     }
-                } catch (ignored: Exception) {}
+                } catch (ignored: Exception) {
+                    }
             }
         }.apply {
             isDaemon = true

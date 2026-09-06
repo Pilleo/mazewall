@@ -1,9 +1,8 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
-import io.mazewall.recover
-import io.mazewall.onSuccess
 import io.mazewall.core.Deadline
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -14,6 +13,8 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.typed
+import io.mazewall.onSuccess
+import io.mazewall.recover
 
 /**
  * Blocking notification/response IO primitives extracted from [SupervisorSessionHandler]
@@ -35,14 +36,18 @@ internal class NotificationReader(
      * Deadline-bounded poll of [socketFd] for a JVM validation response, with interrupt-aware
      * EINTR backoff. Returns the poll revent count (<= 0 on timeout/failure).
      */
-    data class AwaitResult(val revents: Long, val remainingMillis: Int)
+    data class AwaitResult(
+        val revents: Long,
+        val remainingMillis: Int,
+    )
 
     fun awaitJvmResponse(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         timeoutMs: Long,
         slowThresholdMs: Long,
     ): AwaitResult {
-        val arena = io.mazewall.ffi.memory.NativeArena.ofConfined()
+        val arena = io.mazewall.ffi.memory.NativeArena
+            .ofConfined()
         arena.use { _ ->
             val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
             pollFd.setFd(socketFd.value)
@@ -108,7 +113,10 @@ internal class NotificationReader(
      * poll loop provides the shutdown path (POLLHUP/POLLIN-on-socket → LoopAction.Shutdown), so
      * EINTR here only re-blocks, matching the previous behavior verbatim.
      */
-    fun recvNotification(listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>, notif: ManagedSegment): Boolean {
+    fun recvNotification(
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        notif: ManagedSegment,
+    ): Boolean {
         var recvRes: LinuxNative.SyscallResult<Long, *>
         while (true) {
             recvRes = engine.raw.ioctl(

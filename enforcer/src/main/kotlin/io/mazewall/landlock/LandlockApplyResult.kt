@@ -1,6 +1,7 @@
 package io.mazewall.landlock
 
 import io.mazewall.UnsupportedKernelFeatureException
+import io.mazewall.core.FdOwnership
 import io.mazewall.ffi.NativeConstants
 
 /**
@@ -9,22 +10,32 @@ import io.mazewall.ffi.NativeConstants
  */
 internal sealed interface LandlockFdOutcome {
     data class Ok(
-        val fd: io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.Ruleset, io.mazewall.core.FdState.Open>,
+        val fd: io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.Ruleset, io.mazewall.core.FdState.Open, FdOwnership.Owned>,
     ) : LandlockFdOutcome
 
-    data class Err(val errno: Int, val rawValue: Long) : LandlockFdOutcome
+    data class Err(
+        val errno: Int,
+        val rawValue: Long,
+    ) : LandlockFdOutcome
 }
 
 internal sealed interface LandlockRestrictOutcome {
-    data class Ok(val ruleset: LandlockRuleset<RulesetState.Sealed>) : LandlockRestrictOutcome
-    data class Err(val errno: Int) : LandlockRestrictOutcome
+    data class Ok(
+        val ruleset: LandlockRuleset<RulesetState.Sealed>,
+    ) : LandlockRestrictOutcome
+
+    data class Err(
+        val errno: Int,
+    ) : LandlockRestrictOutcome
 }
 
 public sealed interface LandlockApplyResult {
     public data object Applied : LandlockApplyResult
 
     /** Operator-configured fallback allowed the process to continue without Landlock. */
-    public data class Bypassed(val reason: String) : LandlockApplyResult
+    public data class Bypassed(
+        val reason: String,
+    ) : LandlockApplyResult
 
     public data class Rejected(
         val reason: String,
@@ -46,7 +57,8 @@ public sealed interface LandlockApplyResult {
     public fun isApplied(): Boolean = this is Applied
 }
 
-internal fun LandlockApplyResult.toFailure(): Throwable = when (this) {
+internal fun LandlockApplyResult.toFailure(): Throwable =
+    when (this) {
     is LandlockApplyResult.Rejected -> toException()
     is LandlockApplyResult.Bypassed -> IllegalStateException(reason)
     is LandlockApplyResult.Applied -> IllegalStateException("Landlock applied")

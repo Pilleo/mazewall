@@ -2,13 +2,16 @@ package io.mazewall
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.ForeignFdGuard
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import kotlin.test.*
 
+@ExtendWith(ForeignFdGuard::class)
 class LinuxNativeCoverageTest {
     @AfterEach
     fun tearDown() {
@@ -140,7 +143,7 @@ class LinuxNativeCoverageTest {
         LinuxNative.setEngine(mock)
 
         val seg = allocate(8)
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(1)
+        val fd = FileDescriptor.replace<FileDescriptorRole.Generic>(1)
 
         mock.networking.acceptResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10)
         assertEquals(10L, LinuxNative.networking.accept(fd, seg, seg).getOrThrow("test"))

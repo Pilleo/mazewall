@@ -1,12 +1,11 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.core.Tid
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.state.*
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -31,7 +30,11 @@ internal object PendingSpawnRegistry {
     /**
      * Registers the authorized stack trace for a parent thread currently spawning a process.
      */
-    fun register(parentTid: Tid, stackTrace: List<StackTraceElement>, nowNanos: Long = System.nanoTime()) {
+    fun register(
+        parentTid: Tid,
+        stackTrace: List<StackTraceElement>,
+        nowNanos: Long = System.nanoTime(),
+    ) {
         val now = nowNanos
         registry[parentTid] = PendingSpawn(stackTrace, now)
         registry.entries.removeIf { it.value.isExpired(now) }
@@ -40,7 +43,10 @@ internal object PendingSpawnRegistry {
     /**
      * Retrieves the authorized stack trace for a given parent TID.
      */
-    fun get(parentTid: Tid, nowNanos: Long = System.nanoTime()): List<StackTraceElement>? {
+    fun get(
+        parentTid: Tid,
+        nowNanos: Long = System.nanoTime(),
+    ): List<StackTraceElement>? {
         val entry = registry[parentTid] ?: return null
         if (entry.isExpired(nowNanos)) {
             registry.remove(parentTid, entry)

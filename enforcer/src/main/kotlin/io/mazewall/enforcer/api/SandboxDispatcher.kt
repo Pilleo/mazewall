@@ -1,13 +1,12 @@
 package io.mazewall.enforcer.api
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.Policy
 import io.mazewall.PolicyDefinition
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -24,7 +23,6 @@ import java.util.concurrent.Executors
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
 object SandboxDispatcher {
-
     internal const val MAX_CACHED_POOLS: Int = 32
 
     /**
@@ -50,7 +48,10 @@ object SandboxDispatcher {
      * This method is designed to be easily usable from both Java and Kotlin.
      */
     @JvmStatic
-    fun <T> execute(policy: Policy<*, *>, block: Callable<T>): T {
+    fun <T> execute(
+        policy: Policy<*, *>,
+        block: Callable<T>,
+    ): T {
         val definition = policy.definition
         val executor = getOrCreateElasticPool(definition)
         return executor.submit(block).get()
@@ -60,7 +61,10 @@ object SandboxDispatcher {
      * Executes the given Kotlin lambda [block] on a thread pool perfectly constrained by the [policy].
      * Blocks the calling thread until the execution completes.
      */
-    inline fun <T> executeBlock(policy: Policy<*, *>, crossinline block: () -> T): T {
+    inline fun <T> executeBlock(
+        policy: Policy<*, *>,
+        crossinline block: () -> T,
+    ): T {
         return execute(policy, Callable { block() })
     }
 
@@ -88,11 +92,12 @@ object SandboxDispatcher {
                 thread.name = "mazewall-sandbox-${def.hashCode().toUInt().toString(16)}"
                 thread
             }
-            
+
             // Wrap the raw pool to ensure the policy is applied to every thread created by it.
             // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
             // We use the internal installOnCurrentThread to wrap execution directly.
-            io.mazewall.enforcer.internal.ContainedExecutorWrapper(rawPool, def)
+            io.mazewall.enforcer.internal
+                .ContainedExecutorWrapper(rawPool, def)
         }
     }
 

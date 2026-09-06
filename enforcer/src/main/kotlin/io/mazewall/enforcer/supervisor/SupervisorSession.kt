@@ -1,12 +1,11 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.core.Tid
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.state.*
 
 /**
  * Resource token representing an active, contained supervisor session.
@@ -16,7 +15,7 @@ import io.mazewall.core.Tid
  * to prevent classloader leaks and inconsistent thread state.
  */
 public class SupervisorSession internal constructor(
-    private val tid: Tid
+    private val tid: Tid,
 ) : AutoCloseable {
     override fun close() {
         SupervisorInstaller.unregisterThread(tid)

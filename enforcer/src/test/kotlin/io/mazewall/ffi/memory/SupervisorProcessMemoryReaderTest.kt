@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class SupervisorProcessMemoryReaderTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -56,7 +55,7 @@ class SupervisorProcessMemoryReaderTest {
                 liovcnt: Long,
                 remoteIov: ManagedSegment,
                 riovcnt: Long,
-                flags: Long
+                flags: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 // Read base addresses/lengths from descriptor segments
                 // localIov has structure of iovec: [base_addr (8 bytes), len (8 bytes)]
@@ -64,7 +63,9 @@ class SupervisorProcessMemoryReaderTest {
                 val localLen = localIov.readLong(8)
 
                 // Fill the destination buffer with non-zero bytes (e.g., 'A')
-                val localBuf = java.lang.foreign.MemorySegment.ofAddress(localBase).reinterpret(localLen)
+                val localBuf = java.lang.foreign.MemorySegment
+                    .ofAddress(localBase)
+                    .reinterpret(localLen)
                 localBuf.fill('A'.code.toByte())
 
                 return LinuxNative.SyscallResult.Success(localLen)
@@ -92,9 +93,8 @@ class SupervisorProcessMemoryReaderTest {
                 liovcnt: Long,
                 remoteIov: ManagedSegment,
                 riovcnt: Long,
-                flags: Long
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+                flags: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
         }
         LinuxNative.setEngine(MockNativeEngine(memory = mockMemory))
 

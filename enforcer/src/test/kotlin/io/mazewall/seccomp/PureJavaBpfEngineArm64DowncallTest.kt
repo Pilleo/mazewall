@@ -22,7 +22,6 @@ import kotlin.test.assertTrue
  */
 @Isolated
 class PureJavaBpfEngineArm64DowncallTest {
-
     private var savedOsArch: String? = null
     private var osArchOverridden = false
 
@@ -58,10 +57,10 @@ class PureJavaBpfEngineArm64DowncallTest {
         try {
             // Set system property to simulate ARM64 architecture
             System.setProperty("os.arch", "arm64")
-            
+
             val mockProcess = MockNativeProcess()
             val mockMemory = MockNativeMemory()
-            
+
             // Mock successful syscall
             val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
             mockEngine.onSyscall = { nr, a1, a2, a3, a4, a5, a6 ->
@@ -80,7 +79,7 @@ class PureJavaBpfEngineArm64DowncallTest {
 
             val policy = Policy.builder().build()
             val compiled = policy.definition.compile(Arch.AARCH64)
-            
+
             // This should trigger the downcall compilation path for ARM64
             PureJavaBpfEngine.install(compiled)
         } finally {
@@ -94,16 +93,16 @@ class PureJavaBpfEngineArm64DowncallTest {
         osArchOverridden = true
         try {
             System.setProperty("os.arch", "arm64")
-            
+
             val mockProcess = MockNativeProcess()
             val mockMemory = MockNativeMemory()
-            
+
             // Mock seccomp(2) syscall as unsupported to trigger prctl fallback
             val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
             mockEngine.onSyscall = { _, _, _, _, _, _, _ ->
                 LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1L)
             }
-            
+
             var prctlSetSeccompCalled = false
             mockProcess.onPrctl = { command ->
                 if (command is PrctlCommand.SetSeccomp) {
@@ -119,11 +118,44 @@ class PureJavaBpfEngineArm64DowncallTest {
 
             val policy = Policy.builder().build()
             val compiled = policy.definition.compile(Arch.AARCH64)
-            
+
             PureJavaBpfEngine.install(compiled)
-            
+
             // Verify that prctl fallback was used
             assertTrue(prctlSetSeccompCalled, "prctl SetSeccomp should be called as fallback on ARM64")
+        } finally {
+            // Property will be restored in tearDown
+        }
+    }
+
+    @Test
+    fun `test setNoNewPrivs downcall compilation on ARM64`() {
+        savedOsArch = System.getProperty("os.arch")
+        osArchOverridden = true
+        try {
+            System.setProperty("os.arch", "arm64")
+
+            val mockProcess = MockNativeProcess()
+            var setNoNewPrivsCalled = false
+            var prctlCommand: PrctlCommand? = null
+
+            mockProcess.onPrctl = { command ->
+                if (command is PrctlCommand.SetNoNewPrivs) {
+                    setNoNewPrivsCalled = true
+                    prctlCommand = command
+                    assertTrue(command.enabled, "SetNoNewPrivs should be enabled")
+                }
+                LinuxNative.SyscallResult.Success(0L)
+            }
+
+            val mockEngine = MockNativeEngine(process = mockProcess)
+            LinuxNative.setEngine(mockEngine)
+
+            // Directly call setNoNewPrivs to test downcall compilation
+            PureJavaBpfEngine.setNoNewPrivs()
+
+            assertTrue(setNoNewPrivsCalled, "setNoNewPrivs should be called")
+            assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs, "Command should be SetNoNewPrivs")
         } finally {
             // Property will be restored in tearDown
         }

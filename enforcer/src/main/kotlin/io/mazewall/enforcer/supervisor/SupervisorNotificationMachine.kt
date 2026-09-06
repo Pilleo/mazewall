@@ -5,11 +5,16 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.seccomp.SupervisedKind
 
 internal sealed interface JvmVerdict {
-    data class Deny(val errorNr: Int) : JvmVerdict
+    data class Deny(
+        val errorNr: Int,
+    ) : JvmVerdict
+
     data object Allow : JvmVerdict
+
     data object InjectFd : JvmVerdict
 
-    fun toWire(): Int = when (this) {
+    fun toWire(): Int =
+        when (this) {
         is Deny -> 0
         is Allow -> 1
         is InjectFd -> 2
@@ -18,16 +23,29 @@ internal sealed interface JvmVerdict {
 
 internal sealed interface SupervisorRoute {
     public data object Continue : SupervisorRoute
+
     public data object AskJvm : SupervisorRoute
+
     public data object InjectFd : SupervisorRoute
+
     public data object SecureExec : SupervisorRoute
-    public data class Abort(val errno: Int, val reason: String) : SupervisorRoute
+
+    public data class Abort(
+        val errno: Int,
+        val reason: String,
+    ) : SupervisorRoute
 }
 
 internal object SupervisorNotificationMachine {
-    fun classify(nr: Int, arch: Arch): SupervisedKind = SupervisedKind.classify(nr, arch)
+    fun classify(
+        nr: Int,
+        arch: Arch,
+    ): SupervisedKind = SupervisedKind.classify(nr, arch)
 
-    fun parseJvmVerdict(decision: Int, errorNr: Int): JvmVerdict? {
+    fun parseJvmVerdict(
+        decision: Int,
+        errorNr: Int,
+    ): JvmVerdict? {
         return when (decision) {
             0 -> JvmVerdict.Deny(errorNr)
             1 -> JvmVerdict.Allow
@@ -52,7 +70,10 @@ internal object SupervisorNotificationMachine {
         }
     }
 
-    fun evaluateJvm(kind: SupervisedKind, verdict: JvmVerdict): SupervisorRoute {
+    fun evaluateJvm(
+        kind: SupervisedKind,
+        verdict: JvmVerdict,
+    ): SupervisorRoute {
         return when (verdict) {
             is JvmVerdict.Deny ->
                 SupervisorRoute.Abort(verdict.errorNr, "jvm deny")
@@ -83,18 +104,21 @@ internal object SupervisorNotificationMachine {
         return SupervisorRoute.AskJvm
     }
 
-    internal fun looksLikeClassloading(path: String): Boolean =
-        path.endsWith(".class") || path.contains("META-INF/") || path.endsWith(".jar")
+    internal fun looksLikeClassloading(path: String): Boolean = path.endsWith(".class") || path.contains("META-INF/") || path.endsWith(".jar")
 }
 
 internal sealed interface InjectTarget {
     data object Open : InjectTarget
+
     data object Connect : InjectTarget
+
     data object Accept : InjectTarget
+
     data object Unsupported : InjectTarget
 }
 
-internal fun injectTarget(kind: SupervisedKind): InjectTarget = when (kind) {
+internal fun injectTarget(kind: SupervisedKind): InjectTarget =
+    when (kind) {
     is SupervisedKind.Open -> InjectTarget.Open
     is SupervisedKind.Connect -> InjectTarget.Connect
     is SupervisedKind.Accept -> InjectTarget.Accept
@@ -102,8 +126,12 @@ internal fun injectTarget(kind: SupervisedKind): InjectTarget = when (kind) {
 }
 
 internal sealed interface ExecRewritePlan {
-    data class Ready(val path: String) : ExecRewritePlan
+    data class Ready(
+        val path: String,
+    ) : ExecRewritePlan
+
     data object UnsupportedArch : ExecRewritePlan
+
     data object MissingPath : ExecRewritePlan
 }
 

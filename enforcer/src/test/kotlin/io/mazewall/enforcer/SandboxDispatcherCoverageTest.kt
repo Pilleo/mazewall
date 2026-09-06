@@ -1,16 +1,15 @@
 package io.mazewall.enforcer
 
 import io.mazewall.Policy
+import io.mazewall.enforcer.api.SandboxDispatcher
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Callable
 import kotlin.test.assertEquals
-import io.mazewall.enforcer.api.SandboxDispatcher
 import kotlin.test.assertTrue
 
 @Suppress("DEPRECATION")
 class SandboxDispatcherCoverageTest {
-
     @AfterEach
     fun tearDown() {
         System.clearProperty("io.mazewall.fallback")
@@ -42,12 +41,20 @@ class SandboxDispatcherCoverageTest {
     @Test
     fun `evicts least recently used pools above the fixed cache cap`() {
         val firstPool = SandboxDispatcher.getOrCreateElasticPool(
-            Policy.builder().customViolationPhrase("policy-0").build().definition,
+            Policy
+                .builder()
+                .customViolationPhrase("policy-0")
+                .build()
+                .definition,
         )
 
         repeat(SandboxDispatcher.MAX_CACHED_POOLS) { index ->
             SandboxDispatcher.getOrCreateElasticPool(
-                Policy.builder().customViolationPhrase("policy-${index + 1}").build().definition,
+                Policy
+                    .builder()
+                    .customViolationPhrase("policy-${index + 1}")
+                    .build()
+                    .definition,
             )
         }
 
@@ -59,8 +66,10 @@ class SandboxDispatcherCoverageTest {
     fun `legacy package SandboxDispatcher forwards execute and shutdownAll`() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
         val policy = Policy.builder().build()
-        val result = io.mazewall.enforcer.SandboxDispatcher.execute(policy, Callable { "legacy" })
+        val result = io.mazewall.enforcer.SandboxDispatcher
+            .execute(policy, Callable { "legacy" })
         assertEquals("legacy", result)
-        io.mazewall.enforcer.SandboxDispatcher.shutdownAll()
+        io.mazewall.enforcer.SandboxDispatcher
+            .shutdownAll()
     }
 }

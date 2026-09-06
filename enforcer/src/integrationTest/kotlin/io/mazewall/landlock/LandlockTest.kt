@@ -6,12 +6,11 @@ import io.mazewall.IsolatedProcessTester
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
-import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.ffi.internal.RealNativeEngine
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
@@ -175,8 +174,10 @@ class LandlockTest : BaseIntegrationTest() {
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
-            .allowFsWrite(io.mazewall.core.SandboxedPath.of(file, true))
-            .build()
+            .allowFsWrite(
+                io.mazewall.core.SandboxedPath
+                .of(file, true),
+            ).build()
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, policy)
         safeExecutor.submit { Files.writeString(Path.of(file), "created!") }.get()
@@ -510,7 +511,8 @@ class LandlockTest : BaseIntegrationTest() {
                 a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
+                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                        .toLong()
                 ) {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
@@ -544,7 +546,8 @@ class LandlockTest : BaseIntegrationTest() {
                 a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION.toLong()
+                    a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                        .toLong()
                 ) {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else {
@@ -562,55 +565,6 @@ class LandlockTest : BaseIntegrationTest() {
         } finally {
             LinuxNative.setEngine(RealNativeEngine)
         }
-    }
-
-    @Test
-    fun `testLandlockStateDataClassCoverage`() {
-        val s1 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(10), 5)
-        val s2 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(10), 5)
-        val s3 = LandlockState.ConfiguringRuleset(FileDescriptor.unsafe(11), 5)
-        assertEquals(s1, s2)
-        assertNotEquals<LandlockState>(s1, s3)
-        assertEquals(s1.hashCode(), s2.hashCode())
-        assertNotNull(s1.toString())
-        assertEquals(10, s1.rulesetFd.value)
-        assertEquals(5, s1.abi)
-        val copied = s1.copy(rulesetFd = FileDescriptor.unsafe(12))
-        assertEquals(12, copied.rulesetFd.value)
-
-        val q1 = LandlockState.QueryingAbi(3)
-        val q2 = LandlockState.QueryingAbi(3)
-        assertEquals(q1, q2)
-        assertEquals(q1.hashCode(), q2.hashCode())
-        assertNotNull(q1.toString())
-        val qCopied = q1.copy(abi = 4)
-        assertEquals(4, qCopied.abi)
-
-        val c1 = LandlockState.CreatingRuleset(3)
-        val c2 = LandlockState.CreatingRuleset(3)
-        assertEquals(c1, c2)
-        assertEquals(c1.hashCode(), c2.hashCode())
-        assertNotNull(c1.toString())
-        val cCopied = c1.copy(abi = 4)
-        assertEquals(4, cCopied.abi)
-
-        val e1 = LandlockState.Enforcing(FileDescriptor.unsafe(10))
-        val e2 = LandlockState.Enforcing(FileDescriptor.unsafe(10))
-        assertEquals(e1, e2)
-        assertNotEquals<LandlockState>(e1, LandlockState.Applied)
-        assertEquals(e1.hashCode(), e2.hashCode())
-        assertNotNull(e1.toString())
-        val eCopied = e1.copy(rulesetFd = FileDescriptor.unsafe(11))
-        assertEquals(11, eCopied.rulesetFd.value)
-
-        val err = RuntimeException("test")
-        val f1 = LandlockState.Failed(err)
-        val f2 = LandlockState.Failed(err)
-        assertEquals(f1, f2)
-        assertEquals(f1.hashCode(), f2.hashCode())
-        assertNotNull(f1.toString())
-        val fCopied = f1.copy(error = err)
-        assertEquals(err, fCopied.error)
     }
 
     fun testDirectoryRenameResistance(
@@ -633,7 +587,8 @@ class LandlockTest : BaseIntegrationTest() {
         val basePath = Path.of(baseDir)
 
         // 1. Initial reads before rename:
-        safeExecutor.submit {
+        safeExecutor
+            .submit {
             // Read allowedDir/allowed.txt should succeed
             val allowedTxt = allowedPath.resolve("allowed.txt")
             if (Files.readString(allowedTxt) != "allowed") {
@@ -656,7 +611,8 @@ class LandlockTest : BaseIntegrationTest() {
         Files.move(forbiddenPath, allowedPath)
 
         // 3. Post-rename reads:
-        safeExecutor.submit {
+        safeExecutor
+            .submit {
             // Attempt to read the new files at the old path allowedDir/secret.txt (which points to the forbidden directory)
             // This MUST be blocked because the inode of the new allowedDir was never allowed.
             val newSecretInAllowedOldPath = allowedPath.resolve("secret.txt")
@@ -695,7 +651,7 @@ class LandlockTest : BaseIntegrationTest() {
                 "testDirectoryRenameResistance",
                 baseDir.toString(),
                 allowedDir.toString(),
-                forbiddenDir.toString()
+                forbiddenDir.toString(),
             )
         } finally {
             baseDir.toFile().deleteRecursively()

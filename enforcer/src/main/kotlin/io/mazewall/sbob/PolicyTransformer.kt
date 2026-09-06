@@ -1,18 +1,17 @@
 package io.mazewall.sbob
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.BillOfBehaviorDto
-import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyBuilder
+import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyScope
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 
 /**
  * Transforms a DTO and normalized paths into a Mazewall [PolicyDefinition].
@@ -25,7 +24,7 @@ internal object PolicyTransformer {
         dto: BillOfBehaviorDto,
         prunedReads: Set<String>,
         prunedWrites: Set<String>,
-        base: PolicyDefinition<*>
+        base: PolicyDefinition<*>,
     ): PolicyDefinition<PolicyScope.ThreadLocalOnly> {
         val mappedSyscalls = dto.syscalls
             .mapNotNull { name ->

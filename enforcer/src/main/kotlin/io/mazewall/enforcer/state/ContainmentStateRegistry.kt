@@ -83,7 +83,10 @@ internal object ContainmentStateRegistry {
         return merged
     }
 
-    private fun mergeStates(ts: ContainerState, ps: ContainerState): ContainerState {
+    private fun mergeStates(
+        ts: ContainerState,
+        ps: ContainerState,
+    ): ContainerState {
         val mergedActions = ts.syscallActions.toMutableMap()
         for ((sys, action) in ps.syscallActions) {
             val current = mergedActions[sys]
@@ -113,13 +116,13 @@ internal object ContainmentStateRegistry {
             allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
             landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
-            engineState = mergedEngineState
+            engineState = mergedEngineState,
         )
     }
 
     private fun mergeEngineStates(
         ts: SeccompInstallationState,
-        ps: SeccompInstallationState
+        ps: SeccompInstallationState,
     ): SeccompInstallationState = listOf(ts, ps).maxBy(SeccompInstallationState::rank)
 
     /**
@@ -131,7 +134,7 @@ internal object ContainmentStateRegistry {
     fun sanitizeThreadState(): Nothing {
         throw UnsupportedOperationException(
             "Sanitization of thread state is intentionally disabled. " +
-                "OS-level sandbox restrictions are permanent for the thread's lifetime."
+                "OS-level sandbox restrictions are permanent for the thread's lifetime.",
         )
     }
 }

@@ -12,10 +12,10 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class BpfBuilderCoverageTest {
-
     @Test
     fun `jumpIfEqual resolves both forward label offsets`() {
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 
@@ -56,7 +56,8 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `test backward jump throw`() {
-        val loaded = BpfProgram.builder()
+        val loaded = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 
@@ -73,7 +74,8 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `test unknown label throw`() {
-        val loaded = BpfProgram.builder()
+        val loaded = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 
@@ -88,12 +90,14 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `label issued by another builder is rejected at jump`() {
-        val foreign = BpfProgram.builder()
+        val foreign = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
         val stolen = foreign.nextLabel("x")
 
-        val loaded = BpfProgram.builder()
+        val loaded = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 
@@ -105,10 +109,12 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `label issued by another builder is rejected at mark even if names collide`() {
-        val a = BpfProgram.builder()
+        val a = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
-        val b = BpfProgram.builder()
+        val b = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
         val aLabel = a.nextLabel("x")
@@ -142,11 +148,14 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `test dsl Function overload`() {
-        BpfProgram.dsl(Arch.AMD64, object : Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>> {
+        BpfProgram.dsl(
+            Arch.AMD64,
+            object : Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>> {
             override fun apply(t: BpfBuilder<BpfState.Active>): BpfBuilder<BpfState.Terminated> {
                 return t.allow()
             }
-        })
+        },
+        )
     }
 
     @Test
@@ -184,7 +193,8 @@ class BpfBuilderCoverageTest {
 
     @Test
     fun `test duplicate label marking throws IllegalArgumentException`() {
-        val loaded = BpfProgram.builder()
+        val loaded = BpfProgram
+            .builder()
             .checkArch(Arch.AMD64)
             .loadSyscallNr()
 

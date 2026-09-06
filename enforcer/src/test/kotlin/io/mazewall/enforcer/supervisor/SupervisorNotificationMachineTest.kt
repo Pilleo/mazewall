@@ -14,12 +14,12 @@ import java.nio.file.Path
 import java.util.stream.Stream
 
 internal class SupervisorNotificationMachineTest {
-
     private val arch = Arch.AMD64
 
     companion object {
         @JvmStatic
-        fun jvmVerdictTestCases(): Stream<Pair<JvmVerdict, Int>> = Stream.of(
+        fun jvmVerdictTestCases(): Stream<Pair<JvmVerdict, Int>> =
+            Stream.of(
             Pair(JvmVerdict.Deny(NativeConstants.EPERM), NativeConstants.EPERM),
             Pair(JvmVerdict.Deny(NativeConstants.EACCES), NativeConstants.EACCES),
             Pair(JvmVerdict.Allow, 0),
@@ -36,7 +36,8 @@ internal class SupervisorNotificationMachineTest {
         }
 
         @JvmStatic
-        fun execRewriteCases(): Stream<ExecRewriteCase> = Stream.of(
+        fun execRewriteCases(): Stream<ExecRewriteCase> =
+            Stream.of(
             ExecRewriteCase("unsupported on AARCH64", Arch.AARCH64, "/bin/true", ExecRewritePlan.UnsupportedArch),
             ExecRewriteCase("missing path on AMD64", Arch.AMD64, null, ExecRewritePlan.MissingPath),
             ExecRewriteCase("ready on AMD64 with path", Arch.AMD64, "/bin/true", ExecRewritePlan.Ready("/bin/true")),
@@ -82,7 +83,11 @@ internal class SupervisorNotificationMachineTest {
         "Accept,  Allow,    InjectFd",
         "Unknown, Allow,    Continue",
     )
-    fun `test evaluateJvm routing table`(kindName: String, verdictType: String, expectedRouteType: String) {
+    fun `test evaluateJvm routing table`(
+        kindName: String,
+        verdictType: String,
+        expectedRouteType: String,
+    ) {
         val kind = when (kindName) {
             "Open" -> SupervisedKind.Open
             "Accept" -> SupervisedKind.Accept
@@ -128,7 +133,10 @@ internal class SupervisorNotificationMachineTest {
         "Exec, Unsupported",
         "Spawn, Unsupported",
     )
-    fun `inject target follows kind not raw nr`(kindName: String, expectedTargetName: String) {
+    fun `inject target follows kind not raw nr`(
+        kindName: String,
+        expectedTargetName: String,
+    ) {
         val kind = when (kindName) {
             "Open" -> SupervisedKind.Open
             "Accept" -> SupervisedKind.Accept

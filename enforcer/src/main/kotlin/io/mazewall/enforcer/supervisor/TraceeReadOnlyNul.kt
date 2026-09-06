@@ -12,8 +12,7 @@ import java.io.File
 internal object TraceeReadOnlyNul {
     private val MAP_LINE = Regex("""^([0-9a-fA-F]+)-([0-9a-fA-F]+)\s+(r[w-][x-])p\s+""")
 
-    context(arena: NativeArena)
-    fun find(tid: Tid): Long? {
+    context(arena: NativeArena) fun find(tid: Tid): Long? {
         val maps = File("/proc/${tid.value}/maps")
         if (!maps.isFile) {
             return null

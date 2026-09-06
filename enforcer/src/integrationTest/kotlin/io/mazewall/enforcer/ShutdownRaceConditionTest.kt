@@ -2,11 +2,11 @@ package io.mazewall.enforcer
 
 import io.mazewall.BaseIntegrationTest
 import io.mazewall.IsolatedProcessTester
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -15,9 +15,12 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 
 class ShutdownRaceConditionTest : BaseIntegrationTest() {
-
     fun testRegistrySyncOnInterruption() {
-        val policy = Policy.builder().block(Syscall.OPEN).allowMmapExec().build()
+        val policy = Policy
+            .builder()
+            .block(Syscall.OPEN)
+            .allowMmapExec()
+            .build()
         val executor = Executors.newFixedThreadPool(1)
 
         val filterDepthAfterInterruption = AtomicInteger(-1)

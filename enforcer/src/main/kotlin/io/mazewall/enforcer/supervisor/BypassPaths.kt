@@ -1,17 +1,17 @@
 package io.mazewall.enforcer.supervisor
 
+import java.io.FileNotFoundException
+import java.lang.management.ManagementFactory
+import java.net.URI
+import java.net.URISyntaxException
 import java.nio.file.AccessDeniedException
 import java.nio.file.FileSystemException
 import java.nio.file.FileSystemLoopException
+import java.nio.file.InvalidPathException
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.nio.file.NoSuchFileException
-import java.io.FileNotFoundException
 import java.util.jar.JarFile
-import java.net.URI
-import java.net.URISyntaxException
-import java.nio.file.InvalidPathException
-import java.lang.management.ManagementFactory
 import java.util.logging.Logger
 
 /**
@@ -27,9 +27,17 @@ public object BypassPaths {
      * Unsafe results must not be treated as bypass matches.
      */
     public sealed interface PathResolution {
-        public data class Resolved(val path: Path) : PathResolution
-        public data class Missing(val normalized: Path) : PathResolution
-        public data class Unsafe(val reason: String) : PathResolution
+        public data class Resolved(
+            val path: Path,
+        ) : PathResolution
+
+        public data class Missing(
+            val normalized: Path,
+        ) : PathResolution
+
+        public data class Unsafe(
+            val reason: String,
+        ) : PathResolution
     }
 
     public fun resolveForPolicy(path: Path): PathResolution {

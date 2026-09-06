@@ -16,7 +16,6 @@ import kotlin.test.assertTrue
  * corrupts lazy bootstrap classloads (missing PREAD64) and deadlocks coordination.
  */
 class AllowListSpecFloorTest {
-
     private val arch = Arch.AMD64
 
     @Test

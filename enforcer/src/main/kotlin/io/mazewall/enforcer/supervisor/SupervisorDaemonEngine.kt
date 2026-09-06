@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -12,7 +13,7 @@ import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 internal class SupervisorDaemonEngine(
     private val socketPath: String,
     private val engine: NativeEngine = LinuxNative,
-    private val socketManager: SocketManager = io.mazewall.core.RealSocketManager
+    private val socketManager: SocketManager = io.mazewall.core.RealSocketManager,
 ) {
     private val delegate = SeccompDaemonEngine(
         socketPath = socketPath,
@@ -23,7 +24,7 @@ internal class SupervisorDaemonEngine(
         handshakeAckByte = 0xAC.toByte(),
         maxConnections = MAX_CONNECTIONS,
         engine = engine,
-        socketManager = socketManager
+        socketManager = socketManager,
     )
 
     @JvmField
@@ -40,20 +41,20 @@ internal class SupervisorDaemonEngine(
         delegate.run()
     }
 
-    internal fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
         delegate.handleConnection(socketFd)
     }
 
     @JvmName("handleNewConnection")
-    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    internal fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
         delegate.handleNewConnection(serverFd)
     }
 
     internal fun processConnectionStep(
         arena: io.mazewall.ffi.memory.NativeArena,
         connection: io.mazewall.ffi.networking.SeccompConnection,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        pollFdManaged: io.mazewall.ffi.memory.ManagedSegment
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        pollFdManaged: io.mazewall.ffi.memory.ManagedSegment,
     ): io.mazewall.ffi.networking.SeccompConnection? {
         return delegate.processConnectionStep(arena, connection, socketFd, pollFdManaged)
     }

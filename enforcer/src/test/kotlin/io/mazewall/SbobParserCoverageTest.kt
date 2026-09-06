@@ -72,15 +72,19 @@ class SbobParserCoverageTest {
     @Test
     fun `test relative path resolution`() {
         val json = """{"opens": ["config/settings.json"]}"""
-        
+
         // Should throw exception if baseCwd is not provided
         val ex = assertFailsWith<IllegalArgumentException> {
             SbobParser.parseJsonToPolicy(json)
         }
         assertTrue(ex.message!!.contains("SBoB contains relative path"))
-        
+
         // Should resolve against baseCwd if provided
-        val policy = SbobParser.parseJsonToPolicy(json, baseCwd = java.nio.file.Paths.get("/opt/app"))
+        val policy = SbobParser.parseJsonToPolicy(
+            json,
+            baseCwd = java.nio.file.Paths
+            .get("/opt/app"),
+        )
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/opt/app/config/settings.json" })
     }
 }

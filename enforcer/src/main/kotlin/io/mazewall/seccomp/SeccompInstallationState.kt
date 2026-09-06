@@ -1,19 +1,16 @@
 package io.mazewall.seccomp
-import io.mazewall.enforcer.diagnostics.*
-
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
+import io.mazewall.CompiledSandbox
 import io.mazewall.LinuxNative
 import io.mazewall.PolicyDefinition
-import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
-import io.mazewall.CompiledSandbox
 import io.mazewall.core.Arch
-import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 
 /**
  * States representing the progress of a Seccomp program installation.
@@ -29,7 +26,10 @@ internal sealed interface SeccompInstallationState {
     data object Uninitialized : SeccompInstallationState {
         override val rank: Int = 0
 
-        fun buildFilter(arena: NativeArena, sandbox: CompiledSandbox<*>): FilterBuilt {
+        fun buildFilter(
+            arena: NativeArena,
+            sandbox: CompiledSandbox<*>,
+        ): FilterBuilt {
             val filters = sandbox.compiledFilters
             val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
             return FilterBuilt(prog)
@@ -55,7 +55,10 @@ internal sealed interface SeccompInstallationState {
     ) : SeccompInstallationState {
         override val rank: Int = 3
 
-        fun applyFilter(arch: Arch, useTsync: Boolean): FilterApplied {
+        fun applyFilter(
+            arch: Arch,
+            useTsync: Boolean,
+        ): FilterApplied {
             return PureJavaBpfEngine.installFilter(arch, program, useTsync)
         }
     }

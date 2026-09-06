@@ -147,7 +147,8 @@ class ContainmentViolationDetectorTest {
     @Test
     fun `test detector instantiation coverage`() {
         val detector = ContainmentViolationDetector
-        org.junit.jupiter.api.Assertions.assertNotNull(detector)
+        org.junit.jupiter.api.Assertions
+            .assertNotNull(detector)
     }
 
     @Test
@@ -167,10 +168,10 @@ class ContainmentViolationDetectorTest {
 
     @Test
     fun `legacy constructor keeps nullable taxonomy fields`() {
-        val v = io.mazewall.enforcer.api.ContainmentViolationException("legacy")
+        val v = io.mazewall.enforcer.api
+            .ContainmentViolationException("legacy")
         assertEquals(null, v.errno)
         assertEquals(null, v.syscallNr)
         assertTrue(ContainmentViolationDetector.isContainmentViolation(v))
     }
 }
-

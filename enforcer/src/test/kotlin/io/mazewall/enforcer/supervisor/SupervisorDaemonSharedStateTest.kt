@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SupervisorDaemonSharedStateTest {
-
     @Test
     fun `supervisor engine state is the shared delegate state`() {
         val engine = SupervisorDaemonEngine(socketPath = "/tmp/supervisor-shared-state.sock")

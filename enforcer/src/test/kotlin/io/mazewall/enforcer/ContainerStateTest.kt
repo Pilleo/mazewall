@@ -1,15 +1,14 @@
 package io.mazewall.enforcer
 
 import io.mazewall.Policy
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.seccomp.SeccompInstallationState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class ContainerStateTest {
-
     @Test
     fun `test withNewSeccompPolicy updates state correctly`() {
         val initialState = ContainerState()
@@ -17,7 +16,7 @@ class ContainerStateTest {
         val nextState = initialState.withNewSeccompPolicy(
             toInstall = policy,
             newBlocks = mapOf(Syscall.EXECVE to SeccompAction.ACT_KILL_PROCESS),
-            newDefaultAction = SeccompAction.ACT_KILL_PROCESS
+            newDefaultAction = SeccompAction.ACT_KILL_PROCESS,
         )
 
         assertEquals(1, nextState.filterDepth)

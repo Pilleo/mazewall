@@ -2,25 +2,25 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockProcess
+import io.mazewall.MockProcessLauncher
+import io.mazewall.MockSocketManager
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
 import io.mazewall.core.Tid
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.readByte
+import io.mazewall.seccomp.SeccompInstallationState
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.enforcer.state.ContainerState
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.seccomp.SeccompInstallationState
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import io.mazewall.ffi.memory.readByte
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
@@ -30,13 +30,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
-
     @AfterEach
     fun resetContainmentState() {
         ContainmentStateRegistry.processState = ContainerState()
         ContainmentStateRegistry.threadState = ContainerState()
     }
-
 
     @Test
     fun `spawn is allowed when only an outer OCI seccomp profile is present`() {
@@ -132,7 +130,8 @@ class SupervisorDaemonManagerTest {
         val manager = SupervisorDaemonManager(mockEngine, mockSocket, mockLauncher)
 
         val exitLatch = CountDownLatch(1)
-        val exitCodeReceived = java.util.concurrent.atomic.AtomicInteger(-1)
+        val exitCodeReceived = java.util.concurrent.atomic
+            .AtomicInteger(-1)
         manager.onUnexpectedExit = { exitCode ->
             exitCodeReceived.set(exitCode)
             exitLatch.countDown()
@@ -154,7 +153,10 @@ class SupervisorDaemonManagerTest {
         val mockLauncher = object : MockProcessLauncher(first) {
             var starts = 0
 
-            override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
                 starts++
                 return super.startProcess(args, redirectErrorStream)
             }
@@ -179,13 +181,22 @@ class SupervisorDaemonManagerTest {
     fun `spawnDaemon falls back to short temp directory when default socket path is too long`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = object : MockProcessLauncher() {
-            override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
+            override fun createTempDirectory(
+                prefix: String,
+                vararg attrs: FileAttribute<*>,
+            ): Path {
                 // Return an excessively long path that exceeds 107 bytes when suffix and /supervisor.sock is appended
-                return java.nio.file.Paths.get("/" + "a".repeat(120))
+                return java.nio.file.Paths
+                    .get("/" + "a".repeat(120))
             }
 
-            override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
-                return java.nio.file.Paths.get("/tmp/fallback-mock-dir")
+            override fun createTempDirectory(
+                dir: Path,
+                prefix: String,
+                vararg attrs: FileAttribute<*>,
+            ): Path {
+                return java.nio.file.Paths
+                    .get("/tmp/fallback-mock-dir")
             }
         }
         mockLauncher.mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
@@ -203,5 +214,4 @@ class SupervisorDaemonManagerTest {
             manager.stop()
         }
     }
-
 }

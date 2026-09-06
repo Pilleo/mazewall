@@ -8,11 +8,10 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 internal class ContainmentStateRegistryTest {
-
     @AfterEach
     fun teardown() {
         ContainmentStateRegistry.threadState = ContainerState()
@@ -39,8 +38,10 @@ internal class ContainmentStateRegistryTest {
     @Test
     fun `test ProcessStateRegistry concurrent updates and state resolutions`() {
         val originalState = ContainmentStateRegistry.processState
-        val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
-        val stopFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+        val executor = java.util.concurrent.Executors
+            .newFixedThreadPool(8)
+        val stopFlag = java.util.concurrent.atomic
+            .AtomicBoolean(false)
         val exceptions = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
 
         try {
@@ -48,7 +49,8 @@ internal class ContainmentStateRegistryTest {
 
             // Spawn 4 threads updating the process state
             repeat(4) {
-                tasks.add(executor.submit {
+                tasks.add(
+                    executor.submit {
                     while (!stopFlag.get()) {
                         try {
                             ContainmentStateRegistry.updateProcessState { state ->
@@ -58,12 +60,14 @@ internal class ContainmentStateRegistryTest {
                             exceptions.add(t)
                         }
                     }
-                })
+                },
+                )
             }
 
             // Spawn 4 threads concurrently resolving current state
             repeat(4) {
-                tasks.add(executor.submit {
+                tasks.add(
+                    executor.submit {
                     while (!stopFlag.get()) {
                         try {
                             val resolved = ContainmentStateRegistry.resolveCurrentState()
@@ -72,7 +76,8 @@ internal class ContainmentStateRegistryTest {
                             exceptions.add(t)
                         }
                     }
-                })
+                },
+                )
             }
 
             // Let them run for 300ms
@@ -84,7 +89,6 @@ internal class ContainmentStateRegistryTest {
 
             // Check if any exceptions were thrown
             assertTrue(exceptions.isEmpty(), "Expected no concurrent modification exceptions, but got: ${exceptions.map { it.stackTraceToString() }}")
-
         } finally {
             executor.shutdownNow()
             executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
@@ -138,7 +142,7 @@ internal class ContainmentStateRegistryTest {
         val message = exception.message ?: ""
         assertTrue(
             message.contains("permanent") || message.contains("thread") || message.contains("lifetime"),
-            "Exception message should mention permanent restrictions or thread lifetime, got: $message"
+            "Exception message should mention permanent restrictions or thread lifetime, got: $message",
         )
     }
 
@@ -148,8 +152,9 @@ internal class ContainmentStateRegistryTest {
         // The Java reflection API returns java.lang.Void.class for the return type.
         val method = ContainmentStateRegistry::class.java.getDeclaredMethod("sanitizeThreadState")
         assertEquals(
-            Void::class.java, method.returnType,
-            "Return type should be java.lang.Void (which represents Kotlin's Nothing)"
+            Void::class.java,
+            method.returnType,
+            "Return type should be java.lang.Void (which represents Kotlin's Nothing)",
         )
     }
 
@@ -163,8 +168,9 @@ internal class ContainmentStateRegistryTest {
         }
 
         assertEquals(
-            3, ContainmentStateRegistry.threadState.filterDepth,
-            "threadState should not be cleared after sanitizeThreadState throws"
+            3,
+            ContainmentStateRegistry.threadState.filterDepth,
+            "threadState should not be cleared after sanitizeThreadState throws",
         )
     }
 
@@ -297,11 +303,14 @@ internal class ContainmentStateRegistryTest {
         assertEquals(expectedMerged, resolved.allowedSyscalls)
     }
 
-    private fun parseAction(name: String): io.mazewall.core.SeccompAction = when (name.trim()) {
+    private fun parseAction(name: String): io.mazewall.core.SeccompAction =
+        when (name.trim()) {
         "ACT_KILL_PROCESS" -> io.mazewall.core.SeccompAction.ACT_KILL_PROCESS
         "ACT_KILL_THREAD" -> io.mazewall.core.SeccompAction.ACT_KILL_THREAD
         "ACT_TRAP" -> io.mazewall.core.SeccompAction.ACT_TRAP
-        "ACT_ERRNO" -> io.mazewall.core.SeccompAction.ACT_ERRNO()
+        "ACT_ERRNO" ->
+            io.mazewall.core.SeccompAction
+            .ACT_ERRNO()
         "ACT_NOTIFY" -> io.mazewall.core.SeccompAction.ACT_NOTIFY
         "ACT_LOG" -> io.mazewall.core.SeccompAction.ACT_LOG
         else -> io.mazewall.core.SeccompAction.ACT_ALLOW

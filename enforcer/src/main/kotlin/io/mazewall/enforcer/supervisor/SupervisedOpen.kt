@@ -42,24 +42,27 @@ internal sealed interface SupervisedOpen {
         ): SupervisedOpen? =
             when (nr) {
                 arch.open -> {
-                    if (args.size < 2) null
-                    else {
+                    if (args.size < 2) {
+                        null
+                    } else {
                         val flags = OpenFlags(args[1].toInt())
                         val mode = if (args.size > 2) args[2].toInt() else 0
                         Open(path, flags, mode)
                     }
                 }
                 arch.openat -> {
-                    if (args.size < 3) null
-                    else {
+                    if (args.size < 3) {
+                        null
+                    } else {
                         val flags = OpenFlags(args[2].toInt())
                         val mode = if (args.size > 3) args[3].toInt() else 0
                         OpenAt(args[0].toInt(), path, flags, mode)
                     }
                 }
                 arch.openat2 -> {
-                    if (args.isEmpty() || how == null) null
-                    else {
+                    if (args.isEmpty() || how == null) {
+                        null
+                    } else {
                         OpenAt2(args[0].toInt(), path, how)
                     }
                 }

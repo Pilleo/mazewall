@@ -1,7 +1,6 @@
 package io.mazewall.landlock
 
 import io.mazewall.LinuxNative
-import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeMemory
@@ -10,6 +9,7 @@ import io.mazewall.MockNativeProcess
 import io.mazewall.MockPlatformProvider
 import io.mazewall.Platform
 import io.mazewall.Policy
+import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -32,7 +32,7 @@ class LandlockCoverageTest {
         fileSystem: MockNativeFileSystem = MockNativeFileSystem(),
         networking: MockNativeNetworking = MockNativeNetworking(),
         process: MockNativeProcess = MockNativeProcess(),
-        memory: MockNativeMemory = MockNativeMemory()
+        memory: MockNativeMemory = MockNativeMemory(),
     ) : MockNativeEngine(fileSystem, networking, process, memory) {
         override fun syscall(
             nr: Long,
@@ -44,7 +44,8 @@ class LandlockCoverageTest {
             a6: io.mazewall.core.NativeArg,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                a3 is io.mazewall.core.NativeArg.LongArg && a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
+                a3 is io.mazewall.core.NativeArg.LongArg &&
+                a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
             ) {
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
             }
@@ -69,7 +70,7 @@ class LandlockCoverageTest {
 
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
-                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
+                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }
     }
@@ -97,7 +98,7 @@ class LandlockCoverageTest {
 
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
-                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(42)), 0L)
+                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(42)), 0L)
             }
         }
     }
@@ -123,7 +124,8 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         val session = LandlockSession(Policy.builder().build().definition)
-        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
+        org.junit.jupiter.api.Assumptions
+            .assumeTrue(io.mazewall.Platform.isSupported())
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
@@ -178,9 +180,9 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf()
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(false)
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe<FileDescriptorRole.Ruleset>(10))).restrictSelf(true)
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf()
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf(false)
+        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf(true)
 
         assertEquals(
             listOf(0L, 0L, 1L shl 3),
@@ -211,17 +213,29 @@ class LandlockCoverageTest {
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                     }
                 }
-            }
+            },
         )
         LinuxNative.setEngine(mockFallback)
         // Must use allowFsWrite to have creation capabilities, so that fallback occurs!
-        val session1 = LandlockSession(Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file", true)).build().definition)
+        val session1 = LandlockSession(
+            Policy
+            .builder()
+            .allowFsWrite(SandboxedPath.of("/nonexistent/file", true))
+            .build()
+            .definition,
+        )
         session1.applyRuleset()
 
         LinuxNative.setEngine(mock)
         val tempFile = java.io.File.createTempFile("landlock-test", "txt")
         try {
-            val session2 = LandlockSession(Policy.builder().allowFsRead(tempFile.absolutePath).build().definition)
+            val session2 = LandlockSession(
+                Policy
+                .builder()
+                .allowFsRead(tempFile.absolutePath)
+                .build()
+                .definition,
+            )
             session2.applyRuleset()
         } finally {
             tempFile.delete()
@@ -230,7 +244,8 @@ class LandlockCoverageTest {
 
     @Test
     fun `test handleInitialOpenFailure with deleted file`() {
-        val deletedPathAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+        val deletedPathAttempts = java.util.concurrent.atomic
+            .AtomicInteger(0)
         val mockFallback = SupportedLandlockMock(
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
@@ -244,13 +259,20 @@ class LandlockCoverageTest {
                     }
                     return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                 }
-            }
+            },
         )
         LinuxNative.setEngine(mockFallback)
 
         // Use allowFsWrite to check deleted check when fallback is possible
-        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
-        val session = LandlockSession(Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file (deleted)", true)).build().definition)
+        org.junit.jupiter.api.Assumptions
+            .assumeTrue(io.mazewall.Platform.isSupported())
+        val session = LandlockSession(
+            Policy
+            .builder()
+            .allowFsWrite(SandboxedPath.of("/nonexistent/file (deleted)", true))
+            .build()
+            .definition,
+        )
         session.applyRuleset()
 
         assertEquals(1, deletedPathAttempts.get(), "Should only attempt to open the deleted file path once, with no fallback to parent directory")
@@ -298,7 +320,11 @@ class LandlockCoverageTest {
 
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
         // Request policy requiring ABI v2 (rename)
-        val policy = Policy.builder().allowFsRead("/tmp").allow(io.mazewall.core.Syscall.RENAME).build()
+        val policy = Policy
+            .builder()
+            .allowFsRead("/tmp")
+            .allow(io.mazewall.core.Syscall.RENAME)
+            .build()
         // Should run and bypass silently without warning or exception
         val accessMask = Landlock.getAccessMask(1, policy.definition)
         assertNotNull(accessMask)
@@ -417,7 +443,7 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -447,7 +473,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -512,7 +538,7 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -540,7 +566,7 @@ class LandlockCoverageTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -570,7 +596,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -603,7 +629,7 @@ class LandlockCoverageTest {
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -634,13 +660,17 @@ class LandlockCoverageTest {
                     }
                     return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                 }
-            }
+            },
         )
         LinuxNative.setEngine(mockFallback)
 
         // Must use allowFsWrite to trigger fallback
         val session = LandlockSession(
-            Policy.builder().allowFsWrite(SandboxedPath.of("/nonexistent/file", true)).build().definition
+            Policy
+                .builder()
+                .allowFsWrite(SandboxedPath.of("/nonexistent/file", true))
+                .build()
+                .definition,
         )
         session.applyRuleset()
 
@@ -680,12 +710,16 @@ class LandlockCoverageTest {
                     }
                     return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
                 }
-            }
+            },
         )
         LinuxNative.setEngine(mockFallback)
 
         val session = LandlockSession(
-            Policy.builder().allowFsRead(SandboxedPath.of("/nonexistent/file", true)).build().definition
+            Policy
+                .builder()
+                .allowFsRead(SandboxedPath.of("/nonexistent/file", true))
+                .build()
+                .definition,
         )
         session.applyRuleset()
 
@@ -760,12 +794,16 @@ class LandlockCoverageTest {
 
                 // Test ABI 4 (size should be 16L / V2 size, net mask should be passed correctly)
                 Landlock.createRuleset(15L, Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, 4)
+
+                // ABI 6 adds the scoped field, so the full current struct is valid.
+                Landlock.createRuleset(15L, Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, 6)
             }
         }
 
-        assertEquals(2, observedSizes.size)
+        assertEquals(3, observedSizes.size)
         assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_V1_SIZE, observedSizes[0])
-        assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_SIZE, observedSizes[1])
+        assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_V4_SIZE, observedSizes[1])
+        assertEquals(io.mazewall.ffi.Layouts.LANDLOCK_RULESET_ATTR_SIZE, observedSizes[2])
 
         assertEquals(Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, observedNetMasks[1])
     }

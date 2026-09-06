@@ -7,8 +7,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
-import kotlin.test.assertTrue
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * Regression tests for issue-20260823-171953: the compilation cache key must be the
@@ -18,7 +18,6 @@ import kotlin.test.assertSame
  * tests' executor threads insert foreign entries concurrently.
  */
 class PolicyCompilationCacheTest {
-
     @AfterEach
     fun tearDown() {
         io.mazewall.PolicyCompilationCache.clear()

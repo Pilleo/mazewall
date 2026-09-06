@@ -1,11 +1,10 @@
 package io.mazewall.seccomp
 
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 
 /**
@@ -90,6 +89,9 @@ public object BpfStaticVerifier {
     }
 }
 
-private fun verificationFailure(program: BpfProgram<BpfStatus.Unverified>, detail: String): Nothing {
+private fun verificationFailure(
+    program: BpfProgram<BpfStatus.Unverified>,
+    detail: String,
+): Nothing {
     throw IllegalArgumentException("BPF verification failed: $detail\nBPF program:\n${program.disassemble()}")
 }

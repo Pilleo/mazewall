@@ -1,32 +1,32 @@
 package io.mazewall.enforcer.supervisor
-import io.mazewall.enforcer.diagnostics.*
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SupervisorProcessMemoryReader
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import io.mazewall.ffi.networking.SupervisorValidationChannel
+import io.mazewall.getFdOrThrow
+import io.mazewall.onFailure
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.nio.charset.StandardCharsets
@@ -53,7 +53,7 @@ public object SupervisorInstaller {
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
-        onFilterApplied: () -> Unit = {}
+        onFilterApplied: () -> Unit = {},
     ): SupervisorSession {
         ValidationListenerPreload.ensureLoaded()
         val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
@@ -70,11 +70,11 @@ public object SupervisorInstaller {
                 socketPath = context.socketPath,
                 filter = filter,
                 processWide = false,
-                onFilterApplied = onFilterApplied
+                onFilterApplied = onFilterApplied,
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
-                    FileDescriptor.unixSocket(socketFd),
-                    scopingPolicy
+                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket),
+                    scopingPolicy,
                 )
                 listener.start(readyLatch)
             }
@@ -87,8 +87,8 @@ public object SupervisorInstaller {
 }
 
 internal class JVMValidationListener(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val scopingPolicy: StacktraceScopingPolicy
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val scopingPolicy: StacktraceScopingPolicy,
 ) {
     private val closed = AtomicBoolean(false)
     private val logger = Logger.getLogger(JVMValidationListener::class.java.name)
@@ -114,7 +114,10 @@ internal class JVMValidationListener(
     }
 
     @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
-    private fun runValidationReactor(channel: SupervisorValidationChannel, readyLatch: CountDownLatch) {
+    private fun runValidationReactor(
+        channel: SupervisorValidationChannel,
+        readyLatch: CountDownLatch,
+    ) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
             val dis = DataInputStream(BufferedInputStream(channel.inputStream))
@@ -210,7 +213,8 @@ internal class JVMValidationListener(
                     logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${totalMs}ms for syscall nr=$nr")
                 }
 
-                val kind = io.mazewall.platform.seccomp.SupervisedKind.classify(nr, traceeArch)
+                val kind = io.mazewall.platform.seccomp.SupervisedKind
+                    .classify(nr, traceeArch)
                 val verdict = if (!isAllowed) {
                     JvmVerdict.Deny(NativeConstants.EPERM)
                 } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {
@@ -311,7 +315,11 @@ internal class JVMValidationListener(
             return path
         }
         val search = ArrayList<String>()
-        System.getenv("PATH")?.split(':')?.filter { it.isNotEmpty() }?.let { search.addAll(it) }
+        System
+            .getenv("PATH")
+            ?.split(':')
+            ?.filter { it.isNotEmpty() }
+            ?.let { search.addAll(it) }
         search.add("/usr/bin")
         search.add("/bin")
         for (dir in search) {
@@ -340,12 +348,16 @@ internal class JVMValidationListener(
         } finally {
             try {
                 reader?.close()
-            } catch (ignored: java.io.IOException) {}
+            } catch (ignored: java.io.IOException) {
+                }
         }
         return tid
     }
 
-    private fun readRequestArgs(dis: DataInputStream, argCount: Int): List<Any> {
+    private fun readRequestArgs(
+        dis: DataInputStream,
+        argCount: Int,
+    ): List<Any> {
         val argsList = java.util.ArrayList<Any>(argCount)
         for (i in 0 until argCount) {
             val type = dis.readByte()
@@ -369,7 +381,6 @@ internal class JVMValidationListener(
         }
         return argsList
     }
-
 }
 
 public object ValidationLog {

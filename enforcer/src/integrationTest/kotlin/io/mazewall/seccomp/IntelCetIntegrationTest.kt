@@ -1,13 +1,13 @@
 package io.mazewall.seccomp
 
 import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.EnabledIfCetSupported
+import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.NeedsFreshJvm
 import io.mazewall.Platform
 import io.mazewall.Policy
-import io.mazewall.install
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.install
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertTrue
@@ -46,7 +46,8 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
             val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
             // Even if CET is not supported on the test runner, it should bypass and complete successfully under WARN_AND_BYPASS
-            safeExecutor.submit {
+            safeExecutor
+                .submit {
                 // Task should execute successfully
             }.get()
         } finally {

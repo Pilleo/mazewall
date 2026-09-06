@@ -1,19 +1,19 @@
 package io.mazewall.landlock
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.FdState
 import io.mazewall.core.use
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.NativeArena
 
 /**
@@ -35,13 +35,13 @@ internal sealed interface LandlockState {
 
     /** Ruleset FD created, adding classpath and user-defined path rules. */
     data class ConfiguringRuleset(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
         val abi: Int,
     ) : LandlockState
 
     /** Enabling no_new_privs and restricting the thread. */
     data class Enforcing(
-        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>,
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
     ) : LandlockState
 
     /** Ruleset applied successfully to the thread. */
@@ -64,6 +64,7 @@ internal sealed interface LandlockState {
  */
 public sealed interface RulesetState {
     public interface Building : RulesetState
+
     public interface Sealed : RulesetState
 }
 
@@ -72,7 +73,7 @@ public sealed interface RulesetState {
  * by its mutability state [S] to prevent post-enforcement rule modifications.
  */
 public class LandlockRuleset<out S : RulesetState> internal constructor(
-    public val fd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open>
+    public val fd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
 )
 
 /**
@@ -80,6 +81,7 @@ public class LandlockRuleset<out S : RulesetState> internal constructor(
  */
 internal sealed interface LandlockLifecycle {
     val diagnosticState: LandlockState
+
     /** Ruleset FD created, ready to add classpath and user rules. */
     class RulesetCreated(
         val ruleset: LandlockRuleset<RulesetState.Building>,
@@ -87,6 +89,7 @@ internal sealed interface LandlockLifecycle {
         val policy: PolicyDefinition<*>?,
     ) : LandlockLifecycle {
         override val diagnosticState: LandlockState = LandlockState.ConfiguringRuleset(ruleset.fd, abi)
+
         fun addRules(arena: NativeArena): RulesAdded {
             val allFsRead = Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR
             val classpathFlags = allFsRead or Landlock.LANDLOCK_ACCESS_FS_EXECUTE
@@ -106,8 +109,7 @@ internal sealed interface LandlockLifecycle {
     ) : LandlockLifecycle {
         override val diagnosticState: LandlockState = LandlockState.Enforcing(ruleset.fd)
 
-        fun tryRestrictSelf(processWide: Boolean = false): LandlockRestrictOutcome =
-            Landlock.tryEnforceRuleset(ruleset, processWide)
+        fun tryRestrictSelf(processWide: Boolean = false): LandlockRestrictOutcome = Landlock.tryEnforceRuleset(ruleset, processWide)
 
         fun restrictSelf(processWide: Boolean = false): Restricted {
             Landlock.enforceRuleset(ruleset, processWide)
@@ -147,7 +149,8 @@ internal class LandlockSession(
                 val unsupported = Landlock.handleUnsupportedLandlockOutcome()
                 state = when (unsupported) {
                     is LandlockApplyResult.Rejected -> LandlockState.Failed(
-                        UnsupportedKernelFeatureException(unsupported.reason), state,
+                        UnsupportedKernelFeatureException(unsupported.reason),
+                        state,
                     )
                     else -> LandlockState.Applied
                 }
@@ -216,7 +219,9 @@ internal class LandlockSession(
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw UnsupportedKernelFeatureException(msg)
         } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-            java.util.logging.Logger.getLogger(Landlock::class.java.name).warning("$msg Rules will only be applied to the current thread and its descendants.")
+            java.util.logging.Logger
+                .getLogger(Landlock::class.java.name)
+                .warning("$msg Rules will only be applied to the current thread and its descendants.")
         }
     }
 }
