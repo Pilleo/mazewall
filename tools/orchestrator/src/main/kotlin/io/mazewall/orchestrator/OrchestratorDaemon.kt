@@ -1,6 +1,10 @@
 package io.mazewall.orchestrator
 
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.util.concurrent.TimeUnit
 
 class CommandInterpreter(
@@ -152,7 +156,14 @@ class OrchestratorDaemonRunner(
     fun saveState() {
         val props = java.util.Properties()
         context.save(props)
-        stateFile.outputStream().use { props.store(it, "Orchestrator state") }
+        val parent = stateFile.parentFile ?: File(".")
+        val temporary = File(parent, "${stateFile.name}.tmp")
+        temporary.outputStream().use { props.store(it, "Orchestrator state") }
+        try {
+            Files.move(temporary.toPath(), stateFile.toPath(), REPLACE_EXISTING, ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary.toPath(), stateFile.toPath(), REPLACE_EXISTING)
+        }
     }
 
     fun run() {

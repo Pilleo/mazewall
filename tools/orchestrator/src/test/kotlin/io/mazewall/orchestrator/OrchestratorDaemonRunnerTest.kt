@@ -39,6 +39,7 @@ class OrchestratorDaemonRunnerTest {
         runner.saveState()
 
         assertTrue(stateFile.exists())
+        assertFalse(File(tempDir, "${stateFile.name}.tmp").exists())
 
         val loader = OrchestratorDaemonRunner(env, stateFile)
         loader.loadState()
