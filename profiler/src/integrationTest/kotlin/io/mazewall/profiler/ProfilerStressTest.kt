@@ -13,7 +13,6 @@ import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class ProfilerStressTest : BaseIntegrationTest() {
-
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic

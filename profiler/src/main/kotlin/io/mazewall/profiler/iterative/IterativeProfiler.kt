@@ -16,7 +16,12 @@ import java.nio.file.AccessDeniedException
  */
 @Deprecated(
     message = "Deny-and-retry is not a tracer. Use MazewallProfiler (USER_NOTIF or HYBRID_NO_URING).",
-    replaceWith = ReplaceWith("MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))", "io.mazewall.profiler.MazewallProfiler", "io.mazewall.profiler.ProfileOptions", "io.mazewall.profiler.ProfileStrategy"),
+    replaceWith = ReplaceWith(
+        "MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))",
+        "io.mazewall.profiler.MazewallProfiler",
+        "io.mazewall.profiler.ProfileOptions",
+        "io.mazewall.profiler.ProfileStrategy",
+    ),
 )
 object IterativeProfiler {
     public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor()
@@ -98,19 +103,32 @@ object IterativeProfiler {
         var builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
         // Canonical component-wise containment (issue-20260823-135558): /base/dir must not match
         // /base/dir-extra, and relative paths are never contained.
-        val p = java.nio.file.Paths.get(path).toAbsolutePath().normalize()
+        val p = java.nio.file.Paths
+            .get(path)
+            .toAbsolutePath()
+            .normalize()
         val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any {
-            io.mazewall.core.isUnder(p, java.nio.file.Paths.get(it.value))
+            io.mazewall.core.isUnder(
+                p,
+                java.nio.file.Paths
+                .get(it.value),
+            )
         }
 
         // allowFs* are copy-on-promotion: keep the returned builder.
         builder = if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
-            builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+            builder.allowFsWrite(
+                io.mazewall.core.SandboxedPath
+                .of(path, allowNonExistent = true),
+            )
         } else {
             // First attempt: grant read access only.
             // If it was a write attempt, the next run will hit the `isCurrentlyReadAllowed` branch and add write.
-            builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+            builder.allowFsRead(
+                io.mazewall.core.SandboxedPath
+                .of(path, allowNonExistent = true),
+            )
         }
         return builder.build()
     }
@@ -123,7 +141,7 @@ object IterativeProfiler {
         }
         return ContainmentViolationDetector(
             initialCustomPhrases = phrases,
-            initialCustomRegexes = regexes
+            initialCustomRegexes = regexes,
         )
     }
 
@@ -131,7 +149,10 @@ object IterativeProfiler {
         return extractViolationPath(t, Policy.PURE_COMPUTE_UNSAFE)
     }
 
-    private fun extractViolationPath(t: Throwable, policy: Policy<*, Uncompiled>): String? {
+    private fun extractViolationPath(
+        t: Throwable,
+        policy: Policy<*, Uncompiled>,
+    ): String? {
         val detector = getDetectorForPolicy(policy)
         val violation = detector.findViolationCause(t) ?: return null
         val path = when {
@@ -150,8 +171,14 @@ object IterativeProfiler {
         }
         return path?.let {
             try {
-                java.nio.file.Paths.get(it).toAbsolutePath().normalize().toString()
-            } catch (@Suppress("SwallowedException") e: java.nio.file.InvalidPathException) {
+                java.nio.file.Paths
+                    .get(it)
+                    .toAbsolutePath()
+                    .normalize()
+                    .toString()
+            } catch (
+                @Suppress("SwallowedException") e: java.nio.file.InvalidPathException,
+            ) {
                 null
             }
         }
@@ -167,8 +194,17 @@ object IterativeProfiler {
     }
 
     private fun isRestrictedSeparator(c: Char): Boolean {
-        return c == ':' || c == '\'' || c == '"' || c == '(' || c == ')' ||
-                c == '[' || c == ']' || c == '{' || c == '}' || c == ',' || c == ';'
+        return c == ':' ||
+            c == '\'' ||
+            c == '"' ||
+            c == '(' ||
+            c == ')' ||
+                c == '[' ||
+            c == ']' ||
+            c == '{' ||
+            c == '}' ||
+            c == ',' ||
+            c == ';'
     }
 
     private fun resolveAbsolutePath(

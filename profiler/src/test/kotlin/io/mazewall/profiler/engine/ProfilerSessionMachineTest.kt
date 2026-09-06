@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -11,10 +12,9 @@ import java.util.stream.Stream
 import kotlin.reflect.KClass
 
 internal class ProfilerSessionMachineTest {
-
     companion object {
-        private val socket = FileDescriptor.unixSocket(3)
-        private val listener = FileDescriptor.seccompNotif(4)
+        private val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(3)
+        private val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(4)
         private val active = ProfilerState.ActiveSession(socket, listener)
         private val event = SyscallEvent<SyscallEventState.Resolved>(
             tid = Tid(1),
@@ -37,7 +37,8 @@ internal class ProfilerSessionMachineTest {
         }
 
         @JvmStatic
-        fun sessionTransitions(): Stream<SessionTestCase> = Stream.of(
+        fun sessionTransitions(): Stream<SessionTestCase> =
+            Stream.of(
             SessionTestCase(
                 name = "active notification becomes notified",
                 initialState = active,

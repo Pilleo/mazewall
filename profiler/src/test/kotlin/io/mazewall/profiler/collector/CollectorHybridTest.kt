@@ -18,7 +18,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CollectorHybridTest {
-
     @Test
     fun `parser reads uring syscall and connect lines`() {
         val log = """
@@ -77,7 +76,8 @@ class CollectorHybridTest {
     fun `recorded eBPF log compiles through the session without live attach`() {
         val log = Files.createTempFile("ebpf", ".log")
         Files.writeString(log, "kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/sidecar\n")
-        MazewallProfiler.open(
+        MazewallProfiler
+            .open(
             ProfileOptions(strategy = ProfileStrategy.EBPF, ebpfEventLog = log),
         ).use { session ->
             val result = session.profile { "ok" }
@@ -125,7 +125,11 @@ class CollectorHybridTest {
 
     @Test
     fun `missing log file fails closed`() {
-        val collector = EbpfCollector(EbpfLoad.Available, recordedLog = java.nio.file.Path.of("/no/such/ebpf.log"))
+        val collector = EbpfCollector(
+            EbpfLoad.Available,
+            recordedLog = java.nio.file.Path
+            .of("/no/such/ebpf.log"),
+        )
         assertFailsWith<IncompleteProfileException> { collector.start() }
     }
 }

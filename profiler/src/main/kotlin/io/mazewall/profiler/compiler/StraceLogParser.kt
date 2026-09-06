@@ -18,25 +18,56 @@ public object StraceLogParser {
 
     // Syscall name sets for path extraction (uppercase as parseLine produces)
     private val firstOnlySyscalls = setOf(
-        "OPEN", "CREAT", "UNLINK", "RMDIR", "MKDIR", "CHDIR", "CHROOT",
-        "ACCESS", "STAT", "LSTAT", "NEWFSTATAT", "FSTATAT",
-        "CHMOD", "CHOWN", "LCHOWN", "TRUNCATE",
-        "UTIME", "UTIMES", "FCHMOD", "FCHOWN", "FSTAT",
-        "READLINK", "EXECVE", "EXECVEAT",
-        "OPENAT", "OPENAT2",
+        "OPEN",
+        "CREAT",
+        "UNLINK",
+        "RMDIR",
+        "MKDIR",
+        "CHDIR",
+        "CHROOT",
+        "ACCESS",
+        "STAT",
+        "LSTAT",
+        "NEWFSTATAT",
+        "FSTATAT",
+        "CHMOD",
+        "CHOWN",
+        "LCHOWN",
+        "TRUNCATE",
+        "UTIME",
+        "UTIMES",
+        "FCHMOD",
+        "FCHOWN",
+        "FSTAT",
+        "READLINK",
+        "EXECVE",
+        "EXECVEAT",
+        "OPENAT",
+        "OPENAT2",
     )
 
     private val twoPathSyscalls = setOf(
-        "LINK", "SYMLINK", "RENAME",
+        "LINK",
+        "SYMLINK",
+        "RENAME",
     )
 
     private val firstPathAtSyscalls = setOf(
-        "UNLINKAT", "MKDIRAT", "FACCESSAT", "FACCESSAT2",
-        "FCHMODAT", "FCHOWNAT", "READLINKAT", "UTIMENSAT",
+        "UNLINKAT",
+        "MKDIRAT",
+        "FACCESSAT",
+        "FACCESSAT2",
+        "FCHMODAT",
+        "FCHOWNAT",
+        "READLINKAT",
+        "UTIMENSAT",
     )
 
     private val secondAndThirdAtSyscalls = setOf(
-        "SYMLINKAT", "LINKAT", "RENAMEAT", "RENAMEAT2"
+        "SYMLINKAT",
+        "LINKAT",
+        "RENAMEAT",
+        "RENAMEAT2",
     )
 
     public data class StraceParseResult(
@@ -68,8 +99,7 @@ public object StraceLogParser {
         return StraceParseResult(observations, dropped)
     }
 
-    public fun parse(log: String): List<ProfileObservation> =
-        parseWithStats(log).observations
+    public fun parse(log: String): List<ProfileObservation> = parseWithStats(log).observations
 
     public fun parseLine(line: String): ProfileObservation? {
         val cleaned = line.trim()
@@ -133,9 +163,12 @@ public object StraceLogParser {
      * Not all quoted strings are paths - e.g., execve argv entries or readlink buffers.
      * Syscall names are uppercase (from parseLine).
      */
-    private fun extractQuotedPaths(syscallName: String, args: String): List<String> {
+    private fun extractQuotedPaths(
+        syscallName: String,
+        args: String,
+    ): List<String> {
         val allPaths = mutableListOf<String>()
-        val matches = "\"(.*?)\"" .toRegex().findAll(args).map { it.groupValues[1] }.toList()
+        val matches = "\"(.*?)\"".toRegex().findAll(args).map { it.groupValues[1] }.toList()
 
         when (syscallName) {
             // First-only: only the first quoted string is a path

@@ -12,8 +12,8 @@ import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import io.mazewall.profiler.engine.ProfilerDaemonEngine
 import io.mazewall.profiler.engine.ProfilerSessionHandler
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.TraceEvent
 
 @AnalyzeClasses(packages = ["io.mazewall.profiler"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ProfilerArchitectureTest {
@@ -27,9 +27,11 @@ class ProfilerArchitectureTest {
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("java.lang.foreign..", "io.mazewall.ffi.memory..")
-            .because("To prevent memory segment lifetime leaks and native memory finalization GC overhead, all trace events must strictly hold and pass JVM heap-only data, never referencing FFM MemorySegment or internal native memory classes.")
-            .check(allClasses)
+            .because(
+                "To prevent memory segment lifetime leaks and native memory finalization GC overhead, all trace events must strictly hold and pass JVM heap-only data, never referencing FFM MemorySegment or internal native memory classes.",
+            ).check(allClasses)
     }
+
     @ArchTest
     fun `handshake ordering (0xAC Protocol)`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val requireAckBeforeContinue = object : ArchCondition<JavaMethod>("ensure performHandshake occurs before sendSeccompContinue") {

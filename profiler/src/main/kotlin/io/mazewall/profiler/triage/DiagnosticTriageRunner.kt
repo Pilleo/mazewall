@@ -87,8 +87,7 @@ object DiagnosticTriageRunner {
                     line.contains("seccomp", ignoreCase = true) ||
                         line.contains("landlock", ignoreCase = true) ||
                         line.contains("audit", ignoreCase = true)
-                }
-                .take(100)
+                }.take(100)
                 .joinToString("\n")
         } catch (e: Exception) {
             "Unable to capture dmesg: ${e.message}"
@@ -97,12 +96,13 @@ object DiagnosticTriageRunner {
 
     private fun captureThreadDump(): String {
         val selfPid = ProcessHandle.current().pid()
-        val pids = ProcessHandle.allProcesses().toList()
+        val pids = ProcessHandle
+            .allProcesses()
+            .toList()
             .filter { ph ->
                 val command = ph.info().command().orElse("")
                 ph.pid() != selfPid && (command.contains("java") || command.contains("gradle"))
-            }
-            .map { it.pid() }
+            }.map { it.pid() }
 
         if (pids.isEmpty()) {
             return "No other active Java/Gradle processes found."
@@ -126,7 +126,8 @@ object DiagnosticTriageRunner {
     private fun collectHsErrLogs(): String {
         val sb = StringBuilder()
         val rootDir = File(".")
-        val files = rootDir.walkTopDown()
+        val files = rootDir
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("hs_err_") && it.name.endsWith(".log") }
             .toList()
 
@@ -148,7 +149,7 @@ object DiagnosticTriageRunner {
 
     private fun captureKernelConfig(): String {
         val sb = StringBuilder()
-        
+
         // 1. Read Yama ptrace_scope
         val yamaFile = File("/proc/sys/kernel/yama/ptrace_scope")
         if (yamaFile.exists()) {
@@ -184,14 +185,15 @@ object DiagnosticTriageRunner {
         // Try standard Linux x86_64 system call header locations
         val paths = listOf(
             "/usr/include/asm/unistd_64.h",
-            "/usr/include/x86_64-linux-gnu/asm/unistd_64.h"
+            "/usr/include/x86_64-linux-gnu/asm/unistd_64.h",
         )
         for (pathStr in paths) {
             val file = File(pathStr)
             if (file.exists()) {
                 return try {
                     file.useLines { lines ->
-                        lines.filter { it.startsWith("#define __NR_") }
+                        lines
+                            .filter { it.startsWith("#define __NR_") }
                             .map { it.removePrefix("#define __NR_").trim() }
                             .joinToString("\n")
                     }
@@ -204,9 +206,12 @@ object DiagnosticTriageRunner {
     }
 
     private fun escapeJson(value: String): String {
-        return "\"" + value.replace("\\", "\\\\")
+        return "\"" +
+            value
+                .replace("\\", "\\\\")
             .replace("\"", "\\\"")
             .replace("\n", "\\n")
-            .replace("\r", "\\r") + "\""
+            .replace("\r", "\\r") +
+            "\""
     }
 }

@@ -5,14 +5,13 @@ import io.mazewall.Policy
 import io.mazewall.Uncompiled
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Syscall
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
 class IterativeProfilerTest {
-
     private fun runPlatformTest(block: () -> Unit) {
         try {
             block()
@@ -129,7 +128,11 @@ class IterativeProfilerTest {
             val basePolicy = Policy.PURE_COMPUTE_UNSAFE
             var attempts = 0
             val relativePath = "build/tmp/custom relative path with spaces.txt"
-            val expectedAbsolutePath = java.nio.file.Paths.get(relativePath).toAbsolutePath().normalize().toString()
+            val expectedAbsolutePath = java.nio.file.Paths
+                .get(relativePath)
+                .toAbsolutePath()
+                .normalize()
+                .toString()
             val compiledPolicy = IterativeProfiler.profile(basePolicy) {
                 attempts++
                 if (attempts == 1) {
@@ -255,13 +258,15 @@ class IterativeProfilerTest {
             val compiledPolicy =
                 IterativeProfiler.profile(basePolicy) {
                     // Use a relative path to read the file
-                    val relativePath = java.nio.file.Paths.get("build/tmp/iterative-relative-test.txt")
-                    java.nio.file.Files.readString(relativePath)
+                    val relativePath = java.nio.file.Paths
+                        .get("build/tmp/iterative-relative-test.txt")
+                    java.nio.file.Files
+                        .readString(relativePath)
                 }
 
             assertTrue(
                 compiledPolicy.allowedFsReadPaths.any { it.value == target.absolutePath },
-                "Should allow read access to absolute path of target: ${target.absolutePath}"
+                "Should allow read access to absolute path of target: ${target.absolutePath}",
             )
 
             target.delete()
@@ -275,6 +280,7 @@ class IterativeProfilerTest {
 
             val testRunnable = object : Runnable {
                 var attempt = 0
+
                 override fun run() {
                     if (attempt == 0) {
                         attempt++
@@ -314,9 +320,12 @@ class IterativeProfilerTest {
             assumeTrue(io.mazewall.Platform.isSupported())
 
             // Start with a policy that allows reading "/tmp/prefix" (so "/tmp/prefix" is in allowedFsReadPaths)
-            val initialPolicy = Policy.builder()
-                .allowFsRead(io.mazewall.core.SandboxedPath.of("/tmp/prefix", allowNonExistent = true))
-                .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
+            val initialPolicy = Policy
+                .builder()
+                .allowFsRead(
+                    io.mazewall.core.SandboxedPath
+                    .of("/tmp/prefix", allowNonExistent = true),
+                ).unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                 .build()
 
             var attempt = 0

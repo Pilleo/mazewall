@@ -68,13 +68,24 @@ public class TierEbpfEngine(
     }
 
     /** One eBPF instruction. */
-    public data class Insn(val code: Int, val dst: Int = 0, val src: Int = 0, val off: Short = 0, val imm: Int = 0)
+    public data class Insn(
+        val code: Int,
+        val dst: Int = 0,
+        val src: Int = 0,
+        val off: Short = 0,
+        val imm: Int = 0,
+    )
 
     @Volatile private var hashFd: Int = -1
+
     @Volatile private var ringFd: Int = -1
+
     @Volatile private var targetFd: Int = -1
+
     @Volatile private var attrFd: Int = -1
+
     @Volatile private var progFd: Int = -1
+
     @Volatile private var linkFd: Int = -1
 
     public fun install(targetTgid: Int) {
@@ -115,32 +126,53 @@ public class TierEbpfEngine(
         }
     }
 
-    public fun setContext(tid: Int, contextId: Int) {
+    public fun setContext(
+        tid: Int,
+        contextId: Int,
+    ) {
         require(hashFd >= 0) { "not installed" }
         Arena.ofConfined().use {
-            if (contextId == 0) deleteElem(it, hashFd, intSeg(it, tid))
-            else updateElem(it, hashFd, intSeg(it, tid), intSeg(it, contextId))
+            if (contextId == 0) {
+                deleteElem(it, hashFd, intSeg(it, tid))
+            } else {
+                updateElem(it, hashFd, intSeg(it, tid), intSeg(it, contextId))
+            }
         }
     }
 
     override fun close() {
-        closeIfOpen(linkFd); linkFd = -1
-        closeIfOpen(progFd); progFd = -1
-        closeIfOpen(ringFd); ringFd = -1
-        closeIfOpen(targetFd); targetFd = -1
-        closeIfOpen(attrFd); attrFd = -1
-        closeIfOpen(hashFd); hashFd = -1
+        closeIfOpen(linkFd)
+        linkFd = -1
+        closeIfOpen(progFd)
+        progFd = -1
+        closeIfOpen(ringFd)
+        ringFd = -1
+        closeIfOpen(targetFd)
+        targetFd = -1
+        closeIfOpen(attrFd)
+        attrFd = -1
+        closeIfOpen(hashFd)
+        hashFd = -1
     }
 
     // ── program construction ────────────────────────────────────────────────
 
     internal fun buildProgram(): List<Insn> {
         val p = mutableListOf<Insn>()
-        fun emit(i: Insn): Int { p += i; return p.size - 1 }
-        fun ldMap(dst: Int, idx: Int) {
+
+        fun emit(i: Insn): Int {
+            p += i
+            return p.size - 1
+        }
+
+        fun ldMap(
+            dst: Int,
+            idx: Int,
+        ) {
             emit(Insn(LD_MAP_FD, dst = dst, src = PSEUDO_FD, imm = idx))
             emit(Insn(code = 0x00))
         }
+
         fun exitFrom(fromIdx: Int) {
             p[fromIdx] = p[fromIdx].copy(off = (p.size - fromIdx - 1).toShort())
         }
@@ -148,9 +180,9 @@ public class TierEbpfEngine(
         emit(Insn(CALL, imm = H_PID_TGID))
         emit(Insn(MOV_REG, dst = 9, src = 0))
         emit(Insn(MOV_REG, dst = 8, src = 9))
-        emit(Insn(AND_IMM, dst = 8, imm = -1))   // r8 = tid
+        emit(Insn(AND_IMM, dst = 8, imm = -1)) // r8 = tid
         emit(Insn(MOV_REG, dst = 7, src = 9))
-        emit(Insn(RSH_IMM, dst = 7, imm = 32))   // r7 = tgid
+        emit(Insn(RSH_IMM, dst = 7, imm = 32)) // r7 = tgid
 
         ldMap(1, 2)
         emit(Insn(MOV_IMM, dst = 2, imm = 0))
@@ -189,10 +221,10 @@ public class TierEbpfEngine(
         emit(Insn(CALL, imm = H_RB_SUBMIT))
 
         // Increment attr_by_ctx[context_id] atomically.
-        emit(Insn(STX_W, dst = FP, src = 5, off = -12))  // key = ctx_id at fp-12
-        ldMap(1, 3)                                      // r1 = attr map fd
+        emit(Insn(STX_W, dst = FP, src = 5, off = -12)) // key = ctx_id at fp-12
+        ldMap(1, 3) // r1 = attr map fd
         emit(Insn(MOV_REG, dst = 2, src = FP))
-        emit(Insn(ADD_IMM, dst = 2, imm = -12))          // r2 = &key
+        emit(Insn(ADD_IMM, dst = 2, imm = -12)) // r2 = &key
         emit(Insn(CALL, imm = H_LOOKUP))
         val jNoSlot = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_IMM, dst = 1, imm = 1))
@@ -200,7 +232,11 @@ public class TierEbpfEngine(
         // fallthrough → exit
         emit(Insn(EXIT))
 
-        exitFrom(jNoTarget); exitFrom(jNoCtx); exitFrom(jZeroCtx); exitFrom(jDrop); exitFrom(jNoSlot)
+        exitFrom(jNoTarget)
+        exitFrom(jNoCtx)
+        exitFrom(jZeroCtx)
+        exitFrom(jDrop)
+        exitFrom(jNoSlot)
         val end = p.size
         p[jNotTarget] = Insn(JNE_REG, dst = 5, src = 7, off = (end - jNotTarget - 1).toShort())
 
@@ -217,7 +253,11 @@ public class TierEbpfEngine(
 
     // ── bpf(2) wrappers ─────────────────────────────────────────────────────
 
-    private fun bpfCall(cmd: Long, attr: MemorySegment, size: Long): Int {
+    private fun bpfCall(
+        cmd: Long,
+        attr: MemorySegment,
+        size: Long,
+    ): Int {
         return when (
             val res = native.syscall(
                 SYS_BPF,
@@ -231,7 +271,12 @@ public class TierEbpfEngine(
         }
     }
 
-    private fun createMap(type: Int, keySize: Int, valueSize: Int, maxEntries: Int): Int =
+    private fun createMap(
+        type: Int,
+        keySize: Int,
+        valueSize: Int,
+        maxEntries: Int,
+    ): Int =
         Arena.ofConfined().use {
             val attr = it.allocate(72)
             attr.set(ValueLayout.JAVA_INT, 0, type)
@@ -241,7 +286,12 @@ public class TierEbpfEngine(
             bpfCall(BPF_MAP_CREATE, attr, 72)
         }
 
-    private fun updateElem(a: Arena, fd: Int, key: MemorySegment, value: MemorySegment) {
+    private fun updateElem(
+        a: Arena,
+        fd: Int,
+        key: MemorySegment,
+        value: MemorySegment,
+    ) {
         val attr = a.allocate(32)
         attr.set(ValueLayout.JAVA_INT, 0, fd)
         attr.set(ValueLayout.ADDRESS, 8, key)
@@ -249,7 +299,11 @@ public class TierEbpfEngine(
         bpfCall(BPF_MAP_UPDATE_ELEM, attr, 32)
     }
 
-    private fun deleteElem(a: Arena, fd: Int, key: MemorySegment) {
+    private fun deleteElem(
+        a: Arena,
+        fd: Int,
+        key: MemorySegment,
+    ) {
         val attr = a.allocate(16)
         attr.set(ValueLayout.JAVA_INT, 0, fd)
         attr.set(ValueLayout.ADDRESS, 8, key)
@@ -275,7 +329,10 @@ public class TierEbpfEngine(
         }
     }
 
-    private fun openRawTp(progFd: Int, name: String): Int =
+    private fun openRawTp(
+        progFd: Int,
+        name: String,
+    ): Int =
         Arena.ofConfined().use {
             val attr = it.allocate(80)
             attr.set(ValueLayout.JAVA_INT, 0, progFd)
@@ -285,13 +342,20 @@ public class TierEbpfEngine(
 
     // ── helpers ─────────────────────────────────────────────────────────────
 
-    private fun strSeg(a: Arena, s: String, size: Int): MemorySegment {
+    private fun strSeg(
+        a: Arena,
+        s: String,
+        size: Int,
+    ): MemorySegment {
         val seg = a.allocate(size.toLong())
         s.toByteArray(Charsets.US_ASCII).forEachIndexed { i, b -> seg.set(ValueLayout.JAVA_BYTE, i.toLong(), b) }
         return seg
     }
 
-    private fun intSeg(a: Arena, v: Int): MemorySegment {
+    private fun intSeg(
+        a: Arena,
+        v: Int,
+    ): MemorySegment {
         val s = a.allocate(4, 4)
         s.set(ValueLayout.JAVA_INT, 0, v)
         return s

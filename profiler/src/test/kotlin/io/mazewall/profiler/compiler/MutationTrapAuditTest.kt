@@ -8,7 +8,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MutationTrapAuditTest {
-
     private val arch = Arch.AMD64
 
     @Test
@@ -20,9 +19,11 @@ class MutationTrapAuditTest {
     @Test
     fun `a floor missing truncate is reported as untrapped`() {
         // Simulate a narrow floor: allow-list style default EPERM with only read allowed.
-        val program = BpfFilter.build(
+        val program = BpfFilter
+            .build(
             arch,
-            Policy.builder()
+            Policy
+                .builder()
                 .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
                 .block(io.mazewall.core.Syscall.CONNECT)
                 .build()

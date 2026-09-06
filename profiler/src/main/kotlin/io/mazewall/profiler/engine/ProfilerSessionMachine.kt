@@ -5,9 +5,13 @@ internal sealed interface ProfilerSessionEvent {
         val id: Long,
         val event: SyscallEvent<SyscallEventState.Resolved>,
     ) : ProfilerSessionEvent
+
     data object EventDelivered : ProfilerSessionEvent
+
     data object AckSucceeded : ProfilerSessionEvent
+
     data object HandshakeFailed : ProfilerSessionEvent
+
     data object PassedThrough : ProfilerSessionEvent
 }
 
@@ -18,7 +22,10 @@ internal data class ProfilerSessionTransition(
 )
 
 internal object ProfilerSessionMachine {
-    fun evaluate(state: ProfilerState, event: ProfilerSessionEvent): ProfilerSessionTransition {
+    fun evaluate(
+        state: ProfilerState,
+        event: ProfilerSessionEvent,
+    ): ProfilerSessionTransition {
         return when (state) {
             is ProfilerState.ActiveSession -> when (event) {
                 is ProfilerSessionEvent.NotificationReceived ->

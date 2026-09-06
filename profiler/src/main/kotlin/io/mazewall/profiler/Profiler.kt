@@ -48,7 +48,10 @@ object Profiler {
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
-    internal var daemonManagerProvider: () -> io.mazewall.profiler.internal.ProfilerDaemonManager = { io.mazewall.profiler.internal.ProfilerDaemonManager.getInstance() }
+    internal var daemonManagerProvider: () -> io.mazewall.profiler.internal.ProfilerDaemonManager = {
+        io.mazewall.profiler.internal.ProfilerDaemonManager
+        .getInstance()
+    }
     internal var installerProvider: io.mazewall.profiler.engine.ProfilerInstallerInterface = io.mazewall.profiler.engine.RealProfilerInstaller
 
     /**
@@ -115,7 +118,7 @@ object Profiler {
             workerThread.join(GRACE_PERIOD_MS)
             errorRef.get()?.let { throw it }
             throw IllegalStateException(
-                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms"
+                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms",
             )
         }
 
@@ -134,13 +137,16 @@ object Profiler {
             listeners.remove(listener)
             listener.passThrough()
         }
-        
+
         if (tid != null) {
             threadRegistry.remove(tid!!)
         }
 
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
-        val observations = localLogs.map { io.mazewall.profiler.ProfileObservation.fromTraceEvent(it) }
+        val observations = localLogs.map {
+            io.mazewall.profiler.ProfileObservation
+            .fromTraceEvent(it)
+        }
         val listener = sessionListener.get()
         val dropped = (listener?.eventQueue?.droppedCount?.toInt() ?: 0) + (listener?.droppedEvents ?: 0)
         val coverage = ProfilingCoverage.infer(
@@ -228,10 +234,10 @@ object Profiler {
             processWide = processWide,
             startTraceListener = { fd, logs, traces, cache, readyLatch ->
                 val listener = ProfilerTraceListener(
-                    FileDescriptor.unixSocket(fd),
+                    FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
                     logs,
                     traces,
-                    cache
+                    cache,
                 )
                 listeners.add(listener)
                 onListenerCreated?.invoke(listener)
@@ -248,8 +254,8 @@ object Profiler {
         synchronized(this) {
             listeners.forEach { it.passThrough() }
             listeners.clear()
-            // Do not call ProfilerDaemonManager.stop() here. 
-            // We want the daemon to stay alive in PassThrough mode to service background threads 
+            // Do not call ProfilerDaemonManager.stop() here.
+            // We want the daemon to stay alive in PassThrough mode to service background threads
             // until the parent JVM exits (which triggers the daemon's stdin EOF monitor).
         }
     }
@@ -267,17 +273,21 @@ object Profiler {
         private val pathCache = ConcurrentHashMap<String, Long>()
 
         override fun <T : Any?> submit(task: Callable<T>): Future<T> {
-            return delegate.submit(Callable {
+            return delegate.submit(
+                Callable {
                 applyProfilingIfNecessary()
                 task.call()
-            })
+            },
+            )
         }
 
         override fun submit(task: Runnable): Future<*> {
-            return delegate.submit(Runnable {
+            return delegate.submit(
+                Runnable {
                 applyProfilingIfNecessary()
                 task.run()
-            })
+            },
+            )
         }
 
         override fun execute(command: Runnable) {
@@ -302,7 +312,7 @@ object Profiler {
                     stackTracesMap = if (captureStackTraces) recentStackProfiles else null,
                     pathCache = pathCache,
                     processWide = false,
-                    onListenerCreated = {}
+                    onListenerCreated = {},
                 )
                 threadApplied = true
             }

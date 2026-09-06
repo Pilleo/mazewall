@@ -15,15 +15,13 @@ internal class SyscallPathResolver(
     /**
      * Resolves path arguments for a raw syscall event.
      */
-    context(arena: NativeArena)
-    fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
+    context(arena: NativeArena) fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
         val argsArr = LongArray(event.args.size) { i -> event.args[i] }
         val paths = resolvePaths(event.tid, event.syscallName, argsArr)
         return event.resolved(paths)
     }
 
-    context(arena: NativeArena)
-    fun resolvePaths(
+    context(arena: NativeArena) fun resolvePaths(
         tid: Tid,
         syscallName: String,
         args: LongArray,
@@ -62,8 +60,7 @@ internal class SyscallPathResolver(
         return paths
     }
 
-    context(arena: NativeArena)
-    fun resolvePaths(
+    context(arena: NativeArena) fun resolvePaths(
         tid: Tid,
         syscallName: String,
         args: List<Long>,
@@ -72,16 +69,16 @@ internal class SyscallPathResolver(
         return resolvePaths(tid, syscallName, argsArr)
     }
 
-    context(arena: NativeArena)
-    private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
+    context(arena: NativeArena) private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
 
-    context(arena: NativeArena)
-    private fun resolveFdPath(tid: Tid, fd: Int): String? = memoryReader.resolveLink(tid, "fd/$fd")
+    context(arena: NativeArena) private fun resolveFdPath(
+        tid: Tid,
+        fd: Int,
+    ): String? = memoryReader.resolveLink(tid, "fd/$fd")
 
     private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
 
-    context(arena: NativeArena)
-    private fun tryRead(
+    context(arena: NativeArena) private fun tryRead(
         tid: Tid,
         addr: Long,
         dirfd: Long = AT_FDCWD_VAL,
@@ -105,8 +102,7 @@ internal class SyscallPathResolver(
         }
     }
 
-    context(arena: NativeArena)
-    private fun resolveRelativePath(
+    context(arena: NativeArena) private fun resolveRelativePath(
         tid: Tid,
         path: String,
         dirfd: Long,
@@ -185,16 +181,25 @@ internal object PathNormalizerHelper {
                 } else if (!isAbsolute) {
                     if (outLen > 0 && chars[outLen - 1] != '/') {
                         if (outLen + compLen + 1 > chars.size || stackSize >= stack.size) {
-                            return java.nio.file.Paths.get(path).normalize().toString()
+                            return java.nio.file.Paths
+                                .get(path)
+                                .normalize()
+                                .toString()
                         }
                         chars[outLen++] = '/'
                     }
                     if (stackSize >= stack.size) {
-                        return java.nio.file.Paths.get(path).normalize().toString()
+                        return java.nio.file.Paths
+                            .get(path)
+                            .normalize()
+                            .toString()
                     }
                     stack[stackSize++] = outLen
                     if (outLen + compLen > chars.size) {
-                        return java.nio.file.Paths.get(path).normalize().toString()
+                        return java.nio.file.Paths
+                            .get(path)
+                            .normalize()
+                            .toString()
                     }
                     for (k in start until i) {
                         chars[outLen + k - start] = path[k]
@@ -204,16 +209,25 @@ internal object PathNormalizerHelper {
             } else {
                 if (outLen > 0 && chars[outLen - 1] != '/') {
                     if (outLen + compLen + 1 > chars.size || stackSize >= stack.size) {
-                        return java.nio.file.Paths.get(path).normalize().toString()
+                        return java.nio.file.Paths
+                            .get(path)
+                            .normalize()
+                            .toString()
                     }
                     chars[outLen++] = '/'
                 }
                 if (stackSize >= stack.size) {
-                    return java.nio.file.Paths.get(path).normalize().toString()
+                    return java.nio.file.Paths
+                        .get(path)
+                        .normalize()
+                        .toString()
                 }
                 stack[stackSize++] = outLen
                 if (outLen + compLen > chars.size) {
-                    return java.nio.file.Paths.get(path).normalize().toString()
+                    return java.nio.file.Paths
+                        .get(path)
+                        .normalize()
+                        .toString()
                 }
                 for (k in start until i) {
                     chars[outLen + k - start] = path[k]
@@ -229,7 +243,10 @@ internal object PathNormalizerHelper {
         return String(chars, 0, outLen)
     }
 
-    fun pathStartsWith(path: String, prefix: String): Boolean {
+    fun pathStartsWith(
+        path: String,
+        prefix: String,
+    ): Boolean {
         if (path == prefix) return true
         if (prefix == "/") return path.startsWith("/")
         return path.startsWith(prefix) && path.length > prefix.length && path[prefix.length] == '/'

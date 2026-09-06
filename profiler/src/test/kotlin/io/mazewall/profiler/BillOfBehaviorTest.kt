@@ -1,16 +1,16 @@
 package io.mazewall.profiler
 
 import io.mazewall.core.Pid
-import io.mazewall.core.Tid
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BillOfBehaviorTest {
@@ -85,11 +85,17 @@ class BillOfBehaviorTest {
         val policy = bob.toPolicy(
             io.mazewall.Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
-                .build(),
+                .defaultAction(
+                    io.mazewall.core.SeccompAction
+                    .ACT_ERRNO(),
+                ).build(),
             allowIncomplete = true,
         )
-        assertEquals(io.mazewall.core.SeccompAction.ACT_ERRNO(), policy.defaultAction)
+        assertEquals(
+            io.mazewall.core.SeccompAction
+            .ACT_ERRNO(),
+                policy.defaultAction,
+        )
 
         val policyDenyList = bob.toPolicy(allowIncomplete = true)
         assertEquals(io.mazewall.core.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
@@ -118,8 +124,10 @@ class BillOfBehaviorTest {
         val allowBase =
             io.mazewall.Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
-                .build()
+                .defaultAction(
+                    io.mazewall.core.SeccompAction
+                    .ACT_ERRNO(),
+                ).build()
         val dslAllow = bob.toDsl(
             "Policy.builder().defaultAction(SeccompAction.ACT_ERRNO()).build()",
             allowBase,
@@ -434,7 +442,8 @@ class BillOfBehaviorTest {
                 paths = emptyList(),
             ),
         )
-        val bob = io.mazewall.profiler.compiler.BobCompiler.compileObservations(observations)
+        val bob = io.mazewall.profiler.compiler.BobCompiler
+            .compileObservations(observations)
         assertFalse(bob.syscalls.contains(Syscall.OPEN))
         assertTrue(bob.syscalls.isEmpty())
 

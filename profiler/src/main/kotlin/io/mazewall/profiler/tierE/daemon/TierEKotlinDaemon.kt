@@ -32,10 +32,12 @@ public fun main() {
     val stopRequested = AtomicBoolean(false)
     var engine: TierEbpfEngine? = null
 
-    Runtime.getRuntime().addShutdownHook(Thread {
+    Runtime.getRuntime().addShutdownHook(
+        Thread {
         runCatching { engine?.close() }
         runCatching { Files.deleteIfExists(Path.of(socketPath)) }
-    })
+    },
+    )
 
     val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
     // Bind abstract unix socket via sun.nio? For now use TCP loopback for prototype simplicity.

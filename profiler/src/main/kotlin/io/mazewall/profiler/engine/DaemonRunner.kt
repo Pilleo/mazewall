@@ -9,7 +9,7 @@ public interface DaemonRunner {
 public class RealDaemonRunner(
     private val exitFn: (Int) -> Unit = { kotlin.system.exitProcess(it) },
     private val stdinReader: java.io.Reader = System.`in`.reader(),
-    private val engineFactory: (String) -> ProfilerDaemonEngine = { ProfilerDaemonEngine(it) }
+    private val engineFactory: (String) -> ProfilerDaemonEngine = { ProfilerDaemonEngine(it) },
 ) : DaemonRunner {
     override fun runDaemon(args: Array<String>) {
         if (args.isEmpty()) {
@@ -33,7 +33,8 @@ public class RealDaemonRunner(
             } finally {
                 try {
                     Runtime.getRuntime().removeShutdownHook(hook)
-                } catch (ignored: Exception) {}
+                } catch (ignored: Exception) {
+                    }
                 exitFn(0)
             }
         }.apply {

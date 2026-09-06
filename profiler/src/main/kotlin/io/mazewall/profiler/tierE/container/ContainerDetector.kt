@@ -9,7 +9,6 @@ import java.nio.file.Path
  * not containerized.
  */
 public object ContainerDetector {
-
     public data class ContainerInfo(
         public val runtime: String,
         public val containerId: String,
@@ -37,7 +36,8 @@ public object ContainerDetector {
         for (line in lines) {
             val idMatch = CONTAINER_ID.find(line) ?: continue
             val id = idMatch.value
-            val runtime = RUNTIME_HINTS.firstOrNull { hint ->
+            val runtime = RUNTIME_HINTS
+                .firstOrNull { hint ->
                 line.contains(hint.first, ignoreCase = true)
             }?.second ?: return ContainerInfo("unknown", id)
             return ContainerInfo(runtime, id)

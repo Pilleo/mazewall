@@ -14,7 +14,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
-
     @Test
     fun `bob compiler is the only path from strace lines and trace events`() {
         val traceEvents = listOf(
@@ -502,18 +501,22 @@ class ProfilerSessionApiTest {
 
     @Test
     fun `ebpf probe reads synthetic proc files`() {
-        val dir = java.nio.file.Files.createTempDirectory("ebpf-probe")
+        val dir = java.nio.file.Files
+            .createTempDirectory("ebpf-probe")
         val status = dir.resolve("status")
         java.nio.file.Files.writeString(
             status,
             "Uid:\t0\t0\t0\t0\nCapEff:\t0000008000000000\n",
         )
         val uidMap = dir.resolve("uid_map")
-        java.nio.file.Files.writeString(uidMap, "0 100000 65536\n")
+        java.nio.file.Files
+            .writeString(uidMap, "0 100000 65536\n")
         val nsA = dir.resolve("nsA")
         val nsB = dir.resolve("nsB")
-        java.nio.file.Files.writeString(nsA, "user:[1]")
-        java.nio.file.Files.writeString(nsB, "user:[2]")
+        java.nio.file.Files
+            .writeString(nsA, "user:[1]")
+        java.nio.file.Files
+            .writeString(nsB, "user:[2]")
         val load = EbpfCapability.probe(
             selfNsUser = nsA,
             initNsUser = nsB,
@@ -758,7 +761,11 @@ class ProfilerSessionApiTest {
         assertTrue(onlyUnparsedCoverage.warnings.contains("CONNECT was observed without a parsed destination"))
     }
 
-    private fun syntheticProbe(inInitNs: Boolean, capEff: Long, euid: Int): EbpfLoad {
+    private fun syntheticProbe(
+        inInitNs: Boolean,
+        capEff: Long,
+        euid: Int,
+    ): EbpfLoad {
         return when {
             inInitNs && (EbpfCapability.hasCap(capEff, 39) || EbpfCapability.hasCap(capEff, 21)) ->
                 EbpfLoad.Available

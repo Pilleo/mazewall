@@ -9,18 +9,24 @@ public sealed interface ControlCommand {
     ) : ControlCommand
 
     public data object Detach : ControlCommand
+
     public data object Status : ControlCommand
+
     public data object Shutdown : ControlCommand
 }
 
 public enum class AttachMode { UPROBE, USDT }
 
 /** Single-line replies; `ok` mirrors the OK/ERR prefix contract. */
-public data class ControlReply(public val ok: Boolean, public val text: String) {
+public data class ControlReply(
+    public val ok: Boolean,
+    public val text: String,
+) {
     public fun render(): String = "${if (ok) "OK" else "ERR"} $text\n"
 
     public companion object {
         public fun ok(text: String = ""): ControlReply = ControlReply(true, text)
+
         public fun err(text: String = ""): ControlReply = ControlReply(false, text)
     }
 }
@@ -43,18 +49,32 @@ public fun parseControlCommand(line: String): Either<ControlCommand, ControlRepl
             }
             Either.Left(ControlCommand.Attach(pid, mode, tokens[3]))
         }
-        "DETACH" -> if (tokens.size == 1) Either.Left(ControlCommand.Detach)
-        else Either.Right(ControlReply.err(USAGE_ERR))
-        "STATUS" -> if (tokens.size == 1) Either.Left(ControlCommand.Status)
-        else Either.Right(ControlReply.err(USAGE_ERR))
-        "SHUTDOWN" -> if (tokens.size == 1) Either.Left(ControlCommand.Shutdown)
-        else Either.Right(ControlReply.err(USAGE_ERR))
+        "DETACH" -> if (tokens.size == 1) {
+            Either.Left(ControlCommand.Detach)
+        } else {
+            Either.Right(ControlReply.err(USAGE_ERR))
+        }
+        "STATUS" -> if (tokens.size == 1) {
+            Either.Left(ControlCommand.Status)
+        } else {
+            Either.Right(ControlReply.err(USAGE_ERR))
+        }
+        "SHUTDOWN" -> if (tokens.size == 1) {
+            Either.Left(ControlCommand.Shutdown)
+        } else {
+            Either.Right(ControlReply.err(USAGE_ERR))
+        }
         else -> Either.Right(ControlReply.err(USAGE_ERR))
     }
 }
 
 /** Minimal right/left to keep the parser dependency-free. */
 public sealed interface Either<L, R> {
-    public data class Left<L, R>(public val value: L) : Either<L, R>
-    public data class Right<L, R>(public val value: R) : Either<L, R>
+    public data class Left<L, R>(
+        public val value: L,
+    ) : Either<L, R>
+
+    public data class Right<L, R>(
+        public val value: R,
+    ) : Either<L, R>
 }

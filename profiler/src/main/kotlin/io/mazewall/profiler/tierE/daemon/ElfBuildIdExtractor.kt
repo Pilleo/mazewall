@@ -6,7 +6,6 @@ package io.mazewall.profiler.tierE.daemon
  * Accepts the full file image; returns lowercase hex or null when absent.
  */
 public object ElfBuildIdExtractor {
-
     private val MAGIC = byteArrayOf(0x7F, 0x45, 0x4C, 0x46) // \x7fELF
     private const val EI_CLASS = 4
     private const val ELFCLASS64 = 2
@@ -34,8 +33,10 @@ public object ElfBuildIdExtractor {
         if (shoff <= 0L || shentsize < SHDR64_SIZE || shnum == 0 || shstrndx >= shnum) return null
         if (shoff + shnum.toLong() * shentsize > image.size) return null
 
-        fun hdr(index: Int, field: Int): Long =
-            image.u64((shoff + index.toLong() * shentsize + field).toInt())
+        fun hdr(
+            index: Int,
+            field: Int,
+        ): Long = image.u64((shoff + index.toLong() * shentsize + field).toInt())
 
         val strtabOffset = hdr(shstrndx, SH_OFFSET).toInt()
         if (strtabOffset !in image.indices) return null
@@ -53,7 +54,8 @@ public object ElfBuildIdExtractor {
                 val nameAligned = aligned(namesz)
                 val descAligned = aligned(descsz)
                 if (off + 12 + nameAligned + descAligned > end) break
-                val isBuildId = type == NT_GNU_BUILD_ID && namesz == 4 &&
+                val isBuildId = type == NT_GNU_BUILD_ID &&
+                    namesz == 4 &&
                     image[off + 12] == 'G'.code.toByte() &&
                     image[off + 13] == 'N'.code.toByte() &&
                     image[off + 14] == 'U'.code.toByte() &&

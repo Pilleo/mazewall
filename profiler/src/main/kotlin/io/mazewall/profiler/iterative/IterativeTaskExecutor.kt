@@ -22,11 +22,13 @@ public class RealIterativeTaskExecutor(
 ) : IterativeTaskExecutor {
     public constructor() : this(DEFAULT_ITERATION_TIMEOUT_MS)
 
-    private val taskCounter = java.util.concurrent.atomic.AtomicLong()
+    private val taskCounter = java.util.concurrent.atomic
+        .AtomicLong()
 
     /** Thrown when a contained iteration exceeds [iterationTimeoutMs]. */
-    public class IterativeTaskTimeoutException(timeoutMs: Long) :
-        IllegalStateException("Profiling iteration exceeded ${timeoutMs}ms and was interrupted")
+    public class IterativeTaskTimeoutException(
+        timeoutMs: Long,
+    ) : IllegalStateException("Profiling iteration exceeded ${timeoutMs}ms and was interrupted")
 
     override fun executeTask(
         currentPolicy: Policy<*, Uncompiled>,

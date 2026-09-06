@@ -120,7 +120,6 @@ dependencies {
     testRuntimeOnly(libs.slf4j.nop)
 }
 
-
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {

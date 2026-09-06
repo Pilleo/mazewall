@@ -23,8 +23,7 @@ object BobCompiler {
     /**
      * Parses the given semantic trace events and returns a [BillOfBehavior].
      */
-    fun compile(events: List<TraceEvent>): BillOfBehavior =
-        compileObservations(events.map { ProfileObservation.fromTraceEvent(it) })
+    fun compile(events: List<TraceEvent>): BillOfBehavior = compileObservations(events.map { ProfileObservation.fromTraceEvent(it) })
 
     fun compileObservations(observations: List<ProfileObservation>): BillOfBehavior {
         val opens = mutableSetOf<String>()

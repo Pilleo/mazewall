@@ -1,6 +1,7 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.memory.ManagedSegment
@@ -18,7 +19,7 @@ import java.io.InterruptedIOException
  * a progressive backoff throttling strategy (yielding and sleeping) on consecutive [EINTR] errors.
  */
 internal class NativeSocketInputStream(
-    private val socketFd: FileDescriptor<*, FdState.Open>,
+    private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
 ) : InputStream() {
     private val readBuf = arena.allocate(1)

@@ -16,7 +16,7 @@ internal interface ProfilerInstallerInterface {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            CountDownLatch
+            CountDownLatch,
         ) -> Unit,
     )
 }
@@ -34,7 +34,7 @@ internal object RealProfilerInstaller : ProfilerInstallerInterface {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            CountDownLatch
+            CountDownLatch,
         ) -> Unit,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(

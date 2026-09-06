@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test
 import java.io.File
 
 class DiagnosticTriageRunnerTest {
-
     @Test
     fun `test triage runner creates report file`() {
         // Run main method which generates report in build/triage_report.json

@@ -3,9 +3,9 @@ package io.mazewall.profiler
 import io.mazewall.Policy
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
-import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
@@ -13,7 +13,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerCoverageTest {
-
     @Test
     fun `profile rejects virtual threads`() {
         val failure = AtomicReference<Throwable?>()

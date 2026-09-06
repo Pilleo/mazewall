@@ -1,22 +1,23 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.close
 import io.mazewall.core.Tid
+import io.mazewall.core.close
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
-import java.io.BufferedInputStream
-import java.io.DataInputStream
-import io.mazewall.ffi.memory.ConfinedSegment
-import java.io.InputStream
-import java.lang.foreign.Arena
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
+import java.io.BufferedInputStream
+import java.io.DataInputStream
+import java.io.InputStream
+import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,13 +33,14 @@ import java.util.logging.Logger
  */
 @Suppress("SwallowedException")
 internal class ProfilerTraceListener(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
+
     // Thread-safe idempotent close guard to prevent native double-close.
     private val socketClosed = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -88,11 +90,13 @@ internal class ProfilerTraceListener(
     var droppedEvents: Int = 0
         private set
 
-    private val gracefulDrainRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val gracefulDrainRequested = java.util.concurrent.atomic
+        .AtomicBoolean(false)
 
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+
         // Signals the daemon to finish writing any in-flight events and close its socket end.
         // On receipt the daemon session loop terminates gracefully (LoopAction.Shutdown), which
         // allows the JVM listener to drain the remaining events before seeing EOF.
@@ -108,7 +112,8 @@ internal class ProfilerTraceListener(
     fun start(readyLatch: CountDownLatch) {
         if (closed.get()) throw IllegalStateException("Listener is already closed")
 
-        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
+        val arena = io.mazewall.ffi.memory.NativeArena
+            .ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
         val thread = Thread {
@@ -140,7 +145,8 @@ internal class ProfilerTraceListener(
                         accumulatedLogs.add(event)
                         val jvmFrames = event.jvmStackTrace
                         if (jvmFrames != null && stackTracesMap != null) {
-                            stackTracesMap.computeIfAbsent(event) {
+                            stackTracesMap
+                                .computeIfAbsent(event) {
                                 CopyOnWriteArrayList<Array<StackTraceElement>>()
                             }.add(jvmFrames)
                         }

@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class IterativeProfilerStateMachineTest {
-
     @Test
     fun `test IterativeProfiler state machine with custom taskExecutor`() {
         val originalExecutor = IterativeProfiler.taskExecutor
@@ -16,7 +15,7 @@ class IterativeProfilerStateMachineTest {
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     calls++
                     return when (calls) {
@@ -49,7 +48,7 @@ class IterativeProfilerStateMachineTest {
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     calls++
                     return java.nio.file.AccessDeniedException("/tmp/infinite-$calls")
@@ -74,7 +73,7 @@ class IterativeProfilerStateMachineTest {
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     return IllegalArgumentException("some error that cannot be parsed as a file path")
                 }
@@ -99,7 +98,7 @@ class IterativeProfilerStateMachineTest {
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     calls++
                     return if (calls == 1) {
@@ -128,7 +127,7 @@ class IterativeProfilerStateMachineTest {
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     return java.io.IOException(null as String?)
                 }
@@ -150,11 +149,15 @@ class IterativeProfilerStateMachineTest {
         try {
             var calls = 0
             val relativePath = "build/tmp/custom relative path with spaces.txt"
-            val expectedAbsolutePath = java.nio.file.Paths.get(relativePath).toAbsolutePath().normalize().toString()
+            val expectedAbsolutePath = java.nio.file.Paths
+                .get(relativePath)
+                .toAbsolutePath()
+                .normalize()
+                .toString()
             val customExecutor = object : IterativeTaskExecutor {
                 override fun executeTask(
                     currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable
+                    task: Runnable,
                 ): Throwable? {
                     calls++
                     return if (calls == 1) {

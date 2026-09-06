@@ -1,44 +1,43 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
-import java.io.IOException
-import java.lang.foreign.Arena
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.unwrap
-import io.mazewall.ffi.memory.writeInt
-import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.SegmentPool
+import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.readShort
-import io.mazewall.ffi.memory.readByte
-import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.unwrap
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeShort
 import io.mazewall.map
 import io.mazewall.onSuccess
+import io.mazewall.platform.seccomp.daemon.LoopAction
+import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+import io.mazewall.profiler.engine.SeccompResponder
 import io.mazewall.recover
-import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.SegmentPool
+import java.io.IOException
+import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
-
-import io.mazewall.profiler.engine.SeccompResponder
-import io.mazewall.platform.seccomp.daemon.NotifResult
-import io.mazewall.platform.seccomp.daemon.LoopAction
-import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-
 
 /**
  * Internal logic for handling active seccomp listeners and shutdown requests.
  */
 internal class ProfilerSessionHandler(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val publisher: TraceEventPublisher,
     private val responder: SeccompResponder,
     private val ioOps: NativeIoOperations,
@@ -46,8 +45,8 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
     private val onShutdown: (String) -> Unit,
-) : AutoCloseable, SeccompNotifHandler {
-
+) : AutoCloseable,
+    SeccompNotifHandler {
     val ledger = SessionEventLedger()
 
     private val sessionArena = NativeArena.ofConfined()
@@ -83,12 +82,11 @@ internal class ProfilerSessionHandler(
      * creating a new confined arena per notification or operation.
      */
     @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
-    context(arena: NativeArena)
-    override fun processNotification(
+    context(arena: NativeArena) override fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ): NotifResult {
         val currentState = state as? ProfilerState.ActiveSession ?: return NotifResult.TERMINATE
 
@@ -123,7 +121,7 @@ internal class ProfilerSessionHandler(
                 tid = Tid(pidVal),
                 syscallName = syscallName,
                 args = argList,
-                paths = paths
+                paths = paths,
             )
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
@@ -160,7 +158,8 @@ internal class ProfilerSessionHandler(
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                    state = ProfilerSessionMachine.evaluate(
+                    state = ProfilerSessionMachine
+                        .evaluate(
                         waiting.state,
                         ProfilerSessionEvent.AckSucceeded,
                     ).state
@@ -174,7 +173,8 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.Failed -> {
                     System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
-                    state = ProfilerSessionMachine.evaluate(
+                    state = ProfilerSessionMachine
+                        .evaluate(
                         waiting.state,
                         ProfilerSessionEvent.HandshakeFailed,
                     ).state
@@ -186,7 +186,8 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.PassedThrough -> {
                     System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
-                    state = ProfilerSessionMachine.evaluate(
+                    state = ProfilerSessionMachine
+                        .evaluate(
                         waiting.state,
                         ProfilerSessionEvent.PassedThrough,
                     ).state
@@ -198,7 +199,8 @@ internal class ProfilerSessionHandler(
                     NotifResult.PASS_THROUGH
                 }
                 is HandshakeSession.Active -> {
-                    state = ProfilerSessionMachine.evaluate(
+                    state = ProfilerSessionMachine
+                        .evaluate(
                         waiting.state,
                         ProfilerSessionEvent.HandshakeFailed,
                     ).state
@@ -224,7 +226,8 @@ internal class ProfilerSessionHandler(
                 with(arena.unwrap) {
                     responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
                 }
-            } catch (ignored: Throwable) {}
+            } catch (ignored: Throwable) {
+                }
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return NotifResult.TERMINATE
         } catch (e: Throwable) {
@@ -246,14 +249,23 @@ internal class ProfilerSessionHandler(
         handshake: HandshakeSession.Active,
         resp: ManagedSegment,
     ): Boolean {
-        if (io.mazewall.platform.seccomp.SupervisedKind.classify(nr, io.mazewall.core.Arch.current())
+        if (io.mazewall.platform.seccomp.SupervisedKind
+            .classify(
+                nr,
+                io.mazewall.core.Arch
+                .current(),
+            )
             is io.mazewall.platform.seccomp.SupervisedKind.Open &&
             resolvedEvent.paths.isNotEmpty()
         ) {
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
-                val matched = io.mazewall.enforcer.supervisor.BypassPaths.isBypassPath(java.nio.file.Paths.get(normalizedPathStr))
+                val matched = io.mazewall.enforcer.supervisor.BypassPaths
+                    .isBypassPath(
+                        java.nio.file.Paths
+                        .get(normalizedPathStr),
+                    )
                 System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                 if (matched) {
                     with(arena.unwrap) {
@@ -267,18 +279,18 @@ internal class ProfilerSessionHandler(
             } catch (e: java.nio.channels.ClosedByInterruptException) {
                 Thread.currentThread().interrupt()
                 throw e
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                }
         }
         return false
     }
-
 
     companion object {
         private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte() // 'S'
         private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte() // 'T' / 'P'
 
         private const val ECONNRESET = 104
-        private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
-
+        private val logger = java.util.logging.Logger
+            .getLogger(ProfilerSessionHandler::class.java.name)
     }
 }

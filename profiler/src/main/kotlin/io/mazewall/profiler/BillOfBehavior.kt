@@ -1,20 +1,20 @@
 package io.mazewall.profiler
 
-import io.mazewall.Policy
-import io.mazewall.core.Tid
-import io.mazewall.PolicyScope
-import io.mazewall.Uncompiled
 import io.mazewall.BillOfBehaviorDto
-import io.mazewall.StackProfileEntryDto
+import io.mazewall.Policy
+import io.mazewall.PolicyScope
 import io.mazewall.StackFrameDto
+import io.mazewall.StackProfileEntryDto
+import io.mazewall.Uncompiled
 import io.mazewall.core.Syscall
-import io.mazewall.sbob.PathNormalizer
+import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.sbob.PathNormalizer
+import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlinx.serialization.json.Json
 
 private val jsonSerializer = Json {
     prettyPrint = true
@@ -101,8 +101,18 @@ data class BillOfBehavior(
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
         // allowFs* are copy-on-promotion: the returned builder must be kept.
-        for (path in pOpens) builder = builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
-        for (path in pWrites) builder = builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        for (path in pOpens) {
+            builder = builder.allowFsRead(
+                io.mazewall.core.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
+        for (path in pWrites) {
+            builder = builder.allowFsWrite(
+                io.mazewall.core.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
         return builder.build()
     }
 
@@ -123,18 +133,22 @@ data class BillOfBehavior(
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
                     complete = false,
-                    warnings = listOf("connect destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks SOCKET/CONNECT")
-                )
+                    warnings = listOf(
+                        "connect destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks SOCKET/CONNECT",
+                    ),
+                ),
             )
         }
         if (execs.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
                     complete = false,
-                    warnings = listOf("exec destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks EXECVE")
-                )
+                    warnings = listOf(
+                        "exec destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks EXECVE",
+                    ),
+                ),
             )
         }
         val unenforceableIoUring = ioUringOps.filter { op ->
@@ -146,7 +160,7 @@ data class BillOfBehavior(
                     complete = false,
                     warnings = coverage.warnings +
                         "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
-                )
+                ),
             )
         }
 
@@ -187,7 +201,6 @@ data class BillOfBehavior(
         sb.append("    .build()")
         return sb.toString()
     }
-
 
     /**
      * Merges two bills of behavior (union of all observations).
@@ -362,7 +375,8 @@ data class BillOfBehavior(
                     args = entry.args.toLongArray(),
                     paths = entry.paths,
                 )
-                val frames = entry.stackTrace.map { frameDto ->
+                val frames = entry.stackTrace
+                    .map { frameDto ->
                     StackTraceElement(
                         frameDto.classLoader ?: "<unknown>",
                         frameDto.module ?: "<unknown>",
@@ -389,7 +403,10 @@ data class BillOfBehavior(
     }
 }
 
-private fun requireComplete(coverage: ProfilingCoverage, allowIncomplete: Boolean) {
+private fun requireComplete(
+    coverage: ProfilingCoverage,
+    allowIncomplete: Boolean,
+) {
     when (coverage.evidence()) {
         is ProfileEvidence.Complete -> {}
         is ProfileEvidence.Incomplete -> {

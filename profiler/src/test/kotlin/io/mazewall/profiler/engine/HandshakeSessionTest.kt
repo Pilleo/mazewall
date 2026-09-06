@@ -8,10 +8,9 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class HandshakeSessionTest {
-
     @Test
     fun `test state transitions`() {
-        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(42)
+        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(42)
         val active = HandshakeSession.Active(notifId = 1L, listenerFd = listenerFd)
 
         val acked = active.acknowledged()

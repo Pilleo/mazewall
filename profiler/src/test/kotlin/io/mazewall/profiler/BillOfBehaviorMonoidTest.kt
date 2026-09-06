@@ -1,27 +1,29 @@
 package io.mazewall.profiler
 
 import io.mazewall.core.Syscall
+import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.Test
 
 /**
  * Monoid laws for BillOfBehavior composition (issue-018).
  * Fixed-sample associativity checks (property framework intentionally not introduced here).
  */
 class BillOfBehaviorMonoidTest {
-
-    private fun sampleA() = BillOfBehavior(
+    private fun sampleA() =
+        BillOfBehavior(
         opens = setOf("/tmp/a"),
         syscalls = setOf(Syscall.CONNECT),
     )
 
-    private fun sampleB() = BillOfBehavior(
+    private fun sampleB() =
+        BillOfBehavior(
         fsWritePaths = setOf("/var/b"),
         connects = setOf(NetworkEndpoint("127.0.0.1", 8080)),
     )
 
-    private fun sampleC() = BillOfBehavior(
+    private fun sampleC() =
+        BillOfBehavior(
         execs = setOf("/usr/bin/env"),
         ioUringOps = setOf("IORING_OP_OPENAT"),
         stackProfile = emptyMap(),

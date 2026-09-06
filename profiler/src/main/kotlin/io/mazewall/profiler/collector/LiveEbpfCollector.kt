@@ -65,7 +65,8 @@ public class LiveEbpfCollector : ProfileCollector {
         started = true
     }
 
-    override fun drain(): CollectorDrain = synchronized(lock) {
+    override fun drain(): CollectorDrain =
+        synchronized(lock) {
         return CollectorDrain(
             observations = observations.toList(),
             droppedEvents = _droppedEvents,
@@ -82,7 +83,8 @@ public class LiveEbpfCollector : ProfileCollector {
     }
 
     public companion object {
-        public fun syscallName(nr: Int): String = when (nr) {
+        public fun syscallName(nr: Int): String =
+            when (nr) {
             0 -> "READ"
             1 -> "WRITE"
             3 -> "CLOSE"

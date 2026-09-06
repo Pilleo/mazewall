@@ -8,13 +8,12 @@ import org.junit.jupiter.api.Test
 import kotlin.test.*
 
 class BillOfBehaviorCoverageTest {
-
     @Test
     fun testToStackTracesJson() {
         val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
         val stack = arrayOf(StackTraceElement("Class", "method", "File.kt", 1))
         val bob = BillOfBehavior(
-            stackProfile = mapOf(event to listOf(stack))
+            stackProfile = mapOf(event to listOf(stack)),
         )
         val json = bob.toStackTracesJson()
         assertTrue(json.contains("OPEN"))
@@ -26,12 +25,12 @@ class BillOfBehaviorCoverageTest {
         val bob = BillOfBehavior(
             opens = setOf("/tmp/legit", "/etc/passwd"),
             fsWritePaths = setOf("/tmp/write", "/var/log/syslog"),
-            execs = setOf("/bin/ls", "/usr/bin/evil")
+            execs = setOf("/bin/ls", "/usr/bin/evil"),
         )
 
         val profile = BaselinePathProfile(
             exactPaths = setOf("/etc/passwd"),
-            pathPrefixes = setOf("/var/log", "/usr/bin")
+            pathPrefixes = setOf("/var/log", "/usr/bin"),
         )
 
         val filtered = bob.filterPaths(profile)

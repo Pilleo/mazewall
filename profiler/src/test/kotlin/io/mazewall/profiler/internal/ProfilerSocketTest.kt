@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeNetworking
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerSocketTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -37,7 +37,7 @@ class ProfilerSocketTest {
             }
 
             override fun connect(
-                sockfd: FileDescriptor<*, FdState.Open>,
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 addr: ManagedSegment,
                 addrlen: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -62,7 +62,7 @@ class ProfilerSocketTest {
         var sendmsgCalled = false
         val mockNetworking = object : MockNativeNetworking() {
             override fun sendmsg(
-                sockfd: FileDescriptor<*, FdState.Open>,
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 msg: ManagedSegment,
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {

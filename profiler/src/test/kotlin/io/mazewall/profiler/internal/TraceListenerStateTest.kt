@@ -1,12 +1,11 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.core.Tid
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class TraceListenerStateTest {
-
     @Test
     fun `test AwaitingEvent`() {
         val state = TraceListenerState.AwaitingEvent
@@ -46,7 +45,7 @@ class TraceListenerStateTest {
             syscallName = "OPENAT",
             args = longArrayOf(0, 0, 0, 0),
             paths = listOf("/tmp/test"),
-            stackTrace = null
+            stackTrace = null,
         )
         val state = TraceListenerState.ProcessingEvent(event)
         assertEquals(event, state.event)

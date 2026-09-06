@@ -4,14 +4,13 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class ProfilerClassCoverageTest {
-
     @Test
     fun `test BillOfBehavior class properties`() {
         val bob = BillOfBehavior(
             opens = setOf("/tmp"),
             fsWritePaths = setOf("/tmp/test"),
             syscalls = setOf(io.mazewall.core.Syscall.OPEN),
-            stackProfile = emptyMap()
+            stackProfile = emptyMap(),
         )
         assertEquals(1, bob.opens.size)
         assertEquals(1, bob.fsWritePaths.size)

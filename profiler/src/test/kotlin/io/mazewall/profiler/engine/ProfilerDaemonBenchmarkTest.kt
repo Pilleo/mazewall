@@ -1,79 +1,168 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
-import io.mazewall.core.NativeArg
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeArg
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
-import io.mazewall.ffi.memory.SegmentPool
-import java.lang.foreign.Arena
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
-import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
+import java.lang.foreign.Arena
+import java.lang.foreign.MemorySegment
+import java.lang.foreign.ValueLayout
 
 class ProfilerDaemonBenchmarkTest {
-
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
     }
 
-    private class BenchmarkTransport : ProfilerTransport, SeccompResponder, TraceEventPublisher, NativeIoOperations, SocketLifecycleManager {
+    private class BenchmarkTransport :
+        ProfilerTransport,
+        SeccompResponder,
+        TraceEventPublisher,
+        NativeIoOperations,
+        SocketLifecycleManager {
         override val raw = object : io.mazewall.RawSyscallOperations {
-            override fun poll(fds: ManagedSegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+            override fun poll(
+                fds: ManagedSegment,
+                nfds: Long,
+                timeout: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(0L)
             }
-            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+
+            override fun ioctl(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                request: Long,
+                arg: ManagedSegment,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return LinuxNative.SyscallResult.Success(0L)
             }
-            override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
-            override fun fcntl(fd: FileDescriptor<*, FdState.Open>, cmd: Int, arg: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
-            override fun syscall(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg, arg5: NativeArg, arg6: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
-            override fun syscall4(nr: Long, arg1: NativeArg, arg2: NativeArg, arg3: NativeArg, arg4: NativeArg): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+            override fun ioctl(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                request: Long,
+                arg: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+            override fun fcntl(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                cmd: Int,
+                arg: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+            override fun syscall(
+                nr: Long,
+                arg1: NativeArg,
+                arg2: NativeArg,
+                arg3: NativeArg,
+                arg4: NativeArg,
+                arg5: NativeArg,
+                arg6: NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+            override fun syscall4(
+                nr: Long,
+                arg1: NativeArg,
+                arg2: NativeArg,
+                arg3: NativeArg,
+                arg4: NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
         }
 
-        context(arena: Arena)
-        override fun sendTraceEvent(socketFd: FileDescriptor<*, FdState.Open>, event: SyscallEvent<SyscallEventState.Resolved>) {}
+        context(arena: Arena) override fun sendTraceEvent(
+            socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
+            event: SyscallEvent<SyscallEventState.Resolved>,
+        ) {}
 
-        context(arena: Arena)
-        override fun sendSeccompContinue(session: HandshakeSession.Success, resp: MemorySegment) {}
+        context(arena: Arena) override fun sendSeccompContinue(
+            session: HandshakeSession.Success,
+            resp: MemorySegment,
+        ) {}
 
-        context(arena: Arena)
-        override fun sendSeccompError(session: HandshakeSession.Failed, resp: MemorySegment, errorNr: Int) {}
+        context(arena: Arena) override fun sendSeccompError(
+            session: HandshakeSession.Failed,
+            resp: MemorySegment,
+            errorNr: Int,
+        ) {}
 
-        override fun read(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        override fun read(
+            fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+            buf: MemorySegment,
+            count: Long,
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (count > 0) {
                 buf.set(ValueLayout.JAVA_BYTE, 0L, PROTOCOL_ACK_BYTE)
             }
             return LinuxNative.SyscallResult.Success(count)
         }
 
-        override fun write(fd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
-        override fun recv(sockfd: FileDescriptor<*, FdState.Open>, buf: MemorySegment, len: Long, flags: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
-        override fun poll(fds: MemorySegment, nfds: Long, timeout: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
-        override fun ioctl(fd: FileDescriptor<*, FdState.Open>, request: Long, arg: MemorySegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(99)
-        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(100)
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> = FileDescriptor.unsafe(101)
-        override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean = true
-        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? = FileDescriptor.unsafe(20)
-        override fun close(fd: FileDescriptor<*, FdState.Open>) {}
+        override fun write(
+            fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+            buf: MemorySegment,
+            count: Long,
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+
+        override fun recv(
+            sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+            buf: MemorySegment,
+            len: Long,
+            flags: Int,
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(len)
+
+        override fun poll(
+            fds: MemorySegment,
+            nfds: Long,
+            timeout: Int,
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
+
+        override fun ioctl(
+            fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+            request: Long,
+            arg: MemorySegment,
+        ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(99)
+
+        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            FileDescriptor.replace(100)
+
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(101)
+
+        override fun sendDescriptor(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+        ): Boolean = true
+
+        override fun recvDescriptor(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+
+        override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {}
     }
 
     private class BenchmarkReader : ProfilerMemoryReader {
-        context(arena: io.mazewall.ffi.memory.NativeArena)
-        override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? = "/tmp/test.txt"
-        context(arena: io.mazewall.ffi.memory.NativeArena)
-        override fun resolveLink(tid: Tid, link: String): String? = "/proc/1/cwd"
+        context(arena: io.mazewall.ffi.memory.NativeArena) override fun readStringFromProcess(
+            tid: Tid,
+            remoteAddr: Long,
+            maxLen: Int,
+        ): String? = "/tmp/test.txt"
+
+        context(arena: io.mazewall.ffi.memory.NativeArena) override fun resolveLink(
+            tid: Tid,
+            link: String,
+        ): String? = "/proc/1/cwd"
     }
 
     @Test
@@ -88,8 +177,8 @@ class ProfilerDaemonBenchmarkTest {
 
         val startTime = System.currentTimeMillis()
 
-        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,

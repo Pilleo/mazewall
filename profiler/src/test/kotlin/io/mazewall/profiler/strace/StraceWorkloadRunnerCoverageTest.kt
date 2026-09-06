@@ -7,13 +7,13 @@ import org.junit.jupiter.api.Test
 
 class DummyWorkload : TraceableWorkload {
     var ran = false
+
     override fun run() {
         ran = true
     }
 }
 
 class StraceWorkloadRunnerCoverageTest {
-
     @Test
     fun `test main runs workload`() {
         val args = arrayOf(DummyWorkload::class.java.name)

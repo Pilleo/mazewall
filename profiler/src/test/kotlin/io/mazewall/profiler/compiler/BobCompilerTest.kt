@@ -228,18 +228,18 @@ val policy = Policy.builder()
     @ParameterizedTest(name = "{0} with flags {1} (isWrite={2}, isRead={3})")
     @CsvSource(
         // OPEN variants (flags at arg index 1)
-        "OPEN, 0, false, true",         // O_RDONLY
-        "OPEN, 1, true, false",          // O_WRONLY
-        "OPEN, 2, true, false",          // O_RDWR
-        "OPEN, 64, true, false",         // O_CREAT
-        "OPEN, 512, true, false",        // O_TRUNC
-        "OPEN, 16777216, false, false",  // O_PATH (0x01000000)
+        "OPEN, 0, false, true", // O_RDONLY
+        "OPEN, 1, true, false", // O_WRONLY
+        "OPEN, 2, true, false", // O_RDWR
+        "OPEN, 64, true, false", // O_CREAT
+        "OPEN, 512, true, false", // O_TRUNC
+        "OPEN, 16777216, false, false", // O_PATH (0x01000000)
         // OPENAT variants (flags at arg index 2)
-        "OPENAT, 0, false, true",        // O_RDONLY
-        "OPENAT, 1, true, false",         // O_WRONLY
-        "OPENAT, 2, true, false",         // O_RDWR
-        "OPENAT, 64, true, false",        // O_CREAT
-        "OPENAT, 512, true, false",       // O_TRUNC
+        "OPENAT, 0, false, true", // O_RDONLY
+        "OPENAT, 1, true, false", // O_WRONLY
+        "OPENAT, 2, true, false", // O_RDWR
+        "OPENAT, 64, true, false", // O_CREAT
+        "OPENAT, 512, true, false", // O_TRUNC
         "OPENAT, 16777216, false, false", // O_PATH (0x01000000)
     )
     fun `test OPEN and OPENAT flags classification`(

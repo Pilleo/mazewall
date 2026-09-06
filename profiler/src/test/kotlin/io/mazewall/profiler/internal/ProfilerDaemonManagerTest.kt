@@ -2,29 +2,27 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockProcess
+import io.mazewall.MockProcessLauncher
+import io.mazewall.MockSocketManager
 import io.mazewall.Platform
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
 import java.util.concurrent.atomic.AtomicInteger
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
 
 class ProfilerDaemonManagerTest {
-
-
     @Test
     fun `test dummy test for coverage`() {
         val clazz = ProfilerDaemonManager::class.java
@@ -76,13 +74,22 @@ class ProfilerDaemonManagerTest {
     fun `spawnDaemon falls back to short temp directory when default socket path is too long`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = object : MockProcessLauncher() {
-            override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
+            override fun createTempDirectory(
+                prefix: String,
+                vararg attrs: FileAttribute<*>,
+            ): Path {
                 // Return an excessively long path that exceeds 107 bytes when suffix and /profiler.sock is appended
-                return java.nio.file.Paths.get("/" + "a".repeat(120))
+                return java.nio.file.Paths
+                    .get("/" + "a".repeat(120))
             }
 
-            override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
-                return java.nio.file.Paths.get("/tmp/fallback-mock-profiler-dir")
+            override fun createTempDirectory(
+                dir: Path,
+                prefix: String,
+                vararg attrs: FileAttribute<*>,
+            ): Path {
+                return java.nio.file.Paths
+                    .get("/tmp/fallback-mock-profiler-dir")
             }
         }
         mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")

@@ -1,14 +1,13 @@
 package io.mazewall.profiler
 
+import io.mazewall.core.Tid
+import io.mazewall.profiler.engine.SessionEvent
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.File
-import io.mazewall.profiler.engine.TraceEvent
-import io.mazewall.core.Tid
-import io.mazewall.profiler.engine.SessionEvent
 
 class ProfilerReflectionTest2 {
-
     @Test
     fun `test SessionEvent functionality`() {
         val notified = SessionEvent.Notified(100L, 1234L, 2L)
@@ -31,7 +30,7 @@ class ProfilerReflectionTest2 {
             syscallName = "OPENAT",
             args = longArrayOf(1, 2, 3),
             paths = listOf("/tmp/test"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.Open)
         val openEvent = event as TraceEvent.Open
@@ -45,7 +44,7 @@ class ProfilerReflectionTest2 {
             syscallName = "OPENAT",
             args = longArrayOf(1, 2, 3),
             paths = listOf("/tmp/test"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())
@@ -58,7 +57,7 @@ class ProfilerReflectionTest2 {
             syscallName = "EXECVE",
             args = longArrayOf(1, 2, 3),
             paths = listOf("/bin/sh"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.Exec)
         val execEvent = event as TraceEvent.Exec
@@ -70,7 +69,7 @@ class ProfilerReflectionTest2 {
             syscallName = "EXECVE",
             args = longArrayOf(1, 2, 3),
             paths = listOf("/bin/sh"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())
@@ -83,7 +82,7 @@ class ProfilerReflectionTest2 {
             syscallName = "MMAP",
             args = longArrayOf(0, 4096, 7, 34, -1, 0),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.Mmap)
         val mmapEvent = event as TraceEvent.Mmap
@@ -95,7 +94,7 @@ class ProfilerReflectionTest2 {
             syscallName = "MMAP",
             args = longArrayOf(0, 4096, 7, 34, -1, 0),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())
@@ -108,7 +107,7 @@ class ProfilerReflectionTest2 {
             syscallName = "SOCKET",
             args = longArrayOf(2, 1, 0),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.Socket)
         val socketEvent = event as TraceEvent.Socket
@@ -120,7 +119,7 @@ class ProfilerReflectionTest2 {
             syscallName = "SOCKET",
             args = longArrayOf(2, 1, 0),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())
@@ -133,7 +132,7 @@ class ProfilerReflectionTest2 {
             syscallName = "MKDIR",
             args = longArrayOf(),
             paths = listOf("/tmp/newdir"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.FsMutation)
         val fsEvent = event as TraceEvent.FsMutation
@@ -145,7 +144,7 @@ class ProfilerReflectionTest2 {
             syscallName = "MKDIR",
             args = longArrayOf(),
             paths = listOf("/tmp/newdir"),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())
@@ -158,7 +157,7 @@ class ProfilerReflectionTest2 {
             syscallName = "UNKNOWN",
             args = longArrayOf(),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertTrue(event is TraceEvent.Generic)
         val genericEvent = event as TraceEvent.Generic
@@ -169,7 +168,7 @@ class ProfilerReflectionTest2 {
             syscallName = "UNKNOWN",
             args = longArrayOf(),
             paths = emptyList(),
-            stackTrace = null
+            stackTrace = null,
         )
         assertEquals(event, event2)
         assertEquals(event.hashCode(), event2.hashCode())

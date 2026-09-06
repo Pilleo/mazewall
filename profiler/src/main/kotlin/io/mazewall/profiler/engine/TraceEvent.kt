@@ -267,7 +267,13 @@ public sealed class TraceEvent {
             }
         }
 
-        private fun createOpenEvent(tid: Tid, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
+        private fun createOpenEvent(
+            tid: Tid,
+            syscallName: String,
+            args: LongArray,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
             return if (paths.isNotEmpty()) {
                 val flags = when (syscallName) {
                     "OPEN" -> if (args.size > INDEX_OPEN_FLAGS) args[INDEX_OPEN_FLAGS] else 0L
@@ -281,12 +287,25 @@ public sealed class TraceEvent {
             }
         }
 
-        private fun createExecEvent(tid: Tid, syscallName: String, args: LongArray, paths: List<String>, stackTrace: List<String>?): TraceEvent {
-            return if (paths.isNotEmpty()) Exec(tid, syscallName, paths[0], stackTrace)
-            else Generic(tid, syscallName, args.toList(), paths, stackTrace)
+        private fun createExecEvent(
+            tid: Tid,
+            syscallName: String,
+            args: LongArray,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (paths.isNotEmpty()) {
+                Exec(tid, syscallName, paths[0], stackTrace)
+            } else {
+                Generic(tid, syscallName, args.toList(), paths, stackTrace)
+            }
         }
 
-        private fun createMmapEvent(tid: Tid, args: LongArray, stackTrace: List<String>?): TraceEvent {
+        private fun createMmapEvent(
+            tid: Tid,
+            args: LongArray,
+            stackTrace: List<String>?,
+        ): TraceEvent {
             return if (args.size >= MIN_MMAP_ARGS) {
                 Mmap(tid, args[INDEX_ADDR], args[INDEX_LEN], args[INDEX_PROT].toInt(), args[INDEX_FLAGS].toInt(), args[INDEX_FD].toInt(), args[INDEX_OFFSET], stackTrace)
             } else {
@@ -294,7 +313,11 @@ public sealed class TraceEvent {
             }
         }
 
-        private fun createSocketEvent(tid: Tid, args: LongArray, stackTrace: List<String>?): TraceEvent {
+        private fun createSocketEvent(
+            tid: Tid,
+            args: LongArray,
+            stackTrace: List<String>?,
+        ): TraceEvent {
             return if (args.size >= MIN_SOCKET_ARGS) {
                 Socket(tid, args[INDEX_DOMAIN].toInt(), args[INDEX_TYPE].toInt(), args[INDEX_PROTOCOL].toInt(), stackTrace)
             } else {
@@ -302,9 +325,17 @@ public sealed class TraceEvent {
             }
         }
 
-        private fun createFsMutationEvent(tid: Tid, syscallName: String, paths: List<String>, stackTrace: List<String>?): TraceEvent {
-            return if (paths.isNotEmpty()) FsMutation(tid, syscallName, paths, stackTrace)
-            else Generic(tid, syscallName, emptyList(), paths, stackTrace)
+        private fun createFsMutationEvent(
+            tid: Tid,
+            syscallName: String,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (paths.isNotEmpty()) {
+                FsMutation(tid, syscallName, paths, stackTrace)
+            } else {
+                Generic(tid, syscallName, emptyList(), paths, stackTrace)
+            }
         }
     }
 }

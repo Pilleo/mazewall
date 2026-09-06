@@ -20,14 +20,18 @@ internal object MutationTrapAudit {
      *         ERRNO-class verdict (i.e. they will never reach USER_NOTIF). Unmapped NRs
      *         (`-1`, e.g. CREAT on aarch64) are excluded — there is nothing to trap.
      */
-    fun untrapped(program: List<BpfInstruction>, arch: Arch): List<String> =
+    fun untrapped(
+        program: List<BpfInstruction>,
+        arch: Arch,
+    ): List<String> =
         MUTATION_SYSCALLS.mapNotNull { sys ->
             val nr = sys.numberFor(arch)
             if (nr < 0) return@mapNotNull null
             val action = BpfSimulator.simulate(program, nr, arch)
             // Trapped = kernel hands the decision to userspace (ERRNO-class in enforce mode,
             // USER_NOTIF in profiling mode). Plain ALLOW means never observed.
-            val trapped = action != null && (
+            val trapped = action != null &&
+                (
                 (action ushr 16) == (NativeConstants.SECCOMP_RET_ERRNO ushr 16) ||
                     action == NativeConstants.SECCOMP_RET_USER_NOTIF
                 )
