@@ -85,6 +85,26 @@ internal class UnixListenDaemonMachineTest {
                 ),
             ),
             TransitionTestCase(
+                name = "accept loop finished from listening falls back to the state server fd",
+                initialState = listening,
+                event = UnixListenDaemonEvent.AcceptLoopFinished(),
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
+                effectValidator = { effects ->
+                    assertEquals(server, effects.filterIsInstance<UnixListenDaemonEffect.CloseServer>().single().serverFd)
+                },
+            ),
+            TransitionTestCase(
+                name = "accept loop finished from active falls back to the state server fd",
+                initialState = active,
+                event = UnixListenDaemonEvent.AcceptLoopFinished(),
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
+                effectValidator = { effects ->
+                    assertEquals(server, effects.filterIsInstance<UnixListenDaemonEffect.CloseServer>().single().serverFd)
+                },
+            ),
+            TransitionTestCase(
                 name = "terminated ignores bind",
                 initialState = UnixListenDaemonState.Terminated,
                 event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
@@ -112,6 +132,65 @@ internal class UnixListenDaemonMachineTest {
                 expectedState = UnixListenDaemonState.ShuttingDown,
                 expectedEffectTypes = listOf(UnixListenDaemonEffect.LogShutdown::class),
             ),
+            TransitionTestCase(
+                name = "uninitialized accept loop completion terminates without a closeable fd",
+                initialState = UnixListenDaemonState.Uninitialized,
+                event = UnixListenDaemonEvent.AcceptLoopFinished(),
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(
+                    UnixListenDaemonEffect.ClearConnectionTables::class,
+                    UnixListenDaemonEffect.StopConnectionWorkers::class,
+                ),
+            ),
+            TransitionTestCase(
+                name = "listening shutdown request becomes shutting down",
+                initialState = listening,
+                event = UnixListenDaemonEvent.ShutdownRequested("before-ready"),
+                expectedState = UnixListenDaemonState.ShuttingDown,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.LogShutdown::class),
+            ),
+            TransitionTestCase(
+                name = "listening ignores a duplicate bind",
+                initialState = listening,
+                event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
+                expectedState = listening,
+            ),
+            TransitionTestCase(
+                name = "active ignores a duplicate ready announcement",
+                initialState = active,
+                event = UnixListenDaemonEvent.ReadyAnnounced,
+                expectedState = active,
+            ),
+            TransitionTestCase(
+                name = "active ignores a duplicate bind",
+                initialState = active,
+                event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
+                expectedState = active,
+            ),
+            TransitionTestCase(
+                name = "shutting down ignores a ready announcement",
+                initialState = UnixListenDaemonState.ShuttingDown,
+                event = UnixListenDaemonEvent.ReadyAnnounced,
+                expectedState = UnixListenDaemonState.ShuttingDown,
+            ),
+            TransitionTestCase(
+                name = "shutting down ignores a duplicate bind",
+                initialState = UnixListenDaemonState.ShuttingDown,
+                event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
+                expectedState = UnixListenDaemonState.ShuttingDown,
+            ),
+            TransitionTestCase(
+                name = "terminated ignores shutdown requests",
+                initialState = UnixListenDaemonState.Terminated,
+                event = UnixListenDaemonEvent.ShutdownRequested("late"),
+                expectedState = UnixListenDaemonState.Terminated,
+            ),
+            TransitionTestCase(
+                name = "terminated ignores accept-loop completion",
+                initialState = UnixListenDaemonState.Terminated,
+                event = UnixListenDaemonEvent.AcceptLoopFinished(server),
+                expectedState = UnixListenDaemonState.Terminated,
+            ),
         )
     }
 
@@ -130,46 +209,6 @@ internal class UnixListenDaemonMachineTest {
             assertTrue(t.effects.isEmpty(), "Expected no effects but got ${t.effects}")
         }
         testCase.effectValidator(t.effects)
-    }
-
-    @Test
-    fun `compile-time exhaustive coverage of state and event variants`() {
-        val states = listOf(
-            UnixListenDaemonState.Uninitialized,
-            listening,
-            active,
-            UnixListenDaemonState.ShuttingDown,
-            UnixListenDaemonState.Terminated,
-        )
-        val events = listOf(
-            UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
-            UnixListenDaemonEvent.ReadyAnnounced,
-            UnixListenDaemonEvent.ShutdownRequested("check"),
-            UnixListenDaemonEvent.AcceptLoopFinished(server),
-        )
-
-        for (state in states) {
-            // Compile-time exhaustive branch check
-            when (state) {
-                is UnixListenDaemonState.Uninitialized -> Unit
-                is UnixListenDaemonState.Listening -> Unit
-                is UnixListenDaemonState.Active -> Unit
-                is UnixListenDaemonState.ShuttingDown -> Unit
-                is UnixListenDaemonState.Terminated -> Unit
-            }
-            for (event in events) {
-                // Compile-time exhaustive event check
-                when (event) {
-                    is UnixListenDaemonEvent.Bound -> Unit
-                    is UnixListenDaemonEvent.ReadyAnnounced -> Unit
-                    is UnixListenDaemonEvent.ShutdownRequested -> Unit
-                    is UnixListenDaemonEvent.AcceptLoopFinished -> Unit
-                }
-                val transition = UnixListenDaemonMachine.evaluate(state, event)
-                // Invariant: evaluate never returns null state
-                assertEquals(false, transition.state == null)
-            }
-        }
     }
 
     @Test

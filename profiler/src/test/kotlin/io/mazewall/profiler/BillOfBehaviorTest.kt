@@ -4,6 +4,7 @@ import io.mazewall.core.Pid
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -11,9 +12,87 @@ import java.nio.file.Paths
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class BillOfBehaviorTest {
+    @Test
+    fun `stack trace JSON preserves syscall and frame identity`() {
+        val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
+        val stack = arrayOf(StackTraceElement("Class", "method", "File.kt", 1))
+
+        val json = BillOfBehavior(stackProfile = mapOf(event to listOf(stack))).toStackTracesJson()
+
+        assertTrue(json.contains("OPEN"))
+        assertTrue(json.contains("Class"))
+    }
+
+    @Test
+    fun `baseline path profile removes only covered path capabilities`() {
+        val behavior = BillOfBehavior(
+            opens = setOf("/tmp/legit", "/etc/passwd"),
+            fsWritePaths = setOf("/tmp/write", "/var/log/syslog"),
+            execs = setOf("/bin/ls", "/usr/bin/evil"),
+        )
+
+        val filtered = behavior.filterPaths(
+            BaselinePathProfile(
+                exactPaths = setOf("/etc/passwd"),
+                pathPrefixes = setOf("/var/log", "/usr/bin"),
+            ),
+        )
+
+        assertEquals(setOf("/tmp/legit"), filtered.opens)
+        assertEquals(setOf("/tmp/write"), filtered.fsWritePaths)
+        assertEquals(setOf("/bin/ls"), filtered.execs)
+    }
+
+    @Test
+    fun `unknown syscall names are ignored while decoding persisted behavior`() {
+        val behavior = BillOfBehavior.fromJson(
+            """
+            {
+                "opens": [],
+                "fsWritePaths": [],
+                "syscalls": ["NON_EXISTENT_SYSCALL"],
+                "execs": [],
+                "stackProfile": []
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(behavior.syscalls.isEmpty())
+    }
+
+    @Test
+    fun `unenforceable io uring observation requires explicit incomplete-policy opt in`() {
+        val observations = listOf(
+            ProfileObservation.IoUring(
+                ObservationCorrelation(1, Tid(1)),
+                ObservationSource.USER_NOTIF,
+                "IORING_OP_CONNECT",
+                listOf("/tmp/socket"),
+            ),
+        )
+        val behavior = BobCompiler.compileObservations(observations)
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "test",
+            processWide = false,
+            observations = observations,
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+
+        assertTrue(behavior.opens.isEmpty())
+        assertTrue(behavior.fsWritePaths.isEmpty())
+        assertFalse(coverage.complete)
+        assertFailsWith<IncompleteProfileException> { behavior.toPolicy(coverage = coverage) }
+        assertNotNull(behavior.toPolicy(coverage = coverage, allowIncomplete = true))
+    }
+
     @Test
     fun `test plus operator merges stack traces without data loss`() {
         val event = TraceEvent(0, "OPEN", longArrayOf(1), listOf("/test"))
@@ -208,6 +287,15 @@ class BillOfBehaviorTest {
         assertTrue(parsed.connects.contains(NetworkEndpoint("2001:db8::1", 8080)))
         assertTrue(parsed.connects.contains(NetworkEndpoint("127.0.0.1", null)))
         assertTrue(parsed.connects.contains(NetworkEndpoint("127.0.0.1", 443)))
+    }
+
+    @Test
+    fun `endpoint parser preserves an empty bracket literal instead of inventing an empty host`() {
+        val original = BillOfBehavior(connects = setOf(NetworkEndpoint("[]", null)))
+
+        val parsed = BillOfBehavior.fromJson(original.toJson())
+
+        assertEquals(setOf(NetworkEndpoint("[]", null)), parsed.connects)
     }
 
     @Test

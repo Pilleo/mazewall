@@ -6,9 +6,14 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 
 class SbobParserTest {
     @Test
@@ -143,6 +148,56 @@ class SbobParserTest {
         val json = "{\"syscalls\": [\"INVALID_SYSCALL\", \"OPEN\"]}"
         val policy = SbobParser.parseJsonToPolicy(json, Policy.PURE_COMPUTE_UNSAFE)
         assertTrue(policy.isSyscallAllowed(Syscall.OPEN))
+    }
+
+    @Test
+    fun `SBoB removes an observed syscall from an allow-by-default blacklist`() {
+        val blacklist = Policy
+            .builder()
+            .defaultAction(SeccompAction.ACT_ALLOW)
+            .block(Syscall.EXECVE)
+            .build()
+
+        val policy = SbobParser.parseJsonToPolicy("""{"syscalls": ["execve", "unknown_syscall"]}""", blacklist)
+
+        assertFalse(policy.syscallActions.containsKey(Syscall.EXECVE))
+    }
+
+    @ParameterizedTest(name = "malformed SBoB variant {index} is rejected")
+    @ValueSource(
+        strings = [
+            """{"key": "val""",
+            """{"key": ["val"]""",
+            """{"key" ["val"]}""",
+            """{"key": "val"} junk""",
+            """{"key": "val", , "key2": "val2"}""",
+        ],
+    )
+    fun `malformed SBoB JSON is rejected`(json: String) {
+        assertFails { SbobParser.parseJsonToPolicy(json) }
+    }
+
+    @Test
+    fun `relative SBoB paths require an explicit working directory and resolve beneath it`() {
+        assertFailsWith<IllegalArgumentException> {
+            SbobParser.parseJsonToPolicy("""{"opens": ["config/settings.json"]}""")
+        }
+
+        val policy = SbobParser.parseJsonToPolicy(
+            """{"opens": ["config/settings.json"]}""",
+            baseCwd = Path.of("/opt/app"),
+        )
+
+        assertTrue(policy.allowedFsReadPaths.any { it.value == "/opt/app/config/settings.json" })
+    }
+
+    @Test
+    fun `SBoB normalizes paths before pruning covered descendants`() {
+        val policy = SbobParser.parseJsonToPolicy(
+            """{"opens": ["/etc", "/etc/passwd", "/var/log", "/var/log/syslog", "/tmp/../tmp/foo"]}""",
+        )
+
+        assertEquals(setOf("/etc", "/var/log", "/tmp/foo"), policy.allowedFsReadPaths.map { it.value }.toSet())
     }
 
     @Test

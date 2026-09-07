@@ -12,61 +12,10 @@ import org.junit.jupiter.api.extension.ExtendWith
 import kotlin.test.*
 
 @ExtendWith(ForeignFdGuard::class)
-class LinuxNativeCoverageTest {
+class LinuxNativeDelegationTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-    }
-
-    @Test
-    fun `test data class methods for SyscallResult`() {
-        val res1: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100L)
-        val res2: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100L)
-        val res3: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, 200L)
-
-        assertEquals(res1, res2)
-        assertNotEquals<LinuxNative.SyscallResult<*, *>>(res1, res3)
-        assertEquals(res1.hashCode(), res2.hashCode())
-        assertNotNull(res1.toString())
-        assertEquals(100L, (res1 as LinuxNative.SyscallResult.Success).value)
-        assertEquals(1, (res3 as LinuxNative.SyscallResult.Error).errno)
-        assertEquals(200L, res3.rawValue)
-    }
-
-    @Test
-    fun `test FileDescriptor methods`() {
-        val fd1 = FileDescriptor.generic(10)
-        val fd2 = FileDescriptor.generic(10)
-        val fd3 = FileDescriptor.generic(-1)
-
-        assertEquals(fd1, fd2)
-        assertNotEquals(fd1, fd3)
-        assertTrue(fd1.isValid)
-        assertTrue(fd3.isInvalid)
-        assertEquals("fd(10)", fd1.toString())
-        assertEquals("fd(-1, closed/invalid)", fd3.toString())
-    }
-
-    @Test
-    fun `test data class methods for BpfInstruction`() {
-        val f1 = BpfInstruction.Jmp(1, 2, 3, 4)
-        val f2 = BpfInstruction.Jmp(1, 2, 3, 4)
-        val f3 = BpfInstruction.Jmp(1, 0, 0, 0)
-
-        assertEquals(f1, f2)
-        assertNotEquals(f1, f3)
-        assertEquals(f1.hashCode(), f2.hashCode())
-        assertNotNull(f1.toString())
-        assertEquals(1, f1.code.toInt())
-        assertEquals(2, f1.jt.toInt())
-        assertEquals(3, f1.jf.toInt())
-        assertEquals(4, f1.k)
-
-        val l1 = BpfInstruction.Ld(0x20, 0x1234)
-        assertEquals(0x20.toShort(), l1.code)
-        assertEquals(0, l1.jt.toInt())
-        assertEquals(0, l1.jf.toInt())
-        assertEquals(0x1234, l1.k)
     }
 
     @Test
@@ -83,12 +32,23 @@ class LinuxNativeCoverageTest {
         mock.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(444)
         LinuxNative.setEngine(mock)
 
-        val res = LinuxNative.raw.syscall4(1, io.mazewall.core.NativeArg.IntArg(2), io.mazewall.core.NativeArg.IntArg(3), io.mazewall.core.NativeArg.IntArg(4), io.mazewall.core.NativeArg.IntArg(5))
+        val res = LinuxNative.raw.syscall4(
+            1,
+            io.mazewall.core.NativeArg
+            .IntArg(2),
+                io.mazewall.core.NativeArg
+                .IntArg(3),
+                    io.mazewall.core.NativeArg
+                    .IntArg(4),
+                        io.mazewall.core.NativeArg
+                        .IntArg(5),
+        )
         assertEquals(444L, res.getOrThrow("test"))
     }
 
     @Test
-    fun `raw syscall delegates null and memory arguments to configured engine`() = nativeScope {
+    fun `raw syscall delegates null and memory arguments to configured engine`() =
+        nativeScope {
         val observed = mutableListOf<io.mazewall.core.NativeArg>()
         val mock = MockNativeEngine().apply {
             onSyscall = { _, a1, a2, _, _, _, _ ->
@@ -103,22 +63,31 @@ class LinuxNativeCoverageTest {
         val result = LinuxNative.raw.syscall(
             123,
             io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg.MemoryArg(segment),
-            io.mazewall.core.NativeArg.IntArg(1),
-            io.mazewall.core.NativeArg.IntArg(2),
-            io.mazewall.core.NativeArg.IntArg(3),
-            io.mazewall.core.NativeArg.IntArg(4),
+            io.mazewall.core.NativeArg
+                .MemoryArg(segment),
+            io.mazewall.core.NativeArg
+                .IntArg(1),
+            io.mazewall.core.NativeArg
+                .IntArg(2),
+            io.mazewall.core.NativeArg
+                .IntArg(3),
+            io.mazewall.core.NativeArg
+                .IntArg(4),
         )
 
         assertEquals(17L, result.getOrThrow("delegated syscall"))
         assertEquals(io.mazewall.core.NativeArg.NullArg, observed[0])
-        assertEquals(io.mazewall.core.NativeArg.MemoryArg(segment), observed[1])
+        assertEquals(
+            io.mazewall.core.NativeArg
+            .MemoryArg(segment),
+                observed[1],
+        )
     }
-
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `test newSockFProg manual packing`() = nativeScope {
+    fun `test newSockFProg manual packing`() =
+        nativeScope {
         val filters = listOf(
             BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
             BpfInstruction.Ld(0x05, 0x00000001),
@@ -136,9 +105,9 @@ class LinuxNativeCoverageTest {
         assertEquals(0x12345678, f1.getK())
     }
 
-
     @Test
-    fun `test missing syscall wrappers in LinuxNative`() = nativeScope {
+    fun `test missing syscall wrappers in LinuxNative`() =
+        nativeScope {
         val mock = MockNativeEngine()
         LinuxNative.setEngine(mock)
 

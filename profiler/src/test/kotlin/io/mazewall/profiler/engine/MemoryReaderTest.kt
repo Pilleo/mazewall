@@ -6,6 +6,7 @@ import io.mazewall.MockNativeFileSystem
 import io.mazewall.core.Tid
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.testing.withNativeEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
@@ -49,15 +50,12 @@ class MemoryReaderTest {
             override val fileSystem = mockFs
         }
 
-        LinuxNative.setEngine(mockEngine)
-        try {
+        withNativeEngine(mockEngine) {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 val result = with(arena) { reader.resolveLink(tid, link) }
                 assertEquals(expectedPath, result)
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -87,16 +85,13 @@ class MemoryReaderTest {
             override val memory = mockMem
         }
 
-        LinuxNative.setEngine(mockEngine)
-        try {
+        withNativeEngine(mockEngine) {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val reader = RealMemoryReader
                 org.junit.jupiter.api.assertThrows<ContainmentViolationException> {
                     with(arena) { reader.readStringFromProcess(tid, remoteAddr, mockData.size) }
                 }
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 }

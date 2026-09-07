@@ -5,6 +5,10 @@
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260907-065311-extract-install-self-verification-planning-from-native-execu](code_health/issue-20260907-065311-extract-install-self-verification-planning-from-native-execu.md) | Extract install self-verification planning from native execution | high | enforcer |
+| [issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder](code_health/issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder.md) | Extract Tier-E BPF program-load request encoder | high | profiler |
+| [issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher](code_health/issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher.md) | Extract immutable syscall-number resolver from dispatcher | high | platform |
+| [issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage](testing/issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage.md) | Move platform-owned unit tests into platform coverage | high | platform |
 | [issue-20260906-011942-align-orchestrator-backlog-validation-with-active-tier-e-met](code_health/issue-20260906-011942-align-orchestrator-backlog-validation-with-active-tier-e-met.md) | Align orchestrator backlog validation with active Tier-E metadata | high | orchestrator |
 | [MAZ-19-productivity-review](MAZ-19-productivity-review.md) | MAZ-19: Productivity Review for MAZ-18 | high | paperclip-management |
 | [issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa](implementation/issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa.md) | Implement blast-radius memory injection linking Codanna impact symbols to agentmemory | high | testing |

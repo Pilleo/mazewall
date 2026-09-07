@@ -45,25 +45,6 @@ val compileVulnerableRop =
         commandLine("bash", "$rootDir/scripts/run_cet_demo.sh")
     }
 
-val integrationTestJvmArgs =
-    listOf(
-        "--enable-native-access=ALL-UNNAMED",
-        "-Xmx256m",
-        "-Xms128m",
-        "-Dfile.encoding=UTF-8",
-        "-Dsun.jnu.encoding=UTF-8",
-    ) +
-        if (System.getProperty("debug.disableSelfVerify") == "true") {
-            listOf("-Ddebug.disableSelfVerify=true")
-        } else {
-            emptyList()
-        } +
-        if (System.getProperty("debug.enableSelfVerify") == "true") {
-            listOf("-Dio.mazewall.selfVerify=true")
-        } else {
-            emptyList()
-        }
-
 // issue-20260823-172001: CLI --tests filters that match only 'needs-fresh-jvm' classes fail on
 // :enforcer:integrationTest with "No tests found", silently hiding the correct task. Emit a
 // routing hint at CONFIGURATION time (Gradle 9 does not expose CLI patterns to Test tasks).
@@ -114,6 +95,33 @@ fun findMatchingTaggedClasses(
     return hits.distinct()
 }
 
+/**
+ * Gradle's tag filter runs after class discovery. With forkEvery = 1 that
+ * otherwise starts a fresh JVM for every untagged integration class. Select
+ * tagged classes before forking, then let JUnit retain method-level tagging.
+ */
+fun freshJvmClassNames(): List<String> =
+    sourceSets["integrationTest"]
+        .output.classesDirs
+        .flatMap { root ->
+            if (!root.isDirectory) return@flatMap emptyList()
+            root
+                .walkTopDown()
+                .filter { it.isFile && it.extension == "class" }
+                .filter { String(it.readBytes(), Charsets.ISO_8859_1).contains("NeedsFreshJvm") }
+                .map {
+                    it
+                        .relativeTo(root)
+                        .invariantSeparatorsPath
+                        .removeSuffix(".class")
+                        .replace('/', '.')
+                }.filterNot { '$' in it }
+                // The annotation definition contains its own descriptor. It is
+                // not a test class and must not create an empty fresh-JVM fork.
+                .filterNot { it.endsWith(".NeedsFreshJvm") }
+                .toList()
+        }.distinct()
+
 if (cliTestPatterns.isNotEmpty()) {
     val freshOnly = findMatchingTaggedClasses(cliTestPatterns, wantTag = true)
     val plain = findMatchingTaggedClasses(cliTestPatterns, wantTag = false)
@@ -125,14 +133,15 @@ if (cliTestPatterns.isNotEmpty()) {
     }
 }
 
-fun Test.configureIntegrationHarness() {
+fun Test.configureEnforcerIntegrationPrerequisites() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
-    jvmArgs(integrationTestJvmArgs)
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    testLogging {
-        showStandardStreams = true
+    if (System.getProperty("debug.disableSelfVerify") == "true") {
+        jvmArgs("-Ddebug.disableSelfVerify=true")
+    }
+    if (System.getProperty("debug.enableSelfVerify") == "true") {
+        jvmArgs("-Dio.mazewall.selfVerify=true")
     }
     dependsOn(compileVulnerableRop)
     // issue-20260823-172001: routing hints are emitted at CONFIGURATION time (see
@@ -141,7 +150,7 @@ fun Test.configureIntegrationHarness() {
 
 val integrationTest =
     tasks.register<Test>("integrationTest") {
-        configureIntegrationHarness()
+        configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
@@ -152,12 +161,18 @@ val integrationTest =
 
 val integrationTestFreshJvm =
     tasks.register<Test>("integrationTestFreshJvm") {
-        configureIntegrationHarness()
+        configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
         useJUnitPlatform {
             includeTags("needs-fresh-jvm")
         }
         forkEvery = 1
+        doFirst {
+            filter {
+                isFailOnNoMatchingTests = false
+                freshJvmClassNames().forEach(::includeTestsMatching)
+            }
+        }
     }
 
 tasks.check {
@@ -165,9 +180,6 @@ tasks.check {
 }
 
 tasks.test {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
 val plantumlConfig by configurations.creating
@@ -256,6 +268,12 @@ pitest {
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
+
+    // These are host-unit floors for the deterministic security-policy slice above.
+    // They are intentionally not a substitute for kernelCheck's native contracts.
+    coverageThreshold.set(89)
+    mutationThreshold.set(61)
+    testStrengthThreshold.set(76)
 }
 
 classDiagrams {

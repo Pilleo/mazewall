@@ -102,29 +102,37 @@ val integrationTestRuntimeOnly by configurations.getting {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
-val integrationTestJvmArgs =
-    listOf(
-        "--enable-native-access=ALL-UNNAMED",
-        "-Xmx256m",
-        "-Xms128m",
-        "-Dfile.encoding=UTF-8",
-        "-Dsun.jnu.encoding=UTF-8",
-    )
-
-fun Test.configureIntegrationHarness() {
+fun Test.configureIntegrationSourceSet() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
-    jvmArgs(integrationTestJvmArgs)
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    testLogging {
-        showStandardStreams = true
-    }
 }
+
+fun freshJvmClassNames(): List<String> =
+    sourceSets["integrationTest"]
+        .output.classesDirs
+        .flatMap { root ->
+            if (!root.isDirectory) return@flatMap emptyList()
+            root
+                .walkTopDown()
+                .filter { it.isFile && it.extension == "class" }
+                .filter { String(it.readBytes(), Charsets.ISO_8859_1).contains("NeedsFreshJvm") }
+                .map {
+                    it
+                        .relativeTo(root)
+                        .invariantSeparatorsPath
+                        .removeSuffix(".class")
+                        .replace('/', '.')
+                }.filterNot { '$' in it }
+                // The annotation definition contains its own descriptor. It is
+                // not a test class and must not create an empty fresh-JVM fork.
+                .filterNot { it.endsWith(".NeedsFreshJvm") }
+                .toList()
+        }.distinct()
 
 val integrationTest =
     tasks.register<Test>("integrationTest") {
-        configureIntegrationHarness()
+        configureIntegrationSourceSet()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
@@ -135,12 +143,18 @@ val integrationTest =
 
 val integrationTestFreshJvm =
     tasks.register<Test>("integrationTestFreshJvm") {
-        configureIntegrationHarness()
+        configureIntegrationSourceSet()
         description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
         useJUnitPlatform {
             includeTags("needs-fresh-jvm")
         }
         forkEvery = 1
+        doFirst {
+            filter {
+                isFailOnNoMatchingTests = false
+                freshJvmClassNames().forEach(::includeTestsMatching)
+            }
+        }
     }
 
 tasks.check {
@@ -148,9 +162,6 @@ tasks.check {
 }
 
 tasks.test {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
 val plantumlConfig by configurations.creating
@@ -189,6 +200,7 @@ pitest {
             "io.mazewall.profiler.engine.ProfilerSessionMachine*",
             "io.mazewall.profiler.ProfilingCoverage*",
             "io.mazewall.profiler.BillOfBehavior*",
+            "io.mazewall.profiler.tierE.daemon.ControlProtocol*",
         ),
     )
 
@@ -207,7 +219,9 @@ pitest {
             "io.mazewall.profiler.engine.SyscallPathResolverTest",
             "io.mazewall.profiler.engine.ProfilerSessionMachineTest",
             "io.mazewall.profiler.ProfilingCoverageTest",
+            "io.mazewall.profiler.ProfilerSessionApiTest",
             "io.mazewall.profiler.BillOfBehaviorTest",
+            "io.mazewall.profiler.tierE.daemon.ControlProtocolTest",
         ),
     )
 
@@ -215,6 +229,11 @@ pitest {
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
+
+    // Host-unit floor for profile-evidence and policy-compilation behavior.
+    coverageThreshold.set(93)
+    mutationThreshold.set(65)
+    testStrengthThreshold.set(75)
 }
 
 classDiagrams {

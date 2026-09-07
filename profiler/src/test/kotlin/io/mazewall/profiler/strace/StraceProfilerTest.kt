@@ -1,16 +1,9 @@
 package io.mazewall.profiler.strace
 
 import io.mazewall.Policy
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 
 class StraceProfilerTest {
-    @Test
-    fun `test coverage for StraceProfiler instantiation`() {
-        val clazz = StraceProfiler::class.java
-        assertNotNull(clazz)
-    }
-
     @Test
     fun `test that StraceProfiler and Profiler contain TOCTOU KDoc documentation`() {
         var rootDir = java.io.File(".").absoluteFile

@@ -6,12 +6,17 @@ import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import java.util.concurrent.Executors
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
+import java.util.stream.Stream
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class ContainedExecutorsCoverageTest {
+class ContainedExecutorsStateTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()
@@ -41,29 +46,35 @@ class ContainedExecutorsCoverageTest {
         }
     }
 
-    @Test
-    fun testHandleUnsupportedPlatformBehaviors() {
+    @ParameterizedTest(name = "os={0}, seccomp={1}, fallback={2} -> reject={3}")
+    @MethodSource("unsupportedPlatformFallbacks")
+    fun `unsupported platform fallback is fail-closed unless bypass is explicitly selected`(
+        osName: String,
+        seccompSupported: Boolean,
+        fallback: String,
+        shouldReject: Boolean,
+    ) {
         val mockProvider = object : PlatformProvider by RealPlatformProvider {
-            override fun getOsName(): String = "Linux"
+            override fun getOsName(): String = osName
 
-            override fun hasKernelSeccompSupport(): Boolean = false
+            override fun hasKernelSeccompSupport(): Boolean = seccompSupported
 
             override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
                 io.mazewall.LinuxNative.SyscallResult
                 .Error(22, -1)
         }
         Platform.setProvider(mockProvider)
+        System.setProperty("io.mazewall.fallback", fallback)
 
-        System.setProperty("io.mazewall.fallback", "FAIL")
-        assertFailsWith<UnsupportedOperationException> {
+        val failure = runCatching {
             ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+        }.exceptionOrNull()
+
+        if (shouldReject) {
+            assertIs<UnsupportedOperationException>(failure)
+        } else {
+            assertNull(failure)
         }
-
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-
-        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
     }
 
     @Test
@@ -103,25 +114,6 @@ class ContainedExecutorsCoverageTest {
 
         assertEquals(false, receipt.installed)
         assertEquals(true, receipt.landlockApplied)
-    }
-
-    @Test
-    fun testNonLinuxFallbackBehaviors() {
-        val mockProvider = object : PlatformProvider by RealPlatformProvider {
-            override fun getOsName(): String = "macOS"
-        }
-        Platform.setProvider(mockProvider)
-
-        System.setProperty("io.mazewall.fallback", "FAIL")
-        assertFailsWith<UnsupportedOperationException> {
-            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-        }
-
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
-
-        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-        ContainedExecutors.installOnCurrentThread(Policy.builder().build())
     }
 
     @Test
@@ -180,5 +172,18 @@ class ContainedExecutorsCoverageTest {
         val policyWithoutLandlock = Policy.builder().build()
         val receiptClean = ContainedExecutors.installOnCurrentThread(policyWithoutLandlock.definition)
         assertEquals(false, receiptClean.landlockApplied, "Policy without Landlock on clean state must report landlockApplied=false")
+    }
+
+    companion object {
+        @JvmStatic
+        fun unsupportedPlatformFallbacks(): Stream<Arguments> =
+            Stream.of(
+            Arguments.of("Linux", false, "FAIL", true),
+            Arguments.of("Linux", false, "SILENT_BYPASS", false),
+            Arguments.of("Linux", false, "WARN_AND_BYPASS", false),
+            Arguments.of("macOS", false, "FAIL", true),
+            Arguments.of("macOS", false, "SILENT_BYPASS", false),
+            Arguments.of("macOS", false, "WARN_AND_BYPASS", false),
+        )
     }
 }

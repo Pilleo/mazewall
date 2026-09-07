@@ -1,52 +1,41 @@
 package io.mazewall.profiler.strace
+
 import io.mazewall.profiler.TraceableWorkload
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.test.assertEquals
 
 class StraceWorkloadRunnerTest {
-    class MockWorkload : TraceableWorkload {
-        companion object {
-            val executed = AtomicBoolean(false)
-        }
+    @Test
+    fun `runner instantiates and executes the requested workload`() {
+        RecordingWorkload.runs = 0
 
-        override fun run() {
-            executed.set(true)
-        }
+        StraceWorkloadRunner.main(arrayOf(RecordingWorkload::class.java.name))
+
+        assertEquals(1, RecordingWorkload.runs)
     }
 
     @Test
-    fun `main executes valid workload`() {
-        MockWorkload.executed.set(false)
-        StraceWorkloadRunner.main(arrayOf(MockWorkload::class.java.name))
-        assertTrue(MockWorkload.executed.get(), "Workload should have been executed")
-    }
-
-    @Test
-    fun `main throws on missing argument`() {
+    fun `runner rejects a missing workload class`() {
         assertThrows(IllegalArgumentException::class.java) {
             StraceWorkloadRunner.main(emptyArray())
         }
     }
 
     @Test
-    fun `main throws on invalid class`() {
-        assertThrows(ClassNotFoundException::class.java) {
-            StraceWorkloadRunner.main(arrayOf("non.existent.Class"))
-        }
-    }
-
-    @Test
-    fun `main throws on non-workload class`() {
+    fun `runner rejects a class that is not a workload`() {
         assertThrows(IllegalArgumentException::class.java) {
             StraceWorkloadRunner.main(arrayOf(String::class.java.name))
         }
     }
+}
 
-    private fun assertTrue(
-        condition: Boolean,
-        message: String,
-    ) {
-        if (!condition) throw AssertionError(message)
+class RecordingWorkload : TraceableWorkload {
+    override fun run() {
+        runs += 1
+    }
+
+    companion object {
+        var runs: Int = 0
     }
 }

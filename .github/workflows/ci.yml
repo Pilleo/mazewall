@@ -51,6 +51,10 @@ jobs:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
+            - name: Run Host-Safe Unit Quality Gate
+              # This gate intentionally precedes Podman setup: ordinary CI
+              # runners must be able to prove unit behavior and coverage.
+              run: ./gradlew unitCheck --no-daemon
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -81,7 +85,7 @@ jobs:
                   ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
               if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh :enforcer:pitest -Dpitest.threads=2
+              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Dpitest.threads=2
             - name: Run Vulnerability Exploitation Demo
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh

@@ -6,6 +6,10 @@ import io.mazewall.ffi.memory.openPath
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
+import java.util.stream.Stream
 
 /**
  * All descriptor integers come from real opens this test owns (see
@@ -23,6 +27,18 @@ class FileDescriptorTest {
             }
 
         private fun <T> withArena(block: NativeArena.() -> T): T = NativeArena.ofConfined().use(block)
+
+        @JvmStatic
+        fun descriptorRoles(): Stream<Arguments> =
+            Stream.of(
+                Arguments.of("generic", FileDescriptorRole.Generic),
+                Arguments.of("unix socket", FileDescriptorRole.UnixSocket),
+                Arguments.of("ruleset", FileDescriptorRole.Ruleset),
+                Arguments.of("O_PATH", FileDescriptorRole.OPath),
+                Arguments.of("seccomp notification", FileDescriptorRole.SeccompNotif),
+                Arguments.of("pid", FileDescriptorRole.Pid),
+                Arguments.of("granted", FileDescriptorRole.Granted),
+            )
     }
 
     @Test
@@ -351,19 +367,12 @@ class FileDescriptorTest {
         assertEquals(FileDescriptor::class.java, ctor.parameterTypes.single())
     }
 
-    @Test
-    fun `verify role factories and lifecycle transitions for every role`() =
-        withArena {
-        val cases = listOf(
-            "generic" to FileDescriptorRole.Generic,
-            "unixSocket" to FileDescriptorRole.UnixSocket,
-            "ruleset" to FileDescriptorRole.Ruleset,
-            "oPath" to FileDescriptorRole.OPath,
-            "seccompNotif" to FileDescriptorRole.SeccompNotif,
-            "pid" to FileDescriptorRole.Pid,
-            "granted" to FileDescriptorRole.Granted,
-        )
-        for ((roleName, expectedRole) in cases) {
+    @ParameterizedTest(name = "{0} factory preserves role across close")
+    @MethodSource("descriptorRoles")
+    fun `verify role factory and lifecycle transition`(
+        roleName: String,
+        expectedRole: FileDescriptorRole,
+    ) = withArena {
             val fd = when (expectedRole) {
                 FileDescriptorRole.Generic -> FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
                 FileDescriptorRole.UnixSocket -> FileDescriptor.adopt(realFd(), FileDescriptorRole.UnixSocket)
@@ -383,30 +392,4 @@ class FileDescriptorTest {
             assertTrue(closed.isClosedType(), roleName)
             assertEquals(expectedRole, closed.role, roleName)
         }
-    }
-
-    @Test
-    fun `compile-time exhaustive check on FileDescriptorRole variants`() {
-        val roles: List<FileDescriptorRole> = listOf(
-            FileDescriptorRole.Generic,
-            FileDescriptorRole.Ruleset,
-            FileDescriptorRole.OPath,
-            FileDescriptorRole.SeccompNotif,
-            FileDescriptorRole.UnixSocket,
-            FileDescriptorRole.Pid,
-            FileDescriptorRole.Granted,
-        )
-
-        for (role in roles) {
-            when (role) {
-                is FileDescriptorRole.Generic -> Unit
-                is FileDescriptorRole.Ruleset -> Unit
-                is FileDescriptorRole.OPath -> Unit
-                is FileDescriptorRole.SeccompNotif -> Unit
-                is FileDescriptorRole.UnixSocket -> Unit
-                is FileDescriptorRole.Pid -> Unit
-                is FileDescriptorRole.Granted -> Unit
-            }
-        }
-    }
 }

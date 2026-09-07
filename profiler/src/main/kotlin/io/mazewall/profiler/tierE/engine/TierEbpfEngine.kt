@@ -563,13 +563,7 @@ public class TierEbpfEngine(
         return program
     }
 
-    internal fun pack(i: Insn): Long {
-        val code = i.code.toLong() and 0xff
-        val regs = ((i.src and 0xF).toLong() shl 4) or (i.dst and 0xF).toLong()
-        val off = (i.off.toLong() and 0xFFFF) shl 16
-        val imm = (i.imm.toLong() and 0xFFFFFFFFL) shl 32
-        return code or (regs shl 8) or off or imm
-    }
+    internal fun pack(i: Insn): Long = BpfProgLoadRequestEncoder.pack(i)
 
     // ── bpf(2) wrappers ─────────────────────────────────────────────────────
 
@@ -654,31 +648,12 @@ public class TierEbpfEngine(
         programType: Int,
         programName: String,
     ): Int {
-        val insns = program.map { insn ->
-            if (insn.code == LD_MAP_FD && insn.src == PSEUDO_FD) insn.copy(imm = mapFds[insn.imm]) else insn
-        }
         return Arena.ofConfined().use {
-            val packed = insns.map(::pack)
-            val seg = it.allocate(packed.size * 8L, 8)
-            packed.forEachIndexed { i, v -> seg.set(ValueLayout.JAVA_LONG, i * 8L, v) }
-
-            val verifierLog = it.allocate(64 * 1024L)
-            val attr = it.allocate(BpfProgLoadLayout.SIZE)
-            attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.PROGRAM_TYPE, programType)
-            attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.INSTRUCTION_COUNT, insns.size)
-            attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.INSTRUCTIONS, seg)
-            attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.LICENSE, strSeg(it, "GPL", 4))
-            attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL, 1)
-            attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_SIZE, verifierLog.byteSize().toInt())
-            attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.LOG_BUFFER, verifierLog)
-            require(programName.length < BpfProgLoadLayout.PROGRAM_NAME_SIZE)
-            programName.toByteArray(Charsets.US_ASCII).forEachIndexed { index, byte ->
-                attr.set(ValueLayout.JAVA_BYTE, BpfProgLoadLayout.PROGRAM_NAME + index, byte)
-            }
-            when (val result = bpfResult(BPF_PROG_LOAD, attr, BpfProgLoadLayout.SIZE)) {
+            val request = BpfProgLoadRequestEncoder.encode(it, program, mapFds, programType, programName)
+            when (val result = bpfResult(BPF_PROG_LOAD, request.attr, BpfProgLoadLayout.SIZE)) {
                 is SyscallResult.Success -> result.value.toInt()
                 is SyscallResult.Error -> {
-                    val log = verifierLog.getString(0).trim()
+                    val log = request.verifierLog.getString(0).trim()
                     val diagnostic = if (log.isEmpty()) "no verifier log" else log
                     throw IllegalStateException("BPF_PROG_LOAD failed: $result; verifier: $diagnostic")
                 }

@@ -11,7 +11,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class BpfBuilderCoverageTest {
+class BpfBuilderTest {
     @Test
     fun `jumpIfEqual resolves both forward label offsets`() {
         val builder = BpfProgram
