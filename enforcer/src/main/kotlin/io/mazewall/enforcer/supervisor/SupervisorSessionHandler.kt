@@ -666,40 +666,14 @@ internal class SupervisorSessionHandler(
         req: SupervisedOpen,
         tid: Tid,
     ): Int {
+        val plan = SupervisorOpenPlan.create(req)
         val howSeg = arena.allocate(Layouts.OPEN_HOW_SIZE)
+        howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, plan.flags)
+        howSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, plan.mode)
+        howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, plan.resolve)
+        val pathSeg = arena.allocateFrom(plan.path)
 
-        val flags = when (req) {
-            is SupervisedOpen.Open -> req.flags.value.toLong()
-            is SupervisedOpen.OpenAt -> req.flags.value.toLong()
-            is SupervisedOpen.OpenAt2 ->
-                req.how.flags.value
-                .toLong()
-        }
-        val mode = when (req) {
-            is SupervisedOpen.Open -> req.mode.toLong()
-            is SupervisedOpen.OpenAt -> req.mode.toLong()
-            is SupervisedOpen.OpenAt2 -> req.how.mode
-        }
-        val resolve = when (req) {
-            is SupervisedOpen.OpenAt2 -> req.how.resolve or NativeConstants.RESOLVE_BENEATH.toLong()
-            is SupervisedOpen.Open,
-            is SupervisedOpen.OpenAt,
-            -> 0L
-        }
-
-        howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
-        howSeg.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, mode)
-        howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve)
-
-        val (isAbsolute, traceeDirfd) = when (req) {
-            is SupervisedOpen.Open -> true to TraceeDirFd.CurrentWorkingDirectory
-            is SupervisedOpen.OpenAt -> req.path.startsWith("/") to req.dirfd
-            is SupervisedOpen.OpenAt2 -> req.path.startsWith("/") to req.dirfd
-        }
-
-        val pathSeg = arena.allocateFrom(req.path)
-
-        if (isAbsolute || traceeDirfd == TraceeDirFd.CurrentWorkingDirectory) {
+        if (plan.useCurrentWorkingDirectory) {
             return signedErrno(
                 engine.fileSystem.openat2(
                     FileDescriptor.AT_FDCWD,
@@ -709,7 +683,7 @@ internal class SupervisorSessionHandler(
                 ),
             )
         } else {
-            val importedFd = importTraceeFd(tid, traceeDirfd)
+            val importedFd = importTraceeFd(tid, plan.traceeDirfd)
             if (importedFd < 0) return importedFd
             return SafeLocalFd(importedFd).use { importedSafe ->
                 signedErrno(engine.fileSystem.openat2(importedSafe.handle, pathSeg, howSeg, Layouts.OPEN_HOW_SIZE))
