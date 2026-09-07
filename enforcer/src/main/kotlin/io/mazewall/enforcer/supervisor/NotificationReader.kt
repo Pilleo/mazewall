@@ -32,6 +32,13 @@ internal class NotificationReader(
     private val engine: io.mazewall.NativeEngine,
     private val logger: java.util.logging.Logger,
 ) {
+    private companion object {
+        const val SINGLE_POLL_FD: Long = 1L
+        const val IMMEDIATE_EINTR_RETRY_LIMIT = 1
+        const val YIELD_EINTR_RETRY_LIMIT = 3
+        const val EINTR_SLEEP_MILLIS = 1L
+    }
+
     /**
      * Deadline-bounded poll of [socketFd] for a JVM validation response, with interrupt-aware
      * EINTR backoff. Returns the poll revent count (<= 0 on timeout/failure).
@@ -78,7 +85,7 @@ internal class NotificationReader(
                 logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
                 return 0L
             }
-            when (val result = engine.raw.poll(pollFd, 1L, deadline.remainingMillis())) {
+            when (val result = engine.raw.poll(pollFd, SINGLE_POLL_FD, deadline.remainingMillis())) {
                 is LinuxNative.SyscallResult.Success -> return result.value
                 is LinuxNative.SyscallResult.Error -> {
                     if (result.errno != NativeConstants.EINTR) return 0L
@@ -92,14 +99,14 @@ internal class NotificationReader(
 
     private fun backoffAfterEintr(eintrCount: Int): Boolean =
         when {
-            eintrCount <= 1 -> true
-            eintrCount <= 3 -> {
+            eintrCount <= IMMEDIATE_EINTR_RETRY_LIMIT -> true
+            eintrCount <= YIELD_EINTR_RETRY_LIMIT -> {
                 Thread.yield()
                 true
             }
             else ->
                 try {
-                    Thread.sleep(1)
+                    Thread.sleep(EINTR_SLEEP_MILLIS)
                     true
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
