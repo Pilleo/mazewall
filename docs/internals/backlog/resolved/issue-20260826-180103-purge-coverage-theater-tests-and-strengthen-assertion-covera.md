@@ -1,7 +1,7 @@
 ---
 title: "Purge coverage theater tests and strengthen assertion coverage"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260826-180100"
@@ -50,3 +50,9 @@ Several `*CoverageTest` files serve as coverage theater rather than meaningful b
 
 <!-- id: issue-20260826-180103  file: issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
+
+## Resolution evidence (2026-09-07)
+
+- The listed `*CoverageTest` sources no longer exist. Their behavioral replacements are domain-named (`BpfBuilderTest`, `LinuxNativeDelegationTest`, `LandlockApplyResultTest`, and `SandboxDispatcherCacheTest`) and assert instruction layout, delegation arguments/results, lifecycle transitions, and cache eviction respectively.
+- The named filler files (`BillOfBehaviorDtoCoverageTest`, `SeccompInstallationStateCoverageTest`, `TraceEventCoverageTest`, and `ContainedExecutorsCoverageTest`) are absent from the current test tree.
+- Verified with `./scripts/check_coverage.sh`: enforcer core 82.71% (minimum 80.0%) and profiler 87.09% (minimum 60.0%).
