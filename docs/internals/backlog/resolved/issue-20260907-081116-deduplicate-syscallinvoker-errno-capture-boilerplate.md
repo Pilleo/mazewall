@@ -1,7 +1,7 @@
 ---
 title: "Deduplicate SyscallInvoker errno capture boilerplate"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "platform"
@@ -39,6 +39,11 @@ Errno capture is centralized in intent but duplicated across a ~390-line `Syscal
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `SyscallInvoker` centralizes immediate errno capture in
+`intCall` and `longCall`; the pointer-returning mmap call preserves its required address
+conversion. `gettid` unwraps an errno-aware result rather than capturing and dropping errno.
+`./gradlew :platform:test` passed.
 
 <!-- id: issue-20260907-081116  file: issue-20260907-081116-deduplicate-syscallinvoker-errno-capture-boilerplate.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
