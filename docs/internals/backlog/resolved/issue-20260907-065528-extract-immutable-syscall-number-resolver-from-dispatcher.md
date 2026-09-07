@@ -1,7 +1,7 @@
 ---
 title: "Extract immutable syscall-number resolver from dispatcher"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "platform"
@@ -59,6 +59,12 @@ graph TD
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `SyscallNumberResolver` and its immutable mapper objects
+now own architecture-specific mapping, while `Syscall.numberFor` preserves the public facade and
+unsupported sentinel. Representative mapping/alias tests are in `SyscallNumberResolverTest`.
+The focused test passed; after cleaning filtered-test execution data, `./gradlew :platform:unitCheck`
+also passed.
 
 <!-- id: issue-20260907-065528  file: issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
