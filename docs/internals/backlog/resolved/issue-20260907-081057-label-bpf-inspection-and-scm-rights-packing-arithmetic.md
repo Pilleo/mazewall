@@ -1,7 +1,7 @@
 ---
 title: "Label BPF inspection and SCM_RIGHTS packing arithmetic"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -47,3 +47,10 @@ paperclip_identifier: "MAZ-1184"
 
 <!-- id: issue-20260907-081057  file: issue-20260907-081057-label-bpf-inspection-and-scm-rights-packing-arithmetic.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
+
+## Resolution evidence (2026-09-07)
+
+- `BpfFilter.emitInspections` now labels the accumulator value and branch meaning for each 64-bit high/low-word load and comparison.
+- `UnsafePrctlInspector` names every Linux `prctl` option in its safe allow-list.
+- `SupervisorSocketUtils` already documented the LP64 `CMSG_LEN` and `CMSG_SPACE` arithmetic; no duplicate transport magic remains to remove.
+- Verified: `./gradlew :enforcer:test --tests io.mazewall.seccomp.BpfFilterTest`.

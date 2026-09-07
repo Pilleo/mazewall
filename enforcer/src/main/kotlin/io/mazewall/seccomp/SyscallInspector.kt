@@ -173,9 +173,22 @@ internal class UnsafePrctlInspector : SyscallInspector {
     }
 
     private companion object {
-        // linux/prctl.h: PR_SET_NAME, PR_GET_NAME, PR_GET_SECCOMP, PR_SET_SECCOMP,
-        // PR_SET_NO_NEW_PRIVS, PR_GET_NO_NEW_PRIVS
-        private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39)
+        // linux/prctl.h values are kept named so the BPF allow-list is reviewable.
+        private const val PR_SET_NAME = 15
+        private const val PR_GET_NAME = 16
+        private const val PR_GET_SECCOMP = 21
+        private const val PR_SET_SECCOMP = 22
+        private const val PR_SET_NO_NEW_PRIVS = 38
+        private const val PR_GET_NO_NEW_PRIVS = 39
+
+        private val SAFE_PRCTL_OPTIONS = listOf(
+            PR_SET_NAME,
+            PR_GET_NAME,
+            PR_GET_SECCOMP,
+            PR_SET_SECCOMP,
+            PR_SET_NO_NEW_PRIVS,
+            PR_GET_NO_NEW_PRIVS,
+        )
     }
 }
 

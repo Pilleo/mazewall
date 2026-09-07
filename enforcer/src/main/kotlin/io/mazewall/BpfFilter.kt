@@ -241,10 +241,12 @@ object BpfFilter {
                             val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
                             val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
-                            // 64-bit arg: BPF_LD|BPF_W|BPF_ABS high word, then low word.
+                            // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
                             loadAbsolute(argOffsetHi)
+                            // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
                             jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
                             mark(checkLoLabel)
+                            // A = args[i][31:0]. A match selects the inspection's matched action.
                             loadAbsolute(argOffsetLo)
                             jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
                             mark(nextValLabel)
@@ -278,11 +280,12 @@ object BpfFilter {
                         val denyLabel = nextLabel("${labelPrefix}_deny")
                         val allowLabel = nextLabel("${labelPrefix}_allow")
 
-                        // 64-bit (arg & mask) == expected: high word then low word.
+                        // A = (args[i][63:32] & mask[63:32]); both words must match for a 64-bit match.
                         loadAbsolute(argOffsetHi)
                         and(maskHi)
                         jumpIfEqual(expectedHi, jt = checkLoLabel, jf = denyLabel)
                         mark(checkLoLabel)
+                        // A = (args[i][31:0] & mask[31:0]); a mismatch takes the unmatched action.
                         loadAbsolute(argOffsetLo)
                         and(maskLo)
                         jumpIfEqual(expectedLo, jt = allowLabel, jf = denyLabel)

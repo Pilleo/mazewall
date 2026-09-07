@@ -1,7 +1,7 @@
 ---
 title: "Fix Landlock-before-seccomp docs pointing at applyContainment"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "docs"
@@ -41,3 +41,8 @@ Landlock-before-seccomp is documented on `ContainedExecutorWrapper.applyContainm
 
 <!-- id: issue-20260907-081101  file: issue-20260907-081101-fix-landlock-before-seccomp-docs-pointing-at-applycontainmen.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
+
+## Resolution evidence (2026-09-07)
+
+- `enforcer/AGENTS.md`, `containment-design.md`, and `ContainedExecutors` KDoc all name `installInternal`, `applyLandlockIfNecessary`, and `installSeccompFilter` in the required order.
+- A repository search found no stale `applyContainment()` reference.
