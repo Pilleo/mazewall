@@ -595,23 +595,17 @@ internal class SupervisorSessionHandler(
 
     context(arena: NativeArena) internal fun handleInjectFd(context: SupervisorRouteContext): Boolean {
         val (request, extracted, resp) = context
-        val (id, header, pathStr, sockaddrBytes) = request
-        val (nr, tid, traceeArch, _, _, args) = header
-        val openHow = extracted.openHow
+        val id = request.id
+        val header = request.header
+        val nr = header.nr
+        val tid = header.tid
+        val traceeArch = header.arch
         var localFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>? = null
         var injectFlags = NewFdFlags.NONE
         try {
-            val localFdValue = when (injectTarget(SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(nr), traceeArch))) {
-                is InjectTarget.Open -> {
-                    if (pathStr == null) {
-                        sendSeccompError(id, NativeConstants.EPERM, resp)
-                        return true
-                    }
-                    val req = SupervisedOpen.parse(nr, args, pathStr, traceeArch, openHow)
-                    if (req == null) {
-                        sendSeccompError(id, NativeConstants.EPERM, resp)
-                        return true
-                    }
+            val localFdValue = when (val plan = SupervisorInjectionPlan.create(nr, traceeArch, header.args, extracted)) {
+                is SupervisorInjectionPlan.Open -> {
+                    val req = plan.request
                     injectFlags =
                         when (req) {
                             is SupervisedOpen.Open -> NewFdFlags.forOpen(req.flags)
@@ -620,18 +614,12 @@ internal class SupervisorSessionHandler(
                         }
                     openFileInSupervisor(req, tid)
                 }
-                is InjectTarget.Connect -> {
-                    if (sockaddrBytes == null) {
-                        sendSeccompError(id, NativeConstants.EPERM, resp)
-                        return true
-                    }
-                    connectSocketInSupervisor(sockaddrBytes)
-                }
-                is InjectTarget.Accept -> {
-                    handleAcceptAsync(id, nr, args, tid, traceeArch)
+                is SupervisorInjectionPlan.Connect -> connectSocketInSupervisor(plan.sockaddr)
+                SupervisorInjectionPlan.Accept -> {
+                    handleAcceptAsync(id, nr, header.args, tid, traceeArch)
                     return true
                 }
-                is InjectTarget.Unsupported -> -NativeConstants.EPERM
+                is SupervisorInjectionPlan.Deny -> -plan.errno
             }
 
             if (localFdValue < 0) {
