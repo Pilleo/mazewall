@@ -1,7 +1,7 @@
 ---
 title: "Hide profiler handshake and native IO from public API"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -43,6 +43,12 @@ CODE_QUALITY.md wants machines, events, and effects `internal`. `profiler.api` s
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `HandshakeSession`, `NativeIoOperations`, and
+`ContextEvent.fromSegment` are internal. `ProfilerApiDumpTest` rejects the handshake, native-I/O,
+and `MemorySegment` symbols in `profiler.api`. `./gradlew :profiler:test` passed. The historical
+`apiCheck` task no longer exists; `:profiler:unitCheck` is the configured coverage gate and must
+run with the complete test suite rather than a filtered test.
 
 <!-- id: issue-20260907-080818  file: issue-20260907-080818-hide-profiler-handshake-and-native-io-from-public-api.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

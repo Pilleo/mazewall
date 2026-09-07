@@ -1,7 +1,7 @@
 ---
 title: "Replace profiler control tokens and mmap flags with sealed types"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -43,6 +43,11 @@ Profiler mmap events and ioctl helpers keep `fd`/`prot`/`flags` as `Int`. Contro
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `ControlCommand` is sealed with an explicit `Unknown`
+variant and exhaustive rejection dispatch. Mmap protection, flags, and descriptor arguments are
+separate value types at the trace-event boundary. `./gradlew :profiler:test --tests
+io.mazewall.profiler.tierE.daemon.ControlProtocolTest` passed.
 
 <!-- id: issue-20260907-080837  file: issue-20260907-080837-replace-profiler-control-tokens-and-mmap-flags-with-sealed-t.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
