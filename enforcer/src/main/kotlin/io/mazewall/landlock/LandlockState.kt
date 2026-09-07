@@ -304,16 +304,7 @@ internal class LandlockSession(
                 return unsupported
             }
 
-            val accessMaskFs = if (policy != null) {
-                Landlock.getAccessMask(abi, policy)
-            } else {
-                Landlock.getFullAccessMask(abi)
-            }
-            val accessMaskNet = if (policy != null) {
-                Landlock.getNetAccessMask(abi, policy)
-            } else {
-                Landlock.getFullNetAccessMask(abi)
-            }
+            val (accessMaskFs, accessMaskNet) = accessMasks(abi)
 
             val createRuleset = transition(
                 LandlockInstallEvent.Begin(abi, accessMaskFs, accessMaskNet),
@@ -387,4 +378,9 @@ internal class LandlockSession(
                 .warning("$msg Rules will only be applied to the current thread and its descendants.")
         }
     }
+
+    private fun accessMasks(abi: Int): Pair<Long, Long> =
+        policy?.let {
+            Landlock.getAccessMask(abi, it) to Landlock.getNetAccessMask(abi, it)
+        } ?: (Landlock.getFullAccessMask(abi) to Landlock.getFullNetAccessMask(abi))
 }
