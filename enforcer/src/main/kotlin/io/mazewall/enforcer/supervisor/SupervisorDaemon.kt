@@ -13,6 +13,8 @@ import kotlin.system.exitProcess
  */
 public object SupervisorDaemon {
     public const val DAEMON_READY_SENTINEL: String = "MAZEWALL_SUPERVISOR_READY"
+    private val logger: java.util.logging.Logger = java.util.logging.Logger
+        .getLogger(SupervisorDaemon::class.java.name)
 
     @JvmStatic
     public fun main(args: Array<String>) {
@@ -54,9 +56,7 @@ public object SupervisorDaemon {
         try {
             engine.run()
         } catch (t: Throwable) {
-            System.err.println("[SUPERVISOR-FATAL] Fatal error in SupervisorDaemon: ${t.message}")
-            t.printStackTrace(System.err)
-            System.err.flush()
+            logger.log(java.util.logging.Level.SEVERE, "[SUPERVISOR-FATAL] Fatal error in SupervisorDaemon", t)
             exitProcess(1)
         }
     }
