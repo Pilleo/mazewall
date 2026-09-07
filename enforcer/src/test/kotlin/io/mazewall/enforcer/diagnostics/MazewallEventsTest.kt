@@ -52,6 +52,15 @@ class MazewallEventsTest {
     }
 
     @Test
+    fun `listener errors are never swallowed`() {
+        MazewallEvents.register { throw AssertionError("listener invariant failed") }
+
+        assertFailsWith<AssertionError> {
+            MazewallEvents.emit(MazewallEvents.LandlockApplied(processWide = true, abiVersion = 5))
+        }
+    }
+
+    @Test
     fun `failOnListenerError propagates for test seams`() {
         MazewallEvents.failOnListenerError = true
         MazewallEvents.register { error("boom") }
