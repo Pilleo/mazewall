@@ -419,19 +419,23 @@ internal class SupervisorSessionHandler(
             val decision = respSeg.getDecision()
             val errorNr = respSeg.getErrorNr()
 
-            if (respId != id) {
+            val route = SupervisorJvmVerdictResolver.route(
+                id,
+                nr,
+                traceeArch,
+                respId,
+                decision.toInt(),
+                errorNr,
+            )
+            if (route == null) {
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return false
             }
 
             val jvmPath = respSeg.getPath()
-            val kind = SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
-            val verdict = SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
             val transition = SupervisorSessionMachine.evaluate(
                 SupervisorSessionState.AwaitingJvmVerdict,
-                SupervisorSessionEvent.JvmVerdictReceived(
-                    SupervisorNotificationMachine.evaluateJvm(kind, verdict),
-                ),
+                SupervisorSessionEvent.JvmVerdictReceived(route),
             )
             val effect = transition.effect as? SupervisorSessionEffect.ExecuteRoute
                 ?: return terminalRoutes.abort(context, NativeConstants.EPERM)
