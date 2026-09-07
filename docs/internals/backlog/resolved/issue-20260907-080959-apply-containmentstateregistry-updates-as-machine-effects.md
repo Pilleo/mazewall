@@ -1,7 +1,7 @@
 ---
 title: "Apply ContainmentStateRegistry updates as machine effects"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260907-080955"
@@ -43,6 +43,12 @@ paperclip_identifier: "MAZ-1176"
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `ContainmentRegistryEffect` models Landlock, seccomp,
+restore, and engine-state updates; `ContainmentRegistryEffectInterpreter` is the only mutation
+boundary used after install decisions. Landlock-before-seccomp remains encoded in the installation
+phases. `./gradlew :enforcer:test --tests
+io.mazewall.enforcer.state.ContainmentRegistryEffectTest` passed.
 
 <!-- id: issue-20260907-080959  file: issue-20260907-080959-apply-containmentstateregistry-updates-as-machine-effects.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

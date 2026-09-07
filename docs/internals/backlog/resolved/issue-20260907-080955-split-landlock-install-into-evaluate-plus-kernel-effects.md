@@ -1,7 +1,7 @@
 ---
 title: "Split Landlock install into evaluate plus kernel effects"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -39,6 +39,11 @@ paperclip_identifier: "MAZ-1175"
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `LandlockInstall.evaluate` produces sealed lifecycle
+states and `CreateRuleset`, `AddRules`, `RestrictSelf`, and `CloseFd` effects. `LandlockSession`
+updates state exclusively through the evaluator transition and interprets native outcomes as
+events. `./gradlew :enforcer:test --tests io.mazewall.landlock.LandlockApplyResultTest` passed.
 
 <!-- id: issue-20260907-080955  file: issue-20260907-080955-split-landlock-install-into-evaluate-plus-kernel-effects.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
