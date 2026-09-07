@@ -21,6 +21,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class LandlockApplyResultTest {
     @AfterEach
     fun tearDown() {

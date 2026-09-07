@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class ProfilerTest {
     class MockProcess(
         private val pid: Long,

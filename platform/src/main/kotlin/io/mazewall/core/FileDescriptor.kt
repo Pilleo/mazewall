@@ -214,6 +214,15 @@ internal object FdEpoch {
 
         val wasOwned = isOwnedThroughEpoch(fd)
         val isLive = isLive(fd, generation)
+        val existsInKernel = verifyKernelLiveness(fd)
+
+        if (!existsInKernel) {
+            System.err.println(
+                "[FdEpoch Audit] WARNING: suppressing close of fd=$fd because fcntl(F_GETFD) reports EBADF. " +
+                    "The descriptor was already closed or reused outside this lifecycle.",
+            )
+            return false
+        }
 
         if (!wasOwned && isLive) {
             System.err.println(
@@ -574,9 +583,10 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
  */
 public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(): FileDescriptor<R, FdState.Closed, FdOwnership.Owned> {
     if (value >= 0 && !isClosedType()) {
-        FdEpoch.auditClose(value, generation)
-        @Suppress("UNCHECKED_CAST")
-        LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
+        if (FdEpoch.auditClose(value, generation)) {
+            @Suppress("UNCHECKED_CAST")
+            LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
+        }
         arena?.close()
     }
     return FileDescriptor.closedView(this)

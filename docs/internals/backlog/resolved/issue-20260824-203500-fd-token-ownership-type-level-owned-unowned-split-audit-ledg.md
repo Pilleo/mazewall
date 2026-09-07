@@ -1,7 +1,7 @@
 ---
 title: "FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "platform"
@@ -56,3 +56,11 @@ docs/internals/designs/core/fd-token-ownership.md
    assertions are safe; anything calling close() must use owned integers).
 4. Adopt ForeignFdGuard (platform test sources) across enforcer/profiler suites.
 5. Audit pid-handle discipline analogously (invented pids + signal-bearing syscalls).
+
+## Resolution evidence (2026-09-07)
+
+- `FileDescriptor` carries `FdOwnership` at the type level: raw and role-specific factories produce `Unowned`; only `adopt`, `replace`, and kernel-result adoption produce `Owned` close-capable tokens.
+- `FdEpoch` records ownership and, in `mazewall.fd.audit=true`, now checks `fcntl(F_GETFD)` before close. A kernel-dead descriptor is logged and its second close is suppressed.
+- `FileDescriptorTest` proves audit mode rejects an epoch-live token after its kernel descriptor has closed.
+- The raw unowned literal-factory sweep now finds only two mock/equality uses, neither close-capable. Owned replacement fixtures are protected by `ForeignFdGuard` across every JUnit test class that mints them; the remaining Kotest design spec routes close operations through its injected transport.
+- Verified: `./gradlew :platform:test --tests io.mazewall.core.FileDescriptorTest`, `./gradlew :platform:cleanTest :platform:unitCheck`, and focused guarded enforcer/profiler suites.

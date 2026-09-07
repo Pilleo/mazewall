@@ -21,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class SupervisorDaemonEngineTest {
     @AfterEach
     fun tearDown() {
@@ -40,12 +41,12 @@ class SupervisorDaemonEngineTest {
             }
         }
 
+        LinuxNative.setEngine(mockEngine)
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
         val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
         val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
         val connection = io.mazewall.ffi.networking.SeccompConnection
             .FdAttached(socketFd, listenerFd)
-
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val pollFd = PollFdSegment.of(arena.allocate(8))
             mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }

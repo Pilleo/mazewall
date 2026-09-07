@@ -61,6 +61,25 @@ class FileDescriptorTest {
         }
 
     @Test
+    fun `audit rejects an epoch-live descriptor the kernel has already closed`() =
+        withArena {
+            val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+            val previousAuditSetting = System.getProperty("mazewall.fd.audit")
+            try {
+                System.setProperty("mazewall.fd.audit", "true")
+                fd.close()
+
+                assertFalse(FdEpoch.auditClose(fd.value, fd.generation))
+            } finally {
+                if (previousAuditSetting == null) {
+                    System.clearProperty("mazewall.fd.audit")
+                } else {
+                    System.setProperty("mazewall.fd.audit", previousAuditSetting)
+                }
+            }
+        }
+
+    @Test
     fun `test FileDescriptor creation and close`() =
         withArena {
         val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)

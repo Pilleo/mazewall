@@ -43,6 +43,7 @@ import java.lang.foreign.ValueLayout
 import java.nio.channels.ClosedByInterruptException
 
 @Isolated
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class ProfilerDaemonTest {
     @AfterEach
     fun tearDown() {
