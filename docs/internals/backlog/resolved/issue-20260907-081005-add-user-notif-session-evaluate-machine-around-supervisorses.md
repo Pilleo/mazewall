@@ -1,7 +1,7 @@
 ---
 title: "Add USER_NOTIF session evaluate machine around SupervisorSessionHandler"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260826-102722"
@@ -44,6 +44,12 @@ paperclip_identifier: "MAZ-1180"
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `SupervisorSessionMachine` has sealed session state,
+events, effects, and a pure evaluator. `SupervisorSessionHandler` interprets the effects and
+retains exactly-one terminal response handling. `./gradlew :enforcer:test --tests
+io.mazewall.enforcer.supervisor.SupervisorSessionHandlerTest --tests
+io.mazewall.enforcer.supervisor.SupervisorSessionMachineTest` passed.
 
 <!-- id: issue-20260907-081005  file: issue-20260907-081005-add-user-notif-session-evaluate-machine-around-supervisorses.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

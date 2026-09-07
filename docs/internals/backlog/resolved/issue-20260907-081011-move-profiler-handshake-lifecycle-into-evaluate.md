@@ -1,7 +1,7 @@
 ---
 title: "Move profiler handshake lifecycle into evaluate"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260907-080818"
@@ -42,6 +42,12 @@ Profiler session and parent trace listener assign lifecycle during socket and no
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `ProfilerSessionMachine` and `TraceListenerMachine`
+own lifecycle transitions. Handshake, notification, failure, parent-listener, and noise-path
+CONTINUE handling all feed explicit events through their evaluators. `./gradlew :profiler:test
+--tests io.mazewall.profiler.engine.ProfilerSessionMachineTest --tests
+io.mazewall.profiler.engine.ProfilerSessionHandlerTest` passed.
 
 <!-- id: issue-20260907-081011  file: issue-20260907-081011-move-profiler-handshake-lifecycle-into-evaluate.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
