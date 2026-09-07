@@ -12,6 +12,11 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.memory.native
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
+import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.ProfilerTransport
+import io.mazewall.profiler.ffi.RealProfilerTransport
+import io.mazewall.profiler.ffi.SeccompResponder
+import io.mazewall.profiler.ffi.TraceEventPublisher
 
 /**
  * Wrapper classes that route all native I/O through the injected [ProfilerTransport]
@@ -56,13 +61,15 @@ internal class TransportNativeEngine(
  * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
  * structures and resolving memory using [ProfilerMemoryReader].
  */
-public class ProfilerDaemonEngine(
+public class ProfilerDaemonEngine internal constructor(
     private val socketPath: String,
     private val transport: ProfilerTransport = RealProfilerTransport,
     private val memoryReader: ProfilerMemoryReader = RealMemoryReader,
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = transport,
 ) {
+    public constructor(socketPath: String) : this(socketPath, RealProfilerTransport)
+
     private val publisher: TraceEventPublisher = transport
     private val responder: SeccompResponder = transport
     private val ioOps: NativeIoOperations = transport

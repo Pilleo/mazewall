@@ -22,7 +22,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicReference
-import java.util.logging.Logger
 
 /**
  * High-level API for system call profiling and Bill of Behavior (SBoB) generation.
@@ -44,7 +43,6 @@ object Profiler {
     private const val WORKER_JOIN_TIMEOUT_MS = 60_000L
     private const val GRACE_PERIOD_MS = 5_000L
 
-    private val logger = Logger.getLogger(Profiler::class.java.name)
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
@@ -53,6 +51,7 @@ object Profiler {
         .getInstance()
     }
     internal var installerProvider: io.mazewall.profiler.engine.ProfilerInstallerInterface = io.mazewall.profiler.engine.RealProfilerInstaller
+    internal var tidProvider: () -> Tid = { LinuxNative.process.gettid() }
 
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
@@ -80,8 +79,9 @@ object Profiler {
 
         var tid: io.mazewall.core.Tid? = null
         val workerThread = Thread {
-            tid = LinuxNative.process.gettid()
-            threadRegistry[tid!!] = Thread.currentThread()
+            val workerTid = tidProvider()
+            tid = workerTid
+            threadRegistry[workerTid] = Thread.currentThread()
             try {
                 // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
                 // The resolver daemon needs to be notified by the kernel, which then notifies
@@ -138,9 +138,7 @@ object Profiler {
             listener.passThrough()
         }
 
-        if (tid != null) {
-            threadRegistry.remove(tid!!)
-        }
+        tid?.let(threadRegistry::remove)
 
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
         val observations = localLogs.map {
@@ -304,7 +302,7 @@ object Profiler {
             if (!threadApplied) {
                 val currentThread = Thread.currentThread()
                 validateNotVirtual()
-                threadRegistry[LinuxNative.process.gettid()] = currentThread
+                threadRegistry[tidProvider()] = currentThread
                 installProfilingFilterForThread(
                     socketPath = context.socketPath,
                     policy = policy,

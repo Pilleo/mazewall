@@ -24,6 +24,9 @@ autonomy: "supervised"
 open_questions: false
 review_verdict: skipped
 has_side_effects: true
+
+paperclip_issue_id: "283e246c-0544-4ce2-9cc3-02bd376b0000"
+paperclip_identifier: "MAZ-1148"
 ---
 
 # 🟡 [Severity: MEDIUM]: Extract immutable syscall-number resolver from dispatcher

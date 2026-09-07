@@ -20,7 +20,7 @@ internal object SupervisorFastPath {
      */
     fun resolveAbsolutePath(
         pid: Int,
-        dirfd: Int,
+        dirfd: TraceeDirFd,
         pathStr: String,
     ): Path? {
         val path = java.nio.file.Paths
@@ -38,7 +38,7 @@ internal object SupervisorFastPath {
             }
         }
         try {
-            val baseDir = if (dirfd == AT_FDCWD) {
+            val baseDir = if (dirfd.value == AT_FDCWD) {
                 BypassPaths.toRealPathWithFallback(
                     java.nio.file.Paths
                     .get("/proc/$pid/cwd"),
@@ -46,7 +46,7 @@ internal object SupervisorFastPath {
             } else {
                 BypassPaths.toRealPathWithFallback(
                     java.nio.file.Paths
-                    .get("/proc/$pid/fd/$dirfd"),
+                    .get("/proc/$pid/fd/${dirfd.value}"),
                 )
             }
             return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
@@ -57,7 +57,7 @@ internal object SupervisorFastPath {
         } catch (e: java.io.FileNotFoundException) {
             return null
         } catch (e: Exception) {
-            logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=$dirfd path=$pathStr: ${e.message}" }
+            logger.severe { "Critical error during baseDir or /proc resolution for pid=$pid dirfd=${dirfd.value} path=$pathStr: ${e.message}" }
             throw e
         }
     }

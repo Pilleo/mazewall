@@ -232,6 +232,7 @@ object Layouts {
     val SOCKADDR_UN_PATH_OFFSET: Long = SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_path"))
     const val SOCKADDR_UN_PATH_SIZE: Long = 108L
 
+    // LP64 CMSG_ALIGN(sizeof(struct cmsghdr)); data starts after 8+4+4 header.
     const val CMSGHDR_DATA_OFFSET: Long = 16L
 
     const val SUPERVISOR_RESPONSE_ID_OFFSET: Long = 0L

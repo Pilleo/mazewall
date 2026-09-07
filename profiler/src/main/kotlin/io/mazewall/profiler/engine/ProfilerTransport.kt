@@ -1,4 +1,4 @@
-package io.mazewall.profiler.engine
+package io.mazewall.profiler.ffi
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.FdOwnership
@@ -12,6 +12,9 @@ import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
+import io.mazewall.profiler.engine.SECCOMP_IOCTL_NOTIF_SEND
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -20,7 +23,7 @@ import java.nio.charset.StandardCharsets
 /**
  * High-level interface for publishing domain events to the parent JVM.
  */
-interface TraceEventPublisher {
+internal interface TraceEventPublisher {
     context(arena: Arena) fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
         event: SyscallEvent<SyscallEventState.Resolved>,
@@ -30,7 +33,7 @@ interface TraceEventPublisher {
 /**
  * High-level interface for sending seccomp responses back to the kernel.
  */
-interface SeccompResponder {
+internal interface SeccompResponder {
     /**
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
@@ -54,7 +57,7 @@ interface SeccompResponder {
 /**
  * Low-level interface for raw POSIX-like polling and I/O.
  */
-interface NativeIoOperations {
+internal interface NativeIoOperations {
     val raw: io.mazewall.RawSyscallOperations
 
     fun poll(
@@ -99,7 +102,7 @@ typealias SocketLifecycleManager = io.mazewall.core.SocketManager
 /**
  * Legacy composite interface for communicating with the parent JVM and receiving file descriptors.
  */
-interface ProfilerTransport :
+internal interface ProfilerTransport :
     TraceEventPublisher,
     SeccompResponder,
     NativeIoOperations,
@@ -109,18 +112,11 @@ interface ProfilerTransport :
  * Real implementation of [ProfilerTransport] using standard Linux syscalls.
  */
 @Suppress("MagicNumber", "ReturnCount", "ThrowsCount")
-object RealProfilerTransport : ProfilerTransport {
+internal object RealProfilerTransport : ProfilerTransport {
     private val logger = java.util.logging.Logger
         .getLogger(RealProfilerTransport::class.java.name)
 
     override val raw: io.mazewall.RawSyscallOperations get() = LinuxNative.raw
-    private const val CMSG_LEN_VAL = 20L
-    private const val CMSG_LEN_OFF = 0L
-    private const val CMSG_LEVEL_OFF = 8L
-    private const val CMSG_TYPE_OFF = 12L
-    private const val CMSG_DATA_OFF = 16L
-    private const val SOL_SOCKET_VAL = 1
-    private const val SCM_RIGHTS_VAL = 1
 
     private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
     private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)

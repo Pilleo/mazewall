@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.Arch
+import io.mazewall.core.SyscallNumber
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.seccomp.SupervisedKind
 
@@ -38,21 +39,27 @@ internal sealed interface SupervisorRoute {
 
 internal object SupervisorNotificationMachine {
     fun classify(
-        nr: Int,
+        nr: SyscallNumber,
         arch: Arch,
     ): SupervisedKind = SupervisedKind.classify(nr, arch)
 
     fun parseJvmVerdict(
         decision: Int,
         errorNr: Int,
-    ): JvmVerdict? {
-        return when (decision) {
-            0 -> JvmVerdict.Deny(errorNr)
-            1 -> JvmVerdict.Allow
-            2 -> JvmVerdict.InjectFd
-            else -> null
+    ): JvmVerdict =
+        if (decision == JVM_DECISION_DENY) {
+            JvmVerdict.Deny(errorNr)
+        } else if (decision == JVM_DECISION_ALLOW) {
+            JvmVerdict.Allow
+        } else if (decision == JVM_DECISION_INJECT_FD) {
+            JvmVerdict.InjectFd
+        } else {
+            JvmVerdict.Deny(NativeConstants.EPERM)
         }
-    }
+
+    private const val JVM_DECISION_DENY = 0
+    private const val JVM_DECISION_ALLOW = 1
+    private const val JVM_DECISION_INJECT_FD = 2
 
     fun evaluateFastPath(
         kind: SupervisedKind,

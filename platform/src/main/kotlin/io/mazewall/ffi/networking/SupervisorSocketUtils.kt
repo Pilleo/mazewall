@@ -26,7 +26,11 @@ public object SupervisorSocketUtils {
     public const val SOCK_STREAM: Int = 1
     public const val BACKLOG_SIZE: Int = 128
     public const val SOCKADDR_UN_SIZE: Int = 110
+
+    // LP64: CMSG_LEN(sizeof(int)) = CMSG_ALIGN(sizeof(cmsghdr)) + sizeof(int) = 16 + 4
     public const val CMSG_RIGHTS_LEN: Long = 20L
+
+    // LP64: CMSG_SPACE(sizeof(int)) = CMSG_ALIGN(sizeof(cmsghdr)) + CMSG_ALIGN(sizeof(int)) = 16 + 8
     public const val MSG_CONTROL_BUF_SIZE: Long = 24L
     public const val SOL_SOCKET: Int = 1
     public const val SCM_RIGHTS: Int = 1

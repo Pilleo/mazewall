@@ -173,6 +173,8 @@ internal class UnsafePrctlInspector : SyscallInspector {
     }
 
     private companion object {
+        // linux/prctl.h: PR_SET_NAME, PR_GET_NAME, PR_GET_SECCOMP, PR_SET_SECCOMP,
+        // PR_SET_NO_NEW_PRIVS, PR_GET_NO_NEW_PRIVS
         private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39)
     }
 }

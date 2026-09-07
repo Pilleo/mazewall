@@ -4,11 +4,12 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.PortalMethod
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Registry bridging generated `<Service>PortalDispatcher` objects into the worker
- * loop. Builtins (PortalMethods 1..4) are dispatched first; anything else is looked
+ * loop. Builtins are dispatched first; generated [PortalMethod.Generated] values are looked
  * up here, so a generated service invocation reaches its generated dispatcher
  * instead of falling into `unknown method`.
  *
@@ -16,31 +17,31 @@ import java.util.concurrent.ConcurrentHashMap
  * list of `fqcn.Service=fqcn.ServiceImpl[;fqcn.DispatcherObject]` entries. The
  * dispatcher object defaults to `<simple-name>PortalDispatcher` in the service's
  * package and must expose `METHOD_IDS: IntArray` plus
- * `handle(impl, methodId, payload, granted): ByteArray`.
+ * `handle(impl, method, payload, granted): ByteArray`.
  */
 public object PortalDispatcherRegistry {
     public typealias Handler =
         (
-            methodId: Int,
+            method: PortalMethod.Generated,
             payload: ByteArray,
             granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
         ) -> ByteArray
 
-    private val handlers = ConcurrentHashMap<Int, Handler>()
+    private val handlers = ConcurrentHashMap<PortalMethod.Generated, Handler>()
 
     public fun register(
         ids: IntArray,
         handler: Handler,
     ) {
-        for (id in ids) handlers[id] = handler
+        for (id in ids) handlers[PortalMethod.Generated(id)] = handler
     }
 
-    /** Attempts registered dispatch; null when no handler claims [methodId]. */
+    /** Attempts registered dispatch; null when no handler claims [method]. */
     public fun dispatchOrNull(
-        methodId: Int,
+        method: PortalMethod.Generated,
         payload: ByteArray,
         granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
-    ): ByteArray? = handlers[methodId]?.invoke(methodId, payload, granted)
+    ): ByteArray? = handlers[method]?.invoke(method, payload, granted)
 
     /**
      * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Tolerant of malformed
@@ -83,10 +84,11 @@ public object PortalDispatcherRegistry {
                 it.name == "handle" && it.parameterCount == 4
             }
 
-        // One closure per id keeps the invoked methodId exact without re-parsing.
+        // One closure per id keeps the typed generated method exact without re-parsing.
         for (id in methodIds) {
-            handlers[id] = { mid, payload, granted ->
-                handle.invoke(dispatcherObject, impl, mid, payload, granted) as ByteArray
+            val method = PortalMethod.Generated(id)
+            handlers[method] = { generatedMethod, payload, granted ->
+                handle.invoke(dispatcherObject, impl, generatedMethod, payload, granted) as ByteArray
             }
         }
     }

@@ -89,6 +89,8 @@ internal object FdEpoch {
      * If the slot is already live, returns that generation so aliases of the
      * same resource share a token. Does not bump a leftover live slot.
      */
+    fun claimOpen(fd: FileDescriptor<*, *, *>): Long = claimOpen(fd.value)
+
     fun claimOpen(fd: Int): Long {
         if (fd < 0) return 0L
         val ref = table.computeIfAbsent(fd) { AtomicReference(Slot(0L, false, false)) }

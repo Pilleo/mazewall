@@ -50,6 +50,6 @@ internal class SupervisedKindTest {
         arch: Arch,
         expectedKind: SupervisedKind,
     ) {
-        assertEquals(expectedKind, SupervisedKind.classify(nr, arch))
+        assertEquals(expectedKind, SupervisedKind.classify(io.mazewall.core.SyscallNumber(nr), arch))
     }
 }

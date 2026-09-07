@@ -2,6 +2,30 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Tid
 
+/** Linux `mmap(2)` protection bits kept distinct from unrelated integer arguments. */
+@JvmInline
+public value class MmapProtection(
+    public val bits: Int,
+) {
+    public val allowsExecution: Boolean get() = bits and EXECUTE_BIT != 0
+
+    private companion object {
+        private const val EXECUTE_BIT = 0x04
+    }
+}
+
+/** Linux `mmap(2)` mapping flags kept distinct from protection bits and descriptors. */
+@JvmInline
+public value class MmapFlags(
+    public val bits: Int,
+)
+
+/** The raw `mmap(2)` descriptor argument; `-1` is valid for anonymous mappings. */
+@JvmInline
+public value class MmapFileDescriptor(
+    public val value: Int,
+)
+
 /**
  * A semantic, polymorphic representation of a trapped system call.
  *
@@ -129,25 +153,25 @@ public sealed class TraceEvent {
         override val tid: Tid,
         val addr: Long,
         val len: Long,
-        val prot: Int,
-        val flags: Int,
-        val fd: Int,
+        val protection: MmapProtection,
+        val mappingFlags: MmapFlags,
+        val fileDescriptor: MmapFileDescriptor,
         val offset: Long,
         override val stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val syscallName: String = "MMAP"
 
         /** Returns true if the mapping is executable (PROT_EXEC). */
-        val isExecutable: Boolean get() = (prot and 0x04) != 0
+        val isExecutable: Boolean get() = protection.allowsExecution
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Mmap) return false
             if (addr != other.addr) return false
             if (len != other.len) return false
-            if (prot != other.prot) return false
-            if (flags != other.flags) return false
-            if (fd != other.fd) return false
+            if (protection != other.protection) return false
+            if (mappingFlags != other.mappingFlags) return false
+            if (fileDescriptor != other.fileDescriptor) return false
             if (offset != other.offset) return false
             if (stackTrace != other.stackTrace) return false
             return true
@@ -156,9 +180,9 @@ public sealed class TraceEvent {
         override fun hashCode(): Int {
             var result = addr.hashCode()
             result = 31 * result + len.hashCode()
-            result = 31 * result + prot
-            result = 31 * result + flags
-            result = 31 * result + fd
+            result = 31 * result + protection.hashCode()
+            result = 31 * result + mappingFlags.hashCode()
+            result = 31 * result + fileDescriptor.hashCode()
             result = 31 * result + offset.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             return result
@@ -307,7 +331,16 @@ public sealed class TraceEvent {
             stackTrace: List<String>?,
         ): TraceEvent {
             return if (args.size >= MIN_MMAP_ARGS) {
-                Mmap(tid, args[INDEX_ADDR], args[INDEX_LEN], args[INDEX_PROT].toInt(), args[INDEX_FLAGS].toInt(), args[INDEX_FD].toInt(), args[INDEX_OFFSET], stackTrace)
+                Mmap(
+                    tid,
+                    args[INDEX_ADDR],
+                    args[INDEX_LEN],
+                    MmapProtection(args[INDEX_PROT].toInt()),
+                    MmapFlags(args[INDEX_FLAGS].toInt()),
+                    MmapFileDescriptor(args[INDEX_FD].toInt()),
+                    args[INDEX_OFFSET],
+                    stackTrace,
+                )
             } else {
                 Generic(tid, "MMAP", args.toList(), emptyList(), stackTrace)
             }

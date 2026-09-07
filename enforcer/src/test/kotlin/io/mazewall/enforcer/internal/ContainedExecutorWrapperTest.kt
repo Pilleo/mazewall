@@ -2,6 +2,7 @@ package io.mazewall.enforcer.internal
 
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.PolicyDefinition
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -45,7 +46,7 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is ContainmentViolationException)
+        assertTrue(ex.cause is AccessDeniedException)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)
@@ -103,7 +104,57 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is ContainmentViolationException)
+        assertTrue(ex.cause is AccessDeniedException)
+
+        delegate.shutdown()
+        delegate.awaitTermination(1, TimeUnit.SECONDS)
+    }
+
+    @Test
+    fun `test submit preserves structured containment metadata`() {
+        val delegate = Executors.newSingleThreadExecutor()
+        val wrapper = ContainedExecutorWrapper(delegate, policyDefinition)
+        val denial = ContainmentViolationException(
+            message = "kernel denial",
+            errno = 1,
+            syscallNr = 59,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
+        )
+
+        val ex = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            wrapper.submit(Callable { throw denial }).get()
+        }
+
+        val propagated = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertEquals(1, propagated.errno)
+        assertEquals(59, propagated.syscallNr)
+        assertEquals(ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL, propagated.evidence)
+
+        delegate.shutdown()
+        delegate.awaitTermination(1, TimeUnit.SECONDS)
+    }
+
+    @Test
+    fun `test submit promotes nested structured metadata without losing the original failure`() {
+        val delegate = Executors.newSingleThreadExecutor()
+        val wrapper = ContainedExecutorWrapper(delegate, policyDefinition)
+        val denial = ContainmentViolationException(
+            message = "kernel denial",
+            errno = 13,
+            syscallNr = 257,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
+        )
+        val outer = IllegalStateException("task context", denial)
+
+        val ex = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            wrapper.submit(Callable { throw outer }).get()
+        }
+
+        val propagated = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertEquals(13, propagated.errno)
+        assertEquals(257, propagated.syscallNr)
+        assertEquals(ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL, propagated.evidence)
+        assertTrue(propagated.cause === outer)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)

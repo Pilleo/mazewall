@@ -20,10 +20,14 @@ class PortalStubGeneratorTest {
         assertTrue(stub.contains("SampleGreeterPortalStub"))
         assertTrue(stub.contains("ProcessBroker"))
         assertTrue(stub.contains("broker.invoke"))
+        assertTrue(stub.contains("PortalMethod.Generated"))
         assertTrue(stub.contains("PortalCodec.encodeString"))
+        assertTrue(stub.contains("GREET_METHOD_ID"))
         assertFalse(stub.contains("Impl("))
         assertTrue(dispatcher.contains("SampleGreeterPortalDispatcher"))
         assertTrue(dispatcher.contains("impl.greet"))
+        assertTrue(dispatcher.contains("method: PortalMethod.Generated"))
+        assertTrue(dispatcher.contains("GREET_METHOD_ID"))
         assertFalse(dispatcher.contains("Impl("))
     }
 
@@ -33,11 +37,10 @@ class PortalStubGeneratorTest {
         val dispatcher = files.single { it.name == "SampleGreeterPortalDispatcher" }.toString()
         assertTrue(dispatcher.contains("val METHOD_IDS: IntArray"), "registry bootstrap needs METHOD_IDS")
         // Ids must stay outside the builtin range (PortalMethods 1..4).
-        val ids = Regex("intArrayOf\\(([^)]*)\\)")
+        val ids = Regex("const val [A-Z_]+_METHOD_ID: Int = ([\\d_]+)")
             .find(dispatcher)!!
             .groupValues[1]
-            .split(",")
-            .map { it.trim().toInt() }
+            .let { listOf(it.replace("_", "").toInt()) }
         assertTrue(ids.isNotEmpty())
         assertTrue(ids.all { it >= 1000 }, "generated ids must not collide with builtins: $ids")
     }
@@ -54,8 +57,10 @@ class PortalStubGeneratorTest {
     fun `ReadFd is attached not serialized`() {
         val files = PortalStubGenerator.generate(SampleFd::class.java)
         val stub = files.single { it.name == "SampleFdPortalStub" }.toString()
+        val dispatcher = files.single { it.name == "SampleFdPortalDispatcher" }.toString()
         assertTrue(stub.contains("broker.invoke"))
         assertFalse(stub.contains("encodeString(fd)"))
+        assertTrue(dispatcher.contains("Capability slot 0: fd"), dispatcher)
     }
 
     @Test
@@ -99,6 +104,9 @@ class PortalStubGeneratorTest {
         assertTrue(dispatcherFiles.any { it.contains("PortalDispatcher") }, dispatcherFiles.toString())
         assertTrue(stubFiles.none { it.contains("PortalDispatcher") }, stubFiles.toString())
         assertTrue(dispatcherFiles.none { it.contains("PortalStub") }, dispatcherFiles.toString())
+        val dispatcherSource = dispatcherDir.walkTopDown().first { it.isFile && it.name.contains("PortalDispatcher") }.readText()
+        assertTrue(dispatcherSource.contains("GREET_METHOD_ID"), dispatcherSource)
+        assertTrue(dispatcherSource.contains("when (method.wire)"), dispatcherSource)
     }
 
     @Test

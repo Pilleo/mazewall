@@ -38,8 +38,7 @@ public class SupervisorValidationChannel(
     ) {
         sendResponse(
             id,
-            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
-                ?: JvmVerdict.Deny(io.mazewall.ffi.NativeConstants.EPERM),
+            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr),
             path,
         )
     }

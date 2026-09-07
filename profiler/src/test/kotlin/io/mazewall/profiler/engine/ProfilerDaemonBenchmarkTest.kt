@@ -14,6 +14,12 @@ import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.profiler.ffi.HandshakeSession
+import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.ProfilerTransport
+import io.mazewall.profiler.ffi.SeccompResponder
+import io.mazewall.profiler.ffi.SocketLifecycleManager
+import io.mazewall.profiler.ffi.TraceEventPublisher
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test

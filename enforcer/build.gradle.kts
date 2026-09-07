@@ -100,28 +100,6 @@ fun findMatchingTaggedClasses(
  * otherwise starts a fresh JVM for every untagged integration class. Select
  * tagged classes before forking, then let JUnit retain method-level tagging.
  */
-fun freshJvmClassNames(): List<String> =
-    sourceSets["integrationTest"]
-        .output.classesDirs
-        .flatMap { root ->
-            if (!root.isDirectory) return@flatMap emptyList()
-            root
-                .walkTopDown()
-                .filter { it.isFile && it.extension == "class" }
-                .filter { String(it.readBytes(), Charsets.ISO_8859_1).contains("NeedsFreshJvm") }
-                .map {
-                    it
-                        .relativeTo(root)
-                        .invariantSeparatorsPath
-                        .removeSuffix(".class")
-                        .replace('/', '.')
-                }.filterNot { '$' in it }
-                // The annotation definition contains its own descriptor. It is
-                // not a test class and must not create an empty fresh-JVM fork.
-                .filterNot { it.endsWith(".NeedsFreshJvm") }
-                .toList()
-        }.distinct()
-
 if (cliTestPatterns.isNotEmpty()) {
     val freshOnly = findMatchingTaggedClasses(cliTestPatterns, wantTag = true)
     val plain = findMatchingTaggedClasses(cliTestPatterns, wantTag = false)
@@ -167,12 +145,7 @@ val integrationTestFreshJvm =
             includeTags("needs-fresh-jvm")
         }
         forkEvery = 1
-        doFirst {
-            filter {
-                isFailOnNoMatchingTests = false
-                freshJvmClassNames().forEach(::includeTestsMatching)
-            }
-        }
+        doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
 tasks.check {

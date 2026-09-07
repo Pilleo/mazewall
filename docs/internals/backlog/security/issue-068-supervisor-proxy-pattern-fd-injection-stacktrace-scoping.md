@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: ab90f1c2-e5c3-455a-a1e4-3dcb49514c01
-paperclip_identifier: MAZ-743
+paperclip_issue_id: "0ad6eebf-2d48-4350-97a1-32e5430f5177"
+paperclip_identifier: "MAZ-1161"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping

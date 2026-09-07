@@ -571,6 +571,7 @@ class "ErrnoMapping" as io.mazewall.core.ErrnoMapping {
 class "FdEpoch" as io.mazewall.core.FdEpoch {
   + {static}FdEpoch INSTANCE
   __
+  +long claimOpen(FileDescriptor<?, ?, ?>)
   +long claimOpen(int)
   +long adoptKernelReuse(int)
   +void retire(int, long)
@@ -968,6 +969,13 @@ class "ContainerState" as io.mazewall.enforcer.state.ContainerState {
   +ContainerState withNewSeccompPolicy(PolicyDefinition<?>, Map<Syscall, ? extends SeccompAction>, SeccompAction)
   +ContainerState withLandlockPolicy(PolicyDefinition<?>)
   +ContainerState withEngineState(SeccompInstallationState)
+}
+interface "ContainmentRegistryEffect" as io.mazewall.enforcer.state.ContainmentRegistryEffect {
+}
+class "ContainmentRegistryEffectInterpreter" as io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter {
+  + {static}ContainmentRegistryEffectInterpreter INSTANCE
+  __
+  +void apply(ContainmentRegistryEffect)
 }
 class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateRegistry {
   + {static}ContainmentStateRegistry INSTANCE
@@ -1768,6 +1776,19 @@ class "LandlockApplyResultKt" as io.mazewall.landlock.LandlockApplyResultKt {
 }
 interface "LandlockFdOutcome" as io.mazewall.landlock.LandlockFdOutcome {
 }
+class "LandlockInstall" as io.mazewall.landlock.LandlockInstall {
+  + {static}LandlockInstall INSTANCE
+  __
+  +LandlockInstallTransition evaluate(LandlockState, LandlockInstallEvent)
+}
+interface "LandlockInstallEffect" as io.mazewall.landlock.LandlockInstallEffect {
+}
+interface "LandlockInstallEvent" as io.mazewall.landlock.LandlockInstallEvent {
+}
+class "LandlockInstallTransition" as io.mazewall.landlock.LandlockInstallTransition {
+  +LandlockState getState()
+  +List<LandlockInstallEffect> getEffects()
+}
 interface "LandlockLifecycle" as io.mazewall.landlock.LandlockLifecycle {
   + {abstract}LandlockState getDiagnosticState()
 }
@@ -2014,6 +2035,13 @@ interface "SeccompEngine" as io.mazewall.seccomp.SeccompEngine<S extends EngineS
 interface "SeccompInstallationState" as io.mazewall.seccomp.SeccompInstallationState {
   + {abstract}int getRank()
 }
+class "SelfVerificationPlan" as io.mazewall.seccomp.SelfVerificationPlan {
+  + {static}Companion Companion
+  __
+  +int getLivenessNr()
+  +boolean getProbeLiveness()
+  +List<Pair<Integer, Integer>> getDeniedProbes()
+}
 class "SocketAddressFamilyInspector" as io.mazewall.seccomp.SocketAddressFamilyInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
   +void emitSpecial(BpfBuilder<? extends Active>, Arch, InspectionContext, Set<Integer>)
@@ -2122,6 +2150,7 @@ io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDef
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.PolicyDefinition
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.core.SeccompAction
+io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter --> io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainerState
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.core.ThreadLocalDelegate
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainmentStateRegistry
@@ -2210,6 +2239,9 @@ io.mazewall.ffi.networking.SupervisorSocketUtils --> io.mazewall.ffi.networking.
 io.mazewall.ffi.networking.SupervisorValidationChannel --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.ffi.networking.SupervisorValidationChannel --> io.mazewall.core.FileDescriptor
 io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock
+io.mazewall.landlock.LandlockInstall --> io.mazewall.landlock.LandlockInstall
+io.mazewall.landlock.LandlockInstallTransition --> io.mazewall.landlock.LandlockState
+io.mazewall.landlock.LandlockInstallTransition --> io.mazewall.landlock.LandlockInstallEffect
 io.mazewall.landlock.LandlockRuleset --> io.mazewall.core.FileDescriptor
 io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockSession --> io.mazewall.PolicyDefinition

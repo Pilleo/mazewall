@@ -1,10 +1,32 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 82 | *Total Resolved Issues:* 501
-*Total Active Issues:* 87 | *Total Resolved Issues:* 496
+*Total Active Issues:* 103 | *Total Resolved Issues:* 501
+*Total Active Issues:* 108 | *Total Resolved Issues:* 496
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260907-094634-079-make-containment-exception-classification-and-extr](issue-20260907-094634-079-make-containment-exception-classification-and-extr.md) | Make containment exception classification and extraction reliable for callers | high | enforcer |
+| [issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines](testing/issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines.md) | Forbid silent else on sealed lifecycle and security machines | high | testing |
+| [issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n](code_health/issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n.md) | Make OrchestratorEvent evaluate exhaustive instead of else no-op | high | orchestrator |
+| [issue-20260907-080810-archunit-forbid-profiler-memorysegment-outside-ffi](testing/issue-20260907-080810-archunit-forbid-profiler-memorysegment-outside-ffi.md) | ArchUnit-forbid profiler MemorySegment outside ffi | high | profiler |
+| [issue-20260907-080818-hide-profiler-handshake-and-native-io-from-public-api](code_health/issue-20260907-080818-hide-profiler-handshake-and-native-io-from-public-api.md) | Hide profiler handshake and native IO from public API | high | profiler |
+| [issue-20260907-080829-thread-filedescriptor-through-platform-downcalls-and-classif](code_health/issue-20260907-080829-thread-filedescriptor-through-platform-downcalls-and-classif.md) | Thread FileDescriptor through platform downcalls and classification | high | platform |
+| [issue-20260907-080837-replace-profiler-control-tokens-and-mmap-flags-with-sealed-t](code_health/issue-20260907-080837-replace-profiler-control-tokens-and-mmap-flags-with-sealed-t.md) | Replace profiler control tokens and mmap flags with sealed types | high | profiler |
+| [issue-20260907-080845-replace-portal-method-int-and-byte-constants-with-sealed-por](code_health/issue-20260907-080845-replace-portal-method-int-and-byte-constants-with-sealed-por.md) | Replace portal method Int and Byte constants with sealed PortalMethod | high | docs |
+| [issue-20260907-080940-replace-orchestrator-module-identity-string-with-sealed-type](code_health/issue-20260907-080940-replace-orchestrator-module-identity-string-with-sealed-type.md) | Replace orchestrator module identity String with sealed type | medium | orchestrator |
+| [issue-20260907-080949-thread-filedescriptor-through-supervisor-dirfd-and-landlock](code_health/issue-20260907-080949-thread-filedescriptor-through-supervisor-dirfd-and-landlock.md) | Thread FileDescriptor through supervisor dirfd and Landlock fds | high | enforcer |
+| [issue-20260907-080955-split-landlock-install-into-evaluate-plus-kernel-effects](code_health/issue-20260907-080955-split-landlock-install-into-evaluate-plus-kernel-effects.md) | Split Landlock install into evaluate plus kernel effects | high | enforcer |
+| [issue-20260907-080959-apply-containmentstateregistry-updates-as-machine-effects](code_health/issue-20260907-080959-apply-containmentstateregistry-updates-as-machine-effects.md) | Apply ContainmentStateRegistry updates as machine effects | high | enforcer |
+| [issue-20260907-081005-add-user-notif-session-evaluate-machine-around-supervisorses](code_health/issue-20260907-081005-add-user-notif-session-evaluate-machine-around-supervisorses.md) | Add USER_NOTIF session evaluate machine around SupervisorSessionHandler | high | enforcer |
+| [issue-20260907-081011-move-profiler-handshake-lifecycle-into-evaluate](code_health/issue-20260907-081011-move-profiler-handshake-lifecycle-into-evaluate.md) | Move profiler handshake lifecycle into evaluate | high | profiler |
+| [issue-20260907-081045-add-portal-worker-and-broker-evaluate-machine](code_health/issue-20260907-081045-add-portal-worker-and-broker-evaluate-machine.md) | Add portal worker and broker evaluate machine | high | docs |
+| [issue-20260907-081051-move-orchestrator-i-o-out-of-orchestratorstate-execute](code_health/issue-20260907-081051-move-orchestrator-i-o-out-of-orchestratorstate-execute.md) | Move orchestrator I/O out of OrchestratorState execute | high | orchestrator |
+| [issue-20260907-081057-label-bpf-inspection-and-scm-rights-packing-arithmetic](code_health/issue-20260907-081057-label-bpf-inspection-and-scm-rights-packing-arithmetic.md) | Label BPF inspection and SCM_RIGHTS packing arithmetic | medium | enforcer |
+| [issue-20260907-081101-fix-landlock-before-seccomp-docs-pointing-at-applycontainmen](code_health/issue-20260907-081101-fix-landlock-before-seccomp-docs-pointing-at-applycontainmen.md) | Fix Landlock-before-seccomp docs pointing at applyContainment | low | docs |
+| [issue-20260907-081107-require-0xac-ack-on-profiler-user-notif-noise-path](security/issue-20260907-081107-require-0xac-ack-on-profiler-user-notif-noise-path.md) | Require 0xAC ACK on profiler USER_NOTIF noise path | high | profiler |
+| [issue-20260907-081112-make-portal-codegen-stubs-reviewable-with-named-method-ids](code_health/issue-20260907-081112-make-portal-codegen-stubs-reviewable-with-named-method-ids.md) | Make portal-codegen stubs reviewable with named method IDs | medium | docs |
+| [issue-20260907-081116-deduplicate-syscallinvoker-errno-capture-boilerplate](code_health/issue-20260907-081116-deduplicate-syscallinvoker-errno-capture-boilerplate.md) | Deduplicate SyscallInvoker errno capture boilerplate | medium | platform |
+| [issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local](security/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md) | Keep portal-worker Landlock process-scoped not thread-local | high | docs |
 | [issue-20260907-065311-extract-install-self-verification-planning-from-native-execu](code_health/issue-20260907-065311-extract-install-self-verification-planning-from-native-execu.md) | Extract install self-verification planning from native execution | high | enforcer |
 | [issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder](code_health/issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder.md) | Extract Tier-E BPF program-load request encoder | high | profiler |
 | [issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher](code_health/issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher.md) | Extract immutable syscall-number resolver from dispatcher | high | platform |

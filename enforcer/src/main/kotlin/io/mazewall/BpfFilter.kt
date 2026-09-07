@@ -241,6 +241,7 @@ object BpfFilter {
                             val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
                             val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
+                            // 64-bit arg: BPF_LD|BPF_W|BPF_ABS high word, then low word.
                             loadAbsolute(argOffsetHi)
                             jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
                             mark(checkLoLabel)
@@ -254,7 +255,7 @@ object BpfFilter {
                     }
 
                     is ArgCheck.EqualsAny32 -> {
-                        // Low-word-only comparison: see ArgCheck.EqualsAny32 KDoc.
+                        // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
                         val allowLabel = nextLabel("${labelPrefix}_allow")
                         check.allowedValues.forEachIndexed { valIdx, value ->
                             val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
@@ -277,6 +278,7 @@ object BpfFilter {
                         val denyLabel = nextLabel("${labelPrefix}_deny")
                         val allowLabel = nextLabel("${labelPrefix}_allow")
 
+                        // 64-bit (arg & mask) == expected: high word then low word.
                         loadAbsolute(argOffsetHi)
                         and(maskHi)
                         jumpIfEqual(expectedHi, jt = checkLoLabel, jf = denyLabel)

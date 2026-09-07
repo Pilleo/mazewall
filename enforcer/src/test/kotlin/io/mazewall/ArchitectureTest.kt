@@ -91,7 +91,7 @@ class ArchitectureTest {
             .onlyBeCalled()
             .byMethodsThat(
                 DescribedPredicate.describe("matching name") {
-                    it != null && (it.name.matches(Regex("isContainmentViolation|hasViolation|findViolation")))
+                    it != null && (it.name.matches(Regex("isContainmentViolation|diagnose|findInferredViolation")))
                 },
             ).because("traversal methods correctly handle cause chains which direct checks might skip")
             .check(allClasses)
@@ -570,6 +570,17 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$InjectFd",
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
+            ),
+            "io.mazewall.enforcer.supervisor.JvmVerdict" to setOf(
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$Deny",
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$Allow",
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$InjectFd",
+            ),
+            "io.mazewall.enforcer.state.ContainmentRegistryEffect" to setOf(
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$LandlockApplied",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$SeccompInstalled",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$RestoreThreadState",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$EngineStateUpdated",
             ),
             "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(
                 "io.mazewall.enforcer.supervisor.SupervisedOpen\$Open",

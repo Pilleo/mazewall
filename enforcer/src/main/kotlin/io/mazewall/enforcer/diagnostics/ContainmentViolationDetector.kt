@@ -1,10 +1,7 @@
 package io.mazewall.enforcer.diagnostics
 
-import io.mazewall.enforcer.*
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.state.*
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
+import io.mazewall.enforcer.api.ContainmentViolationException
 import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.util.ServiceLoader
@@ -17,6 +14,19 @@ import java.util.logging.Logger
 fun interface ViolationMatcher {
     fun matches(t: Throwable): Boolean
 }
+
+/**
+ * Caller-facing result for exception diagnosis.
+ *
+ * [evidence] distinguishes an observed Mazewall policy verdict from an exception that merely
+ * resembles a permission failure. Callers must not treat inferred evidence as proof of a kernel
+ * decision.
+ */
+data class ContainmentDiagnostic(
+    val cause: Throwable,
+    val evidence: ContainmentViolationEvidence,
+    val violation: ContainmentViolationException? = null,
+)
 
 class ContainmentViolationDetector
     @JvmOverloads
@@ -176,36 +186,52 @@ class ContainmentViolationDetector
     }
 
     fun isContainmentViolation(t: Throwable): Boolean {
-        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
-        return hasViolation(t, visited)
+        return diagnose(t)?.evidence == ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL
+    }
+
+    /**
+     * Diagnoses [t] across its causes and suppressed exceptions without relying on message parsing
+     * for confirmed-denial semantics. Structured violations are preferred over inferred matches.
+     */
+    fun diagnose(t: Throwable): ContainmentDiagnostic? {
+        val structured = findStructuredViolation(t, identitySet())
+        if (structured != null) {
+            return ContainmentDiagnostic(structured, structured.evidence, structured)
+        }
+        val inferred = findInferredViolation(t, identitySet()) ?: return null
+        return ContainmentDiagnostic(inferred, ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE)
     }
 
     fun findViolationCause(t: Throwable): Throwable? {
-        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
-        return findViolation(t, visited)
+        return diagnose(t)?.cause
     }
 
-    private fun hasViolation(
+    /** Returns the most useful structured violation across causes before suppressed failures. */
+    fun findStructuredViolation(t: Throwable): ContainmentViolationException? = findStructuredViolation(t, identitySet())
+
+    private fun findStructuredViolation(
         t: Throwable?,
         visited: MutableSet<Throwable>,
-    ): Boolean {
-        if (t == null || !visited.add(t)) return false
-        return isDirectContainmentViolation(t) ||
-            hasViolation(t.cause, visited) ||
-            t.suppressedExceptions.any { hasViolation(it, visited) }
+    ): ContainmentViolationException? {
+        if (t == null || !visited.add(t)) return null
+        return (t as? ContainmentViolationException)
+            ?: findStructuredViolation(t.cause, visited)
+            ?: t.suppressedExceptions.firstNotNullOfOrNull { findStructuredViolation(it, visited) }
     }
 
-    private fun findViolation(
+    private fun findInferredViolation(
         t: Throwable?,
         visited: MutableSet<Throwable>,
     ): Throwable? {
         if (t == null || !visited.add(t)) return null
-        return if (isDirectContainmentViolation(t)) {
+        return if (t !is ContainmentViolationException && isDirectContainmentViolation(t)) {
             t
         } else {
-            findViolation(t.cause, visited) ?: t.suppressedExceptions.firstNotNullOfOrNull { findViolation(it, visited) }
+            findInferredViolation(t.cause, visited) ?: t.suppressedExceptions.firstNotNullOfOrNull { findInferredViolation(it, visited) }
         }
     }
+
+    private fun identitySet(): MutableSet<Throwable> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
 
     private fun isDirectContainmentViolation(t: Throwable): Boolean {
         return MATCHERS.any { it.matches(t) }
@@ -247,7 +273,11 @@ class ContainmentViolationDetector
 
         fun isContainmentViolation(t: Throwable): Boolean = defaultInstance.isContainmentViolation(t)
 
+        fun diagnose(t: Throwable): ContainmentDiagnostic? = defaultInstance.diagnose(t)
+
         fun findViolationCause(t: Throwable): Throwable? = defaultInstance.findViolationCause(t)
+
+        fun findStructuredViolation(t: Throwable): ContainmentViolationException? = defaultInstance.findStructuredViolation(t)
 
         fun findViolationRanges(msg: String): Sequence<IntRange> = defaultInstance.findViolationRanges(msg)
 

@@ -66,18 +66,18 @@ public class ProcessBroker(
     internal fun idleSize(): Int = idle.size
 
     public fun echo(text: String): String {
-        val payload = call(PortalMethods.ECHO, text.toByteArray(StandardCharsets.UTF_8), emptyList())
+        val payload = call(PortalMethod.Echo, text.toByteArray(StandardCharsets.UTF_8), emptyList())
         return payload.toString(StandardCharsets.UTF_8)
     }
 
     public fun invoke(
-        methodId: Int,
+        method: PortalMethod,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,
-    ): ByteArray = call(methodId, payload, granted.map { it.fd })
+    ): ByteArray = call(method, payload, granted.map { it.fd })
 
     public fun checksum(fd: Capability.ReadFd): Int {
-        val payload = call(PortalMethods.CHECKSUM, ByteArray(0), listOf(fd.fd))
+        val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd.fd))
         require(payload.size == 4) { "checksum must be 4 bytes" }
         return ((payload[0].toInt() and 0xff) shl 24) or
             ((payload[1].toInt() and 0xff) shl 16) or
@@ -96,11 +96,11 @@ public class ProcessBroker(
         buf[1] = (millis ushr 16).toByte()
         buf[2] = (millis ushr 8).toByte()
         buf[3] = millis.toByte()
-        call(PortalMethods.SLEEP, buf, emptyList())
+        call(PortalMethod.Sleep, buf, emptyList())
     }
 
     internal fun tryOpenHostPasswd() {
-        call(PortalMethods.TRY_OPEN_HOST_PASSWD, ByteArray(0), emptyList())
+        call(PortalMethod.TryOpenHostPasswd, ByteArray(0), emptyList())
     }
 
     internal fun spawnedWorkers(): Int = spawned.get()
@@ -114,7 +114,7 @@ public class ProcessBroker(
     }
 
     internal fun call(
-        methodId: Int,
+        method: PortalMethod,
         payload: ByteArray,
         fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>,
     ): ByteArray {
@@ -125,19 +125,29 @@ public class ProcessBroker(
         var returnedToPool = false
         return try {
             val id = nextId.getAndIncrement()
-            slot.channel.send(PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
+            val request = PortalFrame(PortalKind.Request, id, method, payload, fds.size)
+            var callState = PortalBrokerCallMachine
+                .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
+                .state
+            slot.channel.send(request, fds)
             val (reply, extra) = slot.channel.receive(callTimeoutMs)
             extra.forEach { sockets.close(it) }
-            check(reply.requestId == id) { "request id mismatch" }
-            if (reply.kind == PortalKind.ERROR) {
-                returnToPoolOrDestroy(slot)
-                returnedToPool = true
-                throw PortalCallException(reply.payload.toString(StandardCharsets.UTF_8))
+            val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
+            callState = transition.state
+            when (val effect = transition.effect) {
+                is PortalBrokerCallEffect.ReturnPayload -> {
+                    returnToPoolOrDestroy(slot)
+                    returnedToPool = true
+                    effect.payload
+                }
+                is PortalBrokerCallEffect.RemoteError -> {
+                    returnToPoolOrDestroy(slot)
+                    returnedToPool = true
+                    throw PortalCallException(effect.message)
+                }
+                is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
+                PortalBrokerCallEffect.None -> throw PortalCallException("portal RPC produced no terminal result")
             }
-            check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
-            returnToPoolOrDestroy(slot)
-            returnedToPool = true
-            reply.payload
         } catch (e: PortalCallException) {
             if (!returnedToPool) {
                 recycleDeadWorker(slot)

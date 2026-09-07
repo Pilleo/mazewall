@@ -194,16 +194,11 @@ internal object InstallSelfVerifier {
         mergedState: ContainerState,
         priorFilterDepth: Int,
     ) {
-        // Perform union-aware verification:
-        // 1. Liveness probe (getpid) - must be allowed by ALL layers including merged state
-        val livenessNr = arch.getpid
-        val effectiveLivenessAction = mergedState.getEffectiveAction(livenessNr, arch)
-        val expectedLivenessCode = effectiveLivenessAction.toKernelReturnCode()
-
-        if (expectedLivenessCode == NativeConstants.SECCOMP_RET_ALLOW) {
+        val plan = SelfVerificationPlan.create(instructions, arch, mergedState = mergedState)
+        if (plan.probeLiveness) {
             // Liveness probe should succeed under merged policy
             val pid = LinuxNative.raw.syscall(
-                livenessNr.toLong(),
+                plan.livenessNr.toLong(),
                 NativeArg.LongArg(0),
                 NativeArg.LongArg(0),
                 NativeArg.LongArg(0),
@@ -216,13 +211,13 @@ internal object InstallSelfVerifier {
             }
         } else {
             // Liveness is denied by merged policy - skip the actual probe but verify denied probes
-            verifyDeniedProbesWithUnion(instructions, arch, mergedState)
+            verifyDeniedProbes(instructions, plan.deniedProbes)
             markVerified(instructions)
             return
         }
 
         // 2. Verify denied probes based on union semantics
-        verifyDeniedProbesWithUnion(instructions, arch, mergedState)
+        verifyDeniedProbes(instructions, plan.deniedProbes)
 
         markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
@@ -232,125 +227,6 @@ internal object InstallSelfVerifier {
             ),
         )
     }
-
-    /**
-     * Union-aware denied probe verification.
-     *
-     * For stacked filters, we verify that syscalls denied by the UNION (merged state)
-     * produce the expected errno when probed against the kernel.
-     *
-     * @param instructions The BPF instructions of the newly installed program
-     * @param arch The architecture
-     * @param mergedState The merged container state
-     */
-    private fun verifyDeniedProbesWithUnion(
-        instructions: List<BpfInstruction>,
-        arch: Arch,
-        mergedState: ContainerState,
-    ) {
-        val deniedNrs = deniedProbeNrsWithUnion(instructions, arch, mergedState)
-        for ((nr, expectedErrno) in deniedNrs) {
-            val res = LinuxNative.raw.syscall(
-                nr.toLong(),
-                NativeArg.LongArg(0),
-                NativeArg.LongArg(0),
-                NativeArg.LongArg(0),
-                NativeArg.LongArg(0),
-                NativeArg.LongArg(0),
-                NativeArg.LongArg(0),
-            )
-            val actualErrno = (res as? LinuxNative.SyscallResult.Error)?.errno
-            if (actualErrno != expectedErrno) {
-                io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
-                    io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
-                        passed = false,
-                        detail = "union-aware nr=$nr expected=$expectedErrno actual=$actualErrno",
-                    ),
-                )
-                throw SelfVerificationException(
-                    "Union-aware kernel verdict diverges for nr=$nr: " +
-                        "expected errno=$expectedErrno, got result=$res",
-                    instructions,
-                )
-            }
-        }
-    }
-
-    /**
-     * Union-aware denied probe NR selection.
-     *
-     * Selects syscall NRs that should be denied by the UNION of all stacked filters.
-     * A syscall is denied if the merged state's effective action is ERRNO-class.
-     *
-     * @param instructions The BPF instructions of the newly installed program
-     * @param arch The architecture
-     * @param mergedState The merged container state
-     * @return List of (syscall_nr, expected_errno) pairs for denied probes
-     */
-    internal fun deniedProbeNrsWithUnion(
-        instructions: List<BpfInstruction>,
-        arch: Arch,
-        mergedState: ContainerState,
-        maxProbes: Int = MAX_PROBES,
-    ): List<Pair<Int, Int>> {
-        val candidates = LinkedHashSet<Int>()
-        SyscallProbeMatrix.structural(arch).forEach { candidates.add(it.nr) }
-        candidates.add(SyscallProbeMatrix.SYNTHETIC_HIGH_NR)
-
-        // Policy-matched NRs from the current program
-        val auditTokens = setOf(Arch.AMD64.audit, Arch.AARCH64.audit)
-        for (inst in instructions) {
-            if (inst is BpfInstruction.Jmp &&
-                inst.code == JEQ_OPCODE &&
-                inst.k in 0..MAX_PLAUSIBLE_NR &&
-                inst.k !in auditTokens
-            ) {
-                candidates.add(inst.k)
-            }
-        }
-
-        val out = mutableListOf<Pair<Int, Int>>()
-        for (nr in candidates) {
-            // Use merged state to get the effective action for union-aware verification
-            val effectiveAction = mergedState.getEffectiveAction(nr, arch)
-            val actionCode = effectiveAction.toKernelReturnCode()
-
-            // Skip arg-inspected syscalls (same reasoning as non-union verification)
-            if (isArgInspected(instructions, nr)) continue
-
-            // Check if this is an ERRNO-class action (denied)
-            if ((actionCode ushr 16) == (NativeConstants.SECCOMP_RET_ERRNO ushr 16)) {
-                out += nr to (actionCode and 0xFFFF)
-                if (out.size >= maxProbes) return out
-            }
-        }
-        return out
-    }
-
-    /**
-     * Selects up to [MAX_PROBES] syscall NRs whose simulator-predicted verdict is ERRNO-class,
-     * preferring structural edge cases (nr 0, synthetic highs) then matched policy NRs.
-     */
-    internal fun deniedProbeNrs(
-        instructions: List<BpfInstruction>,
-        arch: Arch,
-        maxProbes: Int = MAX_PROBES,
-    ): List<Pair<Int, Int>> = SelfVerificationPlan.deniedProbeNrs(instructions, arch, maxProbes)
-
-    private const val MAX_PROBES = 4
-    private const val MAX_PLAUSIBLE_NR = 9_999
-    private const val JEQ_OPCODE: Short = 0x15
-    private const val LD_ABS_OPCODE: Short = 0x20
-
-    /**
-     * True when the decision section following the `JEQ nr` comparison for [nr] reads
-     * seccomp_data.args — i.e. the filter inspects syscall arguments, so a zero-arg probe would
-     * fabricate a verdict.
-     */
-    internal fun isArgInspected(
-        instructions: List<BpfInstruction>,
-        nr: Int,
-    ): Boolean = SelfVerificationPlan.isArgInspected(instructions, nr)
 
     class SelfVerificationException(
         message: String,

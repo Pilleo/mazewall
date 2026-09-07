@@ -13,7 +13,6 @@ public object ElfBuildIdExtractor {
     private const val E_SHENTSIZE = 0x3A
     private const val E_SHNUM = 0x3C
     private const val E_SHSTRNDX = 0x3E
-    private const val SH_NAME = 0
     private const val SH_TYPE = 4
     private const val SH_OFFSET = 24
     private const val SH_SIZE = 32

@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.." || exit
 echo "🧹 Running ktlint check..."
 ./gradlew ktlintCheck
 
-echo "🔍 Running Detekt analysis..."
-./gradlew detekt
+echo "🔍 Running Detekt analysis (type-resolved; skips :tools)..."
+./gradlew detektMain
 
 echo "🪲 Running SpotBugs analysis..."
 ./gradlew spotbugsMain

@@ -43,7 +43,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         get() = when (ContainerState.resolveCurrentState().engineState) {
             is SeccompInstallationState.Uninitialized -> EngineState.UnprivilegedImpl
             is SeccompInstallationState.Verified -> EngineState.LoadedImpl
-            else -> EngineState.ConfiguredImpl
+            is SeccompInstallationState.FilterBuilt,
+            is SeccompInstallationState.PrivilegesLocked,
+            is SeccompInstallationState.SystemCallApplied,
+            is SeccompInstallationState.FallbackPrctlApplied,
+            is SeccompInstallationState.Failed,
+            -> EngineState.ConfiguredImpl
         }
 
     override val isSupported: Boolean
@@ -133,10 +138,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     private fun updateState(next: SeccompInstallationState, useTsync: Boolean) {
-        if (useTsync) {
-            ContainmentStateRegistry.updateProcessState { it.withEngineState(next) }
-        }
-        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withEngineState(next)
+        ContainmentRegistryEffectInterpreter.apply(
+            ContainmentRegistryEffect.EngineStateUpdated(processWide = useTsync, state = next),
+        )
     }
 
     /**

@@ -97,10 +97,6 @@ internal class ProfilerTraceListener(
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
 
-        // Signals the daemon to finish writing any in-flight events and close its socket end.
-        // On receipt the daemon session loop terminates gracefully (LoopAction.Shutdown), which
-        // allows the JVM listener to drain the remaining events before seeing EOF.
-        private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte()
         private const val PASS_THROUGH_COMMAND_BYTE = 0x54.toByte()
         private const val JOIN_TIMEOUT_MS = 5000L
         private const val INTERRUPT_JOIN_TIMEOUT_MS = 500L
@@ -110,7 +106,7 @@ internal class ProfilerTraceListener(
      * Starts the background listener thread.
      */
     fun start(readyLatch: CountDownLatch) {
-        if (closed.get()) throw IllegalStateException("Listener is already closed")
+        check(!closed.get()) { "Listener is already closed" }
 
         val arena = io.mazewall.ffi.memory.NativeArena
             .ofShared()
@@ -168,7 +164,7 @@ internal class ProfilerTraceListener(
 
     /**
      * Shuts down the listener using the graceful drain protocol:
-     * 1. Sends SHUTDOWN_COMMAND_BYTE to the daemon so it finishes writing any in-flight events.
+     * 1. Sends PASS_THROUGH_COMMAND_BYTE to the daemon so it finishes writing any in-flight events.
      * 2. Waits for the listener thread to drain all remaining events until it sees EOF from the daemon.
      * 3. Only then closes the underlying socket FD.
      *
@@ -239,10 +235,6 @@ internal class ProfilerTraceListener(
             workerThread = null
             collectorThread = null
         }
-    }
-
-    private fun sendShutdownCommand() {
-        sendCommand(SHUTDOWN_COMMAND_BYTE)
     }
 
     /**
@@ -333,7 +325,7 @@ internal class ProfilerTraceListener(
         try {
             try {
                 // Read handshake ACK from the daemon confirming the listener FD was received.
-                state = TraceListenerState.Disconnected
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
                     logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
@@ -346,7 +338,7 @@ internal class ProfilerTraceListener(
 
             System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
             while (!closed.get()) {
-                state = TraceListenerState.AwaitingEvent
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
                 } catch (e: java.io.EOFException) {
@@ -360,13 +352,13 @@ internal class ProfilerTraceListener(
                     throw e
                 }
 
-                state = TraceListenerState.ProcessingEvent(event)
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.EventRead(event))
                 processEvent(event)
             }
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
         } finally {
-            state = TraceListenerState.Disconnected
+            state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SocketClosed)
             eventQueue.close()
         }
     }
@@ -374,17 +366,20 @@ internal class ProfilerTraceListener(
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
         System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
         val tidValue = dis.readInt()
-        state = TraceListenerState.ReadingHeader(tidValue)
+        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
 
         val syscallNameLen = dis.readInt()
-        state = TraceListenerState.ReadingSyscall(tidValue, syscallNameLen)
+        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SyscallRead(tidValue, syscallNameLen))
 
         val syscallNameBytes = ByteArray(syscallNameLen)
         dis.readFully(syscallNameBytes)
         val syscallName = String(syscallNameBytes, Charsets.UTF_8)
 
         val argsCount = dis.readInt()
-        state = TraceListenerState.ReadingArguments(tidValue, syscallName, argsCount)
+        state = TraceListenerMachine.evaluate(
+            state,
+            TraceListenerEvent.ArgumentsRead(tidValue, syscallName, argsCount),
+        )
 
         val args = LongArray(argsCount)
         for (i in 0 until argsCount) {
@@ -393,7 +388,7 @@ internal class ProfilerTraceListener(
 
         val pathsCount = dis.readInt()
         val paths = mutableListOf<String>()
-        for (i in 0 until pathsCount) {
+        repeat(pathsCount) {
             val pathLen = dis.readInt()
             val pathBytes = ByteArray(pathLen)
             dis.readFully(pathBytes)

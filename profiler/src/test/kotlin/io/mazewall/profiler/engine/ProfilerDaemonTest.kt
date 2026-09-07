@@ -21,6 +21,13 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeShort
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.profiler.ffi.HandshakeSession
+import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.ProfilerTransport
+import io.mazewall.profiler.ffi.RealProfilerTransport
+import io.mazewall.profiler.ffi.SeccompResponder
+import io.mazewall.profiler.ffi.SocketLifecycleManager
+import io.mazewall.profiler.ffi.TraceEventPublisher
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -825,6 +832,7 @@ class ProfilerDaemonTest {
 
                     assertEquals(NotifResult.TERMINATE, ok)
                     assertTrue(transport.errorSent)
+                    assertTrue(handler.state is ProfilerState.Terminated)
                 } finally {
                     SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
                     SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)

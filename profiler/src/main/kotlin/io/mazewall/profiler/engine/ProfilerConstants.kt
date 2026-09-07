@@ -1,7 +1,5 @@
 package io.mazewall.profiler.engine
 
-import java.lang.foreign.ValueLayout
-
 internal const val ADDR_UN_SIZE = 110
 internal const val SOCKADDR_UN_PATH_SIZE = 108
 internal const val BACKLOG_SIZE = 128
@@ -18,7 +16,10 @@ internal const val ACK_BUF_SIZE = 4L
 internal const val POLLFD_FD_OFF = 0L
 internal const val POLLFD_EVENTS_OFF = 4L
 internal const val POLLFD_REVENTS_OFF = 6L
-internal val POLLFD_REVENT_DATA_OFF = ValueLayout.JAVA_LONG.byteSize() + POLLFD_REVENTS_OFF
+
+/** Linux LP64 ABI width used by the native pollfd-related protocol layout. */
+internal const val NATIVE_LONG_SIZE = 8L
+internal const val POLLFD_REVENT_DATA_OFF = NATIVE_LONG_SIZE + POLLFD_REVENTS_OFF
 
 internal const val MAX_SYSCALL_ARGS = 6
 internal const val ARG_DIR_FD = 0

@@ -13,8 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023939-tier-e-wp-09-live-collector.md"
-paperclip_issue_id: 7343d83e-47d4-48f3-b460-1a8663917e55
-paperclip_identifier: MAZ-711
+paperclip_issue_id: "4f68fb4e-d1c3-4607-990c-b64ecac0d83c"
+paperclip_identifier: "MAZ-1144"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-10 — Oracle Comparison Suite (G3)

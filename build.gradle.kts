@@ -2,6 +2,9 @@ import org.gradle.api.publish.PublishingExtension
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
+/** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
+fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path.startsWith(":tools")
+
 plugins {
     alias(libs.plugins.kotlin)
     alias(libs.plugins.detekt)
@@ -21,10 +24,11 @@ allprojects {
         mavenCentral()
     }
 
-    // Disable detekt globally
-    tasks.configureEach {
-        if (name.contains("detekt", ignoreCase = true)) {
-            enabled = false
+    if (skipsKotlinStyleTools()) {
+        tasks.configureEach {
+            if (name.contains("detekt", ignoreCase = true) || name.contains("ktlint", ignoreCase = true)) {
+                enabled = false
+            }
         }
     }
 
@@ -43,7 +47,7 @@ allprojects {
         }
     }
 
-    if (!project.path.startsWith(":demos")) {
+    if (!skipsKotlinStyleTools()) {
         apply(plugin = "org.jlleitschuh.gradle.ktlint")
         configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
             version.set("1.7.0")
@@ -153,7 +157,7 @@ allprojects {
 
     // Ensure code is formatted before compilation or check to prevent build failures
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        if (!project.path.startsWith(":demos")) {
+        if (!skipsKotlinStyleTools()) {
             dependsOn("ktlintFormat")
         }
         compilerOptions {
@@ -168,14 +172,14 @@ allprojects {
     }
 
     tasks.matching { it.name == "ktlintCheck" || it.name == "ktlintTestSourceSetCheck" || it.name == "ktlintMainSourceSetCheck" }.configureEach {
-        if (!project.path.startsWith(":demos")) {
+        if (!skipsKotlinStyleTools()) {
             dependsOn("ktlintFormat")
         }
     }
 
     // Also format Kotlin scripts (like build.gradle.kts)
     tasks.matching { it.name == "kotlinSourcesJar" }.configureEach {
-        if (!project.path.startsWith(":demos")) {
+        if (!skipsKotlinStyleTools()) {
             dependsOn("ktlintFormat")
         }
     }
@@ -248,7 +252,7 @@ detekt {
     allRules = false
     config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
     source.setFrom(files("src/main/kotlin"))
-    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Never
+    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Error
 }
 
 subprojects {
@@ -259,12 +263,19 @@ subprojects {
     apply(plugin = "maven-publish")
     apply(plugin = "base")
     apply(plugin = "jacoco")
-    apply(plugin = "dev.detekt")
     apply(plugin = "com.github.spotbugs")
-
-    detekt {
-        baseline = file("$rootDir/config/detekt/${project.name}-baseline.xml")
-        source.setFrom(files("src/main/kotlin"))
+    if (!path.startsWith(":tools")) {
+        apply(plugin = "dev.detekt")
+        detekt {
+            baseline = file("$rootDir/config/detekt/${project.name}-baseline.xml")
+            source.setFrom(files("src/main/kotlin"))
+            failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Error
+        }
+        plugins.withId("dev.detekt") {
+            tasks.named("check") {
+                dependsOn("detektMain")
+            }
+        }
     }
 
     tasks.configureEach {
@@ -591,17 +602,19 @@ tasks.register("kernelCheck") {
 
 evaluationDependsOn(":profiler")
 
-val profilerRuntimeClasspath =
-    project(":profiler")
-        .extensions
-        .getByType<org.gradle.api.tasks.SourceSetContainer>()["main"]
-        .runtimeClasspath
+val triageRuntimeClasspath by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+dependencies {
+    add(triageRuntimeClasspath.name, project(":profiler"))
+}
 
 tasks.register<JavaExec>("runTriage") {
     group = "verification"
     description = "Gathers system telemetry and diagnostics on failure."
-    dependsOn(":profiler:classes")
-    classpath = profilerRuntimeClasspath
+    classpath = triageRuntimeClasspath
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
 
     val testFailures =

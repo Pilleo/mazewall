@@ -4,7 +4,6 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import java.lang.foreign.MemorySegment
 
 /**
  * States representing the lifecycle of a profiler connection/session.

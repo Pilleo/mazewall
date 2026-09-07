@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp
 
 import io.mazewall.MazewallInternal
 import io.mazewall.core.Arch
+import io.mazewall.core.SyscallNumber
 
 /** USER_NOTIF kinds shared by supervisor policy and profiler noise filtering. */
 @MazewallInternal
@@ -20,11 +21,11 @@ public sealed interface SupervisedKind {
 
     public companion object {
         public fun classify(
-            nr: Int,
+            nr: SyscallNumber,
             arch: Arch,
         ): SupervisedKind {
-            if (nr < 0) return Unknown
-            return when (nr) {
+            if (nr.nr < 0) return Unknown
+            return when (nr.nr) {
                 arch.open, arch.openat, arch.openat2 -> Open
                 arch.connect -> Connect
                 arch.accept, arch.accept4 -> Accept

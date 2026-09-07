@@ -23,6 +23,9 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+
+paperclip_issue_id: "10a3572a-2a8b-404f-ba1e-d40676f876cf"
+paperclip_identifier: "MAZ-1150"
 ---
 
 # 🟡 [Severity: MEDIUM]: Move platform-owned unit tests into platform coverage

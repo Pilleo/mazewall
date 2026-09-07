@@ -23,7 +23,8 @@ internal object BpfProgLoadRequestEncoder {
         programType: Int,
         programName: String,
     ): Request {
-        require(programName.length < BpfProgLoadLayout.PROGRAM_NAME_SIZE) {
+        val programNameBytes = programName.toAsciiProgramName()
+        require(programNameBytes.size < BpfProgLoadLayout.PROGRAM_NAME_SIZE) {
             "BPF program name must fit ${BpfProgLoadLayout.PROGRAM_NAME_SIZE - 1} ASCII bytes"
         }
         val instructions = program.map { instruction ->
@@ -47,7 +48,7 @@ internal object BpfProgLoadRequestEncoder {
         attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL, 1)
         attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_SIZE, verifierLog.byteSize().toInt())
         attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.LOG_BUFFER, verifierLog)
-        programName.toByteArray(Charsets.US_ASCII).forEachIndexed { index, byte ->
+        programNameBytes.forEachIndexed { index, byte ->
             attr.set(ValueLayout.JAVA_BYTE, BpfProgLoadLayout.PROGRAM_NAME + index, byte)
         }
         return Request(attr, instructionSegment, verifierLog)
@@ -70,5 +71,12 @@ internal object BpfProgLoadRequestEncoder {
         value.toByteArray(Charsets.US_ASCII).forEachIndexed { index, byte ->
             segment.set(ValueLayout.JAVA_BYTE, index.toLong(), byte)
         }
+    }
+
+    private fun String.toAsciiProgramName(): ByteArray {
+        require(all { character -> character.code in 1..0x7F }) {
+            "BPF program name must contain only non-NUL ASCII characters"
+        }
+        return toByteArray(Charsets.US_ASCII)
     }
 }

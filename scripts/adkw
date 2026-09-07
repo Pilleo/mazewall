@@ -1,50 +1,49 @@
 #!/usr/bin/env bash
-#
-# adkw: Agent DevKit Wrapper (mirrors gradlew / mvnw pattern)
-#
-# Resolves ADK runtime from local user cache (~/.adk/dists/...),
-# building or fetching the distribution if not present, and executes
-# the ADK entry point with all arguments passed directly.
-#
-
-set -euo pipefail
-
-APP_NAME="adk"
-APP_BASE_NAME="$(basename "$0")"
-ADK_USER_HOME="${ADK_USER_HOME:-$HOME/.adk}"
-WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Locate wrapper properties if present, otherwise default to local development source
-WRAPPER_PROPERTIES="${WRAPPER_DIR}/adk-wrapper.properties"
-DIST_VERSION="0.1.0"
-REPO_SOURCE="${ADK_SOURCE_REPO:-$HOME/Documents/code/java/agent-devkit}"
-
-if [ -f "$WRAPPER_PROPERTIES" ]; then
-    VERSION_PROP="$(grep "^distributionVersion=" "$WRAPPER_PROPERTIES" | cut -d= -f2 || true)"
-    if [ -n "$VERSION_PROP" ]; then
-        DIST_VERSION="$VERSION_PROP"
-    fi
+set -eo pipefail
+WRAPPER_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROPS="$WRAPPER_DIR/adk-wrapper.properties"
+ADK_HOME="$HOME/.adk"
+[ -n "${ADK_USER_HOME:-}" ] && ADK_HOME="$ADK_USER_HOME"
+VERSION="$(awk -F= '$1=="distributionVersion"{print $2}' "$PROPS")"
+MIN_JAVA="$(awk -F= '$1=="minimumJavaVersion"{print $2}' "$PROPS")"
+DIST_DIR="$ADK_HOME/dists/adk-$VERSION"
+DIST_BIN="$DIST_DIR/bin/agent-devkit"
+SOURCE="$(awk -F= '$1=="distributionSource"{print $2}' "$PROPS")"
+if [ "$1" = "--doctor" ]; then
+  echo "version=$VERSION"
+  echo "source=${SOURCE:-unset}"
+  echo "distribution=$DIST_DIR"
+  echo "javaMinimum=$MIN_JAVA"
+  echo "state=$([ -x "$DIST_BIN" ] && echo ready || echo missing)"
+  exit 0
 fi
-
-DIST_DIR="${ADK_USER_HOME}/dists/adk-${DIST_VERSION}"
-DIST_BIN="${DIST_DIR}/bin/agent-devkit"
-
-# Auto-provision distribution if missing or stale
-if [ ! -x "$DIST_BIN" ]; then
-    echo "==> [adkw] Initializing adk ${DIST_VERSION} in ${DIST_DIR}..." >&2
-    mkdir -p "${ADK_USER_HOME}/dists"
-    
-    if [ -d "$REPO_SOURCE" ]; then
-        (
-            cd "$REPO_SOURCE"
-            ./gradlew installDist -q
-        )
-        rm -rf "$DIST_DIR"
-        cp -r "${REPO_SOURCE}/build/install/agent-devkit" "$DIST_DIR"
-    else
-        echo "Error: Cannot resolve adk distribution source at ${REPO_SOURCE}." >&2
-        exit 1
-    fi
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "adkw --doctor | --install-dev [--replace] | <adk-command>"
+  echo "Forwards to the installed ADK CLI. Java ${MIN_JAVA}+ required for commands."
+  if [ -x "$DIST_BIN" ]; then exec "$DIST_BIN" --help; fi
+  exit 0
 fi
-
+[ -n "$VERSION" ] && [ -n "$MIN_JAVA" ] || { echo "Wrapper metadata is incomplete." >&2; exit 5; }
+java_major="$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1)"
+[ -n "$java_major" ] || { echo "Java is not available." >&2; exit 6; }
+[ "$java_major" -ge "$MIN_JAVA" ] || { echo "Java $MIN_JAVA+ required (found $java_major)." >&2; exit 6; }
+if [ "$1" = "--install-dev" ]; then
+  shift
+  REPLACE=false
+  [ "${1:-}" = "--replace" ] && REPLACE=true && shift
+  [ -n "$ADK_DEV_SOURCE" ] && [ -d "$ADK_DEV_SOURCE" ] || { echo "Set ADK_DEV_SOURCE." >&2; exit 2; }
+  if [ -e "$DIST_DIR" ] && [ "$REPLACE" != true ]; then
+    echo "Distribution exists; refusing replacement. Use --install-dev --replace." >&2
+    exit 3
+  fi
+  TEMP_DIR="$DIST_DIR.tmp.$$"
+  (cd "$ADK_DEV_SOURCE" && ./gradlew installDist -q)
+  mkdir -p "$(dirname "$DIST_DIR")"
+  rm -rf "$TEMP_DIR"
+  cp -R "$ADK_DEV_SOURCE/build/install/agent-devkit" "$TEMP_DIR"
+  [ -x "$TEMP_DIR/bin/agent-devkit" ] || { rm -rf "$TEMP_DIR"; exit 4; }
+  rm -rf "$DIST_DIR"
+  mv "$TEMP_DIR" "$DIST_DIR"; exit 0
+fi
+[ -x "$DIST_BIN" ] || { echo "ADK is not installed. Use --install-dev." >&2; exit 2; }
 exec "$DIST_BIN" "$@"

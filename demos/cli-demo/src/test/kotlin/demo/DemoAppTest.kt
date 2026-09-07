@@ -1,9 +1,12 @@
 package demo
 
-import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.util.concurrent.ExecutionException
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -38,8 +41,9 @@ class DemoAppTest {
     @Test
     @EnabledIfLinuxAndSupported
     fun `SafeRunner blocks execution in JNDI`() {
-        assertFailsWith<ContainmentViolationException> {
+        val failure = assertFailsWith<ExecutionException> {
             SafeRunner.run($$"${jndi:ldap://test?cmd=ls}")
         }
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(failure)?.evidence)
     }
 }

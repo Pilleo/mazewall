@@ -144,7 +144,11 @@ public class AttributionCollector(
                     null,
                     when (observation.attributionStatus) {
                         AttributionStatus.NO_ACTIVE_INVOCATION -> ResolutionStatus.NO_ACTIVE_INVOCATION
-                        else -> ResolutionStatus.INVALID_KERNEL_ATTRIBUTION
+                        AttributionStatus.SEQUENCE_GAP,
+                        AttributionStatus.ACTIVATION_MISMATCH,
+                        AttributionStatus.KERNEL_CAPTURE_FAILED,
+                        AttributionStatus.PENDING_DICTIONARY,
+                        -> ResolutionStatus.INVALID_KERNEL_ATTRIBUTION
                     },
                 ),
             )

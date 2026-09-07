@@ -34,7 +34,6 @@ class ControlProtocolTest {
                 Arguments.of("detach arguments", "DETACH now", "USAGE:"),
                 Arguments.of("status arguments", "STATUS verbose", "USAGE:"),
                 Arguments.of("shutdown arguments", "SHUTDOWN now", "USAGE:"),
-                Arguments.of("unknown command", "PING", "USAGE:"),
             )
     }
 
@@ -62,6 +61,14 @@ class ControlProtocolTest {
     fun `attach rejects zero session tag`() {
         val parsed = parseControlCommand("ATTACH 42 uprobe /opt/libagent.so b0aa 0")
         assertEquals("ERR BAD_SESSION_TAG\n", assertIs<Either.Right<ControlCommand, ControlReply>>(parsed).value.render())
+    }
+
+    @Test
+    fun `unknown command is represented explicitly before it is rejected`() {
+        val command = assertIs<Either.Left<ControlCommand, ControlReply>>(parseControlCommand("PING")).value
+
+        assertEquals(ControlCommand.Unknown("PING"), command)
+        assertEquals("ERR USAGE:", requireNotNull(command.rejectionReply()).render().take(10))
     }
 
     @ParameterizedTest(name = "{0}")

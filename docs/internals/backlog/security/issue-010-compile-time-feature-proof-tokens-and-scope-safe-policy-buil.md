@@ -11,8 +11,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: a1f65636-482d-4254-a0b2-7435a4be9794
-paperclip_identifier: MAZ-738
+paperclip_issue_id: "d071e1c1-8316-4350-8cf3-c4719cf2bee0"
+paperclip_identifier: "MAZ-1156"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State Pattern)

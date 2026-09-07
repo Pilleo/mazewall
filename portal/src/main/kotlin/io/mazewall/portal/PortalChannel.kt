@@ -54,7 +54,7 @@ public class PortalChannel(
                     ?: error("expected granted FD")
             fds.add(granted)
         }
-        return PortalFrame(header.kind, header.requestId, header.methodId, payload, header.fdCount) to fds
+        return PortalFrame(header.kind, header.requestId, header.method, payload, header.fdCount) to fds
     }
 
     override fun close() {

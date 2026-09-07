@@ -156,10 +156,10 @@ class SyscallPathResolverTest {
 
         context(arena: NativeArena) override fun resolveLink(
             tid: Tid,
-            path: String,
+            link: String,
         ): String? {
-            if (path == "cwd") return "/home/user"
-            if (path == "fd/5") return "/opt/app"
+            if (link == "cwd") return "/home/user"
+            if (link == "fd/5") return "/opt/app"
             return null
         }
     }

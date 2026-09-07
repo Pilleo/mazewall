@@ -327,9 +327,11 @@ and `landlock_restrict_self(2)` — all standard syscalls. If seccomp is install
 first with a policy that blocks `openat` (e.g. `PURE_COMPUTE_UNSAFE`), these Landlock
 syscalls fail before Landlock can activate.
 
-**Enforced order in `ContainedExecutors.ContainedExecutorWrapper.applyContainment()`:**
-1. `Landlock.applyRuleset(policy)`    ← first
-2. `installOnCurrentThread(policy)`   ← second
+**Enforced order in `ContainedExecutors.installInternal`:**
+1. `applyLandlockIfNecessary(processWide, policy)`  ← first
+2. `installSeccompFilter(...)`                      ← second
+
+Wrapper wrap methods only call `installOnCurrentThread`, which reaches `installInternal`.
 
 Do not change this order.
 

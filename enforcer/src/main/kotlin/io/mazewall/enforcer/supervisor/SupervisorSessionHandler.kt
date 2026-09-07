@@ -51,7 +51,7 @@ import java.util.logging.Logger
 internal data class SyscallArguments(
     val pathStr: String?,
     val sockaddrBytes: ByteArray?,
-    val dirfd: Int = -100,
+    val dirfd: TraceeDirFd = TraceeDirFd.CurrentWorkingDirectory,
     val openHow: OpenHow? = null,
 )
 
@@ -130,7 +130,6 @@ internal class SupervisorSessionHandler(
         private val logger = Logger.getLogger(SupervisorSessionHandler::class.java.name)
 
         private const val POLL_TIMEOUT_MS = 30000
-        private const val AT_FDCWD = -100
 
         // Argument types
         private const val ARG_TYPE_LONG: Byte = 0
@@ -218,6 +217,31 @@ internal class SupervisorSessionHandler(
                     .read(notif)
                 val id = parsed.id
                 try {
+                    processParsedNotification(parsed, resp)
+                } catch (e: Exception) {
+                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", e)
+                    try {
+                        sendSeccompError(id, NativeConstants.EPERM, resp)
+                    } catch (ignored: Exception) {
+                        // Ignore secondary errors during best-effort EPERM response
+                    }
+                    false
+                }
+            }
+        }
+    }
+
+    context(arena: NativeArena) private fun processParsedNotification(
+        parsed: io.mazewall.platform.seccomp.SeccompNotification,
+        resp: ManagedSegment,
+    ): Boolean {
+        val id = parsed.id
+
+                    var sessionState = SupervisorSessionMachine
+                        .evaluate(
+                            SupervisorSessionState.AwaitingNotification,
+                            SupervisorSessionEvent.NotificationReceived,
+                        ).state
                     val pidVal = parsed.pid
                     val archVal = parsed.arch
                     val nr = parsed.nr
@@ -228,7 +252,7 @@ internal class SupervisorSessionHandler(
                         .fromAudit(archVal)
                     val extracted = extractNotificationArgs(nr, tid, args, traceeArch)
                     val header = NotifHeader(nr, tid, traceeArch, archVal, getPpid(pidVal), args)
-                    val kind = SupervisorNotificationMachine.classify(header.nr, header.arch)
+                    val kind = SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(header.nr), header.arch)
                     logger.info { "[SUPERVISOR-DEBUG] Received syscall notification: id=$id, pid=$pidVal, arch=$archVal, ppid=${header.ppid}, nr=$nr, path=${extracted.pathStr}" }
 
                     // --- DAEMON-SIDE FAST-PATH BYPASS ---
@@ -242,36 +266,38 @@ internal class SupervisorSessionHandler(
                     // application classpath, or Java agents. Paths are resolved to absolute form and normalized.
                     // Since these paths contain trusted platform/application classes and libraries that are already loaded
                     // or destined to be loaded, it is safe to bypass policy evaluation and directly inject the file descriptor.
-                    var resolvedPathStr: String? = extracted.pathStr
-                    var resolvedPath: java.nio.file.Path? = null
-                    if (kind is SupervisedKind.Open && extracted.pathStr != null) {
-                        try {
-                            resolvedPath = SupervisorFastPath.resolveAbsolutePath(pidVal, extracted.dirfd, extracted.pathStr)
-                            if (resolvedPath != null) {
-                                resolvedPathStr = resolvedPath.toAbsolutePath().toString()
-                            }
-                        } catch (e: Exception) {
-                            logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
-                            throw e
-                        }
-                    }
+                    val resolvedFastPath = resolveFastPath(pidVal, kind, extracted)
                     val request = JvmVerdictRequest(id, header, extracted.pathStr, extracted.sockaddrBytes)
                     val routeContext = SupervisorRouteContext(request, extracted, resp)
-                    when (val route = SupervisorNotificationMachine.evaluateFastPath(kind, resolvedPath, extracted.pathStr)) {
-                        is SupervisorRoute.Continue -> {
-                            terminalRoutes.execute(route, routeContext)
-                            logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue resolved=$resolvedPathStr" }
+                    val transition = SupervisorSessionMachine.evaluate(
+                        sessionState,
+                        SupervisorSessionEvent.PathResolved(
+                            SupervisorNotificationMachine.evaluateFastPath(kind, resolvedFastPath.path, extracted.pathStr),
+                        ),
+                    )
+                    sessionState = transition.state
+                    when (val effect = transition.effect) {
+                        is SupervisorSessionEffect.ExecuteRoute -> {
+                            when (val route = effect.route) {
+                                SupervisorRoute.Continue ->
+                                    logger.info { "[SUPERVISOR-DEBUG] Fast-path allow continue resolved=${resolvedFastPath.displayPath}" }
+                                is SupervisorRoute.Abort -> logger.severe { "[SUPERVISOR-DEBUG] ${route.reason}" }
+                                is SupervisorRoute.AskJvm,
+                                SupervisorRoute.InjectFd,
+                                SupervisorRoute.SecureExec,
+                                -> error("fast-path cannot inject, rewrite, or ask JVM after a terminal transition")
+                            }
+                            terminalRoutes.execute(effect.route, routeContext)
                             return true
                         }
-                        is SupervisorRoute.Abort -> {
-                            logger.severe { "[SUPERVISOR-DEBUG] ${route.reason}" }
-                            terminalRoutes.execute(route, routeContext)
-                            return true
+                        SupervisorSessionEffect.RequestJvmVerdict -> Unit
+                        is SupervisorSessionEffect.Abort -> {
+                            terminalRoutes.abort(routeContext, effect.errno)
+                            return false
                         }
-                        is SupervisorRoute.AskJvm -> { }
-                        is SupervisorRoute.InjectFd,
-                        is SupervisorRoute.SecureExec,
-                        -> error("fast-path cannot inject or rewrite")
+                        SupervisorSessionEffect.ResolvePath,
+                        null,
+                        -> error("path resolution must produce a terminal route or JVM request")
                     }
 
                     logger.info { "[SUPERVISOR-DEBUG] Forwarding request to JVM validation listener" }
@@ -284,16 +310,27 @@ internal class SupervisorSessionHandler(
                     val res = readAndHandleJvmResponse(routeContext)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
-                } catch (e: Exception) {
-                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", e)
-                    try {
-                        sendSeccompError(id, NativeConstants.EPERM, resp)
-                    } catch (ignored: Exception) {
-                        // Ignore secondary errors during best-effort EPERM response
-                    }
-                    return false
-                }
-            }
+    }
+
+    private data class ResolvedFastPath(
+        val path: java.nio.file.Path?,
+        val displayPath: String?,
+    )
+
+    private fun resolveFastPath(
+        pid: Int,
+        kind: SupervisedKind,
+        extracted: SyscallArguments,
+    ): ResolvedFastPath {
+        if (kind !is SupervisedKind.Open || extracted.pathStr == null) {
+            return ResolvedFastPath(null, extracted.pathStr)
+        }
+        try {
+            val path = SupervisorFastPath.resolveAbsolutePath(pid, extracted.dirfd, extracted.pathStr)
+            return ResolvedFastPath(path, path?.toAbsolutePath()?.toString() ?: extracted.pathStr)
+        } catch (e: Exception) {
+            logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
+            throw e
         }
     }
 
@@ -305,18 +342,18 @@ internal class SupervisorSessionHandler(
     ): SyscallArguments {
         var pathStr: String? = null
         var sockaddrBytes: ByteArray? = null
-        var dirfd = AT_FDCWD
+        var dirfd = TraceeDirFd.CurrentWorkingDirectory
         var openHow: OpenHow? = null
         when (nr) {
             arch.open -> {
                 pathStr = readStringFromProcess(tid, args[0])
             }
             arch.openat -> {
-                dirfd = args[0].toInt()
+                dirfd = TraceeDirFd(args[0].toInt())
                 pathStr = readStringFromProcess(tid, args[1])
             }
             arch.openat2 -> {
-                dirfd = args[0].toInt()
+                dirfd = TraceeDirFd(args[0].toInt())
                 pathStr = readStringFromProcess(tid, args[1])
                 val howBytes = readBytesFromProcess(tid, args[2], Layouts.OPEN_HOW_SIZE.toInt())
                 if (howBytes != null && howBytes.size >= Layouts.OPEN_HOW_SIZE.toInt()) {
@@ -336,13 +373,13 @@ internal class SupervisorSessionHandler(
                 }
             }
             arch.accept, arch.accept4 -> {
-                dirfd = args[0].toInt()
+                dirfd = TraceeDirFd(args[0].toInt())
             }
             arch.execve -> {
                 pathStr = readExecPath(tid, args[0])
             }
             arch.execveat -> {
-                dirfd = args[0].toInt()
+                dirfd = TraceeDirFd(args[0].toInt())
                 pathStr = readExecPath(tid, args[1])
             }
         }
@@ -354,7 +391,10 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena) internal fun sendRequestToJvm(request: JvmVerdictRequest): Boolean {
-        val (id, header, pathStr, sockaddrBytes) = request
+        val id = request.id
+        val header = request.header
+        val pathStr = request.path
+        val sockaddrBytes = request.sockaddrBytes
         val sizeOfMeta = SIZE_META + SIZE_INT + SIZE_INT // Include PPID and Arch
         val sizeOfArgHeader = SIZE_ARG_HEADER
         val totalSize = sizeOfMeta +
@@ -417,10 +457,9 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena) internal fun readAndHandleJvmResponse(context: SupervisorRouteContext): Boolean {
-        val (request, extracted, resp) = context
-        val (id, header, pathStr, sockaddrBytes) = request
-        val (nr, tid, traceeArch, _, _, args) = header
-        val openHow = extracted.openHow
+        val (request, _, resp) = context
+        val (id, header, pathStr) = request
+        val (nr, _, traceeArch) = header
         val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
         pollFd.setFd(socketFd.value)
         pollFd.setEvents(NativeConstants.POLLIN)
@@ -481,14 +520,18 @@ internal class SupervisorSessionHandler(
             }
 
             val jvmPath = respSeg.getPath()
-            val kind = SupervisorNotificationMachine.classify(nr, traceeArch)
+            val kind = SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
             val verdict = SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
-            if (verdict == null) {
-                sendSeccompError(id, NativeConstants.EPERM, resp)
-                return false
-            }
+            val transition = SupervisorSessionMachine.evaluate(
+                SupervisorSessionState.AwaitingJvmVerdict,
+                SupervisorSessionEvent.JvmVerdictReceived(
+                    SupervisorNotificationMachine.evaluateJvm(kind, verdict),
+                ),
+            )
+            val effect = transition.effect as? SupervisorSessionEffect.ExecuteRoute
+                ?: return terminalRoutes.abort(context, NativeConstants.EPERM)
             return routeDispatcher.execute(
-                SupervisorNotificationMachine.evaluateJvm(kind, verdict),
+                effect.route,
                 context,
                 jvmPath,
                 routeExecutor,
@@ -573,7 +616,6 @@ internal class SupervisorSessionHandler(
                 return@use true
             }
 
-            val pathAddr = if (nr == traceeArch.execve) args[0] else args[1]
             val argv = if (nr == traceeArch.execve) args[1] else args[2]
             val envp = if (nr == traceeArch.execve) args[2] else args[3]
             // pathname for execveat(AT_EMPTY_PATH) MUST point at memory the tracee cannot
@@ -647,10 +689,10 @@ internal class SupervisorSessionHandler(
         val (id, header, pathStr, sockaddrBytes) = request
         val (nr, tid, traceeArch, _, _, args) = header
         val openHow = extracted.openHow
-        var localFdValue = -1
+        var localFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>? = null
         var injectFlags = NewFdFlags.NONE
         try {
-            localFdValue = when (injectTarget(SupervisorNotificationMachine.classify(nr, traceeArch))) {
+            val localFdValue = when (injectTarget(SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(nr), traceeArch))) {
                 is InjectTarget.Open -> {
                     if (pathStr == null) {
                         sendSeccompError(id, NativeConstants.EPERM, resp)
@@ -688,38 +730,9 @@ internal class SupervisorSessionHandler(
                 sendSeccompError(id, -localFdValue, resp)
                 return true
             }
+            localFd = FileDescriptor.adopt(localFdValue, FileDescriptorRole.Generic)
 
-            val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
-            addfd.managed.fill(0)
-            addfd.setId(id)
-            addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
-            addfd.setSrcfd(localFdValue)
-            addfd.setNewfdFlags(injectFlags.value)
-
-            val addfdManaged = addfd.managed
-            var success = false
-            while (true) {
-                val ioctlRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged.typed<IoctlPayload.SeccompNotifAddFd>())
-                logger.info { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD res=$ioctlRes" }
-                if (ioctlRes is LinuxNative.SyscallResult.Success<*, *>) {
-                    success = true
-                    break
-                } else if (ioctlRes is LinuxNative.SyscallResult.Error<*> && ioctlRes.errno == NativeConstants.EINTR) {
-                    continue
-                } else {
-                    val errno = (ioctlRes as LinuxNative.SyscallResult.Error<*>).errno
-                    if (errno == NativeConstants.EBADF) {
-                        logger.severe {
-                            "[SUPERVISOR-SECURITY] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed with EBADF (listenerFd=${listenerFd.value}, srcfd=$localFdValue). Target thread state or file descriptor invalid."
-                        }
-                    } else {
-                        logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed with errno $errno. Sending EPERM." }
-                    }
-                    break
-                }
-            }
-
-            if (!success) {
+            if (!injectFd(id, localFd, injectFlags)) {
                 logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed. Sending EPERM." }
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return true
@@ -727,8 +740,32 @@ internal class SupervisorSessionHandler(
 
             return true
         } finally {
-            if (localFdValue >= 0) {
-                closeLocalFd(localFdValue)
+            localFd?.let(::closeLocalFd)
+        }
+    }
+
+    context(arena: NativeArena) private fun injectFd(
+        id: Long,
+        localFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
+        flags: NewFdFlags,
+    ): Boolean {
+        val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
+        addfd.managed.fill(0)
+        addfd.setId(id)
+        addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
+        addfd.setSrcfd(localFd.value)
+        addfd.setNewfdFlags(flags.value)
+        while (true) {
+            when (val result = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed.typed<IoctlPayload.SeccompNotifAddFd>())) {
+                is LinuxNative.SyscallResult.Success -> return true
+                is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR) {
+                    if (result.errno == NativeConstants.EBADF) {
+                        logger.severe { "[SUPERVISOR-SECURITY] SECCOMP_IOCTL_NOTIF_ADDFD failed with EBADF (listenerFd=${listenerFd.value}, srcfd=${localFd.value})." }
+                    } else {
+                        logger.severe { "[SUPERVISOR-DEBUG] SECCOMP_IOCTL_NOTIF_ADDFD failed with errno ${result.errno}." }
+                    }
+                    return false
+                }
             }
         }
     }
@@ -773,7 +810,9 @@ internal class SupervisorSessionHandler(
         }
         val resolve = when (req) {
             is SupervisedOpen.OpenAt2 -> req.how.resolve or NativeConstants.RESOLVE_BENEATH.toLong()
-            else -> 0L
+            is SupervisedOpen.Open,
+            is SupervisedOpen.OpenAt,
+            -> 0L
         }
 
         howSeg.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
@@ -781,14 +820,14 @@ internal class SupervisorSessionHandler(
         howSeg.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve)
 
         val (isAbsolute, traceeDirfd) = when (req) {
-            is SupervisedOpen.Open -> true to FileDescriptor.AT_FDCWD.value
+            is SupervisedOpen.Open -> true to TraceeDirFd.CurrentWorkingDirectory
             is SupervisedOpen.OpenAt -> req.path.startsWith("/") to req.dirfd
             is SupervisedOpen.OpenAt2 -> req.path.startsWith("/") to req.dirfd
         }
 
         val pathSeg = arena.allocateFrom(req.path)
 
-        if (isAbsolute || traceeDirfd == FileDescriptor.AT_FDCWD.value) {
+        if (isAbsolute || traceeDirfd == TraceeDirFd.CurrentWorkingDirectory) {
             return signedErrno(
                 engine.fileSystem.openat2(
                     FileDescriptor.AT_FDCWD,
@@ -808,9 +847,9 @@ internal class SupervisorSessionHandler(
 
     private fun importTraceeFd(
         tid: Tid,
-        traceeDirfd: Int,
+        traceeDirfd: TraceeDirFd,
     ): Int {
-        if (traceeDirfd == FileDescriptor.AT_FDCWD.value) {
+        if (traceeDirfd == TraceeDirFd.CurrentWorkingDirectory) {
             val cwdPath = "/proc/${getTgid(tid.value)}/cwd"
             val fd = NativeArena.ofConfined().use { arena ->
                 engine.fileSystem.open(
@@ -832,7 +871,7 @@ internal class SupervisorSessionHandler(
         }
         return SafeLocalFd(pidfdVal).use { pidfdSafe ->
             val pidfd = FileDescriptor.pid(pidfdSafe.fd)
-            val importedRes = engine.process.pidfdGetFd(pidfd, traceeDirfd, 0)
+            val importedRes = engine.process.pidfdGetFd(pidfd, traceeDirfd.value, 0)
             when (importedRes) {
                 is LinuxNative.SyscallResult.Success -> importedRes.value.toInt()
                 is LinuxNative.SyscallResult.Error -> -importedRes.errno
@@ -862,13 +901,14 @@ internal class SupervisorSessionHandler(
             }
         }()
         if (socketRes < 0) return socketRes
+        val socketFd = FileDescriptor.adopt(socketRes, FileDescriptorRole.UnixSocket)
 
         val addr = arena.allocate(sockaddrBytes.size.toLong())
         ManagedSegment.copy(sockaddrBytes, 0, addr, 0L, sockaddrBytes.size)
 
         val connectErr = {
             val res = engine.networking.connect(
-                FileDescriptor.adopt(socketRes, FileDescriptorRole.UnixSocket),
+                socketFd,
                 addr,
                 sockaddrBytes.size,
             )
@@ -878,16 +918,15 @@ internal class SupervisorSessionHandler(
             }
         }()
         if (connectErr != 0) {
-            closeLocalFd(socketRes)
+            closeLocalFd(socketFd)
             return -connectErr
         }
         return socketRes
     }
 
-    private fun closeLocalFd(fd: Int) {
-        val token = FileDescriptor.adopt(fd, FileDescriptorRole.Generic)
-        if (token.isLiveForIo()) {
-            engine.fileSystem.close(token)
+    private fun closeLocalFd(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+        if (fd.isLiveForIo()) {
+            engine.fileSystem.close(fd)
         }
     }
 
@@ -913,12 +952,6 @@ internal class SupervisorSessionHandler(
         id: Long,
         resp: ManagedSegment,
     ) = responseWriter.sendContinue(id, resp)
-
-    private fun sendSeccompSuccess(
-        id: Long,
-        valVal: Long,
-        resp: ManagedSegment,
-    ) = responseWriter.sendSuccess(id, valVal, resp)
 
     private fun sendSeccompError(
         id: Long,
@@ -1095,30 +1128,8 @@ internal class SupervisorSessionHandler(
                                             .writeBytes(tid, traceeAddrLenPtr, lenBytes)
                                     }
 
-                                    // Inject accepted FD
-                                    val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
-                                    addfd.managed.fill(0)
-                                    addfd.setId(id)
-                                    addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
-                                    addfd.setSrcfd(clientFdSafe.fd)
                                     val acceptFlags = if (nr == traceeArch.accept4) args[3].toInt() else 0
-                                    addfd.setNewfdFlags(NewFdFlags.forAccept(acceptFlags).value)
-
-                                    val addfdManaged = addfd.managed
-                                    var injectSuccess = false
-                                    while (true) {
-                                        val ioctlRes = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfdManaged.typed<IoctlPayload.SeccompNotifAddFd>())
-                                        if (ioctlRes is LinuxNative.SyscallResult.Success<*, *>) {
-                                            injectSuccess = true
-                                            break
-                                        } else if (ioctlRes is LinuxNative.SyscallResult.Error<*> && ioctlRes.errno == NativeConstants.EINTR) {
-                                            continue
-                                        } else {
-                                            break
-                                        }
-                                    }
-
-                                    if (!injectSuccess) {
+                                    if (!injectFd(id, clientFdSafe.handle, NewFdFlags.forAccept(acceptFlags))) {
                                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                                     }
                                 }

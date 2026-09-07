@@ -214,7 +214,7 @@ internal class JVMValidationListener(
                 }
 
                 val kind = io.mazewall.platform.seccomp.SupervisedKind
-                    .classify(nr, traceeArch)
+                    .classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
                 val verdict = if (!isAllowed) {
                     JvmVerdict.Deny(NativeConstants.EPERM)
                 } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {

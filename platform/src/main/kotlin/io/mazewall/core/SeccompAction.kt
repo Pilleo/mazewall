@@ -112,7 +112,14 @@ public sealed interface SeccompAction {
     public fun toKernelReturnCode(): Int =
         when (this) {
             is ACT_ERRNO -> nativeCode or (errno and 0xFFFF)
-            else -> nativeCode
+            is ACT_KILL_PROCESS,
+            is ACT_KILL_THREAD,
+            is ACT_TRAP,
+            is ACT_TRACE,
+            is ACT_NOTIFY,
+            is ACT_LOG,
+            is ACT_ALLOW,
+            -> nativeCode
         }
 
     public companion object {

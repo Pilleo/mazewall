@@ -7,7 +7,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
-import io.mazewall.portal.PortalMethods
+import io.mazewall.portal.PortalMethod
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.Adler32
@@ -19,14 +19,14 @@ import java.util.zip.Adler32
 @Suppress("DMI_HARDCODED_ABSOLUTE_FILENAME")
 internal object PortalBuiltinDispatch {
     fun handle(
-        methodId: Int,
+        method: PortalMethod,
         payload: ByteArray,
         fds: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
     ): ByteArray =
-        when (methodId) {
-            PortalMethods.ECHO -> payload
-            PortalMethods.CHECKSUM -> checksum(fds.single())
-            PortalMethods.SLEEP -> {
+        when (method) {
+            PortalMethod.Echo -> payload
+            PortalMethod.Checksum -> checksum(fds.single())
+            PortalMethod.Sleep -> {
                 val ms =
                     if (payload.size >= 4) {
                         ((payload[0].toInt() and 0xff) shl 24) or
@@ -40,12 +40,11 @@ internal object PortalBuiltinDispatch {
                 ByteArray(0)
             }
 
-            PortalMethods.TRY_OPEN_HOST_PASSWD -> {
+            PortalMethod.TryOpenHostPasswd -> {
                 java.io.FileInputStream("/etc/passwd").use { it.read() }
                 error("worker opened /etc/passwd")
             }
-
-            else -> error("unknown method $methodId")
+            is PortalMethod.Generated -> throw UnknownPortalMethod(method)
         }
 
     private fun checksum(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>): ByteArray {
@@ -71,3 +70,7 @@ internal object PortalBuiltinDispatch {
         return out.array()
     }
 }
+
+internal class UnknownPortalMethod(
+    val method: PortalMethod.Generated,
+) : IllegalArgumentException("unknown portal method ${method.wire}")

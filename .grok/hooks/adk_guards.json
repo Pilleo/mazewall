@@ -2,11 +2,11 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "replace_file_content|multi_replace_file_content|write_to_file|Write|Edit|edit|write|file_write|patch",
+        "matcher": "search_replace|write|Write|Edit|MultiEdit|replace_file_content|multi_replace_file_content|write_to_file",
         "hooks": [
           {
             "type": "command",
-            "command": "./scripts/adkw guard \"{file}\"",
+            "command": "./scripts/adkw hook --harness grok --file \"{file}\"",
             "timeout": 30
           }
         ]

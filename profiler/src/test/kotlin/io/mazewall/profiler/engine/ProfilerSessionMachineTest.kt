@@ -52,6 +52,13 @@ internal class ProfilerSessionMachineTest {
                 expectedStateType = ProfilerState.Notified::class,
             ),
             SessionTestCase(
+                name = "active noise notification is explicitly passed through",
+                initialState = active,
+                event = ProfilerSessionEvent.NoisePathBypassed,
+                expectedStateType = ProfilerState.ActiveSession::class,
+                expectedPassThrough = true,
+            ),
+            SessionTestCase(
                 name = "notified event delivered becomes waiting for ack",
                 initialState = notified,
                 event = ProfilerSessionEvent.EventDelivered,
@@ -74,6 +81,13 @@ internal class ProfilerSessionMachineTest {
                 name = "handshake failure from notified terminates session",
                 initialState = notified,
                 event = ProfilerSessionEvent.HandshakeFailed,
+                expectedStateType = ProfilerState.Terminated::class,
+                expectedTerminate = true,
+            ),
+            SessionTestCase(
+                name = "transport failure terminates an active session",
+                initialState = active,
+                event = ProfilerSessionEvent.TransportFailed,
                 expectedStateType = ProfilerState.Terminated::class,
                 expectedTerminate = true,
             ),
@@ -103,9 +117,11 @@ internal class ProfilerSessionMachineTest {
                 ProfilerSessionEvent.AckSucceeded,
                 ProfilerSessionEvent.HandshakeFailed,
                 ProfilerSessionEvent.PassedThrough,
+                ProfilerSessionEvent.NoisePathBypassed,
             )
             val handled = setOf(
                 ProfilerState.ActiveSession::class to ProfilerSessionEvent.NotificationReceived::class,
+                ProfilerState.ActiveSession::class to ProfilerSessionEvent.NoisePathBypassed::class,
                 ProfilerState.Notified::class to ProfilerSessionEvent.EventDelivered::class,
                 ProfilerState.Notified::class to ProfilerSessionEvent.HandshakeFailed::class,
                 ProfilerState.WaitingForAck::class to ProfilerSessionEvent.AckSucceeded::class,

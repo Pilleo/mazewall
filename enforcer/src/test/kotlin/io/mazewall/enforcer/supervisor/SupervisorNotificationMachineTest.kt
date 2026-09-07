@@ -4,7 +4,6 @@ import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.seccomp.SupervisedKind
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -47,7 +46,7 @@ internal class SupervisorNotificationMachineTest {
     @Test
     fun `custom supervised nr routes to AskJvm on fast path`() {
         val route = SupervisorNotificationMachine.evaluateFastPath(
-            SupervisorNotificationMachine.classify(999_999, arch),
+            SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(999_999), arch),
             resolvedPath = null,
             rawPath = null,
         )
@@ -126,8 +125,8 @@ internal class SupervisorNotificationMachineTest {
     }
 
     @Test
-    fun `unknown jvm decision code is null so handler fail-closes`() {
-        assertNull(SupervisorNotificationMachine.parseJvmVerdict(99, 0))
+    fun `unknown jvm decision code is deny EPERM`() {
+        assertEquals(JvmVerdict.Deny(NativeConstants.EPERM), SupervisorNotificationMachine.parseJvmVerdict(99, 0))
     }
 
     @ParameterizedTest(name = "{0} round-trips wire format")

@@ -20,6 +20,9 @@ autonomy: "supervised"
 open_questions: false
 review_verdict: skipped
 has_side_effects: true
+
+paperclip_issue_id: "166b8195-063e-4d29-acd3-64f609829cd2"
+paperclip_identifier: "MAZ-1147"
 ---
 
 # 🟡 [Severity: MEDIUM]: Extract Tier-E BPF program-load request encoder

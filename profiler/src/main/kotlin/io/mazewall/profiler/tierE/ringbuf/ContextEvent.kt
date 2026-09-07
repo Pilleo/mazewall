@@ -76,7 +76,7 @@ public data class ContextEvent(
          * Native-endian read straight from a mapped ring-buffer segment.
          * All fields are naturally aligned inside the 24-byte record.
          */
-        public fun fromSegment(
+        internal fun fromSegment(
             seg: MemorySegment,
             offset: Long,
         ): ContextEvent =

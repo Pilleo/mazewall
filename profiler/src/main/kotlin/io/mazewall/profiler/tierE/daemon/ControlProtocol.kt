@@ -18,6 +18,11 @@ public sealed interface ControlCommand {
     public data object Status : ControlCommand
 
     public data object Shutdown : ControlCommand
+
+    /** A syntactically valid command line whose operation token is unsupported. */
+    public data class Unknown(
+        public val token: String,
+    ) : ControlCommand
 }
 
 public enum class AttachMode { UPROBE, USDT }
@@ -38,6 +43,18 @@ public data class ControlReply(
 
 private val USAGE_ERR =
     "USAGE: ATTACH <pid> <uprobe|usdt> <agent.so> <marker-offset> <session-tag-hex> [full-stream|unique-stack-syscall] | DETACH | STATUS | SHUTDOWN"
+
+/** A reply required before an unrecognized command reaches daemon execution. */
+public fun ControlCommand.rejectionReply(): ControlReply? =
+    when (this) {
+        is ControlCommand.Attach,
+        ControlCommand.Detach,
+        ControlCommand.Status,
+        ControlCommand.Shutdown,
+        -> null
+
+        is ControlCommand.Unknown -> ControlReply.err(USAGE_ERR)
+    }
 
 public fun parseControlCommand(line: String): Either<ControlCommand, ControlReply> {
     val tokens = line.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -80,7 +97,7 @@ public fun parseControlCommand(line: String): Either<ControlCommand, ControlRepl
         } else {
             Either.Right(ControlReply.err(USAGE_ERR))
         }
-        else -> Either.Right(ControlReply.err(USAGE_ERR))
+        else -> Either.Left(ControlCommand.Unknown(tokens[0]))
     }
 }
 

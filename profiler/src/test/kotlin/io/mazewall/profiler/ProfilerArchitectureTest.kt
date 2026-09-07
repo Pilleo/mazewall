@@ -18,6 +18,22 @@ import io.mazewall.profiler.engine.TraceEvent
 @AnalyzeClasses(packages = ["io.mazewall.profiler"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ProfilerArchitectureTest {
     @ArchTest
+    fun `raw FFM stays in profiler ffi or native implementation packages`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages(
+                "io.mazewall.profiler.ffi..",
+                "io.mazewall.profiler.internal..",
+                "io.mazewall.profiler.tierE.engine..",
+                "io.mazewall.profiler.tierE.ringbuf..",
+            ).should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("profiler protocol and domain code must not expose raw FFM types; native handling belongs behind profiler FFI packages")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun `no FFM segments leak across trace event boundaries`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
@@ -70,6 +86,23 @@ class ProfilerArchitectureTest {
     }
 
     @ArchTest
+    fun `public profiler types do not take MemorySegment`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        methods()
+            .that()
+            .arePublic()
+            .and()
+            .areDeclaredInClassesThat()
+            .arePublic()
+            .and()
+            .areDeclaredInClassesThat()
+            .resideInAPackage("io.mazewall.profiler")
+            .should()
+            .notHaveRawParameterTypes(java.lang.foreign.MemorySegment::class.java)
+            .because("Operator-facing profiler types must not expose FFM MemorySegment; handshake I/O stays internal.")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun `reactor loop statelessness`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         classes()
             .that()
@@ -92,6 +125,13 @@ class ProfilerArchitectureTest {
                 "io.mazewall.profiler.EbpfLoad\$Available",
                 "io.mazewall.profiler.EbpfLoad\$UserNamespaceRoot",
                 "io.mazewall.profiler.EbpfLoad\$Denied",
+            ),
+            "io.mazewall.profiler.tierE.daemon.ControlCommand" to setOf(
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Attach",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Detach",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Status",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Shutdown",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Unknown",
             ),
         )
         for ((parent, kids) in expected) {

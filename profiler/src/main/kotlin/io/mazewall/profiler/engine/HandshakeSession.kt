@@ -1,4 +1,4 @@
-package io.mazewall.profiler.engine
+package io.mazewall.profiler.ffi
 
 import io.mazewall.LinuxNative
 import io.mazewall.core.FdOwnership
@@ -7,6 +7,12 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.profiler.engine.ACK_BUF_SIZE
+import io.mazewall.profiler.engine.PASS_THROUGH_COMMAND_BYTE
+import io.mazewall.profiler.engine.POLLFD_REVENTS_OFF
+import io.mazewall.profiler.engine.POLL_ACK_TIMEOUT_MS
+import io.mazewall.profiler.engine.PROTOCOL_ACK_BYTE
+import io.mazewall.profiler.engine.SHUTDOWN_COMMAND_BYTE
 import io.mazewall.recover
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -14,7 +20,7 @@ import java.lang.foreign.ValueLayout
 /**
  * A type-safe state machine for the seccomp notification handshake.
  */
-sealed class HandshakeSession {
+internal sealed class HandshakeSession {
     abstract val notifId: Long
     abstract val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>
 

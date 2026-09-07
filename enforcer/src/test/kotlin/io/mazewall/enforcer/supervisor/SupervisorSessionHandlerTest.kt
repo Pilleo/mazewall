@@ -492,7 +492,7 @@ class SupervisorSessionHandlerTest {
                 capturedLocalLen = localIov.readLong(8)
                 capturedRemoteBase = remoteIov.readLong(0)
                 capturedRemoteLen = remoteIov.readLong(8)
-                return LinuxNative.SyscallResult.Success(capturedLocalLen!!)
+                return LinuxNative.SyscallResult.Success(capturedLocalLen)
             }
 
             override fun write(

@@ -14,8 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023938-tier-e-wp-08-ffm-bridge-client.md"
-paperclip_issue_id: 863ba4f5-68a1-4373-8af8-9333baa258d0
-paperclip_identifier: MAZ-710
+paperclip_issue_id: "8f6e4333-16a1-4f42-8fdc-33f8814604a1"
+paperclip_identifier: "MAZ-1143"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-09 — LiveEbpfCollector Integration

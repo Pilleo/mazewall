@@ -41,4 +41,4 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
 /**
  * Real implementation of [ProfilerMemoryReader] using process_vm_readv and readlink.
  */
-public object RealMemoryReader : ProfilerMemoryReader, TraceeMemoryReader by TraceeMemoryReader.Real
+public object RealMemoryReader : ProfilerMemoryReader

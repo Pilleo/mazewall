@@ -23,6 +23,9 @@ autonomy: "supervised"
 open_questions: false
 review_verdict: skipped
 has_side_effects: true
+
+paperclip_issue_id: "217cdb8a-1dc3-4a90-b5eb-0b4b3301ac65"
+paperclip_identifier: "MAZ-1146"
 ---
 
 # 🟡 [Severity: MEDIUM]: Extract install self-verification planning from native execution

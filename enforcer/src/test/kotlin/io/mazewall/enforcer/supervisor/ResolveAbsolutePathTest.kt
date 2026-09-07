@@ -34,7 +34,7 @@ class ResolveAbsolutePathTest {
 
         // FIXED BEHAVIOR: resolveAbsolutePath now returns a securely canonicalized non-null Path using toRealPathWithFallback,
         // resolving the existing parent hierarchy first to prevent directory traversal / symlink escapes.
-        val result = SupervisorFastPath.resolveAbsolutePath(0, -100, nonExistentPath) as Path?
+        val result = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(-100), nonExistentPath)
 
         assertNotNull(result)
         assertEquals(Paths.get(nonExistentPath).normalize(), result)
@@ -42,7 +42,7 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `resolveAbsolutePath returns path even for non-existent path in safeBypassPaths`() {
-        val result = SupervisorFastPath.resolveAbsolutePath(0, -100, "build/non-existent-file-12345") as Path?
+        val result = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(-100), "build/non-existent-file-12345")
         assertNotNull(result)
         // With AT_FDCWD, the code queries baseDir = /proc/0/cwd, which points to the current working directory.
         // So the resolved path's prefix will be /proc/0/cwd/build/non-existent-file-12345.
@@ -57,7 +57,7 @@ class ResolveAbsolutePathTest {
             FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
         )
 
-        val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, 999, "build/secret") as Path?
+        val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(999), "build/secret")
 
         if (resolvedPath == null) {
             return
@@ -87,7 +87,7 @@ class ResolveAbsolutePathTest {
         try {
             val traceePid = tracee.inputReader().readLine().toInt()
             val resolvedPath =
-                SupervisorFastPath.resolveAbsolutePath(traceePid, 9, "build/secret") as Path
+                SupervisorFastPath.resolveAbsolutePath(traceePid, TraceeDirFd(9), "build/secret") as Path
 
             // "build" is beneath the daemon working directory and is normally bypassed. It must not
             // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.

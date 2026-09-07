@@ -151,7 +151,7 @@ public data class ProfilingCoverage(
             drainComplete: Boolean,
             environment: ProfileEnvironment,
         ): ProfilingCoverage {
-            val ioUring = inferIoUring(strategy, observations, environment)
+            val ioUring = inferIoUring(observations, environment)
             val pathQuality = inferPaths(observations)
             val warnings = mutableListOf<String>()
             if (ioUring == IoUringVisibility.BLIND) {
@@ -265,7 +265,6 @@ public data class ProfilingCoverage(
         }
 
         internal fun inferIoUring(
-            strategy: ProfileStrategy,
             observations: List<ProfileObservation>,
             environment: ProfileEnvironment,
         ): IoUringVisibility {
@@ -357,7 +356,6 @@ public data class ProfilingCoverage(
                     is ProfileObservation.Connect -> 0
                 }
             val failed = pathBearing.count { obs -> obs.paths.size < expectedOperands(obs) }
-            val resolved = pathBearing.size - failed
             return when {
                 failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
                 failed > 0 && !truncated -> PathResolutionQuality.FAILED

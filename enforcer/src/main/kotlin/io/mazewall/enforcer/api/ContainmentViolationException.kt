@@ -6,6 +6,18 @@ import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 
+/** The strength of evidence behind a containment diagnostic. */
+enum class ContainmentViolationEvidence {
+    /** Mazewall observed the policy denial at its kernel-facing boundary. */
+    OBSERVED_POLICY_DENIAL,
+
+    /** A third-party exception resembled a permission failure but was not authenticated by Mazewall. */
+    INFERRED_PERMISSION_FAILURE,
+
+    /** The exception is structured but its origin was not recorded by this library version. */
+    UNKNOWN,
+}
+
 /**
  * Exception thrown when a contained task violates the configured policy
  * (e.g., attempts to execute a blocked syscall).
@@ -22,6 +34,7 @@ import io.mazewall.enforcer.state.*
  *
  * @param errno kernel errno of the denied decision, when known (see `NativeConstants`).
  * @param syscallNr syscall number whose execution was denied, when known.
+ * @param evidence whether Mazewall observed the denial or only has incomplete provenance.
  */
 @Suppress("DEPRECATION")
 class ContainmentViolationException(
@@ -29,4 +42,5 @@ class ContainmentViolationException(
     cause: Throwable? = null,
     val errno: Int? = null,
     val syscallNr: Int? = null,
+    val evidence: ContainmentViolationEvidence = ContainmentViolationEvidence.UNKNOWN,
 ) : io.mazewall.enforcer.ContainmentViolationException(message, cause)

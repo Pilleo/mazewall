@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ADK-managed: refresh Codanna after git moves the tree.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+command -v codanna >/dev/null 2>&1 || exit 0
+test -f "$ROOT/.codanna/settings.toml" || exit 0
+(cd "$ROOT" && nohup codanna index . --no-progress >/dev/null 2>&1 &)
+exit 0

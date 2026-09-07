@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
+import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.ProfilerInstallerInterface
 import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.internal.DaemonContext
@@ -131,6 +132,10 @@ class ProfilerTest {
         // Reset Profiler providers back to default
         Profiler.daemonManagerProvider = { ProfilerDaemonManager.getInstance() }
         Profiler.installerProvider = io.mazewall.profiler.engine.RealProfilerInstaller
+        Profiler.tidProvider = {
+            io.mazewall.LinuxNative.process
+            .gettid()
+        }
     }
 
     @Test
@@ -164,6 +169,11 @@ class ProfilerTest {
 
         Profiler.daemonManagerProvider = { mockDaemonManager }
         Profiler.installerProvider = mockInstaller
+        var tidRequests = 0
+        Profiler.tidProvider = {
+            tidRequests += 1
+            Tid(4242)
+        }
 
         val result = Profiler.profile {
             "success"
@@ -171,6 +181,7 @@ class ProfilerTest {
 
         assertEquals("success", result.value)
         assertTrue(mockInstaller.installCalled)
+        assertEquals(1, tidRequests)
         assertNotNull(result.behavior)
     }
 

@@ -4,21 +4,62 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /** Wire kinds for the process-portal Unix RPC. */
-public object PortalKind {
-    public const val REQUEST: Byte = 1
-    public const val RESPONSE: Byte = 2
-    public const val ERROR: Byte = 3
+public sealed class PortalKind(
+    public val wire: Byte,
+) {
+    public data object Request : PortalKind(1)
+
+    public data object Response : PortalKind(2)
+
+    public data object Error : PortalKind(3)
+
+    public companion object {
+        public fun fromWire(wire: Byte): PortalKind =
+            when (wire) {
+                Request.wire -> Request
+                Response.wire -> Response
+                Error.wire -> Error
+                else -> throw IllegalArgumentException("unknown portal kind $wire")
+            }
+    }
 }
 
-public object PortalMethods {
-    public const val ECHO: Int = 1
-    public const val CHECKSUM: Int = 2
+/** A portal operation with an explicitly owned on-wire method id. */
+public sealed class PortalMethod(
+    public val wire: Int,
+) {
+    public data object Echo : PortalMethod(1)
 
-    /** Worker sleeps [payload] milliseconds. Used to test call timeouts. */
-    public const val SLEEP: Int = 3
+    public data object Checksum : PortalMethod(2)
 
-    /** Worker tries `FileInputStream("/etc/passwd")`. Used to test Landlock deny. */
-    public const val TRY_OPEN_HOST_PASSWD: Int = 4
+    public data object Sleep : PortalMethod(3)
+
+    public data object TryOpenHostPasswd : PortalMethod(4)
+
+    /** A stable code-generated service method; builtin ids remain reserved. */
+    public data class Generated public constructor(
+        public val generatedWire: Int,
+    ) : PortalMethod(generatedWire) {
+        init {
+            require(generatedWire !in FIRST_BUILTIN_METHOD_ID..LAST_BUILTIN_METHOD_ID) {
+                "generated portal method id $generatedWire is reserved"
+            }
+        }
+    }
+
+    public companion object {
+        private const val FIRST_BUILTIN_METHOD_ID = 1
+        private const val LAST_BUILTIN_METHOD_ID = 4
+
+        public fun fromWire(wire: Int): PortalMethod =
+            when (wire) {
+                Echo.wire -> Echo
+                Checksum.wire -> Checksum
+                Sleep.wire -> Sleep
+                TryOpenHostPasswd.wire -> TryOpenHostPasswd
+                else -> Generated(wire)
+            }
+    }
 }
 
 /**
@@ -26,16 +67,16 @@ public object PortalMethods {
  * a following `SCM_RIGHTS` burst, never in the payload.
  */
 public data class PortalFrame(
-    val kind: Byte,
+    val kind: PortalKind,
     val requestId: Int,
-    val methodId: Int,
+    val method: PortalMethod,
     val payload: ByteArray,
     val fdCount: Int,
 ) {
     init {
         require(payload.size <= MAX_PAYLOAD) { "payload ${payload.size} exceeds $MAX_PAYLOAD" }
         require(fdCount in 0..MAX_FDS) { "fdCount $fdCount not in 0..$MAX_FDS" }
-        if (kind == PortalKind.RESPONSE || kind == PortalKind.ERROR) {
+        if (kind == PortalKind.Response || kind == PortalKind.Error) {
             require(fdCount == 0) { "worker→broker FDs are forbidden" }
         }
     }
@@ -43,11 +84,11 @@ public data class PortalFrame(
     public fun headerBytes(): ByteArray {
         val buf = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
         buf.put(MAGIC)
-        buf.put(kind)
+        buf.put(kind.wire)
         buf.put(0)
         buf.putShort(0)
         buf.putInt(requestId)
-        buf.putInt(methodId)
+        buf.putInt(method.wire)
         buf.putInt(payload.size)
         buf.put(fdCount.toByte())
         buf.put(0)
@@ -68,26 +109,26 @@ public data class PortalFrame(
             val magic = ByteArray(4)
             buf.get(magic)
             require(magic.contentEquals(MAGIC)) { "bad portal magic" }
-            val kind = buf.get()
+            val kind = PortalKind.fromWire(buf.get())
             buf.get()
             buf.short
             val requestId = buf.int
-            val methodId = buf.int
+            val method = PortalMethod.fromWire(buf.int)
             val payloadLen = buf.int
             val fdCount = buf.get().toInt() and 0xff
             require(payloadLen in 0..MAX_PAYLOAD) { "payloadLen $payloadLen" }
             require(fdCount in 0..MAX_FDS) { "fdCount $fdCount" }
-            if (kind == PortalKind.RESPONSE || kind == PortalKind.ERROR) {
+            if (kind == PortalKind.Response || kind == PortalKind.Error) {
                 require(fdCount == 0) { "worker→broker FDs are forbidden" }
             }
-            return ParsedHeader(kind, requestId, methodId, payloadLen, fdCount)
+            return ParsedHeader(kind, requestId, method, payloadLen, fdCount)
         }
     }
 
     public data class ParsedHeader(
-        val kind: Byte,
+        val kind: PortalKind,
         val requestId: Int,
-        val methodId: Int,
+        val method: PortalMethod,
         val payloadLen: Int,
         val fdCount: Int,
     )

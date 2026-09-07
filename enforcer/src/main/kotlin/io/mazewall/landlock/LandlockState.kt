@@ -8,6 +8,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.close
 import io.mazewall.core.use
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
@@ -57,6 +58,142 @@ internal sealed interface LandlockState {
         /** Last successfully entered lifecycle phase before this failure. */
         val previous: LandlockState? = null,
     ) : LandlockState
+}
+
+/** A pure state transition produced by the Landlock installation evaluator. */
+internal data class LandlockInstallTransition(
+    val state: LandlockState,
+    val effects: List<LandlockInstallEffect>,
+)
+
+/** Inputs returned to the installation evaluator by the session or native-effect interpreter. */
+internal sealed interface LandlockInstallEvent {
+    data class Begin(
+        val abi: Int,
+        val filesystemAccess: Long,
+        val networkAccess: Long,
+    ) : LandlockInstallEvent
+
+    data class RulesetCreated(
+        val ruleset: LandlockRuleset<RulesetState.Building>,
+        val abi: Int,
+        val policy: PolicyDefinition<*>?,
+    ) : LandlockInstallEvent
+
+    data class RulesAdded(
+        val ruleset: LandlockRuleset<RulesetState.Building>,
+        val processWide: Boolean,
+    ) : LandlockInstallEvent
+
+    data object RestrictionApplied : LandlockInstallEvent
+
+    data object Bypassed : LandlockInstallEvent
+
+    data class Failed(
+        val error: Throwable,
+    ) : LandlockInstallEvent
+}
+
+/** Native work requested by the installation evaluator. */
+internal sealed interface LandlockInstallEffect {
+    data class CreateRuleset(
+        val filesystemAccess: Long,
+        val networkAccess: Long,
+        val abi: Int,
+    ) : LandlockInstallEffect
+
+    data class AddRules(
+        val ruleset: LandlockRuleset<RulesetState.Building>,
+        val abi: Int,
+        val policy: PolicyDefinition<*>?,
+    ) : LandlockInstallEffect
+
+    data class RestrictSelf(
+        val ruleset: LandlockRuleset<RulesetState.Building>,
+        val processWide: Boolean,
+    ) : LandlockInstallEffect
+
+    data class CloseFd(
+        val rulesetFd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
+    ) : LandlockInstallEffect
+}
+
+/**
+ * Pure Landlock installation state machine. Native calls are interpreted by
+ * [LandlockSession], never performed while evaluating a transition.
+ */
+internal object LandlockInstall {
+    fun evaluate(
+        state: LandlockState,
+        event: LandlockInstallEvent,
+    ): LandlockInstallTransition =
+        when (event) {
+        is LandlockInstallEvent.Begin -> {
+            require(state == LandlockState.Uninitialized) {
+                "Landlock installation can only begin from Uninitialized"
+            }
+            LandlockInstallTransition(
+                state = LandlockState.CreatingRuleset(event.abi),
+                effects = listOf(
+                    LandlockInstallEffect.CreateRuleset(
+                        event.filesystemAccess,
+                        event.networkAccess,
+                        event.abi,
+                    ),
+                ),
+            )
+        }
+
+        is LandlockInstallEvent.RulesetCreated -> {
+            require(state == LandlockState.CreatingRuleset(event.abi)) {
+                "Landlock ruleset creation must follow the matching creation phase"
+            }
+            LandlockInstallTransition(
+                state = LandlockState.ConfiguringRuleset(event.ruleset.fd, event.abi),
+                effects = listOf(
+                    LandlockInstallEffect.AddRules(event.ruleset, event.abi, event.policy),
+                ),
+            )
+        }
+
+        is LandlockInstallEvent.RulesAdded -> {
+            require(state is LandlockState.ConfiguringRuleset && state.rulesetFd == event.ruleset.fd) {
+                "Landlock rules must be added from the matching configuration phase"
+            }
+            LandlockInstallTransition(
+                state = LandlockState.Enforcing(event.ruleset.fd),
+                effects = listOf(LandlockInstallEffect.RestrictSelf(event.ruleset, event.processWide)),
+            )
+        }
+
+        LandlockInstallEvent.RestrictionApplied -> {
+            require(state is LandlockState.Enforcing) {
+                "Landlock restriction can only complete from Enforcing"
+            }
+            LandlockInstallTransition(
+                LandlockState.Applied,
+                listOf(LandlockInstallEffect.CloseFd(state.rulesetFd)),
+            )
+        }
+
+        LandlockInstallEvent.Bypassed ->
+            LandlockInstallTransition(LandlockState.Applied, emptyList())
+
+        is LandlockInstallEvent.Failed ->
+            LandlockInstallTransition(
+                LandlockState.Failed(event.error, state),
+                when (state) {
+                    is LandlockState.ConfiguringRuleset -> listOf(LandlockInstallEffect.CloseFd(state.rulesetFd))
+                    is LandlockState.Enforcing -> listOf(LandlockInstallEffect.CloseFd(state.rulesetFd))
+                    LandlockState.Uninitialized,
+                    is LandlockState.QueryingAbi,
+                    is LandlockState.CreatingRuleset,
+                    LandlockState.Applied,
+                    is LandlockState.Failed,
+                    -> emptyList()
+                },
+            )
+    }
 }
 
 /**
@@ -134,12 +271,21 @@ internal class LandlockSession(
         tryApplyRuleset().orThrow()
     }
 
+    private fun transition(event: LandlockInstallEvent): List<LandlockInstallEffect> {
+        val transition = LandlockInstall.evaluate(state, event)
+        state = transition.state
+        return transition.effects
+    }
+
+    private fun interpretTerminalEffects(effects: List<LandlockInstallEffect>) {
+        effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { it.rulesetFd.close() }
+    }
+
     @Suppress("TooGenericExceptionCaught")
     fun tryApplyRuleset(): LandlockApplyResult {
         try {
             val features = Platform.featureMatrix
             val abi = features.landlockAbiVersion
-            state = LandlockState.QueryingAbi(abi)
 
             if (processWide && !features.landlockTsyncSupported) {
                 handleProcessWideUnsupported()
@@ -147,12 +293,13 @@ internal class LandlockSession(
 
             if (abi < 1) {
                 val unsupported = Landlock.handleUnsupportedLandlockOutcome()
-                state = when (unsupported) {
-                    is LandlockApplyResult.Rejected -> LandlockState.Failed(
-                        UnsupportedKernelFeatureException(unsupported.reason),
-                        state,
+                when (unsupported) {
+                    is LandlockApplyResult.Rejected -> transition(
+                        LandlockInstallEvent.Failed(UnsupportedKernelFeatureException(unsupported.reason)),
                     )
-                    else -> LandlockState.Applied
+                    is LandlockApplyResult.Applied,
+                    is LandlockApplyResult.Bypassed,
+                    -> transition(LandlockInstallEvent.Bypassed)
                 }
                 return unsupported
             }
@@ -168,37 +315,53 @@ internal class LandlockSession(
                 Landlock.getFullNetAccessMask(abi)
             }
 
-            state = LandlockState.CreatingRuleset(abi)
+            val createRuleset = transition(
+                LandlockInstallEvent.Begin(abi, accessMaskFs, accessMaskNet),
+            ).single() as LandlockInstallEffect.CreateRuleset
             NativeArena.ofConfined().use { arena ->
-                val created = with(arena) { Landlock.tryCreateRuleset(accessMaskFs, accessMaskNet, abi) }
+                val created = with(arena) {
+                    Landlock.tryCreateRuleset(
+                        createRuleset.filesystemAccess,
+                        createRuleset.networkAccess,
+                        createRuleset.abi,
+                    )
+                }
                 when (created) {
                     is LandlockFdOutcome.Err -> {
                         val outcome = Landlock.classifyLandlockErrno(
                             "landlock_create_ruleset",
                             created.errno,
                         )
-                        state = LandlockState.Failed(outcome.toFailure(), state)
+                        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(outcome.toFailure())))
                         return outcome
                     }
                     is LandlockFdOutcome.Ok -> {
                         created.fd.use { rulesetFd ->
                             val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
-                            val lifecycle = LandlockLifecycle.RulesetCreated(ruleset, abi, policy)
-                            state = lifecycle.diagnosticState
+                            val addRules = transition(
+                                LandlockInstallEvent.RulesetCreated(ruleset, abi, policy),
+                            ).single() as LandlockInstallEffect.AddRules
+                            val lifecycle = LandlockLifecycle.RulesetCreated(
+                                addRules.ruleset,
+                                addRules.abi,
+                                addRules.policy,
+                            )
 
                             val added = lifecycle.addRules(arena)
-                            state = added.diagnosticState
-                            when (val restricted = added.tryRestrictSelf(processWide)) {
+                            val restrictSelf = transition(
+                                LandlockInstallEvent.RulesAdded(added.ruleset, processWide),
+                            ).single() as LandlockInstallEffect.RestrictSelf
+                            when (val restricted = added.tryRestrictSelf(restrictSelf.processWide)) {
                                 is LandlockRestrictOutcome.Err -> {
                                     val outcome = Landlock.classifyLandlockErrno(
                                         "landlock_restrict_self",
                                         restricted.errno,
                                     )
-                                    state = LandlockState.Failed(outcome.toFailure(), state)
+                                    interpretTerminalEffects(transition(LandlockInstallEvent.Failed(outcome.toFailure())))
                                     return outcome
                                 }
                                 is LandlockRestrictOutcome.Ok -> {
-                                    state = LandlockLifecycle.Restricted.diagnosticState
+                                    interpretTerminalEffects(transition(LandlockInstallEvent.RestrictionApplied))
                                 }
                             }
                         }
@@ -207,7 +370,7 @@ internal class LandlockSession(
             }
             return LandlockApplyResult.Applied
         } catch (t: Throwable) {
-            state = LandlockState.Failed(t, state)
+            interpretTerminalEffects(transition(LandlockInstallEvent.Failed(t)))
             return LandlockApplyResult.Rejected(t.message ?: t.javaClass.name, cause = t)
         }
     }

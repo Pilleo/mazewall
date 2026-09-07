@@ -356,7 +356,9 @@ object ContainedExecutors {
             // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
             // if Landlock was NOT applied during this installation attempt.
             if (!processWide && initialState != null && !landlockSuccessfullyApplied) {
-                ContainmentStateRegistry.threadState = initialState
+                ContainmentRegistryEffectInterpreter.apply(
+                    ContainmentRegistryEffect.RestoreThreadState(initialState),
+                )
             }
             val fallback = Platform.configuredFallback()
             val landlockInForce =
@@ -488,12 +490,9 @@ object ContainedExecutors {
                                     .getAbiVersion(),
                             ),
                         )
-                        if (processWide) {
-                            ContainmentStateRegistry.updateProcessState { it.withLandlockPolicy(policy) }
-                        } else {
-                            ContainmentStateRegistry.threadState =
-                                ContainmentStateRegistry.threadState.withLandlockPolicy(policy)
-                        }
+                        ContainmentRegistryEffectInterpreter.apply(
+                            ContainmentRegistryEffect.LandlockApplied(processWide, policy),
+                        )
                         return LandlockStep.APPLIED
                     }
                     is io.mazewall.landlock.LandlockApplyResult.Bypassed -> return LandlockStep.BYPASSED
@@ -627,7 +626,16 @@ object ContainedExecutors {
             if (processWide) {
                 throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
             }
-            val onApplied = { updateThreadState(newBlocks, newDefaultAction, toInstall) }
+            val onApplied = {
+                ContainmentRegistryEffectInterpreter.apply(
+                    ContainmentRegistryEffect.SeccompInstalled(
+                        processWide = false,
+                        policy = toInstall,
+                        blocks = newBlocks,
+                        defaultAction = newDefaultAction,
+                    ),
+                )
+            }
             val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
                 toInstall,
                 scopingPolicy,
@@ -648,11 +656,17 @@ object ContainedExecutors {
 
             if (processWide) {
                 PureJavaBpfEngine.installOnProcess(compiledSandbox)
-                updateProcessState(newBlocks, newDefaultAction, toInstall)
             } else {
                 PureJavaBpfEngine.install(compiledSandbox)
-                updateThreadState(newBlocks, newDefaultAction, toInstall)
             }
+            ContainmentRegistryEffectInterpreter.apply(
+                ContainmentRegistryEffect.SeccompInstalled(
+                    processWide,
+                    toInstall,
+                    newBlocks,
+                    newDefaultAction,
+                ),
+            )
             // Runtime self-verification (issue-20260823-172003): OPT-IN via
             // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
             // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
@@ -666,23 +680,5 @@ object ContainedExecutors {
             )
             return AutoCloseable {}
         }
-    }
-
-    private fun updateProcessState(
-        newBlocks: Map<Syscall, SeccompAction>,
-        newDefaultAction: SeccompAction,
-        toInstall: PolicyDefinition<*>,
-    ) {
-        ContainmentStateRegistry.updateProcessState { current ->
-            current.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
-        }
-    }
-
-    private fun updateThreadState(
-        newBlocks: Map<Syscall, SeccompAction>,
-        newDefaultAction: SeccompAction,
-        toInstall: PolicyDefinition<*>,
-    ) {
-        ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
     }
 }

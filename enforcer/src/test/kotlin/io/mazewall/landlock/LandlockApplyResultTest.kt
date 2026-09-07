@@ -30,6 +30,64 @@ class LandlockApplyResultTest {
     }
 
     @Test
+    fun `beginning installation evaluates to a ruleset creation effect without native work`() {
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Uninitialized,
+            LandlockInstallEvent.Begin(abi = 6, filesystemAccess = 15L, networkAccess = 3L),
+        )
+
+        assertEquals(LandlockState.CreatingRuleset(6), transition.state)
+        assertEquals(
+            listOf(LandlockInstallEffect.CreateRuleset(15L, 3L, 6)),
+            transition.effects,
+        )
+    }
+
+    @Test
+    fun `ruleset creation evaluates to rule addition before restriction`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.CreatingRuleset(6),
+            LandlockInstallEvent.RulesetCreated(ruleset, abi = 6, policy = null),
+        )
+
+        assertEquals(LandlockState.ConfiguringRuleset(ruleset.fd, 6), transition.state)
+        assertEquals(
+            listOf(LandlockInstallEffect.AddRules(ruleset, abi = 6, policy = null)),
+            transition.effects,
+        )
+    }
+
+    @Test
+    fun `successful restriction evaluates to applied and closes the owned ruleset`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Enforcing(ruleset.fd),
+            LandlockInstallEvent.RestrictionApplied,
+        )
+
+        assertEquals(LandlockState.Applied, transition.state)
+        assertEquals(listOf(LandlockInstallEffect.CloseFd(ruleset.fd)), transition.effects)
+    }
+
+    @Test
+    fun `failed restriction retains enforcing phase and closes the owned ruleset`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val failure = IllegalStateException("landlock_restrict_self failed")
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Enforcing(ruleset.fd),
+            LandlockInstallEvent.Failed(failure),
+        )
+
+        val failed = assertIs<LandlockState.Failed>(transition.state)
+        assertEquals(LandlockState.Enforcing(ruleset.fd), failed.previous)
+        assertEquals(listOf(LandlockInstallEffect.CloseFd(ruleset.fd)), transition.effects)
+    }
+
+    @Test
     fun `tryCreateRuleset returns Error on ENOSYS without throwing`() {
         LinuxNative.setEngine(object : MockNativeEngine() {
             override fun syscall(

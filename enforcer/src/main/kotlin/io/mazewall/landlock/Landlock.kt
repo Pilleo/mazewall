@@ -122,7 +122,7 @@ object Landlock {
 
     private sealed interface OpenResult {
         data class Success(
-            val fd: Int,
+            val fd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Owned>,
             val isFallback: Boolean,
         ) : OpenResult
 
@@ -405,7 +405,7 @@ object Landlock {
         val initialResult = openPath(resolvedPath, openFlags)
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess)
-        val (fdResult, isFallback) = when (openRes) {
+        val (pathFd, isFallback) = when (openRes) {
             is OpenResult.Success -> openRes.fd to openRes.isFallback
             is OpenResult.Error -> {
                 logOpenFailure(resolvedPath, openRes.errno)
@@ -413,7 +413,7 @@ object Landlock {
             }
         }
 
-        FileDescriptor.adopt(fdResult, FileDescriptorRole.OPath).use { pathFd ->
+        pathFd.use {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
         }
@@ -448,12 +448,12 @@ object Landlock {
             val fallbackFlags = io.mazewall.core.OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
             val openResult = openPath(parentPath, fallbackFlags)
             return when (openResult) {
-                is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.value.toInt(), true)
+                is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(openResult.value.toInt(), FileDescriptorRole.OPath), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
             }
         }
         return when (res) {
-            is LinuxNative.SyscallResult.Success -> OpenResult.Success(res.value.toInt(), false)
+            is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.OPath), false)
             is LinuxNative.SyscallResult.Error -> OpenResult.Error(res.errno)
         }
     }

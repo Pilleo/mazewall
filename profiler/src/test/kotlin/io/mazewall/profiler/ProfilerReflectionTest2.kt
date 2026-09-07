@@ -1,6 +1,9 @@
 package io.mazewall.profiler
 
 import io.mazewall.core.Tid
+import io.mazewall.profiler.engine.MmapFileDescriptor
+import io.mazewall.profiler.engine.MmapFlags
+import io.mazewall.profiler.engine.MmapProtection
 import io.mazewall.profiler.engine.SessionEvent
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.*
@@ -88,6 +91,9 @@ class ProfilerReflectionTest2 {
         val mmapEvent = event as TraceEvent.Mmap
         assertTrue(mmapEvent.isExecutable)
         assertEquals(4096L, mmapEvent.len)
+        assertEquals(MmapProtection(7), mmapEvent.protection)
+        assertEquals(MmapFlags(34), mmapEvent.mappingFlags)
+        assertEquals(MmapFileDescriptor(-1), mmapEvent.fileDescriptor)
 
         val event2 = TraceEvent.invoke(
             tidValue = 1234,

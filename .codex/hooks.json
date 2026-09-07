@@ -1,1 +1,16 @@
-../.grok/hooks/mazewall_guards.json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "ApplyPatch|Write|Edit|MultiEdit|Bash|search_replace|write|UpdateFile|replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/adkw hook --harness codex --file \"{file}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

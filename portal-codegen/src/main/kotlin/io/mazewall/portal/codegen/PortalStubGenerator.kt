@@ -18,6 +18,8 @@ import java.lang.reflect.Method
 
 public object PortalStubGenerator {
     private val processBroker = ClassName("io.mazewall.portal", "ProcessBroker")
+    private val portalMethod = ClassName("io.mazewall.portal", "PortalMethod")
+    private val generatedPortalMethod = portalMethod.nestedClass("Generated")
     private val portalCodec = ClassName("io.mazewall.portal", "PortalCodec")
     private val capability = ClassName("io.mazewall.portal", "Capability")
     private val readFd = capability.nestedClass("ReadFd")
@@ -83,15 +85,13 @@ public object PortalStubGenerator {
                         .build(),
                 )
         for ((method, id) in ids) {
-            type.addFunction(hostMethod(method, id))
+            type.addProperty(methodIdProperty(method, id))
+            type.addFunction(hostMethod(method))
         }
         return FileSpec.builder(pkg, stubName).addType(type.build()).build()
     }
 
-    private fun hostMethod(
-        method: Method,
-        id: Int,
-    ): FunSpec {
+    private fun hostMethod(method: Method): FunSpec {
         val spec =
             FunSpec
                 .builder(method.name)
@@ -124,9 +124,9 @@ public object PortalStubGenerator {
         spec.addStatement("val payload = %L", payloadExpr)
         val invoke =
             if (granted.isEmpty()) {
-                CodeBlock.of("broker.invoke(%L, payload)", id)
+                CodeBlock.of("broker.invoke(%T.Generated(%L), payload)", portalMethod, methodConstantName(method))
             } else {
-                CodeBlock.of("broker.invoke(%L, payload, %L)", id, granted.joinToString(", "))
+                CodeBlock.of("broker.invoke(%T.Generated(%L), payload, %L)", portalMethod, methodConstantName(method), granted.joinToString(", "))
             }
         val ret = BoundaryTypes.kindOf(method.returnType)
         if (ret is BoundaryTypes.Kind.UnitT) {
@@ -157,20 +157,21 @@ public object PortalStubGenerator {
                 .builder("handle")
                 .addModifiers(KModifier.PUBLIC)
                 .addParameter("impl", service.asClassName())
-                .addParameter("methodId", Int::class)
+                .addParameter("method", generatedPortalMethod)
                 .addParameter("payload", ByteArray::class)
                 .addParameter("granted", LIST.parameterizedBy(readFd))
                 .returns(ByteArray::class)
-                .beginControlFlow("when (methodId)")
+                .beginControlFlow("when (method.wire)")
         var fdIndex = 0
         for ((method, id) in ids) {
             fdIndex = 0
-            handle.beginControlFlow("%L ->", id)
+            handle.beginControlFlow("%L ->", methodConstantName(method))
             handle.addStatement("val reader = %T(payload)", codecReader)
             val args = mutableListOf<String>()
             method.parameters.forEach { p ->
                 val kind = BoundaryTypes.kindOf(p.type)
                 if (kind is BoundaryTypes.Kind.ReadFd) {
+                    handle.addComment("Capability slot %L: %N", fdIndex, p.name)
                     handle.addStatement("val %N = granted[%L]", p.name, fdIndex)
                     fdIndex++
                     args.add(p.name)
@@ -190,7 +191,7 @@ public object PortalStubGenerator {
             }
             handle.endControlFlow()
         }
-        handle.addStatement("else -> error(%P)", "unknown portal method \$methodId")
+        handle.addStatement("else -> error(%P)", "unknown generated portal method \${method.wire}")
         handle.endControlFlow()
         val idsProperty =
             PropertySpec
@@ -198,17 +199,30 @@ public object PortalStubGenerator {
                     "METHOD_IDS",
                     IntArray::class,
                     KModifier.PUBLIC,
-                ).initializer("intArrayOf(${ids.values.joinToString(", ")})")
+                ).initializer("intArrayOf(${ids.keys.joinToString(", ") { methodConstantName(it) }})")
                 .build()
         val type =
             TypeSpec
                 .objectBuilder(name)
                 .addModifiers(KModifier.PUBLIC)
-                .addProperty(idsProperty)
+                .apply {
+                    ids.forEach { (method, id) -> addProperty(methodIdProperty(method, id)) }
+                }.addProperty(idsProperty)
                 .addFunction(handle.build())
                 .build()
         return FileSpec.builder(pkg, name).addType(type).build()
     }
+
+    private fun methodIdProperty(
+        method: Method,
+        id: Int,
+    ): PropertySpec =
+        PropertySpec
+            .builder(methodConstantName(method), Int::class, KModifier.PRIVATE, KModifier.CONST)
+            .initializer("%L", id)
+            .build()
+
+    private fun methodConstantName(method: Method): String = method.name.uppercase() + "_METHOD_ID"
 
     private fun encode(
         kind: BoundaryTypes.Kind,
@@ -256,7 +270,8 @@ public object PortalStubGenerator {
             BoundaryTypes.Kind.StringT -> CodeBlock.of("%T.encodeString(%L)", portalCodec, access)
             BoundaryTypes.Kind.BytesT -> CodeBlock.of("%T.encodeBytes(%L)", portalCodec, access)
             is BoundaryTypes.Kind.RecordT -> encode(kind, access)
-            else -> throw IllegalArgumentException("cannot encode property $prop of kind $kind")
+            BoundaryTypes.Kind.ReadFd -> error("ReadFd is not encoded in the payload")
+            BoundaryTypes.Kind.UnitT -> CodeBlock.of("ByteArray(0)")
         }
     }
 

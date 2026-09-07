@@ -236,14 +236,17 @@ public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompile
  * execution and cleaned up afterward. This is the recommended way to run short-lived contained
  * operations without permanently affecting the thread.
  *
- * <p><b>Fail-Closed:</b> If the task throws an exception due to a containment violation, it will
- * be propagated to the caller. The sandbox ensures that blocked syscalls result in exceptions
- * rather than silent failures.
+ * <p><b>Failure reporting:</b> installation failures and task exceptions propagate to the caller.
+ * An observed policy denial may be reported as a
+ * [io.mazewall.enforcer.api.ContainmentViolationException]; inspect its structured fields and
+ * evidence rather than parsing an exception message. A task can handle its own failure, and a
+ * process-terminating policy action cannot be reported through this return path.
  *
  * @param policy The policy to enforce during task execution
  * @param task The task to execute
  * @return The result of the task
- * @throws RuntimeException if the task throws an exception or violates the containment policy
+ * @throws RuntimeException if installation or the task throws; a policy denial is reported only
+ * when the execution path surfaces it as an exception
  */
 public fun <T> runContained(
     policy: Policy<*, *>,
@@ -261,12 +264,13 @@ public fun <T> runContained(
 }
 
 /**
- * Executes the given task in a contained sandbox with the specified policy.
+ * Executes the given task in a contained sandbox with the specified policy. See the
+ * [Callable] overload for failure-reporting limits and structured violation diagnostics.
  *
  * @param policy The policy to enforce during task execution
  * @param task The task to execute
  * @return The result of the task
- * @throws RuntimeException if the task throws an exception or violates the containment policy
+ * @throws RuntimeException if installation or the task throws
  */
 public fun <T> runContained(
     policy: Policy<*, *>,
@@ -276,11 +280,12 @@ public fun <T> runContained(
 }
 
 /**
- * Executes the given task in a contained sandbox with the specified policy.
+ * Executes the given task in a contained sandbox with the specified policy. See the
+ * [Callable] overload for failure-reporting limits and structured violation diagnostics.
  *
  * @param policy The policy to enforce during task execution
  * @param task The task to execute
- * @throws RuntimeException if the task throws an exception or violates the containment policy
+ * @throws RuntimeException if installation or the task throws
  */
 public fun runContained(
     policy: Policy<*, *>,
@@ -303,8 +308,11 @@ public fun runContained(
  * <p><b>Ownership:</b> The returned executor is a wrapper that applies the sandbox policy to each task.
  * The original executor remains unchanged. The wrapper manages the lifecycle of the sandbox for each task.
  *
- * <p><b>Fail-Closed:</b> If a task violates the containment policy, it will throw an exception
- * that can be caught from the Future returned by submit().
+ * <p><b>Failure reporting:</b> [java.util.concurrent.Future.get] retains standard
+ * [java.util.concurrent.ExecutionException] wrapping. If Mazewall observes a denial, inspect its
+ * [io.mazewall.enforcer.api.ContainmentViolationException] cause and evidence; ordinary task and
+ * installation failures remain distinct. A task that handles an error internally has no failure
+ * to report through its future.
  *
  * @param delegate The underlying executor service to wrap
  * @param policy The policy to apply to all tasks

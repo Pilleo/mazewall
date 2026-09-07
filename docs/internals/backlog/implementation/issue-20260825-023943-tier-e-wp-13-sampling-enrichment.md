@@ -14,8 +14,8 @@ open_questions: true
 dependencies:
   - "issue-20260825-023936-tier-e-wp-06-noise-budget.md"
   - "issue-20260825-023940-tier-e-wp-10-oracle-comparison.md"
-paperclip_issue_id: 6257d8df-5389-4923-912b-476515077a68
-paperclip_identifier: MAZ-714
+paperclip_issue_id: "728fdf77-70eb-451e-ae40-9cfe7f6b0582"
+paperclip_identifier: "MAZ-1152"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-13 — Sampling Enrichment Policy

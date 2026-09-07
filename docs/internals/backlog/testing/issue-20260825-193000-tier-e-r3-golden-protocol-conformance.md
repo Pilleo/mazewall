@@ -13,8 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023934-tier-e-wp-04-lifecycle-trust.md"
-paperclip_issue_id: b6256d4c-c97e-4395-ae26-c720c5e7194f
-paperclip_identifier: MAZ-767
+paperclip_issue_id: "add9a3d3-1443-431a-941b-aecc2fb59c25"
+paperclip_identifier: "MAZ-1178"
 ---
 
 # 🟢 [Severity: LOW]: R3 — Golden-File Protocol Conformance Suite

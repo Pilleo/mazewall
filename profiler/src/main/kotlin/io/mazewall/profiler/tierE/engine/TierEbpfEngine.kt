@@ -71,7 +71,6 @@ public class TierEbpfEngine(
         private const val JEQ_IMM: Int = 0x15
         private const val JA: Int = 0x05
         private const val JNE_REG: Int = 0x5d
-        private const val AND_IMM: Int = 0x57
         private const val OR_IMM: Int = 0x47
         private const val RSH_IMM: Int = 0x77
         private const val LD_MAP_FD: Int = 0x18
@@ -86,7 +85,6 @@ public class TierEbpfEngine(
         public const val EVENT_SIZE: Int = 88
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
-        private const val NAME_MAX: Int = 16
     }
 
     /** One eBPF instruction. */

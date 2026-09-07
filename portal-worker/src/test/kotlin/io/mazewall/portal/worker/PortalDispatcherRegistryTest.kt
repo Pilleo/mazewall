@@ -4,8 +4,10 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.PortalMethod
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 /**
@@ -20,13 +22,13 @@ class PortalDispatcherRegistryTest {
 
         fun handle(
             impl: EchoService,
-            methodId: Int,
+            method: PortalMethod.Generated,
             payload: ByteArray,
             granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
         ): ByteArray =
-            when (methodId) {
+            when (method.wire) {
             1000 -> ((impl as EchoServiceImpl).tag + ":" + payload.decodeToString()).toByteArray()
-            else -> error("unknown portal method $methodId")
+            else -> error("unknown portal method ${method.wire}")
         }
     }
 
@@ -52,19 +54,18 @@ class PortalDispatcherRegistryTest {
         assertEquals(1, count)
 
         val out = PortalDispatcherRegistry.dispatchOrNull(
-            1000,
+            PortalMethod.Generated(1000),
             "hello".toByteArray(),
             grantedFds(),
         )
         assertEquals("impl:hello", out?.decodeToString())
-        assertNull(PortalDispatcherRegistry.dispatchOrNull(1001, ByteArray(0), grantedFds()))
+        assertNull(PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(1001), ByteArray(0), grantedFds()))
     }
 
     @Test
-    fun `unknown and builtin ids are not claimed by the registry`() {
-        assertNull(PortalDispatcherRegistry.dispatchOrNull(9999, ByteArray(0), grantedFds()))
-        // Builtins stay owned by PortalBuiltinDispatch; registry ignores them.
-        assertNull(PortalDispatcherRegistry.dispatchOrNull(1, ByteArray(0), grantedFds()))
+    fun `unknown generated ids are not claimed and builtin ids cannot be generated`() {
+        assertNull(PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(9999), ByteArray(0), grantedFds()))
+        assertFailsWith<IllegalArgumentException> { PortalMethod.Generated(1) }
     }
 
     @Test

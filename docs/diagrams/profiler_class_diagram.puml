@@ -177,6 +177,208 @@ interface "UringOp" as io.mazewall.profiler.UringOp {
   +boolean isPathBearing()
   +boolean isFilesystemMutation()
 }
+class "AgentDefinitionFile" as io.mazewall.profiler.attribution.AgentDefinitionFile {
+  + {static}AgentDefinitionFile INSTANCE
+  __
+  +Contents read(Path)
+  +Contents decode(byte[])
+}
+class "AttributionCollector" as io.mazewall.profiler.attribution.AttributionCollector {
+  + {static}int VIRTUAL_THREAD_CAPTURE_FLAG
+  __
+  +SessionIntegrity getIntegrity()
+  +List<ResolvedSyscall> accept(StackDefinition)
+  +List<ResolvedSyscall> accept(InvocationDefinition)
+  +List<ResolvedSyscall> accept(SyscallAttribution)
+  +void recordLoss(long)
+  +void recordVirtualPinnedIntervals(long, long)
+  +List<ResolvedSyscall> finish()
+}
+enum "AttributionStatus" as io.mazewall.profiler.attribution.AttributionStatus {
+  PENDING_DICTIONARY
+  NO_ACTIVE_INVOCATION
+  SEQUENCE_GAP
+  ACTIVATION_MISMATCH
+  KERNEL_CAPTURE_FAILED
+}
+enum "CaptureFailure" as io.mazewall.profiler.attribution.CaptureFailure {
+  STACK_WALK_FAILED
+  STACK_TRUNCATED_REJECTED
+  UNSUPPORTED_EXECUTION
+  EXECUTION_IDENTITY_CHANGED
+}
+enum "CaptureGuarantee" as io.mazewall.profiler.attribution.CaptureGuarantee {
+  FULL_STREAM
+  UNIQUE_EDGES
+  INCOMPLETE
+}
+class "ExecutionContext" as io.mazewall.profiler.attribution.ExecutionContext {
+  __
+  +long getExecutionId()
+  +ExecutionKind getKind()
+  +ExecutionContext copy(long, ExecutionKind)
+}
+class "ExecutionId" as io.mazewall.profiler.attribution.ExecutionId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+enum "ExecutionKind" as io.mazewall.profiler.attribution.ExecutionKind {
+  PLATFORM
+  VIRTUAL
+}
+class "InvocationDefinition" as io.mazewall.profiler.attribution.InvocationDefinition {
+  __
+  +long getInvocationId()
+  +InvocationId getParentInvocationId()
+  +StackTraceId getStackTraceId()
+  +CaptureFailure getCaptureFailure()
+  +ExecutionContext getExecutionContext()
+  +InvocationDefinition copy(long, InvocationId, StackTraceId, CaptureFailure, ExecutionContext)
+}
+interface "InvocationEvent" as io.mazewall.profiler.attribution.InvocationEvent {
+  + {abstract}TaskIdentity getTask()
+  + {abstract}long getSequence()
+}
+class "InvocationId" as io.mazewall.profiler.attribution.InvocationId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "InvocationProtocol" as io.mazewall.profiler.attribution.InvocationProtocol {
+  ..
+  + {static}InvocationProtocol INSTANCE
+  __
+  +byte[] encode(InvocationEvent)
+  +InvocationEvent decode(byte[])
+}
+class "InvocationReplayMachine" as io.mazewall.profiler.attribution.InvocationReplayMachine {
+  +ReplayResult accept(InvocationEvent)
+}
+class "ManagedFrame" as io.mazewall.profiler.attribution.ManagedFrame {
+  +String getClassLoaderIdentity()
+  +String getClassName()
+  +String getMethodName()
+  +String getDescriptor()
+  +long getBytecodeLocation()
+  +ManagedFrameKind getKind()
+}
+enum "ManagedFrameKind" as io.mazewall.profiler.attribution.ManagedFrameKind {
+  JAVA
+  NATIVE_METHOD
+}
+interface "ReplayResult" as io.mazewall.profiler.attribution.ReplayResult {
+  __
+  + {abstract}StateInvalidated getInvalidated()
+}
+enum "ResolutionStatus" as io.mazewall.profiler.attribution.ResolutionStatus {
+  RESOLVED
+  DICTIONARY_UNRESOLVED
+  CAPTURE_FAILED
+  NO_ACTIVE_INVOCATION
+  INVALID_KERNEL_ATTRIBUTION
+  TRUNCATED_STACK
+  EXECUTION_IDENTITY_UNRESOLVED
+}
+class "ResolvedSyscall" as io.mazewall.profiler.attribution.ResolvedSyscall {
+  __
+  +SyscallAttribution getObservation()
+  +StackDefinition getStackDefinition()
+  +ResolutionStatus getResolutionStatus()
+  +ExecutionContext getExecutionContext()
+}
+class "SessionIntegrity" as io.mazewall.profiler.attribution.SessionIntegrity {
+  +long getObservedLosses()
+  +long getAttributionFailures()
+  +TierEEmissionMode getEmissionMode()
+  +long getVirtualPinnedScopes()
+  +long getVirtualPinnedNanos()
+  +CaptureGuarantee getGuarantee()
+  +boolean getComplete()
+  +boolean getCoverageComplete()
+}
+enum "StackCaptureQuality" as io.mazewall.profiler.attribution.StackCaptureQuality {
+  COMPLETE
+  TRUNCATED
+}
+class "StackDefinition" as io.mazewall.profiler.attribution.StackDefinition {
+  __
+  +long getStackTraceId()
+  +List<ManagedFrame> getFrames()
+  +StackCaptureQuality getCaptureQuality()
+  +StackDefinition copy(long, List<ManagedFrame>, StackCaptureQuality)
+}
+class "StackTraceDictionary" as io.mazewall.profiler.attribution.StackTraceDictionary {
+  +StackDefinition intern(List<ManagedFrame>, StackCaptureQuality)
+  +StackDefinition resolve(long)
+}
+class "StackTraceId" as io.mazewall.profiler.attribution.StackTraceId {
+  ..
+  + {static}Companion Companion
+  + {static}long MAX_VALUE
+  __
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "StateInvalidated" as io.mazewall.profiler.attribution.StateInvalidated {
+  +TaskIdentity getTask()
+  +long getExpectedSequence()
+  +long getActualSequence()
+  +StateInvalidationReason getReason()
+}
+enum "StateInvalidationReason" as io.mazewall.profiler.attribution.StateInvalidationReason {
+  SEQUENCE_GAP
+  ACTIVATION_MISMATCH
+}
+class "SyscallAttribution" as io.mazewall.profiler.attribution.SyscallAttribution {
+  ..
+  + {static}Companion Companion
+  + {static}int ARGUMENT_COUNT
+  __
+  +TaskIdentity getTask()
+  +long getTaskSequence()
+  +int getSyscallNumber()
+  +List<Long> getArgs()
+  +InvocationId getInvocationId()
+  +AttributionStatus getAttributionStatus()
+  +int getCaptureFlags()
+  +SyscallAttribution copy(TaskIdentity, long, int, List<Long>, InvocationId, AttributionStatus, int)
+}
+class "TaskIdentity" as io.mazewall.profiler.attribution.TaskIdentity {
+  +long getProcessEpoch()
+  +int getTid()
+  +long getTaskEpoch()
+}
+enum "TierEEmissionMode" as io.mazewall.profiler.attribution.TierEEmissionMode {
+  FULL_STREAM
+  UNIQUE_STACK_SYSCALL
+}
+class "TierEOptions" as io.mazewall.profiler.attribution.TierEOptions {
+  __
+  +TierEEmissionMode getEmissionMode()
+}
+class "TierEProfile" as io.mazewall.profiler.attribution.TierEProfile {
+  +List<ResolvedSyscall> getSyscalls()
+  +SessionIntegrity getIntegrity()
+}
+class "TierEProfilerSession" as io.mazewall.profiler.attribution.TierEProfilerSession {
+  +void installAndAttach(int, int, Path, long)
+  +List<ResolvedSyscall> poll()
+  +TierEProfile finish(Path)
+  +long markerTransitionCount()
+  +long lastMarkerPidTgid()
+  +void close()
+}
 class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
   +List<ProfileObservation> getObservations()
   +int getDroppedEvents()
@@ -190,6 +392,7 @@ class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
   +void close()
 }
 class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
+  ..
   + {static}EbpfEventParser INSTANCE
   __
   +EbpfParseResult parse(String)
@@ -250,16 +453,41 @@ interface "DaemonRunner" as io.mazewall.profiler.engine.DaemonRunner {
 }
 abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
   + {abstract}long getNotifId()
-  + {abstract}FileDescriptor<SeccompNotif, Open> getListenerFd()
+  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
+}
+class "MmapFileDescriptor" as io.mazewall.profiler.engine.MmapFileDescriptor {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "MmapFlags" as io.mazewall.profiler.engine.MmapFlags {
+  +int getBits()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "MmapProtection" as io.mazewall.profiler.engine.MmapProtection {
+  +int getBits()
+  + {static}boolean getAllowsExecution-impl(int)
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
 }
 interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
   + {abstract}RawSyscallOperations getRaw()
   + {abstract}SyscallResult poll(MemorySegment, long, int)
-  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
-  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
-  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
-  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
-  + {abstract}void close(FileDescriptor<?, ? extends Open>)
+  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
+  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
+  + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
 }
 class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
   + {static}PathNormalizerHelper INSTANCE
@@ -280,12 +508,12 @@ class "ProfilerDaemon" as io.mazewall.profiler.engine.ProfilerDaemon {
 }
 class "ProfilerDaemonEngine" as io.mazewall.profiler.engine.ProfilerDaemonEngine {
   + {static}Companion Companion
-  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open>> clientSockets
+  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
   __
   +UnixListenDaemonState getState()
   +void run(Function0<Unit>)
-  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open>)
-  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open>)
+  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +void triggerGlobalShutdown(String)
 }
 class "ProfilerInstaller" as io.mazewall.profiler.engine.ProfilerInstaller {
@@ -317,7 +545,7 @@ class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHan
   +ManagedSegment getSocketPollFd()
   +ProfilerState getState()
   +void close()
-  +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open>, FileDescriptor<UnixSocket, ? extends Open>)
+  +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>)
 }
 class "ProfilerSessionMachine" as io.mazewall.profiler.engine.ProfilerSessionMachine {
   + {static}ProfilerSessionMachine INSTANCE
@@ -330,8 +558,8 @@ class "ProfilerSessionTransition" as io.mazewall.profiler.engine.ProfilerSession
   +boolean getPassThrough()
 }
 interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
-  + {abstract}FileDescriptor<UnixSocket, Open> getSocketFd()
-  + {abstract}FileDescriptor<SeccompNotif, Open> getListenerFd()
+  + {abstract}FileDescriptor<UnixSocket, Open, Owned> getSocketFd()
+  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
 }
 interface "ProfilerTransport" as io.mazewall.profiler.engine.ProfilerTransport {
 }
@@ -357,21 +585,21 @@ class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTranspo
   + {static}RealProfilerTransport INSTANCE
   __
   +RawSyscallOperations getRaw()
-  +void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
+  +void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
   +void sendSeccompContinue(Arena, Success, MemorySegment)
   +void sendSeccompError(Arena, Failed, MemorySegment, int)
-  +FileDescriptor<UnixSocket, Open> connect(String)
-  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open>, FileDescriptor<?, ? extends Open>)
-  +FileDescriptor<SeccompNotif, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>)
-  +FileDescriptor<R, Open> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open>, R)
+  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
+  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
   +SyscallResult poll(MemorySegment, long, int)
-  +SyscallResult read(FileDescriptor<?, ? extends Open>, MemorySegment, long)
-  +SyscallResult write(FileDescriptor<?, ? extends Open>, MemorySegment, long)
-  +SyscallResult recv(FileDescriptor<?, ? extends Open>, MemorySegment, long, int)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open>, long, MemorySegment)
-  +FileDescriptor<UnixSocket, Open> createUnixServer(String)
-  +FileDescriptor<UnixSocket, Open> accept(FileDescriptor<UnixSocket, ? extends Open>)
-  +void close(FileDescriptor<?, ? extends Open>)
+  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  +SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
+  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
+  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +void close(FileDescriptor<?, ? extends Open, Owned>)
 }
 class "RealSeccompNotificationParser" as io.mazewall.profiler.engine.RealSeccompNotificationParser {
   + {static}RealSeccompNotificationParser INSTANCE
@@ -433,7 +661,7 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   +void setJvmStackTrace(StackTraceElement[])
 }
 interface "TraceEventPublisher" as io.mazewall.profiler.engine.TraceEventPublisher {
-  + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open>, SyscallEvent<? extends Resolved>)
+  + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
 }
 class "TransportNativeEngine" as io.mazewall.profiler.engine.TransportNativeEngine {
   +RawSyscallOperations getRaw()
@@ -443,8 +671,8 @@ class "TransportNativeEngine" as io.mazewall.profiler.engine.TransportNativeEngi
   +NativeMemory getMemory()
 }
 class "TransportNativeMemory" as io.mazewall.profiler.engine.TransportNativeMemory {
-  +SyscallResult read(FileDescriptor<?, ? extends Open>, ManagedSegment, long)
-  +SyscallResult write(FileDescriptor<?, ? extends Open>, ManagedSegment, long)
+  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
   +SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
   +SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
   +ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
@@ -562,6 +790,7 @@ interface "ControlCommand" as io.mazewall.profiler.tierE.daemon.ControlCommand {
 }
 class "ControlProtocolKt" as io.mazewall.profiler.tierE.daemon.ControlProtocolKt {
   __
+  + {static}ControlReply rejectionReply(ControlCommand)
   + {static}Either<ControlCommand, ControlReply> parseControlCommand(String)
 }
 class "ControlReply" as io.mazewall.profiler.tierE.daemon.ControlReply {
@@ -579,19 +808,97 @@ class "ElfBuildIdExtractor" as io.mazewall.profiler.tierE.daemon.ElfBuildIdExtra
   __
   +String extract(byte[])
 }
+class "ElfSymbolOffset" as io.mazewall.profiler.tierE.daemon.ElfSymbolOffset {
+  + {static}ElfSymbolOffset INSTANCE
+  __
+  +long resolve(Path, String)
+  +long resolve(byte[], String)
+}
 class "TierEKotlinDaemonKt" as io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt {
   + {static}void main()
+}
+class "BpfBtfLoadLayout" as io.mazewall.profiler.tierE.engine.BpfBtfLoadLayout {
+  + {static}BpfBtfLoadLayout INSTANCE
+  + {static}long SIZE
+  + {static}long BTF
+  + {static}long LOG_BUFFER
+  + {static}long BTF_SIZE
+  + {static}long LOG_SIZE
+  + {static}long LOG_LEVEL
+}
+class "BpfMapCreateLayout" as io.mazewall.profiler.tierE.engine.BpfMapCreateLayout {
+  + {static}BpfMapCreateLayout INSTANCE
+  + {static}long MAP_FLAGS
+  + {static}long BTF_FD
+  + {static}long BTF_KEY_TYPE_ID
+  + {static}long BTF_VALUE_TYPE_ID
+}
+class "BpfProgLoadLayout" as io.mazewall.profiler.tierE.engine.BpfProgLoadLayout {
+  + {static}BpfProgLoadLayout INSTANCE
+  + {static}long SIZE
+  + {static}long PROGRAM_TYPE
+  + {static}long INSTRUCTION_COUNT
+  + {static}long INSTRUCTIONS
+  + {static}long LICENSE
+  + {static}long LOG_LEVEL
+  + {static}long LOG_SIZE
+  + {static}long LOG_BUFFER
+  + {static}long KERNEL_VERSION
+  + {static}long PROGRAM_FLAGS
+  + {static}long PROGRAM_NAME
+  + {static}int PROGRAM_NAME_SIZE
+}
+class "BpfProgLoadRequestEncoder" as io.mazewall.profiler.tierE.engine.BpfProgLoadRequestEncoder {
+  + {static}BpfProgLoadRequestEncoder INSTANCE
+  __
+  +Request encode(Arena, List<Insn>, List<Integer>, int, String)
+  +long pack(Insn)
+}
+class "BpfRawTracepointOpenLayout" as io.mazewall.profiler.tierE.engine.BpfRawTracepointOpenLayout {
+  + {static}BpfRawTracepointOpenLayout INSTANCE
+  + {static}long SIZE
+  + {static}long NAME
+  + {static}long PROGRAM_FD
+}
+class "InvocationStateBtf" as io.mazewall.profiler.tierE.engine.InvocationStateBtf {
+  + {static}InvocationStateBtf INSTANCE
+  __
+  +byte[] load()
+  +int invocationStateTypeId()
+  +int taskStorageKeyTypeId()
+  +int findStructTypeId(byte[], String)
+}
+class "PerfEventAttrLayout" as io.mazewall.profiler.tierE.engine.PerfEventAttrLayout {
+  + {static}PerfEventAttrLayout INSTANCE
+  + {static}long SIZE
+  + {static}long TYPE
+  + {static}long SIZE_FIELD
+  + {static}long SAMPLE_PERIOD
+  + {static}long UPROBE_PATH
+  + {static}long UPROBE_OFFSET
 }
 class "TierEbpfEngine" as io.mazewall.profiler.tierE.engine.TierEbpfEngine {
   + {static}Companion Companion
   + {static}int EVENT_SIZE
   __
   +void install(int)
-  +long[] readAttrCounts()
-  +void setContext(int, int)
+  +void install(int, int, TierEOptions)
+  +long readLossCount()
+  +long readMarkerTransitionCount()
+  +long readLastMarkerPidTgid()
+  +long readMarkerFailureCount()
+  +void attachMarker(int, Path, long)
+  +List<SyscallInvocationEvent> drainEvents()
   +void close()
-  +List<Insn> buildProgram()
+  +List<Insn> buildProgram(TierEOptions)
+  +List<Insn> buildMarkerProgram()
   +long pack(Insn)
+}
+class "BpfRingBufferReader" as io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader {
+  + {static}Companion Companion
+  __
+  +List<byte[]> drain()
+  +void close()
 }
 class "ContextEvent" as io.mazewall.profiler.tierE.ringbuf.ContextEvent {
   + {static}Companion Companion
@@ -604,7 +911,39 @@ class "ContextEvent" as io.mazewall.profiler.tierE.ringbuf.ContextEvent {
   +int getContextId()
   +ContextEvent copy(long, int, int, int, int)
 }
+class "SyscallInvocationEvent" as io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent {
+  + {static}Companion Companion
+  + {static}int ARGUMENT_COUNT
+  + {static}int FLAG_VTHREAD_EXPERIMENTAL
+  + {static}int FLAG_ARGUMENT_READ_FAILED
+  + {static}int SIZE_BYTES
+  __
+  +long getKtimeNs()
+  +int getTgid()
+  +int getTid()
+  +int getSyscallNr()
+  +int getFlags()
+  +long getInvocationId()
+  +long getSequence()
+  +List<ULong> getArgs()
+  +SyscallInvocationEvent copy(long, int, int, int, int, long, long, List<ULong>)
+}
 class "StressDriverMainKt" as io.mazewall.profiler.tierE.stress.StressDriverMainKt {
+  + {static}void main(String[])
+}
+class "TierEDifferentialSmoke" as io.mazewall.profiler.tierE.stress.TierEDifferentialSmoke {
+  + {static}TierEDifferentialSmoke INSTANCE
+  __
+  + {static}void main(String[])
+}
+class "TierEKernelSmoke" as io.mazewall.profiler.tierE.stress.TierEKernelSmoke {
+  + {static}TierEKernelSmoke INSTANCE
+  __
+  + {static}void main(String[])
+}
+class "UserNotifOracleSmoke" as io.mazewall.profiler.tierE.stress.UserNotifOracleSmoke {
+  + {static}UserNotifOracleSmoke INSTANCE
+  __
   + {static}void main(String[])
 }
 class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
@@ -638,6 +977,42 @@ io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
+io.mazewall.profiler.attribution.AgentDefinitionFile --> io.mazewall.profiler.attribution.AgentDefinitionFile
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.StackTraceId
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.SyscallAttribution
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.InvocationId
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.StackDefinition
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.TierEEmissionMode
+io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.InvocationDefinition
+io.mazewall.profiler.attribution.ExecutionContext --> io.mazewall.profiler.attribution.ExecutionKind
+io.mazewall.profiler.attribution.InvocationDefinition --> io.mazewall.profiler.attribution.CaptureFailure
+io.mazewall.profiler.attribution.InvocationDefinition --> io.mazewall.profiler.attribution.StackTraceId
+io.mazewall.profiler.attribution.InvocationDefinition --> io.mazewall.profiler.attribution.InvocationId
+io.mazewall.profiler.attribution.InvocationDefinition --> io.mazewall.profiler.attribution.ExecutionContext
+io.mazewall.profiler.attribution.InvocationProtocol --> io.mazewall.profiler.attribution.InvocationProtocol
+io.mazewall.profiler.attribution.InvocationReplayMachine --> io.mazewall.profiler.attribution.TaskIdentity
+io.mazewall.profiler.attribution.ManagedFrame --> io.mazewall.profiler.attribution.ManagedFrameKind
+io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.SyscallAttribution
+io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.StackDefinition
+io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.ExecutionContext
+io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.ResolutionStatus
+io.mazewall.profiler.attribution.SessionIntegrity --> io.mazewall.profiler.attribution.TierEEmissionMode
+io.mazewall.profiler.attribution.StackDefinition --> io.mazewall.profiler.attribution.StackCaptureQuality
+io.mazewall.profiler.attribution.StackDefinition --> io.mazewall.profiler.attribution.ManagedFrame
+io.mazewall.profiler.attribution.StackTraceDictionary --> io.mazewall.profiler.attribution.StackTraceId
+io.mazewall.profiler.attribution.StackTraceDictionary --> io.mazewall.profiler.attribution.StackDefinition
+io.mazewall.profiler.attribution.StateInvalidated --> io.mazewall.profiler.attribution.StateInvalidationReason
+io.mazewall.profiler.attribution.StateInvalidated --> io.mazewall.profiler.attribution.TaskIdentity
+io.mazewall.profiler.attribution.SyscallAttribution --> io.mazewall.profiler.attribution.InvocationId
+io.mazewall.profiler.attribution.SyscallAttribution --> io.mazewall.profiler.attribution.AttributionStatus
+io.mazewall.profiler.attribution.SyscallAttribution --> io.mazewall.profiler.attribution.TaskIdentity
+io.mazewall.profiler.attribution.TierEOptions --> io.mazewall.profiler.attribution.TierEEmissionMode
+io.mazewall.profiler.attribution.TierEProfile --> io.mazewall.profiler.attribution.ResolvedSyscall
+io.mazewall.profiler.attribution.TierEProfile --> io.mazewall.profiler.attribution.SessionIntegrity
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.tierE.engine.TierEbpfEngine
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.ResolvedSyscall
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.AttributionCollector
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.TierEOptions
 io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.IoUringVisibility
 io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.collector.EbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
@@ -710,5 +1085,18 @@ io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.Strac
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
 io.mazewall.profiler.tierE.container.ContainerDetector --> io.mazewall.profiler.tierE.container.ContainerDetector
 io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor --> io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor
+io.mazewall.profiler.tierE.daemon.ElfSymbolOffset --> io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
+io.mazewall.profiler.tierE.engine.BpfBtfLoadLayout --> io.mazewall.profiler.tierE.engine.BpfBtfLoadLayout
+io.mazewall.profiler.tierE.engine.BpfMapCreateLayout --> io.mazewall.profiler.tierE.engine.BpfMapCreateLayout
+io.mazewall.profiler.tierE.engine.BpfProgLoadLayout --> io.mazewall.profiler.tierE.engine.BpfProgLoadLayout
+io.mazewall.profiler.tierE.engine.BpfProgLoadRequestEncoder --> io.mazewall.profiler.tierE.engine.BpfProgLoadRequestEncoder
+io.mazewall.profiler.tierE.engine.BpfRawTracepointOpenLayout --> io.mazewall.profiler.tierE.engine.BpfRawTracepointOpenLayout
+io.mazewall.profiler.tierE.engine.InvocationStateBtf --> io.mazewall.profiler.tierE.engine.InvocationStateBtf
+io.mazewall.profiler.tierE.engine.PerfEventAttrLayout --> io.mazewall.profiler.tierE.engine.PerfEventAttrLayout
+io.mazewall.profiler.tierE.engine.TierEbpfEngine --> io.mazewall.profiler.attribution.TierEOptions
+io.mazewall.profiler.tierE.engine.TierEbpfEngine --> io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader
+io.mazewall.profiler.tierE.stress.TierEDifferentialSmoke --> io.mazewall.profiler.tierE.stress.TierEDifferentialSmoke
+io.mazewall.profiler.tierE.stress.TierEKernelSmoke --> io.mazewall.profiler.tierE.stress.TierEKernelSmoke
+io.mazewall.profiler.tierE.stress.UserNotifOracleSmoke --> io.mazewall.profiler.tierE.stress.UserNotifOracleSmoke
 io.mazewall.profiler.triage.DiagnosticTriageRunner --> io.mazewall.profiler.triage.DiagnosticTriageRunner
 @enduml
