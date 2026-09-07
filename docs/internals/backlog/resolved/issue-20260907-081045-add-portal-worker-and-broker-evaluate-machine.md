@@ -1,7 +1,7 @@
 ---
 title: "Add portal worker and broker evaluate machine"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260907-080845"
@@ -42,6 +42,12 @@ Portal worker `serve` and broker pool `call` are send/receive loops with no `fun
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `PortalBrokerCallMachine` and `PortalWorkerMachine` provide
+sealed RPC lifecycle states, events, effects, and pure evaluators. The broker call and worker
+serve loops interpret frame/SCM_RIGHTS I/O around those transitions. `./gradlew :portal:test
+--tests io.mazewall.portal.PortalBrokerCallMachineTest :portal-worker:test --tests
+io.mazewall.portal.worker.PortalWorkerMachineTest` passed.
 
 <!-- id: issue-20260907-081045  file: issue-20260907-081045-add-portal-worker-and-broker-evaluate-machine.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
