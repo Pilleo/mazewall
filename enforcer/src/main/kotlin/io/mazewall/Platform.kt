@@ -190,7 +190,7 @@ public object Platform {
                     io.mazewall.core.Arch
                         .current() == io.mazewall.core.Arch.AMD64
                 } catch (e: UnsupportedOperationException) {
-                    false
+                    unsupportedCetPlatform(e)
                 }
 
     /**
@@ -210,10 +210,20 @@ public object Platform {
                 }
             }
         } catch (e: UnsupportedOperationException) {
-            null
+            unavailableShstkStatus(e)
         } catch (e: IllegalStateException) {
-            null
+            unavailableShstkStatus(e)
         }
+    }
+
+    private fun unsupportedCetPlatform(cause: UnsupportedOperationException): Boolean {
+        logger.log(java.util.logging.Level.FINE, "CET is unavailable because the architecture is unsupported", cause)
+        return false
+    }
+
+    private fun unavailableShstkStatus(cause: RuntimeException): Long? {
+        logger.log(java.util.logging.Level.FINE, "CET shadow-stack status probe is unavailable", cause)
+        return null
     }
 
     internal fun isKernelCetSupported(): Boolean = probeShstkStatus() != null
