@@ -312,11 +312,6 @@ internal class SupervisorSessionHandler(
                     return res
     }
 
-    private data class ResolvedFastPath(
-        val path: java.nio.file.Path?,
-        val displayPath: String?,
-    )
-
     private fun resolveFastPath(
         pid: Int,
         kind: SupervisedKind,

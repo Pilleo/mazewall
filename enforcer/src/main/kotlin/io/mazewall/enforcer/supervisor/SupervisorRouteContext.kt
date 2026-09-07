@@ -28,3 +28,9 @@ internal data class SupervisorRouteContext(
     val extracted: SyscallArguments,
     val response: ManagedSegment,
 )
+
+/** Result of resolving the optional daemon-side fast-path target. */
+internal data class ResolvedFastPath(
+    val path: java.nio.file.Path?,
+    val displayPath: String?,
+)
