@@ -301,57 +301,14 @@ object ContainedExecutors {
         val initialState = if (processWide) null else ContainmentStateRegistry.threadState
         var landlockSuccessfullyApplied = false
         try {
-            val augmentedPolicy = if (scopingPolicy.handlers.isNotEmpty()) {
-                val overriddenActions = policy.syscallActions.toMutableMap()
-                for (sys in scopingPolicy.handlers.keys) {
-                    overriddenActions[sys] = SeccompAction.ACT_NOTIFY
-                }
-                policy.copy(syscallActions = overriddenActions)
-            } else {
-                policy
-            }
-
-            if (!Platform.isSupported()) {
-                handleUnsupportedPlatform()
-                return io.mazewall.InstallationReceipt(
-                    processWide = processWide,
-                    requestedPolicy = policy,
-                    installed = false,
-                )
-            }
+            val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
+            unsupportedPlatformReceipt(processWide, policy)?.let { return it }
 
             validateLinuxAndNotVirtual()
-
-            if (augmentedPolicy.hasSupervisedSyscalls) {
-                io.mazewall.enforcer.supervisor.SupervisorDaemonManager
-                    .getInstance()
-                    .getOrSpawnSharedDaemon()
+            preparePreSeccompEffects(augmentedPolicy)
+            return installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy) {
+                landlockSuccessfullyApplied = true
             }
-
-            if (augmentedPolicy.lockIntelCet) {
-                armIntelCet()
-            }
-
-            when (val landlock = applyLandlockIfNecessary(processWide, augmentedPolicy)) {
-                LandlockStep.APPLIED -> landlockSuccessfullyApplied = true
-                LandlockStep.BYPASSED -> {
-                    return io.mazewall.InstallationReceipt(
-                        processWide = processWide,
-                        requestedPolicy = policy,
-                        installed = false,
-                    )
-                }
-                LandlockStep.UNCHANGED -> {
-                    val activeState = if (processWide) {
-                        ContainmentStateRegistry.processState
-                    } else {
-                        ContainmentStateRegistry.threadState
-                    }
-                    landlockSuccessfullyApplied = activeState.landlockPolicy != null
-                }
-            }
-
-            return installSeccompFilter(processWide, augmentedPolicy, scopingPolicy, landlockSuccessfullyApplied)
         } catch (t: Throwable) {
             // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
             // if Landlock was NOT applied during this installation attempt.
@@ -391,6 +348,54 @@ object ContainedExecutors {
             throw t
         }
     }
+
+    private fun augmentForScoping(
+        policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy,
+    ): PolicyDefinition<*> =
+        policy.copy(
+            syscallActions = policy.syscallActions + scopingPolicy.handlers.keys.associateWith { SeccompAction.ACT_NOTIFY },
+        )
+
+    private fun unsupportedPlatformReceipt(
+        processWide: Boolean,
+        policy: PolicyDefinition<*>,
+    ): io.mazewall.InstallationReceipt? {
+        if (Platform.isSupported()) return null
+        handleUnsupportedPlatform()
+        return io.mazewall.InstallationReceipt(processWide = processWide, requestedPolicy = policy, installed = false)
+    }
+
+    private fun preparePreSeccompEffects(policy: PolicyDefinition<*>) {
+        if (policy.hasSupervisedSyscalls) {
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+                .getInstance()
+                .getOrSpawnSharedDaemon()
+        }
+        if (policy.lockIntelCet) armIntelCet()
+    }
+
+    private fun installLandlockThenSeccomp(
+        processWide: Boolean,
+        requestedPolicy: PolicyDefinition<*>,
+        policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy,
+        markLandlockApplied: () -> Unit,
+    ): io.mazewall.InstallationReceipt {
+        val landlockApplied = when (applyLandlockIfNecessary(processWide, policy)) {
+            LandlockStep.APPLIED -> true.also { markLandlockApplied() }
+            LandlockStep.BYPASSED ->
+                return io.mazewall.InstallationReceipt(
+                    processWide = processWide,
+                    requestedPolicy = requestedPolicy,
+                    installed = false,
+                )
+            LandlockStep.UNCHANGED -> activeLandlockPolicy(processWide)
+        }
+        return installSeccompFilter(processWide, policy, scopingPolicy, landlockApplied)
+    }
+
+    private fun activeLandlockPolicy(processWide: Boolean): Boolean = (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
 
     private fun installSeccompFilter(
         processWide: Boolean,
