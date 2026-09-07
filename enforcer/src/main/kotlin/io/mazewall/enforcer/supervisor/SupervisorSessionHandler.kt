@@ -331,52 +331,15 @@ internal class SupervisorSessionHandler(
         tid: Tid,
         args: LongArray,
         arch: io.mazewall.core.Arch,
-    ): SyscallArguments {
-        var pathStr: String? = null
-        var sockaddrBytes: ByteArray? = null
-        var dirfd = TraceeDirFd.CurrentWorkingDirectory
-        var openHow: OpenHow? = null
-        when (nr) {
-            arch.open -> {
-                pathStr = readStringFromProcess(tid, args[0])
-            }
-            arch.openat -> {
-                dirfd = TraceeDirFd(args[0].toInt())
-                pathStr = readStringFromProcess(tid, args[1])
-            }
-            arch.openat2 -> {
-                dirfd = TraceeDirFd(args[0].toInt())
-                pathStr = readStringFromProcess(tid, args[1])
-                val howBytes = readBytesFromProcess(tid, args[2], Layouts.OPEN_HOW_SIZE.toInt())
-                if (howBytes != null && howBytes.size >= Layouts.OPEN_HOW_SIZE.toInt()) {
-                    val buf = java.nio.ByteBuffer
-                        .wrap(howBytes)
-                        .order(java.nio.ByteOrder.nativeOrder())
-                    val flags = buf.getLong(Layouts.OPEN_HOW_FLAGS_OFFSET.toInt())
-                    val mode = buf.getLong(Layouts.OPEN_HOW_MODE_OFFSET.toInt())
-                    val resolve = buf.getLong(Layouts.OPEN_HOW_RESOLVE_OFFSET.toInt())
-                    openHow = OpenHow(OpenFlags(flags.toInt()), mode, resolve)
-                }
-            }
-            arch.connect -> {
-                val addrLen = args[2].toInt()
-                if (addrLen in 1..MAX_ADDR_LEN) {
-                    sockaddrBytes = readBytesFromProcess(tid, args[1], addrLen)
-                }
-            }
-            arch.accept, arch.accept4 -> {
-                dirfd = TraceeDirFd(args[0].toInt())
-            }
-            arch.execve -> {
-                pathStr = readExecPath(tid, args[0])
-            }
-            arch.execveat -> {
-                dirfd = TraceeDirFd(args[0].toInt())
-                pathStr = readExecPath(tid, args[1])
-            }
-        }
-        return SyscallArguments(pathStr, sockaddrBytes, dirfd, openHow)
-    }
+    ): SyscallArguments =
+        SupervisorArgumentExtractor.extract(
+        nr,
+        tid,
+        args,
+        arch,
+        readString = { readTid, address -> readExecPath(readTid, address) },
+        readBytes = { readTid, address, length -> readBytesFromProcess(readTid, address, length) },
+    )
 
     internal fun resolveBypassPath(resolvedPath: java.nio.file.Path): java.nio.file.Path? {
         return resolvedPath.takeIf(BypassPaths::isBypassPath)
