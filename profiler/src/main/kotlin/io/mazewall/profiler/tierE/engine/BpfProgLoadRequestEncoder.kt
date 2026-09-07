@@ -27,7 +27,10 @@ internal object BpfProgLoadRequestEncoder {
         require(programNameBytes.size < BpfProgLoadLayout.PROGRAM_NAME_SIZE) {
             "BPF program name must fit ${BpfProgLoadLayout.PROGRAM_NAME_SIZE - 1} ASCII bytes"
         }
-        val instructions = program.map { instruction ->
+        val instructions = program.mapIndexed { index, instruction ->
+            require(instruction.code in 0..0xff) { "Instruction $index has an invalid opcode: ${instruction.code}" }
+            require(instruction.dst in 0..0xf) { "Instruction $index has an invalid destination register: ${instruction.dst}" }
+            require(instruction.src in 0..0xf) { "Instruction $index has an invalid source register: ${instruction.src}" }
             if (instruction.code == LD_MAP_FD && instruction.src == PSEUDO_FD) {
                 require(instruction.imm in mapFds.indices) { "Missing map FD for pseudo index ${instruction.imm}" }
                 instruction.copy(imm = mapFds[instruction.imm])

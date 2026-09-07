@@ -1,7 +1,7 @@
 ---
 title: "Extract Tier-E BPF program-load request encoder"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -49,3 +49,10 @@ host-unit tests.
 
 <!-- id: issue-20260907-065452  file: issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
+
+## Resolution evidence (2026-09-07)
+
+- `BpfProgLoadRequestEncoder` owns pure validation, pseudo-map-FD substitution, and caller-arena `bpf_attr` encoding; `TierEbpfEngine.loadProg` retains the syscall, immediate result handling, and verifier diagnostic translation.
+- The encoder rejects non-ASCII and overlong names, absent pseudo-map descriptors, and register fields that cannot be represented in eBPF's four-bit register encoding.
+- Host tests inspect program type, instruction count/address and packed value, GPL/license pointer, verifier-log settings/pointer, exact name boundary, pseudo-FD substitution, missing maps, and malformed registers.
+- Verified: `./gradlew :profiler:test --tests io.mazewall.profiler.tierE.engine.BpfProgLoadRequestEncoderTest` and `./gradlew :profiler:test`.
