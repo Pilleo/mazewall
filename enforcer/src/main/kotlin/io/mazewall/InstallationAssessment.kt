@@ -75,17 +75,7 @@ public object InstallationAssessor {
             stages.add(InstallationStage.PLATFORM)
         }
 
-        val matrix = if (Platform.isLinux) {
-            Platform.featureMatrix
-        } else {
-            KernelFeatureMatrix(
-            seccompSupported = false,
-            seccompTsyncSupported = false,
-            seccompUserNotifSupported = false,
-            landlockAbiVersion = 0,
-            cetSupported = false,
-        )
-        }
+        val matrix = featureMatrix()
         if (!Platform.isSupported()) {
             reasons.add("seccomp is not available or sanity check failed")
             stages.add(InstallationStage.SECCOMP)
@@ -135,12 +125,7 @@ public object InstallationAssessor {
             installable = reasons.isEmpty(),
             fallback = fallback,
             argumentRules = policy.argumentRules,
-            mode =
-                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) {
-                    PolicyMode.ALLOW_LIST
-                } else {
-                    PolicyMode.DENY_LIST
-                },
+            mode = policyMode(policy),
             warnings = warnings,
             blockingReasons = reasons,
             blockedStages = stages.distinct(),
@@ -152,4 +137,19 @@ public object InstallationAssessor {
             seccompSupported = Platform.isSupported(),
         )
     }
+
+    private fun featureMatrix(): KernelFeatureMatrix =
+        if (Platform.isLinux) {
+            Platform.featureMatrix
+        } else {
+            KernelFeatureMatrix(
+                seccompSupported = false,
+                seccompTsyncSupported = false,
+                seccompUserNotifSupported = false,
+                landlockAbiVersion = 0,
+                cetSupported = false,
+            )
+        }
+
+    private fun policyMode(policy: PolicyDefinition<*>): PolicyMode = if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) PolicyMode.ALLOW_LIST else PolicyMode.DENY_LIST
 }
