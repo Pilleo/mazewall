@@ -101,34 +101,7 @@ public object BypassPaths {
         }
 
         fun parseManifestClassPath(jarPath: Path) {
-            try {
-                JarFile(jarPath.toFile()).use { jar ->
-                    val manifest = jar.manifest ?: return
-                    val classPathAttr = manifest.mainAttributes.getValue("Class-Path") ?: return
-                    val parentDir = jarPath.parent ?: return
-                    for (entry in classPathAttr.split(" ")) {
-                        if (entry.isNotEmpty()) {
-                            try {
-                                val uri = URI(entry)
-                                val resolvedPath = if (uri.isAbsolute) {
-                                    Paths.get(uri)
-                                } else {
-                                    parentDir.resolve(uri.path).normalize()
-                                }
-                                addPathAndReal(resolvedPath)
-                            } catch (e: URISyntaxException) {
-                                // Syntax error in manifest CP, skip
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-            } catch (e: FileNotFoundException) {
-                // Normal if Jar file doesn't exist
-            } catch (e: Exception) {
-                logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
-            }
+            manifestClassPathEntries(jarPath).forEach(::addPathAndReal)
         }
 
         try {
@@ -199,6 +172,39 @@ public object BypassPaths {
             // (Removed user.dir bypass because it breaks profiler tests by bypassing all project files)
         } catch (e: Exception) {
             logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun manifestClassPathEntries(jarPath: Path): List<Path> =
+        try {
+            JarFile(jarPath.toFile()).use { jar ->
+                val classPath = jar.manifest?.mainAttributes?.getValue("Class-Path") ?: return emptyList()
+                val parentDir = jarPath.parent ?: return emptyList()
+                classPath.split(" ").mapNotNull { entry -> resolveManifestEntry(entry, parentDir, jarPath) }
+            }
+        } catch (_: FileNotFoundException) {
+            emptyList()
+        } catch (e: Exception) {
+            logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
+            emptyList()
+        }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun resolveManifestEntry(
+        entry: String,
+        parentDir: Path,
+        jarPath: Path,
+    ): Path? {
+        if (entry.isEmpty()) return null
+        return try {
+            val uri = URI(entry)
+            if (uri.isAbsolute) Paths.get(uri) else parentDir.resolve(uri.path).normalize()
+        } catch (_: URISyntaxException) {
+            null
+        } catch (e: Exception) {
+            logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
+            null
         }
     }
 
