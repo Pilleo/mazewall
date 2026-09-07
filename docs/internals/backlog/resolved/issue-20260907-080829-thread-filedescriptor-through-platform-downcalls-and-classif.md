@@ -1,7 +1,7 @@
 ---
 title: "Thread FileDescriptor through platform downcalls and classification"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260824-203500"
@@ -45,6 +45,12 @@ paperclip_identifier: "MAZ-1170"
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** public native-engine entry points and classification
+boundaries use typed `FileDescriptor` and `SyscallNumber` values; raw descriptor integers remain
+only at the `invokeExact` boundary. `SupervisorNotificationMachine.classify` also accepts
+`SyscallNumber`. `./gradlew :platform:test --tests
+io.mazewall.platform.seccomp.SupervisedKindTest` passed.
 
 <!-- id: issue-20260907-080829  file: issue-20260907-080829-thread-filedescriptor-through-platform-downcalls-and-classif.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
