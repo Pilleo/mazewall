@@ -1,7 +1,7 @@
 ---
 title: "Make portal-codegen stubs reviewable with named method IDs"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies:
   - "issue-20260907-080845"
@@ -43,6 +43,11 @@ portal-codegen emits uncommented `when (methodId)` stubs whose IDs are truncated
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** generated host and worker sources define method-name-based
+constants, construct `PortalMethod.Generated` at the wire boundary, and emit named capability-slot
+comments next to indexed granted FDs. The generator tests inspect rendered Kotlin. `./gradlew
+:portal:test :portal-worker:test :portal-codegen:test` passed.
 
 <!-- id: issue-20260907-081112  file: issue-20260907-081112-make-portal-codegen-stubs-reviewable-with-named-method-ids.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

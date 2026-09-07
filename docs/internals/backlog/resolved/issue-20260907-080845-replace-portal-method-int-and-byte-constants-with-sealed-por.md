@@ -1,7 +1,7 @@
 ---
 title: "Replace portal method Int and Byte constants with sealed PortalMethod"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "docs"
@@ -47,6 +47,11 @@ Portal, codegen, and worker wire `PortalKind` as `Byte` constants and `PortalMet
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `PortalFrame` now parses numeric wire values into sealed
+`PortalKind` and `PortalMethod`; the numeric frame layout remains unchanged. Broker, worker, and
+codegen dispatch use the sealed method model, and `BoundaryTypes.Kind` encoding is exhaustive.
+`./gradlew :portal:test :portal-worker:test :portal-codegen:test` passed.
 
 <!-- id: issue-20260907-080845  file: issue-20260907-080845-replace-portal-method-int-and-byte-constants-with-sealed-por.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
