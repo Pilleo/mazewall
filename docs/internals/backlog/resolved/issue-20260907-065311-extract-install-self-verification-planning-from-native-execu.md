@@ -1,7 +1,7 @@
 ---
 title: "Extract install self-verification planning from native execution"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -51,6 +51,12 @@ kernel. Separate that decision from execution while preserving its opt-in and fa
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** immutable `SelfVerificationPlan` derives bounded probes
+without native execution or publication. `InstallSelfVerifier` executes the plan, fails closed on
+mismatch, publishes diagnostics, and memoizes only after all probes succeed. `./gradlew
+:enforcer:test --tests io.mazewall.seccomp.InstallSelfVerifierTest --tests
+io.mazewall.seccomp.SelfVerificationPlanTest` passed.
 
 <!-- id: issue-20260907-065311  file: issue-20260907-065311-extract-install-self-verification-planning-from-native-execu.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
