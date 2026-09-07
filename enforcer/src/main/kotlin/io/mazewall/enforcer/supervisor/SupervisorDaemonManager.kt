@@ -276,27 +276,41 @@ public class SupervisorDaemonManager(
         process: Process,
     ) {
         try {
-            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val fd = socketManager.connect(socketPath)
-                try {
-                    val cmd = arena.allocate(1L)
-                    cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
-                    while (true) {
-                        val writeRes = engine.memory.write(fd, cmd, 1)
-                        if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                            continue
-                        }
-                        break
-                    }
-                } finally {
-                    socketManager.close(fd)
-                }
-            }
+            sendShutdownCommand(socketPath)
         } catch (e: Exception) {
             logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", e)
             return // destroyForcibly() by the caller is the authoritative escalation.
         }
-        // Bounded liveness poll: exit as soon as the daemon acknowledges by dying.
+        awaitDaemonExit(process)
+    }
+
+    private fun sendShutdownCommand(socketPath: String) {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val fd = socketManager.connect(socketPath)
+            try {
+                val command = arena.allocate(1L)
+                command.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
+                writeCommandUntilNotInterrupted(fd, command)
+            } finally {
+                socketManager.close(fd)
+            }
+        }
+    }
+
+    private fun writeCommandUntilNotInterrupted(
+        fd: io.mazewall.core.FileDescriptor<
+            io.mazewall.core.FileDescriptorRole.UnixSocket,
+            io.mazewall.core.FdState.Open,
+            io.mazewall.core.FdOwnership.Owned,
+        >,
+        command: io.mazewall.ffi.memory.ManagedSegment,
+    ) {
+        do {
+            val result = engine.memory.write(fd, command, 1)
+        } while (result is io.mazewall.LinuxNative.SyscallResult.Error && result.errno == io.mazewall.ffi.NativeConstants.EINTR)
+    }
+
+    private fun awaitDaemonExit(process: Process) {
         val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
         try {
             while (process.isAlive && System.currentTimeMillis() < deadline) {
