@@ -317,12 +317,8 @@ internal class SupervisorSessionHandler(
         kind: SupervisedKind,
         extracted: SyscallArguments,
     ): ResolvedFastPath {
-        if (kind !is SupervisedKind.Open || extracted.pathStr == null) {
-            return ResolvedFastPath(null, extracted.pathStr)
-        }
         try {
-            val path = SupervisorFastPath.resolveAbsolutePath(pid, extracted.dirfd, extracted.pathStr)
-            return ResolvedFastPath(path, path?.toAbsolutePath()?.toString() ?: extracted.pathStr)
+            return SupervisorFastPathResolution.resolve(pid, kind, extracted)
         } catch (e: Exception) {
             logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
             throw e
