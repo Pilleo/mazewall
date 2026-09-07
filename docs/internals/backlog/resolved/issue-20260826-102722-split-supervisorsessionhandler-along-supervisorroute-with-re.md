@@ -1,7 +1,7 @@
 ---
 title: "Split SupervisorSessionHandler along SupervisorRoute with request context types"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "enforcer"
@@ -37,6 +37,13 @@ paperclip_identifier: MAZ-685
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** `NotifHeader`, `JvmVerdictRequest`, and
+`SupervisorRouteContext` replace positional request data. `SupervisorRouteDispatcher`,
+`SupervisorRouteExecutor`, and `SupervisorTerminalRoutes` separate route execution while retaining
+the handler as the I/O interpreter. Handler tests enumerate routes and assert exactly-one response.
+`./gradlew :enforcer:test --tests io.mazewall.enforcer.supervisor.SupervisorSessionHandlerTest`
+passed.
 
 <!-- id: issue-20260826-102722  file: issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
