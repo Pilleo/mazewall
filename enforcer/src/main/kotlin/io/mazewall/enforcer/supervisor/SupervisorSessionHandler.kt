@@ -105,6 +105,7 @@ internal class SupervisorSessionHandler(
         ) = sendSeccompError(id, errno, response)
     })
     private val routeDispatcher = SupervisorRouteDispatcher(terminalRoutes)
+    private val fdInjector = SupervisorFdInjector(engine, listenerFd, logger)
     private val routeExecutor = object : SupervisorRouteExecutor {
         context(arena: NativeArena) override fun injectFd(context: SupervisorRouteContext): Boolean = handleInjectFd(context)
 
@@ -629,7 +630,7 @@ internal class SupervisorSessionHandler(
             }
             localFd = FileDescriptor.adopt(localFdValue, FileDescriptorRole.Generic)
 
-            if (!injectFd(id, localFd, injectFlags)) {
+            if (!fdInjector.inject(id, localFd, injectFlags)) {
                 logger.severe { "[SUPERVISOR-DEBUG] ioctl SECCOMP_IOCTL_NOTIF_ADDFD failed. Sending EPERM." }
                 sendSeccompError(id, NativeConstants.EPERM, resp)
                 return true
@@ -638,32 +639,6 @@ internal class SupervisorSessionHandler(
             return true
         } finally {
             localFd?.let(::closeLocalFd)
-        }
-    }
-
-    context(arena: NativeArena) private fun injectFd(
-        id: Long,
-        localFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
-        flags: NewFdFlags,
-    ): Boolean {
-        val addfd = SeccompNotifAddFdSegment.of(arena.allocate(Layouts.SECCOMP_NOTIF_ADDFD))
-        addfd.managed.fill(0)
-        addfd.setId(id)
-        addfd.setFlags(NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())
-        addfd.setSrcfd(localFd.value)
-        addfd.setNewfdFlags(flags.value)
-        while (true) {
-            when (val result = engine.raw.ioctl(listenerFd, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, addfd.managed.typed<IoctlPayload.SeccompNotifAddFd>())) {
-                is LinuxNative.SyscallResult.Success -> return true
-                is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR) {
-                    if (result.errno == NativeConstants.EBADF) {
-                        logger.severe { "[SUPERVISOR-SECURITY] SECCOMP_IOCTL_NOTIF_ADDFD failed with EBADF (listenerFd=${listenerFd.value}, srcfd=${localFd.value})." }
-                    } else {
-                        logger.severe { "[SUPERVISOR-DEBUG] SECCOMP_IOCTL_NOTIF_ADDFD failed with errno ${result.errno}." }
-                    }
-                    return false
-                }
-            }
         }
     }
 
@@ -1026,7 +1001,7 @@ internal class SupervisorSessionHandler(
                                     }
 
                                     val acceptFlags = if (nr == traceeArch.accept4) args[3].toInt() else 0
-                                    if (!injectFd(id, clientFdSafe.handle, NewFdFlags.forAccept(acceptFlags))) {
+                                    if (!fdInjector.inject(id, clientFdSafe.handle, NewFdFlags.forAccept(acceptFlags))) {
                                         sendSeccompError(id, NativeConstants.EPERM, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                                     }
                                 }
