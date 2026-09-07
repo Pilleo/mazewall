@@ -179,64 +179,61 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         prog: ManagedSegment,
         useTsync: Boolean,
     ): SeccompInstallationState.FilterApplied {
-        // Try modern seccomp(2) syscall first
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
-        var seccompResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            seccompResult = LinuxNative.raw.syscall(
+            val result = LinuxNative.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 io.mazewall.core.NativeArg.LongArg(flags),
                 io.mazewall.core.NativeArg.MemoryArg(prog),
             )
-            if (seccompResult is LinuxNative.SyscallResult.Error && seccompResult.errno == NativeConstants.EINTR) {
+            if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
             }
-            break
-        }
-
-        if (seccompResult is LinuxNative.SyscallResult.Error) {
-            // Fall back to prctl for older kernels
-            val errno1 = seccompResult.errno
-
-            if (useTsync) {
-                throw IllegalStateException(
-                    "Process-wide seccomp installation (TSYNC) failed: ${tsyncFailureDetail(errno1, offendingTid = null)}",
-                )
+            return when (result) {
+                is LinuxNative.SyscallResult.Success -> successfulSeccompInstall(result.value, useTsync)
+                is LinuxNative.SyscallResult.Error -> fallbackToPrctl(prog, useTsync, result.errno)
             }
+        }
+    }
 
-            var prctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
-            while (true) {
-                prctlResult = LinuxNative.process.prctl(
+    private fun fallbackToPrctl(
+        prog: ManagedSegment,
+        useTsync: Boolean,
+        seccompErrno: Int,
+    ): SeccompInstallationState.FilterApplied {
+        if (useTsync) {
+            throw IllegalStateException(
+                "Process-wide seccomp installation (TSYNC) failed: ${tsyncFailureDetail(seccompErrno, offendingTid = null)}",
+            )
+        }
+        while (true) {
+            val result = LinuxNative.process.prctl(
                     PrctlCommand.SetSeccomp(
                         NativeConstants.SECCOMP_MODE_FILTER.toLong(),
                         io.mazewall.core.NativeArg.MemoryArg(prog)
                     )
                 )
-                if (prctlResult is LinuxNative.SyscallResult.Error && prctlResult.errno == NativeConstants.EINTR) {
-                    continue
-                }
-                break
-            }
-
-            if (prctlResult is LinuxNative.SyscallResult.Error) {
+            if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) continue
+            if (result is LinuxNative.SyscallResult.Error) {
                 throw IllegalStateException(
-                    "seccomp installation failed: seccomp(2) errno=$errno1, prctl errno=${prctlResult.errno}",
-                )
-            } else {
-                return SeccompInstallationState.FallbackPrctlApplied
-            }
-        } else {
-            val applied = seccompResult as LinuxNative.SyscallResult.Success
-            if (useTsync && applied.value > 0L) {
-                throw IllegalStateException(
-                    "Process-wide seccomp installation (TSYNC) failed: ${
-                        tsyncFailureDetail(errno = null, offendingTid = applied.value)
-                    }",
+                    "seccomp installation failed: seccomp(2) errno=$seccompErrno, prctl errno=${result.errno}",
                 )
             }
-            return SeccompInstallationState.SystemCallApplied
+            return SeccompInstallationState.FallbackPrctlApplied
         }
+    }
+
+    private fun successfulSeccompInstall(
+        result: Long,
+        useTsync: Boolean,
+    ): SeccompInstallationState.FilterApplied {
+        if (useTsync && result > 0L) {
+            throw IllegalStateException(
+                "Process-wide seccomp installation (TSYNC) failed: ${tsyncFailureDetail(errno = null, offendingTid = result)}",
+            )
+        }
+        return SeccompInstallationState.SystemCallApplied
     }
 
     /**
