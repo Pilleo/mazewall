@@ -95,9 +95,18 @@ class ContainmentViolationDetector
             for (matcher in loader) {
                 registerMatcher(matcher)
             }
-        } catch (e: Throwable) {
-            // Safe fallback, do not crash initialization/loading of detector
+        } catch (e: java.util.ServiceConfigurationError) {
+            if (e.cause is Error) throw e
+            logServiceMatcherFailure(e)
+        } catch (e: LinkageError) {
+            logServiceMatcherFailure(e)
+        } catch (e: SecurityException) {
+            logServiceMatcherFailure(e)
         }
+    }
+
+    private fun logServiceMatcherFailure(cause: Throwable) {
+        logger.log(java.util.logging.Level.WARNING, "Unable to load a containment-violation matcher service", cause)
     }
 
     /**

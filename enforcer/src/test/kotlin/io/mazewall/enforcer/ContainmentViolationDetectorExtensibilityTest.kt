@@ -8,7 +8,10 @@ import io.mazewall.enforcer.diagnostics.ViolationMatcher
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.net.URLClassLoader
+import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -163,6 +166,29 @@ class ContainmentViolationDetectorExtensibilityTest {
 
         // Unrelated exception should still be false
         assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("Unrelated message")))
+    }
+
+    @Test
+    fun `fatal service matcher initialization is not swallowed`() {
+        val services = Files.createTempDirectory("mazewall-fatal-matcher").resolve("META-INF/services")
+        Files.createDirectories(services)
+        Files.writeString(
+            services.resolve("io.mazewall.enforcer.diagnostics.ViolationMatcher"),
+            "io.mazewall.enforcer.TestFatalServiceViolationMatcher",
+        )
+
+        URLClassLoader(
+            arrayOf(
+                services.parent.parent
+            .toUri()
+            .toURL(),
+            ),
+                javaClass.classLoader,
+        ).use { classLoader ->
+            assertFailsWith<java.util.ServiceConfigurationError> {
+                ContainmentViolationDetector(useDefaults = false, classLoader = classLoader)
+            }
+        }
     }
 
     @Test
