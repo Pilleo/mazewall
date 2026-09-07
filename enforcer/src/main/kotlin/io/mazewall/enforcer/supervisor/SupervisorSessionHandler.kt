@@ -40,6 +40,7 @@ import io.mazewall.ffi.memory.writeIntUnaligned
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeLongUnaligned
 import io.mazewall.ffi.networking.NetworkOrderBuffer
+import io.mazewall.ffi.supervisor.JvmVerdictRequestEncoder
 import io.mazewall.ffi.typed
 import io.mazewall.onSuccess
 import io.mazewall.platform.seccomp.SupervisedKind
@@ -382,68 +383,18 @@ internal class SupervisorSessionHandler(
     }
 
     context(arena: NativeArena) internal fun sendRequestToJvm(request: JvmVerdictRequest): Boolean {
-        val id = request.id
-        val header = request.header
-        val pathStr = request.path
-        val sockaddrBytes = request.sockaddrBytes
-        val sizeOfMeta = SIZE_META + SIZE_INT + SIZE_INT // Include PPID and Arch
-        val sizeOfArgHeader = SIZE_ARG_HEADER
-        val totalSize = sizeOfMeta +
-            (
-            if (pathStr != null) {
-                sizeOfArgHeader + pathStr.toByteArray(StandardCharsets.UTF_8).size
-            } else if (sockaddrBytes != null) {
-                sizeOfArgHeader + sockaddrBytes.size
-            } else {
-                MAX_ARGS * (SIZE_BYTE + BYTES_PER_LONG.toInt())
-            }
+        val encoded = JvmVerdictRequestEncoder.encode(
+            request.id,
+            request.header.tid.value,
+            request.header.audit,
+            request.header.ppid,
+            request.header.nr,
+            request.header.args,
+            request.path,
+            request.sockaddrBytes,
         )
-
-        val buf = arena.allocate(totalSize.toLong())
-        val netBuf = NetworkOrderBuffer(buf.native)
-        var offset = 0L
-
-        netBuf.writeLong(offset, id)
-        offset += BYTES_PER_LONG
-        netBuf.writeInt(offset, header.tid.value)
-        offset += SIZE_INT
-        netBuf.writeInt(offset, header.audit)
-        offset += SIZE_INT
-        netBuf.writeInt(offset, header.ppid)
-        offset += SIZE_INT
-        netBuf.writeInt(offset, header.nr)
-        offset += SIZE_INT
-
-        if (pathStr != null) {
-            netBuf.writeInt(offset, ONE_ARG)
-            offset += SIZE_INT
-            netBuf.writeByte(offset, ARG_TYPE_STRING)
-            offset += SIZE_BYTE
-            val bytes = pathStr.toByteArray(StandardCharsets.UTF_8)
-            netBuf.writeIntUnaligned(offset, bytes.size)
-            offset += SIZE_INT
-            ManagedSegment.copy(bytes, 0, buf, offset, bytes.size)
-        } else if (sockaddrBytes != null) {
-            netBuf.writeInt(offset, ONE_ARG)
-            offset += SIZE_INT
-            netBuf.writeByte(offset, ARG_TYPE_SOCKADDR)
-            offset += SIZE_BYTE
-            netBuf.writeIntUnaligned(offset, sockaddrBytes.size)
-            offset += SIZE_INT
-            ManagedSegment.copy(sockaddrBytes, 0, buf, offset, sockaddrBytes.size)
-        } else {
-            netBuf.writeInt(offset, MAX_ARGS)
-            offset += SIZE_INT
-            for (arg in header.args) {
-                netBuf.writeByte(offset, ARG_TYPE_LONG)
-                offset += SIZE_BYTE
-                netBuf.writeLongUnaligned(offset, arg)
-                offset += BYTES_PER_LONG
-            }
-        }
-
         val writeRes = io.mazewall.core.SocketIo
-            .writeFully(engine.memory, socketFd, buf, totalSize.toLong())
+            .writeFully(engine.memory, socketFd, encoded.buffer, encoded.size)
         return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
