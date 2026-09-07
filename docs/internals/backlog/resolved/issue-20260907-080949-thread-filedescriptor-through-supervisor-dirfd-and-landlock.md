@@ -1,7 +1,7 @@
 ---
 title: "Thread FileDescriptor through supervisor dirfd and Landlock fds"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260824-203500"
@@ -45,6 +45,12 @@ After platform downcalls take `FileDescriptor`, enforcer still leaks `Int` on su
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+**Resolution evidence (2026-09-07):** tracee-owned dirfds use the non-owning `TraceeDirFd` type;
+supervisor-local and Landlock open results use owned typed `FileDescriptor` tokens and close only
+through those tokens. `./gradlew :enforcer:test --tests
+io.mazewall.enforcer.supervisor.SupervisedOpenTest --tests
+io.mazewall.landlock.LandlockApplyResultTest` passed.
 
 <!-- id: issue-20260907-080949  file: issue-20260907-080949-thread-filedescriptor-through-supervisor-dirfd-and-landlock.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->
