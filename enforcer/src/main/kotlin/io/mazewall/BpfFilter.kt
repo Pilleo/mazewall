@@ -304,64 +304,75 @@ object BpfFilter {
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
     ) {
-        val actionsToEmit = mutableListOf<Pair<Int, Int>>()
+        val actionsToEmit = collectLinearActions(syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
+        if (shouldUseBst(defaultNativeAction, actionsToEmit)) {
+            emitBstActions(builder, actionsToEmit)
+        } else {
+            emitGroupedActions(builder, actionsToEmit)
+        }
+    }
 
-        for ((nr, action) in syscallActions.entries.sortedBy { it.key }) {
-            if (nr !in handledNrs) {
-                handledNrs.add(nr)
-
+    private fun collectLinearActions(
+        syscallActions: Map<Int, SeccompAction>,
+        jvmCriticalNrs: Set<Int>,
+        profilingMode: Boolean,
+        defaultNativeAction: Int,
+        handledNrs: MutableSet<Int>,
+    ): List<Pair<Int, Int>> {
+        val actions = syscallActions.entries
+            .sortedBy { it.key }
+            .filter { (nr, _) -> handledNrs.add(nr) }
+            .mapNotNull { (nr, action) ->
                 val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else action
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
-
-                if (nativeAction != defaultNativeAction) {
-                    actionsToEmit.add(nr to nativeAction)
-                }
+                (nr to nativeAction).takeIf { nativeAction != defaultNativeAction }
             }
+        return actions + immutableBaseActions(defaultNativeAction, jvmCriticalNrs, handledNrs)
+    }
+
+    private fun immutableBaseActions(
+        defaultNativeAction: Int,
+        jvmCriticalNrs: Set<Int>,
+        handledNrs: MutableSet<Int>,
+    ): List<Pair<Int, Int>> =
+        jvmCriticalNrs
+            .sorted()
+            .takeIf { defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW }
+            ?.filter { handledNrs.add(it) }
+            ?.map { it to NativeConstants.SECCOMP_RET_ALLOW }
+            .orEmpty()
+
+    private fun shouldUseBst(
+        defaultNativeAction: Int,
+        actions: List<Pair<Int, Int>>,
+    ): Boolean = defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actions.size in 1..32
+
+    private fun emitBstActions(
+        builder: BpfBuilder<BpfState.Active>,
+        actions: List<Pair<Int, Int>>,
+    ) {
+        val sortedActions = actions.sortedBy { it.first }
+        val actionLabels = sortedActions.map { it.second }.distinct().associateWith { builder.nextLabel("action_ret") }
+        emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
+        val doneLabel = builder.nextLabel("bst_done")
+        builder.jumpUnconditional(doneLabel)
+        for ((action, label) in actionLabels) {
+            builder.mark(label)
+            builder.ret(action)
         }
+        builder.mark(doneLabel)
+    }
 
-        // Inject the JVM Immutable Base for restrictive default actions (Whitelists)
-        if (defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW) {
-            for (nr in jvmCriticalNrs.sorted()) {
-                if (nr in handledNrs) continue
-                handledNrs.add(nr)
-
-                actionsToEmit.add(nr to NativeConstants.SECCOMP_RET_ALLOW)
-            }
-        }
-
-        // If default action is ALLOW (blacklist) and actionsToEmit size is within safe bounds (<= 32),
-        // we can build a Binary Search Tree (BST) to reach the decisions much faster.
-        if (defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actionsToEmit.isNotEmpty() && actionsToEmit.size <= 32) {
-            val sortedActions = actionsToEmit.sortedBy { it.first }
-            val actionLabels = mutableMapOf<Int, BpfLabel>()
-            for (action in sortedActions.map { it.second }.distinct()) {
-                actionLabels[action] = builder.nextLabel("action_ret")
-            }
-
-            emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
-
-            // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
-            val doneLabel = builder.nextLabel("bst_done")
-            builder.jumpUnconditional(doneLabel)
-
-            for ((action, label) in actionLabels) {
-                builder.mark(label)
-                builder.ret(action)
-            }
-
-            builder.mark(doneLabel)
-            return
-        }
-
-        // Group by nativeAction and ensure deterministic order by sorting keys and values
-        val groups = actionsToEmit
+    private fun emitGroupedActions(
+        builder: BpfBuilder<BpfState.Active>,
+        actions: List<Pair<Int, Int>>,
+    ) {
+        val groups = actions
             .groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
             .toSortedMap()
 
         for ((nativeAction, nrs) in groups) {
-            // To prevent jump offset overflows (limit is 255), we chunk syscalls.
-            // Chunk size of 100 ensures max offset is well within boundaries.
             for (chunk in nrs.chunked(100)) {
                 val actionLabel = builder.nextLabel("action_ret")
                 val skipLabel = builder.nextLabel("skip_ret")
