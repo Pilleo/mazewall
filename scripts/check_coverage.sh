@@ -4,10 +4,11 @@
 # Ensure we are in the project root
 cd "$(dirname "$0")/.." || exit
 
-# Run Jacoco report generation first if it doesn't exist or to ensure it's fresh
-# Note: This runs inside podman to ensure tests have run in the correct environment
-echo "📊 Generating Jacoco reports..."
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew jacocoTestReport || ./gradlew jacocoTestReport
+# Run host-safe coverage generation first. Kernel coverage is intentionally a
+# separate `kernelCheck` concern: a normal CI runner must never need Podman or
+# seccomp capabilities merely to prove its unit-test floor.
+echo "📊 Generating host-safe unit coverage reports..."
+./gradlew jacocoTestReport
 
 echo ""
 echo "🧐 Verifying coverage thresholds..."
@@ -59,10 +60,9 @@ check_threshold() {
 # --- Enforcer ---
 ENFORCER_XML="enforcer/build/reports/jacoco/test/jacocoTestReport.xml"
 if [ -f "$ENFORCER_XML" ]; then
-    echo "Module: :enforcer"
-    check_threshold "Landlock" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/landlock/Landlock")" "65.0"
-    check_threshold "LinuxNative" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/LinuxNative")" "78.0"
-    # Core classes (Policy as proxy)
+    echo "Module: :enforcer (unit only)"
+    # Policy is deterministic host-safe policy logic. Native bridge contracts
+    # belong to kernelCheck, not this unit-only script.
     check_threshold "Core (Policy)" "$(get_coverage "$ENFORCER_XML" "class" "io/mazewall/Policy")" "80.0"
 else
     echo "❌ Enforcer report missing: $ENFORCER_XML"
@@ -73,7 +73,7 @@ echo ""
 # --- Profiler ---
 PROFILER_XML="profiler/build/reports/jacoco/test/jacocoTestReport.xml"
 if [ -f "$PROFILER_XML" ]; then
-    echo "Module: :profiler"
+    echo "Module: :profiler (unit only)"
     check_threshold "Profiler" "$(get_coverage "$PROFILER_XML" "class" "io/mazewall/profiler/Profiler")" "60.0"
 else
     echo "❌ Profiler report missing: $PROFILER_XML"

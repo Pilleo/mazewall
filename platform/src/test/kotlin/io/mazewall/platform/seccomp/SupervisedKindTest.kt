@@ -2,7 +2,6 @@ package io.mazewall.platform.seccomp
 
 import io.mazewall.core.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -52,28 +51,5 @@ internal class SupervisedKindTest {
         expectedKind: SupervisedKind,
     ) {
         assertEquals(expectedKind, SupervisedKind.classify(nr, arch))
-    }
-
-    @Test
-    fun `compile-time exhaustive check on SupervisedKind variants`() {
-        val kinds: List<SupervisedKind> = listOf(
-            SupervisedKind.Open,
-            SupervisedKind.Connect,
-            SupervisedKind.Accept,
-            SupervisedKind.Exec,
-            SupervisedKind.Spawn,
-            SupervisedKind.Unknown,
-        )
-
-        for (kind in kinds) {
-            when (kind) {
-                is SupervisedKind.Open -> Unit
-                is SupervisedKind.Connect -> Unit
-                is SupervisedKind.Accept -> Unit
-                is SupervisedKind.Exec -> Unit
-                is SupervisedKind.Spawn -> Unit
-                is SupervisedKind.Unknown -> Unit
-            }
-        }
     }
 }

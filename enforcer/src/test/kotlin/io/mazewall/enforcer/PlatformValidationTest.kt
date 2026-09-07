@@ -10,7 +10,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 
-class ValidationCoverageTest {
+class PlatformValidationTest {
     @AfterEach
     fun tearDown() {
         Platform.resetToDefault()

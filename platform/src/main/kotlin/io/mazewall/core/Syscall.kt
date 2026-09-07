@@ -124,7 +124,7 @@ enum class Syscall {
     fun numberFor(arch: Arch): Int = SyscallMapper.numberFor(this, arch)
 
     public companion object {
-        /** Null if [name] is not a [Syscall] enum constant (e.g. CREAT, recvmsg). */
+        /** Null if [name] is not a [Syscall] enum constant (e.g. recvmsg). */
         public fun tryParse(name: String): Syscall? {
             val key = name.uppercase(Locale.US)
             return entries.find { it.name == key }

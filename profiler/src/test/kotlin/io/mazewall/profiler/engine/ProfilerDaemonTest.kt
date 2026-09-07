@@ -488,13 +488,6 @@ class ProfilerDaemonTest {
     }
 
     @Test
-    fun `test profiler daemon instantiation coverage`() {
-        val clazz = ProfilerDaemon::class.java
-        org.junit.jupiter.api.Assertions
-            .assertNotNull(clazz)
-    }
-
-    @Test
     fun `test handleConnection restores interrupt status on InterruptedException`() {
         val transport = object : MockTransport() {
             override fun recvDescriptor(

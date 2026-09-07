@@ -77,11 +77,24 @@ internal class SupervisorNotificationMachineTest {
 
     @ParameterizedTest(name = "kind={0} verdict={1} -> {2}")
     @CsvSource(
-        "Exec,    Allow,    SecureExec",
-        "Spawn,   Allow,    Continue",
+        "Open,    Deny,     Abort",
         "Open,    Allow,    InjectFd",
+        "Open,    InjectFd, InjectFd",
+        "Accept,  Deny,     Abort",
         "Accept,  Allow,    InjectFd",
+        "Accept,  InjectFd, InjectFd",
+        "Connect, Deny,     Abort",
+        "Connect, Allow,    InjectFd",
+        "Connect, InjectFd, InjectFd",
+        "Exec,    Deny,     Abort",
+        "Exec,    Allow,    SecureExec",
+        "Exec,    InjectFd, InjectFd",
+        "Spawn,   Deny,     Abort",
+        "Spawn,   Allow,    Continue",
+        "Spawn,   InjectFd, InjectFd",
+        "Unknown, Deny,     Abort",
         "Unknown, Allow,    Continue",
+        "Unknown, InjectFd, InjectFd",
     )
     fun `test evaluateJvm routing table`(
         kindName: String,
@@ -102,14 +115,14 @@ internal class SupervisorNotificationMachineTest {
             else -> JvmVerdict.Deny(NativeConstants.EPERM)
         }
         val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)
-        val actualRouteType = when (route) {
-            is SupervisorRoute.Continue -> "Continue"
-            is SupervisorRoute.SecureExec -> "SecureExec"
-            is SupervisorRoute.InjectFd -> "InjectFd"
-            is SupervisorRoute.Abort -> "Abort"
-            is SupervisorRoute.AskJvm -> "AskJvm"
+        val expectedRoute = when (expectedRouteType) {
+            "Continue" -> SupervisorRoute.Continue
+            "SecureExec" -> SupervisorRoute.SecureExec
+            "InjectFd" -> SupervisorRoute.InjectFd
+            "Abort" -> SupervisorRoute.Abort(NativeConstants.EPERM, "jvm deny")
+            else -> error("Unknown expected route $expectedRouteType")
         }
-        assertEquals(expectedRouteType, actualRouteType)
+        assertEquals(expectedRoute, route)
     }
 
     @Test
@@ -159,45 +172,5 @@ internal class SupervisorNotificationMachineTest {
     @MethodSource("execRewriteCases")
     fun `exec rewrite planning tests`(testCase: ExecRewriteCase) {
         assertEquals(testCase.expectedPlan, planExecRewrite(testCase.arch, testCase.path, null))
-    }
-
-    @Test
-    fun `compile-time exhaustive coverage of supervisor model types`() {
-        val kinds = listOf(
-            SupervisedKind.Open,
-            SupervisedKind.Accept,
-            SupervisedKind.Connect,
-            SupervisedKind.Exec,
-            SupervisedKind.Spawn,
-            SupervisedKind.Unknown,
-        )
-        for (kind in kinds) {
-            when (kind) {
-                SupervisedKind.Open -> Unit
-                SupervisedKind.Accept -> Unit
-                SupervisedKind.Connect -> Unit
-                SupervisedKind.Exec -> Unit
-                SupervisedKind.Spawn -> Unit
-                SupervisedKind.Unknown -> Unit
-            }
-        }
-        val verdicts = listOf(JvmVerdict.Allow, JvmVerdict.InjectFd, JvmVerdict.Deny(NativeConstants.EPERM))
-        for (verdict in verdicts) {
-            when (verdict) {
-                is JvmVerdict.Allow -> Unit
-                is JvmVerdict.InjectFd -> Unit
-                is JvmVerdict.Deny -> Unit
-            }
-            for (kind in kinds) {
-                val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)
-                when (route) {
-                    is SupervisorRoute.Continue -> Unit
-                    is SupervisorRoute.SecureExec -> Unit
-                    is SupervisorRoute.InjectFd -> Unit
-                    is SupervisorRoute.Abort -> Unit
-                    is SupervisorRoute.AskJvm -> Unit
-                }
-            }
-        }
     }
 }

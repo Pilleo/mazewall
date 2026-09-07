@@ -180,45 +180,37 @@ internal class ContainmentStateRegistryTest {
         private val dummyFilterBuilt = SeccompInstallationState.FilterBuilt(ManagedSegment.NULL)
         private val dummyPrivLocked = SeccompInstallationState.PrivilegesLocked(ManagedSegment.NULL)
 
+        data class RankedEngineState(
+            val name: String,
+            val state: SeccompInstallationState,
+            val rank: Int,
+        )
+
+        private val rankedEngineStates = listOf(
+            RankedEngineState("uninitialized", SeccompInstallationState.Uninitialized, 0),
+            RankedEngineState("failed", dummyFailed, 1),
+            RankedEngineState("filter built", dummyFilterBuilt, 2),
+            RankedEngineState("privileges locked", dummyPrivLocked, 3),
+            RankedEngineState("syscall applied", SeccompInstallationState.SystemCallApplied, 4),
+            RankedEngineState("prctl applied", SeccompInstallationState.FallbackPrctlApplied, 4),
+            RankedEngineState("verified", SeccompInstallationState.Verified, 5),
+        )
+
         @JvmStatic
         fun engineStateCombinations(): java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> =
-            java.util.stream.Stream.of(
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Uninitialized,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Verified,
-                    SeccompInstallationState.Verified,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Verified,
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Verified,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyPrivLocked,
-                    dummyFilterBuilt,
-                    dummyPrivLocked,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyFilterBuilt,
-                    SeccompInstallationState.SystemCallApplied,
-                    SeccompInstallationState.SystemCallApplied,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.FallbackPrctlApplied,
-                    SeccompInstallationState.SystemCallApplied,
-                    SeccompInstallationState.FallbackPrctlApplied,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyFailed,
-                    SeccompInstallationState.Uninitialized,
-                    dummyFailed,
-                ),
-            )
+            rankedEngineStates
+                .flatMap { thread ->
+                rankedEngineStates.map { process ->
+                    val expected = if (thread.rank >= process.rank) thread else process
+                    org.junit.jupiter.params.provider.Arguments.of(
+                        thread.name,
+                        process.name,
+                        thread.state,
+                        process.state,
+                        expected.state,
+                    )
+                }
+            }.stream()
 
         @JvmStatic
         fun allowedSyscallsCombinations(): java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> =
@@ -246,9 +238,11 @@ internal class ContainmentStateRegistryTest {
             )
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> merged {2}")
+    @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> highest-ranked state")
     @org.junit.jupiter.params.provider.MethodSource("engineStateCombinations")
     fun `test composite mergeEngineStates resolution`(
+        threadName: String,
+        processName: String,
         threadEngineState: SeccompInstallationState,
         processEngineState: SeccompInstallationState,
         expectedMergedEngineState: SeccompInstallationState,
@@ -257,7 +251,11 @@ internal class ContainmentStateRegistryTest {
         ContainmentStateRegistry.processState = ContainerState(engineState = processEngineState)
 
         val resolved = ContainmentStateRegistry.resolveCurrentState()
-        assertEquals(expectedMergedEngineState, resolved.engineState)
+        assertEquals(
+            expectedMergedEngineState,
+            resolved.engineState,
+            "thread $threadName plus process $processName must retain the highest-ranked state",
+        )
     }
 
     @org.junit.jupiter.params.ParameterizedTest(name = "thread allows={0}, process allows={1} -> merged allows={2}")
@@ -345,30 +343,5 @@ internal class ContainmentStateRegistryTest {
         val resolved = ContainmentStateRegistry.resolveCurrentState()
         assertEquals(expectedMergedAction, resolved.defaultAction)
         assertEquals(expectedMergedAction, resolved.syscallActions[io.mazewall.core.Syscall.READ])
-    }
-
-    @Test
-    fun `compile-time exhaustive check on SeccompInstallationState variants`() {
-        val states: List<SeccompInstallationState> = listOf(
-            SeccompInstallationState.Uninitialized,
-            dummyFailed,
-            dummyFilterBuilt,
-            dummyPrivLocked,
-            SeccompInstallationState.SystemCallApplied,
-            SeccompInstallationState.FallbackPrctlApplied,
-            SeccompInstallationState.Verified,
-        )
-
-        for (state in states) {
-            when (state) {
-                is SeccompInstallationState.Uninitialized -> Unit
-                is SeccompInstallationState.Failed -> Unit
-                is SeccompInstallationState.FilterBuilt -> Unit
-                is SeccompInstallationState.PrivilegesLocked -> Unit
-                is SeccompInstallationState.SystemCallApplied -> Unit
-                is SeccompInstallationState.FallbackPrctlApplied -> Unit
-                is SeccompInstallationState.Verified -> Unit
-            }
-        }
     }
 }

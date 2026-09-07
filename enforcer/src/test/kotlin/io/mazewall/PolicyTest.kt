@@ -22,6 +22,15 @@ class PolicyTest {
     }
 
     @Test
+    fun `builder defaults retain the three argument-safety restrictions`() {
+        val policy = Policy.builder().build()
+
+        assertFalse(policy.allowMmapExec)
+        assertFalse(policy.allowNonThreadClone)
+        assertFalse(policy.allowUnsafePrctl)
+    }
+
+    @Test
     fun `builder methods correctly set flags`(
         @TempDir tempDir: java.nio.file.Path,
     ) {

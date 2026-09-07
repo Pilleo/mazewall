@@ -24,12 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerDaemonManagerTest {
     @Test
-    fun `test dummy test for coverage`() {
-        val clazz = ProfilerDaemonManager::class.java
-        assertNotNull(clazz)
-    }
-
-    @Test
     fun `test daemon spawn and stop with mocks`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()

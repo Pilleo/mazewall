@@ -61,9 +61,7 @@ internal object InstallSelfVerifier {
      */
     fun warmup() {
         val arch = Arch.current()
-        BpfSimulator.simulate(emptyList(), 0, arch)
-        SyscallProbeMatrix.structural(arch)
-        deniedProbeNrs(emptyList(), arch)
+        SelfVerificationPlan.create(emptyList(), arch)
     }
 
     /** Test seam: forget memoized program verifications. */
@@ -108,18 +106,17 @@ internal object InstallSelfVerifier {
             }
         }
 
-        val livenessNr = arch.getpid
-        val predictedLiveness = BpfSimulator.simulate(instructions, livenessNr, arch)
-        if (predictedLiveness != NativeConstants.SECCOMP_RET_ALLOW) {
+        val plan = SelfVerificationPlan.create(instructions, arch)
+        if (!plan.probeLiveness) {
             // The policy denies getpid: skip liveness (it would be a false failure), but still
             // verify the DENIED probes below, which do not depend on thread health.
-            verifyDeniedProbes(instructions, arch)
+            verifyDeniedProbes(instructions, plan.deniedProbes)
             markVerified(instructions)
             return
         }
 
         val pid = LinuxNative.raw.syscall(
-            livenessNr.toLong(),
+            plan.livenessNr.toLong(),
             NativeArg.LongArg(0),
             NativeArg.LongArg(0),
             NativeArg.LongArg(0),
@@ -131,7 +128,7 @@ internal object InstallSelfVerifier {
             "Post-install liveness failed: $pid"
         }
 
-        verifyDeniedProbes(instructions, arch)
+        verifyDeniedProbes(instructions, plan.deniedProbes)
         markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
@@ -147,9 +144,8 @@ internal object InstallSelfVerifier {
 
     private fun verifyDeniedProbes(
         instructions: List<BpfInstruction>,
-        arch: Arch,
+        deniedNrs: List<Pair<Int, Int>>,
     ) {
-        val deniedNrs = deniedProbeNrs(instructions, arch)
         for ((nr, expectedErrno) in deniedNrs) {
             val res = LinuxNative.raw.syscall(
                 nr.toLong(),
@@ -339,40 +335,7 @@ internal object InstallSelfVerifier {
         instructions: List<BpfInstruction>,
         arch: Arch,
         maxProbes: Int = MAX_PROBES,
-    ): List<Pair<Int, Int>> {
-        val candidates = LinkedHashSet<Int>()
-        SyscallProbeMatrix.structural(arch).forEach { candidates.add(it.nr) }
-        candidates.add(SyscallProbeMatrix.SYNTHETIC_HIGH_NR)
-
-        // Policy-matched NRs are the JEQ comparands of the emitted program. Restrict to the
-        // plausible syscall-NR range and exclude architecture audit tokens.
-        val auditTokens = setOf(Arch.AMD64.audit, Arch.AARCH64.audit)
-        for (inst in instructions) {
-            if (inst is BpfInstruction.Jmp &&
-                inst.code == JEQ_OPCODE &&
-                inst.k in 0..MAX_PLAUSIBLE_NR &&
-                inst.k !in auditTokens
-            ) {
-                candidates.add(inst.k)
-            }
-        }
-
-        val out = mutableListOf<Pair<Int, Int>>()
-        for (nr in candidates) {
-            val action = BpfSimulator.simulate(instructions, nr, arch) ?: continue
-            // Arg-inspected syscalls (e.g. prctl) decide on runtime arguments; probing them
-            // with fabricated arguments would assert a verdict the real workload may never hit.
-            // Skip any NR whose matched instruction section reads seccomp_data.args.
-            if (isArgInspected(instructions, nr)) continue
-            // Class-exact check: ALLOW (0x7fff0000) contains the ERRNO bits as a subset, so a
-            // plain AND would misclassify allowed probes as denied.
-            if ((action ushr 16) == (NativeConstants.SECCOMP_RET_ERRNO ushr 16)) {
-                out += nr to (action and 0xFFFF)
-                if (out.size >= maxProbes) return out
-            }
-        }
-        return out
-    }
+    ): List<Pair<Int, Int>> = SelfVerificationPlan.deniedProbeNrs(instructions, arch, maxProbes)
 
     private const val MAX_PROBES = 4
     private const val MAX_PLAUSIBLE_NR = 9_999
@@ -387,22 +350,7 @@ internal object InstallSelfVerifier {
     internal fun isArgInspected(
         instructions: List<BpfInstruction>,
         nr: Int,
-    ): Boolean {
-        val idx = instructions.indexOfFirst {
-            it is BpfInstruction.Jmp && it.code == JEQ_OPCODE && it.k == nr
-        }
-        if (idx < 0) return false
-        for (i in idx + 1 until instructions.size) {
-            val inst = instructions[i]
-            when {
-                inst is BpfInstruction.Ret -> return false // end of this NR's decision section
-                inst is BpfInstruction.Ld &&
-                    inst.k >= BpfSimulator.SECCOMP_DATA_ARGS_OFFSET &&
-                    inst.k < BpfSimulator.SECCOMP_DATA_ARGS_OFFSET + 48 -> return true
-            }
-        }
-        return false
-    }
+    ): Boolean = SelfVerificationPlan.isArgInspected(instructions, nr)
 
     class SelfVerificationException(
         message: String,

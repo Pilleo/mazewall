@@ -145,13 +145,6 @@ class ContainmentViolationDetectorTest {
     }
 
     @Test
-    fun `test detector instantiation coverage`() {
-        val detector = ContainmentViolationDetector
-        org.junit.jupiter.api.Assertions
-            .assertNotNull(detector)
-    }
-
-    @Test
     fun `structured violation matches even with null message and no defaults`() {
         // issue-20260823-171958: structured type is matched by construction, before any
         // message heuristic, and regardless of the useDefaults switch.

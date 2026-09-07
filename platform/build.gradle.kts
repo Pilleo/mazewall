@@ -36,13 +36,7 @@ val integrationTest =
         group = "verification"
         testClassesDirs = sourceSets["integrationTest"].output.classesDirs
         classpath = sourceSets["integrationTest"].runtimeClasspath
-        useJUnitPlatform()
-        jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-        systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         forkEvery = 1
-        testLogging {
-            showStandardStreams = true
-        }
     }
 
 val cAbiOracle = layout.buildDirectory.file("abi-oracle/layout-oracle")
@@ -80,9 +74,6 @@ tasks.check {
 
 tasks.test {
     dependsOn(compileCAbiOracle)
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
 dependencies {
@@ -114,6 +105,7 @@ pitest {
             "io.mazewall.platform.daemon.UnixListenDaemonMachine*",
             "io.mazewall.ffi.networking.SeccompConnectionMachine*",
             "io.mazewall.core.PrctlCommand*",
+            "io.mazewall.core.NetworkSyscallMapper*",
         ),
     )
     excludedClasses.set(
@@ -129,10 +121,16 @@ pitest {
             "io.mazewall.platform.daemon.UnixListenDaemonMachineTest",
             "io.mazewall.ffi.networking.SeccompConnectionMachineTest",
             "io.mazewall.core.PrctlCommandTest",
+            "io.mazewall.core.NetworkSyscallMapperTest",
         ),
     )
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
+
+    // Host-unit floor for pure ABI values and protocol state machines.
+    coverageThreshold.set(97)
+    mutationThreshold.set(61)
+    testStrengthThreshold.set(98)
 }

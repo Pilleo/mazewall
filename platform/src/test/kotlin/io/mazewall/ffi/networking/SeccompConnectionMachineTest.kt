@@ -5,7 +5,6 @@ import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
@@ -103,6 +102,78 @@ internal class SeccompConnectionMachineTest {
                 expectedConnection = active,
                 expectedEffectTypes = emptyList(),
             ),
+            ConnectionTestCase(
+                name = "ack failure before listener attachment is ignored",
+                initialConnection = accepted,
+                event = SeccompConnectionEvent.AckFailed,
+                expectedConnection = accepted,
+            ),
+            ConnectionTestCase(
+                name = "session completion before listener attachment is ignored",
+                initialConnection = accepted,
+                event = SeccompConnectionEvent.SessionFinished,
+                expectedConnection = accepted,
+            ),
+            ConnectionTestCase(
+                name = "second listener received after attachment is ignored",
+                initialConnection = attached,
+                event = SeccompConnectionEvent.ListenerReceived(listener),
+                expectedConnection = attached,
+            ),
+            ConnectionTestCase(
+                name = "receive failure after attachment is ignored",
+                initialConnection = attached,
+                event = SeccompConnectionEvent.RecvFailed,
+                expectedConnection = attached,
+            ),
+            ConnectionTestCase(
+                name = "poll idle after attachment is ignored",
+                initialConnection = attached,
+                event = SeccompConnectionEvent.PollIdle,
+                expectedConnection = attached,
+            ),
+            ConnectionTestCase(
+                name = "poll failure after attachment is ignored",
+                initialConnection = attached,
+                event = SeccompConnectionEvent.PollFailed,
+                expectedConnection = attached,
+            ),
+            ConnectionTestCase(
+                name = "session completion before acknowledgement is ignored",
+                initialConnection = attached,
+                event = SeccompConnectionEvent.SessionFinished,
+                expectedConnection = attached,
+            ),
+            ConnectionTestCase(
+                name = "receive failure while active is ignored",
+                initialConnection = active,
+                event = SeccompConnectionEvent.RecvFailed,
+                expectedConnection = active,
+            ),
+            ConnectionTestCase(
+                name = "poll idle while active is ignored",
+                initialConnection = active,
+                event = SeccompConnectionEvent.PollIdle,
+                expectedConnection = active,
+            ),
+            ConnectionTestCase(
+                name = "poll failure while active is ignored",
+                initialConnection = active,
+                event = SeccompConnectionEvent.PollFailed,
+                expectedConnection = active,
+            ),
+            ConnectionTestCase(
+                name = "duplicate acknowledgement while active is ignored",
+                initialConnection = active,
+                event = SeccompConnectionEvent.AckSucceeded,
+                expectedConnection = active,
+            ),
+            ConnectionTestCase(
+                name = "failed acknowledgement while active is ignored",
+                initialConnection = active,
+                event = SeccompConnectionEvent.AckFailed,
+                expectedConnection = active,
+            ),
         )
     }
 
@@ -121,42 +192,5 @@ internal class SeccompConnectionMachineTest {
             assertTrue(t.effects.isEmpty(), "Expected no effects but got ${t.effects}")
         }
         testCase.connectionValidator(t.connection)
-    }
-
-    @Test
-    fun `compile-time exhaustive coverage of connection and event variants`() {
-        val connections: List<SeccompConnection> = listOf(accepted, attached, active)
-        val events: List<SeccompConnectionEvent> = listOf(
-            SeccompConnectionEvent.ListenerReceived(listener),
-            SeccompConnectionEvent.PollIdle,
-            SeccompConnectionEvent.PollFailed,
-            SeccompConnectionEvent.RecvFailed,
-            SeccompConnectionEvent.AckSucceeded,
-            SeccompConnectionEvent.AckFailed,
-            SeccompConnectionEvent.SessionFinished,
-        )
-
-        for (conn in connections) {
-            // Compile-time exhaustive connection check
-            when (conn) {
-                is SeccompConnection.Accepted -> Unit
-                is SeccompConnection.FdAttached -> Unit
-                is SeccompConnection.Active -> Unit
-            }
-            for (event in events) {
-                // Compile-time exhaustive event check
-                when (event) {
-                    is SeccompConnectionEvent.ListenerReceived -> Unit
-                    is SeccompConnectionEvent.PollIdle -> Unit
-                    is SeccompConnectionEvent.PollFailed -> Unit
-                    is SeccompConnectionEvent.RecvFailed -> Unit
-                    is SeccompConnectionEvent.AckSucceeded -> Unit
-                    is SeccompConnectionEvent.AckFailed -> Unit
-                    is SeccompConnectionEvent.SessionFinished -> Unit
-                }
-                // Total function verification
-                SeccompConnectionMachine.evaluate(conn, event)
-            }
-        }
     }
 }

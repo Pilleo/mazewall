@@ -9,7 +9,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @Suppress("DEPRECATION")
-class SandboxDispatcherCoverageTest {
+class SandboxDispatcherCacheTest {
     @AfterEach
     fun tearDown() {
         System.clearProperty("io.mazewall.fallback")
