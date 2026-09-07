@@ -55,48 +55,8 @@ internal class NotificationReader(
 
             val startMs = System.currentTimeMillis()
             val deadline = Deadline.afterMillis(timeoutMs)
-            var count = 0L
             val pollFdManaged = pollFd.managed
-            var eintrCount = 0
-            while (deadline.remainingMillis() > 0) {
-                if (Thread.currentThread().isInterrupted) {
-                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
-                    break
-                }
-
-                val pollRes = engine.raw.poll(pollFdManaged, 1L, deadline.remainingMillis())
-
-                var gotEintr = false
-                count = pollRes.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) {
-                        gotEintr = true
-                        0L
-                    } else {
-                        0L
-                    }
-                }
-                if (pollRes is LinuxNative.SyscallResult.Success) {
-                    count = pollRes.value
-                    break
-                }
-                if (!gotEintr) {
-                    break
-                }
-
-                eintrCount++
-                if (eintrCount > 1) {
-                    if (eintrCount > 3) {
-                        try {
-                            Thread.sleep(1)
-                        } catch (e: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                            break
-                        }
-                    } else {
-                        Thread.yield()
-                    }
-                }
-            }
+            val count = pollUntilResponse(pollFdManaged, deadline)
             val durationMs = System.currentTimeMillis() - startMs
             if (durationMs > slowThresholdMs) {
                 logger.warning(
@@ -107,6 +67,45 @@ internal class NotificationReader(
             return AwaitResult(count, deadline.remainingMillis())
         }
     }
+
+    private fun pollUntilResponse(
+        pollFd: ManagedSegment,
+        deadline: Deadline,
+    ): Long {
+        var eintrCount = 0
+        while (deadline.remainingMillis() > 0) {
+            if (Thread.currentThread().isInterrupted) {
+                logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
+                return 0L
+            }
+            when (val result = engine.raw.poll(pollFd, 1L, deadline.remainingMillis())) {
+                is LinuxNative.SyscallResult.Success -> return result.value
+                is LinuxNative.SyscallResult.Error -> {
+                    if (result.errno != NativeConstants.EINTR) return 0L
+                    eintrCount++
+                    if (!backoffAfterEintr(eintrCount)) return 0L
+                }
+            }
+        }
+        return 0L
+    }
+
+    private fun backoffAfterEintr(eintrCount: Int): Boolean =
+        when {
+            eintrCount <= 1 -> true
+            eintrCount <= 3 -> {
+                Thread.yield()
+                true
+            }
+            else ->
+                try {
+                    Thread.sleep(1)
+                    true
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    false
+                }
+        }
 
     /**
      * Single SECCOMP_IOCTL_NOTIF_RECV with an unconditional EINTR retry loop. The caller's outer
