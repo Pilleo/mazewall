@@ -52,6 +52,22 @@ object Profiler {
     }
     internal var installerProvider: io.mazewall.profiler.engine.ProfilerInstallerInterface = io.mazewall.profiler.engine.RealProfilerInstaller
     internal var tidProvider: () -> Tid = { LinuxNative.process.gettid() }
+    private val runtimeOverride = ThreadLocal<ProfilerRuntime?>()
+
+    internal fun currentRuntime(): ProfilerRuntime = runtimeOverride.get() ?: ProfilerRuntime(daemonManagerProvider, installerProvider, tidProvider)
+
+    internal inline fun <T> withRuntime(
+        runtime: ProfilerRuntime,
+        block: () -> T,
+    ): T {
+        val previous = runtimeOverride.get()
+        runtimeOverride.set(runtime)
+        return try {
+            block()
+        } finally {
+            runtimeOverride.set(previous)
+        }
+    }
 
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
@@ -66,7 +82,9 @@ object Profiler {
         validateNotVirtual()
         ProfilerAckPreload.ensureLoaded()
 
-        val context = daemonManagerProvider().getOrSpawnSharedDaemon()
+        val runtime = currentRuntime()
+
+        val context = runtime.daemonManager().getOrSpawnSharedDaemon()
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
@@ -79,7 +97,7 @@ object Profiler {
 
         var tid: io.mazewall.core.Tid? = null
         val workerThread = Thread {
-            val workerTid = tidProvider()
+            val workerTid = runtime.tid()
             tid = workerTid
             threadRegistry[workerTid] = Thread.currentThread()
             try {
@@ -87,7 +105,8 @@ object Profiler {
                 // The resolver daemon needs to be notified by the kernel, which then notifies
                 // our JVM listener thread to record the event.
                 try {
-                    installProfilingFilterForThread(
+                        installProfilingFilterForThread(
+                            installer = runtime.installer,
                         context.socketPath,
                         PolicyPresets.PURE_COMPUTE_UNSAFE,
                         localLogs,
@@ -211,11 +230,13 @@ object Profiler {
             } else {
                 PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
             }
-        val context = daemonManagerProvider().getOrSpawnSharedDaemon()
-        return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces)
+        val runtime = currentRuntime()
+        val context = runtime.daemonManager().getOrSpawnSharedDaemon()
+        return ProfilerExecutorWrapper(delegate, policy, context, captureStackTraces, runtime)
     }
 
     private fun installProfilingFilterForThread(
+        installer: io.mazewall.profiler.engine.ProfilerInstallerInterface,
         socketPath: String,
         policy: PolicyDefinition<*>,
         accumulatedLogs: MutableList<TraceEvent>,
@@ -224,7 +245,7 @@ object Profiler {
         processWide: Boolean,
         onListenerCreated: ((ProfilerTraceListener) -> Unit)? = null,
     ) {
-        installerProvider.installProfilingFilterForThread(
+        installer.installProfilingFilterForThread(
             socketPath = socketPath,
             policy = policy,
             accumulatedLogs = accumulatedLogs,
@@ -259,11 +280,12 @@ object Profiler {
         }
     }
 
-    class ProfilerExecutorWrapper(
+    class ProfilerExecutorWrapper internal constructor(
         private val delegate: ExecutorService,
         private val policy: PolicyDefinition<*>,
         private val context: io.mazewall.profiler.internal.DaemonContext,
         private val captureStackTraces: Boolean = true,
+        private val runtime: ProfilerRuntime,
     ) : ExecutorService by delegate {
         private var threadApplied by threadLocal { false }
         val recentLogs = CopyOnWriteArrayList<TraceEvent>()
@@ -303,8 +325,9 @@ object Profiler {
             if (!threadApplied) {
                 val currentThread = Thread.currentThread()
                 validateNotVirtual()
-                threadRegistry[tidProvider()] = currentThread
+                threadRegistry[runtime.tid()] = currentThread
                 installProfilingFilterForThread(
+                    installer = runtime.installer,
                     socketPath = context.socketPath,
                     policy = policy,
                     accumulatedLogs = recentLogs,
