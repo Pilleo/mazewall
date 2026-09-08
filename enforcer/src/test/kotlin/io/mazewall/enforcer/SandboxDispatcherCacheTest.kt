@@ -51,8 +51,10 @@ class SandboxDispatcherCacheTest {
             SandboxDispatcher.getOrCreateElasticPool(
                 Policy
                     .builder()
-                    .customViolationPhrase("policy-${index + 1}")
-                    .build()
+                    .defaultAction(
+                        io.mazewall.core.SeccompAction
+                        .ACT_TRACE(index + 1),
+                    ).build()
                     .definition,
             )
         }
