@@ -15,6 +15,9 @@ internal sealed interface SupervisorSessionState {
     data object ExecutingReply : SupervisorSessionState
 
     data object Replied : SupervisorSessionState
+
+    /** Terminal without a confirmed kernel reply; the owning session must be recycled. */
+    data object Terminated : SupervisorSessionState
 }
 
 internal sealed interface SupervisorSessionEvent {
@@ -112,7 +115,7 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.ReplySucceeded -> SupervisorSessionTransition(SupervisorSessionState.Replied)
                     SupervisorSessionEvent.ReplyFailed,
                     SupervisorSessionEvent.Failed,
-                    -> SupervisorSessionTransition(SupervisorSessionState.Replied, SupervisorSessionEffect.Abort())
+                    -> SupervisorSessionTransition(SupervisorSessionState.Terminated)
                     SupervisorSessionEvent.NotificationReceived,
                     is SupervisorSessionEvent.PathResolved,
                     is SupervisorSessionEvent.JvmVerdictReceived,
@@ -120,7 +123,9 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.JvmRequestFailed,
                     -> SupervisorSessionTransition(state)
                 }
-            SupervisorSessionState.Replied -> SupervisorSessionTransition(state)
+            SupervisorSessionState.Replied,
+            SupervisorSessionState.Terminated,
+            -> SupervisorSessionTransition(state)
         }
 
     private fun routeTransition(route: SupervisorRoute): SupervisorSessionTransition =

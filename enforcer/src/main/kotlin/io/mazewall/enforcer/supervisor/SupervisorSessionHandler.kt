@@ -292,8 +292,12 @@ internal class SupervisorSessionHandler(
                                 SupervisorRoute.SecureExec,
                                 -> error("fast-path cannot inject, rewrite, or ask JVM after a terminal transition")
                             }
-                            terminalRoutes.execute(effect.route, routeContext)
-                            return true
+                            val replied = terminalRoutes.execute(effect.route, routeContext) ?: error("fast-path route must be terminal")
+                            return SupervisorSessionMachine
+                                .evaluate(
+                                transition.state,
+                                if (replied) SupervisorSessionEvent.ReplySucceeded else SupervisorSessionEvent.ReplyFailed,
+                            ).state == SupervisorSessionState.Replied
                         }
                         SupervisorSessionEffect.RequestJvmVerdict -> Unit
                         is SupervisorSessionEffect.Abort -> {
@@ -309,6 +313,7 @@ internal class SupervisorSessionHandler(
                     val success = sendRequestToJvm(request)
                     if (!success) {
                         logger.severe { "[SUPERVISOR-DEBUG] Failed to send request to JVM" }
+                        failClosed(routeContext, sessionState, SupervisorSessionEvent.JvmRequestFailed)
                         return false
                     }
 
@@ -400,7 +405,7 @@ internal class SupervisorSessionHandler(
                 socketManager.close(socketFd)
             } catch (ignored: Exception) {
                 }
-            sendSeccompError(id, NativeConstants.EPERM, resp)
+            failClosed(context, state)
             return false
         }
 
@@ -420,7 +425,7 @@ internal class SupervisorSessionHandler(
                 socketManager.close(socketFd)
             } catch (ignored: Exception) {
                 }
-            sendSeccompError(id, NativeConstants.EPERM, resp)
+            failClosed(context, state)
             return false
         }
         if (readRes is LinuxNative.SyscallResult.Success && readRes.value == Layouts.SUPERVISOR_RESPONSE_SIZE) {
@@ -438,7 +443,7 @@ internal class SupervisorSessionHandler(
                 errorNr,
             )
             if (route == null) {
-                sendSeccompError(id, NativeConstants.EPERM, resp)
+                failClosed(context, state)
                 return false
             }
 
@@ -448,7 +453,10 @@ internal class SupervisorSessionHandler(
                 SupervisorSessionEvent.JvmVerdictReceived(route),
             )
             val effect = transition.effect as? SupervisorSessionEffect.ExecuteRoute
-                ?: return terminalRoutes.abort(context, NativeConstants.EPERM)
+                ?: run {
+                    failClosed(context, state)
+                    return false
+                }
             val replied = routeDispatcher.execute(
                 effect.route,
                 context,
@@ -461,9 +469,24 @@ internal class SupervisorSessionHandler(
                 if (replied) SupervisorSessionEvent.ReplySucceeded else SupervisorSessionEvent.ReplyFailed,
             ).state == SupervisorSessionState.Replied
         } else {
-            sendSeccompError(id, NativeConstants.EPERM, resp)
+            failClosed(context, state)
             return false
         }
+    }
+
+    context(arena: NativeArena) private fun failClosed(
+        context: SupervisorRouteContext,
+        state: SupervisorSessionState,
+        event: SupervisorSessionEvent = SupervisorSessionEvent.Failed,
+    ): Boolean {
+        val transition = SupervisorSessionMachine.evaluate(state, event)
+        val effect = transition.effect as? SupervisorSessionEffect.Abort ?: return false
+        val replied = terminalRoutes.execute(SupervisorRoute.Abort(effect.errno, "supervisor session failure"), context) == true
+        return SupervisorSessionMachine
+            .evaluate(
+            transition.state,
+            if (replied) SupervisorSessionEvent.ReplySucceeded else SupervisorSessionEvent.ReplyFailed,
+        ).state == SupervisorSessionState.Replied
     }
 
     /**

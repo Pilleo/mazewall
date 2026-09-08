@@ -71,4 +71,15 @@ class SupervisorSessionMachineTest {
         assertEquals(SupervisorSessionState.ExecutingReply, transition.state)
         assertEquals(SupervisorSessionEffect.Abort(), transition.effect)
     }
+
+    @Test
+    fun `failed kernel reply terminates without manufacturing a second reply`() {
+        val failed = SupervisorSessionMachine.evaluate(
+            SupervisorSessionState.ExecutingReply,
+            SupervisorSessionEvent.ReplyFailed,
+        )
+
+        assertEquals(SupervisorSessionState.Terminated, failed.state)
+        assertEquals(null, failed.effect)
+    }
 }
