@@ -6,6 +6,8 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import java.math.BigDecimal
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import javax.inject.Inject
 
 abstract class GenerateInvocationStateBtf
@@ -32,9 +34,74 @@ abstract class GenerateInvocationStateBtf
             execOperations.exec {
                 commandLine("clang", "-target", "bpf", "-g", "-O2", "-c", source.get().asFile.absolutePath, "-o", objectFile.get().asFile.absolutePath)
             }
-            execOperations.exec {
-                commandLine("llvm-objcopy", "--dump-section", ".BTF=${resource.get().asFile.absolutePath}", objectFile.get().asFile.absolutePath)
+            extractBtf(objectFile.get().asFile, resource.get().asFile)
+        }
+
+        private fun extractBtf(
+            objectFile: java.io.File,
+            resourceFile: java.io.File,
+        ) {
+            val image = objectFile.readBytes()
+            require(image.size >= ELF64_HEADER_SIZE && image.copyOfRange(0, ELF_MAGIC.size).contentEquals(ELF_MAGIC)) {
+                "BTF object is not an ELF file: $objectFile"
             }
+            require(image[ELF_CLASS_OFFSET] == ELFCLASS64 && image[ELF_DATA_OFFSET] == ELFDATA2LSB) {
+                "BTF object must be a little-endian ELF64 file: $objectFile"
+            }
+            val elf = ByteBuffer.wrap(image).order(ByteOrder.LITTLE_ENDIAN)
+            val sectionHeadersOffset = checkedInt(elf.getLong(SECTION_HEADERS_OFFSET))
+            val sectionHeaderSize = elf.getShort(SECTION_HEADER_SIZE_OFFSET).toInt() and UNSIGNED_SHORT_MASK
+            val sectionCount = elf.getShort(SECTION_COUNT_OFFSET).toInt() and UNSIGNED_SHORT_MASK
+            val namesSection = elf.getShort(SECTION_NAMES_INDEX_OFFSET).toInt() and UNSIGNED_SHORT_MASK
+            require(sectionHeaderSize >= ELF64_SECTION_HEADER_SIZE && namesSection < sectionCount) { "invalid ELF section headers: $objectFile" }
+
+            fun sectionHeader(index: Int): Int = sectionHeadersOffset + index * sectionHeaderSize
+            fun sectionOffset(header: Int): Int = checkedInt(elf.getLong(header + SECTION_OFFSET_OFFSET))
+            fun sectionSize(header: Int): Int = checkedInt(elf.getLong(header + SECTION_SIZE_OFFSET))
+            fun checkedRange(offset: Int, size: Int): IntRange {
+                require(offset >= 0 && size >= 0 && offset <= image.size - size) { "invalid ELF section range: $objectFile" }
+                return offset until offset + size
+            }
+
+            val namesHeader = sectionHeader(namesSection)
+            val names = checkedRange(sectionOffset(namesHeader), sectionSize(namesHeader))
+            fun sectionName(header: Int): String {
+                val start = names.first + elf.getInt(header)
+                require(start in names) { "invalid ELF section name: $objectFile" }
+                val end = generateSequence(start) { index -> (index + 1).takeIf { it in names } }
+                    .first { image[it] == 0.toByte() }
+                return image.copyOfRange(start, end).decodeToString()
+            }
+
+            val btfHeader = (0 until sectionCount)
+                .map(::sectionHeader)
+                .firstOrNull { sectionName(it) == BTF_SECTION }
+                ?: error("ELF BTF section is missing: $objectFile")
+            val btf = checkedRange(sectionOffset(btfHeader), sectionSize(btfHeader))
+            resourceFile.writeBytes(image.copyOfRange(btf.first, btf.last + 1))
+        }
+
+        private fun checkedInt(value: Long): Int {
+            require(value in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) { "ELF offset exceeds supported range: $value" }
+            return value.toInt()
+        }
+
+        private companion object {
+            val ELF_MAGIC: ByteArray = byteArrayOf(0x7f, 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte())
+            const val ELF_CLASS_OFFSET: Int = 4
+            const val ELF_DATA_OFFSET: Int = 5
+            const val ELFCLASS64: Byte = 2
+            const val ELFDATA2LSB: Byte = 1
+            const val ELF64_HEADER_SIZE: Int = 64
+            const val ELF64_SECTION_HEADER_SIZE: Int = 64
+            const val SECTION_HEADERS_OFFSET: Int = 40
+            const val SECTION_HEADER_SIZE_OFFSET: Int = 58
+            const val SECTION_COUNT_OFFSET: Int = 60
+            const val SECTION_NAMES_INDEX_OFFSET: Int = 62
+            const val SECTION_OFFSET_OFFSET: Int = 24
+            const val SECTION_SIZE_OFFSET: Int = 32
+            const val UNSIGNED_SHORT_MASK: Int = 0xffff
+            const val BTF_SECTION: String = ".BTF"
         }
     }
 
