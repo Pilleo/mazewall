@@ -10,11 +10,9 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import java.io.IOException
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
 import java.nio.file.Path
 import java.util.logging.Logger
 
@@ -171,15 +169,11 @@ public class ProfilerDaemonManager(
         process: Process,
     ) {
         try {
-            Arena.ofConfined().use { arena ->
-                val fd = socketManager.connect(socketPath)
-                try {
-                    val cmd = arena.allocate(1)
-                    cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
-                    engine.memory.write(fd, ConfinedSegment(cmd), 1)
-                } finally {
-                    socketManager.close(fd)
-                }
+            val fd = socketManager.connect(socketPath)
+            try {
+                ProfilerNativeCommandWriter.writeByte(engine, fd, SHUTDOWN_COMMAND_BYTE)
+            } finally {
+                socketManager.close(fd)
             }
         } catch (ignored: Exception) {
             // Caller escalates via destroyForcibly().

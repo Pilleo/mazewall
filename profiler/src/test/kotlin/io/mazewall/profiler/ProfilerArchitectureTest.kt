@@ -23,7 +23,6 @@ class ProfilerArchitectureTest {
             .that()
             .resideOutsideOfPackages(
                 "io.mazewall.profiler.ffi..",
-                "io.mazewall.profiler.internal..",
                 "io.mazewall.profiler.tierE.engine..",
                 "io.mazewall.profiler.tierE.ringbuf..",
             ).should()

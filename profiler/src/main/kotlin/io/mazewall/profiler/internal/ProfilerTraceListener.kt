@@ -7,9 +7,9 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.core.close
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -17,7 +17,6 @@ import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -300,15 +299,11 @@ internal class ProfilerTraceListener(
 
     private fun sendCommand(commandByte: Byte) {
         try {
-            Arena.ofConfined().use { arena ->
-                val buf = arena.allocate(1)
-                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                val res = LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1)
-                if (res is LinuxNative.SyscallResult.Error) {
-                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
-                } else {
-                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
-                }
+            val res = ProfilerNativeCommandWriter.writeByte(LinuxNative, socketFd, commandByte)
+            if (res is LinuxNative.SyscallResult.Error<*>) {
+                System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
+            } else {
+                System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
             }
         } catch (expectedCommandFailure: Exception) {
             System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${expectedCommandFailure.message}")
