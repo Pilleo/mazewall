@@ -12,15 +12,30 @@ configuration cache, warm `unitCheck` does not regress by more than 10%, and no
 verification gate disappears from the lifecycle graph without an explicit
 correctness rationale.
 
-## Modernization reference run
+## Modernization comparison
 
 - Host: Linux 7.1.13 x86-64
 - JDK: Oracle GraalVM 25.0.2
 - Gradle: 9.6.1
-- Strict host gate: 79 seconds to populate the configuration cache; 7 seconds
-  warm with 50 of 51 actionable tasks up-to-date
-- Full merge gate: 304 seconds to populate the configuration cache; 8 seconds
-  warm with 172 of 175 actionable tasks up-to-date
+- Baseline revision: `3a0d0115`
+- Modernized revision: `47360867`
+
+Both revisions were measured from already-built worktrees on the same host. The
+`cold` mode disables configuration cache but retains task outputs, isolating
+configuration and graph overhead from compilation noise.
+
+| Task | Mode | Before | After | Actionable tasks before | After |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `help` | cold | 5s | 2s | 4 | 11 |
+| `unitCheck` | cold | 2s | 2s | 108 | 60 |
+| `build` | cold | 11s | 6s | 224 | 185 |
+| `build` | warm-prime | 11s | 1s | 221 | 175 |
+| `build` | warm | 1s | 2s | 221 | 175 |
+
+The important stable changes are the 44% smaller host-gate graph and 17% smaller
+full-build graph. Cold configured build time fell by 45%; the one-second warm
+samples are below the precision where their ordering is meaningful. Peak RSS
+remained effectively flat at roughly 240 MiB.
 
 The warm full gate reported `Configuration cache entry reused`. A tracked-state
 snapshot taken immediately before and after that gate was byte-for-byte equal.

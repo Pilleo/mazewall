@@ -19,14 +19,14 @@ for task in help unitCheck build; do
         fi
         started="$(date +%s)"
         /usr/bin/time -f '%M' -o "$output_dir/${task}-${run}.rss" \
-            ./gradlew "$task" --profile --console=plain "${extra_args[@]}" \
+            ./gradlew "$task" --profile --info --console=plain "${extra_args[@]}" \
             >"$output_dir/${task}-${run}.log" 2>&1
         finished="$(date +%s)"
         elapsed=$((finished - started))
         peak_rss="$(cat "$output_dir/${task}-${run}.rss")"
         executed_tasks="$(sed -nE 's/^([0-9]+) actionable tasks?.*/\1/p' "$output_dir/${task}-${run}.log" | tail -1)"
         executed_tasks="${executed_tasks:-0}"
-        configured_projects="$(rg -c '^> Configure project ' "$output_dir/${task}-${run}.log" || true)"
+        configured_projects="$(rg -c '^Evaluating project ' "$output_dir/${task}-${run}.log" || true)"
         cache_hits="$(rg -c ' FROM-CACHE$' "$output_dir/${task}-${run}.log" || true)"
         cache_reused="no"
         if rg -q "Configuration cache entry reused" "$output_dir/${task}-${run}.log"; then
