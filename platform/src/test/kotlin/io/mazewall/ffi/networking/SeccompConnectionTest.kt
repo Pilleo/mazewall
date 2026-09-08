@@ -13,6 +13,15 @@ import io.mazewall.core.ForeignFdGuard as FdGuardImport
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class SeccompConnectionTest {
     @Test
+    fun `socket manager injection is write once`() {
+        val connection = SeccompConnection.Accepted(FileDescriptor.replace(12))
+        connection.socketManager = unusedSocketManager()
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
+            connection.socketManager = unusedSocketManager()
+        }
+    }
+
+    @Test
     fun `failed close remains observable and retries ownership`() {
         var attempts = 0
         val connection = SeccompConnection.Accepted(FileDescriptor.replace(11)).apply {
@@ -74,5 +83,23 @@ class SeccompConnectionTest {
         connection.close()
 
         assertEquals(listOf(20), closedDescriptors)
+    }
+
+    private fun unusedSocketManager(): SocketManager =
+        object : SocketManager {
+        override fun createUnixServer(socketPath: String) = error("unused")
+
+        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) = error("unused")
+
+        override fun connect(socketPath: String) = error("unused")
+
+        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>) = error("unused")
+
+        override fun sendDescriptor(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+        ) = error("unused")
+
+        override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) = Unit
     }
 }

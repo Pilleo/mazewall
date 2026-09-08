@@ -26,8 +26,17 @@ public sealed class SeccompConnection(
     public abstract val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
     public open val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? get() = null
 
-    /** Optional custom socket manager used during close(). Defaults to RealSocketManager. */
+    /**
+     * Optional close implementation. It is injected once during connection setup and then frozen,
+     * so a live session cannot switch descriptor ownership semantics mid-flight.
+     */
     public var socketManager: SocketManager = RealSocketManager
+        set(value) {
+            check(!socketManagerInjected || field === value) { "socket manager is immutable after connection setup" }
+            field = value
+            socketManagerInjected = true
+        }
+    private var socketManagerInjected: Boolean = false
 
     @Suppress("TooGenericExceptionCaught")
     @Synchronized
