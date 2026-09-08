@@ -1,8 +1,10 @@
 package io.mazewall.profiler.engine
 
+import io.mazewall.core.Tid
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 
 class TraceEventTest {
     @Test
@@ -24,5 +26,24 @@ class TraceEventTest {
 
         val set = setOf(event1, event2)
         assertEquals(1, set.size, "Set should deduplicate events by behavior, ignoring TID")
+    }
+
+    @Test
+    fun `generic event snapshots mutable collections and JVM stack traces`() {
+        val args = mutableListOf(1L)
+        val paths = mutableListOf("/safe")
+        val event = TraceEvent.Generic(Tid(42), "UNKNOWN", args, paths)
+        val stack = arrayOf(StackTraceElement("Owner", "method", "Owner.kt", 1))
+
+        event.jvmStackTrace = stack
+        args += 2L
+        paths += "/changed"
+        stack[0] = StackTraceElement("Other", "method", "Other.kt", 2)
+
+        assertEquals(listOf(1L), event.args)
+        assertEquals(listOf("/safe"), event.paths)
+        assertEquals("Owner", event.jvmStackTrace?.single()?.className)
+        event.jvmStackTrace = null
+        assertNull(event.jvmStackTrace)
     }
 }

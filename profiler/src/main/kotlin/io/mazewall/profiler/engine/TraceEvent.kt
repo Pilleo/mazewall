@@ -52,18 +52,47 @@ public sealed class TraceEvent {
     public open val paths: List<String> get() = emptyList()
 
     @Volatile
-    public var jvmStackTrace: Array<StackTraceElement>? = null
+    private var jvmStackTraceStorage: Array<StackTraceElement>? = null
+
+    /** A defensive snapshot; attribution must not mutate an event after publication. */
+    public var jvmStackTrace: Array<StackTraceElement>?
+        get() = jvmStackTraceStorage?.copyOf()
+        set(value) {
+            jvmStackTraceStorage = value?.copyOf()
+        }
 
     /**
      * A generic event for syscalls that don't have a specialized type yet.
      */
-    public data class Generic(
+    public class Generic(
         override val tid: Tid,
         override val syscallName: String,
-        val args: List<Long>,
-        override val paths: List<String> = emptyList(),
-        override val stackTrace: List<String>? = null,
+        args: List<Long>,
+        paths: List<String> = emptyList(),
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
+        public val args: List<Long> = java.util.List.copyOf(args)
+        override val paths: List<String> = java.util.List.copyOf(paths)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            args: List<Long> = this.args,
+            paths: List<String> = this.paths,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Generic = Generic(tid, syscallName, args, paths, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): List<Long> = args
+
+        public operator fun component4(): List<String> = paths
+
+        public operator fun component5(): List<String>? = stackTrace
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Generic) return false
