@@ -17,6 +17,7 @@ import io.mazewall.profiler.internal.ProfilerTraceListener
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
@@ -184,6 +185,39 @@ class ProfilerTest {
         assertTrue(mockInstaller.installCalled)
         assertEquals(1, tidRequests)
         assertNotNull(result.behavior)
+    }
+
+    @Test
+    fun `profile removes worker registration when workload fails`() {
+        val launcher = MockProcessLauncher()
+        val socket = MockSocketManager()
+        val manager = ProfilerDaemonManager(io.mazewall.LinuxNative, socket, launcher)
+        val tid = Tid(4343)
+        Profiler.daemonManagerProvider = { manager }
+        Profiler.tidProvider = { tid }
+        Profiler.installerProvider = object : ProfilerInstallerInterface {
+            override fun installProfilingFilterForThread(
+                socketPath: String,
+                policy: PolicyDefinition<*>,
+                accumulatedLogs: MutableList<TraceEvent>,
+                stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+                pathCache: MutableMap<String, Long>,
+                processWide: Boolean,
+                startTraceListener: (
+                    Int,
+                    MutableList<TraceEvent>,
+                    MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+                    MutableMap<String, Long>,
+                    CountDownLatch,
+                ) -> Unit,
+            ) = Unit
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            Profiler.profile { throw IllegalStateException("workload failed") }
+        }
+
+        assertTrue(!Profiler.threadRegistry.containsKey(tid))
     }
 
     @Test

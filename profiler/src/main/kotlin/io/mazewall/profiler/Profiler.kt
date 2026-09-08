@@ -94,8 +94,24 @@ object Profiler {
 
         // Capture the trace listener created for this session so it can be drained before compile.
         val sessionListener = AtomicReference<ProfilerTraceListener>()
+        var sessionCleaned = false
 
         var tid: io.mazewall.core.Tid? = null
+
+        fun cleanupSession() {
+            var cleanupFailure: Throwable? = null
+            sessionListener.get()?.let { listener ->
+                listeners.remove(listener)
+                try {
+                    listener.passThrough()
+                } catch (failure: Throwable) {
+                    cleanupFailure = failure
+                }
+            }
+            tid?.let(threadRegistry::remove)
+            cleanupFailure?.let { throw it }
+        }
+
         val workerThread = Thread {
             val workerTid = runtime.tid()
             tid = workerTid
@@ -131,56 +147,58 @@ object Profiler {
             start()
         }
 
-        // Bounded join (issue-20260823-172000): a wedged reactor must not hang the profiler forever.
-        workerThread.join(WORKER_JOIN_TIMEOUT_MS)
-        if (workerThread.isAlive) {
-            workerThread.interrupt()
-            workerThread.join(GRACE_PERIOD_MS)
+        var primaryFailure: Throwable? = null
+        try {
+            // Bounded join (issue-20260823-172000): a wedged reactor must not hang the profiler forever.
+            workerThread.join(WORKER_JOIN_TIMEOUT_MS)
+            if (workerThread.isAlive) {
+                workerThread.interrupt()
+                workerThread.join(GRACE_PERIOD_MS)
+                errorRef.get()?.let { throw it }
+                throw IllegalStateException(
+                    "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms",
+                )
+            }
+
             errorRef.get()?.let { throw it }
-            throw IllegalStateException(
-                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms",
+
+            // Drain the listener before compiling so asynchronously delivered events are stable.
+            cleanupSession()
+            sessionCleaned = true
+
+            val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
+            val observations = localLogs.map {
+                io.mazewall.profiler.ProfileObservation
+                .fromTraceEvent(it)
+            }
+            val listener = sessionListener.get()
+            val dropped = (listener?.eventQueue?.droppedCount?.toInt() ?: 0) + (listener?.droppedEvents ?: 0)
+            val coverage = ProfilingCoverage.infer(
+                strategy = ProfileStrategy.USER_NOTIF,
+                strategyReason = "Profiler.profile USER_NOTIF session",
+                processWide = processWide,
+                observations = observations,
+                stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
+                droppedEvents = dropped,
+                drainComplete = listener?.drainComplete == true,
+                environment = ProfileEnvironment(
+                    kernelRelease = System.getProperty("os.version") ?: "unknown",
+                    ebpfLoad = EbpfCapability.probe(),
+                ),
             )
+            return ProfilingResult(blockResult.get() as T, bob, localStackProfile, coverage, observations)
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
+        } finally {
+            if (!sessionCleaned) {
+                try {
+                    cleanupSession()
+                } catch (cleanupFailure: Throwable) {
+                    primaryFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure
+                }
+            }
         }
-
-        errorRef.get()?.let { throw it }
-
-        // CRITICAL: Drain the trace listener before compiling the Bill of Behavior.
-        //
-        // The daemon delivers events asynchronously after releasing the tracee (fire-and-forget).
-        // After workerThread.join() returns, there may still be events in-flight: the daemon wrote
-        // them to the socket but the listener thread has not yet called accumulatedLogs.add().
-        //
-        // close() sends SHUTDOWN_COMMAND_BYTE to signal the daemon to stop, then waits for the
-        // listener thread to drain all remaining socket data until it sees EOF. Only then does
-        // BobCompiler.compile() read localLogs, which is now stable and complete.
-        sessionListener.get()?.let { listener ->
-            listeners.remove(listener)
-            listener.passThrough()
-        }
-
-        tid?.let(threadRegistry::remove)
-
-        val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
-        val observations = localLogs.map {
-            io.mazewall.profiler.ProfileObservation
-            .fromTraceEvent(it)
-        }
-        val listener = sessionListener.get()
-        val dropped = (listener?.eventQueue?.droppedCount?.toInt() ?: 0) + (listener?.droppedEvents ?: 0)
-        val coverage = ProfilingCoverage.infer(
-            strategy = ProfileStrategy.USER_NOTIF,
-            strategyReason = "Profiler.profile USER_NOTIF session",
-            processWide = processWide,
-            observations = observations,
-            stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
-            droppedEvents = dropped,
-            drainComplete = listener?.drainComplete == true,
-            environment = ProfileEnvironment(
-                kernelRelease = System.getProperty("os.version") ?: "unknown",
-                ebpfLoad = EbpfCapability.probe(),
-            ),
-        )
-        return ProfilingResult(blockResult.get() as T, bob, localStackProfile, coverage, observations)
     }
 
     /**
