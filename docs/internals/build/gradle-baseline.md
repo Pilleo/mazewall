@@ -41,3 +41,16 @@ The warm full gate reported `Configuration cache entry reused`. A tracked-state
 snapshot taken immediately before and after that gate was byte-for-byte equal.
 The task-graph contract is also enforced by the BuildSrc TestKit suite and
 `scripts/check_gradle_lifecycle.sh`.
+
+## OWASP Dependency-Check cache
+
+Pull-request run `34255417287`, attempt 1 (`ae809e89`), performed the expected
+cold refresh: `dependencyCheckAnalyze` downloaded all 387,494 NVD records in
+4m47s (17:21:53–17:26:40 UTC). `setup-gradle` then saved a 122 MB Gradle User
+Home entry containing `dependency-check-data`.
+
+Attempt 2 reran the identical revision. `setup-gradle` restored that exact 122
+MB entry, including `dependency-check-data`; `dependencyCheckAnalyze` completed
+in 16s (17:31:07–17:31:23 UTC) without logging a complete NVD-record download.
+The vulnerability analysis and CVSS gate both remained active, and the rerun
+completed successfully.
