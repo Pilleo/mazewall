@@ -22,6 +22,25 @@ class CAbiLayoutOracleTest {
         expectedLayouts().forEach { (key, expected) ->
             assertEquals(expected, actual[key], "C ABI mismatch for $key")
         }
+        assertLandlockRulesetPrefix(actual)
+    }
+
+    private fun assertLandlockRulesetPrefix(actual: Map<String, Long>) {
+        assertTrue(
+            actual.getValue("size.landlock_ruleset_attr") <= Layouts.LANDLOCK_RULESET_ATTR_SIZE,
+            "host Landlock ruleset prefix exceeds the FFM layout",
+        )
+        assertEquals(
+            Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET,
+            actual.getValue("offset.landlock_ruleset_attr.handled_access_fs"),
+            "C ABI mismatch for landlock_ruleset_attr.handled_access_fs",
+        )
+        actual["offset.landlock_ruleset_attr.handled_access_net"]?.let { offset ->
+            assertEquals(Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET, offset, "C ABI mismatch for landlock_ruleset_attr.handled_access_net")
+        }
+        actual["offset.landlock_ruleset_attr.scoped"]?.let { offset ->
+            assertEquals(Layouts.LANDLOCK_RULESET_ATTR_SCOPED_OFFSET, offset, "C ABI mismatch for landlock_ruleset_attr.scoped")
+        }
     }
 
     private fun expectedLayouts(): Map<String, Long> =
@@ -76,10 +95,6 @@ class CAbiLayoutOracleTest {
         "offset.pollfd.fd" to Layouts.POLLFD_FD_OFFSET,
         "offset.pollfd.events" to Layouts.POLLFD_EVENTS_OFFSET,
         "offset.pollfd.revents" to Layouts.POLLFD_REVENTS_OFFSET,
-        "size.landlock_ruleset_attr" to Layouts.LANDLOCK_RULESET_ATTR_SIZE,
-        "offset.landlock_ruleset_attr.handled_access_fs" to Layouts.LANDLOCK_RULESET_ATTR_FS_OFFSET,
-        "offset.landlock_ruleset_attr.handled_access_net" to Layouts.LANDLOCK_RULESET_ATTR_NET_OFFSET,
-        "offset.landlock_ruleset_attr.scoped" to Layouts.LANDLOCK_RULESET_ATTR_SCOPED_OFFSET,
         "size.landlock_path_beneath_attr" to Layouts.LANDLOCK_PATH_BENEATH_ATTR.byteSize(),
         "offset.landlock_path_beneath_attr.allowed_access" to Layouts.LANDLOCK_PATH_BENEATH_ATTR_ACCESS_OFFSET,
         "offset.landlock_path_beneath_attr.parent_fd" to Layouts.LANDLOCK_PATH_BENEATH_ATTR_FD_OFFSET,

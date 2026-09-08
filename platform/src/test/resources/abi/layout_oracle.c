@@ -24,7 +24,13 @@ int main(void) {
     SIZE(cmsghdr); OFFSET(cmsghdr, cmsg_len); OFFSET(cmsghdr, cmsg_level); OFFSET(cmsghdr, cmsg_type);
     SIZE(sockaddr_un); OFFSET(sockaddr_un, sun_family); OFFSET(sockaddr_un, sun_path);
     SIZE(pollfd); OFFSET(pollfd, fd); OFFSET(pollfd, events); OFFSET(pollfd, revents);
-    SIZE(landlock_ruleset_attr); OFFSET(landlock_ruleset_attr, handled_access_fs); OFFSET(landlock_ruleset_attr, handled_access_net); OFFSET(landlock_ruleset_attr, scoped);
+    SIZE(landlock_ruleset_attr); OFFSET(landlock_ruleset_attr, handled_access_fs);
+#ifdef LANDLOCK_ACCESS_NET_BIND_TCP
+    OFFSET(landlock_ruleset_attr, handled_access_net);
+#endif
+#ifdef LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
+    OFFSET(landlock_ruleset_attr, scoped);
+#endif
     SIZE(landlock_path_beneath_attr); OFFSET(landlock_path_beneath_attr, allowed_access); OFFSET(landlock_path_beneath_attr, parent_fd);
     SIZE(open_how); OFFSET(open_how, flags); OFFSET(open_how, mode); OFFSET(open_how, resolve);
     return 0;
