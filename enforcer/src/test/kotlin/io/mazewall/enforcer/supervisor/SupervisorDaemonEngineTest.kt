@@ -2,15 +2,12 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeNetworking
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.PollFdSegment
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -21,7 +18,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class SupervisorDaemonEngineTest {
     @AfterEach
     fun tearDown() {
