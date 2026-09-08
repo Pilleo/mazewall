@@ -732,9 +732,13 @@ tasks.register("detektWarningRatchet") {
                         .readLines()
                         .mapNotNull { line ->
                             Regex("""<file name=\"([^\"]+)\">""").find(line)?.let { file = it.groupValues[1] }
-                            if (!line.contains("severity=\"warning\"")) null
-                            else "$file|${line.replace(Regex("""(line|column)=\"\d+\""""), "")}"
-                        }.sorted().joinToString("\n")
+                            if (!line.contains("severity=\"warning\"")) {
+                                null
+                            } else {
+                                "$file|${line.replace(Regex("""(line|column)=\"\d+\""""), "")}"
+                            }
+                        }.sorted()
+                        .joinToString("\n")
                 val fingerprint =
                     MessageDigest
                         .getInstance("SHA-256")
@@ -758,8 +762,10 @@ tasks.register("validateBacklogIndex") {
     description = "Ensures the backlog index has one authoritative summary line"
     doLast {
         val index = rootProject.file("docs/internals/backlog/README.md")
-        val summaries = Regex("""^\*Total Active Issues:\* \d+ \| \*Total Resolved Issues:\* \d+$""", RegexOption.MULTILINE)
-            .findAll(index.readText()).count()
+        val summaries =
+            Regex("""^\*Total Active Issues:\* \d+ \| \*Total Resolved Issues:\* \d+$""", RegexOption.MULTILINE)
+                .findAll(index.readText())
+                .count()
         check(summaries == 1) { "Backlog index must contain exactly one total summary, found $summaries" }
     }
 }
