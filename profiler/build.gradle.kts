@@ -130,6 +130,12 @@ val integrationTestFreshJvm =
         doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
+// Fresh-JVM tests spawn a child using this task's runtime classpath. Keep the
+// ordinary integration source set quiescent while that child is loading classes.
+integrationTestFreshJvm.configure {
+    mustRunAfter(integrationTest)
+}
+
 tasks.check {
     dependsOn(integrationTest, integrationTestFreshJvm)
 }

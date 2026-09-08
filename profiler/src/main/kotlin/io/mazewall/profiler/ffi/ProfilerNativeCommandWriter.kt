@@ -12,6 +12,9 @@ import java.lang.foreign.ValueLayout
 
 /** Owns the short-lived native buffer used for one-byte profiler control commands. */
 internal object ProfilerNativeCommandWriter {
+    /** Forces class resolution before a process-wide seccomp filter can block lazy loading. */
+    fun preload() = Unit
+
     fun writeByte(
         memory: NativeMemory,
         socket: FileDescriptor<out FileDescriptorRole, FdState.Open, out FdOwnership>,

@@ -34,6 +34,19 @@ internal sealed interface TraceListenerEvent {
 
 /** Keeps listener lifecycle assignment independent from socket reads and their failure paths. */
 internal object TraceListenerMachine {
+    /** Preloads every sealed event implementation used after USER_NOTIF installation. */
+    fun preload() {
+        listOf(
+            TraceListenerEvent.HandshakeReceived,
+            TraceListenerEvent.HandshakeRejected,
+            TraceListenerEvent.AwaitEvent,
+            TraceListenerEvent.SocketClosed,
+            TraceListenerState.AwaitingEvent,
+            TraceListenerState.Disconnected,
+            TraceListenerState.HandshakeRejected,
+        )
+    }
+
     fun evaluate(
         state: TraceListenerState,
         event: TraceListenerEvent,

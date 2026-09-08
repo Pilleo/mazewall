@@ -15,6 +15,7 @@ import io.mazewall.profiler.engine.ProfilerInstaller
 import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerTraceListener
+import io.mazewall.profiler.internal.TraceListenerMachine
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -79,6 +80,9 @@ object Profiler {
         captureStackTraces: Boolean = true,
         block: () -> T,
     ): ProfilingResult<T> {
+        io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
+            .preload()
+        TraceListenerMachine.preload()
         validateNotVirtual()
         ProfilerAckPreload.ensureLoaded()
 
