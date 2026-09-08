@@ -8,16 +8,15 @@ import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
  * A functional router that executes blocks of code inside policy-specific sandboxes.
  *
- * It caches a bounded number of [ExecutorService] instances based on the exact
- * [PolicyDefinition]. The full definition is intentional: executor threads permanently acquire
- * both Seccomp and Landlock restrictions, so policies with different filesystem rules cannot
- * safely share a worker pool. Least-recently-used pools are shut down when the cache is full.
+ * It automatically caches and reuses [ExecutorService] instances based on the exact
+ * [PolicyDefinition]. This prevents thread-explosion while ensuring strict containment.
  *
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
@@ -26,18 +25,51 @@ object SandboxDispatcher {
     internal const val MAX_CACHED_POOLS: Int = 32
 
     /**
-     * Access-ordered cache guarded by itself. Shutting down an evicted pool prevents permanently
-     * contained daemon threads from accumulating when callers construct dynamic policies.
+     * Cache key for the sandbox dispatcher pools.
+     * While BPF compilation cache correctly ignores Landlock paths (since paths do not change
+     * the compiled syscall filter instructions), the *Executor Cache* must include Landlock paths
+     * in its identity because `ContainedExecutorWrapper` is initialized once per pool with a specific
+     * `PolicyDefinition`. Reusing an executor for a different path policy would incorrectly enforce
+     * the initial Landlock paths on subsequent tasks.
      */
-    private val poolCache = object : LinkedHashMap<PolicyDefinition<*>, ExecutorService>(
-        MAX_CACHED_POOLS,
-        0.75f,
-        true,
+    private data class CacheKey(
+        val defaultAction: io.mazewall.core.SeccompAction,
+        val syscallActions: Map<io.mazewall.core.Syscall, io.mazewall.core.SeccompAction>,
+        val allowMmapExec: Boolean,
+        val allowNonThreadClone: Boolean,
+        val allowUnsafePrctl: Boolean,
+        val lockIntelCet: Boolean,
+        val allowedFsReadPaths: Set<io.mazewall.core.SandboxedPath>,
+        val allowedFsWritePaths: Set<io.mazewall.core.SandboxedPath>,
+        val enforceLandlock: Boolean,
+        val arch: io.mazewall.core.Arch,
     ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PolicyDefinition<*>, ExecutorService>): Boolean {
-            val shouldEvict = size > MAX_CACHED_POOLS
-            if (shouldEvict) eldest.value.shutdown()
-            return shouldEvict
+        constructor(definition: PolicyDefinition<*>, arch: io.mazewall.core.Arch) : this(
+            definition.defaultAction,
+            definition.syscallActions,
+            definition.allowMmapExec,
+            definition.allowNonThreadClone,
+            definition.allowUnsafePrctl,
+            definition.lockIntelCet,
+            definition.allowedFsReadPaths,
+            definition.allowedFsWritePaths,
+            definition.enforceLandlock,
+            arch,
+        )
+    }
+
+    /**
+     * Cache mapping a distinct Policy projection to its dedicated thread pool.
+     * Executor threads are permanently contained and therefore pooled forever by design;
+     * eviction only happens under cap pressure or shutdownAll().
+     */
+    private val poolCache = object : java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ExecutorService>): Boolean {
+            if (size > MAX_CACHED_POOLS) {
+                eldest.value.shutdown()
+                return true
+            }
+            return false
         }
     }
 
@@ -73,33 +105,38 @@ object SandboxDispatcher {
      */
     @PublishedApi
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
+        val key = CacheKey(
+            definition,
+            io.mazewall.core.Arch
+            .current(),
+        )
         synchronized(poolCache) {
-            poolCache[definition]?.let { return it }
-            val pool = createElasticPool(definition)
-            poolCache[definition] = pool
-            return pool
-        }
-    }
+            val existing = poolCache[key]
+            if (existing != null) return existing
 
-    private fun createElasticPool(definition: PolicyDefinition<*>): ExecutorService {
-        return run {
-            val def = definition
             // Use a cached thread pool to allow elastic scaling for blocking I/O workloads,
             // similar to Dispatchers.IO. Threads idle for 60 seconds are terminated.
             val rawPool = Executors.newCachedThreadPool { runnable ->
                 val thread = Thread(runnable)
                 thread.isDaemon = true
-                thread.name = "mazewall-sandbox-${def.hashCode().toUInt().toString(16)}"
+                thread.name = "mazewall-sandbox-${definition.hashCode().toUInt().toString(16)}"
                 thread
             }
 
             // Wrap the raw pool to ensure the policy is applied to every thread created by it.
             // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
             // We use the internal installOnCurrentThread to wrap execution directly.
-            io.mazewall.enforcer.internal
-                .ContainedExecutorWrapper(rawPool, def)
+            val wrapped = io.mazewall.enforcer.internal
+                .ContainedExecutorWrapper(rawPool, definition)
+            poolCache[key] = wrapped
+            return wrapped
         }
     }
+
+    /**
+     * Retrieves the current number of cached executors. Used for testing.
+     */
+    internal fun entryCount(): Int = synchronized(poolCache) { poolCache.size }
 
     internal fun cachedPoolsForTest(): List<ExecutorService> = synchronized(poolCache) { poolCache.values.toList() }
 
