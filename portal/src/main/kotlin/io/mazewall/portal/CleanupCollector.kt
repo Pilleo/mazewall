@@ -4,6 +4,7 @@ package io.mazewall.portal
 internal class CleanupCollector {
     private val failures = mutableListOf<CleanupFailure>()
 
+    @Suppress("TooGenericExceptionCaught") // cleanup must collect every close failure regardless of implementation type
     fun attempt(
         resource: String,
         action: () -> Unit,
