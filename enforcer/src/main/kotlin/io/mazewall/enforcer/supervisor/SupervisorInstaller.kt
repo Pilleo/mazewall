@@ -30,7 +30,6 @@ import io.mazewall.onFailure
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -38,14 +37,16 @@ import java.util.logging.Logger
 
 public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
-    internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
+    private val compatibilityRuntime = SupervisorRuntimeContext()
+
+    internal fun compatibilityRuntime(): SupervisorRuntimeContext = compatibilityRuntime
 
     public fun registerThread(tid: Tid) {
-        threadRegistry[tid] = Thread.currentThread()
+        compatibilityRuntime.register(tid)
     }
 
     public fun unregisterThread(tid: Tid) {
-        threadRegistry.remove(tid)
+        compatibilityRuntime.unregister(tid)
     }
 
     public fun installSupervisedFilterForThread(
@@ -62,7 +63,8 @@ public object SupervisorInstaller {
 
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()
-        registerThread(tid)
+        val runtime = SupervisorRuntimeContext()
+        runtime.register(tid)
         try {
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
@@ -73,15 +75,16 @@ public object SupervisorInstaller {
                 val listener = JVMValidationListener(
                     FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket),
                     scopingPolicy,
+                    runtime,
                 )
                 listener.start(readyLatch)
             }
-            return SupervisorSession(tid)
+            return SupervisorSession(tid, runtime)
         } catch (expectedInstallFailure: Exception) {
-            unregisterThread(tid)
+            runtime.unregister(tid)
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
-            unregisterThread(tid)
+            runtime.unregister(tid)
             throw expectedInstallError
         }
     }
@@ -90,6 +93,7 @@ public object SupervisorInstaller {
 internal class JVMValidationListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val scopingPolicy: StacktraceScopingPolicy,
+    private val runtime: SupervisorRuntimeContext = SupervisorInstaller.compatibilityRuntime(),
 ) {
     private val closed = AtomicBoolean(false)
     private val logger = Logger.getLogger(JVMValidationListener::class.java.name)
@@ -167,7 +171,7 @@ internal class JVMValidationListener(
                 val cloneNr = traceeArch.clone
 
                 val startMs = System.currentTimeMillis()
-                val targetThread = SupervisorInstaller.threadRegistry[Tid(pidVal)]
+                val targetThread = runtime.resolve(Tid(pidVal))
                 var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
 
                 // --- STACKTRACE PROPAGATION LOGIC ---
