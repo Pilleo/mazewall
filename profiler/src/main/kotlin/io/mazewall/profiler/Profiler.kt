@@ -73,6 +73,7 @@ object Profiler {
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
      */
+    @Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally") // session cleanup must preserve worker failures and collect cleanup failures
     @JvmStatic
     @JvmOverloads
     fun <T> profile(

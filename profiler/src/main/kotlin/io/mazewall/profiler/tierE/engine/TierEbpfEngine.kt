@@ -126,6 +126,7 @@ public class TierEbpfEngine(
         install(targetTgid, 1)
     }
 
+    @Suppress("TooGenericExceptionCaught") // native acquisition and rollback must retain every failure type
     public fun install(
         targetTgid: Int,
         sessionTag: Int,
@@ -274,6 +275,7 @@ public class TierEbpfEngine(
         requireNotNull(resources)
     }
 
+    @Suppress("TooGenericExceptionCaught") // close is best-effort across independently owned native resources
     private fun closeResources(installed: Resources) {
         var cleanupFailure: Throwable? = null
         try {
