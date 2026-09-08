@@ -9,6 +9,7 @@ import io.mazewall.Uncompiled
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.engine.behavioralKey
 import io.mazewall.sbob.PathNormalizer
 import kotlinx.serialization.json.Json
 import java.io.InputStream
@@ -45,9 +46,9 @@ class BillOfBehavior(
     val execs: Set<String> = java.util.Set.copyOf(execs)
     val connects: Set<NetworkEndpoint> = java.util.Set.copyOf(connects)
     val ioUringOps: Set<String> = java.util.Set.copyOf(ioUringOps)
-    private val stackProfileStorage = freezeStackProfile(stackProfile)
+    private val stackProfileStorage = ImmutableStackProfile.copyOf(stackProfile)
     val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
-        get() = freezeStackProfile(stackProfileStorage)
+        get() = stackProfileStorage.snapshot()
 
     fun copy(
         opens: Set<String> = this.opens,
@@ -67,21 +68,12 @@ class BillOfBehavior(
             execs == other.execs &&
             connects == other.connects &&
             ioUringOps == other.ioUringOps &&
-        stackProfilesEqual(stackProfileStorage, other.stackProfileStorage)
+        stackProfileStorage == other.stackProfileStorage
 
     override fun hashCode(): Int =
         listOf(opens, fsWritePaths, syscalls, execs, connects, ioUringOps).hashCode() *
             31 +
-            stackProfileStorage.entries.fold(0) { hash, entry ->
-                hash + 31 * entry.key.hashCode() + entry.value.fold(0) { framesHash, frame -> framesHash + frame.contentHashCode() }
-            }
-
-    private fun freezeStackProfile(value: Map<TraceEvent, List<Array<StackTraceElement>>>) = java.util.Map.copyOf(value.mapValues { (_, frames) -> java.util.List.copyOf(frames.map { it.copyOf() }) })
-
-    private fun stackProfilesEqual(
-        left: Map<TraceEvent, List<Array<StackTraceElement>>>,
-        right: Map<TraceEvent, List<Array<StackTraceElement>>>,
-    ) = left.size == right.size && left.all { (event, frames) -> right[event]?.let { other -> frames.size == other.size && frames.indices.all { frames[it].contentEquals(other[it]) } } == true }
+            stackProfileStorage.hashCode()
 
     /**
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
@@ -250,12 +242,18 @@ class BillOfBehavior(
      * Merges two bills of behavior (union of all observations).
      */
     operator fun plus(other: BillOfBehavior): BillOfBehavior {
-        val mergedStackProfile = stackProfile.toMutableMap()
-        for ((event, traces) in other.stackProfile) {
-            val existing = mergedStackProfile[event] ?: emptyList()
-            val mergedTraces = (existing + traces).distinctBy { it.toList() }
-            mergedStackProfile[event] = mergedTraces
+        val mergedStackProfile = linkedMapOf<io.mazewall.profiler.engine.TraceEventKey, Pair<TraceEvent, MutableList<Array<StackTraceElement>>>>()
+
+        fun merge(profile: Map<TraceEvent, List<Array<StackTraceElement>>>) {
+            for ((event, traces) in profile) {
+                val entry = mergedStackProfile.getOrPut(event.behavioralKey()) { event to mutableListOf() }
+                for (trace in traces) {
+                    if (entry.second.none { it.contentEquals(trace) }) entry.second += trace
+                }
+            }
         }
+        merge(stackProfile)
+        merge(other.stackProfile)
 
         return BillOfBehavior(
             opens = opens + other.opens,
@@ -264,7 +262,7 @@ class BillOfBehavior(
             execs = execs + other.execs,
             connects = connects + other.connects,
             ioUringOps = ioUringOps + other.ioUringOps,
-            stackProfile = mergedStackProfile,
+            stackProfile = mergedStackProfile.values.associate { (event, traces) -> event to traces },
         )
     }
 

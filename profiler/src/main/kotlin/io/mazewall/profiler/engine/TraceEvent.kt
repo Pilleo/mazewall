@@ -169,15 +169,37 @@ public sealed class TraceEvent {
     /**
      * Specialized event for file opening operations (OPEN, OPENAT, OPENAT2).
      */
-    public data class Open(
+    public class Open(
         override val tid: Tid,
         override val syscallName: String,
         val path: String,
         val flags: Long,
         val mode: Int,
-        override val stackTrace: List<String>? = null,
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val paths: List<String> = listOf(path)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            path: String = this.path,
+            flags: Long = this.flags,
+            mode: Int = this.mode,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Open = Open(tid, syscallName, path, flags, mode, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): String = path
+
+        public operator fun component4(): Long = flags
+
+        public operator fun component5(): Int = mode
+
+        public operator fun component6(): List<String>? = stackTrace
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -203,13 +225,29 @@ public sealed class TraceEvent {
     /**
      * Specialized event for process execution (EXECVE, EXECVEAT).
      */
-    public data class Exec(
+    public class Exec(
         override val tid: Tid,
         override val syscallName: String,
         val path: String,
-        override val stackTrace: List<String>? = null,
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val paths: List<String> = listOf(path)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            path: String = this.path,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Exec = Exec(tid, syscallName, path, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): String = path
+
+        public operator fun component4(): List<String>? = stackTrace
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -231,7 +269,7 @@ public sealed class TraceEvent {
     /**
      * Specialized event for memory mapping (MMAP).
      */
-    public data class Mmap(
+    public class Mmap(
         override val tid: Tid,
         val addr: Long,
         val len: Long,
@@ -239,9 +277,37 @@ public sealed class TraceEvent {
         val mappingFlags: MmapFlags,
         val fileDescriptor: MmapFileDescriptor,
         val offset: Long,
-        override val stackTrace: List<String>? = null,
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val syscallName: String = "MMAP"
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            addr: Long = this.addr,
+            len: Long = this.len,
+            protection: MmapProtection = this.protection,
+            mappingFlags: MmapFlags = this.mappingFlags,
+            fileDescriptor: MmapFileDescriptor = this.fileDescriptor,
+            offset: Long = this.offset,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Mmap = Mmap(tid, addr, len, protection, mappingFlags, fileDescriptor, offset, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): Long = addr
+
+        public operator fun component3(): Long = len
+
+        public operator fun component4(): MmapProtection = protection
+
+        public operator fun component5(): MmapFlags = mappingFlags
+
+        public operator fun component6(): MmapFileDescriptor = fileDescriptor
+
+        public operator fun component7(): Long = offset
+
+        public operator fun component8(): List<String>? = stackTrace
 
         /** Returns true if the mapping is executable (PROT_EXEC). */
         val isExecutable: Boolean get() = protection.allowsExecution
@@ -274,14 +340,34 @@ public sealed class TraceEvent {
     /**
      * Specialized event for network socket operations.
      */
-    public data class Socket(
+    public class Socket(
         override val tid: Tid,
         val domain: Int,
         val type: Int,
         val protocol: Int,
-        override val stackTrace: List<String>? = null,
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val syscallName: String = "SOCKET"
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            domain: Int = this.domain,
+            type: Int = this.type,
+            protocol: Int = this.protocol,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Socket = Socket(tid, domain, type, protocol, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): Int = domain
+
+        public operator fun component3(): Int = type
+
+        public operator fun component4(): Int = protocol
+
+        public operator fun component5(): List<String>? = stackTrace
+
         public val addressFamily: AddressFamily get() = AddressFamily.fromRaw(domain)
         public val socketType: SocketType get() = SocketType(type)
         public val ipProtocol: IpProtocol get() = IpProtocol(protocol)
@@ -311,12 +397,30 @@ public sealed class TraceEvent {
     /**
      * Specialized event for filesystem mutation (MKDIR, RMDIR, UNLINK, etc.).
      */
-    public data class FsMutation(
+    public class FsMutation(
         override val tid: Tid,
         override val syscallName: String,
-        override val paths: List<String>,
-        override val stackTrace: List<String>? = null,
+        paths: List<String>,
+        stackTrace: List<String>? = null,
     ) : TraceEvent() {
+        override val paths: List<String> = java.util.List.copyOf(paths)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            paths: List<String> = this.paths,
+            stackTrace: List<String>? = this.stackTrace,
+        ): FsMutation = FsMutation(tid, syscallName, paths, stackTrace)
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): List<String> = paths
+
+        public operator fun component4(): List<String>? = stackTrace
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is FsMutation) return false

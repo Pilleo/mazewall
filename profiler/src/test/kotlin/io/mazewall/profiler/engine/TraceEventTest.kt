@@ -27,6 +27,7 @@ class TraceEventTest {
 
         val set = setOf(event1, event2)
         assertEquals(1, set.size, "Set should deduplicate events by behavior, ignoring TID")
+        assertEquals(event1.behavioralKey(), event2.behavioralKey())
     }
 
     @Test
@@ -46,6 +47,18 @@ class TraceEventTest {
         assertEquals("Owner", event.jvmStackTrace?.single()?.className)
         event.jvmStackTrace = null
         assertNull(event.jvmStackTrace)
+    }
+
+    @Test
+    fun `specialized events snapshot mutable path and stack trace lists`() {
+        val paths = mutableListOf("/safe")
+        val stack = mutableListOf("caller")
+        val event = TraceEvent.FsMutation(Tid(42), "UNLINK", paths, stack)
+        paths += "/changed"
+        stack += "mutated"
+
+        assertEquals(listOf("/safe"), event.paths)
+        assertEquals(listOf("caller"), event.stackTrace)
     }
 
     @Test

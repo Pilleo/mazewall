@@ -34,9 +34,9 @@ class ProfilingResult<T>(
     ),
     observations: List<ProfileObservation> = emptyList(),
 ) {
-    private val stackProfileStorage = freezeStackProfile(stackProfile)
+    private val stackProfileStorage = ImmutableStackProfile.copyOf(stackProfile)
     val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
-        get() = freezeStackProfile(stackProfileStorage)
+        get() = stackProfileStorage.snapshot()
     val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
 
     fun copy(
@@ -46,8 +46,6 @@ class ProfilingResult<T>(
         coverage: ProfilingCoverage = this.coverage,
         observations: List<ProfileObservation> = this.observations,
     ): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations)
-
-    private fun freezeStackProfile(value: Map<TraceEvent, List<Array<StackTraceElement>>>) = java.util.Map.copyOf(value.mapValues { (_, frames) -> java.util.List.copyOf(frames.map { it.copyOf() }) })
 
     @JvmOverloads
     fun toPolicy(

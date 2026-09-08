@@ -31,6 +31,17 @@ class BillOfBehaviorTest {
     }
 
     @Test
+    fun `stack-profile equality and hash use frame content rather than array identity`() {
+        val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
+        val frame = StackTraceElement("Class", "method", "File.kt", 1)
+        val left = BillOfBehavior(stackProfile = mapOf(event to listOf(arrayOf(frame))))
+        val right = BillOfBehavior(stackProfile = mapOf(event to listOf(arrayOf(frame))))
+
+        assertEquals(left, right)
+        assertEquals(left.hashCode(), right.hashCode())
+    }
+
+    @Test
     fun `stack trace JSON preserves syscall and frame identity`() {
         val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
         val stack = arrayOf(StackTraceElement("Class", "method", "File.kt", 1))
