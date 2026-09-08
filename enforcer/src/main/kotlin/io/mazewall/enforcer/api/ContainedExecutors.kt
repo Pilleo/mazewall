@@ -223,6 +223,15 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, combinedPolicy)
     }
 
+    /**
+     * Returns a typed containment view for components that require an explicit
+     * execution scope. The delegate lifecycle remains owned by the caller.
+     */
+    fun <S : PolicyScope> wrapTyped(
+        delegate: ExecutorService,
+        policy: Policy<S, Uncompiled>,
+    ): ContainedExecutor<S> = ContainedExecutorView(wrap(delegate, policy), policy)
+
     private fun containedThreadFactory(
         tag: String,
         policy: Policy<*, Uncompiled>,
