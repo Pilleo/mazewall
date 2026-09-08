@@ -1,14 +1,49 @@
 package io.mazewall.profiler.tierE.engine
 
+import io.mazewall.LinuxNative.SyscallHandledState
+import io.mazewall.LinuxNative.SyscallResult
 import io.mazewall.RawSyscallOperations
 import io.mazewall.profiler.attribution.TierEEmissionMode
 import io.mazewall.profiler.attribution.TierEOptions
 import java.lang.reflect.Proxy
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class BpfProgLoadLayoutTest {
+    @Test
+    fun `failed install closes every already acquired descriptor`() {
+        var bpfCalls = 0
+        val closed = mutableListOf<Long>()
+        val native = Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(RawSyscallOperations::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "syscall" -> {
+                    val number = args[0] as Long
+                    when (number) {
+                        321L -> when (++bpfCalls) {
+                            1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
+                            else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1)
+                        }
+                        3L -> {
+                            closed += (args[1] as io.mazewall.core.NativeArg.LongArg).value
+                            SyscallResult.Success<Long, SyscallHandledState.Unhandled>(0L)
+                        }
+                        else -> error("unexpected syscall $number")
+                    }
+                }
+                else -> error("unexpected raw operation ${method.name}")
+            }
+        } as RawSyscallOperations
+
+        assertFailsWith<IllegalStateException> { TierEbpfEngine(native).install(42) }
+
+        assertEquals(listOf(71L), closed)
+    }
+
     @Test
     fun `uses the linux bpf prog load attribute offsets`() {
         assertEquals(16L, BpfProgLoadLayout.LICENSE)

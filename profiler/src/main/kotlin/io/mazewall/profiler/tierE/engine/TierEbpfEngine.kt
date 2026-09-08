@@ -96,25 +96,30 @@ public class TierEbpfEngine(
         val imm: Int = 0,
     )
 
-    @Volatile private var invocationStorageFd: Int = -1
+    private enum class Lifecycle { DETACHED, INSTALLING, ATTACHED, CLOSING, CLOSED }
 
-    @Volatile private var invocationBtfFd: Int = -1
+    /**
+     * The complete ownership set for one installation. It is deliberately not
+     * published until every acquisition succeeds, so a failed install has one
+     * reverse-order rollback path instead of nine independently visible FDs.
+     */
+    private class Resources {
+        var invocationStorageFd: Int = -1
+        var invocationBtfFd: Int = -1
+        var ringFd: Int = -1
+        var lossFd: Int = -1
+        var sessionFd: Int = -1
+        var coverageEdgeFd: Int = -1
+        var progFd: Int = -1
+        var markerProgFd: Int = -1
+        var linkFd: Int = -1
+        val markerPerfFds = mutableListOf<Int>()
+        var ringReader: BpfRingBufferReader? = null
+    }
 
-    @Volatile private var ringFd: Int = -1
-
-    @Volatile private var lossFd: Int = -1
-
-    @Volatile private var sessionFd: Int = -1
-
-    @Volatile private var coverageEdgeFd: Int = -1
-
-    @Volatile private var progFd: Int = -1
-
-    @Volatile private var markerProgFd: Int = -1
-    private val markerPerfFds = mutableListOf<Int>()
-
-    @Volatile private var linkFd: Int = -1
-    private var ringReader: BpfRingBufferReader? = null
+    private val lifecycleLock = Any()
+    private var lifecycle = Lifecycle.DETACHED
+    private var resources: Resources? = null
     private var options: TierEOptions = TierEOptions()
 
     public fun install(targetTgid: Int) {
@@ -131,39 +136,57 @@ public class TierEbpfEngine(
         }
         require(targetTgid > 0)
         require(sessionTag > 0) { "session tag must be positive" }
-        check(invocationStorageFd < 0) { "already installed" }
-        this.options = options
-        invocationBtfFd = loadBtf(InvocationStateBtf.load())
-        invocationStorageFd = createMap(
+        val installed = synchronized(lifecycleLock) {
+            check(lifecycle == Lifecycle.DETACHED || lifecycle == Lifecycle.CLOSED) { "already installed or closing" }
+            lifecycle = Lifecycle.INSTALLING
+            Resources()
+        }
+        try {
+            this.options = options
+            installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
+            installed.invocationStorageFd = createMap(
             type = MAP_TASK_STORAGE,
             keySize = 4,
             valueSize = 24,
             maxEntries = 0,
             mapFlags = BPF_F_NO_PREALLOC,
-            btfFd = invocationBtfFd,
+            btfFd = installed.invocationBtfFd,
             btfKeyTypeId = InvocationStateBtf.taskStorageKeyTypeId(),
             btfValueTypeId = InvocationStateBtf.invocationStateTypeId(),
         )
-        ringFd = createMap(MAP_RINGBUF, keySize = 0, valueSize = 0, maxEntries = RING_CAPACITY)
-        if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
-            coverageEdgeFd = createMap(MAP_LRU_HASH, keySize = 16, valueSize = 8, maxEntries = COVERAGE_EDGE_CAPACITY)
-        }
-        lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 4)
-        sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 1)
-        Arena.ofConfined().use { arena ->
+            installed.ringFd = createMap(MAP_RINGBUF, keySize = 0, valueSize = 0, maxEntries = RING_CAPACITY)
+            if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
+                installed.coverageEdgeFd = createMap(MAP_LRU_HASH, keySize = 16, valueSize = 8, maxEntries = COVERAGE_EDGE_CAPACITY)
+            }
+            installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 4)
+            installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 1)
+            Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(8, 4)
             configuration.set(ValueLayout.JAVA_INT, 0, sessionTag)
             configuration.set(ValueLayout.JAVA_INT, 4, targetTgid)
-            updateElem(arena, sessionFd, intSeg(arena, 0), configuration)
-        }
-        markerProgFd = loadProg(buildMarkerProgram(), listOf(invocationStorageFd, lossFd, sessionFd), PROG_KPROBE, "tier_e_marker")
-        progFd = loadProg(
+                updateElem(arena, installed.sessionFd, intSeg(arena, 0), configuration)
+            }
+            installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd, installed.lossFd, installed.sessionFd), PROG_KPROBE, "tier_e_marker")
+            installed.progFd = loadProg(
             buildProgram(),
-            listOf(invocationStorageFd, ringFd, lossFd, sessionFd, coverageEdgeFd),
+            listOf(installed.invocationStorageFd, installed.ringFd, installed.lossFd, installed.sessionFd, installed.coverageEdgeFd),
             PROG_RAW_TP,
             "tier_e_syscall",
         )
-        linkFd = openRawTp(progFd, "sys_enter")
+            installed.linkFd = openRawTp(installed.progFd, "sys_enter")
+            synchronized(lifecycleLock) {
+                resources = installed
+                lifecycle = Lifecycle.ATTACHED
+            }
+        } catch (failure: Throwable) {
+            try {
+                closeResources(installed)
+            } catch (cleanupFailure: Throwable) {
+                failure.addSuppressed(cleanupFailure)
+            }
+            synchronized(lifecycleLock) { lifecycle = Lifecycle.DETACHED }
+            throw failure
+        }
     }
 
     /** Number of kernel observations lost because the ring buffer was full. */
@@ -178,11 +201,11 @@ public class TierEbpfEngine(
 
     private fun readCounter(index: Int): Long =
         Arena.ofConfined().use { arena ->
-        require(lossFd >= 0) { "engine is not installed" }
+        val installed = requireInstalled()
         val key = intSeg(arena, index)
         val value = arena.allocate(8, 8)
         val attr = arena.allocate(24)
-        attr.set(ValueLayout.JAVA_INT, 0, lossFd)
+        attr.set(ValueLayout.JAVA_INT, 0, installed.lossFd)
         attr.set(ValueLayout.ADDRESS, 8, key)
         attr.set(ValueLayout.ADDRESS, 16, value)
         bpfCall(H_LOOKUP.toLong(), attr, 24)
@@ -194,7 +217,7 @@ public class TierEbpfEngine(
         agentLibrary: Path,
         markerOffset: Long,
     ) {
-        require(markerProgFd >= 0) { "engine is not installed" }
+        val installed = requireInstalled()
         require(targetPid > 0 && markerOffset >= 0)
         require(Files.isRegularFile(agentLibrary)) { "agent library does not exist: $agentLibrary" }
         val uprobeType = Files.readString(Path.of("/sys/bus/event_source/devices/uprobe/type")).trim().toInt()
@@ -219,8 +242,8 @@ public class TierEbpfEngine(
                     NativeArg.LongArg(PERF_FLAG_FD_CLOEXEC),
                 ).getOrThrow("perf_event_open(uprobe,cpu=$cpu)")
                     .toInt()
-                markerPerfFds += fd
-                rawIoctl(fd, PERF_EVENT_IOC_SET_BPF, markerProgFd.toLong())
+                installed.markerPerfFds += fd
+                rawIoctl(fd, PERF_EVENT_IOC_SET_BPF, installed.markerProgFd.toLong())
                 rawIoctl(fd, PERF_EVENT_IOC_ENABLE, 0)
             }
         }
@@ -228,42 +251,58 @@ public class TierEbpfEngine(
 
     /** Drains committed syscall records without waiting or timestamp correlation. */
     public fun drainEvents(): List<SyscallInvocationEvent> {
-        require(ringFd >= 0) { "engine is not installed" }
-        val reader = ringReader ?: BpfRingBufferReader(native, ringFd, RING_CAPACITY.toLong(), EVENT_SIZE).also {
-            ringReader = it
+        val installed = requireInstalled()
+        val reader = installed.ringReader ?: BpfRingBufferReader(native, installed.ringFd, RING_CAPACITY.toLong(), EVENT_SIZE).also {
+            installed.ringReader = it
         }
         return reader.drain().map(SyscallInvocationEvent::fromBytes)
     }
 
     override fun close() {
+        val installed = synchronized(lifecycleLock) {
+            if (lifecycle == Lifecycle.CLOSED || lifecycle == Lifecycle.DETACHED) return
+            lifecycle = Lifecycle.CLOSING
+            resources.also { resources = null }
+        }
+        installed?.let(::closeResources)
+        synchronized(lifecycleLock) { lifecycle = Lifecycle.CLOSED }
+    }
+
+    private fun requireInstalled(): Resources =
+        synchronized(lifecycleLock) {
+        check(lifecycle == Lifecycle.ATTACHED) { "engine is not installed" }
+        requireNotNull(resources)
+    }
+
+    private fun closeResources(installed: Resources) {
         var cleanupFailure: Throwable? = null
         try {
-            ringReader?.close()
-        } catch (expectedCleanupFailure: Throwable) {
-            cleanupFailure = expectedCleanupFailure
-        } finally {
-            ringReader = null
+            installed.ringReader?.close()
+        } catch (failure: Throwable) {
+            cleanupFailure = failure
         }
-        markerPerfFds.forEach(::closeIfOpen)
-        markerPerfFds.clear()
-        closeIfOpen(linkFd)
-        linkFd = -1
-        closeIfOpen(progFd)
-        progFd = -1
-        closeIfOpen(markerProgFd)
-        markerProgFd = -1
-        closeIfOpen(ringFd)
-        ringFd = -1
-        closeIfOpen(lossFd)
-        lossFd = -1
-        closeIfOpen(sessionFd)
-        sessionFd = -1
-        closeIfOpen(coverageEdgeFd)
-        coverageEdgeFd = -1
-        closeIfOpen(invocationStorageFd)
-        invocationStorageFd = -1
-        closeIfOpen(invocationBtfFd)
-        invocationBtfFd = -1
+        installed.ringReader = null
+
+        fun close(fd: Int) {
+            try {
+                closeIfOpen(fd)
+            } catch (failure: Throwable) {
+                cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
+            }
+        }
+        installed.markerPerfFds.asReversed().forEach(::close)
+        installed.markerPerfFds.clear()
+        listOf(
+            installed.linkFd,
+            installed.progFd,
+            installed.markerProgFd,
+            installed.ringFd,
+            installed.lossFd,
+            installed.sessionFd,
+            installed.coverageEdgeFd,
+            installed.invocationStorageFd,
+            installed.invocationBtfFd,
+        ).forEach(::close)
         cleanupFailure?.let { throw it }
     }
 
