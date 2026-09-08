@@ -29,7 +29,6 @@ import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import java.io.BufferedInputStream
 import java.io.DataInputStream
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -125,10 +124,15 @@ internal class JVMValidationListener(
             try {
                 // Read handshake ACK
                 System.err.println("[JVM-VALIDATION] reading handshake ACK...")
-                val ack = dis.readByte()
+                val ack = dis.readUnsignedByte()
                 System.err.println("[JVM-VALIDATION] handshake ACK received: $ack")
-                if (ack != PROTOCOL_ACK_BYTE) {
-                    logger.warning("Invalid handshake ACK: $ack")
+                when (val handshake = SupervisorValidationDecoder.handshake(ack)) {
+                    SupervisorValidationDecodeResult.HandshakeAccepted -> Unit
+                    is SupervisorValidationDecodeResult.ProtocolViolation -> {
+                        logger.warning(handshake.reason)
+                        return
+                    }
+                    is SupervisorValidationDecodeResult.Arguments -> error("handshake decoder returned arguments")
                 }
             } finally {
                 readyLatch.countDown()
@@ -146,7 +150,14 @@ internal class JVMValidationListener(
                 val nr = dis.readInt()
                 val argCount = dis.readInt()
 
-                val argsList = readRequestArgs(dis, argCount)
+                val argsList = when (val decoded = SupervisorValidationDecoder.arguments(dis, argCount)) {
+                    is SupervisorValidationDecodeResult.Arguments -> decoded.values
+                    is SupervisorValidationDecodeResult.ProtocolViolation -> {
+                        logger.warning(decoded.reason)
+                        break
+                    }
+                    SupervisorValidationDecodeResult.HandshakeAccepted -> error("argument decoder accepted a handshake")
+                }
                 System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppidVal, nr=$nr, args=$argsList")
 
                 val traceeArch = Arch.fromAudit(archVal)
@@ -353,34 +364,6 @@ internal class JVMValidationListener(
                 }
         }
         return tid
-    }
-
-    private fun readRequestArgs(
-        dis: DataInputStream,
-        argCount: Int,
-    ): List<Any> {
-        val argsList = java.util.ArrayList<Any>(argCount)
-        for (i in 0 until argCount) {
-            val type = dis.readByte()
-            when (type.toInt()) {
-                0 -> { // Long
-                    argsList.add(dis.readLong())
-                }
-                1 -> { // String
-                    val len = dis.readInt()
-                    val bytes = ByteArray(len)
-                    dis.readFully(bytes)
-                    argsList.add(String(bytes, StandardCharsets.UTF_8))
-                }
-                2 -> { // SockAddr bytes
-                    val len = dis.readInt()
-                    val bytes = ByteArray(len)
-                    dis.readFully(bytes)
-                    argsList.add(bytes)
-                }
-            }
-        }
-        return argsList
     }
 }
 
