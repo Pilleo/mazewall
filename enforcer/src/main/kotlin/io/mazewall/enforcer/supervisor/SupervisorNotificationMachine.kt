@@ -22,6 +22,17 @@ internal sealed interface JvmVerdict {
     }
 }
 
+/** Raw wire decoding remains open-ended; security routing receives a known verdict only. */
+internal sealed interface JvmVerdictParse {
+    data class Known(
+        val verdict: JvmVerdict,
+    ) : JvmVerdictParse
+
+    data class Unknown(
+        val rawDecision: Int,
+    ) : JvmVerdictParse
+}
+
 internal sealed interface SupervisorRoute {
     public data object Continue : SupervisorRoute
 
@@ -43,18 +54,25 @@ internal object SupervisorNotificationMachine {
         arch: Arch,
     ): SupervisedKind = SupervisedKind.classify(nr, arch)
 
+    fun decodeJvmVerdict(
+        decision: Int,
+        errorNr: Int,
+    ): JvmVerdictParse =
+        when (decision) {
+            JVM_DECISION_DENY -> JvmVerdictParse.Known(JvmVerdict.Deny(errorNr))
+            JVM_DECISION_ALLOW -> JvmVerdictParse.Known(JvmVerdict.Allow)
+            JVM_DECISION_INJECT_FD -> JvmVerdictParse.Known(JvmVerdict.InjectFd)
+            else -> JvmVerdictParse.Unknown(decision)
+        }
+
+    /** Compatibility boundary: unknown peer data is rejected with EPERM. */
     fun parseJvmVerdict(
         decision: Int,
         errorNr: Int,
     ): JvmVerdict =
-        if (decision == JVM_DECISION_DENY) {
-            JvmVerdict.Deny(errorNr)
-        } else if (decision == JVM_DECISION_ALLOW) {
-            JvmVerdict.Allow
-        } else if (decision == JVM_DECISION_INJECT_FD) {
-            JvmVerdict.InjectFd
-        } else {
-            JvmVerdict.Deny(NativeConstants.EPERM)
+        when (val parsed = decodeJvmVerdict(decision, errorNr)) {
+            is JvmVerdictParse.Known -> parsed.verdict
+            is JvmVerdictParse.Unknown -> JvmVerdict.Deny(NativeConstants.EPERM)
         }
 
     private const val JVM_DECISION_DENY = 0

@@ -22,7 +22,7 @@ paperclip_issue_id: "8196b7bc-34ea-42a6-a294-2d8d30aad84e"
 paperclip_identifier: "MAZ-1188"
 ---
 
-# 🔴 [Severity: HIGH]: Require 0xAC ACK on profiler USER_NOTIF noise path
+# 🔴 [Severity: HIGH]: Model ACK-required and suppressed-noise USER_NOTIF paths explicitly
 
 **Context:**
 Profiler `processNotification` is a suppressed cyclomatic mix of parse, path, socket, handshake, and CONTINUE/ERROR. The noise-path helper replies CONTINUE without the `0xAC` ACK loop required for every USER_NOTIF path. `ProfilerArchitectureTest` checks `performHandshake` before `sendSeccompContinue` on `processNotification*`, but a helper that CONTINUE-skips handshake is an accepted exception unless the test names it. Deadlock / lost-wakeup risk if the traced JVM is waiting for ACK.
@@ -36,7 +36,8 @@ Profiler `processNotification` is a suppressed cyclomatic mix of parse, path, so
 3. Run `:profiler:test` and kernel profiler tests if the ACK path is native.
 
 ## Side effects
-- Noise-path CONTINUE without handshake ACK is removed; every USER_NOTIF path must ACK
+- Suppressed-noise CONTINUE remains ACK-free because no JVM event was published;
+  only that explicitly documented branch may bypass the handshake.
 
 ---
 

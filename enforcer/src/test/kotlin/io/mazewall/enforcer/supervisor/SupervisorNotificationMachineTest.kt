@@ -129,6 +129,11 @@ internal class SupervisorNotificationMachineTest {
         assertEquals(JvmVerdict.Deny(NativeConstants.EPERM), SupervisorNotificationMachine.parseJvmVerdict(99, 0))
     }
 
+    @Test
+    fun `unknown jvm decision is represented before fail closed conversion`() {
+        assertEquals(JvmVerdictParse.Unknown(99), SupervisorNotificationMachine.decodeJvmVerdict(99, 0))
+    }
+
     @ParameterizedTest(name = "{0} round-trips wire format")
     @MethodSource("jvmVerdictTestCases")
     fun `jvm verdict wire codes round-trip`(testCase: Pair<JvmVerdict, Int>) {

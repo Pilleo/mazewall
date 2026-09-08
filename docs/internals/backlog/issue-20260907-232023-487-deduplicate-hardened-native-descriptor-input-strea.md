@@ -1,7 +1,7 @@
 ---
 title: "Deduplicate hardened native descriptor input stream"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -23,6 +23,12 @@ SupervisorSocketInputStream and NativeSocketInputStream independently implement 
 
 **Needed:**
 1. Extract the shared implementation into platform without changing descriptor ownership; retain thin module-local adapters only if names are needed.
+
+**Resolution (2026-09-08):** `NativeDescriptorInputStream` is the shared
+platform implementation. `NativeSocketInputStream` and
+`SupervisorSocketInputStream` are thin naming adapters only; both preserve the
+caller-owned arena and externally owned descriptor contract. No duplicate
+EINTR/backoff/EOF implementation remains.
 
 ---
 <!-- id: issue-20260907-232023-487-deduplicate-hardened-native-descriptor-input-strea  file: issue-20260907-232023-487-deduplicate-hardened-native-descriptor-input-strea.md -->
