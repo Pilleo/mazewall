@@ -893,6 +893,7 @@ class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
   + {static}T execute(Policy<?, ?>, Callable<T>)
   +T executeBlock(Policy<?, ?>, Function0<? extends T>)
   +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
+  +int entryCount()
   +List<ExecutorService> cachedPoolsForTest()
   + {static}void shutdownAll()
 }
@@ -1227,7 +1228,7 @@ class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSe
   +boolean processNotification(ManagedSegment, ManagedSegment)
   +Path resolveBypassPath(Path)
   +boolean sendRequestToJvm(NativeArena, JvmVerdictRequest)
-  +boolean readAndHandleJvmResponse(NativeArena, SupervisorRouteContext)
+  +boolean readAndHandleJvmResponse(NativeArena, SupervisorRouteContext, SupervisorSessionState)
   +boolean handleInjectFd(NativeArena, SupervisorRouteContext)
   +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int)
   +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int, OpenHow)

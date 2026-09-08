@@ -100,6 +100,10 @@ For detailed class diagrams and relationship maps of the individual modules:
 - See the [Enforcer Architecture Document](../designs/enforcer/enforcer-architecture.md) for the `:enforcer` module.
 - See the [Profiler Design Document](../designs/profiler/profiler-design.md) for the `:profiler` module.
 
+`architectural-map.md` is the canonical cross-module knowledge map. The module design documents
+above are the canonical locations for their generated PlantUML/SVG class diagrams; do not rely on
+historical `enforcer_map.md` or `profiler_map.md` paths.
+
 ## 5. Critical Memory Layouts (FFM)
 
 If you modify these, you must update both the Kotlin side and the C-side (if applicable).
@@ -177,4 +181,3 @@ configuration-cache provider: those forms either resolve too early or lose produ
 `scripts/check_gradle_lazy_resolution.sh` guards `.asPath` and `.singleFile` uses in build scripts.
 When generating Kotlin build scripts through a shell heredoc, use the correct dollar escaping and
 then inspect the result with `grep -F '${' <file>` so interpolations have not been written literally.
-

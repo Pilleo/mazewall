@@ -47,6 +47,11 @@ interface "FsEffect" as io.mazewall.profiler.FsEffect {
   __
   + {abstract}List<String> getPaths()
 }
+class "ImmutableStackProfile" as io.mazewall.profiler.ImmutableStackProfile {
+  + {static}Companion Companion
+  __
+  +Map<TraceEvent, List<StackTraceElement[]>> snapshot()
+}
 class "IncompleteProfileException" as io.mazewall.profiler.IncompleteProfileException {
   +ProfilingCoverage getCoverage()
 }
@@ -450,8 +455,20 @@ class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
   +List<ProfileObservation> parse(String)
   +ProfileObservation parseLine(String)
 }
+interface "AddressFamily" as io.mazewall.profiler.engine.AddressFamily {
+  + {static}Companion Companion
+}
 interface "DaemonRunner" as io.mazewall.profiler.engine.DaemonRunner {
+  __
   + {abstract}void runDaemon(String[])
+}
+class "IpProtocol" as io.mazewall.profiler.engine.IpProtocol {
+  +int getRaw()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
 }
 class "MmapFileDescriptor" as io.mazewall.profiler.engine.MmapFileDescriptor {
   +int getValue()
@@ -477,6 +494,9 @@ class "MmapProtection" as io.mazewall.profiler.engine.MmapProtection {
   + {static}boolean equals-impl(int, Object)
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
+}
+interface "ObservedSyscall" as io.mazewall.profiler.engine.ObservedSyscall {
+  + {static}Companion Companion
 }
 class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
   + {static}PathNormalizerHelper INSTANCE
@@ -594,6 +614,14 @@ class "SessionEventLedger" as io.mazewall.profiler.engine.SessionEventLedger {
   +void record(SessionEvent)
   +List<SessionEvent> dump()
 }
+class "SocketType" as io.mazewall.profiler.engine.SocketType {
+  +int getRaw()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
 class "SyscallEvent" as io.mazewall.profiler.engine.SyscallEvent<S extends SyscallEventState> {
   +int getTid()
   +String getSyscallName()
@@ -617,9 +645,17 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   + {abstract}int getTid()
   + {abstract}String getSyscallName()
   + {abstract}List<String> getStackTrace()
+  +ObservedSyscall getObservedSyscall()
   +List<String> getPaths()
   +StackTraceElement[] getJvmStackTrace()
   +void setJvmStackTrace(StackTraceElement[])
+}
+class "TraceEventKey" as io.mazewall.profiler.engine.TraceEventKey {
+  +String getKind()
+  +List<Object> getValues()
+}
+class "TraceEventKeyKt" as io.mazewall.profiler.engine.TraceEventKeyKt {
+  + {static}TraceEventKey behavioralKey(TraceEvent)
 }
 class "TransportNativeEngine" as io.mazewall.profiler.engine.TransportNativeEngine {
   +RawSyscallOperations getRaw()
@@ -956,9 +992,10 @@ class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRu
   + {static}void main(String[])
 }
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.BillOfBehavior
+io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.ImmutableStackProfile
 io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.NetworkEndpoint
-io.mazewall.profiler.BillOfBehavior --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.EbpfCapability --> io.mazewall.profiler.EbpfCapability
+io.mazewall.profiler.ImmutableStackProfile --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.IncompleteProfileException --> io.mazewall.profiler.ProfilingCoverage
 io.mazewall.profiler.JvmBaselineProfiles --> io.mazewall.profiler.JvmBaselineProfiles
 io.mazewall.profiler.MazewallProfiler --> io.mazewall.profiler.ProfileStrategy
@@ -978,9 +1015,9 @@ io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.StackAttribution
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileEnvironment
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.PathResolutionQuality
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.BillOfBehavior
+io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ImmutableStackProfile
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.ProfilingCoverage
-io.mazewall.profiler.ProfilingResult --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.attribution.AgentDefinitionFile --> io.mazewall.profiler.attribution.AgentDefinitionFile
 io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.StackTraceId
 io.mazewall.profiler.attribution.AttributionCollector --> io.mazewall.profiler.attribution.SyscallAttribution

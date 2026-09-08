@@ -1,7 +1,7 @@
 ---
 title: "Make portal frames and machine payloads deeply immutable"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -23,6 +23,12 @@ PortalFrame publicly exposes a mutable ByteArray and PortalBrokerCall/PortalWork
 
 **Needed:**
 1. Introduce a defensively copied immutable byte payload boundary (without adding dependencies), then make frame and effect constructors/accessors preserve it.
+
+**Resolution (2026-09-08):** `PortalPayload` owns a copied private byte array and exposes only
+`copyToByteArray()`. `PortalFrame` accepts either that immutable boundary or a compatibility
+`ByteArray` constructor which creates one. `PortalFrameTest.frame owns a stable payload copy`
+proves both ingress and egress mutation cannot change a frame; portal and worker state machines
+therefore retain immutable payload values while wire framing remains byte-for-byte unchanged.
 
 ---
 <!-- id: issue-20260907-232023-077-make-portal-frames-and-machine-payloads-deeply-imm  file: issue-20260907-232023-077-make-portal-frames-and-machine-payloads-deeply-imm.md -->
