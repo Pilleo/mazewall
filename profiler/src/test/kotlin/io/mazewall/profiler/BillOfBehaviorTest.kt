@@ -17,6 +17,17 @@ import kotlin.test.assertTrue
 
 class BillOfBehaviorTest {
     @Test
+    fun `copy equality and hash code use immutable behavior fields`() {
+        val original = BillOfBehavior(opens = setOf("/tmp/input"))
+        val equivalent = original.copy()
+        val changed = original.copy(execs = setOf("/usr/bin/tool"))
+
+        assertEquals(original, equivalent)
+        assertEquals(original.hashCode(), equivalent.hashCode())
+        assertFalse(original == changed)
+    }
+
+    @Test
     fun `behavior and result snapshot stack-frame arrays`() {
         val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
         val source = arrayOf(StackTraceElement("Original", "read", "File.kt", 1))
