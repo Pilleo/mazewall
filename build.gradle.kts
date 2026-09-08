@@ -704,12 +704,12 @@ tasks.register("updateClassDiagrams") {
  */
 val detektWarningFingerprints =
     mapOf(
-        "enforcer" to "959cb2aea1110a1a7c0906ce1d2804ffb507ef55fe56d41c23ad133d7d4b0117",
-        "platform" to "075eaa680f51cbe824d17495458958150fe352e1604748ddde5d0f3324b7d896",
-        "portal-codegen" to "8c066157e3101d69e60ffbc164a7a9dccfa0c98fe1ee3a10a6b592c5240b8388",
-        "portal-worker" to "e76dacb8464ed0b4a83e7f95cebebaa2f26b7fea491659a1cbe2efaf8f0e6d36",
-        "portal" to "df9e7bd024e19cfbf1ce0c2534d0f5776904c8ed3f2f180f658a6854461c4414",
-        "profiler" to "bef5f0bd2c0067772df4ea6ad6b569d34f7fe0af172db8ad5fe2c27ae2a8fec1",
+        "enforcer" to "5e6656bacf7590027364f7e5801ff39ce167c2240b9c23589ef823084bf93bd2",
+        "platform" to "5bfb2965985ee2345ba5e740a84f21e6b451b03e693cc73855aae7f375d2cfd1",
+        "portal-codegen" to "5a832f30776e0ab44844c93a735faf53e60e40d8271149c85093860709148871",
+        "portal-worker" to "4139e6ae293825d416218ae2a68c43577372b3988065c94d0ab40d526d8e0063",
+        "portal" to "7c412005e81381c78c85615582f63265af70901717c3f26efd0f62c15506f0be",
+        "profiler" to "85099423ef9e78b39ebb82fefb5c7f1fe88aafdab92645afd245f9cd8856af58",
     )
 
 tasks.register("detektWarningRatchet") {
@@ -726,7 +726,15 @@ tasks.register("detektWarningRatchet") {
                         .file("reports/detekt/main.xml")
                         .get()
                         .asFile
-                val normalized = report.readText().replace(Regex("""(line|column)=\"\\d+\""""), "")
+                var file = ""
+                val normalized =
+                    report
+                        .readLines()
+                        .mapNotNull { line ->
+                            Regex("""<file name=\"([^\"]+)\">""").find(line)?.let { file = it.groupValues[1] }
+                            if (!line.contains("severity=\"warning\"")) null
+                            else "$file|${line.replace(Regex("""(line|column)=\"\d+\""""), "")}"
+                        }.sorted().joinToString("\n")
                 val fingerprint =
                     MessageDigest
                         .getInstance("SHA-256")
@@ -742,7 +750,18 @@ tasks.register("detektWarningRatchet") {
 }
 
 tasks.named("check") {
-    dependsOn("detektWarningRatchet")
+    dependsOn("detektWarningRatchet", "validateBacklogIndex")
+}
+
+tasks.register("validateBacklogIndex") {
+    group = "verification"
+    description = "Ensures the backlog index has one authoritative summary line"
+    doLast {
+        val index = rootProject.file("docs/internals/backlog/README.md")
+        val summaries = Regex("""^\*Total Active Issues:\* \d+ \| \*Total Resolved Issues:\* \d+$""", RegexOption.MULTILINE)
+            .findAll(index.readText()).count()
+        check(summaries == 1) { "Backlog index must contain exactly one total summary, found $summaries" }
+    }
 }
 
 // RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git

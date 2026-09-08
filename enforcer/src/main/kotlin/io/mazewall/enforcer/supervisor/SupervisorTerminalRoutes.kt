@@ -20,19 +20,15 @@ internal interface SupervisorResponseSender {
 internal class SupervisorTerminalRoutes(
     private val sender: SupervisorResponseSender,
 ) {
+    private val replies = SupervisorReplyInterpreter(sender)
+
     fun execute(
         route: SupervisorRoute,
         context: SupervisorRouteContext,
     ): Boolean? =
         when (route) {
-        is SupervisorRoute.Continue -> {
-            sender.continueNotification(context.request.id, context.response)
-            true
-        }
-        is SupervisorRoute.Abort -> {
-            sender.abortNotification(context.request.id, route.errno, context.response)
-            true
-        }
+        is SupervisorRoute.Continue -> replies.execute(context.request.id, context.response, SupervisorReplyInterpreter.Decision.Continue)
+        is SupervisorRoute.Abort -> replies.execute(context.request.id, context.response, SupervisorReplyInterpreter.Decision.Abort(route.errno))
         is SupervisorRoute.AskJvm,
         is SupervisorRoute.InjectFd,
         is SupervisorRoute.SecureExec,
@@ -43,7 +39,7 @@ internal class SupervisorTerminalRoutes(
         context: SupervisorRouteContext,
         errno: Int,
     ): Boolean {
-        sender.abortNotification(context.request.id, errno, context.response)
+        replies.execute(context.request.id, context.response, SupervisorReplyInterpreter.Decision.Abort(errno))
         return false
     }
 }

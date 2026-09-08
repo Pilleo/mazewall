@@ -68,7 +68,22 @@ public object PortalDispatcherRegistry {
         return count
     }
 
-    private fun registerEntry(entry: String) {
+    /** Startup-only bootstrap: malformed or duplicate handlers abort before dispatch is enabled. */
+    public fun bootstrapStrict(raw: String?): Int {
+        if (raw.isNullOrBlank()) {
+            freeze()
+            return 0
+        }
+        val entries = raw.split(',').map(String::trim)
+        entries.forEach { registerEntry(it, replace = false) }
+        freeze()
+        return entries.size
+    }
+
+    private fun registerEntry(
+        entry: String,
+        replace: Boolean = true,
+    ) {
         require(entry.isNotEmpty()) { "empty entry" }
         val parts = entry.split(';')
         val servicePair = parts[0].split('=')
@@ -96,8 +111,13 @@ public object PortalDispatcherRegistry {
         // One closure per id keeps the typed generated method exact without re-parsing.
         for (id in methodIds) {
             val method = PortalMethod.Generated(id)
-            handlers[method] = { generatedMethod, payload, granted ->
+            val registered: Handler = { generatedMethod, payload, granted ->
                 handle.invoke(dispatcherObject, impl, generatedMethod, payload, granted) as ByteArray
+            }
+            if (replace) {
+                handlers[method] = registered
+            } else {
+                check(handlers.putIfAbsent(method, registered) == null) { "duplicate portal method id: $id" }
             }
         }
     }

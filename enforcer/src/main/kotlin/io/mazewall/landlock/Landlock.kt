@@ -231,15 +231,11 @@ object Landlock {
             io.mazewall.core.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
         )
-        return when (result) {
-            is LinuxNative.SyscallResult.Success -> result.value.toInt()
-            is LinuxNative.SyscallResult.Error -> when (result.errno) {
-                // These mean the optional kernel facility is unavailable, not that enforcement was denied.
-                NativeConstants.ENOSYS,
-                NativeConstants.EOPNOTSUPP,
-                -> 0
-                else -> result.throwErrno("query Landlock ABI version")
-            }
+        return when (val outcome = LandlockCapabilityProbe.classify(result)) {
+            is LandlockCapabilityProbe.Outcome.Supported -> outcome.abi
+            LandlockCapabilityProbe.Outcome.Unsupported -> 0
+            is LandlockCapabilityProbe.Outcome.Rejected ->
+                error("query Landlock ABI version failed with errno=${outcome.errno}")
         }
     }
 

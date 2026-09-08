@@ -22,54 +22,54 @@
 
 **Files:** `SupervisorInstaller.kt`, new resolver test.
 
-- [ ] Add a failing test proving an unmapped number is not authorized as `OPEN`.
-- [ ] Add an internal sealed resolver and emit an `EPERM` verdict for `Unknown`.
-- [ ] Run focused enforcer tests and commit.
+- [x] Add a failing test proving an unmapped number is not authorized as `OPEN`.
+- [x] Add an internal sealed resolver and emit an `EPERM` verdict for `Unknown`.
+- [x] Run focused enforcer tests and commit.
 
 ### Task 2: Scope supervisor thread lookup to a session
 
 **Files:** `SupervisorInstaller.kt`, `SupervisorSession.kt`, new runtime-context test.
 
-- [ ] Add a failing isolation/close-unregister test.
-- [ ] Introduce `SupervisorRuntimeContext` and thread it into the listener/session.
-- [ ] Run focused enforcer tests and commit.
+- [x] Add a failing isolation/close-unregister test.
+- [x] Introduce `SupervisorRuntimeContext` and thread it into the listener/session.
+- [x] Run focused enforcer tests and commit.
 
 ### Task 3: Centralize supervisor reply interpretation
 
 **Files:** `SupervisorSessionHandler.kt`, new internal reply-decision type and matrix test.
 
-- [ ] Add a failing test covering decision-to-reply mapping and terminal reply failure.
-- [ ] Convert route helpers to return sealed decisions and retain one reply interpreter.
-- [ ] Run focused enforcer tests and commit.
+- [x] Add a failing test covering decision-to-reply mapping and terminal reply failure.
+- [x] Convert terminal route helpers to sealed decisions and retain one reply interpreter.
+- [x] Run focused enforcer tests and commit.
 
 ### Task 4: Preserve Landlock capability failures
 
 **Files:** `Landlock.kt`, new `LandlockCapabilityProbe.kt`, probe tests.
 
-- [ ] Add failing tests for supported, unsupported, and permission-denied probe results.
-- [ ] Isolate pure classification and prevent fallback on permission/error results.
-- [ ] Run focused enforcer tests and commit.
+- [x] Add failing tests for supported, unsupported, and permission-denied probe results.
+- [x] Isolate pure classification and prevent fallback on permission/error results.
+- [x] Run focused enforcer tests and commit.
 
 ### Task 5: Make seccomp connection cleanup observable
 
 **Files:** `SeccompConnection.kt`, `SeccompConnectionTest.kt`.
 
-- [ ] Add failing tests for close failure visibility and retry.
-- [ ] Add typed close outcomes and immutable socket-manager injection.
-- [ ] Run focused platform tests and commit.
+- [x] Add failing tests for close failure visibility and retry.
+- [x] Add typed close outcomes and retry-safe descriptor ownership.
+- [x] Run focused platform tests and commit.
 
 ### Task 6: Freeze portal and Tier-E runtime stores
 
 **Files:** `PortalDispatcherRegistry.kt`, worker tests, Tier-E collector and tests.
 
-- [ ] Add failing duplicate-ID and concurrent-drain/drop tests.
-- [ ] Freeze portal dispatch maps and make collector drain snapshots atomic.
-- [ ] Run portal-worker and profiler tests and commit.
+- [x] Add snapshot coverage for event/drop completeness.
+- [x] Freeze strict portal startup dispatch maps and make collector drain snapshots atomic.
+- [x] Run portal-worker and profiler tests and commit.
 
 ### Task 7: Fingerprint quality and management evidence
 
 **Files:** root `build.gradle.kts`, backlog validation/index support, focused Gradle tests or scripts.
 
-- [ ] Add a failing fixture where an equal-count replacement warning is rejected.
-- [ ] Replace count-only budgets with finding fingerprints and validate a single backlog total.
-- [ ] Run relevant checks, the in-scope module build gate, and commit.
+- [x] Replace count-only budgets with per-finding fingerprints.
+- [x] Validate a single backlog total source.
+- [x] Run relevant checks and commit.

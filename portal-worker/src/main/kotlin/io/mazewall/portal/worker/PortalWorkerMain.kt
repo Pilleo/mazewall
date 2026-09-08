@@ -42,7 +42,7 @@ public object PortalWorkerMain {
         System.out.flush()
         // Generated service dispatchers must be registered before the first request
         // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
-        val registered = PortalDispatcherRegistry.bootstrapFromProperty(
+        val registered = PortalDispatcherRegistry.bootstrapStrict(
             System.getProperty("io.mazewall.portal.worker.dispatchers"),
         )
         if (registered > 0) println("[DBG-W] registered=$registered generated dispatcher(s)")
