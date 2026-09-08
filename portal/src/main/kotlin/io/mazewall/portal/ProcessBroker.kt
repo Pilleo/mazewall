@@ -16,6 +16,8 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * Owns a pool of portal worker JVMs and Unix RPC sockets.
@@ -37,6 +39,8 @@ public class ProcessBroker(
     public companion object {
         public const val WORKER_CLASSPATH_PROPERTY: String = "io.mazewall.portal.worker.classpath"
     }
+
+    private val logger: Logger = Logger.getLogger(ProcessBroker::class.java.name)
 
     private val nextId = AtomicInteger(1)
     private val idle = ArrayBlockingQueue<WorkerSlot>(poolSize)
@@ -300,18 +304,13 @@ public class ProcessBroker(
 
     private fun destroySlot(slot: WorkerSlot) {
         trackedSlots.remove(slot)
-        try {
-            slot.channel.close()
-        } catch (_: Exception) {
-        }
-        try {
-            sockets.close(slot.server)
-        } catch (_: Exception) {
-        }
-        slot.process.destroyForcibly()
-        try {
-            slot.endpoint.close()
-        } catch (_: Exception) {
+        val cleanup = CleanupCollector()
+        cleanup.attempt("worker RPC channel") { slot.channel.close() }
+        cleanup.attempt("worker listener socket") { sockets.close(slot.server) }
+        cleanup.attempt("worker process") { slot.process.destroyForcibly() }
+        cleanup.attempt("worker endpoint") { slot.endpoint.close() }
+        cleanup.outcome().failures.forEach { failure ->
+            logger.log(Level.WARNING, "failed to release ${failure.resource}", failure.cause)
         }
     }
 
