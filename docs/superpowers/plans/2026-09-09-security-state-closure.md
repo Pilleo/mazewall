@@ -55,7 +55,7 @@
 **Files:** `SeccompConnection.kt`, `SeccompConnectionTest.kt`.
 
 - [x] Add failing tests for close failure visibility and retry.
-- [x] Add typed close outcomes and retry-safe descriptor ownership.
+- [x] Add typed close outcomes, retry-safe descriptor ownership, and write-once socket-manager injection.
 - [x] Run focused platform tests and commit.
 
 ### Task 6: Freeze portal and Tier-E runtime stores
