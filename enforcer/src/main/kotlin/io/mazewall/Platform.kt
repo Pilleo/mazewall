@@ -32,6 +32,10 @@ public object Platform {
     @Volatile
     private var cachedMatrix: KernelFeatureMatrix? = null
 
+    /** Bumps whenever the test/runtime provider changes; probe results never cross generations. */
+    @Volatile
+    private var providerGeneration: Long = 0
+
     /**
      * Immutable matrix of supported Linux kernel features.
      */
@@ -43,7 +47,12 @@ public object Platform {
             synchronized(this) {
                 val secondCheck = cachedMatrix
                 if (secondCheck != null) return secondCheck
-                val resolved = KernelFeatureMatrix.resolve(provider)
+                val capturedProvider = provider
+                val capturedGeneration = providerGeneration
+                val resolved = KernelFeatureMatrix.resolve(capturedProvider)
+                if (providerGeneration != capturedGeneration || provider !== capturedProvider) {
+                    return featureMatrix
+                }
                 cachedMatrix = resolved
                 return resolved
             }
@@ -56,6 +65,7 @@ public object Platform {
     public fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
             provider = newProvider
+            providerGeneration++
             cachedMatrix = null
             isCpuCetSupportedCached = null
         }
@@ -68,6 +78,7 @@ public object Platform {
     public fun resetToDefault() {
         synchronized(this) {
             provider = RealPlatformProvider
+            providerGeneration++
             cachedMatrix = null
             isCpuCetSupportedOverride = null
             isCpuCetSupportedCached = null
@@ -245,8 +256,10 @@ public object Platform {
         if (cached != null) return cached
 
         // Delegate to the current provider's probe
-        val result = provider.probeCetSupported()
-
+        val capturedProvider = provider
+        val capturedGeneration = providerGeneration
+        val result = capturedProvider.probeCetSupported()
+        if (providerGeneration != capturedGeneration || provider !== capturedProvider) return isCpuCetSupported()
         isCpuCetSupportedCached = result
         return result
     }
