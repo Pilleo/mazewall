@@ -71,16 +71,13 @@ public object PortalWorkerMain {
                     }
                 val received = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FrameReceived(frame))
                 state = received.state
-                val dispatch = when (received) {
-                    is PortalWorkerTransition.Dispatch -> received
-                    is PortalWorkerTransition.Await,
-                    is PortalWorkerTransition.Close,
-                    is PortalWorkerTransition.Send,
-                    -> {
+                val dispatch = when (val action = PortalWorkerTransitionInterpreter.interpret(received)) {
+                    is PortalWorkerLoopAction.Dispatch -> action
+                    PortalWorkerLoopAction.Continue -> {
                         fds.forEach { sockets.close(it) }
                         continue
                     }
-                    is PortalWorkerTransition.ProtocolViolation -> {
+                    is PortalWorkerLoopAction.Terminate -> {
                         fds.forEach { sockets.close(it) }
                         break@serve
                     }
