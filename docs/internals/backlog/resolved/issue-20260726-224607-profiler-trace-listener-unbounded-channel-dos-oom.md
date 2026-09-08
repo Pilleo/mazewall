@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 19cc5f8c-8abe-4077-850d-b6280c8dfa81
+paperclip_identifier: MAZ-387
 ---
 
 # 🔴 [Severity: HIGH]: Profiler Trace Listener Unbounded Channel DoS / OOM Vulnerability

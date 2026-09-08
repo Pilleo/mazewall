@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 93e31907-33e7-4291-af08-cd54080dea85
+paperclip_identifier: MAZ-297
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing Thread-Safety in `ProcessStateRegistry` Updates

@@ -11,9 +11,10 @@ object DependencyGraph {
         }
 
         // Sort HIGH > MEDIUM > LOW, then ID descending
-        return unblockedIssues.sortedWith(
+        return unblockedIssues
+            .sortedWith(
             compareByDescending<BacklogIssue> { it.priority.rank }
-                .thenByDescending { it.id }
+                .thenByDescending { it.id },
         ).firstOrNull()
     }
 }

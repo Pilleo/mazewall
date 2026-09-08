@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 6e98e171-e04b-4080-b33b-ea1568993f81
+paperclip_identifier: MAZ-298
 ---
 
 # 🔴 [Severity: HIGH]: Incomplete Architecture Verification in BPF Compiler

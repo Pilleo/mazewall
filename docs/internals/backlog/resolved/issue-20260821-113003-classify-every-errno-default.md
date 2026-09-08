@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819751071
+paperclip_issue_id: d5fcd2ba-6a49-477a-8177-5a14e62af83d
+paperclip_identifier: MAZ-548
 ---
 
 # 🟡 [Severity: MEDIUM]: Classify every errno default as an allow list

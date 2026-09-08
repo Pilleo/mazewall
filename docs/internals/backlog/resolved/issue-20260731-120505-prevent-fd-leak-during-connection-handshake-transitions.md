@@ -12,6 +12,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 457
+paperclip_issue_id: 9b1aeb67-cb42-4dce-b900-43eb2a249c8c
+paperclip_identifier: MAZ-440
 ---
 
 # 🔴 [Severity: HIGH]: Prevent FD Leak during Connection Handshake Transitions in ProfilerDaemonEngine

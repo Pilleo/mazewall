@@ -3,6 +3,8 @@ title: "Excessive Landlock directory capability leak on unlinked/deleted files e
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 66b09b65-ac81-45ca-98cc-faf85e815e9e
+paperclip_identifier: MAZ-244
 ---
 
 # ✅ [RESOLVED]: Excessive Landlock directory capability leak on unlinked/deleted files ending in ` (deleted)`

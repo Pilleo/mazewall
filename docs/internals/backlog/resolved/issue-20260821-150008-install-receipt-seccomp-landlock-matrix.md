@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/InstallationReceiptMatrixTest.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 2252d9bc-35e8-48d4-9cc1-c060bcc3d71e
+paperclip_identifier: MAZ-574
 ---
 
 # 🟡 [Severity: MEDIUM]: Test InstallationReceipt seccomp×Landlock matrix including UNCHANGED

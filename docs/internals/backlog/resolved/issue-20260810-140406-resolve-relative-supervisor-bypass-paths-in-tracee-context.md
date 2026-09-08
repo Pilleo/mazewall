@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/ResolveAbsolutePathTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: ab7870f7-a829-43f2-b21f-dba2050b767f
+paperclip_identifier: MAZ-467
 ---
 
 # 🔴 [Severity: HIGH]: Resolve relative supervisor bypass paths in the tracee context

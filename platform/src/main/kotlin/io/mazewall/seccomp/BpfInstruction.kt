@@ -1,6 +1,5 @@
 package io.mazewall.seccomp
 
-
 /**
  * Low-level BPF instructions modeled as Algebraic Data Types (ADTs).
  * This represents the final state of an instruction before serialization

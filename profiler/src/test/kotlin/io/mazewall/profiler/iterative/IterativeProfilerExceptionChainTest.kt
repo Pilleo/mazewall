@@ -6,10 +6,10 @@ import java.io.IOException
 import kotlin.test.assertTrue
 
 class IterativeProfilerExceptionChainTest {
-
     @Test
     fun `test iterative profiling handles wrapped exception chains`() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(io.mazewall.Platform.isSupported())
+        org.junit.jupiter.api.Assumptions
+            .assumeTrue(io.mazewall.Platform.isSupported())
         val basePolicy = Policy.PURE_COMPUTE_UNSAFE
         val targetPath = "/etc/wrapped_denied_path"
 
@@ -20,7 +20,9 @@ class IterativeProfilerExceptionChainTest {
         }
 
         // This will fail currently because IterativeProfiler only looks at the top-level exception
-        assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == targetPath },
-            "Should have extracted path from wrapped exception")
+        assertTrue(
+            compiledPolicy.allowedFsReadPaths.any { it.value == targetPath },
+            "Should have extracted path from wrapped exception",
+        )
     }
 }

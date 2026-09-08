@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class OrchestratorTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest
@@ -22,7 +21,8 @@ class OrchestratorTest {
     @Test
     fun testParseIssueFileWithInlineDependencies() {
         val file = File(tempDir, "issue-001-test-inline.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Test Inline Deps"
             priority: medium
@@ -32,7 +32,8 @@ class OrchestratorTest {
             ---
             # Description
             Hello World.
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -47,7 +48,8 @@ class OrchestratorTest {
     @Test
     fun testParseIssueFileWithMultilineDependencies() {
         val file = File(tempDir, "issue-002-test-multi.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: 'Test Multiline Deps'
             priority: medium
@@ -58,7 +60,8 @@ class OrchestratorTest {
             ---
             # Description
             Multiline parser testing.
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val issue = BacklogParser.parseIssueFile(file)
         assertNotNull(issue)
@@ -78,7 +81,7 @@ class OrchestratorTest {
             title = "Task 1",
             priority = BacklogPriority.MEDIUM,
             status = "open",
-            dependencies = listOf("issue-002") // Blocked by issue-002
+            dependencies = listOf("issue-002"), // Blocked by issue-002
         )
         val issue2 = BacklogIssue(
             file = File(tempDir, "issue-002.md"),
@@ -86,7 +89,7 @@ class OrchestratorTest {
             title = "Task 2",
             priority = BacklogPriority.LOW,
             status = "open",
-            dependencies = emptyList() // Unblocked
+            dependencies = emptyList(), // Unblocked
         )
         val issue3 = BacklogIssue(
             file = File(tempDir, "issue-003.md"),
@@ -94,7 +97,7 @@ class OrchestratorTest {
             title = "Task 3",
             priority = BacklogPriority.HIGH,
             status = "open",
-            dependencies = emptyList() // Unblocked, higher priority than 2
+            dependencies = emptyList(), // Unblocked, higher priority than 2
         )
 
         val issues = listOf(issue1, issue2, issue3)
@@ -113,7 +116,7 @@ class OrchestratorTest {
             title = "Task 1",
             priority = BacklogPriority.MEDIUM,
             status = "open",
-            dependencies = emptyList()
+            dependencies = emptyList(),
         )
         val issue2 = BacklogIssue(
             file = File(tempDir, "issue-002.md"),
@@ -121,7 +124,7 @@ class OrchestratorTest {
             title = "Task 2",
             priority = BacklogPriority.MEDIUM,
             status = "open",
-            dependencies = emptyList()
+            dependencies = emptyList(),
         )
 
         val issues = listOf(issue2, issue1) // Out of order
@@ -140,7 +143,7 @@ class OrchestratorTest {
             title = "Task 1",
             priority = BacklogPriority.MEDIUM,
             status = "resolved", // Not open
-            dependencies = emptyList()
+            dependencies = emptyList(),
         )
 
         val next = DependencyGraph.selectNextIssue(listOf(issue))

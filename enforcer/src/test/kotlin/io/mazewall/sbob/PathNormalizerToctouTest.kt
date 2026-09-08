@@ -8,7 +8,9 @@ import java.nio.file.Path
 
 class PathNormalizerToctouTest {
     @Test
-    fun `test normalization with symlinks and dotdot`(@TempDir tempDir: Path) {
+    fun `test normalization with symlinks and dotdot`(
+        @TempDir tempDir: Path,
+    ) {
         val dir1 = tempDir.resolve("dir1")
         val dir2 = tempDir.resolve("dir2")
         Files.createDirectories(dir1)

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "low"
 reversible: true
 github_issue: 133
+paperclip_issue_id: 7d7701d8-3a5d-4ea1-a32c-15f4cf2ed93c
+paperclip_identifier: MAZ-622
 ---
 
 # 🔴 [Severity: HIGH]: Pure FFI Wrapper Type System in io.mazewall.ffi.memory

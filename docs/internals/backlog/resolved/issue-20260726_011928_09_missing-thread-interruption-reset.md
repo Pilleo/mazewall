@@ -13,6 +13,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt
+paperclip_issue_id: f4ff82b1-cdcf-4383-8a30-4df2e6299706
+paperclip_identifier: MAZ-394
 ---
 
 # Issue: `SupervisorSocketUtils` Swallows `InterruptedException`

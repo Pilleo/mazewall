@@ -41,8 +41,7 @@ public class MazewallProfiler private constructor(
         return attachCoverage(raw)
     }
 
-    public fun snapshot(): ProfilingResult<Unit> =
-        lastSnapshot ?: ProfilingResult(Unit, BillOfBehavior(), emptyMap(), emptyCoverage())
+    public fun snapshot(): ProfilingResult<Unit> = lastSnapshot ?: ProfilingResult(Unit, BillOfBehavior(), emptyMap(), emptyCoverage())
 
     override fun close() {
         closed = true
@@ -148,7 +147,8 @@ public class MazewallProfiler private constructor(
                     // profiling mode). Iterative path additions do not alter the syscall set;
                     // custom bases with narrower floors are the operator's responsibility and
                     // will surface as untrapped here only if they also drop preset blocks.
-                    val program = io.mazewall.BpfFilter.build(
+                    val program = io.mazewall.BpfFilter
+                        .build(
                         Arch.current(),
                         io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition,
                         profilingMode = true,
@@ -212,7 +212,10 @@ public class MazewallProfiler private constructor(
             return MazewallProfiler(options, env, resolved, reason)
         }
 
-        internal fun resolve(strategy: ProfileStrategy, load: EbpfLoad): Pair<ProfileStrategy, String> {
+        internal fun resolve(
+            strategy: ProfileStrategy,
+            load: EbpfLoad,
+        ): Pair<ProfileStrategy, String> {
             return when (strategy) {
                 ProfileStrategy.USER_NOTIF ->
                     ProfileStrategy.USER_NOTIF to "explicit USER_NOTIF"

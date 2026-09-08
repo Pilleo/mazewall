@@ -1,0 +1,11 @@
+{
+  "name": "jseccomp",
+  "type": "gradle",
+  "compileCommand": "./gradlew {module}compileKotlin",
+  "testCommand": "./gradlew {module}test",
+  "verificationCommands": {
+    "compile": ["./gradlew", "compileKotlin"],
+    "test": ["./gradlew", "test"]
+  },
+  "memoryNamespace": "jseccomp"
+}

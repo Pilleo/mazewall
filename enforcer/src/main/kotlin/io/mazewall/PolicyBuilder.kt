@@ -1,14 +1,13 @@
 package io.mazewall
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import java.io.File
 
 /**
@@ -41,19 +40,23 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     private val allowedFsReadPaths: MutableSet<SandboxedPath> = mutableSetOf(),
     private val allowedFsWritePaths: MutableSet<SandboxedPath> = mutableSetOf(),
     private val customViolationPhrases: MutableList<String> = mutableListOf(),
-    private val customViolationRegexes: MutableList<Regex> = mutableListOf()
+    private val customViolationRegexes: MutableList<Regex> = mutableListOf(),
 ) {
     public fun defaultAction(action: SeccompAction): PolicyBuilder<S> {
         this.defaultAction = action
         return this
     }
 
-    public fun addAction(action: SeccompAction, vararg syscalls: Syscall): PolicyBuilder<S> {
+    public fun addAction(
+        action: SeccompAction,
+        vararg syscalls: Syscall,
+    ): PolicyBuilder<S> {
         for (sys in syscalls) syscallActions[sys] = action
         return this
     }
 
     public fun block(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
+
     public fun allow(vararg syscalls: Syscall): PolicyBuilder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
 
     /** Uncompiled-definition only. Installed kernel filters cannot grow. */
@@ -76,11 +79,9 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         return this
     }
 
-    public fun allowFsRead(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
-        allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
+    public fun allowFsRead(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> = allowFsRead(SandboxedPath.of(path, allowNonExistent = true))
 
-    public fun allowFsRead(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
-        snapshotAsThreadLocal().apply { allowedFsReadPaths.add(path) }
+    public fun allowFsRead(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> = snapshotAsThreadLocal().apply { allowedFsReadPaths.add(path) }
 
     public fun allowJvmClasspath(): PolicyBuilder<PolicyScope.ThreadLocalOnly> {
         val javaHome = System.getProperty("java.home")
@@ -112,11 +113,9 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         }
     }
 
-    public fun allowFsWrite(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
-        allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
+    public fun allowFsWrite(path: String): PolicyBuilder<PolicyScope.ThreadLocalOnly> = allowFsWrite(SandboxedPath.of(path, allowNonExistent = true))
 
-    public fun allowFsWrite(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
-        snapshotAsThreadLocal().apply { allowedFsWritePaths.add(path) }
+    public fun allowFsWrite(path: SandboxedPath): PolicyBuilder<PolicyScope.ThreadLocalOnly> = snapshotAsThreadLocal().apply { allowedFsWritePaths.add(path) }
 
     /**
      * Creates an independent [PolicyBuilder] typed as [PolicyScope.ThreadLocalOnly], carrying a
@@ -217,7 +216,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             allowedFsWritePaths = allowedFsWritePaths.toSet(),
             enforceLandlock = enforceLandlock,
             customViolationPhrases = customViolationPhrases.toList(),
-            customViolationRegexes = customViolationRegexes.toList()
+            customViolationRegexes = customViolationRegexes.toList(),
         )
     }
 }

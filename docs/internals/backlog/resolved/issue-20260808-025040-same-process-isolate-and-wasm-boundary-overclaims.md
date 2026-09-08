@@ -13,6 +13,8 @@ target_files:
   - "docs/internals/designs/enforcer/process-vs-thread-enforcing-history.md"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 6890783c-c421-46ee-8489-d7aa0d689e94
+paperclip_identifier: MAZ-448
 ---
 
 # 🔴 [Severity: HIGH]: Same-Process GraalVM Isolate and WebAssembly Boundaries Are Overstated

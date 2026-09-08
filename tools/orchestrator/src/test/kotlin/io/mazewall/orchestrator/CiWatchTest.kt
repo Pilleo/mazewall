@@ -6,12 +6,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class CiWatchTest {
-
-    private class FakeGh(var snapshot: GhSnapshot?) : GhCheckSource {
+    private class FakeGh(
+        var snapshot: GhSnapshot?,
+    ) : GhCheckSource {
         var calls = 0
         var lastRepo: String? = null
         var lastNumber: Int? = null
-        override fun fetch(repo: String, prNumber: Int): GhSnapshot? {
+
+        override fun fetch(
+            repo: String,
+            prNumber: Int,
+        ): GhSnapshot? {
             calls++
             lastRepo = repo
             lastNumber = prNumber
@@ -30,16 +35,19 @@ class CiWatchTest {
             return (comments[issueId] ?: emptyList()).map { PaperclipComment("c", it) }
         }
 
-        override fun comment(issueId: String, body: String) {
+        override fun comment(
+            issueId: String,
+            body: String,
+        ) {
             comments.getOrPut(issueId) { mutableListOf() }.add(body)
             notified.add("comment:${body.take(24)}")
         }
 
-        override fun workProducts(issueId: String): List<PaperclipWorkProduct> =
-            workProducts[issueId] ?: emptyList()
+        override fun workProducts(issueId: String): List<PaperclipWorkProduct> = workProducts[issueId] ?: emptyList()
     }
 
-    private fun issueInReview(identifier: String = "MAZ-T") = PaperclipIssue(
+    private fun issueInReview(identifier: String = "MAZ-T") =
+        PaperclipIssue(
         id = "i1",
         identifier = identifier,
         title = identifier,
@@ -61,7 +69,8 @@ class CiWatchTest {
         nowMs: () -> Long = { 1_000_000_000_000L },
     ) = CiWatch(board, gh, notify = { board.notified.add("notify:$it") }, nowMs = nowMs, stuckMinutes = 15)
 
-    private fun failing(sha: String) = GhSnapshot(
+    private fun failing(sha: String) =
+        GhSnapshot(
         headSha = sha,
         statusCheckRollup = listOf(GhCheck("COMPLETED", "FAILURE")),
     )
@@ -137,8 +146,7 @@ class CiWatchTest {
 
     @Test
     fun `classifier edges`() {
-        fun classify(vararg checks: GhCheck) =
-            GhSnapshot("s", checks.toList()).classify()
+        fun classify(vararg checks: GhCheck) = GhSnapshot("s", checks.toList()).classify()
         assertEquals("NONE", GhSnapshot("s", emptyList()).classify())
         assertEquals("SUCCESS", classify(GhCheck("COMPLETED", "SUCCESS")))
         assertEquals("FAILURE", classify(GhCheck("COMPLETED", "FAILURE")))
@@ -164,8 +172,12 @@ class CiWatchTest {
     fun `pr discovery uses work products then description fallback and skips bare issues`() {
         val board = FakeBoard()
         val viaDescription = PaperclipIssue(
-            id = "i2", identifier = "MAZ-D", title = "d", status = "in_review",
-            priority = "low", issueNumber = 2,
+            id = "i2",
+            identifier = "MAZ-D",
+            title = "d",
+            status = "in_review",
+            priority = "low",
+            issueNumber = 2,
             description = "see https://github.com/foo/bar/pull/7 for details",
         )
         val bare = issueInReview()
@@ -182,8 +194,12 @@ class CiWatchTest {
         val board = FakeBoard()
         board.failCommentsFor = "bad"
         val good = PaperclipIssue(
-            id = "good", identifier = "MAZ-GOOD", title = "g", status = "in_review",
-            priority = "low", issueNumber = 3,
+            id = "good",
+            identifier = "MAZ-GOOD",
+            title = "g",
+            status = "in_review",
+            priority = "low",
+            issueNumber = 3,
             description = "https://github.com/foo/bar/pull/9",
         )
         val gh = FakeGh(failing("eeee00001111"))

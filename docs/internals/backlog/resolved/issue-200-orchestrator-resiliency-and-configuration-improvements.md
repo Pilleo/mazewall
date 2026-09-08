@@ -7,6 +7,8 @@ dependencies: []
 component: "orchestrator"
 effort: "medium"
 github_issue: 63
+paperclip_issue_id: 58884079-c4bc-4948-abc4-057074bf2a4e
+paperclip_identifier: MAZ-378
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator Resiliency and Configuration Improvements

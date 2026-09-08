@@ -98,7 +98,7 @@ fun runProfileAndEnforce() {
             val ioUringStatus: String
 
             ioUringStatus = setupResult.map { value ->
-                val ringFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(value.toInt())
+                val ringFd = FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
                 try {
                     "io_uring ring initialized successfully (ringFd=${ringFd.value})"
                 } finally {
@@ -289,7 +289,7 @@ fs.open(
                         throw java.io.IOException("Permission denied (io_uring async worker blocked by Landlock)")
                     }
                 }.onSuccess { value ->
-                    LinuxNative.fileSystem.close(FileDescriptor.unsafe<FileDescriptorRole.Generic>(value.toInt()))
+                    LinuxNative.fileSystem.close(FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic))
                 }
             }
             "Evasion succeeded (Is Landlock supported on this kernel?)"

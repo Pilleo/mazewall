@@ -13,6 +13,8 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 github_issue: 354
+paperclip_issue_id: 6c8150b3-323d-4b01-9b2b-971996ce10e3
+paperclip_identifier: MAZ-397
 ---
 
 # 🔴 [Severity: HIGH]: Fix Silent Swallowing of CLI Authentication Errors in getPrMergeStatus

@@ -3,10 +3,10 @@ package io.mazewall.portal.codegen
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.ListProperty
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.OutputDirectory
@@ -66,7 +66,10 @@ public class PortalCodegenPlugin : Plugin<Project> {
         project.pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
             val kotlinExt =
                 project.extensions.getByType(org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension::class.java)
-            kotlinExt.sourceSets.getByName("main").kotlin.srcDir(generate.map { it.stubOutputDir })
+            kotlinExt.sourceSets
+                .getByName("main")
+                .kotlin
+                .srcDir(generate.map { it.stubOutputDir })
             project.tasks.named("compileKotlin").configure { it.dependsOn(generate) }
         }
     }

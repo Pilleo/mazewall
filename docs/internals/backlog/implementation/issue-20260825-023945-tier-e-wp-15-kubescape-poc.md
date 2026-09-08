@@ -13,7 +13,8 @@ autonomy: "supervised"
 open_questions: true
 dependencies:
   - "issue-20260825-023944-tier-e-wp-14-ffm-migration.md"
-paperclip_issue_id: 668b5140-46a5-472d-b5a8-f57aeac878f4
+paperclip_issue_id: "814b5fd0-e469-4785-985f-c614ad981c8f"
+paperclip_identifier: "MAZ-1154"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-15 — Kubescape Integration PoC

@@ -10,6 +10,8 @@ target_modules:
 - :profiler
 component: profiler
 effort: medium
+paperclip_issue_id: a3e04131-c82f-472e-94f1-ee2b078af60d
+paperclip_identifier: MAZ-217
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Formal Monoidal Composition for `BillOfBehavior`

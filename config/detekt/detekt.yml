@@ -32,6 +32,7 @@ console-reports:
 
 comments:
     active: true
+    severity: warning
     AbsentOrWrongFileLicense:
         active: false
         licenseTemplateIsRegex: false
@@ -74,6 +75,7 @@ comments:
 
 complexity:
     active: true
+    severity: warning
     CognitiveComplexMethod:
         active: false
         allowedComplexity: 15
@@ -152,6 +154,7 @@ complexity:
 
 coroutines:
     active: true
+    severity: warning
     CoroutineLaunchedInTestWithoutRunTest:
         active: false
     GlobalCoroutineUsage:
@@ -178,6 +181,7 @@ coroutines:
 
 empty-blocks:
     active: true
+    severity: warning
     EmptyCatchBlock:
         active: true
         allowedExceptionNameRegex: "_|(ignore|expected).*"
@@ -213,6 +217,7 @@ empty-blocks:
 
 exceptions:
     active: true
+    severity: error
     ErrorUsageWithThrowable:
         active: false
     ExceptionRaisedInUnexpectedLocation:
@@ -239,7 +244,6 @@ exceptions:
     SwallowedException:
         active: true
         ignoredExceptionTypes:
-            - "InterruptedException"
             - "MalformedURLException"
             - "NumberFormatException"
             - "ParseException"
@@ -286,6 +290,7 @@ exceptions:
 
 naming:
     active: true
+    severity: warning
     BooleanPropertyNaming:
         active: false
         allowedPattern: "^(is|has|are)"
@@ -382,6 +387,7 @@ naming:
 
 performance:
     active: true
+    severity: warning
     ArrayPrimitive:
         active: true
     CouldBeSequence:
@@ -404,6 +410,7 @@ performance:
 
 potential-bugs:
     active: true
+    severity: warning
     AvoidReferentialEquality:
         active: true
         forbiddenTypePatterns:
@@ -434,8 +441,13 @@ potential-bugs:
             - "java.util.LinkedHashMap"
             - "java.util.HashMap"
     ElseCaseInsteadOfExhaustiveWhen:
-        active: false
-        ignoredSubjectTypes: []
+        active: true
+        severity: error
+        ignoredSubjectTypes:
+            # Mapper tables dispatch a subset of Syscall and forward the rest.
+            - "io.mazewall.core.Syscall"
+            # JDK FFM layout hierarchy; remaining layouts are MemorySegment.
+            - "java.lang.foreign.MemoryLayout"
     EqualsAlwaysReturnsTrueOrFalse:
         active: true
     EqualsWithHashCodeExist:
@@ -465,6 +477,7 @@ potential-bugs:
         ignoreFunctionCall: []
     ImplicitDefaultLocale:
         active: true
+        severity: error
     ImplicitUnitReturnType:
         active: false
         ignoreAnnotated: ["Test"]
@@ -476,7 +489,8 @@ potential-bugs:
     IteratorNotThrowingNoSuchElementException:
         active: true
     LateinitUsage:
-        active: false
+        active: true
+        severity: error
         excludes: ["**/test/**", "**/androidTest/**", "**/commonTest/**", "**/jvmTest/**", "**/androidUnitTest/**", "**/androidInstrumentedTest/**", "**/jsTest/**", "**/iosTest/**"]
         ignoreOnClassesPattern: ""
     MapGetWithNotNullAssertionOperator:
@@ -518,8 +532,10 @@ potential-bugs:
         active: true
     UnreachableCode:
         active: true
+        severity: error
     UnsafeCallOnNullableType:
         active: true
+        severity: error
         excludes: ["**/test/**", "**/androidTest/**", "**/commonTest/**", "**/jvmTest/**", "**/androidUnitTest/**", "**/androidInstrumentedTest/**", "**/jsTest/**", "**/iosTest/**"]
     UnsafeCast:
         active: true
@@ -533,6 +549,7 @@ potential-bugs:
 
 style:
     active: true
+    severity: warning
     AbstractClassCanBeConcreteClass:
         active: true
     AbstractClassCanBeInterface:
@@ -617,22 +634,23 @@ style:
               value: "TODO:"
         allowedPatterns: ""
     ForbiddenImport:
-        active: false
-        forbiddenImports: []
+        active: true
+        forbiddenImports:
+            - reason: "Reflection-based testing is fragile. Use direct method calls or internal visibility instead."
+              value: "java.lang.reflect.*"
         allowedImports: []
     ForbiddenMethodCall:
-        active: false
+        active: true
+        severity: error
         methods:
-            - reason: "print does not allow you to configure the output stream. Use a logger instead."
-              value: "kotlin.io.print"
-            - reason: "println does not allow you to configure the output stream. Use a logger instead."
-              value: "kotlin.io.println"
             - reason: "using `BigDecimal(Double)` can result in unexpected floating point precision behavior. Use `BigDecimal.valueOf(Double)` or `String.toBigDecimalOrNull()` instead."
               value: "java.math.BigDecimal.<init>(kotlin.Double)"
             - reason: "using `BigDecimal(String)` can result in a `NumberFormatException`. Use `String.toBigDecimalOrNull()`"
               value: "java.math.BigDecimal.<init>(kotlin.String)"
             - reason: "It is marked as obsolete. Use `kotlin.time.measureTime` instead."
               value: "kotlin.system.measureTimeMillis"
+            - reason: "Raw throwable stack traces bypass the project's diagnostic policy."
+              value: "java.lang.Throwable.printStackTrace"
     ForbiddenNamedParam:
         active: false
         methods: []
@@ -640,8 +658,21 @@ style:
         active: false
         markerClasses: []
     ForbiddenSuppress:
-        active: false
-        rules: []
+        # These debt categories are prohibited project-wide. A new exception must be modeled in
+        # types/control flow instead of silenced locally; security-boundary catches are audited
+        # separately while their narrower typed alternatives are introduced.
+        active: true
+        rules:
+            - "UNCHECKED_CAST"
+            - "MagicNumber"
+            - "ReturnCount"
+            - "ThrowsCount"
+            - "CyclomaticComplexMethod"
+            - "LongMethod"
+            - "NestedBlockDepth"
+            - "LongParameterList"
+            - "TooManyFunctions"
+            - "LoopWithTooManyJumpStatements"
     ForbiddenVoid:
         active: true
         ignoreOverridden: false

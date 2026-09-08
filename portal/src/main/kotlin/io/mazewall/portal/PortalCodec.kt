@@ -14,13 +14,25 @@ public object PortalCodec {
     public fun encodeByte(value: Byte): ByteArray = byteArrayOf(value)
 
     public fun encodeShort(value: Short): ByteArray =
-        ByteBuffer.allocate(2).order(ByteOrder.BIG_ENDIAN).putShort(value).array()
+        ByteBuffer
+        .allocate(2)
+        .order(ByteOrder.BIG_ENDIAN)
+        .putShort(value)
+        .array()
 
     public fun encodeInt(value: Int): ByteArray =
-        ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(value).array()
+        ByteBuffer
+        .allocate(4)
+        .order(ByteOrder.BIG_ENDIAN)
+        .putInt(value)
+        .array()
 
     public fun encodeLong(value: Long): ByteArray =
-        ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(value).array()
+        ByteBuffer
+        .allocate(8)
+        .order(ByteOrder.BIG_ENDIAN)
+        .putLong(value)
+        .array()
 
     public fun encodeFloat(value: Float): ByteArray = encodeInt(value.toRawBits())
 

@@ -12,7 +12,6 @@ import kotlin.test.assertTrue
  * approve/skip prefixes keep their old behavior untouched.
  */
 class SupervisorTelegramTest {
-
     private class RecordingTransport : HttpTransport {
         val requests = mutableListOf<HttpRequest>()
 
@@ -95,7 +94,10 @@ class SupervisorTelegramTest {
         val b = bot(transport)
         var action: String? = null
         var approvalId: String? = null
-        b.onPaperclipApproval = { a, aid, _, _ -> action = a; approvalId = aid }
+        b.onPaperclipApproval = { a, aid, _, _ ->
+            action = a
+            approvalId = aid
+        }
         transport.nextBody =
             """{"ok":true,"result":[{"update_id":5,"callback_query":{"id":"c9","data":"${buttons[0].callback_data}"}}]}"""
         b.pollUpdates()
@@ -112,7 +114,8 @@ class SupervisorTelegramTest {
             """[{"id":"ap1","type":"hire","status":"pending","createdAt":"2026-08-24T10:00:00Z"},
                 {"id":"ap0","type":"hire","status":"pending","createdAt":"2026-08-24T09:00:00Z"}]"""
 
-        val stateFile = java.nio.file.Files.createTempFile("sup-state", ".properties")
+        val stateFile = java.nio.file.Files
+            .createTempFile("sup-state", ".properties")
         val client = PaperclipClient(board, "local")
         val notifier = EventNotifier(bot(transport), client, "company", stateFile)
 

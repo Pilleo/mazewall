@@ -3,7 +3,10 @@ package io.mazewall.orchestrator
 import java.io.File
 
 fun interface ChatModel {
-    fun complete(system: String, user: String): String
+    fun complete(
+        system: String,
+        user: String,
+    ): String
 }
 
 internal enum class QuestionKind { FACTUAL, OPERATOR }
@@ -25,7 +28,7 @@ internal fun questionKind(question: String): QuestionKind {
 }
 
 internal const val ISSUE_PAYLOAD_SCHEMA =
-    """{"context":"","needed":"","has_side_effects":false,"investigation_points":[],"important_details":[],"open_questions":[],"extra_files":[],"side_effects":[]}"""
+    """{"context":"<detailed paragraph explaining background, problem, and goals>","needed":"1. <step one>\n2. <step two>","has_side_effects":false,"investigation_points":[],"important_details":[],"open_questions":[],"extra_files":[],"side_effects":[]}"""
 
 object IssueClarifier {
     const val DEFAULT_WEAK_ROUNDS = 1
@@ -43,6 +46,7 @@ object IssueClarifier {
         impactScanner: ImpactScanner = FilesystemImpactScanner(repoRoot),
     ): IssueScaffoldResult {
         var current = draft
+
         fun commit(request: IssueScaffoldRequest): IssueScaffoldResult {
             val files = (current.files + request.explicitFiles).distinct()
             val next = current.copy(request = request, files = files)
@@ -95,7 +99,9 @@ object IssueClarifier {
                             ),
                         )
                         val errors = IssueMarkdownVerifier.readyForReview(dug.markdown, scratchDir)
-                        current = if (errors.isEmpty()) dug else {
+                        current = if (errors.isEmpty()) {
+                            dug
+                        } else {
                             warn(
                                 "clarify: weak side-effect investigation failed verification: ${errors.joinToString("; ")}",
                             )
@@ -229,7 +235,10 @@ object IssueClarifier {
         return current
     }
 
-    fun withImpactHits(draft: IssueScaffoldResult, hits: List<ImpactHit>): IssueScaffoldResult {
+    fun withImpactHits(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): IssueScaffoldResult {
         val lines = hits.map { it.render() }
         val point = if (hits.isEmpty()) {
             "AST identifier scan: 0 hits outside origin files"
@@ -243,7 +252,7 @@ object IssueClarifier {
             )
         } else {
             draft.request.copy(
-                hasSideEffects = draft.request.hasSideEffects ?: hits.isNotEmpty(),
+                hasSideEffects = true,
                 investigationPoints = (draft.request.investigationPoints + point).distinct(),
                 sideEffectImpacts = (draft.request.sideEffectImpacts + lines).distinct(),
             )
@@ -278,7 +287,10 @@ object IssueClarifier {
         return current.copy(markdown = reRender(current, request))
     }
 
-    fun hostFillPlaceholders(draft: IssueScaffoldResult, hits: List<ImpactHit>): IssueScaffoldResult {
+    fun hostFillPlaceholders(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): IssueScaffoldResult {
         var req = draft.request
         var changed = false
         if (isIssuePlaceholder(req.contextBody)) {
@@ -301,7 +313,10 @@ object IssueClarifier {
         return next.copy(markdown = reRender(next, req))
     }
 
-    internal fun hostNeededSteps(draft: IssueScaffoldResult, hits: List<ImpactHit>): String {
+    internal fun hostNeededSteps(
+        draft: IssueScaffoldResult,
+        hits: List<ImpactHit>,
+    ): String {
         val steps = mutableListOf<String>()
         var n = 1
         for (file in draft.files) {
@@ -309,7 +324,9 @@ object IssueClarifier {
             n++
         }
         for (caller in hits.map { it.file }.distinct()) {
-            val sample = hits.filter { it.file == caller }.take(2)
+            val sample = hits
+                .filter { it.file == caller }
+                .take(2)
                 .joinToString { "${it.symbol}:${it.line}" }
             steps += "$n. Update caller `$caller` ($sample)."
             n++
@@ -346,9 +363,21 @@ object IssueClarifier {
         """.trimIndent()
     }
 
-    private fun parseIssuePayload(raw: String, base: IssueScaffoldRequest): IssueScaffoldRequest {
+    private fun parseIssuePayload(
+        raw: String,
+        base: IssueScaffoldRequest,
+    ): IssueScaffoldRequest {
         val context = parseJsonStringField(raw, "context")
-        val needed = parseJsonStringField(raw, "needed")
+        val needed = try {
+            parseJsonStringField(raw, "needed")
+        } catch (_: Exception) {
+            val list = parseStringList(raw, "needed")
+            require(list.isNotEmpty()) { "ACP returned empty needed list" }
+            list
+                .mapIndexed { idx, step ->
+                if (step.trim().matches(Regex("""^\d+\..*"""))) step.trim() else "${idx + 1}. ${step.trim()}"
+            }.joinToString("\n")
+        }
         require(context.isNotBlank() && needed.isNotBlank()) { "ACP returned empty context/needed" }
         require(!isIssuePlaceholder(context) && !isIssuePlaceholder(needed)) {
             "ACP returned placeholder context/needed"
@@ -356,9 +385,9 @@ object IssueClarifier {
         val extra = parseStringList(raw, "extra_files").map { PathModules.normalize(it) }
         val parsedSide = parseJsonBooleanField(raw, "has_side_effects")
         val hasSideEffects = when {
-            base.hasSideEffects == true -> true
+            base.hasSideEffects != null -> base.hasSideEffects
             parsedSide != null -> parsedSide
-            else -> base.hasSideEffects
+            else -> false
         }
         return base.copy(
             explicitFiles = (base.explicitFiles + extra).distinct(),
@@ -366,12 +395,18 @@ object IssueClarifier {
             neededBody = needed,
             openQuestionItems = parseStringList(raw, "open_questions"),
             investigationPoints = (base.investigationPoints + parseStringList(raw, "investigation_points"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
             importantDetails = (base.importantDetails + parseStringList(raw, "important_details"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
             hasSideEffects = hasSideEffects,
             sideEffectImpacts = (base.sideEffectImpacts + parseStringList(raw, "side_effects"))
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
         )
     }
 
@@ -399,17 +434,21 @@ object IssueClarifier {
         weak: ChatModel,
         hits: List<ImpactHit>,
     ): IssueScaffoldRequest {
-        val system = "You author mazewall backlog issues. Output JSON only. Never suggest silent EPERM/EACCES bypasses."
+        val system = "You are a software architect and security engineer authoring a mazewall backlog issue. Output a single JSON object. Never suggest silent EPERM/EACCES bypasses."
         val user = """
-            ROLE: author. Fill Context and Needed, collect implementation facts, fix formatting.
-            Document investigation_points (what you inspected) and important_details (invariants, APIs, edge cases).
-            Needed must be numbered testable steps. Do not leave FILL placeholders or ellipsis-only bodies.
-            Set has_side_effects true if callers, other modules, ABI, tests, or shared types may be affected.
-            Put unresolved blockers in open_questions (may be empty).
-            Return JSON only (empty strings/arrays, never ellipsis):
-            $ISSUE_PAYLOAD_SCHEMA
+            ROLE: author. Write the Context and Needed sections for this new issue titled '${draft.request.title}'.
+            
+            Guidelines:
+            1. 'context': Write 1-2 paragraphs detailing the background, why this change is needed, and design constraints.
+            2. 'needed': Write a numbered list of concrete, testable implementation and verification steps (e.g. 1. In File.kt... 2. Add test... 3. Run ./gradlew...).
+            3. 'has_side_effects': Boolean (true if ABI, callers, or shared state are affected, else false).
+            4. 'investigation_points': List of files or symbols you analyzed.
+            5. 'important_details': List of key technical invariants or constraints.
+            6. 'open_questions': List of unresolved architectural questions (or empty list []).
 
-            Issue:
+            Return ONLY a valid JSON object with keys: "context", "needed", "has_side_effects", "investigation_points", "important_details", "open_questions", "extra_files", "side_effects". Do not echo template placeholders.
+
+            Current Issue Draft:
             ${draft.markdown}
 
             ${planningContext(draft, repoRoot, hits)}
@@ -446,7 +485,10 @@ object IssueClarifier {
         )
     }
 
-    private fun issueSection(draft: IssueScaffoldResult, includeFullIssue: Boolean): String =
+    private fun issueSection(
+        draft: IssueScaffoldResult,
+        includeFullIssue: Boolean,
+    ): String =
         if (includeFullIssue) {
             "Issue:\n${draft.markdown}"
         } else {
@@ -487,7 +529,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request.copy(hasSideEffects = true))
     }
 
-    private fun answerLeftoversWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun answerLeftoversWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val questions = draft.request.openQuestionItems.joinToString("\n") { "- $it" }
         val raw = strong.complete(
             "You only answer leftover questions a weaker pass could not resolve. Output JSON only.",
@@ -507,7 +552,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request)
     }
 
-    private fun leftoversAndReviewWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun leftoversAndReviewWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val questions = draft.request.openQuestionItems.joinToString("\n") { "- $it" }
         val raw = strong.complete(
             "You answer leftover factual questions and independently review the issue. Output JSON only.",
@@ -556,7 +604,10 @@ object IssueClarifier {
         return parseIssuePayload(raw, draft.request.copy(reviewComments = emptyList(), reviewVerdict = null))
     }
 
-    private fun reviewWithStrong(draft: IssueScaffoldResult, strong: ChatModel): IssueScaffoldRequest {
+    private fun reviewWithStrong(
+        draft: IssueScaffoldResult,
+        strong: ChatModel,
+    ): IssueScaffoldRequest {
         val raw = strong.complete(
             "You are an independent final reviewer. You did not write this issue. Output JSON only.",
             """
@@ -577,7 +628,10 @@ object IssueClarifier {
         return draft.request.copy(reviewVerdict = normalized, reviewComments = comments)
     }
 
-    private fun reRender(draft: IssueScaffoldResult, request: IssueScaffoldRequest): String {
+    internal fun reRender(
+        draft: IssueScaffoldResult,
+        request: IssueScaffoldRequest,
+    ): String {
         return IssueTemplateGenerator.render(
             idInstant = draft.instant,
             slug = draft.slug,
@@ -594,7 +648,10 @@ object IssueMarkdownVerifier {
     private val NUMBERED_STEP = Regex("""(?m)^\s*1[.\)]""")
     private val HAS_SIDE_EFFECTS = Regex("""has_side_effects:\s*(true|false)""")
 
-    fun structural(markdown: String, scratchDir: File): List<String> {
+    fun structural(
+        markdown: String,
+        scratchDir: File,
+    ): List<String> {
         val issue = parse(markdown, scratchDir) ?: return listOf("unparseable markdown")
         val errors = mutableListOf<String>()
         if (issue.title.isBlank()) errors += "missing title"
@@ -604,7 +661,10 @@ object IssueMarkdownVerifier {
         return errors
     }
 
-    fun readyForReview(markdown: String, scratchDir: File): List<String> {
+    fun readyForReview(
+        markdown: String,
+        scratchDir: File,
+    ): List<String> {
         val errors = structural(markdown, scratchDir).toMutableList()
         val issue = parse(markdown, scratchDir) ?: return errors
         if (isIssuePlaceholder(issue.context)) errors += "context still FILL"
@@ -626,7 +686,10 @@ object IssueMarkdownVerifier {
         return errors
     }
 
-    private fun parse(markdown: String, scratchDir: File): BacklogIssue? {
+    private fun parse(
+        markdown: String,
+        scratchDir: File,
+    ): BacklogIssue? {
         scratchDir.mkdirs()
         val file = File(scratchDir, "issue-20200101-000001-verify.md")
         file.writeText(markdown)
@@ -648,11 +711,24 @@ internal fun isIssuePlaceholder(text: String?): Boolean {
     val t = text?.trim().orEmpty()
     if (t.isEmpty()) return true
     if (t.contains("FILL:")) return true
+    if (t.contains("<detailed") || t.contains("<step") || t.contains("<placeholder")) return true
     val stripped = t.replace(".", "").replace("…", "").trim()
     return stripped.isEmpty()
 }
 
 internal fun parseJsonObject(raw: String): String {
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    val cleaned = if (raw.contains("```")) {
+        val fencePattern = Regex("""```(?:json)?\s*([\s\S]*?)```""")
+        fencePattern
+            .find(raw)
+            ?.groupValues
+            ?.get(1)
+            ?.trim() ?: raw
+    } else {
+        raw
+    }
+
     var lastStart = -1
     var lastEnd = -1
     var start = -1
@@ -660,8 +736,8 @@ internal fun parseJsonObject(raw: String): String {
     var inString = false
     var escape = false
     var i = 0
-    while (i < raw.length) {
-        val c = raw[i]
+    while (i < cleaned.length) {
+        val c = cleaned[i]
         if (inString) {
             if (escape) {
                 escape = false
@@ -692,10 +768,13 @@ internal fun parseJsonObject(raw: String): String {
         i++
     }
     require(lastStart >= 0 && lastEnd > lastStart) { "expected JSON object in model output" }
-    return raw.substring(lastStart, lastEnd + 1)
+    return cleaned.substring(lastStart, lastEnd + 1)
 }
 
-internal fun parseStringList(raw: String, key: String): List<String> {
+internal fun parseStringList(
+    raw: String,
+    key: String,
+): List<String> {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)
@@ -722,7 +801,10 @@ internal object ClarifyModels {
     }
 }
 
-internal fun parseJsonBooleanField(raw: String, key: String): Boolean? {
+internal fun parseJsonBooleanField(
+    raw: String,
+    key: String,
+): Boolean? {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)
@@ -738,7 +820,10 @@ internal fun parseJsonBooleanField(raw: String, key: String): Boolean? {
     }
 }
 
-internal fun parseJsonStringField(raw: String, key: String): String {
+internal fun parseJsonStringField(
+    raw: String,
+    key: String,
+): String {
     val obj = parseJsonObject(raw)
     val keyMarker = "\"$key\""
     val keyAt = obj.indexOf(keyMarker)

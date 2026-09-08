@@ -7,6 +7,8 @@ dependencies: []
 component: "profiler"
 effort: "medium"
 github_issue: 257
+paperclip_issue_id: bfdb0e58-3124-480e-b044-8dea68eda125
+paperclip_identifier: MAZ-274
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Endianness in `process_vm_readv` Socket Message Tracing

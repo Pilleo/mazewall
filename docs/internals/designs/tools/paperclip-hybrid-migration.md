@@ -137,7 +137,7 @@ times before its first real session; all three are config, not code:
 
 1. `adapterConfig.repository` missing → set it (`Pilleo/mazewall`). Without it the
    adapter cannot derive the Jules source (`RepositorySchema.parse(undefined)`).
-2. `baseBranch` underivable → set `fast-master` (or wire provider metadata).
+2. `baseBranch` underivable → set `master` (or wire provider metadata).
 3. API key binding: the shared secret record existed but was bound as
    `adapterConfig["access.JULES_API_KEY"]`, which the core never materializes.
    Working binding (PATCH `/api/agents/:id`): **both**

@@ -45,8 +45,11 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 ### Option A: Run directly on a Linux host
 
 ```bash
-# Unit tests only (fast, no kernel interaction)
-./gradlew test
+# Host-safe unit tests and unit-only coverage (fast, no kernel interaction)
+./gradlew unitCheck
+
+# Privileged kernel and fresh-JVM contract tests
+./gradlew kernelCheck
 
 # Full integration suite
 ./scripts/run_tests.sh
@@ -67,8 +70,10 @@ The Podman environment provides the correct kernel capabilities and nested secco
 ### Module-Level Checks
 
 ```bash
-./gradlew :enforcer:check    # Jacoco thresholds: LinuxNative ≥ 78%, core ≥ 80%
-./gradlew :profiler:check    # Jacoco thresholds: Profiler ≥ 60%
+./gradlew :enforcer:unitCheck  # host-safe coverage thresholds
+./gradlew :enforcer:pitest :platform:pitest :profiler:pitest -Dpitest.threads=2 # host-only mutation thresholds
+./gradlew :enforcer:kernelCheck # combined native-contract thresholds
+./gradlew :profiler:unitCheck
 ```
 
 ---

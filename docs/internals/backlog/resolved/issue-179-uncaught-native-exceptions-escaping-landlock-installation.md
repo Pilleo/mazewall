@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 124
+paperclip_issue_id: 6e5cc2e3-fc2e-4e25-8d76-bef4dcd9029c
+paperclip_identifier: MAZ-354
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping Landlock Installation

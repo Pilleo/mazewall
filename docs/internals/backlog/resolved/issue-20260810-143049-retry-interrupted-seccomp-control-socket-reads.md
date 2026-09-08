@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SeccompSessionHandlerTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 9de981a1-5905-4d74-b446-631c8ba5edc6
+paperclip_identifier: MAZ-469
 ---
 
 # 🟠 [Severity: MEDIUM]: Retry Interrupted Seccomp Control-Socket Reads

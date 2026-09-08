@@ -37,7 +37,6 @@ package io.mazewall.core
  * client (WP-08); this type is intentionally pure-JVM until that gate.
  */
 public object MazewallContext {
-
     private val current: ThreadLocal<ContextId> = ThreadLocal.withInitial { ContextId.UNKNOWN }
 
     /**
@@ -48,6 +47,10 @@ public object MazewallContext {
     /**
      * Runs [block] with [context] recorded as the calling thread's semantic scope, restoring
      * the previous scope afterwards — even when [block] throws.
+     *
+     * **Fast path:** When the current context is already [context], the storage already holds
+     * that value and no state mutation is performed. This is exactly equivalent to the normal
+     * path in terms of observable state and exception behavior.
      *
      * @throws IllegalStateException when invoked from a virtual thread; no state is changed
      *   in that case.
@@ -64,6 +67,11 @@ public object MazewallContext {
             )
         }
         val previous = current.get()
+        if (previous == context) {
+            // Fast path: storage already holds the target value, no marker downcall needed.
+            // This is exactly equivalent to the normal path for observable state.
+            return block()
+        }
         current.set(context)
         try {
             return block()

@@ -15,37 +15,65 @@ data class OrchestratorConfig(
     val maxRetries: Int = 3,
     val initialRetryDelayMs: Long = 1000,
     val githubCacheTtlMs: Long = 10000,
-    val stuckPendingThresholdMs: Long = 900_000
+    val stuckPendingThresholdMs: Long = 900_000,
 )
 
 interface OrchestratorEnvironment {
     val config: OrchestratorConfig
+
     fun println(message: Any?)
+
     fun print(message: Any?)
+
     fun errPrintln(message: Any?)
-    fun sleep(duration: Long, unit: TimeUnit)
+
+    fun sleep(
+        duration: Long,
+        unit: TimeUnit,
+    )
+
     fun ringBell(times: Int)
+
     fun readLine(): String?
+
     fun getEnvOrNull(key: String): String?
+
     val gitHubClient: GitHubClient
     val julesClient: JulesClient
 
     // Bot
     fun sendNotification(message: String)
-    fun requestApproval(issueId: String, text: String): Boolean
-    fun sendApprovalRequest(issueId: String, text: String)
+
+    fun requestApproval(
+        issueId: String,
+        text: String,
+    ): Boolean
+
+    fun sendApprovalRequest(
+        issueId: String,
+        text: String,
+    )
+
     fun checkApprovalNonBlocking(issueId: String): Boolean?
+
     fun pollTelegramUpdates(context: OrchestratorContext)
-
-
 
     // Backlog / Filesystem
     fun parseAllIssues(): List<BacklogIssue>
-    fun writeGithubIssue(issue: BacklogIssue, number: Int)
+
+    fun writeGithubIssue(
+        issue: BacklogIssue,
+        number: Int,
+    )
+
     fun removeGithubIssue(issue: BacklogIssue)
+
     fun markIssueAsResolved(issue: BacklogIssue)
+
     fun markIssueAsDeferred(issue: BacklogIssue)
+
     fun deleteStateFile()
+
     fun generateKnowledgeMap()
 }
 
@@ -56,9 +84,8 @@ class RealOrchestratorEnvironment(
     private val stateFile: File,
     override val gitHubClient: GitHubClient,
     override val julesClient: JulesClient,
-    override val config: OrchestratorConfig = OrchestratorConfig()
+    override val config: OrchestratorConfig = OrchestratorConfig(),
 ) : OrchestratorEnvironment {
-
     override fun println(message: Any?) {
         val formatted = "[${java.time.LocalDateTime.now()}] $message"
         kotlin.io.println(formatted)
@@ -76,21 +103,28 @@ class RealOrchestratorEnvironment(
         System.err.flush()
     }
 
-    override fun sleep(duration: Long, unit: TimeUnit) = unit.sleep(duration)
+    override fun sleep(
+        duration: Long,
+        unit: TimeUnit,
+    ) = unit.sleep(duration)
 
     override fun ringBell(times: Int) {
         try {
             repeat(times) {
                 var rung = false
                 try {
-                    java.awt.Toolkit.getDefaultToolkit().beep()
+                    java.awt.Toolkit
+                        .getDefaultToolkit()
+                        .beep()
                     rung = true
-                } catch (_: Throwable) {}
+                } catch (_: Throwable) {
+                    }
 
                 try {
                     ProcessBuilder("tput", "bel").inheritIO().start().waitFor()
                     rung = true
-                } catch (_: Throwable) {}
+                } catch (_: Throwable) {
+                    }
 
                 if (!rung) {
                     kotlin.io.print("\u0007")
@@ -98,7 +132,8 @@ class RealOrchestratorEnvironment(
                 }
                 Thread.sleep(300)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            }
     }
 
     override fun readLine(): String? = readlnOrNull()
@@ -124,7 +159,10 @@ class RealOrchestratorEnvironment(
         bot?.pollUpdates()
     }
 
-    override fun sendApprovalRequest(issueId: String, text: String) {
+    override fun sendApprovalRequest(
+        issueId: String,
+        text: String,
+    ) {
         if (bot != null) {
             bot.onReviewRequested = { focusComments ->
                 ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, OrchestratorContext())
@@ -144,7 +182,10 @@ class RealOrchestratorEnvironment(
         return input == "y" || input == "yes"
     }
 
-    override fun requestApproval(issueId: String, text: String): Boolean {
+    override fun requestApproval(
+        issueId: String,
+        text: String,
+    ): Boolean {
         return if (bot != null) {
             bot.onReviewRequested = { focusComments ->
                 ReviewIssueLauncher.launchReviewTask(focusComments, backlogDir, this, OrchestratorContext())
@@ -159,27 +200,12 @@ class RealOrchestratorEnvironment(
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     override fun parseAllIssues(): List<BacklogIssue> = BacklogParser.parseAllIssues(backlogDir)
 
-    override fun writeGithubIssue(issue: BacklogIssue, number: Int) = BacklogParser.writeGithubIssue(issue, number)
+    override fun writeGithubIssue(
+        issue: BacklogIssue,
+        number: Int,
+    ) = BacklogParser.writeGithubIssue(issue, number)
 
     override fun removeGithubIssue(issue: BacklogIssue) = BacklogParser.removeGithubIssue(issue)
 

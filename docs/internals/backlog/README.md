@@ -1,43 +1,119 @@
-# Code Issues Backlog
+# Mazewall Backlog Index
 
-This directory contains modularized backlog items for architectural and security findings. Keeping issues separated improves context efficiency for both developers and AI coding agents.
+*Total Active Issues:* 103 | *Total Resolved Issues:* 501
+*Total Active Issues:* 108 | *Total Resolved Issues:* 496
 
-## Auto-Generated Issue Registries
-
-Individual issue files (`issue-*.md`) created under this directory are automatically scanned, parsed, and registered in the project's architectural maps. Instead of manually maintaining indexes here, consult the dynamically generated knowledge maps:
-
-*   **[Enforcer Module Knowledge Map](../maps/enforcer_map.md)** — Maps design documents, source files, and open issues for the `:enforcer` module.
-*   **[Profiler Module Knowledge Map](../maps/profiler_map.md)** — Maps design documents, source files, and open issues for the `:profiler` module.
-
-## Registering a New Issue
-
-To log a new bug, architectural gap, kernel-level nuance, or security vulnerability, simply create a new markdown file under the appropriate subdirectory:
-
-*   `docs/internals/backlog/security/` for security/vulnerability findings
-*   `docs/internals/backlog/performance/` for performance findings
-*   `docs/internals/backlog/testing/` for testing findings
-*   `docs/internals/backlog/code_health/` for other code/architectural health improvements
-
-Ensure your file starts with YAML frontmatter containing `title`, `severity`, `status`, and `priority` (`high`, `medium`, or `low` — not 0–10):
-
-```markdown
----
-title: "Title of Issue"
-severity: "HIGH/MEDIUM/LOW/CRITICAL/ENHANCEMENT"
-status: "open"
-priority: high
-component: "enforcer"
-target_modules: [":enforcer"]
-target_files: ["enforcer/src/main/kotlin/io/mazewall/SomeFile.kt"]
-open_questions: false # Set to true if pending design/operator feedback
----
-
-# 🔴 [Severity: HIGH]: Title of Issue
-**Context:** ...
-**Needed:** ...
-
-## ❓ Open Questions
-1. [Clarifying design questions, architectural options, or operator trade-offs (required when open_questions: true).]
-```
-
-Once the file is saved, run `./gradlew check` or `./gradlew build` to verify the backlog issue formatting.
+| Issue | Title | Priority | Component |
+|---|---|---|---|
+| [issue-20260907-094634-079-make-containment-exception-classification-and-extr](issue-20260907-094634-079-make-containment-exception-classification-and-extr.md) | Make containment exception classification and extraction reliable for callers | high | enforcer |
+| [issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines](testing/issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines.md) | Forbid silent else on sealed lifecycle and security machines | high | testing |
+| [issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n](code_health/issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n.md) | Make OrchestratorEvent evaluate exhaustive instead of else no-op | high | orchestrator |
+| [issue-20260907-080810-archunit-forbid-profiler-memorysegment-outside-ffi](testing/issue-20260907-080810-archunit-forbid-profiler-memorysegment-outside-ffi.md) | ArchUnit-forbid profiler MemorySegment outside ffi | high | profiler |
+| [issue-20260907-080818-hide-profiler-handshake-and-native-io-from-public-api](code_health/issue-20260907-080818-hide-profiler-handshake-and-native-io-from-public-api.md) | Hide profiler handshake and native IO from public API | high | profiler |
+| [issue-20260907-080829-thread-filedescriptor-through-platform-downcalls-and-classif](code_health/issue-20260907-080829-thread-filedescriptor-through-platform-downcalls-and-classif.md) | Thread FileDescriptor through platform downcalls and classification | high | platform |
+| [issue-20260907-080837-replace-profiler-control-tokens-and-mmap-flags-with-sealed-t](code_health/issue-20260907-080837-replace-profiler-control-tokens-and-mmap-flags-with-sealed-t.md) | Replace profiler control tokens and mmap flags with sealed types | high | profiler |
+| [issue-20260907-080845-replace-portal-method-int-and-byte-constants-with-sealed-por](code_health/issue-20260907-080845-replace-portal-method-int-and-byte-constants-with-sealed-por.md) | Replace portal method Int and Byte constants with sealed PortalMethod | high | docs |
+| [issue-20260907-080940-replace-orchestrator-module-identity-string-with-sealed-type](code_health/issue-20260907-080940-replace-orchestrator-module-identity-string-with-sealed-type.md) | Replace orchestrator module identity String with sealed type | medium | orchestrator |
+| [issue-20260907-080949-thread-filedescriptor-through-supervisor-dirfd-and-landlock](code_health/issue-20260907-080949-thread-filedescriptor-through-supervisor-dirfd-and-landlock.md) | Thread FileDescriptor through supervisor dirfd and Landlock fds | high | enforcer |
+| [issue-20260907-080955-split-landlock-install-into-evaluate-plus-kernel-effects](code_health/issue-20260907-080955-split-landlock-install-into-evaluate-plus-kernel-effects.md) | Split Landlock install into evaluate plus kernel effects | high | enforcer |
+| [issue-20260907-080959-apply-containmentstateregistry-updates-as-machine-effects](code_health/issue-20260907-080959-apply-containmentstateregistry-updates-as-machine-effects.md) | Apply ContainmentStateRegistry updates as machine effects | high | enforcer |
+| [issue-20260907-081005-add-user-notif-session-evaluate-machine-around-supervisorses](code_health/issue-20260907-081005-add-user-notif-session-evaluate-machine-around-supervisorses.md) | Add USER_NOTIF session evaluate machine around SupervisorSessionHandler | high | enforcer |
+| [issue-20260907-081011-move-profiler-handshake-lifecycle-into-evaluate](code_health/issue-20260907-081011-move-profiler-handshake-lifecycle-into-evaluate.md) | Move profiler handshake lifecycle into evaluate | high | profiler |
+| [issue-20260907-081045-add-portal-worker-and-broker-evaluate-machine](code_health/issue-20260907-081045-add-portal-worker-and-broker-evaluate-machine.md) | Add portal worker and broker evaluate machine | high | docs |
+| [issue-20260907-081051-move-orchestrator-i-o-out-of-orchestratorstate-execute](code_health/issue-20260907-081051-move-orchestrator-i-o-out-of-orchestratorstate-execute.md) | Move orchestrator I/O out of OrchestratorState execute | high | orchestrator |
+| [issue-20260907-081057-label-bpf-inspection-and-scm-rights-packing-arithmetic](code_health/issue-20260907-081057-label-bpf-inspection-and-scm-rights-packing-arithmetic.md) | Label BPF inspection and SCM_RIGHTS packing arithmetic | medium | enforcer |
+| [issue-20260907-081101-fix-landlock-before-seccomp-docs-pointing-at-applycontainmen](code_health/issue-20260907-081101-fix-landlock-before-seccomp-docs-pointing-at-applycontainmen.md) | Fix Landlock-before-seccomp docs pointing at applyContainment | low | docs |
+| [issue-20260907-081107-require-0xac-ack-on-profiler-user-notif-noise-path](security/issue-20260907-081107-require-0xac-ack-on-profiler-user-notif-noise-path.md) | Require 0xAC ACK on profiler USER_NOTIF noise path | high | profiler |
+| [issue-20260907-081112-make-portal-codegen-stubs-reviewable-with-named-method-ids](code_health/issue-20260907-081112-make-portal-codegen-stubs-reviewable-with-named-method-ids.md) | Make portal-codegen stubs reviewable with named method IDs | medium | docs |
+| [issue-20260907-081116-deduplicate-syscallinvoker-errno-capture-boilerplate](code_health/issue-20260907-081116-deduplicate-syscallinvoker-errno-capture-boilerplate.md) | Deduplicate SyscallInvoker errno capture boilerplate | medium | platform |
+| [issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local](security/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md) | Keep portal-worker Landlock process-scoped not thread-local | high | docs |
+| [issue-20260907-065311-extract-install-self-verification-planning-from-native-execu](code_health/issue-20260907-065311-extract-install-self-verification-planning-from-native-execu.md) | Extract install self-verification planning from native execution | high | enforcer |
+| [issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder](code_health/issue-20260907-065452-extract-tier-e-bpf-program-load-request-encoder.md) | Extract Tier-E BPF program-load request encoder | high | profiler |
+| [issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher](code_health/issue-20260907-065528-extract-immutable-syscall-number-resolver-from-dispatcher.md) | Extract immutable syscall-number resolver from dispatcher | high | platform |
+| [issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage](testing/issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage.md) | Move platform-owned unit tests into platform coverage | high | platform |
+| [issue-20260906-011942-align-orchestrator-backlog-validation-with-active-tier-e-met](code_health/issue-20260906-011942-align-orchestrator-backlog-validation-with-active-tier-e-met.md) | Align orchestrator backlog validation with active Tier-E metadata | high | orchestrator |
+| [MAZ-19-productivity-review](MAZ-19-productivity-review.md) | MAZ-19: Productivity Review for MAZ-18 | high | paperclip-management |
+| [issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa](implementation/issue-20260905-130408-implement-blast-radius-memory-injection-linking-codanna-impa.md) | Implement blast-radius memory injection linking Codanna impact symbols to agentmemory | high | testing |
+| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | medium | testing |
+| [issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec](implementation/issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec.md) | Align Codanna document indexing and agentmemory semantic recall on BGE-M3 vector space | medium | testing |
+| [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
+| [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
+| [issue-197-graceful-fallback-for-ai-agent-failures](issue-197-graceful-fallback-for-ai-agent-failures.md) | Graceful Fallback for AI Agent Failures | high | orchestrator |
+| [issue-198-auto-closing-linked-github-issues](issue-198-auto-closing-linked-github-issues.md) | Auto-Closing Linked GitHub Issues | high | orchestrator |
+| [issue-202-handle-cli-authentication-failures](issue-202-handle-cli-authentication-failures.md) | Detect and Handle CLI Authentication Failures with Actionable Login Alerts | high | orchestrator |
+| [issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble](issue-202-orchestrator-build-github-issue-body-dynamically-with-project-preamble.md) | Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble | high | orchestrator |
+| [issue-20260726-191002-subsystem-locking-and-core-file-locks-in-dependency-graph](issue-20260726-191002-subsystem-locking-and-core-file-locks-in-dependency-graph.md) | Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency | high | orchestrator |
+| [issue-20260726-191003-dynamic-post-push-target-file-tracking-in-orchestrator](issue-20260726-191003-dynamic-post-push-target-file-tracking-in-orchestrator.md) | Dynamic Post-Push Target File Tracking in Orchestrator Active Slots | high | orchestrator |
+| [issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository](issue-20260726-191004-integrate-mergiraf-ast-merge-driver-into-repository.md) | Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration | high | ci |
+| [issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon](issue-20260726-191502-isolated-worktree-git-rebase-orchestrator-daemon.md) | Isolate Orchestrator Git Operations from Main Working Directory using Temporary | high | orchestrator |
+| [issue-20260726-205801-orchestrator-serial-merge-queue](issue-20260726-205801-orchestrator-serial-merge-queue.md) | Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races | high | orchestrator |
+| [issue-20260726-205802-orchestrator-working-tree-sanitization-barrier](issue-20260726-205802-orchestrator-working-tree-sanitization-barrier.md) | Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks | high | orchestrator |
+| [issue-20260726-205803-mandatory-orchestrator-issue-creation-gating](issue-20260726-205803-mandatory-orchestrator-issue-creation-gating.md) | Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation | high | orchestrator |
+| [issue-20260727-021302-github-cli-token-fallback-and-auth-resilience](issue-20260727-021302-github-cli-token-fallback-and-auth-resilience.md) | GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN | high | orchestrator |
+| [issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset](issue-20260727-025903-orchestrator-closed-pr-detection-and-slot-reset.md) | Detect Closed Pull Requests and Suppress Conflict Alarm Spam in Orchestrator | high | orchestrator |
+| [issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient](issue-20260727-040001-interface-decoupling-processbuilder-realgithubclient.md) | Interface decoupling for ProcessBuilder execution in RealGitHubClient | medium | orchestrator |
+| [issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction](issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction.md) | Add Mandatory Origin Master Rebase Prompt Instructions in Jules Retry and Feedback Prompts | high | orchestrator |
+| [issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write](issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write.md) | Atomic Properties State File Writing in Orchestrator to Prevent Corruption | high | orchestrator |
+| [issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier](issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier.md) | Introduce Branch Sanitization and Checkout Checks in Orchestrator Merging Logic | high | orchestrator |
+| [issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis](issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis.md) | Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups | high | ci |
+| [issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization](issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization.md) | Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser | high | orchestrator |
+| [issue-20260808-032525-reduce-and-version-public-api-surface](issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
+| [issue-20260823-181012-single-start-approval-gate-hybrid](issue-20260823-181012-single-start-approval-gate-hybrid.md) | One start-approval gate for hybrid Paperclip + orchestrator loop | high | orchestrator |
+| [issue-20260823-181013-isolate-paperclip-agent-worktrees](issue-20260823-181013-isolate-paperclip-agent-worktrees.md) | Do not run Paperclip coding agents on the shared jseccomp working tree | high | orchestrator |
+| [issue-20260823-181014-retain-orchestrator-github-ci-merge-states](issue-20260823-181014-retain-orchestrator-github-ci-merge-states.md) | Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists | high | orchestrator |
+| [issue-20260823-181015-harden-paperclip-telegram-git-lifecycle](issue-20260823-181015-harden-paperclip-telegram-git-lifecycle.md) | Harden Paperclip Telegram done-hook: no rebase of the operator working tree | high | orchestrator |
+| [issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter](issue-20260823-181020-add-target-symbols-and-verify-cheap-frontmatter.md) | Extend backlog frontmatter with target_symbols and verify.cheap | high | orchestrator |
+| [issue-20260823-181022-diff-escape-pauses-sibling-slots](issue-20260823-181022-diff-escape-pauses-sibling-slots.md) | Pause sibling slots when a PR diff escapes declared target_files | high | orchestrator |
+| [issue-20260823-181023-keep-module-level-exclusive-scheduling](issue-20260823-181023-keep-module-level-exclusive-scheduling.md) | Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel | high | orchestrator |
+| [issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg](issue-20260824-203500-fd-token-ownership-type-level-owned-unowned-split-audit-ledg.md) | FD token ownership: type-level Owned/Unowned split + audit ledger + literal-int sweep | high | platform |
+| [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |
+| [issue-20260825-195000-tier-e-nice-to-have-1](issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
+| [issue-20260825-195000-tier-e-nice-to-have-2](issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
+| [issue-20260825-195000-tier-e-nice-to-have-3](issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
+| [issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re](issue-20260826-102722-split-supervisorsessionhandler-along-supervisorroute-with-re.md) | Split SupervisorSessionHandler along SupervisorRoute with request context types | medium | enforcer |
+| [issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera](issue-20260826-180103-purge-coverage-theater-tests-and-strengthen-assertion-covera.md) | Purge coverage theater tests and strengthen assertion coverage | high | testing |
+| [issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor](issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor.md) | Add target-based conflict checking to HybridSupervisor | high | orchestrator |
+| [issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli](issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli.md) | Precompile new_backlog_issue into standalone JVM CLI | medium | orchestrator |
+| [issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant](issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant.md) | Wire Codanna into SymbolLocator as an optional accelerant | medium | orchestrator |
+| [issue-20260827-113131-implement-stalledrunreclaimer-in-hybridsupervisor-for-timeou](issue-20260827-113131-implement-stalledrunreclaimer-in-hybridsupervisor-for-timeou.md) | Implement StalledRunReclaimer in HybridSupervisor for timeout recovery | high | orchestrator |
+| [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | medium | orchestrator |
+| [issue-20260827-113352-add-interactive-telegram-clarification-prompts-for-open-oper](issue-20260827-113352-add-interactive-telegram-clarification-prompts-for-open-oper.md) | Add interactive Telegram clarification prompts for open operator questions in HybridSupervisor | medium | orchestrator |
+| [issue-20260827-120200-implement-paperclip-issue-tree-holds-for-runtime-resource-co](issue-20260827-120200-implement-paperclip-issue-tree-holds-for-runtime-resource-co.md) | Implement Paperclip Issue Tree Holds for runtime resource conflict locking in HybridSupervisor | high | orchestrator |
+| [issue-20260827-120347-implement-agent-wakeup-queue-triggering-in-hybridsupervisor](issue-20260827-120347-implement-agent-wakeup-queue-triggering-in-hybridsupervisor.md) | Implement Agent Wakeup Queue triggering in HybridSupervisor on issue unblock | medium | orchestrator |
+| [issue-20260827-120530-implement-git-worktree-lease-isolation-for-local-and-cloud-w](issue-20260827-120530-implement-git-worktree-lease-isolation-for-local-and-cloud-w.md) | Implement Git Worktree lease isolation for local and cloud worker dispatch | high | orchestrator |
+| [issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation](issue-203-orchestrator-validate-issue-context-and-needed-before-github-issue-creation.md) | Orchestrator: Validate Issue Context and Needed Before GitHub Issue Creation | high | orchestrator |
+| [issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance](issue-204-orchestrator-structured-ci-failure-comment-with-diagnosis-guidance.md) | Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules | high | orchestrator |
+| [issue-205-orchestrator-add-failure-context-to-jules-retry-comments](issue-205-orchestrator-add-failure-context-to-jules-retry-comments.md) | Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR | high | orchestrator |
+| [issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous](issue-208-orchestrator-auto-merge-pr-on-verdict-approved-when-autonomous.md) | Orchestrator: Auto-Merge PR on VERDICT: APPROVED When autonomy=autonomous | medium | orchestrator |
+| [issue-20260823-171954-sbob-policy-artifacts-ci-admission](issue-20260823-171954-sbob-policy-artifacts-ci-admission.md) | SBoB Policy Artifacts Workflow: Pinned, Signed, Versioned Policies for CI Admission | medium | enforcer |
+| [issue-20260823-172004-additional-architecture-coverage](issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
+| [issue-20260825-023930-tier-e-initiative](issue-20260825-023930-tier-e-initiative.md) | Tier E Initiative: eBPF Semantic Enrichment (uprobe + task storage) | high | profiler |
+| [issue-20260825-023932-tier-e-wp-02-collector-prototype](issue-20260825-023932-tier-e-wp-02-collector-prototype.md) | Tier E WP-02: Standalone C eBPF syscall collector prototype | high | ebpf-prototype |
+| [issue-20260825-023937-tier-e-wp-07-container-metadata](issue-20260825-023937-tier-e-wp-07-container-metadata.md) | Tier E WP-07: Container metadata association | medium | ebpf-prototype |
+| [issue-20260825-023939-tier-e-wp-09-live-collector](issue-20260825-023939-tier-e-wp-09-live-collector.md) | Tier E WP-09: LiveEbpfCollector integration into :profiler | high | profiler |
+| [issue-20260825-023940-tier-e-wp-10-oracle-comparison](issue-20260825-023940-tier-e-wp-10-oracle-comparison.md) | Tier E WP-10: Oracle comparison suite (Gate G3) | high | profiler |
+| [issue-20260825-023941-tier-e-wp-11-java-agent](issue-20260825-023941-tier-e-wp-11-java-agent.md) | Tier E WP-11: Limited Java agent for automatic boundary scopes | medium | profiler |
+| [issue-20260825-023942-tier-e-wp-12-perf-harness](issue-20260825-023942-tier-e-wp-12-perf-harness.md) | Tier E WP-12: Performance harness (Spring demo service, modes A-D) | medium | profiler |
+| [issue-20260825-023943-tier-e-wp-13-sampling-enrichment](issue-20260825-023943-tier-e-wp-13-sampling-enrichment.md) | Tier E WP-13: Sampling enrichment policy (never sample context propagation) | medium | profiler |
+| [issue-20260825-023944-tier-e-wp-14-ffm-migration](issue-20260825-023944-tier-e-wp-14-ffm-migration.md) | Tier E WP-14: FFM loader/control-plane migration (libbpf-free runtime) | medium | platform |
+| [issue-20260825-023945-tier-e-wp-15-kubescape-poc](issue-20260825-023945-tier-e-wp-15-kubescape-poc.md) | Tier E WP-15: Kubescape node-agent integration PoC | low | profiler |
+| [issue-20260825-193100-tier-e-r4-doctor-preflight](issue-20260825-193100-tier-e-r4-doctor-preflight.md) | Tier E R4: tier-e-doctor environment preflight | high | ebpf-prototype |
+| [issue-059-iterativeprofiler-context-loss-via-thread-creation](issue-059-iterativeprofiler-context-loss-via-thread-creation.md) | `IterativeProfiler` Context Loss via thread creation | high | profiler |
+| [issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil](issue-010-compile-time-feature-proof-tokens-and-scope-safe-policy-buil.md) | Compile-Time Feature Proof Tokens and Scope-Safe Policy Builders (Type-State | low | enforcer |
+| [issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco](issue-029-proof-of-progress-state-machine-for-landlock-discovery-disco.md) | Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`) | low | profiler |
+| [issue-042-compile-time-enforced-tier-1-process-baseline-processcontain](issue-042-compile-time-enforced-tier-1-process-baseline-processcontain.md) | Compile-Time Enforced Tier 1 Process Baseline (`ProcessContainmentToken`) | low | enforcer |
+| [issue-067-unprivileged-pivot-root-empty-tmpfs](issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
+| [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
+| [issue-20260807-210802-aot-thread-containment-eligibility-assessment](issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
+| [issue-20260808-032520-owned-contained-executor-lifecycle](issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
+| [issue-012-algebraic-policy-composition-semigroupmonoid](issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
+| [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
+| [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |
+| [issue-030-architectural-dip-dependency-inversion-violations-in-native-](issue-030-architectural-dip-dependency-inversion-violations-in-native-.md) | Architectural DIP (Dependency Inversion) Violations in Native Scopes | low | enforcer |
+| [issue-043-phantom-types-for-context-aware-capability-tokens](issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
+| [issue-061-manual-ffm-layout-maintenance-and-drift-risk](issue-061-manual-ffm-layout-maintenance-and-drift-risk.md) | Manual FFM Layout Maintenance and Drift Risk | medium | enforcer |
+| [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |
+| [issue-20260726-0135-refactor-profiler-classes-for-testability](issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
+| [issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling](issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md) | Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root | medium | ebpf-prototype |
+| [issue-20260825-191000-ringbuf-rw-data-mapping-eperm](issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md) | BPF ringbuf data area cannot be mapped writable on current kernels | medium | tier-e |
+| [issue-20260825-193000-tier-e-r3-golden-protocol-conformance](issue-20260825-193000-tier-e-r3-golden-protocol-conformance.md) | Tier E R3: golden-file protocol conformance suite | medium | tier-e |

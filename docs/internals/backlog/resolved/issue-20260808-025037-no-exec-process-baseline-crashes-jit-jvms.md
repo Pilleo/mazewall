@@ -14,6 +14,8 @@ target_files:
   - "docs/presentation/article3-enforcement.md"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 4d48b38f-e8fe-420a-8f85-d64d4fbd22ab
+paperclip_identifier: MAZ-445
 ---
 
 # 🔴 [Severity: HIGH]: Process-Wide NO_EXEC Baseline Can Fatally Crash a JIT JVM

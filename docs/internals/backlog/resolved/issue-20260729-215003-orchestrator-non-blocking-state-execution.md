@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 409
+paperclip_issue_id: 29821d98-59e5-47f5-8556-2d8087da3c63
+paperclip_identifier: MAZ-426
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Orchestrator States to Be Fully Non-Blocking to Enable True Concurrent Task Execution

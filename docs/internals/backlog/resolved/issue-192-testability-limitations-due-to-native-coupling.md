@@ -14,6 +14,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 107
+paperclip_issue_id: 26d27466-dcd5-413e-9b5e-ac5869d4a44e
+paperclip_identifier: MAZ-371
 ---
 
 # Description

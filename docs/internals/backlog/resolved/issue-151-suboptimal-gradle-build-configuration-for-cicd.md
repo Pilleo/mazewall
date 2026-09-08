@@ -3,6 +3,8 @@ title: "Suboptimal Gradle Build Configuration for CI/CD"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 2f6d64f2-e1f9-4d6e-86c8-b9c1c3be85b0
+paperclip_identifier: MAZ-327
 ---
 
 # ✅ [RESOLVED]: Suboptimal Gradle Build Configuration for CI/CD

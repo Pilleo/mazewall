@@ -15,8 +15,7 @@ import kotlin.test.fail
 class NetworkBypassReproductionTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
-    @Suppress("ThrowsCount")
-    fun `reproduce sendmmsg and recvmmsg bypass under NO_NETWORK`() {
+        fun `reproduce sendmmsg and recvmmsg bypass under NO_NETWORK`() {
         val executor = Executors.newSingleThreadExecutor()
         // Wrap with NO_NETWORK which should block all networking
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_NETWORK)
@@ -40,7 +39,6 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                         NativeArg.NullArg,
                         NativeArg.NullArg,
                     )
-
 
                     if (sendRes is LinuxNative.SyscallResult.Error) {
                         if (sendRes.errno != 1) { // 1 is EPERM (seccomp block)

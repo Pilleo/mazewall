@@ -53,7 +53,11 @@ $QUALITY_AND_SAFETY_GUIDELINES
 """.trimIndent()
     }
 
-    fun reviewPrompt(prNumber: String, shaPrefix: String, pushWarning: String): String {
+    fun reviewPrompt(
+        prNumber: String,
+        shaPrefix: String,
+        pushWarning: String,
+    ): String {
         return buildString {
             append("⛔ READ-ONLY TASK — DO NOT COMMIT, PUSH, OR EDIT ANY FILES ⛔")
             if (pushWarning.isNotEmpty()) {
@@ -103,7 +107,7 @@ Structure your comment as follows:
 `VERDICT: UNCERTAIN`
 
 ---
-⛔ Reminder: post your review as a **comment only**. Do NOT edit files or push commits. ⛔"""
+⛔ Reminder: post your review as a **comment only**. Do NOT edit files or push commits. ⛔""",
             )
         }
     }

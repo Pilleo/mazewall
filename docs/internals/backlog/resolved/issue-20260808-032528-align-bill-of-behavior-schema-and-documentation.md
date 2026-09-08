@@ -14,6 +14,8 @@ target_files:
   - "profiler/README.md"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 72589c37-36ea-4970-bda2-8ceebad145ed
+paperclip_identifier: MAZ-459
 ---
 
 # 🟢 [Severity: LOW]: Align BillOfBehavior Domain Schema and Documentation

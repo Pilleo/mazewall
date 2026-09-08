@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/PolicyLists.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 8a9ddfff-5c1f-49d6-82eb-fd4af6ff30d0
+paperclip_identifier: MAZ-499
 ---
 
 # Downgrade Read-Only Deny Lists to Thread-Local Scope

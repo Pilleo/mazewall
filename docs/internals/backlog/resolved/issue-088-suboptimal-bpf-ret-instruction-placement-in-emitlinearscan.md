@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 231
+paperclip_issue_id: 9d0d93a4-8a44-4518-a813-46756fa5d1d9
+paperclip_identifier: MAZ-268
 ---
 
 # 🔴 [Severity: LOW]: Suboptimal BPF `RET` instruction placement in `emitLinearScan`

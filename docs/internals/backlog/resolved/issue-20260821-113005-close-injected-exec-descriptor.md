@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "supervised"
 related_pr: 512
 related_thread: 3825912186
+paperclip_issue_id: 0b09beda-785c-420b-ab50-8b2ab9171e65
+paperclip_identifier: MAZ-560
 ---
 
 # 🟡 [Severity: MEDIUM]: Close the injected exec descriptor when rewrite fails

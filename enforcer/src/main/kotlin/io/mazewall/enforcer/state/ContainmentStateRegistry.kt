@@ -74,7 +74,7 @@ internal object ContainmentStateRegistry {
         val ps = processState
 
         if (h.cachedProcessState === ps && h.cachedMergedState != null) {
-            return h.cachedMergedState!!
+            return checkNotNull(h.cachedMergedState) { "cached process state requires a cached merged state" }
         }
 
         val merged = mergeStates(ts, ps)
@@ -83,7 +83,10 @@ internal object ContainmentStateRegistry {
         return merged
     }
 
-    private fun mergeStates(ts: ContainerState, ps: ContainerState): ContainerState {
+    private fun mergeStates(
+        ts: ContainerState,
+        ps: ContainerState,
+    ): ContainerState {
         val mergedActions = ts.syscallActions.toMutableMap()
         for ((sys, action) in ps.syscallActions) {
             val current = mergedActions[sys]
@@ -113,30 +116,14 @@ internal object ContainmentStateRegistry {
             allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
             landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
-            engineState = mergedEngineState
+            engineState = mergedEngineState,
         )
     }
 
     private fun mergeEngineStates(
         ts: SeccompInstallationState,
-        ps: SeccompInstallationState
-    ): SeccompInstallationState {
-        val tsRank = stateRank(ts)
-        val psRank = stateRank(ps)
-        return if (tsRank >= psRank) ts else ps
-    }
-
-    private fun stateRank(state: SeccompInstallationState): Int {
-        return when (state) {
-            is SeccompInstallationState.Uninitialized -> 0
-            is SeccompInstallationState.Failed -> 1
-            is SeccompInstallationState.FilterBuilt -> 2
-            is SeccompInstallationState.PrivilegesLocked -> 3
-            is SeccompInstallationState.SystemCallApplied -> 4
-            is SeccompInstallationState.FallbackPrctlApplied -> 4
-            is SeccompInstallationState.Verified -> 5
-        }
-    }
+        ps: SeccompInstallationState,
+    ): SeccompInstallationState = listOf(ts, ps).maxBy(SeccompInstallationState::rank)
 
     /**
      * Explicitly disables state sanitization.
@@ -147,7 +134,7 @@ internal object ContainmentStateRegistry {
     fun sanitizeThreadState(): Nothing {
         throw UnsupportedOperationException(
             "Sanitization of thread state is intentionally disabled. " +
-                "OS-level sandbox restrictions are permanent for the thread's lifetime."
+                "OS-level sandbox restrictions are permanent for the thread's lifetime.",
         )
     }
 }

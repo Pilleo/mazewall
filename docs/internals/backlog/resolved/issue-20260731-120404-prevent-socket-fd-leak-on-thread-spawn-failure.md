@@ -12,6 +12,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 462
+paperclip_issue_id: b455cd10-53af-4cdd-8678-0aa041eb09d3
+paperclip_identifier: MAZ-439
 ---
 
 # 🔴 [Severity: HIGH]: Prevent Socket FD Leak in ProfilerDaemonEngine on Connection Thread Spawn Failure

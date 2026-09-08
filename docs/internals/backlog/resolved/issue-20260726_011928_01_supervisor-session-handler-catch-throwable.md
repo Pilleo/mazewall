@@ -14,6 +14,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt
+paperclip_issue_id: 1d151a74-64a0-486f-bf31-29e41825f2d5
+paperclip_identifier: MAZ-388
 ---
 
 # Issue: `SupervisorSessionHandler.handleActiveListener` Swallows `Throwable`

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 299
+paperclip_issue_id: 1de7d841-7980-44ee-b96c-6b69fbdcef1f
+paperclip_identifier: MAZ-301
 ---
 
 # 🔴 [Severity: DX-FRICTION]: Opaque Exceptions on Landlock Initialization Failure

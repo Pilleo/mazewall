@@ -15,6 +15,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260823-171500"
+paperclip_issue_id: 6a584865-1630-49cc-8b97-20e2e076d596
+paperclip_identifier: MAZ-604
 ---
 
 # 🟡 [Severity: LOW]: Extract Shared Syscall Probe Matrix Reusable by :profiler USER_NOTIF Filters
@@ -42,4 +44,3 @@ self-verify-before-install feature without new dependencies.
    requiring a live supervisor socket for the pure-verdict layer.
 3. Follow cross-module protocol: land :enforcer changes first, verify `:enforcer:check`, then wire
    :profiler.
-

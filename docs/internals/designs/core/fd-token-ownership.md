@@ -1,6 +1,6 @@
 # File-Descriptor Token Ownership — Invariants & Incident Notes
 
-> Status (2026-08-24): Written after the `ForeignFdGuard` incident. Read this before
+> Status (2026-09-07): The ownership split and audit ledger are implemented. Read this before
 > minting [FileDescriptor] tokens in tests or production.
 
 ## The incident (2026-08-24)
@@ -40,18 +40,16 @@ Every such call is a real `close(int)` syscall in the shared test JVM:
   classes. Disable only for diagnostics: `-Dmazewall.fdguard=off`.
 - KDoc DANGER notes on `FileDescriptor.generic()` and `unsafe()`.
 
-## Roadmap (tracked in backlog)
+## Implemented controls
 
-1. **Type-level ownership split**: `generic()`/`unsafe()` should return an
-   `Unowned` token type that cannot be `close()`d; only factories that create or
-   adopt (`open*`, `adopt`, `replace`, `claimDupIfNeeded`) yield `Owned` tokens with
-   close rights. Compile-time elimination of the entire bug class.
-2. **Audit ledger mode**: `FdEpoch.close()` optionally verifies via
-   `fcntl(fd, F_GETFD)` that the target still exists and logs closes of fds never
-   opened through the epoch (`mazewall.fd.audit=true`).
-3. **Sweep remaining literal-int minting sites** (~61 across enforcer/profiler/
-   platform tests at time of writing); many are equality-only assertions without
-   close and are safe, but each needs classification, not assumption.
-4. **Same discipline for pid handles**: invented pids passed to signal-bearing
-   syscalls would target unrelated processes (host-visible under shared-kernel
-   containers). Audit `pid(`/`pidfd_send_signal`/`kill` call sites.
+1. **Type-level ownership split**: `generic()`/`unsafe()` and role-specific raw
+   factories return `Unowned` tokens that cannot call `close()`. Kernel-result
+   adoption (`adopt`, `replace`, and dup-result handling) yields `Owned` tokens.
+2. **Audit ledger mode**: with `mazewall.fd.audit=true`, `FdEpoch` verifies
+   `fcntl(fd, F_GETFD)` before close, logs untracked close attempts, and suppresses
+   a close when the kernel has already invalidated the descriptor.
+3. **Literal-factory sweep**: the remaining raw literal tokens are mock/equality
+   uses and cannot close. JUnit tests that mint owned replacement fixtures use
+   `ForeignFdGuard`, which fails a test that closes a descriptor present at start.
+4. **PID discipline**: signal-bearing paths create PID tokens only from pidfds
+   returned by `pidfd_open`; never mint one around an invented process identifier.

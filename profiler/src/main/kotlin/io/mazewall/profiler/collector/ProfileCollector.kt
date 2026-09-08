@@ -17,8 +17,11 @@ public data class CollectorDrain(
  */
 public interface ProfileCollector : AutoCloseable {
     public val source: ObservationSource
+
     public fun start()
+
     public fun drain(): CollectorDrain
+
     override fun close()
 }
 
@@ -56,7 +59,10 @@ public object ObservationMerger {
         }
     }
 
-    private fun rank(a: IoUringVisibility, b: IoUringVisibility): IoUringVisibility {
+    private fun rank(
+        a: IoUringVisibility,
+        b: IoUringVisibility,
+    ): IoUringVisibility {
         val order = listOf(
             IoUringVisibility.UNSEEN,
             IoUringVisibility.BLOCKED,

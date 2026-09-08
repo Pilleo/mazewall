@@ -16,6 +16,8 @@ effort: "medium"
 autonomy: "supervised"
 github_issue:
 github_issue: 373
+paperclip_issue_id: f3871120-0203-4512-b157-e68c8dba84b9
+paperclip_identifier: MAZ-401
 ---
 
 # 🔴 [Severity: HIGH]: Replace git rebase with Surgical Intended-Files Apply in Orchestrator's rebaseBranch()

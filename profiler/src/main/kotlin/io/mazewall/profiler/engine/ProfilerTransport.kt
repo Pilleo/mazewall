@@ -1,16 +1,20 @@
-package io.mazewall.profiler.engine
+package io.mazewall.profiler.ffi
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketIo
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.getFdOrThrow
 import io.mazewall.onFailure
 import io.mazewall.onSuccess
-import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.profiler.engine.SECCOMP_IOCTL_NOTIF_SEND
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -19,10 +23,9 @@ import java.nio.charset.StandardCharsets
 /**
  * High-level interface for publishing domain events to the parent JVM.
  */
-interface TraceEventPublisher {
-    context(arena: Arena)
-    fun sendTraceEvent(
-        socketFd: FileDescriptor<*, FdState.Open>,
+internal interface TraceEventPublisher {
+    context(arena: Arena) fun sendTraceEvent(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     )
 }
@@ -30,13 +33,12 @@ interface TraceEventPublisher {
 /**
  * High-level interface for sending seccomp responses back to the kernel.
  */
-interface SeccompResponder {
+internal interface SeccompResponder {
     /**
      * Sends a SECCOMP_USER_NOTIF_FLAG_CONTINUE response to the kernel for a successful handshake.
      * Enforced at compile-time to only work with sessions in the Success state.
      */
-    context(arena: Arena)
-    fun sendSeccompContinue(
+    context(arena: Arena) fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
     )
@@ -45,8 +47,7 @@ interface SeccompResponder {
      * Sends an error response (or generic failure) to the kernel for a failed handshake.
      * Enforced at compile-time to only work with sessions in the Failed state.
      */
-    context(arena: Arena)
-    fun sendSeccompError(
+    context(arena: Arena) fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
         errorNr: Int,
@@ -56,8 +57,9 @@ interface SeccompResponder {
 /**
  * Low-level interface for raw POSIX-like polling and I/O.
  */
-interface NativeIoOperations {
+internal interface NativeIoOperations {
     val raw: io.mazewall.RawSyscallOperations
+
     fun poll(
         fds: MemorySegment,
         nfds: Long,
@@ -65,31 +67,31 @@ interface NativeIoOperations {
     ): LinuxNative.SyscallResult<Long, *>
 
     fun read(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun write(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun recv(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *>
 
     fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *>
 
-    fun close(fd: FileDescriptor<*, FdState.Open>)
+    fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
 }
 
 /**
@@ -100,7 +102,7 @@ typealias SocketLifecycleManager = io.mazewall.core.SocketManager
 /**
  * Legacy composite interface for communicating with the parent JVM and receiving file descriptors.
  */
-interface ProfilerTransport :
+internal interface ProfilerTransport :
     TraceEventPublisher,
     SeccompResponder,
     NativeIoOperations,
@@ -109,25 +111,18 @@ interface ProfilerTransport :
 /**
  * Real implementation of [ProfilerTransport] using standard Linux syscalls.
  */
-@Suppress("MagicNumber", "ReturnCount", "ThrowsCount")
-object RealProfilerTransport : ProfilerTransport {
-    private val logger = java.util.logging.Logger.getLogger(RealProfilerTransport::class.java.name)
+
+internal object RealProfilerTransport : ProfilerTransport {
+    private val logger = java.util.logging.Logger
+        .getLogger(RealProfilerTransport::class.java.name)
 
     override val raw: io.mazewall.RawSyscallOperations get() = LinuxNative.raw
-    private const val CMSG_LEN_VAL = 20L
-    private const val CMSG_LEN_OFF = 0L
-    private const val CMSG_LEVEL_OFF = 8L
-    private const val CMSG_TYPE_OFF = 12L
-    private const val CMSG_DATA_OFF = 16L
-    private const val SOL_SOCKET_VAL = 1
-    private const val SCM_RIGHTS_VAL = 1
 
     private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
     private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
 
-    context(arena: Arena)
-    override fun sendTraceEvent(
-        socketFd: FileDescriptor<*, FdState.Open>,
+    context(arena: Arena) override fun sendTraceEvent(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
         val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
@@ -172,8 +167,7 @@ object RealProfilerTransport : ProfilerTransport {
         res.getOrThrow("sendTraceEvent")
     }
 
-    context(arena: Arena)
-    override fun sendSeccompContinue(
+    context(arena: Arena) override fun sendSeccompContinue(
         session: HandshakeSession.Success,
         resp: MemorySegment,
     ) {
@@ -191,8 +185,7 @@ object RealProfilerTransport : ProfilerTransport {
         res.getOrThrow("sendSeccompContinue")
     }
 
-    context(arena: Arena)
-    override fun sendSeccompError(
+    context(arena: Arena) override fun sendSeccompError(
         session: HandshakeSession.Failed,
         resp: MemorySegment,
         errorNr: Int,
@@ -212,23 +205,32 @@ object RealProfilerTransport : ProfilerTransport {
         res.getOrThrow("sendSeccompError")
     }
 
-    override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        return io.mazewall.core.RealSocketManager.connect(socketPath)
+    override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+        return io.mazewall.core.RealSocketManager
+            .connect(socketPath)
     }
 
-    override fun sendDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>, fdToSend: FileDescriptor<*, FdState.Open>): Boolean {
-        return io.mazewall.core.RealSocketManager.sendDescriptor(socketFd, fdToSend)
+    override fun sendDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+    ): Boolean {
+        return io.mazewall.core.RealSocketManager
+            .sendDescriptor(socketFd, fdToSend)
     }
 
-    override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
-        return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd)
+    override fun recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
+        return io.mazewall.core.RealSocketManager
+            .recvDescriptor(socketFd)
     }
 
     override fun <R : FileDescriptorRole> recvDescriptor(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
-    ): FileDescriptor<R, FdState.Open>? {
-        return io.mazewall.core.RealSocketManager.recvDescriptor(socketFd, role)
+    ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
+        return io.mazewall.core.RealSocketManager
+            .recvDescriptor(socketFd, role)
     }
 
     override fun poll(
@@ -238,39 +240,41 @@ object RealProfilerTransport : ProfilerTransport {
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.raw.poll(ConfinedSegment(fds), nfds, timeout)
 
     override fun read(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.memory.read(fd, ConfinedSegment(buf), count)
 
     override fun write(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.memory.write(fd, ConfinedSegment(buf), count)
 
     override fun recv(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: MemorySegment,
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.networking.recv(sockfd, ConfinedSegment(buf), len, flags)
 
     override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, *> = LinuxNative.raw.ioctl(fd, request, ConfinedSegment(arg))
 
-    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        return io.mazewall.core.RealSocketManager.createUnixServer(socketPath)
+    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+        return io.mazewall.core.RealSocketManager
+            .createUnixServer(socketPath)
     }
 
-    override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
-        return io.mazewall.core.RealSocketManager.accept(serverFd)
+    override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+        return io.mazewall.core.RealSocketManager
+            .accept(serverFd)
     }
 
-    override fun close(fd: FileDescriptor<*, FdState.Open>) {
+    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
         LinuxNative.fileSystem.close(fd)
     }
 }

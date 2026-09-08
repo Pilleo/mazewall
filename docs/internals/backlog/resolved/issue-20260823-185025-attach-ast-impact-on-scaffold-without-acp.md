@@ -22,6 +22,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 1ff7ddff-afb6-4a4b-822f-cd3805dacde1
+paperclip_identifier: MAZ-613
 ---
 
 # 🟡 [Severity: MEDIUM]: Attach AST impact on scaffold without ACP

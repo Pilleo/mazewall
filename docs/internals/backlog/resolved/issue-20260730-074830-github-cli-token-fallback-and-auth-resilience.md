@@ -10,6 +10,8 @@ target_modules:
 target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/OrchestratorDaemon.kt"
+paperclip_issue_id: 4fdc106d-1463-4ce1-a815-cb7413ce8b66
+paperclip_identifier: MAZ-430
 ---
 
 # 🟡 [Severity: MEDIUM]: GitHub CLI Token Precedence and Environment Authentication Resilience

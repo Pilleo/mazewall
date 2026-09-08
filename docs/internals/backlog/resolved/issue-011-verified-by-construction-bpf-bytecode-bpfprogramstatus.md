@@ -7,6 +7,8 @@ dependencies: []
 component: "seccomp"
 effort: "medium"
 github_issue: 291
+paperclip_issue_id: c992ea2e-54c1-4d07-8532-3977e1734b73
+paperclip_identifier: MAZ-214
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Verified-by-Construction BPF Bytecode (BpfProgram<Status>)

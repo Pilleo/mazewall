@@ -5,7 +5,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertFailsWith
 
 class NativeScopeTest {
-
     @Test
     fun `nativeScope closes arena even when exception is thrown`() {
         assertFailsWith<RuntimeException> {

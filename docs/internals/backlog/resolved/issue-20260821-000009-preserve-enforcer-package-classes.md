@@ -18,6 +18,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7iSmJD
+paperclip_issue_id: 19b1a6db-1d34-4ae7-8966-d11cf77e6e7a
+paperclip_identifier: MAZ-521
 ---
 
 # 🔴 [Severity: HIGH]: Preserve existing public enforcer package classes

@@ -12,6 +12,8 @@ target_modules:
 component: orchestrator
 effort: MEDIUM
 github_issue: 249
+paperclip_issue_id: c02d976d-8adb-4392-a7c0-c5add9d48c2b
+paperclip_identifier: MAZ-369
 ---
 
 # Refactor Orchestrator State Machine Testability

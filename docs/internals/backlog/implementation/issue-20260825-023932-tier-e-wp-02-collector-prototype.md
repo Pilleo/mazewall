@@ -14,7 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023931-tier-e-wp-01-mazewall-context-api.md"
-paperclip_issue_id: a0067f0f-ae6c-4d47-af99-a858019ba838
+paperclip_issue_id: "313b1adf-1508-44a5-af6f-bfbb8dbffca9"
+paperclip_identifier: "MAZ-1097"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-02 — Standalone C eBPF Syscall Collector

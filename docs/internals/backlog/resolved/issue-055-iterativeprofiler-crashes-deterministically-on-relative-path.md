@@ -3,6 +3,8 @@ title: "`IterativeProfiler` crashes deterministically on relative-path filesyste
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: a9041484-5333-49b2-bdcd-7df015339c54
+paperclip_identifier: MAZ-246
 ---
 
 # ✅ [RESOLVED]: `IterativeProfiler` crashes deterministically on relative-path filesystem violations

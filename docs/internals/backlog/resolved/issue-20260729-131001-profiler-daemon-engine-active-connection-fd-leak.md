@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: d5e99780-437f-4ba4-8707-362d6f22127c
+paperclip_identifier: MAZ-404
 ---
 
 # 🔴 [Severity: HIGH]: ProfilerDaemonEngine active connection FD leak on session start failure

@@ -15,6 +15,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 3dadc394-2a30-41df-a9c9-5dba3d7c887d
+paperclip_identifier: MAZ-591
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Portal codegen writes stub and dispatcher into one output directory

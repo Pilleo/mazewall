@@ -1,5 +1,6 @@
 package io.mazewall.enforcer
 
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -23,16 +24,16 @@ class ContainmentViolationDetectorTest {
         @JvmStatic
         fun violationCases() =
             listOf(
-                ViolationCase(IOException("Operation not permitted"), true, "IOException with EPERM"),
-                ViolationCase(IOException("Permission denied"), true, "IOException with Permission denied"),
-                ViolationCase(SocketException("Permission denied"), true, "SocketException with Permission denied"),
-                ViolationCase(AccessDeniedException("/some/path"), true, "AccessDeniedException"),
+                ViolationCase(IOException("Operation not permitted"), false, "unobserved IOException with EPERM"),
+                ViolationCase(IOException("Permission denied"), false, "unobserved IOException with Permission denied"),
+                ViolationCase(SocketException("Permission denied"), false, "unobserved SocketException with Permission denied"),
+                ViolationCase(AccessDeniedException("/some/path"), false, "unobserved AccessDeniedException"),
                 ViolationCase(
                     IOException("Cannot run program \"/bin/sh\": IOException: error=1, Operation not permitted"),
-                    true,
-                    "JVM exec EPERM",
+                    false,
+                    "unobserved JVM exec EPERM",
                 ),
-                ViolationCase(ConnectException("Permission denied"), true, "ConnectException with Permission denied"),
+                ViolationCase(ConnectException("Permission denied"), false, "unobserved ConnectException with Permission denied"),
                 ViolationCase(IOException(null as String?), false, "IOException with null message"),
                 ViolationCase(IOException("Connection reset by peer"), false, "Unrelated IOException"),
                 ViolationCase(IllegalArgumentException("bad argument"), false, "Unrelated RuntimeException"),
@@ -64,7 +65,7 @@ class ContainmentViolationDetectorTest {
         val root = IOException("Operation not permitted")
         val mid = RuntimeException("wrapper", root)
         val top = IllegalStateException("top", mid)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(top))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(top)?.evidence)
     }
 
     @Test
@@ -72,7 +73,7 @@ class ContainmentViolationDetectorTest {
         val primary = RuntimeException("task failed")
         val suppressed = IOException("Operation not permitted")
         primary.addSuppressed(suppressed)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(primary))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(primary)?.evidence)
     }
 
     @Test
@@ -101,7 +102,7 @@ class ContainmentViolationDetectorTest {
         primary.addSuppressed(suppressedWrapper)
         val found = ContainmentViolationDetector.findViolationCause(primary)
         assertTrue(found === violation, "Expected the nested IOException, got $found")
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(primary))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(primary)?.evidence)
     }
 
     class CyclicCauseException(
@@ -123,7 +124,7 @@ class ContainmentViolationDetectorTest {
         val violation = IOException("Operation not permitted")
         val t3 = CyclicCauseException { violation }
         next = t3
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(t1))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(t1)?.evidence)
     }
 
     @Test
@@ -139,15 +140,9 @@ class ContainmentViolationDetectorTest {
 
         val violation = IOException("Operation not permitted")
         t2.addSuppressed(violation)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(t1))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(t1)?.evidence)
         val found = ContainmentViolationDetector.findViolationCause(t1)
         assertTrue(found === violation)
-    }
-
-    @Test
-    fun `test detector instantiation coverage`() {
-        val detector = ContainmentViolationDetector
-        org.junit.jupiter.api.Assertions.assertNotNull(detector)
     }
 
     @Test
@@ -159,6 +154,7 @@ class ContainmentViolationDetectorTest {
             message = "denied",
             errno = io.mazewall.ffi.NativeConstants.EPERM,
             syscallNr = 42,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
         )
         assertTrue(detector.isContainmentViolation(v))
         assertEquals(io.mazewall.ffi.NativeConstants.EPERM, v.errno)
@@ -167,10 +163,32 @@ class ContainmentViolationDetectorTest {
 
     @Test
     fun `legacy constructor keeps nullable taxonomy fields`() {
-        val v = io.mazewall.enforcer.api.ContainmentViolationException("legacy")
+        val v = io.mazewall.enforcer.api
+            .ContainmentViolationException("legacy")
         assertEquals(null, v.errno)
         assertEquals(null, v.syscallNr)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(v))
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(v))
+        assertEquals(ContainmentViolationEvidence.UNKNOWN, ContainmentViolationDetector.diagnose(v)?.evidence)
+    }
+
+    @Test
+    fun `generic permission failures are not confirmed containment violations`() {
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(AccessDeniedException("/user-owned-file")))
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("error=13, Permission denied")))
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("Cannot run program \"missing-tool\"")))
+        assertFalse(ContainmentViolationDetector.isContainmentViolation(IllegalArgumentException("error=22, bad argument")))
+    }
+
+    @Test
+    fun `structured violation wins over an outer heuristic match`() {
+        val structured = io.mazewall.enforcer.api.ContainmentViolationException(
+            message = "kernel denial",
+            errno = io.mazewall.ffi.NativeConstants.EPERM,
+            syscallNr = 59,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
+        )
+        val outer = IOException("Permission denied", structured)
+
+        assertTrue(ContainmentViolationDetector.findViolationCause(outer) === structured)
     }
 }
-

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 149
+paperclip_issue_id: df54ee50-c050-4adf-b204-a69c79241768
+paperclip_identifier: MAZ-341
 ---
 
 # 🔴 [Severity: MEDIUM]: Architectural Violation - FFM Leaking Outside `io.mazewall.ffi`

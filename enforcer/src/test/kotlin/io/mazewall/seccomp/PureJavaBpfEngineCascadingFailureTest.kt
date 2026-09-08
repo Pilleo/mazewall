@@ -15,7 +15,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class PureJavaBpfEngineCascadingFailureTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -42,11 +41,12 @@ class PureJavaBpfEngineCascadingFailureTest {
         // 1. Simulate an existing state where prctl is blocked.
         // This simulates a previous filter that was already installed in the kernel.
         ContainmentStateRegistry.threadState = ContainerState(
-            syscallActions = mapOf(Syscall.PRCTL to SeccompAction.ACT_ERRNO())
+            syscallActions = mapOf(Syscall.PRCTL to SeccompAction.ACT_ERRNO()),
         )
 
         // 2. Try to install a new policy that ALLOWS prctl.
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .allow(Syscall.PRCTL)
             .build()
         val compiled = policy.definition.compile(Arch.current())

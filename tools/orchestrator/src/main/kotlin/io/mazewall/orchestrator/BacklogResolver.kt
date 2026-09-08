@@ -25,9 +25,14 @@ class BacklogResolver(
     private val out: (String) -> Unit = ::println,
     private val err: (String) -> Unit = System.err::println,
 ) {
-    fun resolveIfNeeded(identifier: String, description: String?): Boolean {
+    fun resolveIfNeeded(
+        identifier: String,
+        description: String?,
+    ): Boolean {
         val markerPath = Regex("""mazewall:backlog-file=(\S+)""")
-            .find(description.orEmpty())?.groupValues?.get(1)
+            .find(description.orEmpty())
+            ?.groupValues
+            ?.get(1)
             ?: return false
 
         val root = repoRoot.toAbsolutePath().normalize()
@@ -76,11 +81,15 @@ class BacklogResolver(
         return true
     }
 
-    private fun findByBasename(root: Path, basename: String): Path? {
+    private fun findByBasename(
+        root: Path,
+        basename: String,
+    ): Path? {
         val backlog = root.resolve(BACKLOG_DIR)
         if (!Files.exists(backlog)) return null
         return Files.walk(backlog).use { stream ->
-            stream.asSequence()
+            stream
+                .asSequence()
                 .filter { it.name == basename }
                 .firstOrNull()
         }
@@ -96,11 +105,17 @@ class BacklogResolver(
 /** Seam over git for tests; production shells out to the git binary. */
 interface GitRunner {
     /** Returns true when the command exited 0; stderr is surfaced through err on failure. */
-    fun run(workdir: Path, vararg args: String): Boolean
+    fun run(
+        workdir: Path,
+        vararg args: String,
+    ): Boolean
 }
 
 object ProcessGitRunner : GitRunner {
-    override fun run(workdir: Path, vararg args: String): Boolean {
+    override fun run(
+        workdir: Path,
+        vararg args: String,
+    ): Boolean {
         val process = ProcessBuilder("git", *args)
             .directory(workdir.toFile())
             .start()

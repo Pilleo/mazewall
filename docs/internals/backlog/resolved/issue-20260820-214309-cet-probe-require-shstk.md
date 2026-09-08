@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdS
+paperclip_issue_id: f11cfae9-4f8a-496c-b562-de701190c4c8
+paperclip_identifier: MAZ-489
 ---
 
 # 🟠 [Severity: MEDIUM]: Require shadow-stack support for the CET probe

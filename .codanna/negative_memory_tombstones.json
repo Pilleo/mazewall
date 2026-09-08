@@ -1,0 +1,12 @@
+{
+  "fe6db64340ab20ad": {
+    "id": "mem_err_fd4fe596154c",
+    "title": "Anti-Pattern: DeletedLegacyClass123.kt: Unresolved reference to 'DeletedLegacyClass123'",
+    "reason": "DEAD_CODE: Referenced file(s) deleted (enforcer/src/main/kotlin/io/mazewall/DeletedLegacyClass123.kt)",
+    "timestamp": "2026-09-05T10:44:19.000Z"
+  },
+  "enforcer/src/main/kotlin/io/mazewall/DeletedLegacyClass123.kt": {
+    "reason": "DEAD_CODE: Referenced file(s) deleted (enforcer/src/main/kotlin/io/mazewall/DeletedLegacyClass123.kt)",
+    "timestamp": "2026-09-05T10:44:19.000Z"
+  }
+}

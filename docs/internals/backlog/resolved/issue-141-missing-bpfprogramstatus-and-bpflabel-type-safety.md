@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 169
+paperclip_issue_id: 7677175a-f546-4427-8ccf-4be51d03d5dc
+paperclip_identifier: MAZ-317
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing `BpfProgram<Status>` and `BpfLabel` Type-Safety

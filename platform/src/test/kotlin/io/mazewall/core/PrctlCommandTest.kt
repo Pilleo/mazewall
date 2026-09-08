@@ -7,13 +7,14 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
 
 class PrctlCommandTest {
-
     data class PrctlTestCase(
         val name: String,
         val command: PrctlCommand,
         val expectedOption: Int,
         val expectedArg2: NativeArg,
         val expectedArg3: NativeArg = NativeArg.LongArg(0L),
+        val expectedArg4: NativeArg = NativeArg.LongArg(0L),
+        val expectedArg5: NativeArg = NativeArg.LongArg(0L),
     ) {
         override fun toString(): String = name
     }
@@ -44,5 +45,7 @@ class PrctlCommandTest {
         assertEquals(testCase.expectedOption, testCase.command.option, "option should match")
         assertEquals(testCase.expectedArg2, testCase.command.arg2, "arg2 should match")
         assertEquals(testCase.expectedArg3, testCase.command.arg3, "arg3 should match")
+        assertEquals(testCase.expectedArg4, testCase.command.arg4, "arg4 should match")
+        assertEquals(testCase.expectedArg5, testCase.command.arg5, "arg5 should match")
     }
 }

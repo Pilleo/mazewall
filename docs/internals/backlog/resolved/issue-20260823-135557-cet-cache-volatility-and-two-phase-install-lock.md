@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 7a35a914-368b-4100-abd4-33eb8d41228a
+paperclip_identifier: MAZ-585
 ---
 
 # 🟠 [Severity: MEDIUM]: Unsynchronized CET Cache Volatility and Two-Phase Landlock/Seccomp Install Lock
@@ -61,4 +63,3 @@ dependencies: []
    `ContainedExecutors`.
 4. Add a stress test installing two distinct thread-scoped policies concurrently, asserting final
    `ContainmentStateRegistry` matches the union of installed filters after N iterations.
-

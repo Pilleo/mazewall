@@ -12,7 +12,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
-paperclip_issue_id: 4d74d01a-2d24-4eb5-bd2c-7d15f891fb61
+paperclip_issue_id: "9b9350b2-f067-475b-a15d-7383d0944769"
+paperclip_identifier: "MAZ-1177"
 ---
 
 # 🟡 [Severity: LOW]: Rootless podman service masquerades as docker.sock on the dev host

@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819751061
+paperclip_issue_id: 8e145156-88e4-4774-8562-df2c95b95a26
+paperclip_identifier: MAZ-544
 ---
 
 # 🟡 [Severity: MEDIUM]: Preserve close-on-exec on the injected executable descriptor

@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/IntelCetIntegrationTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 1e728f0f-dc16-432d-98cd-ad73d4b66ceb
+paperclip_identifier: MAZ-512
 ---
 
 # Worker-Installing Tests in Fresh JVMs

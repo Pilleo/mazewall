@@ -12,6 +12,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
+paperclip_issue_id: 908aaaa8-5372-4dbf-aa21-562e35429853
+paperclip_identifier: MAZ-582
 ---
 
 # 🔴 [Severity: HIGH]: Policy.Builder Type-State Hole via Unchecked Casts

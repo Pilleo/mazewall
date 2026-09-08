@@ -7,6 +7,8 @@ dependencies: []
 component: "orchestrator"
 effort: "small"
 github_issue: 65
+paperclip_issue_id: f4c4bd81-7b7e-4b1c-8550-e86927e28796
+paperclip_identifier: MAZ-379
 ---
 
 # 🔴 [Severity: HIGH]: Enhance Task Approval Telegram Message with Full Context

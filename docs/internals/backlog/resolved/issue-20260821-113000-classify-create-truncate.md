@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982854
+paperclip_issue_id: 3cae5bc0-8af8-4739-9a4c-38a3c17e044e
+paperclip_identifier: MAZ-525
 ---
 
 # 🔴 [Severity: HIGH]: Classify create and truncate calls as filesystem mutations

@@ -7,7 +7,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.assertTrue
 
 class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
-
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
@@ -21,7 +20,7 @@ class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
         val javaBin = System.getProperty("java.home") + "/bin/java"
         val classpath = System.getProperty("java.class.path")
         val className = "io.mazewall.profiler.ProcessWideProfilerIntegrationTest\$SubprocessMain"
-        
+
         val pb = ProcessBuilder(javaBin, "-cp", classpath, className)
         pb.inheritIO()
         val process = pb.start()

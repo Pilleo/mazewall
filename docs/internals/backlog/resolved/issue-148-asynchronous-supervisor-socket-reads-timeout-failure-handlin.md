@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 163
+paperclip_issue_id: e57a30a8-70b4-404b-948c-a15a14451f9d
+paperclip_identifier: MAZ-324
 ---
 
 # 🔴 [Severity: MEDIUM]: Asynchronous Supervisor socket reads timeout failure handling

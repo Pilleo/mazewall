@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 /**
  * Utility to map common POSIX/Linux error numbers to their symbolic names.
  */
@@ -136,7 +135,7 @@ public object ErrnoMapping {
         130 to "EOWNERDEAD",
         131 to "ENOTRECOVERABLE",
         132 to "ERFKILL",
-        133 to "EHWPOISON"
+        133 to "EHWPOISON",
     )
 
     /**

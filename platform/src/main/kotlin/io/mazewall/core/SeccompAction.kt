@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 import io.mazewall.ffi.NativeConstants
 
 /**
@@ -32,8 +31,7 @@ public sealed interface SeccompAction {
         }
 
     /** Keeps the more restrictive action; [this] wins ties (first-policy). */
-    public fun stricter(other: SeccompAction): SeccompAction =
-        if (restrictivenessRank() >= other.restrictivenessRank()) this else other
+    public fun stricter(other: SeccompAction): SeccompAction = if (restrictivenessRank() >= other.restrictivenessRank()) this else other
 
     /** Immediately terminates the entire process. */
     public data object ACT_KILL_PROCESS : SeccompAction {
@@ -70,13 +68,17 @@ public sealed interface SeccompAction {
      * so `action is ACT_ERRNO` matches every deny. Do not reintroduce a companion
      * that implements [SeccompAction].
      */
-    public data class ACT_ERRNO(public val errno: Int = NativeConstants.EPERM) : SeccompAction {
+    public data class ACT_ERRNO(
+        public val errno: Int = NativeConstants.EPERM,
+    ) : SeccompAction {
         override val priority: Int = 4
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_ERRNO
     }
 
     /** Traces the syscall using ptrace/traceId. */
-    public data class ACT_TRACE(public val traceId: Int) : SeccompAction {
+    public data class ACT_TRACE(
+        public val traceId: Int,
+    ) : SeccompAction {
         override val priority: Int = 4
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_TRACE
     }
@@ -99,7 +101,31 @@ public sealed interface SeccompAction {
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_ALLOW
     }
 
+    /**
+     * Returns the kernel return code for this action.
+     * For [ACT_ERRNO], this encodes the errno in the lower 16 bits:
+     * `SECCOMP_RET_ERRNO | (errno & 0xFFFF)`.
+     * For other actions, returns [nativeCode] directly.
+     *
+     * This is used for union-aware self-verification (issue-20260824-011900).
+     */
+    public fun toKernelReturnCode(): Int =
+        when (this) {
+            is ACT_ERRNO -> nativeCode or (errno and 0xFFFF)
+            is ACT_KILL_PROCESS,
+            is ACT_KILL_THREAD,
+            is ACT_TRAP,
+            is ACT_TRACE,
+            is ACT_NOTIFY,
+            is ACT_LOG,
+            is ACT_ALLOW,
+            -> nativeCode
+        }
+
     public companion object {
-        public fun stricterOf(a: SeccompAction, b: SeccompAction): SeccompAction = a.stricter(b)
+        public fun stricterOf(
+            a: SeccompAction,
+            b: SeccompAction,
+        ): SeccompAction = a.stricter(b)
     }
 }

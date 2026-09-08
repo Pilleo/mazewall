@@ -15,7 +15,8 @@ target_modules:
 target_files:
 - profiler/src/main/kotlin/io/mazewall/profiler/internal/ProfilerTraceListener.kt
 github_issue: 327
-paperclip_issue_id: cfc01917-4af7-4258-a321-94f77b807fe6
+paperclip_issue_id: 0eef7634-5460-4ea1-8eea-ece2232360d1
+paperclip_identifier: MAZ-723
 ---
 
 # Issue: FFM MemorySegment pointer escape in TraceEvent

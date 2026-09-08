@@ -1,6 +1,7 @@
 package io.mazewall.core
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.getFdOrThrow
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -27,7 +28,7 @@ class GrantedFdScmRightsTest {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val acceptFuture =
-                executor.submit<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>> {
+                executor.submit<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>> {
                     RealSocketManager.accept(server)
                 }
             val client = RealSocketManager.connect(endpoint.path)

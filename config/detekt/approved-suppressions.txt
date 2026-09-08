@@ -1,0 +1,6 @@
+# Reviewed production suppressions only.
+# Format: relative/path/to/File.kt:annotation-line:RuleId
+#
+# This list intentionally starts empty. A line is valid only when the annotation has an adjacent
+# SUPPRESSION-RATIONALE comment that names the invariant, failure behavior, and why a narrower
+# construct cannot express it.

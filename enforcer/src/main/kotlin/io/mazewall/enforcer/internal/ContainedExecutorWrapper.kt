@@ -1,15 +1,11 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.state.ContainmentRegistryEffect
+import io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
@@ -63,63 +59,51 @@ internal class ContainedExecutorWrapper(
     private val policy: PolicyDefinition<*>,
     private val scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy,
 ) : ExecutorService by delegate {
-    private fun <T> wrapCallable(task: Callable<T>): Callable<T> =
-        Callable {
-            val initialState = ContainmentStateRegistry.threadState
-            var receipt: io.mazewall.InstallationReceipt? = null
-            try {
-                receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
-                val result = runCatching { task.call() }
-                result.getOrElse { e ->
-                    if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                        // Preserve structured taxonomy fields when re-raising a library-owned
-                        // violation; only synthesize a wrapper for third-party exceptions.
-                        throw if (e is ContainmentViolationException) {
-                            e
-                        } else {
-                            ContainmentViolationException("Task violated containment policy", e)
-                        }
-                    }
-                    throw e
-                }
-            } catch (t: Throwable) {
-                if (receipt == null) {
-                    ContainmentStateRegistry.threadState = initialState
-                }
-                throw t
-            } finally {
-                receipt?.supervisorSession?.close()
-            }
-        }
+    private fun <T> wrapCallable(task: Callable<T>): Callable<T> = Callable { runContained(task::call) }
 
-    private fun wrapRunnable(task: Runnable): Runnable =
-        Runnable {
-            val initialState = ContainmentStateRegistry.threadState
-            var receipt: io.mazewall.InstallationReceipt? = null
-            try {
-                receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
-                val result = runCatching { task.run() }
-                result.onFailure { e ->
-                    if (e is Exception && ContainmentViolationDetector.isContainmentViolation(e)) {
-                        // Preserve structured taxonomy fields when re-raising a library-owned
-                        // violation; only synthesize a wrapper for third-party exceptions.
-                        throw if (e is ContainmentViolationException) {
-                            e
-                        } else {
-                            ContainmentViolationException("Task violated containment policy", e)
-                        }
-                    }
-                    throw e
-                }
-            } catch (t: Throwable) {
-                if (receipt == null) {
-                    ContainmentStateRegistry.threadState = initialState
-                }
-                throw t
-            } finally {
-                receipt?.supervisorSession?.close()
+    private fun wrapRunnable(task: Runnable): Runnable = Runnable { runContained(task::run) }
+
+    private fun <T> runContained(task: () -> T): T {
+        val initialState = ContainmentStateRegistry.threadState
+        var receipt: io.mazewall.InstallationReceipt? = null
+        try {
+            receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
+            return runTask(task)
+        } catch (expectedInstallFailure: Exception) {
+            if (receipt == null) {
+                ContainmentRegistryEffectInterpreter.apply(
+                    ContainmentRegistryEffect.RestoreThreadState(initialState),
+                )
             }
+            throw expectedInstallFailure
+        } catch (expectedInstallError: Error) {
+            if (receipt == null) {
+                ContainmentRegistryEffectInterpreter.apply(
+                    ContainmentRegistryEffect.RestoreThreadState(initialState),
+                )
+            }
+            throw expectedInstallError
+        } finally {
+            receipt?.supervisorSession?.close()
         }
+    }
+
+    private fun <T> runTask(task: () -> T): T = runCatching(task).getOrElse { throw failureForCaller(it) }
+
+    private fun failureForCaller(failure: Throwable): Throwable = (failure as? Exception)?.asContainmentViolation() ?: failure
+
+    private fun Exception.asContainmentViolation(): Exception {
+        val diagnostic = ContainmentViolationDetector.diagnose(this) ?: return this
+        val structured = diagnostic.violation
+        if (this === structured) return structured
+        return ContainmentViolationException(
+            message = "Task reported a containment policy violation",
+            cause = this,
+            errno = structured?.errno,
+            syscallNr = structured?.syscallNr,
+            evidence = diagnostic.evidence,
+        )
+    }
 
     override fun execute(command: Runnable) {
         delegate.execute(wrapRunnable(command))

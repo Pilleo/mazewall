@@ -6,9 +6,8 @@ import io.mazewall.NeedsFreshJvm
 import io.mazewall.Policy
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
 import java.io.File
@@ -20,15 +19,15 @@ import kotlin.test.assertTrue
 @Isolated
 @NeedsFreshJvm
 class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
-
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getInstance().stop()
+            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+                .getInstance()
+                .stop()
         }
     }
-
 
     /**
      * Verifies the [StacktraceScopingPolicy] allow/deny contract.
@@ -70,10 +69,13 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val scopingPolicy = object : StacktraceScopingPolicy {
             override val handlers = mapOf<Syscall, ScopingHandler>(
                 Syscall.OPENAT to { tid, args, stack -> authorize(args, stack) },
-                Syscall.OPEN to { tid, args, stack -> authorize(args, stack) }
+                Syscall.OPEN to { tid, args, stack -> authorize(args, stack) },
             )
-            
-            private fun authorize(args: List<Any>, stack: List<StackTraceElement>): Boolean {
+
+            private fun authorize(
+                args: List<Any>,
+                stack: List<StackTraceElement>,
+            ): Boolean {
                 val path = args.firstOrNull() as? String ?: ""
                 if (!path.contains("supervised_test_")) {
                     return true
@@ -85,40 +87,44 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 return isLegit
             }
         }
- 
-        val policy = Policy.builder()
+
+        val policy = Policy
+            .builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .build()
- 
+
         val rawExecutor = Executors.newSingleThreadExecutor()
         val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
- 
+
         try {
             // Run legit action first. The file is read successfully (either via the allow path
             // of the policy, or via the classloader bypass on a cold JVM — both are correct).
             // The primary effect here is to ensure all Kotlin IO classes are loaded so the
             // subsequent evil-action execution is free from classloading interference.
-            val legitResult = containedExecutor.submit<String> {
+            val legitResult = containedExecutor
+                .submit<String> {
                 LegitContext(tempFile).run()
             }.get()
             assertEquals("legit content", legitResult)
- 
+
             // Run evil action second. All IO classes are now loaded; the classloader bypass
             // cannot fire. The scoping policy is invoked and must deny the access.
-            val evilResult = containedExecutor.submit<Boolean> {
+            val evilResult = containedExecutor
+                .submit<Boolean> {
                 EvilContext(tempFile).run()
             }.get()
             assertTrue(evilResult, "Evil action must be denied by the scoping policy")
             assertTrue(
                 deniedCalls.any { it.contains(tempFile.name) },
-                "Scoping policy must have been invoked and denied the evil file access"
+                "Scoping policy must have been invoked and denied the evil file access",
             )
         } finally {
             rawExecutor.shutdown()
             tempFile.delete()
             System.err.println("--- VALIDATION LOGS ---")
             while (true) {
-                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs.poll() ?: break
+                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs
+                    .poll() ?: break
                 System.err.print(log)
             }
             System.err.println("-----------------------")
@@ -137,7 +143,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             System.err.println("-------------------")
         }
     }
- 
+
     @Test
     @EnabledIfLinuxAndSupported
     fun `test daemon fast-path allows reads inside java home even from evil context`() {
@@ -149,11 +155,12 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val scopingPolicy = object : StacktraceScopingPolicy {
             override val handlers = mapOf<Syscall, ScopingHandler>(
                 Syscall.OPENAT to { tid, args, stack -> false },
-                Syscall.OPEN to { tid, args, stack -> false }
+                Syscall.OPEN to { tid, args, stack -> false },
             )
         }
 
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .build()
 
@@ -163,7 +170,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         try {
             // Read a core JDK file. Despite scopingPolicy returning false for everything,
             // the daemon fast-path should intercept the read and allow it immediately.
-            val result = containedExecutor.submit<Boolean> {
+            val result = containedExecutor
+                .submit<Boolean> {
                 try {
                     releaseFile.readText()
                     true
@@ -179,7 +187,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             rawExecutor.shutdown()
             System.err.println("--- VALIDATION LOGS ---")
             while (true) {
-                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs.poll() ?: break
+                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs
+                    .poll() ?: break
                 System.err.print(log)
             }
             System.err.println("-----------------------")
@@ -199,13 +208,17 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         }
     }
 
-    private class LegitContext(private val file: File) {
+    private class LegitContext(
+        private val file: File,
+    ) {
         fun run(): String {
             return file.readText()
         }
     }
- 
-    private class EvilContext(private val file: File) {
+
+    private class EvilContext(
+        private val file: File,
+    ) {
         fun run(): Boolean {
             return try {
                 file.readText()

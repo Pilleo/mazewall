@@ -15,6 +15,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
+paperclip_issue_id: 689d05ae-3162-49cf-b39d-cba8c270c1c0
+paperclip_identifier: MAZ-586
 ---
 
 # 🔴 [Severity: HIGH]: Consolidate Path Containment Logic Behind a SandboxedPath Predicate

@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdQA
+paperclip_issue_id: 55c5987d-3527-418b-a6b1-8d9beb5e121d
+paperclip_identifier: MAZ-494
 ---
 
 # 🔴 [Severity: HIGH]: Route custom supervised syscalls through JVM validation

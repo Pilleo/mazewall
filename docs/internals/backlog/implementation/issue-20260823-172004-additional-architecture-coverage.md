@@ -13,7 +13,8 @@ effort: "large"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: d5444e0a-b3e1-49c7-9ede-eed086795d1e
+paperclip_issue_id: "731dffca-827a-4e8a-ae15-a58e50745346"
+paperclip_identifier: "MAZ-1138"
 ---
 
 # 🟡 [Severity: LOW]: Additional Architecture Coverage (s390x, ppc64le, riscv64)
@@ -38,4 +39,3 @@ every new enum entry must map for every arch or the test fails.
 4. CI: add cross-build/test matrix entries only if container images exist; otherwise document as
    compile-verified-until-hardware-available.
 5. Extend `SyscallProbeMatrix`/differential suite to iterate all supported arches.
-

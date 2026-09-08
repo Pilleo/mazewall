@@ -1,18 +1,20 @@
 package io.mazewall
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.seccomp.*
 import java.util.logging.Logger
+
+// @ref: docs/internals/designs/enforcer/containment-design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
+// @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 
 /**
  * Builds seccomp-bpf programs using a robust strictly-forward linear scan approach.
@@ -23,8 +25,6 @@ import java.util.logging.Logger
  * allowing new inspections (e.g., for `openat2`) to be added to the BPF build loop
  * without modifying the core [BpfFilter] logic.
  */
-// @ref: docs/internals/designs/enforcer/containment-design.md — BPF linear scan architecture, instruction limits, and 8-bit relative jump constraint
-// @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)
 
@@ -75,7 +75,7 @@ object BpfFilter {
                 UnsafePrctlInspector(),
                 Clone3Inspector(),
                 SocketAddressFamilyInspector(),
-            )
+            ),
         )
     }
 
@@ -152,7 +152,8 @@ object BpfFilter {
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
 
         // 1. Initialize Builder and enforce sequence: Arch Check -> Load NR
-        val builder = BpfProgram.builder()
+        val builder = BpfProgram
+            .builder()
             .checkArch(arch)
             .loadSyscallNr()
 
@@ -164,7 +165,7 @@ object BpfFilter {
             jvmCriticalNrs,
             allowMmapExec,
             allowNonThreadClone,
-            allowUnsafePrctl
+            allowUnsafePrctl,
         )
 
         // Collect and emit all argument-based inspections
@@ -240,9 +241,12 @@ object BpfFilter {
                             val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
                             val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
+                            // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
                             loadAbsolute(argOffsetHi)
+                            // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
                             jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
                             mark(checkLoLabel)
+                            // A = args[i][31:0]. A match selects the inspection's matched action.
                             loadAbsolute(argOffsetLo)
                             jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
                             mark(nextValLabel)
@@ -253,7 +257,7 @@ object BpfFilter {
                     }
 
                     is ArgCheck.EqualsAny32 -> {
-                        // Low-word-only comparison: see ArgCheck.EqualsAny32 KDoc.
+                        // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
                         val allowLabel = nextLabel("${labelPrefix}_allow")
                         check.allowedValues.forEachIndexed { valIdx, value ->
                             val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
@@ -276,10 +280,12 @@ object BpfFilter {
                         val denyLabel = nextLabel("${labelPrefix}_deny")
                         val allowLabel = nextLabel("${labelPrefix}_allow")
 
+                        // A = (args[i][63:32] & mask[63:32]); both words must match for a 64-bit match.
                         loadAbsolute(argOffsetHi)
                         and(maskHi)
                         jumpIfEqual(expectedHi, jt = checkLoLabel, jf = denyLabel)
                         mark(checkLoLabel)
+                        // A = (args[i][31:0] & mask[31:0]); a mismatch takes the unmatched action.
                         loadAbsolute(argOffsetLo)
                         and(maskLo)
                         jumpIfEqual(expectedLo, jt = allowLabel, jf = denyLabel)
@@ -301,63 +307,75 @@ object BpfFilter {
         defaultNativeAction: Int,
         handledNrs: MutableSet<Int>,
     ) {
-        val actionsToEmit = mutableListOf<Pair<Int, Int>>()
+        val actionsToEmit = collectLinearActions(syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
+        if (shouldUseBst(defaultNativeAction, actionsToEmit)) {
+            emitBstActions(builder, actionsToEmit)
+        } else {
+            emitGroupedActions(builder, actionsToEmit)
+        }
+    }
 
-        for ((nr, action) in syscallActions.entries.sortedBy { it.key }) {
-            if (nr !in handledNrs) {
-                handledNrs.add(nr)
-
+    private fun collectLinearActions(
+        syscallActions: Map<Int, SeccompAction>,
+        jvmCriticalNrs: Set<Int>,
+        profilingMode: Boolean,
+        defaultNativeAction: Int,
+        handledNrs: MutableSet<Int>,
+    ): List<Pair<Int, Int>> {
+        val actions = syscallActions.entries
+            .sortedBy { it.key }
+            .filter { (nr, _) -> handledNrs.add(nr) }
+            .mapNotNull { (nr, action) ->
                 val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else action
                 val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
-
-                if (nativeAction != defaultNativeAction) {
-                    actionsToEmit.add(nr to nativeAction)
-                }
+                (nr to nativeAction).takeIf { nativeAction != defaultNativeAction }
             }
+        return actions + immutableBaseActions(defaultNativeAction, jvmCriticalNrs, handledNrs)
+    }
+
+    private fun immutableBaseActions(
+        defaultNativeAction: Int,
+        jvmCriticalNrs: Set<Int>,
+        handledNrs: MutableSet<Int>,
+    ): List<Pair<Int, Int>> =
+        jvmCriticalNrs
+            .sorted()
+            .takeIf { defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW }
+            ?.filter { handledNrs.add(it) }
+            ?.map { it to NativeConstants.SECCOMP_RET_ALLOW }
+            .orEmpty()
+
+    private fun shouldUseBst(
+        defaultNativeAction: Int,
+        actions: List<Pair<Int, Int>>,
+    ): Boolean = defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actions.size in 1..32
+
+    private fun emitBstActions(
+        builder: BpfBuilder<BpfState.Active>,
+        actions: List<Pair<Int, Int>>,
+    ) {
+        val sortedActions = actions.sortedBy { it.first }
+        val actionLabels = sortedActions.map { it.second }.distinct().associateWith { builder.nextLabel("action_ret") }
+        emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
+        val doneLabel = builder.nextLabel("bst_done")
+        builder.jumpUnconditional(doneLabel)
+        for ((action, label) in actionLabels) {
+            builder.mark(label)
+            builder.ret(action)
         }
+        builder.mark(doneLabel)
+    }
 
-        // Inject the JVM Immutable Base for restrictive default actions (Whitelists)
-        if (defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW) {
-            for (nr in jvmCriticalNrs.sorted()) {
-                if (nr in handledNrs) continue
-                handledNrs.add(nr)
-
-                actionsToEmit.add(nr to NativeConstants.SECCOMP_RET_ALLOW)
-            }
-        }
-
-        // If default action is ALLOW (blacklist) and actionsToEmit size is within safe bounds (<= 32),
-        // we can build a Binary Search Tree (BST) to reach the decisions much faster.
-        if (defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actionsToEmit.isNotEmpty() && actionsToEmit.size <= 32) {
-            val sortedActions = actionsToEmit.sortedBy { it.first }
-            val actionLabels = mutableMapOf<Int, BpfLabel>()
-            for (action in sortedActions.map { it.second }.distinct()) {
-                actionLabels[action] = builder.nextLabel("action_ret")
-            }
-
-            emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
-
-            // Unconditional jump to skip RET blocks on fallthrough (not matched in BST)
-            val doneLabel = builder.nextLabel("bst_done")
-            builder.jumpUnconditional(doneLabel)
-
-            for ((action, label) in actionLabels) {
-                builder.mark(label)
-                builder.ret(action)
-            }
-
-            builder.mark(doneLabel)
-            return
-        }
-
-        // Group by nativeAction and ensure deterministic order by sorting keys and values
-        val groups = actionsToEmit.groupBy { it.second }
+    private fun emitGroupedActions(
+        builder: BpfBuilder<BpfState.Active>,
+        actions: List<Pair<Int, Int>>,
+    ) {
+        val groups = actions
+            .groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
             .toSortedMap()
 
         for ((nativeAction, nrs) in groups) {
-            // To prevent jump offset overflows (limit is 255), we chunk syscalls.
-            // Chunk size of 100 ensures max offset is well within boundaries.
             for (chunk in nrs.chunked(100)) {
                 val actionLabel = builder.nextLabel("action_ret")
                 val skipLabel = builder.nextLabel("skip_ret")

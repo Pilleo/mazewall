@@ -3,6 +3,8 @@ title: "Unhandled Signal Interruptions (`EINTR`) in `poll` and `recvmsg` in `Pro
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: d8b5c40c-8ad7-435f-8afe-fdc9dbcc1c08
+paperclip_identifier: MAZ-267
 ---
 
 # ✅ [RESOLVED]: Unhandled Signal Interruptions (`EINTR`) in `poll` and `recvmsg` in `ProfilerDaemon`

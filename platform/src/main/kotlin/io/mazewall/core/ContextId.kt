@@ -41,17 +41,20 @@ public value class ContextId(
      * @throws IllegalArgumentException when [dst] has fewer than [WIRE_SIZE_BYTES] bytes
      *   available from [offset].
      */
-    public fun encodeInto(dst: ByteArray, offset: Int = 0) {
+    public fun encodeInto(
+        dst: ByteArray,
+        offset: Int = 0,
+    ) {
         require(offset >= 0 && dst.size - offset >= WIRE_SIZE_BYTES) {
             "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${dst.size}, offset=$offset"
         }
-        @Suppress("MagicNumber")
+
         val v = value.toInt()
-        @Suppress("MagicNumber")
+
         dst[offset] = (v ushr 24).toByte()
-        @Suppress("MagicNumber")
+
         dst[offset + 1] = ((v ushr 16) and 0xFF).toByte()
-        @Suppress("MagicNumber")
+
         dst[offset + 2] = ((v ushr 8) and 0xFF).toByte()
         dst[offset + 3] = (v and 0xFF).toByte()
     }
@@ -76,11 +79,14 @@ public value class ContextId(
          * @throws IllegalArgumentException when fewer than [WIRE_SIZE_BYTES] bytes are
          *   available in [src] from [offset].
          */
-        public fun decodeFrom(src: ByteArray, offset: Int = 0): ContextId {
+        public fun decodeFrom(
+            src: ByteArray,
+            offset: Int = 0,
+        ): ContextId {
             require(offset >= 0 && src.size - offset >= WIRE_SIZE_BYTES) {
                 "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${src.size}, offset=$offset"
             }
-            @Suppress("MagicNumber")
+
             val v = ((src[offset].toInt() and 0xFF) shl 24) or
                 ((src[offset + 1].toInt() and 0xFF) shl 16) or
                 ((src[offset + 2].toInt() and 0xFF) shl 8) or

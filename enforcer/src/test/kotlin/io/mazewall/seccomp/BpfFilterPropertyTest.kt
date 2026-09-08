@@ -1,11 +1,11 @@
 package io.mazewall.seccomp
-import kotlin.test.assertTrue
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import kotlin.test.assertTrue
 
 class BpfFilterPropertyTest {
     @Test

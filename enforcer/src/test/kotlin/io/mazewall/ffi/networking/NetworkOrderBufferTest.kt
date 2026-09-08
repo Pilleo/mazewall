@@ -6,7 +6,6 @@ import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 
 class NetworkOrderBufferTest {
-
     @Test
     fun `test writing values in network byte order`() {
         Arena.ofConfined().use { arena ->

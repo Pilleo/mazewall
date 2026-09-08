@@ -8,7 +8,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MazewallEventsTest {
-
     @AfterEach
     fun tearDown() {
         MazewallEvents.clear()
@@ -50,6 +49,15 @@ class MazewallEventsTest {
         MazewallEvents.emit(MazewallEvents.LandlockApplied(processWide = true, abiVersion = 5))
 
         assertEquals(1, received.size)
+    }
+
+    @Test
+    fun `listener errors are never swallowed`() {
+        MazewallEvents.register { throw AssertionError("listener invariant failed") }
+
+        assertFailsWith<AssertionError> {
+            MazewallEvents.emit(MazewallEvents.LandlockApplied(processWide = true, abiVersion = 5))
+        }
     }
 
     @Test

@@ -1,17 +1,16 @@
 package io.mazewall
 
+import io.mazewall.LinuxNative.SyscallHandledState
+import io.mazewall.LinuxNative.SyscallResult
+import io.mazewall.core.Arch
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readLong
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.LinuxNative.SyscallHandledState
 import java.util.logging.Logger
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
@@ -54,7 +53,6 @@ public object Platform {
      * Swaps the active platform provider. Used for testing and fault injection.
      */
     @JvmStatic
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
             provider = newProvider
@@ -67,11 +65,11 @@ public object Platform {
      * Restores the default RealPlatformProvider.
      */
     @JvmStatic
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun resetToDefault() {
         synchronized(this) {
             provider = RealPlatformProvider
             cachedMatrix = null
+            isCpuCetSupportedOverride = null
             isCpuCetSupportedCached = null
         }
     }
@@ -187,9 +185,10 @@ public object Platform {
         get() =
             isLinux &&
                 try {
-                    io.mazewall.core.Arch.current() == io.mazewall.core.Arch.AMD64
+                    io.mazewall.core.Arch
+                        .current() == io.mazewall.core.Arch.AMD64
                 } catch (e: UnsupportedOperationException) {
-                    false
+                    unsupportedCetPlatform(e)
                 }
 
     /**
@@ -209,10 +208,20 @@ public object Platform {
                 }
             }
         } catch (e: UnsupportedOperationException) {
-            null
+            unavailableShstkStatus(e)
         } catch (e: IllegalStateException) {
-            null
+            unavailableShstkStatus(e)
         }
+    }
+
+    private fun unsupportedCetPlatform(cause: UnsupportedOperationException): Boolean {
+        logger.log(java.util.logging.Level.FINE, "CET is unavailable because the architecture is unsupported", cause)
+        return false
+    }
+
+    private fun unavailableShstkStatus(cause: RuntimeException): Long? {
+        logger.log(java.util.logging.Level.FINE, "CET shadow-stack status probe is unavailable", cause)
+        return null
     }
 
     internal fun isKernelCetSupported(): Boolean = probeShstkStatus() != null

@@ -2,13 +2,11 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeNetworking
-import io.mazewall.MockNativeMemory
-import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
-import io.mazewall.core.FdState
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.PollFdSegment
 import org.junit.jupiter.api.AfterEach
@@ -21,7 +19,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class SupervisorDaemonEngineTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -40,11 +37,12 @@ class SupervisorDaemonEngineTest {
             }
         }
 
+        LinuxNative.setEngine(mockEngine)
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val socketFd = FileDescriptor.unixSocket(10)
-        val listenerFd = FileDescriptor.seccompNotif(11)
-        val connection = io.mazewall.ffi.networking.SeccompConnection.FdAttached(socketFd, listenerFd)
-
+        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+        val connection = io.mazewall.ffi.networking.SeccompConnection
+            .FdAttached(socketFd, listenerFd)
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val pollFd = PollFdSegment.of(arena.allocate(8))
             mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
@@ -73,14 +71,14 @@ class SupervisorDaemonEngineTest {
 
         val socketManager = object : TestSocketManager() {
             override fun accept(
-                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
                 socketManagerAcceptCalls++
                 return super.accept(serverFd)
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = socketManager)
-        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -106,7 +104,7 @@ class SupervisorDaemonEngineTest {
         }
 
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -125,14 +123,14 @@ class SupervisorDaemonEngineTest {
         }
         val mockSocket = object : TestSocketManager(5) {
             override fun accept(
-                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> {
+                serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
                 fallbackAcceptCalls++
-                return FileDescriptor.unsafe(11)
+                return FileDescriptor.replace(11)
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -154,7 +152,7 @@ class SupervisorDaemonEngineTest {
 
         val mockSocket = object : TestSocketManager(5) {}
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
 
         // Reflection to inject throwing ExecutorService
         val delegateField = SupervisorDaemonEngine::class.java.getDeclaredField("delegate")
@@ -163,21 +161,58 @@ class SupervisorDaemonEngineTest {
 
         val executorField = io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine::class.java.getDeclaredField("connectionExecutor")
         executorField.isAccessible = true
-        executorField.set(delegate, object : java.util.concurrent.ExecutorService {
-            override fun execute(command: Runnable) { throw OutOfMemoryError("Simulated OOM") }
-            override fun submit(task: Runnable): java.util.concurrent.Future<*> { throw OutOfMemoryError("Simulated OOM") }
-            override fun <T> submit(task: java.util.concurrent.Callable<T>): java.util.concurrent.Future<T> { throw OutOfMemoryError("Simulated OOM") }
-            override fun <T> submit(task: Runnable, result: T): java.util.concurrent.Future<T> { throw OutOfMemoryError("Simulated OOM") }
+        executorField.set(
+            delegate,
+            object : java.util.concurrent.ExecutorService {
+            override fun execute(command: Runnable) {
+                throw OutOfMemoryError("Simulated OOM")
+            }
+
+            override fun submit(task: Runnable): java.util.concurrent.Future<*> {
+                throw OutOfMemoryError("Simulated OOM")
+            }
+
+            override fun <T> submit(task: java.util.concurrent.Callable<T>): java.util.concurrent.Future<T> {
+                throw OutOfMemoryError("Simulated OOM")
+            }
+
+            override fun <T> submit(
+                task: Runnable,
+                result: T,
+            ): java.util.concurrent.Future<T> {
+                throw OutOfMemoryError("Simulated OOM")
+            }
+
             override fun shutdown() {}
+
             override fun shutdownNow(): List<Runnable> = emptyList()
+
             override fun isShutdown(): Boolean = false
+
             override fun isTerminated(): Boolean = false
-            override fun awaitTermination(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean = true
+
+            override fun awaitTermination(
+                timeout: Long,
+                unit: java.util.concurrent.TimeUnit,
+            ): Boolean = true
+
             override fun <T> invokeAll(tasks: Collection<java.util.concurrent.Callable<T>>): List<java.util.concurrent.Future<T>> = emptyList()
-            override fun <T> invokeAll(tasks: Collection<java.util.concurrent.Callable<T>>, timeout: Long, unit: java.util.concurrent.TimeUnit): List<java.util.concurrent.Future<T>> = emptyList()
+
+            override fun <T> invokeAll(
+                tasks: Collection<java.util.concurrent.Callable<T>>,
+                timeout: Long,
+                unit: java.util.concurrent.TimeUnit,
+            ): List<java.util.concurrent.Future<T>> = emptyList()
+
             override fun <T> invokeAny(tasks: Collection<java.util.concurrent.Callable<T>>): T = throw UnsupportedOperationException()
-            override fun <T> invokeAny(tasks: Collection<java.util.concurrent.Callable<T>>, timeout: Long, unit: java.util.concurrent.TimeUnit): T = throw UnsupportedOperationException()
-        })
+
+            override fun <T> invokeAny(
+                tasks: Collection<java.util.concurrent.Callable<T>>,
+                timeout: Long,
+                unit: java.util.concurrent.TimeUnit,
+            ): T = throw UnsupportedOperationException()
+        },
+        )
 
         var caughtError = false
         try {
@@ -192,36 +227,45 @@ class SupervisorDaemonEngineTest {
         assertEquals(0, engine.clientSockets.size, "Client socket should be removed from tracking list")
     }
 
-    open class TestSocketManager(val serverFdVal: Int = 5) : SocketManager {
+    open class TestSocketManager(
+        val serverFdVal: Int = 5,
+    ) : SocketManager {
         val closedFds = CopyOnWriteArrayList<Int>()
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> =
-            FileDescriptor.unsafe(serverFdVal)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(serverFdVal)
 
-        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> =
-            FileDescriptor.unsafe(11)
+        override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            FileDescriptor.replace(11)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open> =
-            FileDescriptor.unsafe(12)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(12)
 
-        override fun close(fd: FileDescriptor<*, FdState.Open>) {
+        override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
             closedFds.add(fd.value)
         }
 
-        override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
-            FileDescriptor.unsafe(20)
+        override fun recvDescriptor(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
 
         override fun sendDescriptor(
-            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-            fdToSend: FileDescriptor<*, FdState.Open>
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
         ): Boolean = true
     }
 
     @Test
     fun `run closes client sockets and active listeners on exception or break`() {
         val mockEngine = MockNativeEngine()
+        val expectedCloses = CountDownLatch(2)
 
-        val mockSocket = object : TestSocketManager(5) {}
+        val mockSocket = object : TestSocketManager(5) {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                super.close(fd)
+                if (fd.value == 5 || fd.value == 12) {
+                    expectedCloses.countDown()
+                }
+            }
+        }
 
         // Mock accept4: first call accepts client FD 12, subsequent calls return EINTR
         var acceptCount = 0
@@ -255,8 +299,7 @@ class SupervisorDaemonEngineTest {
             assertEquals("Simulated loop interrupt", e.message)
         }
 
-        // Wait for the connectionExecutor thread to finish its work
-        Thread.sleep(500)
+        assertTrue(expectedCloses.await(1, TimeUnit.SECONDS), "Server and client sockets should close")
 
         assertTrue(mockSocket.closedFds.contains(5), "Server socket 5 should be closed")
         assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed")
@@ -271,17 +314,19 @@ class SupervisorDaemonEngineTest {
 
         val mockEngine = MockNativeEngine()
         val mockSocket = object : TestSocketManager(5) {
-            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? {
+            override fun recvDescriptor(
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
                 return if (socketFd.value == 12) {
-                    FileDescriptor.unsafe(20)
+                    FileDescriptor.replace(20)
                 } else if (socketFd.value == 13) {
-                    FileDescriptor.unsafe(21)
+                    FileDescriptor.replace(21)
                 } else {
                     null
                 }
             }
 
-            override fun close(fd: FileDescriptor<*, FdState.Open>) {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
                 super.close(fd)
                 if (fd.value == 12) {
                     client1Finished.countDown()
@@ -354,7 +399,8 @@ class SupervisorDaemonEngineTest {
         val engineThread = Thread {
             try {
                 engine.run()
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                }
         }.apply {
             name = "test-supervisor-engine"
             start()

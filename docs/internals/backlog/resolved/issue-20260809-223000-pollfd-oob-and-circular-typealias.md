@@ -6,6 +6,8 @@ priority: high
 component: "enforcer"
 target_modules: [":platform", ":profiler", ":enforcer"]
 target_files: ["platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine.kt", "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt", "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"]
+paperclip_issue_id: 2e0d7d5c-b04b-4512-a560-6d9a5aa19fc4
+paperclip_identifier: MAZ-464
 ---
 
 # 🔴 [Severity: HIGH]: Two Critical Bugs Introduced During Reactor Unification

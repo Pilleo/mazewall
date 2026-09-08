@@ -1,15 +1,14 @@
 package io.mazewall.core
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicReference
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 
 internal class MazewallContextTest {
-
     private val http = ContextId(1u)
     private val pdfParse = ContextId(2u)
     private val yamlParse = ContextId(3u)
@@ -73,6 +72,38 @@ internal class MazewallContextTest {
             MazewallContext.withContext(pdfParse) {
                 assertEquals(pdfParse, MazewallContext.current())
             }
+            assertEquals(pdfParse, MazewallContext.current())
+        }
+    }
+
+    @Test
+    fun `skip-if-unchanged path leaves observable state identical to normal path`() {
+        // Fast path: when current() == context, no state mutation should occur
+        // but observable behavior must be identical
+        MazewallContext.withContext(pdfParse) {
+            assertEquals(pdfParse, MazewallContext.current())
+            // Re-entering the same context should use fast path
+            val result = MazewallContext.withContext(pdfParse) {
+                assertEquals(pdfParse, MazewallContext.current())
+                "fast-path-result"
+            }
+            assertEquals("fast-path-result", result)
+            // Context should still be pdfParse after fast path
+            assertEquals(pdfParse, MazewallContext.current())
+        }
+        assertEquals(ContextId.UNKNOWN, MazewallContext.current())
+    }
+
+    @Test
+    fun `skip-if-unchanged fast path preserves exception behavior`() {
+        MazewallContext.withContext(pdfParse) {
+            val thrown = assertThrows(ScopeException::class.java) {
+                MazewallContext.withContext(pdfParse) {
+                    throw ScopeException("fast-path-exception")
+                }
+            }
+            assertEquals("fast-path-exception", thrown.message)
+            // Context should still be pdfParse after exception in fast path
             assertEquals(pdfParse, MazewallContext.current())
         }
     }
@@ -177,5 +208,7 @@ internal class MazewallContextTest {
         assertEquals(ContextId.UNKNOWN, MazewallContext.current())
     }
 
-    private class ScopeException(message: String) : RuntimeException(message)
+    private class ScopeException(
+        message: String,
+    ) : RuntimeException(message)
 }

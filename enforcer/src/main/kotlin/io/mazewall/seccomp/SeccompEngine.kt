@@ -1,12 +1,11 @@
 package io.mazewall.seccomp
 
+import io.mazewall.CompiledSandbox
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.CompiledSandbox
+import io.mazewall.enforcer.state.*
 
 /**
  * Sealed interface representing the type-safe lifecycle states of a SeccompEngine.
@@ -14,14 +13,17 @@ import io.mazewall.CompiledSandbox
 internal sealed interface EngineState {
     /** The engine is initialized but no filters or privileges have been restricted yet. */
     interface Unprivileged : EngineState
+
     object UnprivilegedImpl : Unprivileged
 
     /** The configuration (policy compile) has been registered. */
     interface Configured : EngineState
+
     object ConfiguredImpl : Configured
 
     /** BPF filters have been successfully loaded into the kernel for this thread/process. */
     interface Loaded : EngineState
+
     object LoadedImpl : Loaded
 }
 
@@ -52,8 +54,7 @@ internal interface SeccompEngine<out S : EngineState> {
      * This uses SECCOMP_FILTER_FLAG_TSYNC on Linux.
      * Throws [IllegalStateException] if installation fails or is not supported.
      */
-    fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> =
-        throw UnsupportedOperationException("Global process containment is not supported by this engine.")
+    fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> = throw UnsupportedOperationException("Global process containment is not supported by this engine.")
 
     /**
      * Returns true if this engine is supported on the current system.

@@ -10,6 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: small
+paperclip_issue_id: f1d0e4a0-b080-438d-b120-ece519c0e926
+paperclip_identifier: MAZ-325
 ---
 
 # 🔴 [Severity: CRITICAL]: Classloader Deadlock in JVM Validation Listener

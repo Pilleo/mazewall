@@ -34,7 +34,11 @@ class ArchitectureTest {
                 override fun test(input: JavaMethodCall): Boolean {
                     return input.target.owner.isAssignableTo(LinuxNative::class.java) &&
                         input.target.name !in listOf(
-                        "getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw",
+                        "getFileSystem",
+                            "getNetworking",
+                            "getProcess",
+                            "getMemory",
+                            "getRaw",
                         "isRealEngineActive", // metadata-only probe (issue-20260823-172003), not an I/O bypass
                     )
                 }
@@ -58,7 +62,8 @@ class ArchitectureTest {
     }
 
     @ArchTest
-    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {        noClasses()
+    fun rawSyscallOperationsMustOnlyBeUsedByAllowedPackages(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
             .that()
             .resideOutsideOfPackages(
                 "io.mazewall.seccomp..",
@@ -70,9 +75,7 @@ class ArchitectureTest {
                 "io.mazewall.profiler.engine..",
                 "io.mazewall.platform.seccomp.daemon..",
                 "io.mazewall.platform.seccomp..",
-            )
-
-            .should()
+            ).should()
             .dependOnClassesThat()
             .haveFullyQualifiedName(RawSyscallOperations::class.java.name)
             .because("Raw system call operations are sensitive and must only be used by core enforcer/profiler components")
@@ -88,7 +91,7 @@ class ArchitectureTest {
             .onlyBeCalled()
             .byMethodsThat(
                 DescribedPredicate.describe("matching name") {
-                    it != null && (it.name.matches(Regex("isContainmentViolation|hasViolation|findViolation")))
+                    it != null && (it.name.matches(Regex("isContainmentViolation|diagnose|findInferredViolation")))
                 },
             ).because("traversal methods correctly handle cause chains which direct checks might skip")
             .check(allClasses)
@@ -124,7 +127,8 @@ class ArchitectureTest {
         noClasses()
             .that()
             .resideInAPackage("io.mazewall..")
-            .and().resideOutsideOfPackages("io.mazewall.ffi..", "io.mazewall.ffi.memory..")
+            .and()
+            .resideOutsideOfPackages("io.mazewall.ffi..", "io.mazewall.ffi.memory..")
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to MemorySegment.get or set") {
                 override fun test(input: JavaMethodCall): Boolean {
@@ -141,7 +145,8 @@ class ArchitectureTest {
         noClasses()
             .that()
             .resideInAPackage("io.mazewall..")
-            .and().resideOutsideOfPackages("io.mazewall.ffi.memory..")
+            .and()
+            .resideOutsideOfPackages("io.mazewall.ffi.memory..")
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to MemorySegment.reinterpret") {
                 override fun test(input: JavaMethodCall): Boolean {
@@ -159,11 +164,13 @@ class ArchitectureTest {
             .that()
             .haveName("nativeScope")
             .should()
-            .haveRawReturnType(DescribedPredicate.describe("not a MemorySegment or ManagedSegment") {
-                it != null && !it.isAssignableTo("java.lang.foreign.MemorySegment") &&
+            .haveRawReturnType(
+                DescribedPredicate.describe("not a MemorySegment or ManagedSegment") {
+                it != null &&
+                    !it.isAssignableTo("java.lang.foreign.MemorySegment") &&
                     !it.isAssignableTo("io.mazewall.ffi.memory.ManagedSegment")
-            })
-            .because("nativeScope must not leak segments beyond their arena lifetime.")
+            },
+            ).because("nativeScope must not leak segments beyond their arena lifetime.")
             .check(allClasses)
     }
 
@@ -226,10 +233,11 @@ class ArchitectureTest {
                 "io.mazewall.platform.seccomp.daemon..",
                 "io.mazewall.ffi.networking..",
                 "io.mazewall.ffi.memory..",
-            )
-
-            .should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("not catch generic exceptions") {
-                override fun check(item: com.tngtech.archunit.core.domain.JavaMethod, events: com.tngtech.archunit.lang.ConditionEvents) {
+            ).should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("not catch generic exceptions") {
+                override fun check(
+                    item: com.tngtech.archunit.core.domain.JavaMethod,
+                    events: com.tngtech.archunit.lang.ConditionEvents,
+                ) {
                     item.tryCatchBlocks.forEach { tryCatchBlock ->
                         tryCatchBlock.caughtThrowables.forEach { caughtException ->
                             val name = caughtException.name
@@ -238,14 +246,18 @@ class ArchitectureTest {
                                 name == RuntimeException::class.java.name
                             ) {
                                 val message = "Method ${item.fullName} catches generic exception $name at ${tryCatchBlock.sourceCodeLocation}"
-                                events.add(com.tngtech.archunit.lang.SimpleConditionEvent.violated(item, message))
+                                events.add(
+                                    com.tngtech.archunit.lang.SimpleConditionEvent
+                                    .violated(item, message),
+                                )
                             }
                         }
                     }
                 }
             })
-            .because("Catching generic exceptions in a security boundary module can silently swallow critical JVM errors or obscure containment violations. Catch specific expected native faults instead.")
-            .check(allClasses)
+            .because(
+                "Catching generic exceptions in a security boundary module can silently swallow critical JVM errors or obscure containment violations. Catch specific expected native faults instead.",
+            ).check(allClasses)
     }
 
     @ArchTest
@@ -257,7 +269,8 @@ class ArchitectureTest {
             .and()
             .haveRawReturnType(LinuxNative.SyscallResult::class.java)
             .should()
-            .notHaveRawReturnType(DescribedPredicate.describe("an unhandled result") {
+            .notHaveRawReturnType(
+                DescribedPredicate.describe("an unhandled result") {
                 // Since generic types are erased, ArchUnit cannot directly inspect them this way easily for Kotlin.
                 // Kotlin compiles it to `SyscallResult`, and generic bounds are stored in metadata.
                 // The prompt says we could do this via detekt or ArchUnit. Detekt is probably better, but let's check method signatures.
@@ -265,8 +278,8 @@ class ArchitectureTest {
                 // Actually ArchUnit CAN inspect `Method.getReturnType().getName()` but it will just be `SyscallResult`.
                 // ArchUnit has `getGenericReturnType()`.
                 false
-            })
-            .allowEmptyShould(true)
+            },
+            ).allowEmptyShould(true)
             .because("Domain logic must handle errors locally before returning")
             .check(allClasses)
     }
@@ -294,7 +307,8 @@ class ArchitectureTest {
             .should()
             .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("calls to Big Endian write helpers") {
                 override fun test(input: JavaMethodCall): Boolean {
-                    return input.target.owner.name.startsWith("io.mazewall.ffi.memory.MemoryWrappersKt") &&
+                    return input.target.owner.name
+                        .startsWith("io.mazewall.ffi.memory.MemoryWrappersKt") &&
                         input.target.name.contains("BigEndian")
                 }
             })
@@ -321,7 +335,6 @@ class ArchitectureTest {
             .because("Virtual thread executors are not permitted in production runtime paths of mazewall")
             .check(allClasses)
     }
-
 
     @ArchTest
     fun jvmStackInspectorMustHavePrimitiveDependenciesOnly(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
@@ -352,9 +365,8 @@ class ArchitectureTest {
                             name == "kotlin.Metadata" ||
                             name.startsWith("[")
                     }
-                }
-            )
-            .because("Any other dependencies in JvmStackInspector could trigger classloading during validation and deadlock the JVM.")
+                },
+            ).because("Any other dependencies in JvmStackInspector could trigger classloading during validation and deadlock the JVM.")
             .check(allClasses)
     }
 
@@ -384,9 +396,8 @@ class ArchitectureTest {
                             name == "kotlin.Metadata" ||
                             name.startsWith("[")
                     }
-                }
-            )
-            .because("Any other dependencies in ScopingValidationState could trigger classloading during validation and deadlock the JVM.")
+                },
+            ).because("Any other dependencies in ScopingValidationState could trigger classloading during validation and deadlock the JVM.")
             .check(allClasses)
     }
 
@@ -439,8 +450,10 @@ class ArchitectureTest {
                 override fun test(input: com.tngtech.archunit.core.domain.JavaConstructorCall): Boolean {
                     val owner = input.target.owner
                     return owner.isAssignableTo(java.lang.Thread::class.java) ||
-                        (owner.isAssignableTo(java.util.concurrent.ExecutorService::class.java) &&
-                            owner.name.startsWith("java.util.concurrent."))
+                        (
+                            owner.isAssignableTo(java.util.concurrent.ExecutorService::class.java) &&
+                            owner.name.startsWith("java.util.concurrent.")
+                        )
                 }
             })
             .orShould()
@@ -448,12 +461,15 @@ class ArchitectureTest {
                 override fun test(input: com.tngtech.archunit.core.domain.JavaMethodCall): Boolean {
                     val owner = input.target.owner
                     return owner.isAssignableTo(java.util.concurrent.Executors::class.java) ||
-                        (owner.isAssignableTo(java.lang.Thread::class.java) &&
-                            input.target.name in setOf("startVirtualThread", "ofVirtual", "ofPlatform"))
+                        (
+                            owner.isAssignableTo(java.lang.Thread::class.java) &&
+                            input.target.name in setOf("startVirtualThread", "ofVirtual", "ofPlatform")
+                        )
                 }
             })
-            .because("Direct creation of Thread or standard Executors ignores mazewall's containment states and structured concurrency requirements, leading to context leaks. Use SandboxDispatcher or ContainedExecutors instead.")
-            .check(allClasses)
+            .because(
+                "Direct creation of Thread or standard Executors ignores mazewall's containment states and structured concurrency requirements, leading to context leaks. Use SandboxDispatcher or ContainedExecutors instead.",
+            ).check(allClasses)
     }
 
     @ArchTest
@@ -477,7 +493,9 @@ class ArchitectureTest {
             .dependOnClassesThat()
             .resideInAPackage("java.lang.foreign..")
 
-        val classes = com.tngtech.archunit.core.importer.ClassFileImporter().importClasses(dummy.violator.DummyViolatingClass::class.java)
+        val classes = com.tngtech.archunit.core.importer
+            .ClassFileImporter()
+            .importClasses(dummy.violator.DummyViolatingClass::class.java)
         org.junit.jupiter.api.assertThrows<AssertionError> {
             rule.check(classes)
         }
@@ -553,6 +571,17 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
                 "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
             ),
+            "io.mazewall.enforcer.supervisor.JvmVerdict" to setOf(
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$Deny",
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$Allow",
+                "io.mazewall.enforcer.supervisor.JvmVerdict\$InjectFd",
+            ),
+            "io.mazewall.enforcer.state.ContainmentRegistryEffect" to setOf(
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$LandlockApplied",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$SeccompInstalled",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$RestoreThreadState",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$EngineStateUpdated",
+            ),
             "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(
                 "io.mazewall.enforcer.supervisor.SupervisedOpen\$Open",
                 "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt",
@@ -583,12 +612,10 @@ class ArchitectureTest {
             .dependOnClassesThat()
             .haveNameMatching(
                 "io\\.mazewall\\.platform\\.seccomp\\.(SupervisedKind|UserNotifReply|SeccompNotifications|SeccompNotification)(\\$.*)?",
-            )
-            .because(
+            ).because(
                 "USER_NOTIF protocol types are cross-module internals, not operator API. " +
                     "Call Policy / ContainedExecutors instead.",
-            )
-            .check(allClasses)
+            ).check(allClasses)
     }
 
     @ArchTest
@@ -601,8 +628,10 @@ class ArchitectureTest {
                 override fun test(input: JavaMethodCall): Boolean {
                     val ownerName = input.target.owner.name
                     val methodName = input.target.name
-                    val isUnsafeCall = (ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
-                        ownerName == "io.mazewall.core.FileDescriptor") &&
+                    val isUnsafeCall = (
+                        ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
+                        ownerName == "io.mazewall.core.FileDescriptor"
+                    ) &&
                         (methodName == "unsafe" || methodName == "unsafe\$default")
 
                     // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
@@ -613,8 +642,7 @@ class ArchitectureTest {
             })
             .because(
                 "Use role-specific factories (generic, unixSocket, ruleset, oPath, seccompNotif, pid) or adopt() for kernel-reused FDs. " +
-                    "unsafe() creates non-live tokens for retired FDs."
-            )
-            .check(allClasses)
+                    "unsafe() creates non-live tokens for retired FDs.",
+            ).check(allClasses)
     }
 }

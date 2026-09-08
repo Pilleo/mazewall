@@ -14,7 +14,8 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
-paperclip_issue_id: 9868ab9a-2af9-4805-9e99-705c0bc6c2ba
+paperclip_issue_id: 83262a1d-6abb-46ef-b9ba-8eecae86c796
+paperclip_identifier: MAZ-636
 ---
 
 # 🔴 [Severity: HIGH]: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble

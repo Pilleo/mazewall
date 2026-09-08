@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 303
+paperclip_issue_id: 05e15334-61cb-4e93-9df9-553616e09d9e
+paperclip_identifier: MAZ-358
 ---
 
 # ✅ [RESOLVED]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths

@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3796525657
+paperclip_issue_id: 17e2c9c9-2558-425d-949c-6255a6392b58
+paperclip_identifier: MAZ-539
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject process-wide USER_NOTIF during assessment

@@ -1,7 +1,7 @@
 package io.mazewall.ffi.internal
 
-
 import io.mazewall.*
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.claimDupIfNeeded
@@ -29,7 +29,7 @@ import java.lang.invoke.MethodHandles
  * hot paths. It does not utilize [nativeScope] or create internal [Arena] instances.
  * Captured error states are optimized using thread-local segments via [ErrnoSegment].
  */
-@Suppress("TooManyFunctions")
+
 public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
@@ -130,10 +130,20 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        syscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
+        syscall(
+        nr,
+            a1,
+            a2,
+            a3,
+            a4,
+        io.mazewall.core.NativeArg
+        .LongArg(0L),
+            io.mazewall.core.NativeArg
+            .LongArg(0L),
+    )
 
     override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -142,7 +152,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     }
 
     override fun ioctl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -151,7 +161,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     }
 
     override fun fcntl(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -223,7 +233,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun openat(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
@@ -233,21 +243,30 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun openat2(
-        dirfd: FileDescriptor<*, FdState.Open>,
+        dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         how: ManagedSegment,
         size: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         dirfd.ebadfUnlessDirfd()?.let { return it }
-        val nr = io.mazewall.core.Arch.current().openat2.toLong()
+        val nr = io.mazewall.core.Arch
+            .current()
+            .openat2
+            .toLong()
         return RealNativeEngine.syscall(
             nr,
-            io.mazewall.core.NativeArg.LongArg(dirfd.value.toLong()),
-            io.mazewall.core.NativeArg.LongArg(path.address()),
-            io.mazewall.core.NativeArg.LongArg(how.address()),
-            io.mazewall.core.NativeArg.LongArg(size),
-            io.mazewall.core.NativeArg.LongArg(0L),
-            io.mazewall.core.NativeArg.LongArg(0L),
+            io.mazewall.core.NativeArg
+                .LongArg(dirfd.value.toLong()),
+            io.mazewall.core.NativeArg
+                .LongArg(path.address()),
+            io.mazewall.core.NativeArg
+                .LongArg(how.address()),
+            io.mazewall.core.NativeArg
+                .LongArg(size),
+            io.mazewall.core.NativeArg
+                .LongArg(0L),
+            io.mazewall.core.NativeArg
+                .LongArg(0L),
         )
     }
 
@@ -256,14 +275,14 @@ internal object RealNativeFileSystem : NativeFileSystem {
         length: Long,
         prot: io.mazewall.core.MmapProt,
         flags: io.mazewall.core.MmapFlags,
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessMmapBacking()?.let { return it }
         return SyscallInvoker.mmap(MMAP, MemorySegment.ofAddress(addr), length, prot.value, flags.value, fd.value, offset)
     }
 
-    override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessLive()?.let { return it }
         fd.retireForClose()
         return SyscallInvoker.close(CLOSE, fd.value)
@@ -393,7 +412,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun accept4(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
         flags: Int,
@@ -411,7 +430,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun bind(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -420,7 +439,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun listen(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         sockfd.ebadfUnlessLive()?.let { return it }
@@ -428,7 +447,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun accept(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -437,7 +456,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun connect(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -446,7 +465,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun sendmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -455,7 +474,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun recvmsg(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -464,7 +483,7 @@ internal object RealNativeNetworking : NativeNetworking {
     }
 
     override fun recv(
-        sockfd: FileDescriptor<*, FdState.Open>,
+        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         len: Long,
         flags: Int,
@@ -506,8 +525,8 @@ internal object RealNativeProcess : NativeProcess {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
-    private val ARCH_PRCTL_LONG: MethodHandle? = try {
-        RealNativeHelper.downcall(
+    private val ARCH_PRCTL_LONG: MethodHandle? =
+        optionalDowncall(
             "arch_prctl",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
@@ -516,11 +535,8 @@ internal object RealNativeProcess : NativeProcess {
             ),
             Linker.Option.captureCallState("errno"),
         )
-    } catch (e: Throwable) {
-        null
-    }
-    private val ARCH_PRCTL_ADDR: MethodHandle? = try {
-        RealNativeHelper.downcall(
+    private val ARCH_PRCTL_ADDR: MethodHandle? =
+        optionalDowncall(
             "arch_prctl",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
@@ -529,9 +545,6 @@ internal object RealNativeProcess : NativeProcess {
             ),
             Linker.Option.captureCallState("errno"),
         )
-    } catch (e: Throwable) {
-        null
-    }
 
     override fun gettid(): io.mazewall.core.Tid {
         return SyscallInvoker.gettid(GETTID)
@@ -556,7 +569,7 @@ internal object RealNativeProcess : NativeProcess {
     }
 
     override fun pidfdGetFd(
-        pidfd: FileDescriptor<*, FdState.Open>,
+        pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         targetFd: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -564,15 +577,33 @@ internal object RealNativeProcess : NativeProcess {
         return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd.value, targetFd, flags)
     }
 
-    override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    override fun archPrctl(
+        code: Int,
+        addr: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val handle = ARCH_PRCTL_LONG ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         return SyscallInvoker.archPrctlLong(handle, code, addr)
     }
 
-    override fun archPrctl(code: Int, addr: ManagedSegment): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    override fun archPrctl(
+        code: Int,
+        addr: ManagedSegment,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val handle = ARCH_PRCTL_ADDR ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         return SyscallInvoker.archPrctlAddr(handle, code, addr.native)
     }
+
+    /** A malformed optional libc binding is represented as the kernel's unsupported-operation result. */
+    private fun optionalDowncall(
+        name: String,
+        descriptor: FunctionDescriptor,
+        vararg options: Linker.Option,
+    ): MethodHandle? =
+        try {
+            RealNativeHelper.downcall(name, descriptor, *options)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
 }
 
 internal object RealNativeMemory : NativeMemory {
@@ -666,7 +697,7 @@ internal object RealNativeMemory : NativeMemory {
     }
 
     override fun read(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -675,7 +706,7 @@ internal object RealNativeMemory : NativeMemory {
     }
 
     override fun write(
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -683,10 +714,7 @@ internal object RealNativeMemory : NativeMemory {
         return SyscallInvoker.write(WRITE, fd.value, buf.native, count)
     }
 
-    context(arena: NativeArena)
-    override fun newSockFProg(
-        filters: List<BpfInstruction>,
-    ): ManagedSegment {
+    context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
         require(filters.size <= NativeConstants.BPF_MAXINSNS) {
             "BPF program exceeds kernel maximum instruction limit of ${NativeConstants.BPF_MAXINSNS} instructions"
         }
@@ -711,12 +739,18 @@ internal object RealNativeHelper {
     private val linker: Linker = Linker.nativeLinker()
     private val stdlib: SymbolLookup = linker.defaultLookup()
 
+    fun result(
+        ret: Long,
+        errno: Int,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        if (ret < 0) {
+            LinuxNative.SyscallResult.Error(errno, ret)
+        } else {
+            LinuxNative.SyscallResult.Success(ret)
+        }
 
-    fun result(ret: Long, errno: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        if (ret < 0) LinuxNative.SyscallResult.Error(errno, ret)
-        else LinuxNative.SyscallResult.Success(ret)
-
-    fun toLong(value: Any?): Long = when (value) {
+    fun toLong(value: Any?): Long =
+        when (value) {
         null -> 0L
         is Long -> value
         is Int -> value.toLong()
@@ -730,7 +764,7 @@ internal object RealNativeHelper {
         is io.mazewall.core.Tid -> value.value.toLong()
         is io.mazewall.core.Uid -> value.value.toLong()
         is io.mazewall.core.MemoryAddress -> value.value
-        is io.mazewall.core.FileDescriptor<*, *> -> value.value.toLong()
+        is io.mazewall.core.FileDescriptor<*, *, FdOwnership> -> value.value.toLong()
         else -> throw IllegalArgumentException("Unsupported type for conversion to Long: ${value::class.simpleName}")
     }
 

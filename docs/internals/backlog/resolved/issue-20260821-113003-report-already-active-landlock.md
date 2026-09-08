@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3823789313
+paperclip_issue_id: ce434487-9caa-48aa-9a51-381c6c0ede01
+paperclip_identifier: MAZ-553
 ---
 
 # 🟡 [Severity: MEDIUM]: Report already-active Landlock in repeat-install receipts

@@ -11,7 +11,8 @@ target_files:
 - build.gradle.kts
 effort: small
 autonomy: autonomous
-paperclip_issue_id: 8bfa0932-bde2-4d26-9c47-560f8babc773
+paperclip_issue_id: 07e882d3-8608-4e41-8265-784ed98129aa
+paperclip_identifier: MAZ-639
 ---
 
 # 🔴 [Severity: HIGH]: Integrate Mergiraf AST Syntax-Aware Git Merge Driver into Repository Configuration

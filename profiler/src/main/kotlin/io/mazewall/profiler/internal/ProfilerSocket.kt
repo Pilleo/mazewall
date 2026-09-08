@@ -17,12 +17,13 @@ internal object ProfilerSocket {
             val sockaddrUn = SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
-            for (retry in 0 until maxRetries) {
+
+            for (retryAttempt in 0 until maxRetries) {
                 val fdRes =
                 LinuxNative.networking.socket(
                     SupervisorSocketUtils.AF_UNIX,
                     SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
-                    0
+                    0,
                 )
 
                 val fdVal = when (fdRes) {
@@ -33,12 +34,12 @@ internal object ProfilerSocket {
                         continue
                     }
                 }
-                val fd = FileDescriptor.unixSocket(fdVal)
+                val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
                 val connRes =
                 LinuxNative.networking.connect(
                     fd,
                     ConfinedSegment(sockaddrUn.segment),
-                    SupervisorSocketUtils.SOCKADDR_UN_SIZE
+                    SupervisorSocketUtils.SOCKADDR_UN_SIZE,
                 )
 
                 if (connRes is LinuxNative.SyscallResult.Success) {
@@ -50,7 +51,7 @@ internal object ProfilerSocket {
                 Thread.sleep(delayMs)
             }
             throw IllegalStateException(
-                "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno"
+                "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno",
             )
         }
     }

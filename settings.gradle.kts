@@ -9,6 +9,7 @@ buildCache {
 }
 
 dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     // Use Maven Central as the default repository (where Gradle will download dependencies) in all subprojects.
     repositories {
         mavenCentral()
@@ -42,14 +43,15 @@ include(":portal-worker")
 include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
-include(":tier-e-proto")
 
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:
 //   ./gradlew :tools:orchestrator:test -PincludeOrchestrator=true
 val includeOrchestrator =
     providers.gradleProperty("includeOrchestrator").orNull == "true" ||
-        providers.environmentVariable("INCLUDE_ORCHESTRATOR").orNull
+        providers
+            .environmentVariable("INCLUDE_ORCHESTRATOR")
+            .orNull
             ?.lowercase()
             .let { it == "true" || it == "1" }
 if (includeOrchestrator) {

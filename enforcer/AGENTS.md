@@ -41,7 +41,7 @@ Seccomp filters bind permanently to the OS thread (LWP). Installs from virtual t
 
 ### 3. Landlock-Seccomp Ordering Invariant
 - **Rule:** Landlock's configuration system calls (`landlock_create_ruleset`, `landlock_add_rule`, `landlock_restrict_self`) are blocked by Seccomp policies. Therefore, **Landlock must always be initialized first before Seccomp is installed**.
-- The `applyContainment()` method in `ContainedExecutors.ContainedExecutorWrapper` enforces this correct order. **Do not change this sequence.**
+- `ContainedExecutors.installInternal` enforces this order: `applyLandlockIfNecessary` then `installSeccompFilter`. Wrapper wrap methods only call `installOnCurrentThread`. **Do not change this sequence.**
 
 ### 4. Fail Closed by Default
 Ensure compliance with the global fallback policies defined in [Root AGENTS.md](../AGENTS.md#2-strict-protection-against-unsafe-fallback--bypass-scenarios).

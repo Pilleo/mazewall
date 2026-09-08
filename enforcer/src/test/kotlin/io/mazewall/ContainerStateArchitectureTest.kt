@@ -9,7 +9,6 @@ import io.mazewall.enforcer.state.ContainerState
 
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ContainerStateArchitectureTest {
-
     @ArchTest
     fun containerStateMustRemainNonSubtypeSnapshotType(allClasses: JavaClasses) {
         classes()

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 159
+paperclip_issue_id: 529c491e-30dd-45bd-b012-04efccc50aba
+paperclip_identifier: MAZ-328
 ---
 
 # 🔴 [Severity: LOW]: CI Podman Container Caching Missing

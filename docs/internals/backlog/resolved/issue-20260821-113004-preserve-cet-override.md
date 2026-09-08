@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825290317
+paperclip_issue_id: 4618fee3-ddb1-473d-807b-c6c76711e7d2
+paperclip_identifier: MAZ-556
 ---
 
 # 🔴 [Severity: HIGH]: Preserve the CET capability override during installation

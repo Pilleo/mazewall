@@ -1,15 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlin)
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     alias(libs.plugins.kotlinPluginSerialization)
     application
-}
-
-kotlin {
-    jvmToolchain(25)
-}
-
-repositories {
-    mavenCentral()
 }
 
 dependencies {
@@ -31,7 +24,7 @@ tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
     // Ensure terminal colors and bells propagate
     environment("TERM", System.getenv("TERM") ?: "xterm")
-    
+
     // Explicitly forward FORCE_TASK env variable or project property to the application JVM
     val forceTask = System.getenv("FORCE_TASK") ?: System.getProperty("FORCE_TASK")
     if (forceTask != null) {
@@ -64,6 +57,19 @@ val workPackage by tasks.registering(JavaExec::class) {
     mainClass.set("io.mazewall.orchestrator.WorkPackageKt")
     workingDir = rootProject.projectDir
     val argsFile = project.findProperty("workPackageArgsFile") as String?
+    if (!argsFile.isNullOrBlank()) {
+        args(file(argsFile).readLines().filter { it.isNotEmpty() })
+    }
+}
+
+val blastRadiusMemory by tasks.registering(JavaExec::class) {
+    group = "documentation"
+    description = "Trace Codanna AST impact and correlate with agentmemory invariants"
+    dependsOn(tasks.compileKotlin)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.orchestrator.BlastRadiusMemoryScannerKt")
+    workingDir = rootProject.projectDir
+    val argsFile = project.findProperty("blastRadiusArgsFile") as String?
     if (!argsFile.isNullOrBlank()) {
         args(file(argsFile).readLines().filter { it.isNotEmpty() })
     }

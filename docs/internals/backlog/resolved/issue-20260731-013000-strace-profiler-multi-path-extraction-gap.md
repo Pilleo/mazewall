@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 969a1c6e-f8ac-472e-b2bd-3804278cb978
+paperclip_identifier: MAZ-435
 ---
 
 # 🟡 [Severity: MEDIUM]: StraceProfiler Multi-Path Extraction Logic Gap

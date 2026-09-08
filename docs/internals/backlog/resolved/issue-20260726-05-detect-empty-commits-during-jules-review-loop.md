@@ -13,6 +13,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 313
+paperclip_issue_id: 5a88cdcd-9d98-4fa8-8338-422aea2d3c75
+paperclip_identifier: MAZ-385
 ---
 
 # 🔴 [Severity: MEDIUM]: Detect Empty Commits in Jules Review Loop to Prevent Redundant Correction Comments

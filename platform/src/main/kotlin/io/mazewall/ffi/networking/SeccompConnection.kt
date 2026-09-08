@@ -1,5 +1,6 @@
 package io.mazewall.ffi.networking
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -13,8 +14,8 @@ public sealed class SeccompConnection(
     protected val socketClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
     protected val listenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
 ) : AutoCloseable {
-    public abstract val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
-    public open val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? get() = null
+    public abstract val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+    public open val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? get() = null
 
     /** Optional custom socket manager used during close(). Defaults to RealSocketManager. */
     public var socketManager: SocketManager = RealSocketManager
@@ -23,13 +24,15 @@ public sealed class SeccompConnection(
         if (socketClosedFlag.compareAndSet(false, true)) {
             try {
                 socketManager.close(socketFd)
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
         }
 
         listenerFd?.takeIf { listenerClosedFlag.compareAndSet(false, true) }?.let { lFd ->
             try {
                 socketManager.close(lFd)
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                }
         }
     }
 
@@ -40,11 +43,13 @@ public sealed class SeccompConnection(
 
     /** Initial state: Connection accepted, waiting to receive the seccomp listener FD. */
     public data class Accepted(
-        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
-        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
+        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
     ) : SeccompConnection(sharedSocketClosedFlag, sharedListenerClosedFlag) {
-        public fun attachFd(listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>): FdAttached =
+        public fun attachFd(listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>): FdAttached =
             FdAttached(socketFd, listenerFd, sharedSocketClosedFlag, sharedListenerClosedFlag).also {
                 it.socketManager = this.socketManager
             }
@@ -52,10 +57,12 @@ public sealed class SeccompConnection(
 
     /** Intermediate state: Listener FD received, waiting to send the 0xAC ACK byte. */
     public data class FdAttached(
-        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
-        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
+        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
     ) : SeccompConnection(sharedSocketClosedFlag, sharedListenerClosedFlag) {
         public fun handshakeComplete(): Active =
             Active(socketFd, listenerFd, sharedSocketClosedFlag, sharedListenerClosedFlag).also {
@@ -65,9 +72,11 @@ public sealed class SeccompConnection(
 
     /** Established state: Handshake complete, session is now active and polling. */
     public data class Active(
-        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
-        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
+        override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
+        private val sharedListenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+            .AtomicBoolean(false),
     ) : SeccompConnection(sharedSocketClosedFlag, sharedListenerClosedFlag)
 }

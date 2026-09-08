@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 243
+paperclip_issue_id: 43cffd53-8044-49b8-b281-966f256412f3
+paperclip_identifier: MAZ-250
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` Path Truncation on Spaces

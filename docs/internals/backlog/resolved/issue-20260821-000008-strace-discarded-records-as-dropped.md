@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819861572
+paperclip_issue_id: bbf72b72-dd16-47d6-b22b-f2b5634c6b47
+paperclip_identifier: MAZ-520
 ---
 
 # 🟡 [Severity: LOW]: Strace parser should mark discarded records as dropped

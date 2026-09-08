@@ -7,6 +7,8 @@ dependencies: []
 component: "seccomp"
 effort: "large"
 github_issue: 269
+paperclip_issue_id: fc5266bc-e998-46de-a33c-7fded58b4a18
+paperclip_identifier: MAZ-236
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Type-State Enforced BPF DSL

@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class BaselinePathProfileTest {
-
     @Test
     fun `test matches with exact paths`() {
         val profile = BaselinePathProfile(exactPaths = setOf("/etc/passwd", "/etc/hosts"))
@@ -26,7 +25,7 @@ class BaselinePathProfileTest {
     fun `test matches with combined criteria`() {
         val profile = BaselinePathProfile(
             exactPaths = setOf("/etc/ld.so.cache"),
-            pathPrefixes = setOf("/lib/")
+            pathPrefixes = setOf("/lib/"),
         )
         assertTrue(profile.matches("/etc/ld.so.cache"))
         assertTrue(profile.matches("/lib/libc.so.6"))

@@ -7,6 +7,8 @@ dependencies: []
 component: "profiler"
 effort: "medium"
 github_issue: 285
+paperclip_issue_id: 8d9c9ddd-2646-41ac-954d-01dea712d462
+paperclip_identifier: MAZ-218
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Asynchronous Trace Event Streaming via `Channel` / `Flow`

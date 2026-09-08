@@ -11,6 +11,7 @@ target_modules:
 component: enforcer
 effort: medium
 paperclip_issue_id: ba6bf676-451d-41e4-8a80-8393424fc0e2
+paperclip_identifier: MAZ-37
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Resource Containment via Cgroups v2

@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 411
+paperclip_issue_id: bca14b29-1b14-492a-8264-e0e8216ceaf4
+paperclip_identifier: MAZ-416
 ---
 
 # 🔴 [Severity: MEDIUM]: Prevent global Supervisor daemon shutdown upon single session termination to support multi-connection resilience

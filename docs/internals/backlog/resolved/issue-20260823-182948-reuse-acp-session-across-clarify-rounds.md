@@ -21,6 +21,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: e42d28e4-fc0f-4921-ab25-d67a43ec9b5a
+paperclip_identifier: MAZ-607
 ---
 
 # 🟡 [Severity: MEDIUM]: Reuse ACP session across clarify rounds

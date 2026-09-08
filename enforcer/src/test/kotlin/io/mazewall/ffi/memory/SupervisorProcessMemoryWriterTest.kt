@@ -3,8 +3,8 @@ package io.mazewall.ffi.memory
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
-class SupervisorProcessMemoryWriterTest {
 
+class SupervisorProcessMemoryWriterTest {
     @Test
     fun `test writing bytes returns false for invalid arguments`() {
         val tid = Tid(1234)

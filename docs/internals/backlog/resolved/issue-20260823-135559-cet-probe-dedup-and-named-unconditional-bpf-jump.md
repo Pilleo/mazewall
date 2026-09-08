@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 1642684e-05f9-4077-8264-07ae5d4e803b
+paperclip_identifier: MAZ-587
 ---
 
 # 🟡 [Severity: LOW]: Deduplicate CET Probe/Guard Ladder and Introduce Named Unconditional BPF Jump
@@ -40,4 +42,3 @@ dependencies: []
    and replace all four occurrences in `BpfFilter`.
 3. Add unit tests asserting the generated instruction stream for the BST and chunked-scan paths is
    unchanged after introducing `jumpUnconditional` (golden-instruction regression test).
-

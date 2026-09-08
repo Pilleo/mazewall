@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 278
+paperclip_issue_id: f7b49982-c671-4f50-baba-ec80eb1f979b
+paperclip_identifier: MAZ-227
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Compile-Time BPF Termination Safety (Type-State RET Enforcement)

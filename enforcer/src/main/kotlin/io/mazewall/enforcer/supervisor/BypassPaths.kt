@@ -1,17 +1,17 @@
 package io.mazewall.enforcer.supervisor
 
+import java.io.FileNotFoundException
+import java.lang.management.ManagementFactory
+import java.net.URI
+import java.net.URISyntaxException
 import java.nio.file.AccessDeniedException
 import java.nio.file.FileSystemException
 import java.nio.file.FileSystemLoopException
+import java.nio.file.InvalidPathException
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.nio.file.NoSuchFileException
-import java.io.FileNotFoundException
 import java.util.jar.JarFile
-import java.net.URI
-import java.net.URISyntaxException
-import java.nio.file.InvalidPathException
-import java.lang.management.ManagementFactory
 import java.util.logging.Logger
 
 /**
@@ -27,32 +27,42 @@ public object BypassPaths {
      * Unsafe results must not be treated as bypass matches.
      */
     public sealed interface PathResolution {
-        public data class Resolved(val path: Path) : PathResolution
-        public data class Missing(val normalized: Path) : PathResolution
-        public data class Unsafe(val reason: String) : PathResolution
+        public data class Resolved(
+            val path: Path,
+        ) : PathResolution
+
+        public data class Missing(
+            val normalized: Path,
+        ) : PathResolution
+
+        public data class Unsafe(
+            val reason: String,
+        ) : PathResolution
     }
 
+     // Expected filesystem states are deliberately mapped to a deny-safe PathResolution.
     public fun resolveForPolicy(path: Path): PathResolution {
         return try {
             PathResolution.Resolved(toRealPathWithFallback(path))
-        } catch (e: FileSystemLoopException) {
+        } catch (_: FileSystemLoopException) {
             PathResolution.Unsafe("symlink-loop")
-        } catch (e: AccessDeniedException) {
+        } catch (_: AccessDeniedException) {
             PathResolution.Unsafe("access-denied")
-        } catch (e: NoSuchFileException) {
+        } catch (_: NoSuchFileException) {
             PathResolution.Missing(path.toAbsolutePath().normalize())
-        } catch (e: FileNotFoundException) {
+        } catch (_: FileNotFoundException) {
             PathResolution.Missing(path.toAbsolutePath().normalize())
-        } catch (e: FileSystemException) {
+        } catch (_: FileSystemException) {
             PathResolution.Unsafe("filesystem")
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             PathResolution.Unsafe("security")
-        } catch (e: InvalidPathException) {
+        } catch (_: InvalidPathException) {
             PathResolution.Unsafe("invalid")
         }
     }
 
-    public fun toRealPathWithFallback(path: Path): Path {
+     // A missing suffix is reconstructed only below an already-canonical parent.
+    internal fun toRealPathWithFallback(path: Path): Path {
         val abs = path.toAbsolutePath().normalize()
         var current = abs
         val nonExistentParts = mutableListOf<String>()
@@ -64,10 +74,10 @@ public object BypassPaths {
                     resolved = resolved.resolve(nonExistentParts[i])
                 }
                 return resolved.normalize()
-            } catch (e: NoSuchFileException) {
+            } catch (_: NoSuchFileException) {
                 nonExistentParts.add(current.fileName.toString())
                 current = current.parent ?: break
-            } catch (e: FileNotFoundException) {
+            } catch (_: FileNotFoundException) {
                 nonExistentParts.add(current.fileName.toString())
                 current = current.parent ?: break
             }
@@ -79,7 +89,6 @@ public object BypassPaths {
         return resolved.normalize()
     }
 
-    @Suppress("SwallowedException", "TooGenericExceptionCaught")
     public val safeBypassPaths: List<Path> = mutableListOf<Path>().apply {
         fun addPathAndReal(path: Path) {
             val abs = path.toAbsolutePath().normalize()
@@ -93,34 +102,7 @@ public object BypassPaths {
         }
 
         fun parseManifestClassPath(jarPath: Path) {
-            try {
-                JarFile(jarPath.toFile()).use { jar ->
-                    val manifest = jar.manifest ?: return
-                    val classPathAttr = manifest.mainAttributes.getValue("Class-Path") ?: return
-                    val parentDir = jarPath.parent ?: return
-                    for (entry in classPathAttr.split(" ")) {
-                        if (entry.isNotEmpty()) {
-                            try {
-                                val uri = URI(entry)
-                                val resolvedPath = if (uri.isAbsolute) {
-                                    Paths.get(uri)
-                                } else {
-                                    parentDir.resolve(uri.path).normalize()
-                                }
-                                addPathAndReal(resolvedPath)
-                            } catch (e: URISyntaxException) {
-                                // Syntax error in manifest CP, skip
-                            } catch (e: Exception) {
-                                logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
-                            }
-                        }
-                    }
-                }
-            } catch (e: FileNotFoundException) {
-                // Normal if Jar file doesn't exist
-            } catch (e: Exception) {
-                logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
-            }
+            manifestClassPathEntries(jarPath).forEach(::addPathAndReal)
         }
 
         try {
@@ -140,10 +122,10 @@ public object BypassPaths {
                             if (entry.endsWith(".jar")) {
                                 parseManifestClassPath(path)
                             }
-                        } catch (e: InvalidPathException) {
+                        } catch (_: InvalidPathException) {
                             // Normal
-                        } catch (e: Exception) {
-                            logger.warning { "Failed to process classpath entry $entry: ${e.message}" }
+                        } catch (expectedClasspathFailure: Exception) {
+                            logger.warning { "Failed to process classpath entry $entry: ${expectedClasspathFailure.message}" }
                         }
                     }
                 }
@@ -157,10 +139,10 @@ public object BypassPaths {
                     if (agentPath.isNotEmpty()) {
                         try {
                             addPathAndReal(Paths.get(agentPath))
-                        } catch (e: InvalidPathException) {
+                        } catch (_: InvalidPathException) {
                             // Normal
-                        } catch (e: Exception) {
-                            logger.warning { "Failed to process javaagent argument $arg: ${e.message}" }
+                        } catch (expectedAgentPathFailure: Exception) {
+                            logger.warning { "Failed to process javaagent argument $arg: ${expectedAgentPathFailure.message}" }
                         }
                     }
                 }
@@ -170,10 +152,10 @@ public object BypassPaths {
             try {
                 addPathAndReal(Paths.get("build"))
                 addPathAndReal(Paths.get(".gradle"))
-            } catch (e: InvalidPathException) {
+            } catch (_: InvalidPathException) {
                 // Normal
-            } catch (e: Exception) {
-                logger.warning { "Failed to add build/.gradle paths: ${e.message}" }
+            } catch (expectedBuildPathFailure: Exception) {
+                logger.warning { "Failed to add build/.gradle paths: ${expectedBuildPathFailure.message}" }
             }
 
             // Add GRADLE_USER_HOME if set to support container/CI cache directories
@@ -182,15 +164,46 @@ public object BypassPaths {
                 if (!gradleUserHome.isNullOrEmpty()) {
                     addPathAndReal(Paths.get(gradleUserHome))
                 }
-            } catch (e: InvalidPathException) {
+            } catch (_: InvalidPathException) {
                 // Normal
-            } catch (e: Exception) {
-                logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
+            } catch (expectedGradleHomeFailure: Exception) {
+                logger.warning { "Failed to add GRADLE_USER_HOME: ${expectedGradleHomeFailure.message}" }
             }
 
             // (Removed user.dir bypass because it breaks profiler tests by bypassing all project files)
-        } catch (e: Exception) {
-            logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
+        } catch (expectedInitializationFailure: Exception) {
+            logger.severe { "Fatal exception during safeBypassPaths initialization: ${expectedInitializationFailure.message}" }
+        }
+    }
+
+    private fun manifestClassPathEntries(jarPath: Path): List<Path> =
+        try {
+            JarFile(jarPath.toFile()).use { jar ->
+                val classPath = jar.manifest?.mainAttributes?.getValue("Class-Path") ?: return emptyList()
+                val parentDir = jarPath.parent ?: return emptyList()
+                classPath.split(" ").mapNotNull { entry -> resolveManifestEntry(entry, parentDir, jarPath) }
+            }
+        } catch (_: FileNotFoundException) {
+            emptyList()
+        } catch (expectedManifestFailure: Exception) {
+            logger.warning { "Failed to process manifest Class-Path for $jarPath: ${expectedManifestFailure.message}" }
+            emptyList()
+        }
+
+    private fun resolveManifestEntry(
+        entry: String,
+        parentDir: Path,
+        jarPath: Path,
+    ): Path? {
+        if (entry.isEmpty()) return null
+        return try {
+            val uri = URI(entry)
+            if (uri.isAbsolute) Paths.get(uri) else parentDir.resolve(uri.path).normalize()
+        } catch (_: URISyntaxException) {
+            null
+        } catch (expectedManifestEntryFailure: Exception) {
+            logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${expectedManifestEntryFailure.message}" }
+            null
         }
     }
 

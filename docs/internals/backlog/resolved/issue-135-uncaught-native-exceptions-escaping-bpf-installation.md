@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 179
+paperclip_issue_id: 582107c1-e866-4a8d-a8f1-99be55dfc60b
+paperclip_identifier: MAZ-311
 ---
 
 # 🔴 [Severity: MEDIUM]: Uncaught Native Exceptions Escaping BPF Installation

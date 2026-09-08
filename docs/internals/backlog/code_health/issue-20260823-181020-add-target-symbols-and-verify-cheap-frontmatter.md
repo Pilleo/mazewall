@@ -15,7 +15,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 3286be04-7bc2-47e4-8a83-413b17949fc6
+paperclip_issue_id: "9ce0de3a-41ca-4075-9b49-459c9d91442a"
+paperclip_identifier: "MAZ-1087"
 ---
 
 # 🟡 [Severity: MEDIUM]: Extend backlog frontmatter with target_symbols and verify.cheap

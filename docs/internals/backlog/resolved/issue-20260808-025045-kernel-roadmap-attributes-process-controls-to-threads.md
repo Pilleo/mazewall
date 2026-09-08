@@ -12,6 +12,8 @@ target_files:
   - "docs/internals/unprivileged-bpf-jvm-opportunities.md"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: c4329ca8-bcf5-4555-a043-d381100f7117
+paperclip_identifier: MAZ-453
 ---
 
 # 🟡 [Severity: MEDIUM]: Kernel Roadmap Attributes Process and Ring Controls to Sandboxed Threads

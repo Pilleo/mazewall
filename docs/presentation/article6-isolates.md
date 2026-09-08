@@ -88,7 +88,7 @@ Combining GraalVM Isolates with Seccomp/Landlock reduces *managed-heap* blast ra
 ### Why is this significantly harder to escape?
 * **Hardware/Memory Isolation:** The Isolate boundary prevents the ACE Pivot — the attacker's native pointers cannot address the main application's heap.
 * **Managed thread model:** An isolate does not share the host `ForkJoinPool`. That removes the *trivial* `CompletableFuture.runAsync` hop **if** no host callback or leftover executor is reachable. It is not structural impossibility against native ACE or a compromised isolate runtime.
-* **Kernel Isolation:** The Mazewall Seccomp/Landlock boundary prevents spawning a shell, opening network sockets, or reading files.
+* **Kernel restrictions:** On a dedicated contained worker, configured Seccomp and Landlock rules deny direct process creation, socket operations, and filesystem access. This does not constrain inherited descriptors, shared capabilities, or unrestricted sibling threads.
 * **W^X Enforcement:** The absence of a JIT compiler allows Seccomp to permanently block `PROT_EXEC`, making binary shellcode injection impossible.
 
 ---

@@ -3,6 +3,8 @@ title: "Kernel Invariants and Limitations of io_uring Restrictions (seccomp, Lan
 severity: "MEDIUM"
 status: "resolved"
 priority: medium
+paperclip_issue_id: fddeb777-ff62-40f6-8869-f589bb99dcea
+paperclip_identifier: MAZ-627
 ---
 
 # 🟡 [Severity: MEDIUM]: Kernel Invariants and Limitations of io_uring Restrictions

@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: 9a9c7d20-07ef-4248-afd2-fcf0cd7e1512
+paperclip_identifier: MAZ-304
 ---
 
 # 🔴 [Severity: DX-FRICTION]: Missing Extensibility in Exception Message Parsing

@@ -15,6 +15,8 @@ target_files:
   - "docs/internals/backlog/resolved/issue-106-installonprocess-process-wide-seccomp-synchronization-tsync-.md"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 34c98ce8-7761-407b-8891-441fc8d5da51
+paperclip_identifier: MAZ-446
 ---
 
 # 🔴 [Severity: HIGH]: Seccomp TSYNC Documentation Uses an Incorrect no_new_privs Premise

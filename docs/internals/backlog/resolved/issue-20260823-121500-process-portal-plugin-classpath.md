@@ -17,6 +17,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 44cbae8a-980b-4093-b568-6c5d1436b34f
+paperclip_identifier: MAZ-581
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Process portal: guest implementation off the broker classpath

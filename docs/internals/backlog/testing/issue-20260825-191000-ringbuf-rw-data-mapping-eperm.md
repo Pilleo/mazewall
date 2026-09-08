@@ -12,7 +12,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: 13dd67bb-2dad-44b8-bfd6-002492832a70
+paperclip_issue_id: 781128af-02d7-4386-8f97-d5b0aba94413
+paperclip_identifier: MAZ-766
 ---
 
 # 🟡 [Severity: MEDIUM]: Ringbuf data area rejects PROT_WRITE mappings (errno EPERM)

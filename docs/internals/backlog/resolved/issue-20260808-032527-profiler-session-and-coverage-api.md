@@ -14,6 +14,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/BillOfBehavior.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: cf9c26f1-32ab-4303-a82e-d085cd00704c
+paperclip_identifier: MAZ-458
 ---
 
 # 🟡 [Severity: MEDIUM]: Introduce Isolated Profiler Sessions and Structured Coverage

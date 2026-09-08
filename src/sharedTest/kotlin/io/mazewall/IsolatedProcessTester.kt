@@ -30,6 +30,10 @@ object IsolatedProcessTester {
             "-XX:+UnlockExperimentalVMOptions",
             "-XX:-EnableJVMCI",
             "-XX:-UseJVMCICompiler",
+            // Seccomp process-wide tests must exercise execve in the JVM process itself.
+            // JDK 25's posix_spawn helper performs an earlier exec that the NO_EXEC filter
+            // correctly denies, hiding the behavior under test.
+            "-Djdk.lang.Process.launchMechanism=FORK",
             "-cp",
             classpath,
             "--enable-native-access=ALL-UNNAMED",
@@ -40,7 +44,8 @@ object IsolatedProcessTester {
         val builder = ProcessBuilder(command)
         // Parent Gradle/Graal workers inject EnableJVMCIProduct via these.
         // Isolated children inherit them and then crash in C1 mmap(PROT_EXEC).
-        io.mazewall.core.JvmChildProcess.stripInheritedJvmOptions(builder.environment())
+        io.mazewall.core.JvmChildProcess
+            .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
         val exitCode = process.waitFor()
@@ -50,7 +55,6 @@ object IsolatedProcessTester {
             )
         }
     }
-
 
     /**
      * Spawns a new JVM process to instantiate [className] and invoke [methodName] via reflection.

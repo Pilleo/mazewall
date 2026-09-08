@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class ParallelTaskSchedulerTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest
@@ -34,7 +33,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Enforcer.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
         // Issue B: target_modules = [:profiler], target_files = [Profiler.kt] (No conflict with A)
         val issueB = BacklogIssue(
@@ -45,7 +44,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Profiler.kt"),
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
         // Issue C: target_modules = [:enforcer], target_files = [Main.kt] (Conflicts with A on module :enforcer)
         val issueC = BacklogIssue(
@@ -56,7 +55,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Main.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
 
         env.issues.addAll(listOf(issueA, issueB, issueC))
@@ -67,9 +66,11 @@ class ParallelTaskSchedulerTest {
         // Verify which tasks got started
         // Both A (highest priority) and B (no conflict) should be selected and started.
         // C should NOT be selected because it conflicts with A on :enforcer module!
-        val startedIds = env.issues.filter { issue ->
+        val startedIds = env.issues
+            .filter { issue ->
             runner.context.activeSlots.any { it.currentIssueId == issue.id }
-        }.map { it.id }.toSet()
+        }.map { it.id }
+            .toSet()
 
         assertTrue(startedIds.contains("issue-a"), "Should select issue-a")
         assertTrue(startedIds.contains("issue-b"), "Should select issue-b (no conflict with issue-a)")
@@ -90,7 +91,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Main.kt"),
-            targetModules = emptyList() // empty!
+            targetModules = emptyList(), // empty!
         )
         env1.issues.add(issueEmptyModules)
         runner1.selectAndStartTasks()
@@ -109,7 +110,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Enforcer.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
 
         val candidateEmptyFiles = BacklogIssue(
@@ -120,7 +121,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = emptyList(), // empty!
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
 
         val candidateDistinct = BacklogIssue(
@@ -131,7 +132,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Profiler.kt"),
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
 
         env2.issues.addAll(listOf(issueActive, candidateEmptyFiles, candidateDistinct))
@@ -147,7 +148,9 @@ class ParallelTaskSchedulerTest {
 
         runner2.selectAndStartTasks()
 
-        val activeIds2 = runner2.context.activeSlots.map { it.currentIssueId }.toSet()
+        val activeIds2 = runner2.context.activeSlots
+            .map { it.currentIssueId }
+            .toSet()
         assertTrue(activeIds2.contains("issue-distinct"), "Distinct task with non-empty targets should start")
         assertFalse(activeIds2.contains("issue-empty-files"), "Task with empty target files should NOT start in parallel with active tasks")
 
@@ -163,7 +166,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = emptyList(), // empty!
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
 
         val candidateNonEmpty = BacklogIssue(
@@ -174,7 +177,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Profiler.kt"),
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
 
         env3.issues.addAll(listOf(issueActiveEmpty, candidateNonEmpty))
@@ -190,7 +193,9 @@ class ParallelTaskSchedulerTest {
 
         runner3.selectAndStartTasks()
 
-        val activeIds3 = runner3.context.activeSlots.map { it.currentIssueId }.toSet()
+        val activeIds3 = runner3.context.activeSlots
+            .map { it.currentIssueId }
+            .toSet()
         assertFalse(activeIds3.contains("issue-non-empty"), "Should NOT start any parallel task when active task has empty targets")
     }
 
@@ -208,7 +213,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("Enforcer.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
 
         // Non-interfering empty-target candidate: e.g. a documentation component
@@ -221,7 +226,7 @@ class ParallelTaskSchedulerTest {
             dependencies = emptyList(),
             targetFiles = emptyList(),
             targetModules = emptyList(),
-            component = "docs"
+            component = "docs",
         )
 
         // Non-interfering empty-target candidate 2: e.g. a review task with "review-task" in the ID
@@ -233,7 +238,7 @@ class ParallelTaskSchedulerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = emptyList(),
-            targetModules = emptyList()
+            targetModules = emptyList(),
         )
 
         // Interfering empty-target candidate: not non-interfering, should be blocked
@@ -246,7 +251,7 @@ class ParallelTaskSchedulerTest {
             dependencies = emptyList(),
             targetFiles = emptyList(),
             targetModules = emptyList(),
-            component = "enforcer" // Not a non-interfering component
+            component = "enforcer", // Not a non-interfering component
         )
 
         env.issues.addAll(listOf(activeIssue, nonInterferingCandidate, nonInterferingCandidate2, interferingCandidate))
@@ -262,10 +267,92 @@ class ParallelTaskSchedulerTest {
 
         runner.selectAndStartTasks()
 
-        val activeIds = runner.context.activeSlots.map { it.currentIssueId }.toSet()
+        val activeIds = runner.context.activeSlots
+            .map { it.currentIssueId }
+            .toSet()
         assertTrue(activeIds.contains("issue-noninterfering"), "Non-interfering empty-target task should start concurrently")
         assertTrue(activeIds.contains("review-task-something"), "Review empty-target task should start concurrently")
         assertFalse(activeIds.contains("issue-interfering"), "Interfering empty-target task should NOT start concurrently with active tasks")
+    }
+
+    @Test
+    fun testMethodGranularityDisjointSymbolsCanRunConcurrently() {
+        val env = MockOrchestratorEnvironment()
+        val runner = OrchestratorDaemonRunner(env, File(tempDir, ".state.methodlocks.properties"))
+
+        // Active issue in Enforcer.kt targeting symbol 'methodA' without side effects
+        val activeIssue = BacklogIssue(
+            file = File(tempDir, "issue-method-a.md"),
+            id = "issue-method-a",
+            title = "Task Method A",
+            priority = BacklogPriority.HIGH,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodA"),
+            hasSideEffects = false,
+        )
+
+        // Candidate 1: same file Enforcer.kt, disjoint symbol 'methodB', no side effects -> should start concurrently
+        val disjointCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-b.md"),
+            id = "issue-method-b",
+            title = "Task Method B",
+            priority = BacklogPriority.HIGH,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodB"),
+            hasSideEffects = false,
+        )
+
+        // Candidate 2: same file Enforcer.kt, overlapping symbol 'methodA', no side effects -> should be blocked
+        val overlappingCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-a-overlap.md"),
+            id = "issue-method-a-overlap",
+            title = "Task Method A Overlap",
+            priority = BacklogPriority.MEDIUM,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodA"),
+            hasSideEffects = false,
+        )
+
+        // Candidate 3: same file Enforcer.kt, disjoint symbol 'methodC', but HAS side effects -> should be blocked
+        val sideEffectsCandidate = BacklogIssue(
+            file = File(tempDir, "issue-method-c.md"),
+            id = "issue-method-c",
+            title = "Task Method C with Side Effects",
+            priority = BacklogPriority.MEDIUM,
+            status = "open",
+            dependencies = emptyList(),
+            targetFiles = listOf("Enforcer.kt"),
+            targetModules = listOf(":enforcer"),
+            targetSymbols = listOf("methodC"),
+            hasSideEffects = true,
+        )
+
+        env.issues.addAll(listOf(activeIssue, disjointCandidate, overlappingCandidate, sideEffectsCandidate))
+
+        val slotActive = SlotContext("issue-method-a").apply {
+            currentIssueTitle = "Task Method A"
+            currentIssueFile = activeIssue.file.path
+            state = PendingApprovalState("issue-method-a", "Task Method A", activeIssue.file.path)
+        }
+        runner.context.activeSlots.add(slotActive)
+
+        runner.selectAndStartTasks()
+
+        val activeIds = runner.context.activeSlots
+            .map { it.currentIssueId }
+            .toSet()
+        assertTrue(activeIds.contains("issue-method-b"), "Disjoint symbol candidate without side effects should run concurrently")
+        assertFalse(activeIds.contains("issue-method-a-overlap"), "Overlapping symbol candidate should be blocked")
+        assertFalse(activeIds.contains("issue-method-c"), "Candidate with side effects on the same file should be blocked")
     }
 
     @Test

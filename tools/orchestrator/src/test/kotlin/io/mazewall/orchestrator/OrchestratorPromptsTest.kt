@@ -4,7 +4,6 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class OrchestratorPromptsTest {
-
     @Test
     fun testTaskPromptIncludesGuidelines() {
         val originalBody = "Fix some bugs."

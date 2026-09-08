@@ -15,8 +15,7 @@ class ComponentRouter(
     fun urlKeyFor(component: String?): String? = component?.trim()?.lowercase()?.let { routes[it] }
 
     /** Extracts the component from an ingested issue description, if present. */
-    fun componentOf(description: String?): String? =
-        description?.let { COMPONENT_RE.find(it)?.groupValues?.get(1) }
+    fun componentOf(description: String?): String? = description?.let { COMPONENT_RE.find(it)?.groupValues?.get(1) }
 
     companion object {
         /** PRIMARY worker for all components (operator directive 2026-08-25).
@@ -29,12 +28,13 @@ class ComponentRouter(
 
         /** Parses PAPERCLIP_COMPONENT_ROUTES entries of the form `component=urlKey`. */
         fun parseOverrides(raw: String?): Map<String, String> =
-            raw.orEmpty().split(',')
+            raw
+                .orEmpty()
+                .split(',')
                 .mapNotNull { entry ->
                     entry.split('=', limit = 2).takeIf { it.size == 2 }?.let { (k, v) ->
                         k.trim().lowercase() to v.trim()
                     }
-                }
-                .toMap()
+                }.toMap()
     }
 }

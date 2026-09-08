@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 837ecc58-3e1f-4bca-8875-01169e75bb9d
+paperclip_identifier: MAZ-418
 ---
 
 # 🔴 [Severity: MEDIUM]: Fix StraceProfiler path extraction to support multi-path system calls like rename and symlink

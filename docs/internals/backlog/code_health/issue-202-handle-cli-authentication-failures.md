@@ -15,7 +15,8 @@ solution_approved: false
 blast_radius: medium
 reversible: true
 github_issue: 450
-paperclip_issue_id: 0c90c2e6-b17f-4f27-ae05-2be032390c00
+paperclip_issue_id: 68a54dcc-418a-48d2-bf2c-97196261dbe2
+paperclip_identifier: MAZ-635
 ---
 
 # 🔴 [Severity: HIGH]: Detect and Handle CLI Authentication Failures with Actionable Login Alerts

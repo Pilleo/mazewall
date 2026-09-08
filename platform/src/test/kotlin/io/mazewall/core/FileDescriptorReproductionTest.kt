@@ -14,25 +14,22 @@ import kotlin.test.*
  */
 @org.junit.jupiter.api.extension.ExtendWith(ForeignFdGuard::class)
 class FileDescriptorReproductionTest {
-
     companion object {
-        context(arena: NativeArena)
-        private fun realFd(): Int =
+        context(arena: NativeArena) private fun realFd(): Int =
             when (val res = openPath("/dev/null", OpenFlags.RDONLY)) {
                 is LinuxNative.SyscallResult.Success -> res.value.toInt()
                 else -> error("open(/dev/null) failed: $res")
             }
 
-        private fun <T> withArena(block: NativeArena.() -> T): T =
-            NativeArena.ofConfined().use(block)
+        private fun <T> withArena(block: NativeArena.() -> T): T = NativeArena.ofConfined().use(block)
     }
 
     @Test
-    fun `file descriptor is strictly immutable and returns closed type`() = withArena {
-        val fd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(realFd())
+    fun `file descriptor is strictly immutable and returns closed type`() =
+        withArena {
+        val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
 
-        @Suppress("CAST_NEVER_SUCCEEDS", "USELESS_CAST")
         val isAutoCloseable = fd as? AutoCloseable
         assertNull(isAutoCloseable, "FileDescriptor should not directly be AutoCloseable")
 
@@ -41,14 +38,14 @@ class FileDescriptorReproductionTest {
         assertFalse(fd.isValid)
         assertFalse(closedFd.isValid)
 
-        @Suppress("USELESS_CAST")
-        assertTrue(closedFd is FileDescriptor<*, FdState.Closed>)
+        assertTrue(closedFd is FileDescriptor<*, FdState.Closed, FdOwnership>)
     }
 
     @Test
-    fun `leftover Open token cannot reach the kernel after close or reuse`() = withArena {
+    fun `leftover Open token cannot reach the kernel after close or reuse`() =
+        withArena {
         val first = realFd()
-        val leftover = FileDescriptor.generic(first)
+        val leftover = FileDescriptor.adopt(first, FileDescriptorRole.Generic)
         leftover.close()
 
         val denied = leftover.ebadfUnlessLive()
@@ -59,7 +56,7 @@ class FileDescriptorReproductionTest {
         // The kernel hands back the just-closed lowest integer; adopting it proves
         // generation separation between the leftover token and the new owner.
         val reusedInt = realFd()
-        val reused = FileDescriptor.generic(reusedInt)
+        val reused = FileDescriptor.adopt(reusedInt, FileDescriptorRole.Generic)
         assertTrue(reused.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNull(reused.ebadfUnlessLive())

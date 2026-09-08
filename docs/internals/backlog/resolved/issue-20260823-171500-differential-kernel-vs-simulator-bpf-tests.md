@@ -12,6 +12,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
+paperclip_issue_id: a9a18b33-0d80-4448-a0c4-2146170c256e
+paperclip_identifier: MAZ-592
 ---
 
 # 🟠 [Severity: MEDIUM]: Differential Kernel-vs-Simulator Integration Tests for Compiled BPF Filters
@@ -50,4 +52,3 @@ the unit-test interpreter in BpfFilterTest delegates to it.
    issue-20260823-140500 deterministically).
 3. Keep structural encoding pins (e.g. JA-in-k regression test) as cheap first-line guards; the
    differential suite is the deep backstop.
-

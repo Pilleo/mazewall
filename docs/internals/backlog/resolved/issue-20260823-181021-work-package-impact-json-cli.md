@@ -14,6 +14,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 85379708-7e93-446d-bfeb-ec507bbd3e1a
+paperclip_identifier: MAZ-606
 ---
 
 # 🟡 [Severity: MEDIUM]: Add a work-package CLI that emits impact JSON from Codanna/ast-grep

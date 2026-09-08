@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.system.exitProcess
 
 object BacklogValidator {
-
     private val VALID_SEVERITIES = setOf("CRITICAL", "HIGH", "MEDIUM", "LOW", "ENHANCEMENT")
     private val VALID_STATUSES = setOf("open", "in_progress", "resolved", "deferred")
     private val VALID_COMPONENTS = setOf("enforcer", "profiler", "orchestrator", "docs", "ci", "testing", "platform")
@@ -19,7 +18,7 @@ object BacklogValidator {
         ":demos:cli-demo",
         ":demos:vulnerable-web-app",
         ":demos:agent-sandbox-demo",
-        ":tools:orchestrator"
+        ":tools:orchestrator",
     )
 
     fun validateBacklog(backlogDir: File): List<String> {
@@ -30,7 +29,8 @@ object BacklogValidator {
         val errors = mutableListOf<String>()
 
         // 1. Gather all issues (including resolved for dependency validation)
-        val allIssues = backlogDir.walkTopDown()
+        val allIssues = backlogDir
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
             .mapNotNull { BacklogParser.parseIssueFile(it) }
             .toList()
@@ -38,7 +38,8 @@ object BacklogValidator {
         val knownIssueIds = allIssues.map { it.id }.toSet()
 
         // 2. Validate open/active backlog files
-        val activeFiles = backlogDir.walkTopDown()
+        val activeFiles = backlogDir
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
             .filter { !it.absolutePath.contains("${File.separator}resolved${File.separator}") }
             .toList()
@@ -101,7 +102,10 @@ object BacklogValidator {
             // Validate open_questions consistency
             val openQuestionsFrontmatterMatch = Regex("(?m)^open_questions:\\s*(.+)$").find(content)
             if (openQuestionsFrontmatterMatch != null) {
-                val rawVal = openQuestionsFrontmatterMatch.groupValues[1].trim().removeSurrounding("\"").removeSurrounding("'")
+                val rawVal = openQuestionsFrontmatterMatch.groupValues[1]
+                    .trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
                 if (rawVal != "true" && rawVal != "false" && !rawVal.startsWith("[") && rawVal.isNotBlank()) {
                     errors.add("${file.name}: Invalid 'open_questions' value '$rawVal'. Allowed: true, false, or list")
                 }
@@ -124,7 +128,8 @@ object BacklogValidator {
         }
 
         // 3. Validate resolved files (ensure they have status 'resolved')
-        val resolvedFiles = backlogDir.walkTopDown()
+        val resolvedFiles = backlogDir
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
             .filter { it.absolutePath.contains("${File.separator}resolved${File.separator}") }
             .toList()

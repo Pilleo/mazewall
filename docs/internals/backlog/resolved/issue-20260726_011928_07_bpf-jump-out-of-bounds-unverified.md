@@ -13,6 +13,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/BpfStaticVerifier.kt
+paperclip_issue_id: 24784231-e811-4583-9b89-e2deba18043f
+paperclip_identifier: MAZ-393
 ---
 
 # Issue: BPF Static Verifier Potential Overflow

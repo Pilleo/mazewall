@@ -3,6 +3,8 @@ title: "Inefficient DependencyCheck Configuration in CI"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: e46dbfbc-eaed-4a70-a958-aa340879afc3
+paperclip_identifier: MAZ-330
 ---
 
 # ✅ [RESOLVED]: Inefficient DependencyCheck Configuration in CI

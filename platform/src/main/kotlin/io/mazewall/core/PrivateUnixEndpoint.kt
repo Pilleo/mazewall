@@ -49,7 +49,6 @@ public class PrivateUnixEndpoint private constructor(
             return PrivateUnixEndpoint(dir, socketFileName, path)
         }
 
-        internal fun utf8Length(path: String): Int =
-            path.toByteArray(StandardCharsets.UTF_8).size
+        internal fun utf8Length(path: String): Int = path.toByteArray(StandardCharsets.UTF_8).size
     }
 }

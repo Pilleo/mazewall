@@ -36,7 +36,7 @@ class MazewallConfig {
             logger.warning("SBoB file not found at $sbobPath. Falling back to default static policy.")
             basePolicy
         }
-        @Suppress("UNCHECKED_CAST")
+
         return ContainedExecutors.wrap(delegate, finalPolicy as Policy<*, Uncompiled>)
     }
 

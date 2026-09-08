@@ -12,6 +12,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: f9a74764-8a0a-489f-a1d8-0446058d38f3
+paperclip_identifier: MAZ-583
 ---
 
 # 🟠 [Severity: MEDIUM]: Stringly-Typed FallbackBehavior Enum Lookup in Failure Path
@@ -30,4 +32,3 @@ secondary exception. The comparison is also redundant: the enclosing `if` alread
    `fallback == Platform.FallbackBehavior.WARN_AND_BYPASS`.
 2. Add a unit test exercising the `WARN_AND_BYPASS` failure path (e.g. via `MockNativeEngine` fault
    injection) asserting the warning is logged and a non-installed `InstallationReceipt` is returned.
-

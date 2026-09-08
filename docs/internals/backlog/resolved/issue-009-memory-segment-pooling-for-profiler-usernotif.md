@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: "2f4e51e8-0275-4533-bc98-f24523564bc6"
+paperclip_issue_id: 5a2358fe-b7b3-47e4-841c-50c6e53d1dd3
+paperclip_identifier: MAZ-721
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF

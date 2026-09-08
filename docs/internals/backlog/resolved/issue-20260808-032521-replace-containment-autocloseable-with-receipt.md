@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSession.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 653c84e6-41a5-4319-b5b1-06a7a3862dfd
+paperclip_identifier: MAZ-454
 ---
 
 # 🟡 [Severity: MEDIUM]: Replace Misleading Containment AutoCloseable with Installation Receipt

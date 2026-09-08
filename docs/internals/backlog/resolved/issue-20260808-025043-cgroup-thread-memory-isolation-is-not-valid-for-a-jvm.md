@@ -12,6 +12,8 @@ target_files:
   - "docs/internals/backlog/security/issue-069-resource-containment-via-cgroups-v2.md"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 69642cb2-f5aa-48e2-8dbd-01ddb48f4547
+paperclip_identifier: MAZ-451
 ---
 
 # 🔴 [Severity: HIGH]: Cgroup Thread Memory Isolation Roadmap Is Invalid for a Shared-Heap JVM

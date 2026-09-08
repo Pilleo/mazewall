@@ -1,6 +1,5 @@
 package io.mazewall.ffi
 
-
 import java.lang.foreign.Linker
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.StructLayout
@@ -66,11 +65,11 @@ object Layouts {
     val SECCOMP_DATA_ARCH_OFFSET: Long = SECCOMP_DATA.byteOffset(MemoryLayout.PathElement.groupElement("arch"))
     val SECCOMP_DATA_ARGS_OFFSET: Long = SECCOMP_DATA.byteOffset(
         MemoryLayout.PathElement.groupElement("args"),
-        MemoryLayout.PathElement.sequenceElement(0)
+        MemoryLayout.PathElement.sequenceElement(0),
     )
     val SECCOMP_ARGS2_OFFSET: Long = SECCOMP_DATA.byteOffset(
         MemoryLayout.PathElement.groupElement("args"),
-        MemoryLayout.PathElement.sequenceElement(2)
+        MemoryLayout.PathElement.sequenceElement(2),
     )
 
     /**
@@ -179,13 +178,17 @@ object Layouts {
     val LANDLOCK_RULESET_ATTR: StructLayout = MemoryLayout.structLayout(
         NATIVE_LONG.withName("handled_access_fs"),
         NATIVE_LONG.withName("handled_access_net"),
+        NATIVE_LONG.withName("scoped"),
     )
     const val LANDLOCK_RULESET_ATTR_V1_SIZE: Long = 8L
+    const val LANDLOCK_RULESET_ATTR_V4_SIZE: Long = 16L
     val LANDLOCK_RULESET_ATTR_SIZE: Long = LANDLOCK_RULESET_ATTR.byteSize()
     val LANDLOCK_RULESET_ATTR_FS_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_fs"))
     val LANDLOCK_RULESET_ATTR_NET_OFFSET: Long =
         LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("handled_access_net"))
+    val LANDLOCK_RULESET_ATTR_SCOPED_OFFSET: Long =
+        LANDLOCK_RULESET_ATTR.byteOffset(MemoryLayout.PathElement.groupElement("scoped"))
 
     /**
      * Corresponds to `struct landlock_path_beneath_attr` in `<linux/landlock.h>`.
@@ -229,6 +232,7 @@ object Layouts {
     val SOCKADDR_UN_PATH_OFFSET: Long = SOCKADDR_UN.byteOffset(MemoryLayout.PathElement.groupElement("sun_path"))
     const val SOCKADDR_UN_PATH_SIZE: Long = 108L
 
+    // LP64 CMSG_ALIGN(sizeof(struct cmsghdr)); data starts after 8+4+4 header.
     const val CMSGHDR_DATA_OFFSET: Long = 16L
 
     const val SUPERVISOR_RESPONSE_ID_OFFSET: Long = 0L

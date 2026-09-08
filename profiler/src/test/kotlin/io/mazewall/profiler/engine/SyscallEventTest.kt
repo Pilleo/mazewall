@@ -6,13 +6,12 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
 
 class SyscallEventTest {
-
     @Test
     fun `test resolved extension function transitions state and adds paths`() {
         val rawEvent = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(100),
             syscallName = "OPENAT",
-            args = listOf(1L, 2L, 3L)
+            args = listOf(1L, 2L, 3L),
         )
 
         val paths = listOf("/etc/passwd")
@@ -29,17 +28,17 @@ class SyscallEventTest {
         val event1 = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(100),
             syscallName = "OPENAT",
-            args = listOf(1L, 2L)
+            args = listOf(1L, 2L),
         )
         val event2 = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(100),
             syscallName = "OPENAT",
-            args = listOf(1L, 2L)
+            args = listOf(1L, 2L),
         )
         val event3 = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(101),
             syscallName = "OPENAT",
-            args = listOf(1L, 2L)
+            args = listOf(1L, 2L),
         )
 
         assertEquals(event1, event2)

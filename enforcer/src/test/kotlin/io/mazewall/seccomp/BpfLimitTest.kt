@@ -22,7 +22,7 @@ class BpfLimitTest {
                 arch,
                 actions,
                 SeccompAction.ACT_ALLOW,
-                DefaultSyscallInspectionPipeline(emptyList())
+                DefaultSyscallInspectionPipeline(emptyList()),
             )
         }
     }
@@ -48,6 +48,7 @@ class BpfLimitTest {
             LinuxNative.resetToDefault()
         }
     }
+
     @Test
     fun `newSockFProg throws exception when instructions exceed limit`() {
         val instructions = List(NativeConstants.BPF_MAXINSNS + 1) {

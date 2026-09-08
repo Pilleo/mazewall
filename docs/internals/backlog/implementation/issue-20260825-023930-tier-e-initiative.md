@@ -15,7 +15,8 @@ effort: "xlarge"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: fc92dc4a-7a22-4527-afdf-79a5b0ac4af9
+paperclip_issue_id: "566cc057-4775-4c54-9986-e8dc326fe120"
+paperclip_identifier: "MAZ-1141"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: Tier E Initiative — eBPF Semantic Enrichment
@@ -86,6 +87,8 @@ WP-10 → {WP-11 → WP-12}, WP-13; WP-14 after WP-10; WP-15 last.
 * Kernel work runs via rootful Podman scripts; host-side `./gradlew build` must stay green at
   every step.
 * Any kernel-behavior discovery gets its own backlog issue immediately (house rule).
+
+**Needed:** Implement the work packages in the documented dependency order and satisfy each named gate before progressing to the next stage.
 
 ## ❓ Open Questions
 

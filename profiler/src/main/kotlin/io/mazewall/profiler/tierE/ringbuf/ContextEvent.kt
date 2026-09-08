@@ -28,7 +28,6 @@ public data class ContextEvent(
     public val contextId: UInt,
 ) {
     public companion object {
-
         /** Field offsets within the 24-byte packed record. */
         private const val OFF_KTIME = 0L
         private const val OFF_TGID = 8L
@@ -52,11 +51,13 @@ public data class ContextEvent(
             require(bytes.size >= SIZE_BYTES) {
                 "context_event needs $SIZE_BYTES bytes, got ${bytes.size}"
             }
+
             fun u64(off: Int): ULong {
                 var v = 0UL
                 for (i in 7 downTo 0) v = (v shl 8) or (bytes[off + i].toULong() and 0xFFu)
                 return v
             }
+
             fun u32(off: Int): UInt {
                 var v = 0u
                 for (i in 3 downTo 0) v = (v shl 8) or (bytes[off + i].toUInt() and 0xFFu)
@@ -75,7 +76,11 @@ public data class ContextEvent(
          * Native-endian read straight from a mapped ring-buffer segment.
          * All fields are naturally aligned inside the 24-byte record.
          */
-        public fun fromSegment(seg: MemorySegment, offset: Long): ContextEvent = ContextEvent(
+        internal fun fromSegment(
+            seg: MemorySegment,
+            offset: Long,
+        ): ContextEvent =
+            ContextEvent(
             ktimeNs = seg.get(LONG, offset + OFF_KTIME).toULong(),
             tgid = seg.get(INT, offset + OFF_TGID).toUInt(),
             tid = seg.get(INT, offset + OFF_TID).toUInt(),

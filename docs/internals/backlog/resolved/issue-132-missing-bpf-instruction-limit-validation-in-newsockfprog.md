@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 265
+paperclip_issue_id: b84f358d-3042-4a91-942c-e9ccf5505316
+paperclip_identifier: MAZ-308
 ---
 
 # 🔴 [Severity: MEDIUM]: Missing BPF Instruction Limit Validation in `newSockFProg`

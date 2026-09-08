@@ -20,7 +20,8 @@ class AllowListTest : BaseIntegrationTest() {
      * lazy bootstrap classloads (ClassFormatError with garbage magic).
      */
     private fun jvmFloor(): Array<Syscall> =
-        io.mazewall.enforcer.engine.JvmFloorPresets.fullJvmFloor()
+        io.mazewall.enforcer.engine.JvmFloorPresets
+        .fullJvmFloor()
 
     private fun preWarm() {
         // Force loading of classes and native symbols that PureJavaBpfEngine and
@@ -46,7 +47,6 @@ LinuxNative.networking.socket(2, 1, 0)
 
         val mmap = Arch.current().mmap.toLong()
         if (mmap >= 0) {
-
 LinuxNative.raw.syscall(
     mmap,
     NativeArg.NullArg,
@@ -56,7 +56,6 @@ LinuxNative.raw.syscall(
     NativeArg.IntArg(-1),
     NativeArg.NullArg,
 )
-
         }
     }
 
@@ -71,8 +70,10 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
-                            .allow(*jvmFloor())
+                            .defaultAction(
+                                io.mazewall.core.SeccompAction
+                                .ACT_ERRNO(),
+                            ).allow(*jvmFloor())
                             .build()
 
                     ContainedExecutors.installOnCurrentThread(policy)
@@ -101,8 +102,10 @@ LinuxNative.raw.syscall(
                     val policy =
                         Policy
                             .builder()
-                            .defaultAction(io.mazewall.core.SeccompAction.ACT_ERRNO())
-                            .allow(*jvmFloor())
+                            .defaultAction(
+                                io.mazewall.core.SeccompAction
+                                .ACT_ERRNO(),
+                            ).allow(*jvmFloor())
                             .build()
 
                     ContainedExecutors.installOnCurrentThread(policy)

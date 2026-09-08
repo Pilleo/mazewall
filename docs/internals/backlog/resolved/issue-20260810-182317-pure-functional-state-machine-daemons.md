@@ -12,6 +12,8 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonMachine.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 73228a48-d1e1-4949-8b78-fd5c390f5c80
+paperclip_identifier: MAZ-475
 ---
 
 # 🟢 [Severity: HIGH]: Pure Functional State Machines for Daemons

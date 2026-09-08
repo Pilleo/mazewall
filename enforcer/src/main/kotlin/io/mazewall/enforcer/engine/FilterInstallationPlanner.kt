@@ -1,16 +1,15 @@
 package io.mazewall.enforcer.engine
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyBuilder
+import io.mazewall.PolicyDefinition
 import io.mazewall.PolicyScope
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import java.util.logging.Logger
 
 /**
@@ -43,7 +42,7 @@ internal object FilterInstallationPlanner {
      * most restrictive (highest priority) action across all stacked filters. Thus, a new filter
      * block is only strictly required if the new action has a higher priority than the current one.
      */
-    @Suppress("CyclomaticComplexMethod")
+
     fun calculateNewFilter(
         policy: PolicyDefinition<*>,
         state: ContainerState,

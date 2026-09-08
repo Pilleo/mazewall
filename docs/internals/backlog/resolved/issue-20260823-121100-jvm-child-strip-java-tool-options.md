@@ -14,6 +14,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: ef9bf208-ebb2-41a6-9985-db6f8b336bd9
+paperclip_identifier: MAZ-577
 ---
 
 # 🟡 [Severity: MEDIUM]: JvmChildProcess must strip JAVA_TOOL_OPTIONS so Graal JVMCI does not crash children

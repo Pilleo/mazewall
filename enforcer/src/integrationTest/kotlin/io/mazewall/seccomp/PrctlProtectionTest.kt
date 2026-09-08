@@ -42,10 +42,10 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     nativeScope {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res =
-                        LinuxNative.process.prctl(
-                            PrctlCommand.SetName(NativeArg.MemoryArg(nameSeg))
-                        )
-                    .getOrThrow("prctl(PR_SET_NAME)")
+                        LinuxNative.process
+                            .prctl(
+                            PrctlCommand.SetName(NativeArg.MemoryArg(nameSeg)),
+                        ).getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
                     }
                 }.get()
@@ -66,10 +66,10 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     nativeScope {
                         val nameBuffer = allocate(16)
                         val res =
-                        LinuxNative.process.prctl(
-                            PrctlCommand.GetName(NativeArg.MemoryArg(nameBuffer))
-                        )
-                    .getOrThrow("prctl(PR_GET_NAME)")
+                        LinuxNative.process
+                            .prctl(
+                            PrctlCommand.GetName(NativeArg.MemoryArg(nameBuffer)),
+                        ).getOrThrow("prctl(PR_GET_NAME)")
                         assertEquals(0, res)
 
                         val name = nameBuffer.readString(0L)
@@ -93,10 +93,10 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                     .submit {
                         // Option 25 is PR_SET_MM (hazardous process memory manipulation), which is blocked
 
-LinuxNative.process.prctl(
-    PrctlCommand.SetMm(25)
-)
-                    .getOrThrow("prctl(PR_SET_MM)")
+LinuxNative.process
+    .prctl(
+    PrctlCommand.SetMm(25),
+).getOrThrow("prctl(PR_SET_MM)")
                     }.get()
             }.let { e ->
                 assertTrue(
@@ -123,7 +123,7 @@ LinuxNative.process.prctl(
                     // it won't be blocked by seccomp BPF with EPERM, so it won't trigger ContainmentViolationException).
                     val res =
                     LinuxNative.process.prctl(
-                        PrctlCommand.SetMm(25)
+                        PrctlCommand.SetMm(25),
                     )
 
                     // If seccomp BPF had blocked it, res would be Error(errno=1).

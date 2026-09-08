@@ -963,7 +963,6 @@ public final class io/mazewall/enforcer/supervisor/BypassPaths {
 	public final fun getSafeBypassPaths ()Ljava/util/List;
 	public final fun isBypassPath (Ljava/nio/file/Path;)Z
 	public final fun resolveForPolicy (Ljava/nio/file/Path;)Lio/mazewall/enforcer/supervisor/BypassPaths$PathResolution;
-	public final fun toRealPathWithFallback (Ljava/nio/file/Path;)Ljava/nio/file/Path;
 }
 
 public abstract interface class io/mazewall/enforcer/supervisor/BypassPaths$PathResolution {

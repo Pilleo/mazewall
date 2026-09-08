@@ -1,43 +1,51 @@
-package io.mazewall.profiler.engine
+package io.mazewall.profiler.ffi
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.recover
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.profiler.engine.ACK_BUF_SIZE
+import io.mazewall.profiler.engine.PASS_THROUGH_COMMAND_BYTE
+import io.mazewall.profiler.engine.POLLFD_REVENTS_OFF
+import io.mazewall.profiler.engine.POLL_ACK_TIMEOUT_MS
+import io.mazewall.profiler.engine.PROTOCOL_ACK_BYTE
+import io.mazewall.profiler.engine.SHUTDOWN_COMMAND_BYTE
+import io.mazewall.recover
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
 /**
  * A type-safe state machine for the seccomp notification handshake.
  */
-sealed class HandshakeSession {
+internal sealed class HandshakeSession {
     abstract val notifId: Long
-    abstract val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>
+    abstract val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>
 
     /** Handshake initiated, event sent to JVM, waiting for 0xAC ACK. */
     class Active(
         override val notifId: Long,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) : HandshakeSession() {
-        fun acknowledged(deferredShutdownReason: String? = null) =
-            Success(notifId, listenerFd, deferredShutdownReason)
+        fun acknowledged(deferredShutdownReason: String? = null) = Success(notifId, listenerFd, deferredShutdownReason)
+
         fun failed() = Failed(notifId, listenerFd)
+
         fun passedThrough() = PassedThrough(notifId, listenerFd)
 
         /**
          * Performs the byte-level protocol handshake with the parent JVM.
          * Decouples IPC polling from orchestration.
          */
-        @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
+
         fun performHandshake(
-            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,
             pollFd: MemorySegment,
             ackBuf: MemorySegment,
-            onShutdown: (String) -> Unit
+            onShutdown: (String) -> Unit,
         ): HandshakeSession {
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
@@ -54,19 +62,18 @@ sealed class HandshakeSession {
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
                     return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
                 } else {
-                    System.err.println("[DAEMON-DEBUG] performHandshake poll woke up but POLLIN is not set! revents=${revents}")
+                    System.err.println("[DAEMON-DEBUG] performHandshake poll woke up but POLLIN is not set! revents=$revents")
                     Thread.sleep(100) // Prevent tight loop log spam
                 }
                 return failed()
             }
         }
 
-        @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
         private fun readAndProcessAck(
-            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,
             ackBuf: MemorySegment,
-            onShutdown: (String) -> Unit
+            onShutdown: (String) -> Unit,
         ): HandshakeSession {
             while (true) {
                 val readRes = ioOps.read(socketFd, ackBuf, ACK_BUF_SIZE)
@@ -118,20 +125,20 @@ sealed class HandshakeSession {
     /** Handshake successful, ready to send SECCOMP_USER_NOTIF_FLAG_CONTINUE. */
     class Success(
         override val notifId: Long,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         val deferredShutdownReason: String? = null,
     ) : HandshakeSession()
 
     /** Handshake failed (timeout, error, or shutdown), must send an error or kill thread. */
     class Failed(
         override val notifId: Long,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) : HandshakeSession()
 
     /** Handshake received pass-through command, ready to send SECCOMP_USER_NOTIF_FLAG_CONTINUE. */
     class PassedThrough(
         override val notifId: Long,
-        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+        override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) : HandshakeSession() {
         fun acknowledged() = Success(notifId, listenerFd)
     }

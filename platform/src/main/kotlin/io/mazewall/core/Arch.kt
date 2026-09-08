@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 data class Arch(
     val name: String,
     val audit: Int,
@@ -139,8 +138,8 @@ data class Arch(
                 recvfrom = 45,
                 getsockopt = 55,
                 setsockopt = 54,
-                getsockname = 50,
-                getpeername = 51,
+                getsockname = 51,
+                getpeername = 52,
                 sendmsg = 46,
                 sendmmsg = 307,
                 recvmmsg = 299,
@@ -354,7 +353,7 @@ data class Arch(
                 seccompSyscallNumber = 277,
             )
 
-        fun current(osArch: String = System.getProperty("os.arch")): Arch =
+        fun current(osArch: String = System.getProperty("os.arch") ?: ""): Arch =
             when (osArch) {
                 "amd64", "x86_64" -> AMD64
                 "aarch64", "arm64" -> AARCH64

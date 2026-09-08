@@ -3,6 +3,8 @@ title: "Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 88fdd730-5109-435e-99bc-a5fe94a4ed76
+paperclip_identifier: MAZ-220
 ---
 
 # ✅ [RESOLVED]: Thread-Safety Violation: Mutable `LongArray` in `SyscallEvent`

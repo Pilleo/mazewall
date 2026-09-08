@@ -9,7 +9,9 @@ public interface DaemonRunner {
 public class RealDaemonRunner(
     private val exitFn: (Int) -> Unit = { kotlin.system.exitProcess(it) },
     private val stdinReader: java.io.Reader = System.`in`.reader(),
-    private val engineFactory: (String) -> ProfilerDaemonEngine = { ProfilerDaemonEngine(it) }
+    private val engineFactory: (String) -> ProfilerDaemonEngine = { ProfilerDaemonEngine(it) },
+    private val registerShutdownHook: (Thread) -> Unit = Runtime.getRuntime()::addShutdownHook,
+    private val removeShutdownHook: (Thread) -> Unit = Runtime.getRuntime()::removeShutdownHook,
 ) : DaemonRunner {
     override fun runDaemon(args: Array<String>) {
         if (args.isEmpty()) {
@@ -21,7 +23,7 @@ public class RealDaemonRunner(
         val engine = engineFactory(socketPath)
 
         val hook = Thread { engine.triggerGlobalShutdown("JVM Shutdown Hook") }
-        Runtime.getRuntime().addShutdownHook(hook)
+        registerShutdownHook(hook)
 
         Thread {
             try {
@@ -32,8 +34,9 @@ public class RealDaemonRunner(
                 engine.triggerGlobalShutdown("Stdin Error: ${e.message}")
             } finally {
                 try {
-                    Runtime.getRuntime().removeShutdownHook(hook)
-                } catch (ignored: Exception) {}
+                    removeShutdownHook(hook)
+                } catch (ignored: Exception) {
+                    }
                 exitFn(0)
             }
         }.apply {

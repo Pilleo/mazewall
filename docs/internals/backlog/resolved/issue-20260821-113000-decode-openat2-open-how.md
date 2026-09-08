@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 related_pr: 512
 related_thread: PRRT_kwDOScnnEM6a5aRK
+paperclip_issue_id: e9fa950f-c8cf-4ba8-8127-f306b6ccadb7
+paperclip_identifier: MAZ-527
 ---
 
 # 🔴 [Severity: HIGH]: Decode openat2's open_how before injecting the descriptor

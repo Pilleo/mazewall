@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 147
+paperclip_issue_id: aca0a1f8-dd64-42ee-be6a-db629a056c86
+paperclip_identifier: MAZ-347
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Scopes and Lifetimes (Re-evaluation)

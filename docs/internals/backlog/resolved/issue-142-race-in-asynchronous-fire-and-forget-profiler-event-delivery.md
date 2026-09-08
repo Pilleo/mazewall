@@ -7,6 +7,8 @@ dependencies: []
 component: "profiler"
 effort: "small"
 github_issue: 301
+paperclip_issue_id: 487a2cdb-ebc8-44f8-8e7f-fb4c50abc1c8
+paperclip_identifier: MAZ-318
 ---
 
 # 🔴 [Severity: CRITICAL]: Race in Asynchronous / Fire-and-Forget Profiler Event Delivery

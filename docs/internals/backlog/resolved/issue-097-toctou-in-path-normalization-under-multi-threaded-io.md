@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 217
+paperclip_issue_id: 8aaf74ec-72d0-4629-a3a2-88f2a2b77ce2
+paperclip_identifier: MAZ-276
 ---
 
 # 🔴 [Severity: MEDIUM]: TOCTOU in Path Normalization under Multi-Threaded I/O

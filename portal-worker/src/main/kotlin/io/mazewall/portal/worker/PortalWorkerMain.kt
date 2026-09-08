@@ -7,6 +7,7 @@ import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
+import io.mazewall.portal.PortalPayload
 import java.nio.charset.StandardCharsets
 import kotlin.system.exitProcess
 
@@ -30,8 +31,10 @@ public object PortalWorkerMain {
             ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
             ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
         )
-        // Landlock is ThreadLocalOnly in the type system (no TSYNC on helper threads).
-        // Apply it on the dispatch thread after connect; fail closed if unsupported.
+        // Worker is a dedicated process. Landlock `restrict_self` is process-wide for
+        // this dispatch thread and threads it later creates; PolicyScope.ThreadLocalOnly
+        // only records that classpath allowlists are not TSYNC'd onto pre-existing JVM
+        // helpers. This is not the in-process supervisor's thread-local seccomp path.
         ContainedExecutors.installOnCurrentThread(
             ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
         )
@@ -49,44 +52,63 @@ public object PortalWorkerMain {
         // loop and lets the worker exit cleanly. The deadline is injectable so tests can prove
         // idle-tick survival in milliseconds instead of minutes
         // (issue-20260824-011654).
-        val idleTimeoutMs = System.getProperty("io.mazewall.portal.worker.idleTimeoutMs")
+        val idleTimeoutMs = System
+            .getProperty("io.mazewall.portal.worker.idleTimeoutMs")
             ?.toLongOrNull() ?: 30_000L
         println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
+        var state: PortalWorkerState = PortalWorkerState.AwaitingRequest
         try {
             while (true) {
                 val (frame, fds) =
                     try {
                         channel.receive(idleTimeoutMs)
                     } catch (_: io.mazewall.portal.PortalReadTimeoutException) {
+                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
                         continue
-                    } catch (_: Exception) {
+                    } catch (expectedPeerClose: Exception) {
+                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
                         break
                     }
-                if (frame.kind != PortalKind.REQUEST) {
-                    fds.forEach { sockets.close(it) }
-                    continue
+                val received = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FrameReceived(frame))
+                state = received.state
+                val dispatch = when (received) {
+                    is PortalWorkerTransition.Dispatch -> received
+                    is PortalWorkerTransition.Await,
+                    is PortalWorkerTransition.Close,
+                    is PortalWorkerTransition.Drop,
+                    is PortalWorkerTransition.Send,
+                    -> {
+                        fds.forEach { sockets.close(it) }
+                        continue
+                    }
                 }
                 try {
-                    val result = PortalBuiltinDispatch.handle(frame.methodId, frame.payload, fds)
-                    channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, result, 0))
-                } catch (e: IllegalArgumentException) {
-                    // Only the builtin "unknown method" signal falls through to the
-                    // generated dispatchers; real builtin failures stay errors.
-                    if (e.message?.startsWith("unknown method") != true) throw e
+                    val result = PortalBuiltinDispatch.handle(dispatch.request.method, dispatch.request.payload.copyToByteArray(), fds)
+                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(result)))
+                    state = replied.state
+                    channel.send(sendFrame(replied))
+                } catch (e: UnknownPortalMethod) {
                     val generated = PortalDispatcherRegistry.dispatchOrNull(
-                        frame.methodId,
-                        frame.payload,
+                        e.method,
+                        dispatch.request.payload.copyToByteArray(),
                         fds,
                     )
                     if (generated != null) {
-                        channel.send(PortalFrame(PortalKind.RESPONSE, frame.requestId, frame.methodId, generated, 0))
+                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(generated)))
+                        state = replied.state
+                        channel.send(sendFrame(replied))
                     } else {
                         val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                        channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
+                        state = replied.state
+                        channel.send(sendFrame(replied))
                     }
-                } catch (e: Exception) {
-                    val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                    channel.send(PortalFrame(PortalKind.ERROR, frame.requestId, frame.methodId, msg, 0))
+                } catch (expectedDispatchFailure: Exception) {
+                    val msg = (expectedDispatchFailure.message ?: expectedDispatchFailure::class.java.simpleName)
+                        .toByteArray(StandardCharsets.UTF_8)
+                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
+                    state = replied.state
+                    channel.send(sendFrame(replied))
                 } finally {
                     fds.forEach { sockets.close(it) }
                 }
@@ -95,4 +117,14 @@ public object PortalWorkerMain {
             channel.close()
         }
     }
+
+    private fun sendFrame(transition: PortalWorkerTransition): PortalFrame =
+        when (transition) {
+            is PortalWorkerTransition.Send -> transition.frame
+            is PortalWorkerTransition.Await,
+            is PortalWorkerTransition.Close,
+            is PortalWorkerTransition.Dispatch,
+            is PortalWorkerTransition.Drop,
+            -> error("dispatch completion must send a reply")
+        }
 }

@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class IterativeProfilerStateTest {
-
     @Test
     fun `test states`() {
         val policy = Policy.PURE_COMPUTE_UNSAFE

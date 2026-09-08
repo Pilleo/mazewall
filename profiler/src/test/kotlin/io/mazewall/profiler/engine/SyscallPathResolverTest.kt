@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.util.stream.Stream
 
 class SyscallPathResolverTest {
-
     private val AT_FDCWD_VAL = -100L
 
     private class RecordingMockReader : ProfilerMemoryReader {
@@ -21,24 +20,32 @@ class SyscallPathResolverTest {
         val addressToString = mutableMapOf<Long, String>()
         val linkToPath = mutableMapOf<String, String>()
 
-        context(arena: NativeArena)
-        override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+        context(arena: NativeArena) override fun readStringFromProcess(
+            tid: Tid,
+            remoteAddr: Long,
+            maxLen: Int,
+        ): String? {
             readAddresses.add(remoteAddr)
             return addressToString[remoteAddr]
         }
 
-        context(arena: NativeArena)
-        override fun resolveLink(tid: Tid, link: String): String? {
+        context(arena: NativeArena) override fun resolveLink(
+            tid: Tid,
+            link: String,
+        ): String? {
             return linkToPath[link]
         }
     }
 
     private fun makeResolver(reader: ProfilerMemoryReader) = SyscallPathResolver(reader, SessionEventLedger())
 
-    private fun makeRawEvent(name: String, args: List<Long>) = SyscallEvent<SyscallEventState.Raw>(
+    private fun makeRawEvent(
+        name: String,
+        args: List<Long>,
+    ) = SyscallEvent<SyscallEventState.Raw>(
         tid = Tid(123),
         syscallName = name,
-        args = args
+        args = args,
     )
 
     @Test
@@ -136,17 +143,23 @@ class SyscallPathResolverTest {
     }
 
     private val stubMemoryReader = object : ProfilerMemoryReader {
-        context(arena: NativeArena)
-        override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+        context(arena: NativeArena) override fun readStringFromProcess(
+            tid: Tid,
+            remoteAddr: Long,
+            maxLen: Int,
+        ): String? {
             if (remoteAddr == 100L) return "/etc/passwd"
             if (remoteAddr == 101L) return "relative/path"
             if (remoteAddr == 102L) return "/var/log"
             return null
         }
-        context(arena: NativeArena)
-        override fun resolveLink(tid: Tid, path: String): String? {
-            if (path == "cwd") return "/home/user"
-            if (path == "fd/5") return "/opt/app"
+
+        context(arena: NativeArena) override fun resolveLink(
+            tid: Tid,
+            link: String,
+        ): String? {
+            if (link == "cwd") return "/home/user"
+            if (link == "fd/5") return "/opt/app"
             return null
         }
     }
@@ -156,13 +169,18 @@ class SyscallPathResolverTest {
         NativeArena.ofConfined().use { arena ->
             with(arena) {
                 val reader = object : ProfilerMemoryReader {
-                    context(arena: NativeArena)
-                    override fun readStringFromProcess(tid: Tid, remoteAddr: Long, maxLen: Int): String? {
+                    context(arena: NativeArena) override fun readStringFromProcess(
+                        tid: Tid,
+                        remoteAddr: Long,
+                        maxLen: Int,
+                    ): String? {
                         throw ContainmentViolationException("Permission denied reading memory from TID ${tid.value}")
                     }
 
-                    context(arena: NativeArena)
-                    override fun resolveLink(tid: Tid, link: String): String? = null
+                    context(arena: NativeArena) override fun resolveLink(
+                        tid: Tid,
+                        link: String,
+                    ): String? = null
                 }
                 val ledger = SessionEventLedger()
                 val resolver = SyscallPathResolver(reader, ledger)
@@ -190,7 +208,8 @@ class SyscallPathResolverTest {
 
     companion object {
         @JvmStatic
-        fun stubPathCases(): Stream<StubPathCase> = Stream.of(
+        fun stubPathCases(): Stream<StubPathCase> =
+            Stream.of(
             StubPathCase("single string arg (OPEN)", "OPEN", listOf(100L), listOf("/etc/passwd")),
             StubPathCase("dirfd with absolute path (OPENAT)", "OPENAT", listOf(5L, 100L), listOf("/etc/passwd")),
             StubPathCase("dirfd with relative path and AT_FDCWD (OPENAT)", "OPENAT", listOf(-100L, 101L), listOf("/home/user/relative/path")),
@@ -278,17 +297,32 @@ class SyscallPathResolverTest {
         "'a/../../..', '../..'",
         "'a/../../../a', '../../a'",
     )
-    fun `test PathNormalizerHelper normalizePath`(input: String, expected: String) {
+    fun `test PathNormalizerHelper normalizePath`(
+        input: String,
+        expected: String,
+    ) {
         assertEquals(expected, PathNormalizerHelper.normalizePath(input))
     }
 
     @Test
     fun `test PathNormalizerHelper normalizePath large inputs fallback`() {
         val deepPath = (1..130).joinToString("/") { "a" }
-        assertEquals(java.nio.file.Paths.get(deepPath).normalize().toString(), PathNormalizerHelper.normalizePath(deepPath))
+        assertEquals(
+            java.nio.file.Paths
+            .get(deepPath)
+            .normalize()
+            .toString(),
+                PathNormalizerHelper.normalizePath(deepPath),
+        )
 
         val longPath = "a".repeat(4100)
-        assertEquals(java.nio.file.Paths.get(longPath).normalize().toString(), PathNormalizerHelper.normalizePath(longPath))
+        assertEquals(
+            java.nio.file.Paths
+            .get(longPath)
+            .normalize()
+            .toString(),
+                PathNormalizerHelper.normalizePath(longPath),
+        )
     }
 
     @ParameterizedTest(name = "\"{0}\" startsWith \"{1}\" == {2}")
@@ -302,7 +336,11 @@ class SyscallPathResolverTest {
         "'/a/b', '/c', false",
         "'a/b', '/a', false",
     )
-    fun `test PathNormalizerHelper pathStartsWith`(path: String, prefix: String, expected: Boolean) {
+    fun `test PathNormalizerHelper pathStartsWith`(
+        path: String,
+        prefix: String,
+        expected: Boolean,
+    ) {
         assertEquals(expected, PathNormalizerHelper.pathStartsWith(path, prefix))
     }
 

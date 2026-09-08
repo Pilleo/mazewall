@@ -1,22 +1,23 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.close
 import io.mazewall.core.Tid
+import io.mazewall.core.close
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.profiler.Profiler
 import io.mazewall.profiler.engine.TraceEvent
-import java.io.BufferedInputStream
-import java.io.DataInputStream
-import io.mazewall.ffi.memory.ConfinedSegment
-import java.io.InputStream
-import java.lang.foreign.Arena
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.runBlocking
+import java.io.BufferedInputStream
+import java.io.DataInputStream
+import java.io.InputStream
+import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -30,15 +31,15 @@ import java.util.logging.Logger
  * and the underlying Unix domain socket is explicitly released, preventing "half-dead"
  * listeners or socket leaks during consecutive profiling runs.
  */
-@Suppress("SwallowedException")
 internal class ProfilerTraceListener(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
+
     // Thread-safe idempotent close guard to prevent native double-close.
     private val socketClosed = AtomicBoolean(false)
     private var workerThread: Thread? = null
@@ -88,15 +89,13 @@ internal class ProfilerTraceListener(
     var droppedEvents: Int = 0
         private set
 
-    private val gracefulDrainRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val gracefulDrainRequested = java.util.concurrent.atomic
+        .AtomicBoolean(false)
 
     companion object {
         private const val DEDUPLICATION_WINDOW_MS = 500L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        // Signals the daemon to finish writing any in-flight events and close its socket end.
-        // On receipt the daemon session loop terminates gracefully (LoopAction.Shutdown), which
-        // allows the JVM listener to drain the remaining events before seeing EOF.
-        private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte()
+
         private const val PASS_THROUGH_COMMAND_BYTE = 0x54.toByte()
         private const val JOIN_TIMEOUT_MS = 5000L
         private const val INTERRUPT_JOIN_TIMEOUT_MS = 500L
@@ -106,16 +105,17 @@ internal class ProfilerTraceListener(
      * Starts the background listener thread.
      */
     fun start(readyLatch: CountDownLatch) {
-        if (closed.get()) throw IllegalStateException("Listener is already closed")
+        check(!closed.get()) { "Listener is already closed" }
 
-        val arena = io.mazewall.ffi.memory.NativeArena.ofShared()
+        val arena = io.mazewall.ffi.memory.NativeArena
+            .ofShared()
         val inputStream = NativeSocketInputStream(socketFd, arena)
 
         val thread = Thread {
             try {
                 runListenerLoop(inputStream, readyLatch)
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
+            } catch (expectedWorkerFailure: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed", expectedWorkerFailure)
             } finally {
                 if (closed.compareAndSet(false, true)) {
                     // Safe socket closure unifies cleanup across worker and main threads.
@@ -140,15 +140,16 @@ internal class ProfilerTraceListener(
                         accumulatedLogs.add(event)
                         val jvmFrames = event.jvmStackTrace
                         if (jvmFrames != null && stackTracesMap != null) {
-                            stackTracesMap.computeIfAbsent(event) {
+                            stackTracesMap
+                                .computeIfAbsent(event) {
                                 CopyOnWriteArrayList<Array<StackTraceElement>>()
                             }.add(jvmFrames)
                         }
                         onEventCollected?.invoke(event)
                     }
                 }
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed with fatal error", t)
+            } catch (expectedCollectorFailure: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed", expectedCollectorFailure)
             } finally {
                 collectorTerminatedLatch.countDown()
             }
@@ -162,7 +163,7 @@ internal class ProfilerTraceListener(
 
     /**
      * Shuts down the listener using the graceful drain protocol:
-     * 1. Sends SHUTDOWN_COMMAND_BYTE to the daemon so it finishes writing any in-flight events.
+     * 1. Sends PASS_THROUGH_COMMAND_BYTE to the daemon so it finishes writing any in-flight events.
      * 2. Waits for the listener thread to drain all remaining events until it sees EOF from the daemon.
      * 3. Only then closes the underlying socket FD.
      *
@@ -181,8 +182,8 @@ internal class ProfilerTraceListener(
             // This triggers EOF on our read side without shutting down the global daemon.
             try {
                 sendCommand(PASS_THROUGH_COMMAND_BYTE)
-            } catch (e: Exception) {
-                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${e.message}")
+            } catch (expectedTransportCloseFailure: Exception) {
+                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${expectedTransportCloseFailure.message}")
             }
 
             var workerJoined = false
@@ -200,7 +201,7 @@ internal class ProfilerTraceListener(
                     } else {
                         workerJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -214,7 +215,7 @@ internal class ProfilerTraceListener(
                     } else {
                         collectorJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -233,10 +234,6 @@ internal class ProfilerTraceListener(
             workerThread = null
             collectorThread = null
         }
-    }
-
-    private fun sendShutdownCommand() {
-        sendCommand(SHUTDOWN_COMMAND_BYTE)
     }
 
     /**
@@ -266,7 +263,7 @@ internal class ProfilerTraceListener(
                     } else {
                         workerJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -280,7 +277,7 @@ internal class ProfilerTraceListener(
                     } else {
                         collectorJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -313,12 +310,11 @@ internal class ProfilerTraceListener(
                     System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
                 }
             }
-        } catch (e: Exception) {
-            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${e.message}")
+        } catch (expectedCommandFailure: Exception) {
+            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${expectedCommandFailure.message}")
         }
     }
 
-    @Suppress("MagicNumber")
     private fun runListenerLoop(
         inputStream: InputStream,
         readyLatch: CountDownLatch,
@@ -327,7 +323,7 @@ internal class ProfilerTraceListener(
         try {
             try {
                 // Read handshake ACK from the daemon confirming the listener FD was received.
-                state = TraceListenerState.Disconnected
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
                     logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
@@ -340,27 +336,31 @@ internal class ProfilerTraceListener(
 
             System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
             while (!closed.get()) {
-                state = TraceListenerState.AwaitingEvent
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
-                } catch (e: java.io.EOFException) {
+                } catch (_: java.io.EOFException) {
                     System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
                     break
-                } catch (e: java.io.IOException) {
+                } catch (expectedCloseIoFailure: java.io.IOException) {
                     if (closed.get()) {
-                        logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", e)
+                        logger.log(
+                            java.util.logging.Level.FINE,
+                            "Trace listener loop interrupted by close",
+                            expectedCloseIoFailure,
+                        )
                         break
                     }
-                    throw e
+                    throw expectedCloseIoFailure
                 }
 
-                state = TraceListenerState.ProcessingEvent(event)
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.EventRead(event))
                 processEvent(event)
             }
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
         } finally {
-            state = TraceListenerState.Disconnected
+            state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SocketClosed)
             eventQueue.close()
         }
     }
@@ -368,17 +368,20 @@ internal class ProfilerTraceListener(
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
         System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
         val tidValue = dis.readInt()
-        state = TraceListenerState.ReadingHeader(tidValue)
+        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
 
         val syscallNameLen = dis.readInt()
-        state = TraceListenerState.ReadingSyscall(tidValue, syscallNameLen)
+        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SyscallRead(tidValue, syscallNameLen))
 
         val syscallNameBytes = ByteArray(syscallNameLen)
         dis.readFully(syscallNameBytes)
         val syscallName = String(syscallNameBytes, Charsets.UTF_8)
 
         val argsCount = dis.readInt()
-        state = TraceListenerState.ReadingArguments(tidValue, syscallName, argsCount)
+        state = TraceListenerMachine.evaluate(
+            state,
+            TraceListenerEvent.ArgumentsRead(tidValue, syscallName, argsCount),
+        )
 
         val args = LongArray(argsCount)
         for (i in 0 until argsCount) {
@@ -387,7 +390,7 @@ internal class ProfilerTraceListener(
 
         val pathsCount = dis.readInt()
         val paths = mutableListOf<String>()
-        for (i in 0 until pathsCount) {
+        repeat(pathsCount) {
             val pathLen = dis.readInt()
             val pathBytes = ByteArray(pathLen)
             dis.readFully(pathBytes)

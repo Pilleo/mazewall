@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 161
+paperclip_issue_id: c7e702cc-71eb-4998-b3ce-c75831545028
+paperclip_identifier: MAZ-326
 ---
 
 # 🔴 [Severity: LOW]: Incomplete FFM Architecture Isolation

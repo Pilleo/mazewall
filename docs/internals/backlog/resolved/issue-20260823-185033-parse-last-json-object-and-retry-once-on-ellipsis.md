@@ -21,6 +21,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: false
+paperclip_issue_id: ae3df41d-9de8-4a75-a98c-8f0760e2f685
+paperclip_identifier: MAZ-616
 ---
 
 # 🟡 [Severity: MEDIUM]: Parse last JSON object and retry once on ellipsis

@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: dd843f3d-fc7a-4cca-b1f3-1368b4e8f87a
+paperclip_identifier: MAZ-465
 ---
 
 # 🔴 [Severity: HIGH]: SupervisorDaemon Inherits Process-Wide Seccomp Filters Leading to ENOSYS

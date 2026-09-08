@@ -1,11 +1,5 @@
 package io.mazewall.seccomp
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.ffi.NativeConstants
 
 /**
@@ -24,13 +18,20 @@ public object BpfStaticVerifier {
      */
     public fun verify(program: BpfProgram<BpfStatus.Unverified>): BpfProgram<BpfStatus.Verified> {
         val instructions = program.instructions
-        if (instructions.isEmpty()) {
-            throw IllegalArgumentException("BPF verification failed: program is empty")
-        }
-        if (instructions.size > NativeConstants.BPF_MAXINSNS) {
-            throw IllegalArgumentException("BPF verification failed: program size (${instructions.size}) exceeds limit of ${NativeConstants.BPF_MAXINSNS} instructions")
-        }
+        validateProgramSize(instructions)
+        verifyControlFlow(program)
+        return BpfProgram(instructions)
+    }
 
+    private fun validateProgramSize(instructions: List<BpfInstruction>) {
+        require(instructions.isNotEmpty()) { "BPF verification failed: program is empty" }
+        require(instructions.size <= NativeConstants.BPF_MAXINSNS) {
+            "BPF verification failed: program size (${instructions.size}) exceeds limit of ${NativeConstants.BPF_MAXINSNS} instructions"
+        }
+    }
+
+    private fun verifyControlFlow(program: BpfProgram<BpfStatus.Unverified>) {
+        val instructions = program.instructions
         val visited = BooleanArray(instructions.size)
         val stack = java.util.ArrayDeque<Int>()
 
@@ -46,46 +47,53 @@ public object BpfStaticVerifier {
                     // Safe termination
                 }
                 is BpfInstruction.Ld, is BpfInstruction.Alu -> {
-                    val nextIdx = idx + 1
-                    if (nextIdx < 0 || nextIdx >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $nextIdx is out of bounds")
-                    }
-                    if (!visited[nextIdx]) {
-                        visited[nextIdx] = true
-                        stack.push(nextIdx)
-                    }
+                    enqueue(program, visited, stack, idx + 1)
                 }
                 is BpfInstruction.Jmp -> {
-                    if (ins.jt < 0) {
-                        throw IllegalArgumentException("BPF verification failed: negative jt offset is not allowed: ${ins.jt}")
-                    }
-                    if (ins.jf < 0) {
-                        throw IllegalArgumentException("BPF verification failed: negative jf offset is not allowed: ${ins.jf}")
-                    }
-
-                    val jtTarget = idx + 1 + ins.jt.toInt()
-                    val jfTarget = idx + 1 + ins.jf.toInt()
-
-                    if (jtTarget < 0 || jtTarget >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $jtTarget is out of bounds")
-                    }
-                    if (jfTarget < 0 || jfTarget >= instructions.size) {
-                        throw IllegalArgumentException("BPF verification failed: instruction index $jfTarget is out of bounds")
-                    }
-
-                    if (!visited[jtTarget]) {
-                        visited[jtTarget] = true
-                        stack.push(jtTarget)
-                    }
-                    if (!visited[jfTarget]) {
-                        visited[jfTarget] = true
-                        stack.push(jfTarget)
-                    }
+                    enqueueJumpTargets(program, visited, stack, idx, ins)
                 }
             }
         }
-
-        // Return a new instance representing the verified state
-        return BpfProgram(instructions)
     }
+
+    private fun enqueueJumpTargets(
+        program: BpfProgram<BpfStatus.Unverified>,
+        visited: BooleanArray,
+        stack: java.util.ArrayDeque<Int>,
+        index: Int,
+        instruction: BpfInstruction.Jmp,
+    ) {
+        requireNonNegativeOffset(program, "jt", instruction.jt)
+        requireNonNegativeOffset(program, "jf", instruction.jf)
+        enqueue(program, visited, stack, index + 1 + instruction.jt.toInt())
+        enqueue(program, visited, stack, index + 1 + instruction.jf.toInt())
+    }
+
+    private fun requireNonNegativeOffset(
+        program: BpfProgram<BpfStatus.Unverified>,
+        name: String,
+        offset: Short,
+    ) {
+        if (offset < 0) verificationFailure(program, "negative $name offset is not allowed: $offset")
+    }
+
+    private fun enqueue(
+        program: BpfProgram<BpfStatus.Unverified>,
+        visited: BooleanArray,
+        stack: java.util.ArrayDeque<Int>,
+        index: Int,
+    ) {
+        if (index !in visited.indices) verificationFailure(program, "instruction index $index is out of bounds")
+        if (!visited[index]) {
+            visited[index] = true
+            stack.push(index)
+        }
+    }
+}
+
+private fun verificationFailure(
+    program: BpfProgram<BpfStatus.Unverified>,
+    detail: String,
+): Nothing {
+    throw IllegalArgumentException("BPF verification failed: $detail\nBPF program:\n${program.disassemble()}")
 }

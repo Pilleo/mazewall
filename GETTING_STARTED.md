@@ -1,6 +1,6 @@
 # Getting Started with mazewall
 
-This guide covers everything you need to go from zero to a working, kernel-enforced sandbox in your JVM application.
+This guide shows how to evaluate kernel-enforced restrictions for selected JVM workers. Read the [threat model](docs/internals/designs/core/security-considerations.md) before applying a policy to an application.
 
 ---
 
@@ -10,12 +10,12 @@ This guide covers everything you need to go from zero to a working, kernel-enfor
 |---|---|---|
 | **JDK** | 22 | 22+ |
 | **Linux kernel** | 3.17 (Seccomp basic) | **6.2+** (full feature set) |
-| **Landlock filesystem isolation** | kernel 5.13 | 6.7+ (includes network control) |
+| **Landlock filesystem isolation** | kernel 5.13 | 6.7+ (adds TCP `bind`/`connect` port restrictions; not general network control) |
 
 > [!NOTE]
-> mazewall compiles and runs on older kernels but degrades gracefully: features unavailable on the host kernel are detected at runtime and skipped or reported. A kernel 6.2+ host (or the provided dev container) gives you everything.
+> mazewall detects unavailable host features at runtime. The effective behavior depends on the configured fallback policy, kernel capabilities, and outer container restrictions. A kernel 6.2+ host (or the provided dev container) provides the broadest supported feature set.
 
-**No root required. No native C libraries. No kernel modules.**
+**No native C libraries or kernel modules are required. Root is not required on a compatible Linux host, but an outer container profile or runtime policy can prevent filter installation.**
 
 ---
 
@@ -63,9 +63,31 @@ dependencies {
 
 ---
 
-## Quick Start: Your First Sandbox in 5 Minutes
+## Before You Evaluate
 
-### Step 1 — Block process spawning on a thread pool (most common use case)
+- Linux only. Record the exact kernel, Landlock ABI, JDK, container runtime, and outer Seccomp profile used for testing.
+- Install the process-wide baseline before framework or application thread pools start. It is irreversible for the life of the process.
+- Use a dedicated **platform-thread** executor for contained work. Do not wrap `ForkJoinPool.commonPool()`, framework-managed pools, or an executor reused for unrelated work: kernel restrictions remain on its workers.
+- Thread-scoped restrictions protect trusted code handling untrusted data. They do not isolate arbitrary hostile Java code, existing file descriptors, shared JVM memory, or unrestricted sibling threads.
+- Validate every policy against representative normal, error, lazy-loading, and dependency-upgrade workloads. Profiler output is a candidate policy, not proof of future behavior.
+
+## Quick Start: Your First Evaluation
+
+### Step 1 — Install a process-wide exec baseline at startup
+
+This prevents the JVM process from creating a child process after installation, including from an uncontained thread. Install it only after confirming that your application does not need later process creation or dynamic native-agent loading.
+
+```kotlin
+// Call once, early in main() / Application.run(), before application thread pools exist.
+ContainedExecutors.installOnProcess(
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+)
+```
+
+> [!IMPORTANT]
+> Once installed, the filter applies to current and future threads in the process and cannot be removed.
+
+### Step 2 — Restrict a dedicated worker pool
 
 ```kotlin
 import io.mazewall.enforcer.api.ContainedExecutors
@@ -82,24 +104,10 @@ val sandboxed = ContainedExecutors.wrap(
 
 // Everything submitted to this pool runs under the kernel-enforced policy.
 sandboxed.submit {
-    processUntrustedInput(payload) // safe: even if this library has a Log4Shell-type bug,
-                                   // it cannot spawn a shell or connect back to an attacker
+    processUntrustedInput(payload)
+    // Configured process-creation syscalls are denied on this worker.
 }
 ```
-
-### Step 2 — Install a process-wide exec baseline at startup
-
-This is the recommended first step for *any* application that doesn't dynamically load native agents post-startup. It prevents the entire JVM process from ever spawning a child process — even if an uncontained thread is compromised.
-
-```kotlin
-// Call once, early in main() / Application.run()
-ContainedExecutors.installOnProcess(
-    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
-)
-```
-
-> [!IMPORTANT]
-> Call `installOnProcess` before starting your framework's thread pools. Once installed, the filter applies to all current and future threads in the process and cannot be removed.
 
 ---
 
@@ -149,7 +157,10 @@ val policy = Policy.builder()
     // No .allowNetwork() → connect/sendmsg are blocked at kernel level
     .build()
 
-val auditedPool = ContainedExecutors.wrap(executor, policy)
+val auditedPool = ContainedExecutors.wrap(
+    Executors.newFixedThreadPool(2), // dedicated; do not reuse outside this scope
+    policy,
+)
 
 // Any ContainmentViolationException from this pool is observable proof
 // that the declared behavioral constraints were violated — enforced by the kernel,
@@ -165,7 +176,7 @@ val policy = Policy.builder()
     // Start from a built-in base
     .base(Policy.NO_EXEC_HOTSPOT)
 
-    // Filesystem access (Landlock — path-exact, inheritable)
+    // Filesystem access (Landlock — inode-backed file or directory rules)
     .allowFsRead("/data/in")
     .allowFsWrite("/data/out")
     .allowJvmClasspath()       // auto-whitelists java.home + classpath entries
@@ -192,7 +203,7 @@ This is the list of "scary JVM + Linux edge cases" that mazewall deals with inte
 | **Lazy class loading** | Landlock blocks classfile reads → `NoClassDefFoundError` inside the sandbox | `allowJvmClasspath()` auto-discovers and whitelists all classpath entries |
 | **Loom virtual threads** | Seccomp filters bind to OS threads; a filter set inside a virtual thread permanently poisons the shared carrier thread | Detects virtual threads at install time and throws `IllegalStateException` immediately |
 | **Landlock + Seccomp ordering** | Installing Seccomp first blocks the `landlock_*` syscalls, making it impossible to add Landlock after | Always installs Landlock first, then Seccomp |
-| **io_uring bypass** | `io_uring` submits I/O operations asynchronously via a kernel ring — thread-scoped Seccomp filters don't apply to async operations | Blocks `io_uring_setup` and `io_uring_enter` in all built-in policies |
+| **io_uring bypass** | `io_uring` submits I/O operations asynchronously via a kernel ring | Verify that the selected policy explicitly denies the relevant `io_uring` syscalls before relying on this restriction |
 
 ---
 
@@ -237,10 +248,11 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
 
 ## Known Limitations
 
-- **Thread-scope vs Process-scope Isolation**: All JVM threads share the same heap. If an attacker achieves native Arbitrary Code Execution on a sandboxed thread, they can potentially corrupt heap memory on an unsandboxed sibling thread. Combine with a process-wide `NO_EXEC` baseline (Tier 1) for defense-in-depth. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the full threat model.
+- **Thread-scope vs Process-scope Isolation**: Thread-scoped restrictions do not isolate arbitrary hostile Java code. Attackers can hop to unrestricted executors, and all JVM threads share heap and address-space state. Existing socket file descriptors may remain usable through generic I/O calls. Combine with a process-wide `NO_EXEC` baseline (Tier 1) and external process/container isolation where that threat model requires it. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the full threat model.
 - **JIT Compiler Coexistence**: The background threads that run JVM JIT compilation are unconstrained by thread-scoped policies. Therefore, thread-local executors wrapped with `Policy.NO_EXEC` or `Policy.PURE_COMPUTE` will *not* trigger JIT compiler `mmap(PROT_EXEC)` failures. However, if you apply a process-wide lockdown, use `Policy.NO_EXEC_HOTSPOT` (or append `.allowMmapExec()`) if JIT compilation is still active. Raw `Policy.NO_EXEC` denies `PROT_EXEC` mappings and can crash HotSpot.
 - **Platform threads only**: Virtual threads (Loom) are explicitly rejected at runtime. Use platform thread pools for sandboxed work.
 - **Linux only**: macOS and Windows do not have Seccomp-BPF or Landlock. The library will fail to install and throw (configurable via the `IO_MAZEWALL_FALLBACK` env var).
+- **Policy coverage is empirical**: The profiler can record only the workload it sees. Re-run policy validation when input classes, error paths, native dependencies, the JVM, kernel, or deployment configuration changes.
 
 ---
 
@@ -250,4 +262,4 @@ io.mazewall.ContainmentViolationException: Containment violation detected: block
 - **Profiler:** Automatically discover the minimal policy your workload needs → [profiler README](profiler/README.md)
 - **Enforcer API reference:** Full policy builder docs → [enforcer/README.md](enforcer/README.md)
 - **Threat model:** What mazewall stops and what it doesn't → [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md)
-
+- **Reproduction guide:** Environment and expected evidence for the provided demonstrations → [docs/REPRODUCING_RESULTS.md](docs/REPRODUCING_RESULTS.md)

@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -10,12 +11,12 @@ import io.mazewall.core.FileDescriptorRole
  */
 public class Capability private constructor() {
     public class ReadFd internal constructor(
-        internal val fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open>,
+        internal val fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>,
     )
 
     public companion object {
         /** Adopt a granted FD received by the worker. Not a host `InputStream`. */
         @JvmStatic
-        public fun readFd(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open>): ReadFd = ReadFd(fd)
+        public fun readFd(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>): ReadFd = ReadFd(fd)
     }
 }

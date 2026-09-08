@@ -15,7 +15,8 @@ effort: "large"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
-paperclip_issue_id: 128309fd-fbd7-4f86-a23a-ce293fc13186
+paperclip_issue_id: 27ed969a-f78d-4999-8049-9230fd2b4441
+paperclip_identifier: MAZ-706
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: SBoB Policy Artifacts Workflow — Pinned, Signed, Versioned Policies for CI Admission
@@ -47,3 +48,5 @@ seccomp/Landlock enforcement could be the missing enforcing backend for syscall/
 2. Should admission failure be fail-closed at install time (refuse to run unpinned builds) or
    report-only initially?
 3. Format: adopt BoB YAML wholesale with a mazewall enforcing profile extension, or dual-export?
+
+**Needed:** Resolve the listed organizational trust-model questions before implementation; no security policy default is assumed.

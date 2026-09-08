@@ -11,6 +11,8 @@ solution_approved: true
 blast_radius: "medium"
 reversible: true
 github_issue: 157
+paperclip_issue_id: 719b9678-04b4-4cde-a644-b6b01a8115c7
+paperclip_identifier: MAZ-335
 ---
 
 # 🔴 [Severity: LOW]: Potential Buffer Overflow / OutOfBoundsException on Long UNIX Socket Paths

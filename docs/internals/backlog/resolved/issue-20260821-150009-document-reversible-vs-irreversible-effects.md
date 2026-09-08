@@ -11,6 +11,8 @@ target_files:
   - "docs/internals/designs/enforcer/containment-design.md"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: fe30bd7f-3f63-4299-a0ae-fa134d3a3d83
+paperclip_identifier: MAZ-575
 ---
 
 # 🟢 [Severity: LOW]: Document reversible JVM tracking vs irreversible kernel vs daemon effects

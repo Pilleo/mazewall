@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 399
+paperclip_issue_id: 0dbd8e80-965b-4ad4-a32e-1b66d18edbe9
+paperclip_identifier: MAZ-406
 ---
 
 # 🔴 [Severity: HIGH]: Implement Parameterized Transition Matrix Testing for Orchestrator States

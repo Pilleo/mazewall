@@ -34,7 +34,7 @@ public data class DaemonContext(
 public class ProfilerDaemonManager(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
-    private val processLauncher: ProcessLauncher = RealProcessLauncher
+    private val processLauncher: ProcessLauncher = RealProcessLauncher,
 ) {
     private val logger = Logger.getLogger(ProfilerDaemonManager::class.java.name)
     private val daemonLock = Any()
@@ -56,9 +56,9 @@ public class ProfilerDaemonManager(
         synchronized(daemonLock) {
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive) {
-
                 engine.process.prctl(
-                    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
+                    io.mazewall.core.PrctlCommand
+                        .SetPtracer(existing.daemonProcess.pid()),
                 )
 
                 return existing
@@ -126,7 +126,8 @@ public class ProfilerDaemonManager(
 
         val prctlRes =
             engine.process.prctl(
-                io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+                io.mazewall.core.PrctlCommand
+                    .SetPtracer(daemonPid),
             )
 
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
@@ -144,7 +145,6 @@ public class ProfilerDaemonManager(
                 threadName = "profiler-daemon-output",
             )
 
-        @Suppress("MagicNumber")
         val ready = JvmChildProcess.awaitReady(pump, 30)
 
         if (!ready) {
@@ -166,7 +166,10 @@ public class ProfilerDaemonManager(
         return DaemonContext(socketPath, socketDir, daemonProcess, shutdownHook)
     }
 
-    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
+    private fun triggerDaemonShutdown(
+        socketPath: String,
+        process: Process,
+    ) {
         try {
             Arena.ofConfined().use { arena ->
                 val fd = socketManager.connect(socketPath)
@@ -188,7 +191,7 @@ public class ProfilerDaemonManager(
             while (process.isAlive && System.currentTimeMillis() < deadline) {
                 Thread.sleep(10)
             }
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
     }

@@ -3,6 +3,8 @@ title: "`ProfilerDaemon` `SYMLINKAT` Mapping Error"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 080dce3c-9a1c-42f3-ab5f-f5ff2a741ecd
+paperclip_identifier: MAZ-248
 ---
 
 # ✅ [RESOLVED]: `ProfilerDaemon` `SYMLINKAT` Mapping Error

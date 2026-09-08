@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/ContainmentStateRegistryTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 5497e82e-58f5-4671-8021-4368bd385d9e
+paperclip_identifier: MAZ-567
 ---
 
 # 🟡 [Severity: MEDIUM]: sanitizeThreadState must be uncallable as cleanup (test + Nothing)

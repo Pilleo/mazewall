@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 54f3c3ae-b80d-4ac4-a8b2-ca98e3ab495a
+paperclip_identifier: MAZ-593
 ---
 
 # 🔴 [Severity: HIGH]: PolicyCompilationCache Grows Without Bound for Dynamic Policies
@@ -45,4 +47,3 @@ program:
    distinctly.
 4. Document the projection invariant next to the key type ("FS paths must NOT participate in this
    key; they do not affect BPF output") to prevent regression.
-

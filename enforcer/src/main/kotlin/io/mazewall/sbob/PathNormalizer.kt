@@ -1,11 +1,10 @@
 package io.mazewall.sbob
 
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
+import io.mazewall.enforcer.state.*
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -39,10 +38,14 @@ public object PathNormalizer {
      * @param baseCwd The base directory to resolve relative paths against.
      * @return A set of resolved, absolute, and pruned path strings.
      */
-    fun normalizeAndPrune(paths: Set<String>, baseCwd: Path?): Set<String> {
+    fun normalizeAndPrune(
+        paths: Set<String>,
+        baseCwd: Path?,
+    ): Set<String> {
         if (paths.isEmpty()) return paths
 
-        val resolvedPaths = paths.map { pathStr ->
+        val resolvedPaths = paths
+            .map { pathStr ->
             var p = Paths.get(pathStr)
             if (!p.isAbsolute) {
                 if (baseCwd == null) {
@@ -97,14 +100,14 @@ public object PathNormalizer {
                 // Try to resolve the current parent prefix physically
                 val real = current.toRealPath()
                 return real.resolve(suffix).normalize()
-            } catch (e: IOException) {
+            } catch (_: IOException) {
                 // Parent component doesn't exist or can't be resolved, move up
                 val fileName = current.fileName
                 if (fileName != null) {
                     suffix = Paths.get(fileName.toString()).resolve(suffix)
                 }
                 current = current.parent
-            } catch (e: SecurityException) {
+            } catch (_: SecurityException) {
                 val fileName = current.fileName
                 if (fileName != null) {
                     suffix = Paths.get(fileName.toString()).resolve(suffix)

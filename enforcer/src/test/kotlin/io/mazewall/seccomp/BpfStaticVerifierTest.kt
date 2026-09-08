@@ -8,7 +8,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
 class BpfStaticVerifierTest {
-
     @Test
     fun `valid program verifies successfully`() {
         val program = BpfProgram.dsl(Arch.AMD64) {
@@ -27,6 +26,20 @@ class BpfStaticVerifierTest {
         val verified: BpfProgram<BpfStatus.Verified> = BpfStaticVerifier.verify(unverified)
         assertNotNull(verified)
         assertEquals(unverified.instructions, verified.instructions)
+    }
+
+    @Test
+    fun `ALU instruction may fall through to a return`() {
+        val program = BpfProgram<BpfStatus.Unverified>(
+            listOf(
+                BpfInstruction.Alu(0x54, 0xff),
+                BpfInstruction.Ret(0x06.toShort(), 0),
+            ),
+        )
+
+        val verified = BpfStaticVerifier.verify(program)
+
+        assertEquals(program.instructions, verified.instructions)
     }
 
     @Test
@@ -49,7 +62,7 @@ class BpfStaticVerifierTest {
         }
         assertEquals(
             "BPF verification failed: program size (${excessiveInstructions.size}) exceeds limit of ${NativeConstants.BPF_MAXINSNS} instructions",
-            exception.message
+            exception.message,
         )
     }
 
@@ -59,26 +72,65 @@ class BpfStaticVerifierTest {
         // Index 1: Ret
         val instructions = listOf(
             BpfInstruction.Jmp(0x15.toShort(), 5.toShort(), 0.toShort(), 0),
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: instruction index 6 is out of bounds", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: instruction index 6 is out of bounds
+            BPF program:
+            0000: jeq #0, +5, +0
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
+    }
+
+    @Test
+    fun `program with false jump target out of bounds throws verification exception`() {
+        // Index 0: jf = 5 targets index 6; the true path remains in bounds.
+        val instructions = listOf(
+            BpfInstruction.Jmp(0x15.toShort(), 0.toShort(), 5.toShort(), 0),
+            BpfInstruction.Ret(0x06.toShort(), 0),
+        )
+        val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
+
+        val exception = assertFailsWith<IllegalArgumentException> {
+            BpfStaticVerifier.verify(badProgram)
+        }
+
+        assertEquals(
+            """
+            BPF verification failed: instruction index 6 is out of bounds
+            BPF program:
+            0000: jeq #0, +0, +5
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
     fun `program with fallthrough off the end throws verification exception`() {
         // Index 0: Ld (falls through to index 1, which is out of bounds)
         val instructions = listOf(
-            BpfInstruction.Ld(0x20.toShort(), 0)
+            BpfInstruction.Ld(0x20.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: instruction index 1 is out of bounds", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: instruction index 1 is out of bounds
+            BPF program:
+            0000: ld [0]
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
@@ -92,13 +144,21 @@ class BpfStaticVerifierTest {
 
         val instructions = listOf(
             jmp,
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: negative jt offset is not allowed: -1", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: negative jt offset is not allowed: -1
+            BPF program:
+            0000: jeq #0, -1, +0
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 
     @Test
@@ -112,12 +172,20 @@ class BpfStaticVerifierTest {
 
         val instructions = listOf(
             jmp,
-            BpfInstruction.Ret(0x06.toShort(), 0)
+            BpfInstruction.Ret(0x06.toShort(), 0),
         )
         val badProgram = BpfProgram<BpfStatus.Unverified>(instructions)
         val exception = assertFailsWith<IllegalArgumentException> {
             BpfStaticVerifier.verify(badProgram)
         }
-        assertEquals("BPF verification failed: negative jf offset is not allowed: -1", exception.message)
+        assertEquals(
+            """
+            BPF verification failed: negative jf offset is not allowed: -1
+            BPF program:
+            0000: jeq #0, +0, -1
+            0001: ret #0x0
+            """.trimIndent(),
+            exception.message,
+        )
     }
 }

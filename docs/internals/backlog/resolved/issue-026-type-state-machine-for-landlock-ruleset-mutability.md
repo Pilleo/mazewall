@@ -3,6 +3,8 @@ title: "Type-State Machine for Landlock Ruleset Mutability"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 783cc945-5358-4aa3-98d8-88a539f23905
+paperclip_identifier: MAZ-224
 ---
 
 # ✅ [RESOLVED]: Type-State Machine for Landlock Ruleset Mutability

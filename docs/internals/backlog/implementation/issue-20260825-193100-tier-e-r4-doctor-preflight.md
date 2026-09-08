@@ -13,7 +13,8 @@ effort: "medium"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: 909f00d9-d975-40a9-a140-259ac042f942
+paperclip_issue_id: "b5f23739-c2b7-43c9-953f-5d546112472e"
+paperclip_identifier: "MAZ-1155"
 ---
 
 # 🟡 [Severity: MEDIUM]: R4 — tier-e-doctor environment preflight

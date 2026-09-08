@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819470487
+paperclip_issue_id: 5edca150-bad5-4786-ba5d-f289d88f5513
+paperclip_identifier: MAZ-545
 ---
 
 # 🟡 [Severity: MEDIUM]: Restrict quoted paths to filesystem syscalls

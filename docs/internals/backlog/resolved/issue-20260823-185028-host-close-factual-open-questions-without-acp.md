@@ -22,6 +22,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: d78c2eb1-19e0-4f66-8dfc-780771d2a16d
+paperclip_identifier: MAZ-614
 ---
 
 # 🟡 [Severity: MEDIUM]: Host-close factual open questions without ACP

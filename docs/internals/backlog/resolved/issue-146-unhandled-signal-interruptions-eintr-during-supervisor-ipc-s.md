@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 167
+paperclip_issue_id: 2cd4bb91-110c-4766-a956-f7625916ee83
+paperclip_identifier: MAZ-322
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled Signal Interruptions (`EINTR`) during Supervisor IPC socket communication

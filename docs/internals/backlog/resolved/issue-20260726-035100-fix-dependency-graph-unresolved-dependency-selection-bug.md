@@ -13,6 +13,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 322
+paperclip_issue_id: f38d93b7-25be-457e-b518-070154e53862
+paperclip_identifier: MAZ-383
 ---
 
 # 🔴 [Severity: HIGH]: Fix DependencyGraph Selecting Tasks with Unresolved Active Dependencies

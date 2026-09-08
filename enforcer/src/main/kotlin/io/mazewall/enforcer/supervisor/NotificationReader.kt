@@ -1,9 +1,8 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
-import io.mazewall.recover
-import io.mazewall.onSuccess
 import io.mazewall.core.Deadline
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -14,6 +13,8 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.typed
+import io.mazewall.onSuccess
+import io.mazewall.recover
 
 /**
  * Blocking notification/response IO primitives extracted from [SupervisorSessionHandler]
@@ -31,18 +32,29 @@ internal class NotificationReader(
     private val engine: io.mazewall.NativeEngine,
     private val logger: java.util.logging.Logger,
 ) {
+    private companion object {
+        const val SINGLE_POLL_FD: Long = 1L
+        const val IMMEDIATE_EINTR_RETRY_LIMIT = 1
+        const val YIELD_EINTR_RETRY_LIMIT = 3
+        const val EINTR_SLEEP_MILLIS = 1L
+    }
+
     /**
      * Deadline-bounded poll of [socketFd] for a JVM validation response, with interrupt-aware
      * EINTR backoff. Returns the poll revent count (<= 0 on timeout/failure).
      */
-    data class AwaitResult(val revents: Long, val remainingMillis: Int)
+    data class AwaitResult(
+        val revents: Long,
+        val remainingMillis: Int,
+    )
 
     fun awaitJvmResponse(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         timeoutMs: Long,
         slowThresholdMs: Long,
     ): AwaitResult {
-        val arena = io.mazewall.ffi.memory.NativeArena.ofConfined()
+        val arena = io.mazewall.ffi.memory.NativeArena
+            .ofConfined()
         arena.use { _ ->
             val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
             pollFd.setFd(socketFd.value)
@@ -50,48 +62,8 @@ internal class NotificationReader(
 
             val startMs = System.currentTimeMillis()
             val deadline = Deadline.afterMillis(timeoutMs)
-            var count = 0L
             val pollFdManaged = pollFd.managed
-            var eintrCount = 0
-            while (deadline.remainingMillis() > 0) {
-                if (Thread.currentThread().isInterrupted) {
-                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
-                    break
-                }
-
-                val pollRes = engine.raw.poll(pollFdManaged, 1L, deadline.remainingMillis())
-
-                var gotEintr = false
-                count = pollRes.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) {
-                        gotEintr = true
-                        0L
-                    } else {
-                        0L
-                    }
-                }
-                if (pollRes is LinuxNative.SyscallResult.Success) {
-                    count = pollRes.value
-                    break
-                }
-                if (!gotEintr) {
-                    break
-                }
-
-                eintrCount++
-                if (eintrCount > 1) {
-                    if (eintrCount > 3) {
-                        try {
-                            Thread.sleep(1)
-                        } catch (e: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                            break
-                        }
-                    } else {
-                        Thread.yield()
-                    }
-                }
-            }
+            val count = pollUntilResponse(pollFdManaged, deadline)
             val durationMs = System.currentTimeMillis() - startMs
             if (durationMs > slowThresholdMs) {
                 logger.warning(
@@ -103,12 +75,54 @@ internal class NotificationReader(
         }
     }
 
+    private fun pollUntilResponse(
+        pollFd: ManagedSegment,
+        deadline: Deadline,
+    ): Long {
+        var eintrCount = 0
+        while (deadline.remainingMillis() > 0) {
+            if (Thread.currentThread().isInterrupted) {
+                logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM validation poll interrupted.")
+                return 0L
+            }
+            when (val result = engine.raw.poll(pollFd, SINGLE_POLL_FD, deadline.remainingMillis())) {
+                is LinuxNative.SyscallResult.Success -> return result.value
+                is LinuxNative.SyscallResult.Error -> {
+                    if (result.errno != NativeConstants.EINTR) return 0L
+                    eintrCount++
+                    if (!backoffAfterEintr(eintrCount)) return 0L
+                }
+            }
+        }
+        return 0L
+    }
+
+    private fun backoffAfterEintr(eintrCount: Int): Boolean =
+        when {
+            eintrCount <= IMMEDIATE_EINTR_RETRY_LIMIT -> true
+            eintrCount <= YIELD_EINTR_RETRY_LIMIT -> {
+                Thread.yield()
+                true
+            }
+            else ->
+                try {
+                    Thread.sleep(EINTR_SLEEP_MILLIS)
+                    true
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    false
+                }
+        }
+
     /**
      * Single SECCOMP_IOCTL_NOTIF_RECV with an unconditional EINTR retry loop. The caller's outer
      * poll loop provides the shutdown path (POLLHUP/POLLIN-on-socket → LoopAction.Shutdown), so
      * EINTR here only re-blocks, matching the previous behavior verbatim.
      */
-    fun recvNotification(listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>, notif: ManagedSegment): Boolean {
+    fun recvNotification(
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        notif: ManagedSegment,
+    ): Boolean {
         var recvRes: LinuxNative.SyscallResult<Long, *>
         while (true) {
             recvRes = engine.raw.ioctl(

@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982867
+paperclip_issue_id: e217689e-faa7-4dae-a5d9-1ed4bc5ffaab
+paperclip_identifier: MAZ-550
 ---
 
 # 🟡 [Severity: MEDIUM]: Include Intel CET support in installation assessment

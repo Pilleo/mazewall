@@ -75,7 +75,10 @@ public sealed interface ProfileObservation {
             }
         }
 
-        private fun openFlagsFrom(name: String, args: List<Long>): Long? {
+        private fun openFlagsFrom(
+            name: String,
+            args: List<Long>,
+        ): Long? {
             return when (name) {
                 "OPEN" -> args.getOrNull(1)
                 "OPENAT" -> args.getOrNull(2)

@@ -3,6 +3,8 @@ title: "Unhandled `SyscallResult` during Shutdown"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: eb5a5425-21ef-490c-8091-b27d5ae4f28d
+paperclip_identifier: MAZ-345
 ---
 
 # ✅ [RESOLVED]: Unhandled `SyscallResult` during Shutdown

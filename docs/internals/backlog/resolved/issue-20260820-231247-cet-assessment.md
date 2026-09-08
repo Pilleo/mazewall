@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/InstallationAssessment.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: fb1d06b4-a97c-42ff-a2e9-401e9db2c03a
+paperclip_identifier: MAZ-496
 ---
 
 # Include Intel CET Support in Installation Assessment

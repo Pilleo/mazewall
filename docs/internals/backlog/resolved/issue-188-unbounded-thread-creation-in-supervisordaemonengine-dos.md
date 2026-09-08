@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 77
+paperclip_issue_id: 17b23b5d-ee2b-44de-8682-4baae7a5dbc6
+paperclip_identifier: MAZ-363
 ---
 
 # 🔴 [Severity: HIGH]: Unbounded Thread Creation in SupervisorDaemonEngine (DoS)

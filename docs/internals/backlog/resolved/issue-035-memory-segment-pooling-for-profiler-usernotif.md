@@ -7,6 +7,8 @@ dependencies: []
 component: "ffi"
 effort: "medium"
 github_issue: 276
+paperclip_issue_id: 386815bd-0744-416e-a10c-1406821ba152
+paperclip_identifier: MAZ-229
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Memory Segment Pooling for Profiler USER_NOTIF

@@ -1,0 +1,22 @@
+---
+title: "\U0001F4DD [NOTE]: Root `:test` task requires host Docker/Podman, not runnable\
+  \ inside dev container"
+severity: MEDIUM
+status: resolved
+priority: medium
+dependencies: []
+target_files:
+- build.gradle.kts
+target_modules:
+- :enforcer
+component: testing
+effort: medium
+paperclip_issue_id: f68edec4-a567-4cd6-9c1b-105219b97da2
+paperclip_identifier: MAZ-758
+---
+
+# 📝 [NOTE]: Root `:test` task requires host Docker/Podman, not runnable inside dev container
+
+**Context:** The root `:test` task (`ContainerizedTestRunner`) spawns a Testcontainer using Docker/Podman, which must be available on the host. Running `./gradlew build` from inside the dev container fails because `docker.sock`/`podman.sock` is not mounted inside. The correct inner-container verification commands are: `./gradlew :enforcer:integrationTest :profiler:integrationTest`. The full `./gradlew build` must be run from the host to trigger `ContainerizedTestRunner`.
+
+**Needed:** Keep the host-runtime requirement documented and use module integration tasks when running inside a development container.

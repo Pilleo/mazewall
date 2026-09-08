@@ -20,6 +20,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 has_side_effects: true
+paperclip_issue_id: 70ad2341-3efd-45f8-b80d-6a2e55193dd3
+paperclip_identifier: MAZ-609
 ---
 
 # 🟡 [Severity: MEDIUM]: Stop investigate loop when questions do not shrink

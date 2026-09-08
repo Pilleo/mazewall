@@ -71,7 +71,10 @@ class JvmChildProcessTest {
         val seen = mutableListOf<List<String>>()
         val launcher =
             object : ProcessLauncher {
-                override fun startProcess(args: List<String>, redirectErrorStream: Boolean): Process {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                ): Process {
                     seen.add(args)
                     return DummyProcess()
                 }
@@ -80,11 +83,16 @@ class JvmChildProcessTest {
 
                 override fun removeShutdownHook(hook: Thread) = Unit
 
-                override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path =
-                    Path.of("/tmp/x")
+                override fun createTempDirectory(
+                    prefix: String,
+                    vararg attrs: FileAttribute<*>,
+                ): Path = Path.of("/tmp/x")
 
-                override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path =
-                    dir.resolve("x")
+                override fun createTempDirectory(
+                    dir: Path,
+                    prefix: String,
+                    vararg attrs: FileAttribute<*>,
+                ): Path = dir.resolve("x")
 
                 override fun deleteIfExists(path: Path): Boolean = true
 
@@ -129,18 +137,28 @@ class JvmChildProcessTest {
         val calls = AtomicInteger()
         val launcher =
             object : ProcessLauncher {
-                override fun startProcess(args: List<String>, redirectErrorStream: Boolean) = DummyProcess()
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                ) = DummyProcess()
 
                 override fun addShutdownHook(hook: Thread) = Unit
 
                 override fun removeShutdownHook(hook: Thread) = Unit
 
-                override fun createTempDirectory(prefix: String, vararg attrs: FileAttribute<*>): Path {
+                override fun createTempDirectory(
+                    prefix: String,
+                    vararg attrs: FileAttribute<*>,
+                ): Path {
                     calls.incrementAndGet()
                     return Path.of("/" + "n".repeat(200), "dir")
                 }
 
-                override fun createTempDirectory(dir: Path, prefix: String, vararg attrs: FileAttribute<*>): Path {
+                override fun createTempDirectory(
+                    dir: Path,
+                    prefix: String,
+                    vararg attrs: FileAttribute<*>,
+                ): Path {
                     calls.incrementAndGet()
                     return dir.resolve("short")
                 }
@@ -155,7 +173,9 @@ class JvmChildProcessTest {
         assertTrue(calls.get() >= 2)
     }
 
-    private class DummyProcess(stdout: String = "") : Process() {
+    private class DummyProcess(
+        stdout: String = "",
+    ) : Process() {
         private val input = stdout.byteInputStream()
 
         override fun getOutputStream() = java.io.ByteArrayOutputStream()

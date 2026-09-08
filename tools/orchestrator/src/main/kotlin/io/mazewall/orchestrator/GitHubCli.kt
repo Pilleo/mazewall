@@ -5,13 +5,12 @@
  */
 package io.mazewall.orchestrator
 
-import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.concurrent.TimeUnit
 
-internal fun proxyConfigurationStatus(value: String?): String =
-    if (value.isNullOrBlank()) "not configured" else "configured"
+internal fun proxyConfigurationStatus(value: String?): String = if (value.isNullOrBlank()) "not configured" else "configured"
 
 /**
  * Reads stdout from [process] if it exits within [timeout]. On timeout the
@@ -33,7 +32,7 @@ internal fun readProcessOutputOrDestroy(
 
 @Serializable
 data class GitHubLabel(
-    val name: String
+    val name: String,
 )
 
 @Serializable
@@ -42,14 +41,14 @@ data class GitHubPR(
     val title: String,
     val headRefName: String,
     val body: String? = null,
-    val labels: List<GitHubLabel> = emptyList()
+    val labels: List<GitHubLabel> = emptyList(),
 )
 
 @Serializable
 data class GitHubIssue(
     val number: Int,
     val title: String,
-    val state: String = "open"
+    val state: String = "open",
 )
 
 @Serializable
@@ -57,21 +56,25 @@ data class GitHubCheck(
     val state: String? = null,
     val name: String? = null,
     val bucket: String? = null,
-    val event: String? = null
+    val event: String? = null,
 )
 
 @Serializable
 data class GitHubRun(
-    val databaseId: Long
+    val databaseId: Long,
 )
 
-class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
+class RealGitHubClient(
+    private val config: OrchestratorConfig,
+) : GitHubClient {
     private val json = Json { ignoreUnknownKeys = true }
 
-    internal data class CachedValue<T>(val value: T, val expiry: Long)
+    internal data class CachedValue<T>(
+        val value: T,
+        val expiry: Long,
+    )
+
     internal val cache = mutableMapOf<String, CachedValue<*>>()
-
-
 
     override fun clearPrCache(prNumber: String) {
         cache.remove("checkBuildStatus-$prNumber")
@@ -98,7 +101,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return result
     }
 
-    private inline fun <T> withCache(key: String, block: () -> T): T {
+    private inline fun <T> withCache(
+        key: String,
+        block: () -> T,
+    ): T {
         val now = System.currentTimeMillis()
         val cached = cache[key]
         if (cached != null && cached.expiry > now) {
@@ -110,7 +116,11 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return result
     }
 
-    override fun createIssue(title: String, body: String, label: String): String {
+    override fun createIssue(
+        title: String,
+        body: String,
+        label: String,
+    ): String {
         val preamble = """
             💡 **Jules Instructions Before Starting:**
             You are an experienced, java/kotlin developer, expert in linux, seccomp, landlock, security. This is your task:
@@ -160,7 +170,11 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun findLinkedPR(issueNumber: String, issueId: String, julesSessionId: String?): String? {
+    override fun findLinkedPR(
+        issueNumber: String,
+        issueId: String,
+        julesSessionId: String?,
+    ): String? {
         val cleanSessionId = julesSessionId?.substringAfterLast("/")?.trim()?.takeIf { it.isNotBlank() }
 
         val searchQueries = mutableListOf<String>()
@@ -197,14 +211,20 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    internal fun isPrMatching(pr: GitHubPR, issueNumber: String, issueId: String, cleanSessionId: String?): Boolean {
+    internal fun isPrMatching(
+        pr: GitHubPR,
+        issueNumber: String,
+        issueId: String,
+        cleanSessionId: String?,
+    ): Boolean {
         if (pr.labels.any { it.name.equals("superseded", ignoreCase = true) }) {
             return false
         }
 
         if (cleanSessionId != null) {
             if (pr.headRefName.contains(cleanSessionId, ignoreCase = true) ||
-                (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)) {
+                (pr.body?.contains(cleanSessionId, ignoreCase = true) == true)
+            ) {
                 return true
             }
         }
@@ -215,7 +235,8 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             if (body.contains("#$issueNumber") ||
                 body.contains("issue $issueNumber", ignoreCase = true) ||
                 title.contains("#$issueNumber") ||
-                title.contains("issue $issueNumber", ignoreCase = true)) {
+                title.contains("issue $issueNumber", ignoreCase = true)
+            ) {
                 return true
             }
         }
@@ -223,7 +244,8 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         if (issueId.isNotBlank()) {
             if (pr.headRefName.contains(issueId, ignoreCase = true) ||
                 (pr.body?.contains(issueId, ignoreCase = true) == true) ||
-                pr.title.contains(issueId, ignoreCase = true)) {
+                pr.title.contains(issueId, ignoreCase = true)
+            ) {
                 return true
             }
         }
@@ -231,7 +253,8 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return false
     }
 
-    override fun checkBuildStatus(prNumber: String): String = withCache("checkBuildStatus-$prNumber") {
+    override fun checkBuildStatus(prNumber: String): String =
+        withCache("checkBuildStatus-$prNumber") {
         try {
             // First check if the PR has merge conflicts (only DIRTY indicates real git conflicts)
             val mergeableJson = execute("gh", "pr", "view", prNumber, "--json", "mergeable,mergeStateStatus,state")
@@ -298,7 +321,8 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun getPrHeadSha(prNumber: String): String = withCache("getPrHeadSha-$prNumber") {
+    override fun getPrHeadSha(prNumber: String): String =
+        withCache("getPrHeadSha-$prNumber") {
         val output = execute("gh", "pr", "view", prNumber, "--json", "headRefOid")
         output.substringAfter("\"headRefOid\":\"").substringBefore("\"")
     }
@@ -366,7 +390,11 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         return executeInDir(null, *command, retry = false)
     }
 
-    private fun executeInDir(workingDir: File?, vararg command: String, retry: Boolean = true): String {
+    private fun executeInDir(
+        workingDir: File?,
+        vararg command: String,
+        retry: Boolean = true,
+    ): String {
         val action = {
             val directory = File("build/tmp").apply { mkdirs() }
             val tempFile = File.createTempFile("gh_cmd_", ".log", directory)
@@ -423,11 +451,15 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun getRepoName(): String = withCache("repoName") {
+    override fun getRepoName(): String =
+        withCache("repoName") {
         execute("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").trim()
     }
 
-    override fun addLabel(issueNumber: String, label: String) {
+    override fun addLabel(
+        issueNumber: String,
+        label: String,
+    ) {
         try {
             execute("gh", "label", "create", label, "--force", "--color", "ed0707", "--description", "Trigger Jules Agent")
         } catch (e: Exception) {
@@ -446,15 +478,21 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             "--color",
             "6f42c1",
             "--description",
-            "Pull request replaced by a newer generation"
+            "Pull request replaced by a newer generation",
         )
     }
 
-    override fun labelPr(prNumber: String, label: String) {
+    override fun labelPr(
+        prNumber: String,
+        label: String,
+    ) {
         execute("gh", "pr", "edit", prNumber, "--add-label", label)
     }
 
-    override fun commentOnPr(prNumber: String, body: String) {
+    override fun commentOnPr(
+        prNumber: String,
+        body: String,
+    ) {
         val directory = File("build/tmp").apply { mkdirs() }
         val tempFile = File.createTempFile("pr_comment_", ".tmp", directory)
         try {
@@ -465,7 +503,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
         }
     }
 
-    override fun commentOnIssue(issueNumber: String, body: String) {
+    override fun commentOnIssue(
+        issueNumber: String,
+        body: String,
+    ) {
         val directory = File("build/tmp").apply { mkdirs() }
         val tempFile = File.createTempFile("issue_comment_", ".tmp", directory)
         try {
@@ -482,10 +523,15 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
 
     override fun getPrUrl(prNumber: String): String {
         return execute("gh", "pr", "view", prNumber, "--json", "url")
-            .substringAfter("\"url\":\"").substringBefore("\"")
+            .substringAfter("\"url\":\"")
+            .substringBefore("\"")
     }
 
-    override fun isCommitEmpty(prNumber: String, shaOld: String, shaNew: String): Boolean {
+    override fun isCommitEmpty(
+        prNumber: String,
+        shaOld: String,
+        shaNew: String,
+    ): Boolean {
         if (shaOld.isEmpty() || shaNew.isEmpty()) return false
         return try {
             val output = execute("gh", "api", "repos/:owner/:repo/compare/$shaOld...$shaNew", "--jq", ".files | length")
@@ -531,7 +577,10 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
      * Executed within a detached temporary worktree (`../temp-rebase-<prNumber>`) to ensure absolute isolation.
      * This prevents working-tree pollution or conflicts with uncommitted/untracked local edits in the main agent workspace.
      */
-    private fun isFileAllowed(file: String, targetFiles: List<String>): Boolean {
+    private fun isFileAllowed(
+        file: String,
+        targetFiles: List<String>,
+    ): Boolean {
         if (file.startsWith("docs/internals/backlog/") && file.endsWith(".md")) return true
         val normalizedFile = file.replace('\\', '/').trim()
         return targetFiles.any { target ->
@@ -551,55 +600,65 @@ class RealGitHubClient(private val config: OrchestratorConfig) : GitHubClient {
             false
         }
     }
-
-
 }
 
-class ProcessExecutionException(val command: String, val exitCode: Int, val output: String) :
-    RuntimeException("Command '$command' failed with exit code $exitCode. Output:\n$output")
+class ProcessExecutionException(
+    val command: String,
+    val exitCode: Int,
+    val output: String,
+) : RuntimeException("Command '$command' failed with exit code $exitCode. Output:\n$output")
 
 @Serializable
 data class GitHubComment(
     val author: GitHubCommentAuthor? = null,
     val body: String,
-    val createdAt: String
+    val createdAt: String,
 )
 
 @Serializable
 data class GitHubCommentAuthor(
-    val login: String
+    val login: String,
 )
 
 @Serializable
 data class CommentsContainer(
-    val comments: List<GitHubComment>
+    val comments: List<GitHubComment>,
 )
 
 @Serializable
 data class GitHubMergeable(
     val mergeable: String? = null,
     val mergeStateStatus: String? = null,
-    val state: String? = null
+    val state: String? = null,
 )
 
 @Serializable
 data class GitHubPrStatus(
     val mergeable: String = "UNKNOWN",
-    val mergeStateStatus: String = "UNKNOWN"
+    val mergeStateStatus: String = "UNKNOWN",
 )
 
 class CliAuthenticationException(
     val tool: String,
     val output: String,
     message: String,
-    cause: Throwable? = null
+    cause: Throwable? = null,
 ) : RuntimeException(message, cause)
 
-fun checkForAuthenticationFailure(command: Array<out String>, exitCode: Int, output: String) {
+fun checkForAuthenticationFailure(
+    command: Array<out String>,
+    exitCode: Int,
+    output: String,
+) {
     val lowerOutput = output.lowercase()
     val fullCommand = command.joinToString(" ")
 
-    val executable = command.firstOrNull()?.split('/', '\\')?.lastOrNull()?.lowercase()?.removeSuffix(".exe") ?: ""
+    val executable = command
+        .firstOrNull()
+        ?.split('/', '\\')
+        ?.lastOrNull()
+        ?.lowercase()
+        ?.removeSuffix(".exe") ?: ""
     val tool = when (executable) {
         "gh" -> "gh"
         "jules" -> "jules"
@@ -625,13 +684,16 @@ fun checkForAuthenticationFailure(command: Array<out String>, exitCode: Int, out
             throw CliAuthenticationException(
                 tool = tool,
                 output = output,
-                message = "CLI Authentication Failure: $toolFriendlyName is not authenticated. Command: '$fullCommand'. Output: $output"
+                message = "CLI Authentication Failure: $toolFriendlyName is not authenticated. Command: '$fullCommand'. Output: $output",
             )
         }
     }
 }
 
-fun handleCliAuthFailure(env: OrchestratorEnvironment, ex: CliAuthenticationException) {
+fun handleCliAuthFailure(
+    env: OrchestratorEnvironment,
+    ex: CliAuthenticationException,
+) {
     val resolutionInstructions = when (ex.tool) {
         "gh" -> "Please run `gh auth login` on the host to continue."
         "jules" -> "Please run `jules login` on the host to continue."

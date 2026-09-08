@@ -14,7 +14,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260825-023940-tier-e-wp-10-oracle-comparison.md"
-paperclip_issue_id: 7a2a4035-f260-44e6-b9cd-0eb454626b17
+paperclip_issue_id: "629e9a86-60ed-4d82-8b72-9a87183633ca"
+paperclip_identifier: "MAZ-1153"
 ---
 
 # 🟢 [Severity: ENHANCEMENT]: WP-14 — FFM Loader / Control-Plane Migration

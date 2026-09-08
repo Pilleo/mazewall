@@ -12,6 +12,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 github_issue: 395
+paperclip_issue_id: f8015b89-adf7-4009-9b0c-c2eb19a148b0
+paperclip_identifier: MAZ-407
 ---
 
 # 🔴 [Severity: HIGH]: Refactor Orchestrator State Machine to Enforce Compile-Time State Invariants via Type-States

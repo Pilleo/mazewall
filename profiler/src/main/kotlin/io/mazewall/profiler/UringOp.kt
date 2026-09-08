@@ -8,17 +8,30 @@ import java.util.Locale
  */
 public sealed interface UringOp {
     public data object Open : UringOp
+
     public data object Write : UringOp
+
     public data object Unlink : UringOp
+
     public data object Rename : UringOp
+
     public data object Mkdir : UringOp
+
     public data object Rmdir : UringOp
+
     public data object Truncate : UringOp
+
     public data object Link : UringOp
+
     public data object Sync : UringOp
+
     public data object CloseDirect : UringOp
+
     public data object Network : UringOp
-    public data class Unknown(val raw: String) : UringOp
+
+    public data class Unknown(
+        val raw: String,
+    ) : UringOp
 
     public fun isPathBearing(): Boolean =
         when (this) {
@@ -63,13 +76,27 @@ public sealed interface UringOp {
 public sealed interface FsEffect {
     public val paths: List<String>
 
-    public data class Read(override val paths: List<String>) : FsEffect
-    public data class Write(override val paths: List<String>) : FsEffect
-    public data class UnknownOpenMode(override val paths: List<String>) : FsEffect
-    public data class Unenforceable(override val paths: List<String>) : FsEffect
+    public data class Read(
+        override val paths: List<String>,
+    ) : FsEffect
+
+    public data class Write(
+        override val paths: List<String>,
+    ) : FsEffect
+
+    public data class UnknownOpenMode(
+        override val paths: List<String>,
+    ) : FsEffect
+
+    public data class Unenforceable(
+        override val paths: List<String>,
+    ) : FsEffect
 
     public companion object {
-        public fun ofUring(op: UringOp, paths: List<String>): FsEffect =
+        public fun ofUring(
+            op: UringOp,
+            paths: List<String>,
+        ): FsEffect =
             when {
                 op is UringOp.Open -> UnknownOpenMode(paths)
                 op.isFilesystemMutation() -> Write(paths)

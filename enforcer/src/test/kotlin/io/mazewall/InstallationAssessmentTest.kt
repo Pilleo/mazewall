@@ -17,7 +17,9 @@ class InstallationAssessmentTest {
 
     @Test
     fun `unsupported platform is not installable even under WARN_AND_BYPASS`() {
-        val bypassName = Platform.FallbackBehavior.entries.first { it.name.startsWith("WARN") }.name
+        val bypassName = Platform.FallbackBehavior.entries
+            .first { it.name.startsWith("WARN") }
+            .name
         System.setProperty("io.mazewall.fallback", bypassName)
         Platform.setProvider(
             MockPlatformProvider().apply {

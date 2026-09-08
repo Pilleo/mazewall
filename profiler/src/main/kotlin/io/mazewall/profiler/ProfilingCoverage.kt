@@ -14,12 +14,16 @@ public enum class ProfileStrategy {
 public enum class IoUringVisibility {
     /** eBPF (or equivalent) saw io_uring submission paths. */
     OBSERVED,
+
     /** Caller disabled io_uring so USER_NOTIF saw POSIX fallbacks. */
     DISABLED_FOR_HYBRID,
+
     /** io_uring syscalls were seen; destinations were not. */
     BLIND,
+
     /** Kernel or OCI profile rejects io_uring_setup. */
     BLOCKED,
+
     /** No io_uring syscalls in this run; destinations remain unobservable to this collector. */
     UNSEEN,
 }
@@ -50,7 +54,10 @@ public data class ProfileEnvironment(
  */
 public sealed interface ProfileEvidence {
     public data object Complete : ProfileEvidence
-    public data class Incomplete(val reasons: List<String>) : ProfileEvidence
+
+    public data class Incomplete(
+        val reasons: List<String>,
+    ) : ProfileEvidence
 }
 
 /**
@@ -93,7 +100,8 @@ public data class ProfilingCoverage(
             }
         return copy(
             pathResolution = kept,
-            complete = complete && kept != PathResolutionQuality.FAILED &&
+            complete = complete &&
+                kept != PathResolutionQuality.FAILED &&
                 kept != PathResolutionQuality.MIXED &&
                 kept != PathResolutionQuality.TRUNCATED,
             warnings = warnings + extra,
@@ -101,7 +109,10 @@ public data class ProfilingCoverage(
     }
 
     public companion object {
-        private fun worsePath(a: PathResolutionQuality, b: PathResolutionQuality): PathResolutionQuality {
+        private fun worsePath(
+            a: PathResolutionQuality,
+            b: PathResolutionQuality,
+        ): PathResolutionQuality {
             val order =
                 listOf(
                     PathResolutionQuality.NONE,
@@ -112,6 +123,7 @@ public data class ProfilingCoverage(
                 )
             return if (order.indexOf(b) > order.indexOf(a)) b else a
         }
+
         /** Used when [io.mazewall.profiler.BillOfBehavior.toPolicy] is called without coverage. */
         @JvmStatic
         public fun absent(): ProfilingCoverage =
@@ -139,7 +151,7 @@ public data class ProfilingCoverage(
             drainComplete: Boolean,
             environment: ProfileEnvironment,
         ): ProfilingCoverage {
-            val ioUring = inferIoUring(strategy, observations, environment)
+            val ioUring = inferIoUring(observations, environment)
             val pathQuality = inferPaths(observations)
             val warnings = mutableListOf<String>()
             if (ioUring == IoUringVisibility.BLIND) {
@@ -200,7 +212,8 @@ public data class ProfilingCoverage(
             val unmappedSyscalls =
                 observations.filter { obs ->
                     obs is ProfileObservation.Syscall &&
-                        io.mazewall.core.Syscall.tryParse(obs.name) == null
+                        io.mazewall.core.Syscall
+                            .tryParse(obs.name) == null
                 }
             if (unmappedSyscalls.isNotEmpty()) {
                 val names =
@@ -223,7 +236,8 @@ public data class ProfilingCoverage(
                         .distinct()
                 warnings.add("unenforceable io_uring opcodes were observed: ${opcodes.joinToString(",")}")
             }
-            val complete = drainComplete && droppedEvents == 0 &&
+            val complete = drainComplete &&
+                droppedEvents == 0 &&
                 ioUring != IoUringVisibility.BLIND &&
                 !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
                 pathQuality != PathResolutionQuality.FAILED &&
@@ -251,7 +265,6 @@ public data class ProfilingCoverage(
         }
 
         internal fun inferIoUring(
-            strategy: ProfileStrategy,
             observations: List<ProfileObservation>,
             environment: ProfileEnvironment,
         ): IoUringVisibility {
@@ -274,13 +287,43 @@ public data class ProfilingCoverage(
 
         private val pathBearingNames =
             setOf(
-                "OPEN", "OPENAT", "OPENAT2", "EXECVE", "EXECVEAT",
-                "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2",
-                "MKDIR", "MKDIRAT", "RMDIR", "LINK", "LINKAT",
-                "SYMLINK", "SYMLINKAT", "CHDIR", "TRUNCATE",
-                "ACCESS", "FACCESSAT", "FACCESSAT2", "STAT", "NEWFSTATAT", "FSTATAT",
-                "CREAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT",
-                "READLINK", "READLINKAT", "CHROOT", "UTIME", "UTIMES", "UTIMENSAT",
+                "OPEN",
+                "OPENAT",
+                "OPENAT2",
+                "EXECVE",
+                "EXECVEAT",
+                "UNLINK",
+                "UNLINKAT",
+                "RENAME",
+                "RENAMEAT",
+                "RENAMEAT2",
+                "MKDIR",
+                "MKDIRAT",
+                "RMDIR",
+                "LINK",
+                "LINKAT",
+                "SYMLINK",
+                "SYMLINKAT",
+                "CHDIR",
+                "TRUNCATE",
+                "ACCESS",
+                "FACCESSAT",
+                "FACCESSAT2",
+                "STAT",
+                "NEWFSTATAT",
+                "FSTATAT",
+                "CREAT",
+                "CHMOD",
+                "FCHMODAT",
+                "CHOWN",
+                "LCHOWN",
+                "FCHOWNAT",
+                "READLINK",
+                "READLINKAT",
+                "CHROOT",
+                "UTIME",
+                "UTIMES",
+                "UTIMENSAT",
             )
 
         private fun expectedPathOperands(name: String): Int =
@@ -289,8 +332,7 @@ public data class ProfilingCoverage(
                 else -> 1
             }
 
-        private fun isUringPathBearing(opcode: String): Boolean =
-            UringOp.parse(opcode).isPathBearing()
+        private fun isUringPathBearing(opcode: String): Boolean = UringOp.parse(opcode).isPathBearing()
 
         private const val TRUNCATION_THRESHOLD = 4096
 
@@ -306,6 +348,7 @@ public data class ProfilingCoverage(
                 }
             if (pathBearing.isEmpty()) return PathResolutionQuality.NONE
             val truncated = pathBearing.any { obs -> obs.paths.any { it.length >= TRUNCATION_THRESHOLD } }
+
             fun expectedOperands(obs: ProfileObservation): Int =
                 when (obs) {
                     is ProfileObservation.Syscall -> expectedPathOperands(obs.name.uppercase())
@@ -313,7 +356,6 @@ public data class ProfilingCoverage(
                     is ProfileObservation.Connect -> 0
                 }
             val failed = pathBearing.count { obs -> obs.paths.size < expectedOperands(obs) }
-            val resolved = pathBearing.size - failed
             return when {
                 failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
                 failed > 0 && !truncated -> PathResolutionQuality.FAILED

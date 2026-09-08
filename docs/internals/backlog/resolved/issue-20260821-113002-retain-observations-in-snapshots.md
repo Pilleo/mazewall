@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819470485
+paperclip_issue_id: f258a1a2-9ec1-4b73-b1c9-6dcbe8315d33
+paperclip_identifier: MAZ-546
 ---
 
 # 🟡 [Severity: MEDIUM]: Retain observations in session snapshots

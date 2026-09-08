@@ -35,8 +35,7 @@ class TestArchitectureTest {
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName(
                 "io.mazewall.seccomp.PureJavaBpfEngineThreadStateSynchronizationTest",
-            )
-            .should(
+            ).should(
                 object : ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>(
                     "not call installOnProcess in-process",
                 ) {
@@ -52,8 +51,7 @@ class TestArchitectureTest {
                                             call.targetOwner.isAssignableTo(PureJavaBpfEngine::class.java) ||
                                             call.targetOwner.name == "io.mazewall.enforcer.ContainedExecutors"
                                         )
-                            }
-                            .forEach { call ->
+                            }.forEach { call ->
                                 events.add(
                                     SimpleConditionEvent.violated(
                                         item,
@@ -64,8 +62,7 @@ class TestArchitectureTest {
                             }
                     }
                 },
-            )
-            .because(
+            ).because(
                 "A @Test method that calls installOnProcess in-process poisons later tests and " +
                     "supervisor daemon children (inherited seccomp). Run the body via IsolatedProcessTester.",
             ).check(allClasses)

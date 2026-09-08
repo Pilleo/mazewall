@@ -3,6 +3,8 @@ title: "Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: a3ae23f9-3c8c-44f3-9c6a-c6caa196d081
+paperclip_identifier: MAZ-239
 ---
 
 # ✅ [RESOLVED]: Silent failure of Profiler path resolution under Yama `ptrace_scope` > 1 leads to catastrophic Landlock enforcement failures

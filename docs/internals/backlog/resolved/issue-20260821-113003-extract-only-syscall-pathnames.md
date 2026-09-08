@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982846
+paperclip_issue_id: 077f3894-1414-4f20-91e6-3da6705dcc67
+paperclip_identifier: MAZ-549
 ---
 
 # 🟡 [Severity: MEDIUM]: Extract only syscall pathname operands from strace

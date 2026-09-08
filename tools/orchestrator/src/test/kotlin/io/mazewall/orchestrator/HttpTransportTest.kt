@@ -11,19 +11,28 @@ import kotlin.test.*
 
 class FakeHttpResponse(
     private val statusCode: Int,
-    private val body: String
+    private val body: String,
 ) : HttpResponse<String> {
     override fun statusCode(): Int = statusCode
+
     override fun request(): HttpRequest = throw UnsupportedOperationException()
+
     override fun previousResponse(): Optional<HttpResponse<String>> = Optional.empty()
+
     override fun headers(): HttpHeaders = HttpHeaders.of(emptyMap()) { _, _ -> true }
+
     override fun body(): String = body
+
     override fun sslSession(): Optional<SSLSession> = Optional.empty()
+
     override fun uri(): URI = throw UnsupportedOperationException()
+
     override fun version(): HttpClient.Version = HttpClient.Version.HTTP_2
 }
 
-class FakeHttpTransport(private val responder: (HttpRequest) -> HttpResponse<String>) : HttpTransport {
+class FakeHttpTransport(
+    private val responder: (HttpRequest) -> HttpResponse<String>,
+) : HttpTransport {
     val requests = mutableListOf<HttpRequest>()
 
     override fun send(request: HttpRequest): HttpResponse<String> {
@@ -33,7 +42,6 @@ class FakeHttpTransport(private val responder: (HttpRequest) -> HttpResponse<Str
 }
 
 class HttpTransportTest {
-
     @Test
     fun testRealJulesClientWithFakeTransport() {
         System.setProperty("JULES_API_KEY", "fake-api-key")
@@ -100,7 +108,9 @@ class HttpTransportTest {
             val fakeTransport = FakeHttpTransport { req ->
                 when {
                     req.uri().path.contains("sessions") -> {
-                        FakeHttpResponse(200, """
+                        FakeHttpResponse(
+                            200,
+                            """
                             {
                               "sessions": [
                                 {
@@ -125,7 +135,8 @@ class HttpTransportTest {
                                 }
                               ]
                             }
-                        """.trimIndent())
+                        """.trimIndent(),
+                        )
                     }
                     else -> FakeHttpResponse(404, "Not Found")
                 }

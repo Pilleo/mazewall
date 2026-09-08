@@ -10,7 +10,6 @@ import org.junit.jupiter.api.assertThrows
 
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ContainmentAckPathArchitectureTest {
-
     private val rule = noClasses()
         .that()
         .resideInAnyPackage(
@@ -19,8 +18,7 @@ class ContainmentAckPathArchitectureTest {
             "io.mazewall.landlock..",
             "io.mazewall.enforcer.state..",
             "io.mazewall.enforcer.engine..",
-        )
-        .should()
+        ).should()
         .dependOnClassesThat()
         .resideInAPackage("kotlinx.coroutines..")
         .because("Putting coroutines on the ACK path can deadlock USER_NOTIF and poison Loom carrier threads")

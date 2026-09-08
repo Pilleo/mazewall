@@ -3,6 +3,7 @@ package io.mazewall.platform.seccomp.daemon
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.RawSyscallOperations
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -10,21 +11,20 @@ import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.networking.SeccompConnection
-import io.mazewall.ffi.networking.SeccompConnectionEffect
-import io.mazewall.ffi.networking.SeccompConnectionEvent
-import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.ffi.networking.SeccompConnection
+import io.mazewall.ffi.networking.SeccompConnectionEffect
+import io.mazewall.ffi.networking.SeccompConnectionEvent
+import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
-
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -39,23 +39,24 @@ public class SeccompDaemonEngine(
     private val socketPath: String,
     private val readySentinel: String = "MAZEWALL_DAEMON_READY",
     private val notifHandlerFactory: (
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     ) -> SeccompNotifHandler,
     private val handshakeAckByte: Byte = PROTOCOL_ACK_BYTE,
     private val maxConnections: Int = 200,
-
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
     private val raw: RawSyscallOperations = engine.raw,
     private val handshakeWriter: (
-        FileDescriptor<*, FdState.Open>,
+        FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
         ManagedSegment,
         Long,
     ) -> LinuxNative.SyscallResult<Long, *> = engine.memory::write,
-    private val connectionAcceptor: ((
-        FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    ) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>)? = null,
+    private val connectionAcceptor: (
+        (
+        FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    ) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+    )? = null,
 ) {
     private val connectionExecutor: ExecutorService = Executors.newFixedThreadPool(maxConnections) { r ->
         Thread(r).apply {
@@ -65,9 +66,9 @@ public class SeccompDaemonEngine(
     }
 
     @JvmField
-    public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>>()
+    public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
 
-    private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>>()
+    private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>>()
     private val stateRef = AtomicReference<UnixListenDaemonState>(UnixListenDaemonState.Uninitialized)
     public var state: UnixListenDaemonState
         get() = stateRef.get()
@@ -144,9 +145,8 @@ public class SeccompDaemonEngine(
         return curr is UnixListenDaemonState.ShuttingDown || curr is UnixListenDaemonState.Terminated
     }
 
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
-    public fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
-        var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>? = null
+    public fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
+        var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         try {
             while (true) {
                 if (connectionAcceptor != null) {
@@ -178,36 +178,34 @@ public class SeccompDaemonEngine(
                 }
 
                 clientSockets.add(clientFd)
-                
+
                 // Spawn a new thread to handle the connection concurrently!
                 connectionExecutor.submit {
                     handleConnection(clientFd)
                 }
                 return
             }
-        } catch (e: InterruptedException) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try { socketManager.close(clientFd) } catch (_: Exception) {}
-            }
+        } catch (_: InterruptedException) {
+            cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
-        } catch (e: java.nio.channels.ClosedByInterruptException) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try { socketManager.close(clientFd) } catch (_: Exception) {}
-            }
+        } catch (_: java.nio.channels.ClosedByInterruptException) {
+            cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
-        } catch (t: Throwable) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try { socketManager.close(clientFd) } catch (_: Exception) {}
-            }
-            if (t is Error) throw t
+        } catch (expectedAcceptFailure: Exception) {
+            cleanupFailedConnection(clientFd)
+        } catch (expectedAcceptError: Error) {
+            cleanupFailedConnection(clientFd)
+            throw expectedAcceptError
         }
     }
 
-    @Suppress("TooGenericExceptionCaught")
-    public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>) {
+    private fun cleanupFailedConnection(clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?) {
+        clientFd ?: return
+        clientSockets.remove(clientFd)
+        runCatching { socketManager.close(clientFd) }
+    }
+
+    public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
         var connection: SeccompConnection = SeccompConnection.Accepted(socketFd).apply {
             this.socketManager = this@SeccompDaemonEngine.socketManager
         }
@@ -225,14 +223,14 @@ public class SeccompDaemonEngine(
                     connection = next
                 }
             }
-        } catch (e: InterruptedException) {
-            System.err.println("[SECCOMP-DAEMON] Connection handler interrupted: ${e.message}")
+        } catch (expectedInterrupt: InterruptedException) {
+            System.err.println("[SECCOMP-DAEMON] Connection handler interrupted: ${expectedInterrupt.message}")
             interrupted = true
-        } catch (e: java.nio.channels.ClosedByInterruptException) {
-            System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${e.message}")
+        } catch (expectedInterruptedChannel: java.nio.channels.ClosedByInterruptException) {
+            System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${expectedInterruptedChannel.message}")
             interrupted = true
-        } catch (e: Exception) {
-            System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${e.message}")
+        } catch (expectedConnectionFailure: Exception) {
+            System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${expectedConnectionFailure.message}")
         } finally {
             clientSockets.remove(socketFd)
             connection.listenerFd?.let { activeListeners.remove(it) }
@@ -246,8 +244,8 @@ public class SeccompDaemonEngine(
     public fun processConnectionStep(
         arena: NativeArena,
         connection: SeccompConnection,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-        pollFdManaged: ManagedSegment
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        pollFdManaged: ManagedSegment,
     ): SeccompConnection? {
         if (connection is SeccompConnection.Accepted) {
             val pollRes = raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)

@@ -13,6 +13,8 @@ target_files:
 effort: "large"
 autonomy: "supervised"
 github_issue: 315
+paperclip_issue_id: 1c3946e8-85bf-4850-b07c-4b61392327a7
+paperclip_identifier: MAZ-384
 ---
 
 # 🔴 [Severity: HIGH]: Multi-Issue Parallel Execution & Conflict-Free Task Scheduler

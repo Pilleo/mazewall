@@ -13,6 +13,8 @@ target_files:
 effort: "small"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 76dc853f-e348-4c85-828c-57fa4bc8f51d
+paperclip_identifier: MAZ-576
 ---
 
 # 🔴 [Severity: HIGH]: Process portal granted FDs must use openat2 RESOLVE_BENEATH

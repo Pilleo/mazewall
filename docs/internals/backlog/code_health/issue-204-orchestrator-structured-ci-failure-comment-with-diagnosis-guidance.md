@@ -14,7 +14,8 @@ reversible: true
 autonomy: supervised
 solution_approved: false
 blast_radius: medium
-paperclip_issue_id: 19670fa8-ec5d-49b5-8759-f1a8e01eed9e
+paperclip_issue_id: 016c358b-9447-4fd8-a4fe-a8367bdbdc39
+paperclip_identifier: MAZ-701
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules

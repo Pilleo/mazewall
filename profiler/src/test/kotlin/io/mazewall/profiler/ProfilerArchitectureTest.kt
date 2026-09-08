@@ -12,11 +12,27 @@ import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import io.mazewall.profiler.engine.ProfilerDaemonEngine
 import io.mazewall.profiler.engine.ProfilerSessionHandler
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.TraceEvent
 
 @AnalyzeClasses(packages = ["io.mazewall.profiler"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ProfilerArchitectureTest {
+    @ArchTest
+    fun `raw FFM stays in profiler ffi or native implementation packages`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackages(
+                "io.mazewall.profiler.ffi..",
+                "io.mazewall.profiler.internal..",
+                "io.mazewall.profiler.tierE.engine..",
+                "io.mazewall.profiler.tierE.ringbuf..",
+            ).should()
+            .dependOnClassesThat()
+            .resideInAPackage("java.lang.foreign..")
+            .because("profiler protocol and domain code must not expose raw FFM types; native handling belongs behind profiler FFI packages")
+            .check(allClasses)
+    }
+
     @ArchTest
     fun `no FFM segments leak across trace event boundaries`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
@@ -27,9 +43,11 @@ class ProfilerArchitectureTest {
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("java.lang.foreign..", "io.mazewall.ffi.memory..")
-            .because("To prevent memory segment lifetime leaks and native memory finalization GC overhead, all trace events must strictly hold and pass JVM heap-only data, never referencing FFM MemorySegment or internal native memory classes.")
-            .check(allClasses)
+            .because(
+                "To prevent memory segment lifetime leaks and native memory finalization GC overhead, all trace events must strictly hold and pass JVM heap-only data, never referencing FFM MemorySegment or internal native memory classes.",
+            ).check(allClasses)
     }
+
     @ArchTest
     fun `handshake ordering (0xAC Protocol)`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val requireAckBeforeContinue = object : ArchCondition<JavaMethod>("ensure performHandshake occurs before sendSeccompContinue") {
@@ -68,6 +86,23 @@ class ProfilerArchitectureTest {
     }
 
     @ArchTest
+    fun `public profiler types do not take MemorySegment`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        methods()
+            .that()
+            .arePublic()
+            .and()
+            .areDeclaredInClassesThat()
+            .arePublic()
+            .and()
+            .areDeclaredInClassesThat()
+            .resideInAPackage("io.mazewall.profiler")
+            .should()
+            .notHaveRawParameterTypes(java.lang.foreign.MemorySegment::class.java)
+            .because("Operator-facing profiler types must not expose FFM MemorySegment; handshake I/O stays internal.")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun `reactor loop statelessness`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         classes()
             .that()
@@ -90,6 +125,13 @@ class ProfilerArchitectureTest {
                 "io.mazewall.profiler.EbpfLoad\$Available",
                 "io.mazewall.profiler.EbpfLoad\$UserNamespaceRoot",
                 "io.mazewall.profiler.EbpfLoad\$Denied",
+            ),
+            "io.mazewall.profiler.tierE.daemon.ControlCommand" to setOf(
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Attach",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Detach",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Status",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Shutdown",
+                "io.mazewall.profiler.tierE.daemon.ControlCommand\$Unknown",
             ),
         )
         for ((parent, kids) in expected) {
@@ -119,7 +161,6 @@ class ProfilerArchitectureTest {
     }
 
     @ArchTest
-    @Suppress("UnusedParameter")
     fun `cross-module invariant - enforcer must not depend on profiler`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         // We actually check this in the Enforcer module's tests, but it's good to re-affirm.
         // Since we are analyzing `io.mazewall.profiler`, we can't easily check `io.mazewall.enforcer`.

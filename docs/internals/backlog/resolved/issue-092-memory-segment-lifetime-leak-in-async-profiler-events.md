@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 225
+paperclip_issue_id: f01d267c-53ef-4c0b-992a-7474a842a898
+paperclip_identifier: MAZ-271
 ---
 
 # 🔴 [Severity: LOW]: Memory Segment Lifetime Leak in Async Profiler Events

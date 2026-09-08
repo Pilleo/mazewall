@@ -5,12 +5,11 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 object ReviewIssueLauncher {
-
     fun launchReviewTask(
         focusComments: String,
         backlogDir: File,
         env: OrchestratorEnvironment,
-        context: OrchestratorContext
+        context: OrchestratorContext,
     ): BacklogIssue {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
         val issueId = "issue-$timestamp-review-task"

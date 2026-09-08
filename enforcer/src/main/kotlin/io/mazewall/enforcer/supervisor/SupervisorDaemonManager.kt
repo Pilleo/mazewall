@@ -1,14 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
-import io.mazewall.seccomp.SeccompInstallationState
 import io.mazewall.core.JavaAgentSelection
 import io.mazewall.core.JvmChildProcess
 import io.mazewall.core.JvmChildSpec
@@ -17,9 +10,15 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.getFdOrThrow
+import io.mazewall.seccomp.SeccompInstallationState
 import java.io.IOException
 import java.nio.file.Path
 import java.util.logging.Logger
@@ -40,28 +39,39 @@ public data class SupervisorContext(
 public class SupervisorDaemonManager(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
-    private val processLauncher: ProcessLauncher = RealProcessLauncher
+    private val processLauncher: ProcessLauncher = RealProcessLauncher,
 ) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)
     private val daemonLock = Any()
-    private var sharedDaemonContext: SupervisorContext? = null
+
+    private sealed interface DaemonHandle {
+        data object NotStarted : DaemonHandle
+
+        data class Running(
+            val context: SupervisorContext,
+        ) : DaemonHandle
+
+        data class Defunct(
+            val context: SupervisorContext,
+        ) : DaemonHandle
+    }
+
+    private var daemonHandle: DaemonHandle = DaemonHandle.NotStarted
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
     internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
-        // Observability before the fail-closed halt (issue-20260823-172005). The halt itself is
-        // non-negotiable: stranded USER_NOTIF waiters cannot be resumed.
-        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
-            io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
-                pid = daemonProcessPid(),
-                exitCode = exitCode,
-                lastLogLines = daemonLogLines.toList(),
-            ),
-        )
+        // The halt itself is non-negotiable: stranded USER_NOTIF waiters cannot be resumed.
         Runtime.getRuntime().halt(1)
     }
 
     private fun daemonProcessPid(): Long =
-        synchronized(daemonLock) { sharedDaemonContext?.daemonProcess?.pid() ?: -1L }
+        synchronized(daemonLock) {
+            when (val handle = daemonHandle) {
+                DaemonHandle.NotStarted -> -1L
+                is DaemonHandle.Running -> handle.context.daemonProcess.pid()
+                is DaemonHandle.Defunct -> handle.context.daemonProcess.pid()
+            }
+        }
 
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
@@ -80,16 +90,15 @@ public class SupervisorDaemonManager(
      */
     public fun getOrSpawnSharedDaemon(): SupervisorContext {
         synchronized(daemonLock) {
-            val existing = sharedDaemonContext
-            if (existing != null && existing.daemonProcess.isAlive) {
-                engine.process.prctl(
-                    io.mazewall.core.PrctlCommand.SetPtracer(existing.daemonProcess.pid())
-                )
-                return existing
+            when (val handle = daemonHandle) {
+                is DaemonHandle.Running -> {
+                    if (handle.context.daemonProcess.isAlive) return handle.context
+                    markDefunct(handle.context, handle.context.daemonProcess.exitValue())
+                }
+                is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
+                DaemonHandle.NotStarted -> Unit
             }
-            val newContext = spawnDaemon()
-            sharedDaemonContext = newContext
-            return newContext
+            return spawnDaemon()
         }
     }
 
@@ -98,11 +107,34 @@ public class SupervisorDaemonManager(
      */
     public fun stop() {
         synchronized(daemonLock) {
-            sharedDaemonContext?.let {
-                cleanupDaemon(it)
-                sharedDaemonContext = null
+            when (val handle = daemonHandle) {
+                is DaemonHandle.Running -> cleanupDaemon(handle.context)
+                is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
+                DaemonHandle.NotStarted -> Unit
             }
+            daemonHandle = DaemonHandle.NotStarted
         }
+    }
+
+    /** Marks the current daemon dead exactly once, emits diagnostics, then applies the fail-closed policy. */
+    private fun markDefunct(
+        context: SupervisorContext,
+        exitCode: Int,
+    ) {
+        val current = daemonHandle
+        if (current !is DaemonHandle.Running || current.context.daemonProcess != context.daemonProcess) return
+        daemonHandle = DaemonHandle.Defunct(context)
+        logger.severe("SupervisorDaemon (PID=${context.daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
+        logger.severe("Last daemon log lines:")
+        daemonLogLines.forEach { line -> logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line") }
+        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+            io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
+                pid = context.daemonProcess.pid(),
+                exitCode = exitCode,
+                lastLogLines = daemonLogLines.toList(),
+            ),
+        )
+        onUnexpectedExit(exitCode)
     }
 
     private fun cleanupDaemon(context: SupervisorContext) {
@@ -165,7 +197,8 @@ public class SupervisorDaemonManager(
         val daemonPid = daemonProcess.pid()
 
         val prctlRes = engine.process.prctl(
-            io.mazewall.core.PrctlCommand.SetPtracer(daemonPid)
+            io.mazewall.core.PrctlCommand
+                .SetPtracer(daemonPid),
         )
         if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
             logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
@@ -173,8 +206,14 @@ public class SupervisorDaemonManager(
 
         val shutdownHook = Thread {
             synchronized(daemonLock) {
-                if (sharedDaemonContext?.daemonProcess == daemonProcess) {
-                    sharedDaemonContext = null
+                when (val handle = daemonHandle) {
+                    is DaemonHandle.Running -> if (handle.context.daemonProcess == daemonProcess) {
+                        daemonHandle = DaemonHandle.NotStarted
+                    }
+                    is DaemonHandle.Defunct -> if (handle.context.daemonProcess == daemonProcess) {
+                        daemonHandle = DaemonHandle.NotStarted
+                    }
+                    DaemonHandle.NotStarted -> Unit
                 }
             }
             daemonProcess.destroyForcibly()
@@ -182,7 +221,7 @@ public class SupervisorDaemonManager(
         processLauncher.addShutdownHook(shutdownHook)
 
         val context = SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
-        sharedDaemonContext = context
+        daemonHandle = DaemonHandle.Running(context)
 
         val pump =
             JvmChildProcess.startStdoutPump(
@@ -196,20 +235,15 @@ public class SupervisorDaemonManager(
                 threadName = "supervisor-daemon-output",
                 onStreamClosed = {
                     synchronized(daemonLock) {
-                        val currentContext = sharedDaemonContext
-                        if (currentContext != null && currentContext.daemonProcess == daemonProcess) {
+                        val currentHandle = daemonHandle
+                        if (currentHandle is DaemonHandle.Running && currentHandle.context.daemonProcess == daemonProcess) {
                             if (!daemonProcess.isAlive) {
                                 val exitCode = try {
                                     daemonProcess.exitValue()
                                 } catch (_: Exception) {
                                     -1
                                 }
-                                logger.severe("SupervisorDaemon (PID=${daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
-                                logger.severe("Last daemon log lines:")
-                                daemonLogLines.forEach { line ->
-                                    logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line")
-                                }
-                                onUnexpectedExit(exitCode)
+                                markDefunct(currentHandle.context, exitCode)
                             }
                         }
                     }
@@ -237,35 +271,52 @@ public class SupervisorDaemonManager(
      * (issue-20260823-172000). Sleep-based waiting is replaced by a liveness poll so shutdown
      * success is observable and fast daemons are not delayed by a fixed 100ms.
      */
-    private fun triggerDaemonShutdown(socketPath: String, process: Process) {
+    private fun triggerDaemonShutdown(
+        socketPath: String,
+        process: Process,
+    ) {
         try {
-            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val fd = socketManager.connect(socketPath)
-                try {
-                    val cmd = arena.allocate(1L)
-                    cmd.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
-                    while (true) {
-                        val writeRes = engine.memory.write(fd, cmd, 1)
-                        if (writeRes is io.mazewall.LinuxNative.SyscallResult.Error && writeRes.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                            continue
-                        }
-                        break
-                    }
-                } finally {
-                    socketManager.close(fd)
-                }
-            }
-        } catch (e: Exception) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", e)
+            sendShutdownCommand(socketPath)
+        } catch (expectedTransportFailure: Exception) {
+            logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", expectedTransportFailure)
             return // destroyForcibly() by the caller is the authoritative escalation.
         }
-        // Bounded liveness poll: exit as soon as the daemon acknowledges by dying.
+        awaitDaemonExit(process)
+    }
+
+    private fun sendShutdownCommand(socketPath: String) {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val fd = socketManager.connect(socketPath)
+            try {
+                val command = arena.allocate(1L)
+                command.writeByte(0L, SHUTDOWN_COMMAND_BYTE)
+                writeCommandUntilNotInterrupted(fd, command)
+            } finally {
+                socketManager.close(fd)
+            }
+        }
+    }
+
+    private fun writeCommandUntilNotInterrupted(
+        fd: io.mazewall.core.FileDescriptor<
+            io.mazewall.core.FileDescriptorRole.UnixSocket,
+            io.mazewall.core.FdState.Open,
+            io.mazewall.core.FdOwnership.Owned,
+        >,
+        command: io.mazewall.ffi.memory.ManagedSegment,
+    ) {
+        do {
+            val result = engine.memory.write(fd, command, 1)
+        } while (result is io.mazewall.LinuxNative.SyscallResult.Error && result.errno == io.mazewall.ffi.NativeConstants.EINTR)
+    }
+
+    private fun awaitDaemonExit(process: Process) {
         val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
         try {
             while (process.isAlive && System.currentTimeMillis() < deadline) {
                 Thread.sleep(10)
             }
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
     }

@@ -21,7 +21,6 @@ internal object ValidationListenerPreload {
             StacktraceScopingPolicy::class.java.name,
             SupervisorValidationChannel::class.java.name,
             ContainmentViolationException::class.java.name,
-            @Suppress("DEPRECATION")
             io.mazewall.enforcer.ContainmentViolationException::class.java.name,
             SupervisorSessionHandler::class.java.name,
             SupervisorNotificationMachine::class.java.name,

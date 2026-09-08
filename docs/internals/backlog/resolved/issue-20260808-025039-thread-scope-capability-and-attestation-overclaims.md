@@ -12,6 +12,8 @@ target_files:
   - "docs/presentation/article1-threat-model.md"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: 193146ed-cfc0-4ca5-a90b-f916c0ac5db1
+paperclip_identifier: MAZ-447
 ---
 
 # 🔴 [Severity: HIGH]: Thread-Scoped Policies Are Documented as Enforcing Capabilities They Cannot Observe

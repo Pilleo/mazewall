@@ -1,7 +1,5 @@
 package io.mazewall.profiler.tierE.collector
 
-
-
 /**
  * Tier E attributed syscall event collector.
  *
@@ -13,11 +11,20 @@ package io.mazewall.profiler.tierE.collector
  */
 public class LiveEbpfCollector {
     private val events = java.util.concurrent.CopyOnWriteArrayList<AttributedEvent>()
-    @Volatile public var droppedCount: Int = 0; private set
-    @Volatile public var drainComplete: Boolean = true; private set
+
+    @Volatile public var droppedCount: Int = 0
+    private set
+
+    @Volatile public var drainComplete: Boolean = true
+    private set
 
     /** Records an event from the BPF ring buffer. Called by the consumer thread. */
-    public fun record(tid: Long, syscallNr: Int, contextId: UInt, ktimeNs: Long) {
+    public fun record(
+        tid: Long,
+        syscallNr: Int,
+        contextId: UInt,
+        ktimeNs: Long,
+    ) {
         events.add(AttributedEvent(tid, syscallNr, contextId, ktimeNs))
     }
 
@@ -30,7 +37,9 @@ public class LiveEbpfCollector {
     public fun drain(): List<AttributedEvent> = events.toList()
 
     /** Clears accumulated events after drain. */
-    public fun clear() { events.clear() }
+    public fun clear() {
+        events.clear()
+    }
 
     public data class AttributedEvent(
         public val tid: Long,

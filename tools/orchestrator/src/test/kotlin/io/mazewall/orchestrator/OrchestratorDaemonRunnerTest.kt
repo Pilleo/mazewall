@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class OrchestratorDaemonRunnerTest {
-
     private var tempDir: File = File("")
     private var stateFile: File = File("")
 
@@ -39,6 +38,7 @@ class OrchestratorDaemonRunnerTest {
         runner.saveState()
 
         assertTrue(stateFile.exists())
+        assertFalse(File(tempDir, "${stateFile.name}.tmp").exists())
 
         val loader = OrchestratorDaemonRunner(env, stateFile)
         loader.loadState()
@@ -58,7 +58,7 @@ class OrchestratorDaemonRunnerTest {
             title = "Title 1",
             priority = BacklogPriority.HIGH,
             status = "open",
-            dependencies = emptyList()
+            dependencies = emptyList(),
         )
         env.issues.add(issue)
 
@@ -89,7 +89,7 @@ class OrchestratorDaemonRunnerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("fileA.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
         env.issues.add(activeIssue)
 
@@ -106,7 +106,7 @@ class OrchestratorDaemonRunnerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("fileB.kt"),
-            targetModules = listOf(":enforcer")
+            targetModules = listOf(":enforcer"),
         )
         env.issues.add(conflictIssue)
 
@@ -119,7 +119,7 @@ class OrchestratorDaemonRunnerTest {
             status = "open",
             dependencies = emptyList(),
             targetFiles = listOf("fileC.kt"),
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
         env.issues.add(cleanIssue)
 
@@ -145,7 +145,7 @@ class OrchestratorDaemonRunnerTest {
             dependencies = emptyList(),
             githubIssue = 398,
             targetFiles = listOf("fileC.kt"),
-            targetModules = listOf(":profiler")
+            targetModules = listOf(":profiler"),
         )
         env.issues.add(inProgressIssue)
 

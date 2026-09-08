@@ -11,6 +11,8 @@ target_modules:
 component: orchestrator
 effort: MEDIUM
 github_issue: 251
+paperclip_issue_id: d7e897e0-eaed-4a37-a598-761e1c9177fb
+paperclip_identifier: MAZ-366
 ---
 
 # Refactor GitHubCli and JulesCli for Testability

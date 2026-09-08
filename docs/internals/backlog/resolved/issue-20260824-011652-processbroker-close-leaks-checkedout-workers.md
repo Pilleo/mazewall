@@ -12,6 +12,8 @@ effort: "small"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 27c4d496-40d7-4603-90ef-a5ba6ef610b0
+paperclip_identifier: MAZ-618
 ---
 
 # 🟠 [Severity: MEDIUM]: ProcessBroker.close() Leaks Checked-Out Workers; Recycle Blocks on Full JVM Spawn

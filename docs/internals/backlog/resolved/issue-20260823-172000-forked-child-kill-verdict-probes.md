@@ -13,6 +13,8 @@ autonomy: "supervised"
 open_questions: false
 dependencies:
   - "issue-20260823-171500"
+paperclip_issue_id: 8f7080d7-2061-4b48-bebe-6741d300a0d5
+paperclip_identifier: MAZ-598
 ---
 
 # 🟡 [Severity: LOW]: Verify SECCOMP_RET_KILL_* Verdicts in Forked Children, Not the Test JVM
@@ -44,4 +46,3 @@ flakiness instead of a deterministic signal.
    new mechanism.
 3. Keep probe latency bounded: per-child timeout with `destroyForcibly` fallback so a broken filter
    cannot hang the suite.
-

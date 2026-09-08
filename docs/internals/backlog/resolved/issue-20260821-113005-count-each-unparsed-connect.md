@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3823789286
+paperclip_issue_id: 19a7a326-dc69-4e14-8ddd-ef28a16f641c
+paperclip_identifier: MAZ-561
 ---
 
 # 🟡 [Severity: MEDIUM]: Count each unparsed connect as incomplete

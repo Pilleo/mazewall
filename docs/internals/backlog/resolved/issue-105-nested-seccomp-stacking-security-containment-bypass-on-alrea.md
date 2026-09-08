@@ -3,6 +3,8 @@ title: "🟢 [RESOLVED]: Nested Seccomp Stacking Security Containment Bypass on 
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 8c975a10-5c1d-4b7e-96c9-ed5dc8c34ffb
+paperclip_identifier: MAZ-282
 ---
 
 # 🟢 [RESOLVED]: Nested Seccomp Stacking Security Containment Bypass on already-blocked Syscalls

@@ -20,7 +20,7 @@ public fun interface SocketPoll {
 public object SocketIo {
     public fun writeFully(
         memory: NativeMemory,
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         total: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
@@ -34,7 +34,7 @@ public object SocketIo {
      */
     public fun readFully(
         memory: NativeMemory,
-        fd: FileDescriptor<*, FdState.Open>,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         buf: ManagedSegment,
         total: Long,
         deadline: Deadline,
@@ -77,8 +77,11 @@ public object SocketIo {
         return LinuxNative.SyscallResult.Success(total)
     }
 
-    private fun slice(buf: ManagedSegment, offset: Long, remaining: Long): ManagedSegment =
-        if (offset == 0L) buf.asSlice(0L, remaining) else buf.asSlice(offset, remaining)
+    private fun slice(
+        buf: ManagedSegment,
+        offset: Long,
+        remaining: Long,
+    ): ManagedSegment = if (offset == 0L) buf.asSlice(0L, remaining) else buf.asSlice(offset, remaining)
 
     private fun transferFully(
         total: Long,

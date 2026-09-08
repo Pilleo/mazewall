@@ -3,6 +3,8 @@ title: "Gradle Configuration Avoidance Breakage via JitPack Shim"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 6b075d9a-b0bd-4e45-9347-f1385043ac89
+paperclip_identifier: MAZ-331
 ---
 
 # ✅ [RESOLVED]: Gradle Configuration Avoidance Breakage via JitPack Shim

@@ -7,10 +7,10 @@ import io.mazewall.Policy
 import io.mazewall.asFd
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
-import io.mazewall.ffi.memory.ConfinedSegment
 import java.io.File
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -20,7 +20,6 @@ import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class ProfilerIntegrationTest : BaseIntegrationTest() {
-
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
@@ -29,14 +28,20 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         }
     }
 
-    private fun awaitLogs(wrapped: Profiler.ProfilerExecutorWrapper, expectedCountAtLeast: Int) {
+    private fun awaitLogs(
+        wrapped: Profiler.ProfilerExecutorWrapper,
+        expectedCountAtLeast: Int,
+    ) {
         val start = System.currentTimeMillis()
         while (wrapped.recentLogs.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
             Thread.sleep(10)
         }
     }
 
-    private fun awaitStackProfiles(wrapped: Profiler.ProfilerExecutorWrapper, expectedCountAtLeast: Int) {
+    private fun awaitStackProfiles(
+        wrapped: Profiler.ProfilerExecutorWrapper,
+        expectedCountAtLeast: Int,
+    ) {
         val start = System.currentTimeMillis()
         while (wrapped.recentStackProfiles.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
             Thread.sleep(10)
@@ -126,7 +131,10 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
 
         // The compiled policy should allow reading from /etc/hostname
         assertTrue(
-            compiledPolicy.allowedFsReadPaths.contains(io.mazewall.core.SandboxedPath.of("/etc/hostname")),
+            compiledPolicy.allowedFsReadPaths.contains(
+                io.mazewall.core.SandboxedPath
+                .of("/etc/hostname"),
+            ),
             "Should contain read-path for /etc/hostname",
         )
 
@@ -195,13 +203,13 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                                 val fd = openRes.asFd()
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
-
 LinuxNative.raw.syscall(
     fchmodNr,
-    io.mazewall.core.NativeArg.FdArg(fd),
-    io.mazewall.core.NativeArg.IntArg(0x1FF),
+    io.mazewall.core.NativeArg
+        .FdArg(fd),
+    io.mazewall.core.NativeArg
+        .IntArg(0x1FF),
 )
-
                                 }
                                 LinuxNative.fileSystem.close(fd)
                             }

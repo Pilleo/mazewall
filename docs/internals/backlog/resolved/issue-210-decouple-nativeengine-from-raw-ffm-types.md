@@ -10,6 +10,8 @@ autonomy: "supervised"
 solution_approved: false
 blast_radius: "medium"
 reversible: true
+paperclip_issue_id: c41def71-865f-48d1-bccf-1827e2eba9ca
+paperclip_identifier: MAZ-623
 ---
 
 # 🔴 [Severity: HIGH]: Decouple NativeEngine Interface and LinuxNative Entry Point from Raw FFM Types

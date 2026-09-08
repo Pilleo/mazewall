@@ -8,11 +8,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerInstallerStateTest {
-
     @Test
     fun `test state properties`() {
-        val listenerFd = FileDescriptor.unsafe<FileDescriptorRole.SeccompNotif>(42)
-        val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(43)
+        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(42)
+        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(43)
 
         val connecting = ProfilerInstallerState.Connecting(listenerFd)
         assertEquals(listenerFd, connecting.listenerFd)

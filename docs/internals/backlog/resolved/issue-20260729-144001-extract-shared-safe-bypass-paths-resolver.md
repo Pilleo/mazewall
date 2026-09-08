@@ -13,6 +13,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: d942d2ab-1301-46ea-8bd0-4d3d5a99e245
+paperclip_identifier: MAZ-413
 ---
 
 # 🔴 [Severity: HIGH]: Extract shared safe bypass paths resolver to eliminate duplicated JVM scanning logic

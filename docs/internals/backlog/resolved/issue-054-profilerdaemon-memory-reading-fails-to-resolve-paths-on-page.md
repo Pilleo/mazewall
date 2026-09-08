@@ -3,6 +3,8 @@ title: "`ProfilerDaemon` memory-reading fails to resolve paths on page boundarie
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 4e3d47ba-6327-4524-9a93-b85907036e28
+paperclip_identifier: MAZ-245
 ---
 
 # ✅ [RESOLVED]: `ProfilerDaemon` memory-reading fails to resolve paths on page boundaries or large strings

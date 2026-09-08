@@ -1,13 +1,12 @@
 package io.mazewall.profiler.iterative
 
 import io.mazewall.Policy
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.io.IOException
 
 class IterativeProfilerParsingTest {
-
     @AfterEach
     fun teardown() {
         IterativeProfiler.resetToDefaults()
@@ -19,7 +18,10 @@ class IterativeProfilerParsingTest {
         return method.invoke(IterativeProfiler, t) as String?
     }
 
-    private fun extractViolationPath(t: Throwable, policy: Policy<*, *>): String? {
+    private fun extractViolationPath(
+        t: Throwable,
+        policy: Policy<*, *>,
+    ): String? {
         val method = IterativeProfiler::class.java.getDeclaredMethod("extractViolationPath", Throwable::class.java, Policy::class.java)
         method.isAccessible = true
         return method.invoke(IterativeProfiler, t, policy) as String?
@@ -42,7 +44,11 @@ class IterativeProfilerParsingTest {
     @Test
     fun `test extractViolationPath with relative path containing spaces`() {
         val relativePath = "build/tmp/custom relative path with spaces.txt"
-        val expected = java.nio.file.Paths.get(relativePath).toAbsolutePath().normalize().toString()
+        val expected = java.nio.file.Paths
+            .get(relativePath)
+            .toAbsolutePath()
+            .normalize()
+            .toString()
         val t = IOException("$relativePath (Permission denied)")
         val result = extractViolationPath(t)
         assertEquals(expected, result)
@@ -78,7 +84,8 @@ class IterativeProfilerParsingTest {
 
     @Test
     fun `test extractViolationPath with policy specific custom phrase`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .customViolationPhrase("Blocked by sandbox")
             .build()
         val t = IOException("/tmp/custom-file Blocked by sandbox")
@@ -96,7 +103,8 @@ class IterativeProfilerParsingTest {
 
     @Test
     fun `test extractViolationPath with policy specific custom regex`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .customViolationRegex(Regex("""restricted: \d+"""))
             .build()
         val t = IOException("/tmp/regex-file restricted: 999")

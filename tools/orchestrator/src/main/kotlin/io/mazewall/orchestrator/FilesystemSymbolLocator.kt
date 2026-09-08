@@ -31,12 +31,17 @@ class FilesystemSymbolLocator(
             for (rootName in searchRoots) {
                 val root = File(repoRoot, rootName)
                 if (!root.exists()) continue
-                root.walkTopDown()
+                root
+                    .walkTopDown()
                     .onEnter { dir -> dir.name !in SKIP_DIRS }
                     .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
                     .forEach { file ->
                         if (found.size >= maxFiles) return found.toList()
-                        val relative = repoRoot.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                        val relative = repoRoot
+                            .toPath()
+                            .relativize(file.toPath())
+                            .toString()
+                            .replace('\\', '/')
                         if (file.nameWithoutExtension == symbol ||
                             file.nameWithoutExtension == "${symbol}Test" ||
                             file.readText().contains(declaration)

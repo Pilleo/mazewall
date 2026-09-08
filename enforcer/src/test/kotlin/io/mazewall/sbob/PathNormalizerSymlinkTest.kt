@@ -8,7 +8,9 @@ import java.nio.file.Path
 
 class PathNormalizerSymlinkTest {
     @Test
-    fun `test pruning does NOT occur if parent is a symlink to prevent production crashes`(@TempDir tempDir: Path) {
+    fun `test pruning does NOT occur if parent is a symlink to prevent production crashes`(
+        @TempDir tempDir: Path,
+    ) {
         val realParent = tempDir.resolve("real_parent")
         Files.createDirectories(realParent)
         val fileInRealParent = realParent.resolve("file.txt")
@@ -19,7 +21,7 @@ class PathNormalizerSymlinkTest {
 
         val paths = setOf(
             symlinkParent.toString(),
-            symlinkParent.resolve("file.txt").toString()
+            symlinkParent.resolve("file.txt").toString(),
         )
 
         // Pruning should NOT occur because symlinkParent has a symbolic link component.
@@ -33,7 +35,9 @@ class PathNormalizerSymlinkTest {
     }
 
     @Test
-    fun `test pruning works for real directories`(@TempDir tempDir: Path) {
+    fun `test pruning works for real directories`(
+        @TempDir tempDir: Path,
+    ) {
         val realParent = tempDir.resolve("real_parent")
         Files.createDirectories(realParent)
         val fileInRealParent = realParent.resolve("file.txt")
@@ -41,7 +45,7 @@ class PathNormalizerSymlinkTest {
 
         val paths = setOf(
             realParent.toString(),
-            fileInRealParent.toString()
+            fileInRealParent.toString(),
         )
 
         // Pruning SHOULD occur because realParent is a directory.
@@ -51,7 +55,9 @@ class PathNormalizerSymlinkTest {
     }
 
     @Test
-    fun `test symlink with dot dot non existent`(@TempDir tempDir: Path) {
+    fun `test symlink with dot dot non existent`(
+        @TempDir tempDir: Path,
+    ) {
         val subDir = tempDir.resolve("sub")
         val dir = subDir.resolve("dir")
         Files.createDirectories(dir)
@@ -66,7 +72,11 @@ class PathNormalizerSymlinkTest {
 
         val result = PathNormalizer.normalizeAndPrune(setOf(pathStr), null)
 
-        val expectedPhysical = subDir.resolve("other_file").toAbsolutePath().normalize().toString()
+        val expectedPhysical = subDir
+            .resolve("other_file")
+            .toAbsolutePath()
+            .normalize()
+            .toString()
         assertEquals(setOf(expectedPhysical), result)
     }
 }

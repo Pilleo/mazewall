@@ -12,7 +12,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-@Suppress("DMI_HARDCODED_ABSOLUTE_FILENAME")
 class PolicyTest {
     @Test
     fun `default policy allows everything`() {
@@ -22,9 +21,28 @@ class PolicyTest {
     }
 
     @Test
-    fun `builder methods correctly set flags`(@TempDir tempDir: java.nio.file.Path) {
-        val rPath = tempDir.resolve("r").toFile().apply { createNewFile() }.absolutePath
-        val wPath = tempDir.resolve("w").toFile().apply { createNewFile() }.absolutePath
+    fun `builder defaults retain the three argument-safety restrictions`() {
+        val policy = Policy.builder().build()
+
+        assertFalse(policy.allowMmapExec)
+        assertFalse(policy.allowNonThreadClone)
+        assertFalse(policy.allowUnsafePrctl)
+    }
+
+    @Test
+    fun `builder methods correctly set flags`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
+        val rPath = tempDir
+            .resolve("r")
+            .toFile()
+            .apply { createNewFile() }
+            .absolutePath
+        val wPath = tempDir
+            .resolve("w")
+            .toFile()
+            .apply { createNewFile() }
+            .absolutePath
 
         val policy =
             Policy
@@ -68,8 +86,14 @@ class PolicyTest {
     }
 
     @Test
-    fun `builder allowFsRead with duplicate path`(@TempDir tempDir: java.nio.file.Path) {
-        val rPath = tempDir.resolve("r").toFile().apply { createNewFile() }.absolutePath
+    fun `builder allowFsRead with duplicate path`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
+        val rPath = tempDir
+            .resolve("r")
+            .toFile()
+            .apply { createNewFile() }
+            .absolutePath
         val policy =
             Policy
                 .builder()
@@ -79,11 +103,20 @@ class PolicyTest {
         assertEquals(1, policy.allowedFsReadPaths.size)
     }
 
-
     @Test
-    fun `builder base() merges all flags`(@TempDir tempDir: java.nio.file.Path) {
-        val rPath = tempDir.resolve("r").toFile().apply { createNewFile() }.absolutePath
-        val wPath = tempDir.resolve("w").toFile().apply { createNewFile() }.absolutePath
+    fun `builder base() merges all flags`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
+        val rPath = tempDir
+            .resolve("r")
+            .toFile()
+            .apply { createNewFile() }
+            .absolutePath
+        val wPath = tempDir
+            .resolve("w")
+            .toFile()
+            .apply { createNewFile() }
+            .absolutePath
 
         val p1 =
             Policy
@@ -147,7 +180,14 @@ class PolicyTest {
         // Test nested paths
         val p3 = Policy.builder().allowFsRead(SandboxedPath.of("/d1", true)).build()
         val p4 = Policy.builder().allowFsRead(SandboxedPath.of("/d1/db", true)).build()
-        assertEquals(setOf("/d1/db"), Policy.combine(p3, p4).allowedFsReadPaths.map { it.value }.toSet())
+        assertEquals(
+            setOf("/d1/db"),
+            Policy
+            .combine(p3, p4)
+            .allowedFsReadPaths
+            .map { it.value }
+            .toSet(),
+        )
     }
 
     @Test
@@ -418,7 +458,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup is blocked if open or openat is restricted and Landlock is not active`() {
-        val p = Policy.builder()
+        val p = Policy
+            .builder()
             .block(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .build()
@@ -429,7 +470,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup remains allowed if open and openat are allowed`() {
-        val p = Policy.builder()
+        val p = Policy
+            .builder()
             .allow(Syscall.OPEN)
             .allow(Syscall.OPENAT)
             .allow(Syscall.IO_URING_SETUP)
@@ -441,7 +483,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup remains allowed if Landlock is active`() {
-        val p = Policy.builder()
+        val p = Policy
+            .builder()
             .block(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .allowFsRead("/some/path")
@@ -453,8 +496,16 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup blocking is resolved correctly during policy combination`() {
-        val p1 = Policy.builder().block(Syscall.OPEN).allow(Syscall.IO_URING_SETUP).build()
-        val p2 = Policy.builder().allow(Syscall.OPEN).allow(Syscall.IO_URING_SETUP).build()
+        val p1 = Policy
+            .builder()
+            .block(Syscall.OPEN)
+            .allow(Syscall.IO_URING_SETUP)
+            .build()
+        val p2 = Policy
+            .builder()
+            .allow(Syscall.OPEN)
+            .allow(Syscall.IO_URING_SETUP)
+            .build()
 
         val combined = Policy.combine(p1, p2)
         assertFalse(combined.isSyscallAllowed(Syscall.IO_URING_SETUP), "combined policy should block io_uring_setup because open is restricted overall and Landlock is not active")
@@ -462,7 +513,8 @@ class PolicyTest {
 
     @Test
     fun `hasSupervisedSyscalls is true when defaultAction is ACT_NOTIFY`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_NOTIFY)
             .build()
         assertTrue(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be true when defaultAction is ACT_NOTIFY")
@@ -470,7 +522,8 @@ class PolicyTest {
 
     @Test
     fun `hasSupervisedSyscalls is false when defaultAction is ACT_ALLOW`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .build()
         assertFalse(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be false when defaultAction is ACT_ALLOW and no syscalls use ACT_NOTIFY")
@@ -478,7 +531,8 @@ class PolicyTest {
 
     @Test
     fun `enforceLandlock is true when Landlock paths are specified`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .allowFsRead("/tmp")
             .build()
         assertTrue(policy.enforceLandlock, "enforceLandlock should be true when Landlock paths are specified")
@@ -539,7 +593,9 @@ class PolicyTest {
     }
 
     @Test
-    fun `fs promotion must not alias the original builder`(@TempDir tempDir: java.nio.file.Path) {
+    fun `fs promotion must not alias the original builder`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
         // Regression for issue-20260823-135554: the FS-adding methods used to re-type and mutate
         // the SAME builder instance, so a ProcessWideSafe-typed reference could silently build a
         // definition containing Landlock filesystem rules.
@@ -555,7 +611,9 @@ class PolicyTest {
     }
 
     @Test
-    fun `promoted builder carries fs state and stays thread-local typed`(@TempDir tempDir: java.nio.file.Path) {
+    fun `promoted builder carries fs state and stays thread-local typed`(
+        @TempDir tempDir: java.nio.file.Path,
+    ) {
         val rPath = tempDir.resolve("r").toString()
         val wPath = tempDir.resolve("w").toString()
 

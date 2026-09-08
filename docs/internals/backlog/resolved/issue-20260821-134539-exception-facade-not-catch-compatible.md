@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/ContainmentViolationExceptionTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 70455f7a-9248-480c-b174-d141ac898d03
+paperclip_identifier: MAZ-565
 ---
 
 # 🔴 [Severity: HIGH]: enforcer.ContainmentViolationException facade is not catch-compatible with the API type

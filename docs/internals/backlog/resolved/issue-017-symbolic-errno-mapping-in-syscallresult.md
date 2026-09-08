@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "medium"
 github_issue: 287
+paperclip_issue_id: e5199dcc-e90a-4653-9bd4-6493e32b7bbf
+paperclip_identifier: MAZ-216
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Symbolic Errno Mapping in `SyscallResult`

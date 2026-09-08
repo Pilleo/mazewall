@@ -12,6 +12,8 @@ chosen_solution: "A"
 blast_radius: "low"
 reversible: true
 github_issue: 89
+paperclip_issue_id: 3a8e744f-eebe-41e4-9f70-4853f0ce4f0d
+paperclip_identifier: MAZ-621
 ---
 
 # 🟡 [Severity: MEDIUM]: Orchestrator: Notify Human When CI Build Status is Stuck in PENDING/UNKNOWN

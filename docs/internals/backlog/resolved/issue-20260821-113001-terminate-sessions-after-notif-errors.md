@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3796525642
+paperclip_issue_id: a86f95be-995c-4f09-811f-a07defe71059
+paperclip_identifier: MAZ-540
 ---
 
 # 🟡 [Severity: MEDIUM]: Terminate sessions after notification receive errors

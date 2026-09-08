@@ -1,12 +1,11 @@
 package io.mazewall.enforcer.supervisor
 
 import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.test.assertEquals
 
 class JvmStackInspectorTest {
-
     @Test
     fun `inspect returns SafeToValidate with current stack and arguments`() {
         val state = JvmStackInspector.inspect(42, listOf("arg1"), Thread.currentThread())
@@ -35,7 +34,7 @@ class JvmStackInspectorTest {
 
         assertFalse(
             state1.rawStack === state2.rawStack,
-            "rawStack arrays should be different instances to prove no caching"
+            "rawStack arrays should be different instances to prove no caching",
         )
     }
 

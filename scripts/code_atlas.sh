@@ -120,6 +120,18 @@ case "$COMMAND" in
         done
         exec ./gradlew -q :tools:orchestrator:workPackage -PincludeOrchestrator=true -PworkPackageArgsFile="$ARGS_FILE"
         ;;
+    blast-radius)
+        if [ -z "$SYMBOL" ]; then echo "Error: Symbol required"; exit 1; fi
+        ensure_fresh_index
+        ARGS_FILE="$(mktemp)"
+        cleanup() { rm -f "$ARGS_FILE"; }
+        trap cleanup EXIT
+        shift
+        for arg in "$SYMBOL" "$@"; do
+            printf '%s\n' "$arg" >> "$ARGS_FILE"
+        done
+        exec ./gradlew -q :tools:orchestrator:blastRadiusMemory -PincludeOrchestrator=true -PblastRadiusArgsFile="$ARGS_FILE"
+        ;;
     reindex)
         echo "Rebuilding Codanna index from workspace..."
         mkdir -p "$ROOT_DIR/.codanna"
@@ -128,7 +140,7 @@ case "$COMMAND" in
         ;;
     *)
         echo "Unknown command: $COMMAND"
-        echo "Supported commands: callers, calls, describe, search, impact, work-package, reindex"
+        echo "Supported commands: callers, calls, describe, search, impact, work-package, blast-radius, reindex"
         exit 1
         ;;
 esac

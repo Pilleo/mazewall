@@ -36,10 +36,12 @@ object StraceProfiler {
         ),
     )
     fun <T : TraceableWorkload> profile(workloadClass: Class<T>): BillOfBehavior {
-        val collector = io.mazewall.profiler.collector.StraceCollector(workloadClass = workloadClass)
+        val collector = io.mazewall.profiler.collector
+            .StraceCollector(workloadClass = workloadClass)
         collector.start()
         return collector.use {
-            io.mazewall.profiler.compiler.BobCompiler.compileObservations(it.drain().observations)
+            io.mazewall.profiler.compiler.BobCompiler
+                .compileObservations(it.drain().observations)
         }
     }
 }

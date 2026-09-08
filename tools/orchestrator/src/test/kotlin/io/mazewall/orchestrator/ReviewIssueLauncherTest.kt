@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class ReviewIssueLauncherTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest

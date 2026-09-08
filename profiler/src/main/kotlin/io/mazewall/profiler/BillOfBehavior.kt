@@ -1,20 +1,20 @@
 package io.mazewall.profiler
 
-import io.mazewall.Policy
-import io.mazewall.core.Tid
-import io.mazewall.PolicyScope
-import io.mazewall.Uncompiled
 import io.mazewall.BillOfBehaviorDto
-import io.mazewall.StackProfileEntryDto
+import io.mazewall.Policy
+import io.mazewall.PolicyScope
 import io.mazewall.StackFrameDto
+import io.mazewall.StackProfileEntryDto
+import io.mazewall.Uncompiled
 import io.mazewall.core.Syscall
-import io.mazewall.sbob.PathNormalizer
+import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.sbob.PathNormalizer
+import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlinx.serialization.json.Json
 
 private val jsonSerializer = Json {
     prettyPrint = true
@@ -26,19 +26,63 @@ private val jsonSerializer = Json {
  * profiling run. This is the raw output of the [Profiler] — completely decoupled
  * from any [io.mazewall.Policy].
  */
-data class BillOfBehavior(
-    val opens: Set<String> = emptySet(),
-    val fsWritePaths: Set<String> = emptySet(),
-    val syscalls: Set<Syscall> = emptySet(),
-    val execs: Set<String> = emptySet(),
-    val connects: Set<NetworkEndpoint> = emptySet(),
-    val ioUringOps: Set<String> = emptySet(),
+class BillOfBehavior(
+    opens: Set<String> = emptySet(),
+    fsWritePaths: Set<String> = emptySet(),
+    syscalls: Set<Syscall> = emptySet(),
+    execs: Set<String> = emptySet(),
+    connects: Set<NetworkEndpoint> = emptySet(),
+    ioUringOps: Set<String> = emptySet(),
     /**
      * Keyed by [TraceEvent] identity; multiple events for the same syscall name
      * may produce different stack entries if triggered from different call sites.
      */
-    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap(),
+    stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap(),
 ) {
+    val opens: Set<String> = java.util.Set.copyOf(opens)
+    val fsWritePaths: Set<String> = java.util.Set.copyOf(fsWritePaths)
+    val syscalls: Set<Syscall> = java.util.Set.copyOf(syscalls)
+    val execs: Set<String> = java.util.Set.copyOf(execs)
+    val connects: Set<NetworkEndpoint> = java.util.Set.copyOf(connects)
+    val ioUringOps: Set<String> = java.util.Set.copyOf(ioUringOps)
+    private val stackProfileStorage = freezeStackProfile(stackProfile)
+    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
+        get() = freezeStackProfile(stackProfileStorage)
+
+    fun copy(
+        opens: Set<String> = this.opens,
+        fsWritePaths: Set<String> = this.fsWritePaths,
+        syscalls: Set<Syscall> = this.syscalls,
+        execs: Set<String> = this.execs,
+        connects: Set<NetworkEndpoint> = this.connects,
+        ioUringOps: Set<String> = this.ioUringOps,
+        stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = this.stackProfile,
+    ): BillOfBehavior = BillOfBehavior(opens, fsWritePaths, syscalls, execs, connects, ioUringOps, stackProfile)
+
+    override fun equals(other: Any?): Boolean =
+        other is BillOfBehavior &&
+            opens == other.opens &&
+            fsWritePaths == other.fsWritePaths &&
+            syscalls == other.syscalls &&
+            execs == other.execs &&
+            connects == other.connects &&
+            ioUringOps == other.ioUringOps &&
+        stackProfilesEqual(stackProfileStorage, other.stackProfileStorage)
+
+    override fun hashCode(): Int =
+        listOf(opens, fsWritePaths, syscalls, execs, connects, ioUringOps).hashCode() *
+            31 +
+            stackProfileStorage.entries.fold(0) { hash, entry ->
+                hash + 31 * entry.key.hashCode() + entry.value.fold(0) { framesHash, frame -> framesHash + frame.contentHashCode() }
+            }
+
+    private fun freezeStackProfile(value: Map<TraceEvent, List<Array<StackTraceElement>>>) = java.util.Map.copyOf(value.mapValues { (_, frames) -> java.util.List.copyOf(frames.map { it.copyOf() }) })
+
+    private fun stackProfilesEqual(
+        left: Map<TraceEvent, List<Array<StackTraceElement>>>,
+        right: Map<TraceEvent, List<Array<StackTraceElement>>>,
+    ) = left.size == right.size && left.all { (event, frames) -> right[event]?.let { other -> frames.size == other.size && frames.indices.all { frames[it].contentEquals(other[it]) } } == true }
+
     /**
      * Compiles this bill of behavior into a [io.mazewall.Policy] starting from [base].
      * Relative paths in the BoB are resolved against [baseCwd].
@@ -90,7 +134,7 @@ data class BillOfBehavior(
             }
         }
         requireComplete(evidence, allowIncomplete)
-        @Suppress("UNCHECKED_CAST")
+
         var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
@@ -101,8 +145,18 @@ data class BillOfBehavior(
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
         // allowFs* are copy-on-promotion: the returned builder must be kept.
-        for (path in pOpens) builder = builder.allowFsRead(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
-        for (path in pWrites) builder = builder.allowFsWrite(io.mazewall.core.SandboxedPath.of(path, allowNonExistent = true))
+        for (path in pOpens) {
+            builder = builder.allowFsRead(
+                io.mazewall.core.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
+        for (path in pWrites) {
+            builder = builder.allowFsWrite(
+                io.mazewall.core.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
         return builder.build()
     }
 
@@ -123,18 +177,22 @@ data class BillOfBehavior(
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
                     complete = false,
-                    warnings = listOf("connect destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks SOCKET/CONNECT")
-                )
+                    warnings = listOf(
+                        "connect destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks SOCKET/CONNECT",
+                    ),
+                ),
             )
         }
         if (execs.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
                 ProfilingCoverage.absent().copy(
                     complete = false,
-                    warnings = listOf("exec destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks EXECVE")
-                )
+                    warnings = listOf(
+                        "exec destinations were observed but cannot be enforced; " +
+                            "toDsl() only unblocks EXECVE",
+                    ),
+                ),
             )
         }
         val unenforceableIoUring = ioUringOps.filter { op ->
@@ -146,7 +204,7 @@ data class BillOfBehavior(
                     complete = false,
                     warnings = coverage.warnings +
                         "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
-                )
+                ),
             )
         }
 
@@ -187,7 +245,6 @@ data class BillOfBehavior(
         sb.append("    .build()")
         return sb.toString()
     }
-
 
     /**
      * Merges two bills of behavior (union of all observations).
@@ -362,7 +419,8 @@ data class BillOfBehavior(
                     args = entry.args.toLongArray(),
                     paths = entry.paths,
                 )
-                val frames = entry.stackTrace.map { frameDto ->
+                val frames = entry.stackTrace
+                    .map { frameDto ->
                     StackTraceElement(
                         frameDto.classLoader ?: "<unknown>",
                         frameDto.module ?: "<unknown>",
@@ -389,7 +447,10 @@ data class BillOfBehavior(
     }
 }
 
-private fun requireComplete(coverage: ProfilingCoverage, allowIncomplete: Boolean) {
+private fun requireComplete(
+    coverage: ProfilingCoverage,
+    allowIncomplete: Boolean,
+) {
     when (coverage.evidence()) {
         is ProfileEvidence.Complete -> {}
         is ProfileEvidence.Incomplete -> {

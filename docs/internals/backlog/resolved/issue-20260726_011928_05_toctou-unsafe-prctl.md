@@ -13,6 +13,8 @@ target_modules:
 - :enforcer
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/seccomp/UnsafePrctlInspector.kt
+paperclip_issue_id: 3a52f9fd-64af-4d29-bec6-c0715402cfd9
+paperclip_identifier: MAZ-392
 ---
 
 # Issue: TOCTOU in Unsafe Prctl Policy Options

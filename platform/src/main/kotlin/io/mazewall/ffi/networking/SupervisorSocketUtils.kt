@@ -1,16 +1,17 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.CmsghdrSegment
+import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.unwrap
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
@@ -25,7 +26,11 @@ public object SupervisorSocketUtils {
     public const val SOCK_STREAM: Int = 1
     public const val BACKLOG_SIZE: Int = 128
     public const val SOCKADDR_UN_SIZE: Int = 110
+
+    // LP64: CMSG_LEN(sizeof(int)) = CMSG_ALIGN(sizeof(cmsghdr)) + sizeof(int) = 16 + 4
     public const val CMSG_RIGHTS_LEN: Long = 20L
+
+    // LP64: CMSG_SPACE(sizeof(int)) = CMSG_ALIGN(sizeof(cmsghdr)) + CMSG_ALIGN(sizeof(int)) = 16 + 8
     public const val MSG_CONTROL_BUF_SIZE: Long = 24L
     public const val SOL_SOCKET: Int = 1
     public const val SCM_RIGHTS: Int = 1
@@ -50,7 +55,7 @@ public object SupervisorSocketUtils {
     public fun connectWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
-        delayMs: Long = 10L
+        delayMs: Long = 10L,
     ): Int {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
@@ -71,7 +76,7 @@ public object SupervisorSocketUtils {
                         continue
                     }
                 }
-                val fd = FileDescriptor.unixSocket(fdVal)
+                val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
                 val connRes = LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fdVal
@@ -87,14 +92,14 @@ public object SupervisorSocketUtils {
                 }
             }
             throw IllegalStateException(
-                "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno"
+                "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno",
             )
         }
     }
 
     public fun sendDescriptor(
         socketFd: Int,
-        fdToSend: Int
+        fdToSend: Int,
     ): Boolean {
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
@@ -131,16 +136,14 @@ public object SupervisorSocketUtils {
         }
     }
 
-    public fun recvDescriptor(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>? =
+    public fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
         recvDescriptor(socketFd, FileDescriptorRole.SeccompNotif)
 
     public fun <R : FileDescriptorRole> recvDescriptor(
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
-    ): FileDescriptor<R, FdState.Open>? {
-        return Arena.ofConfined().use { arena ->
+    ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
+        Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
             controlBuf.fill(0)
@@ -161,21 +164,21 @@ public object SupervisorSocketUtils {
                 val res = LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
-                    if (value == 0L) return@use null
+                    if (value == 0L) return null
 
                     val cmsgLen = cmsg.getCmsgLen()
                     val cmsgLevel = cmsg.getCmsgLevel()
                     val cmsgType = cmsg.getCmsgType()
                     if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.adopt(cmsg.getDataFd(), role)
+                        return FileDescriptor.adopt(cmsg.getDataFd(), role)
                     }
+                    return null
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
                     if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue // EINTR
-                    return@use null
+                    return null
                 }
             }
-            null
         }
     }
 }

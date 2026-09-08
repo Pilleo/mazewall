@@ -1,6 +1,5 @@
 package io.mazewall
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
@@ -77,7 +76,7 @@ class SecurityPolicyTest : BaseIntegrationTest() {
             val ex = org.junit.jupiter.api
                 .assertThrows<ExecutionException> { future.get() }
             assertTrue(
-                ContainmentViolationDetector.isContainmentViolation(ex),
+                ex.cause is ContainmentViolationException,
                 "Expected a containment violation for connect(), got: ${ex.cause?.javaClass?.name}: ${ex.cause?.message}",
             )
         } finally {
@@ -99,7 +98,7 @@ class SecurityPolicyTest : BaseIntegrationTest() {
             val ex = org.junit.jupiter.api
                 .assertThrows<ExecutionException> { future.get() }
             assertTrue(
-                ContainmentViolationDetector.isContainmentViolation(ex),
+                ex.cause is ContainmentViolationException,
                 "Expected a containment violation for execve(), got: ${ex.cause?.javaClass?.name}: ${ex.cause?.message}",
             )
         } finally {

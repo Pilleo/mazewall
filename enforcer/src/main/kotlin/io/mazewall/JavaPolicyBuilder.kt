@@ -74,13 +74,15 @@ public class JavaPolicyBuilder(
         return this
     }
 
-    public fun addAction(action: SeccompAction, vararg syscalls: Syscall): JavaPolicyBuilder {
+    public fun addAction(
+        action: SeccompAction,
+        vararg syscalls: Syscall,
+    ): JavaPolicyBuilder {
         builder.addAction(action, *syscalls)
         return this
     }
 
     public fun base(policy: Policy<*, *>): JavaPolicyBuilder {
-        @Suppress("UNCHECKED_CAST")
         builder.base(policy.definition as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
         return this
     }
@@ -231,7 +233,7 @@ public class JavaPolicyBuilder(
                     "Filesystem rules must be ThreadLocalOnly.",
             )
         }
-        @Suppress("UNCHECKED_CAST")
+
         return Policy(definition as PolicyDefinition<PolicyScope.ProcessWideSafe>)
     }
 

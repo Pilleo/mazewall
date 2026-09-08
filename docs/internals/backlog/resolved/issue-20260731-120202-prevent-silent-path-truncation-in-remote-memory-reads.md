@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 452
+paperclip_issue_id: 26b3536c-2e2a-4de2-80a8-5bce5fa1ba0b
+paperclip_identifier: MAZ-437
 ---
 
 # ☣️ [Severity: CRITICAL]: Prevent Silent Path/String Truncation in Remote Process Memory Reads

@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 open_questions: false
+paperclip_issue_id: f4b3fbae-4451-4702-8593-6f99c4cb7117
+paperclip_identifier: MAZ-410
 ---
 
 # 🔴 [Severity: HIGH]: Eliminate potential TOCTOU on pointer-based argument resolution inside ProfilerSessionHandler

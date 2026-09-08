@@ -13,6 +13,8 @@ target_files:
   - "docs/presentation/article5-graalvm.md"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 6725ec25-3383-4955-a0bc-11c4e0b23b7a
+paperclip_identifier: MAZ-449
 ---
 
 # 🔴 [Severity: HIGH]: Hardware-Hardening Documentation Mixes Implemented CET with Speculative Absolute Controls

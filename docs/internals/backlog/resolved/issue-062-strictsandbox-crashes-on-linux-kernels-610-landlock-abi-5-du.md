@@ -3,6 +3,8 @@ title: "STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 50e00c60-29ce-46c3-b298-3f05c9059ac3
+paperclip_identifier: MAZ-251
 ---
 
 # ✅ [RESOLVED]: STRICT_SANDBOX crashes on Linux kernels < 6.10 (Landlock ABI < 5) due to unblocked `ioctl`

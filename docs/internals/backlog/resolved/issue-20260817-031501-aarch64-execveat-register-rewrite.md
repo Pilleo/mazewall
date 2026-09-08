@@ -14,6 +14,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
+paperclip_issue_id: 9489ae32-9f1d-4021-866c-3e0b36bbbc13
+paperclip_identifier: MAZ-481
 ---
 
 # 🟡 [Severity: MEDIUM]: execveat AT_EMPTY_PATH register rewrite on aarch64

@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: 8696f0ac-e077-421c-bd2d-a8f1ecd1343d
+paperclip_issue_id: "b204d9d3-82d0-4d6b-a0c5-ef503a3c9f7e"
+paperclip_identifier: "MAZ-1118"
 ---
 
 # 🔴 [Severity: MEDIUM]: Manual FFM Layout Maintenance and ABI Drift Risk

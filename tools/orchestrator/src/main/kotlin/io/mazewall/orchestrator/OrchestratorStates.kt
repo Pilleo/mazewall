@@ -5,51 +5,149 @@ import java.util.concurrent.TimeUnit
 
 sealed class OrchestratorEvent {
     data object Tick : OrchestratorEvent()
-    data class TaskSelected(val issue: BacklogIssue) : OrchestratorEvent()
+
+    data class TaskSelected(
+        val issue: BacklogIssue,
+    ) : OrchestratorEvent()
+
     data object NoTaskSelected : OrchestratorEvent()
-    data class TelegramApprovalReceived(val approved: Boolean) : OrchestratorEvent()
-    data class IssueClosedDetected(val issueNumber: String) : OrchestratorEvent()
-    data class GitHubIssueCreated(val issueNumber: String) : OrchestratorEvent()
-    data class LinkedPrDetected(val prNumber: String) : OrchestratorEvent()
-    data class JulesSessionDetected(val session: JulesSession) : OrchestratorEvent()
+
+    data class TelegramApprovalReceived(
+        val approved: Boolean,
+    ) : OrchestratorEvent()
+
+    data class IssueClosedDetected(
+        val issueNumber: String,
+    ) : OrchestratorEvent()
+
+    data class GitHubIssueCreated(
+        val issueNumber: String,
+    ) : OrchestratorEvent()
+
+    data class LinkedPrDetected(
+        val prNumber: String,
+    ) : OrchestratorEvent()
+
+    data class JulesSessionDetected(
+        val session: JulesSession,
+    ) : OrchestratorEvent()
+
     data object JulesStartTimeout : OrchestratorEvent()
-    data class PrCreated(val prNumber: String) : OrchestratorEvent()
-    data class JulesSessionStatusFetched(val session: JulesSession, val unableToComplete: Boolean) : OrchestratorEvent()
-    data class PrBuildStatusFetched(val status: String, val headSha: String) : OrchestratorEvent()
-    data class PrCommentsFetched(val comments: List<GitHubComment>) : OrchestratorEvent()
-    data class CommitEmptyChecked(val isEmpty: Boolean, val newSha: String) : OrchestratorEvent()
-    data class PrMergedDetected(val prNumber: String) : OrchestratorEvent()
+
+    data class PrCreated(
+        val prNumber: String,
+    ) : OrchestratorEvent()
+
+    data class JulesSessionStatusFetched(
+        val session: JulesSession,
+        val unableToComplete: Boolean,
+    ) : OrchestratorEvent()
+
+    data class PrBuildStatusFetched(
+        val status: String,
+        val headSha: String,
+    ) : OrchestratorEvent()
+
+    data class PrCommentsFetched(
+        val comments: List<GitHubComment>,
+    ) : OrchestratorEvent()
+
+    data class CommitEmptyChecked(
+        val isEmpty: Boolean,
+        val newSha: String,
+    ) : OrchestratorEvent()
+
+    data class PrMergedDetected(
+        val prNumber: String,
+    ) : OrchestratorEvent()
 }
 
 sealed class OrchestratorCommand {
-    data class PrintLog(val message: String, val isErr: Boolean = false) : OrchestratorCommand()
-    data class SendTelegramNotification(val message: String) : OrchestratorCommand()
-    data class SendApprovalRequest(val issueId: String, val text: String) : OrchestratorCommand()
-    data class RingBell(val times: Int) : OrchestratorCommand()
-    data class CreateGitHubIssue(val issueId: String, val title: String, val file: String) : OrchestratorCommand()
-    data class WriteGitHubIssueToBacklog(val issueId: String, val issueNumber: Int) : OrchestratorCommand()
-    data class AddLabel(val issueNumber: String, val label: String) : OrchestratorCommand()
-    data class CommentOnPr(val prNumber: String, val body: String) : OrchestratorCommand()
-    data class SendJulesMessage(val sessionId: String, val message: String) : OrchestratorCommand()
-    data class MarkIssueAsResolved(val issueId: String) : OrchestratorCommand()
-    data class RemoveGithubIssue(val issueId: String) : OrchestratorCommand()
+    data class PrintLog(
+        val message: String,
+        val isErr: Boolean = false,
+    ) : OrchestratorCommand()
+
+    data class SendTelegramNotification(
+        val message: String,
+    ) : OrchestratorCommand()
+
+    data class SendApprovalRequest(
+        val issueId: String,
+        val text: String,
+    ) : OrchestratorCommand()
+
+    data class RingBell(
+        val times: Int,
+    ) : OrchestratorCommand()
+
+    data class CreateGitHubIssue(
+        val issueId: String,
+        val title: String,
+        val file: String,
+    ) : OrchestratorCommand()
+
+    data class WriteGitHubIssueToBacklog(
+        val issueId: String,
+        val issueNumber: Int,
+    ) : OrchestratorCommand()
+
+    data class AddLabel(
+        val issueNumber: String,
+        val label: String,
+    ) : OrchestratorCommand()
+
+    data class CommentOnPr(
+        val prNumber: String,
+        val body: String,
+    ) : OrchestratorCommand()
+
+    data class SendJulesMessage(
+        val sessionId: String,
+        val message: String,
+    ) : OrchestratorCommand()
+
+    data class MarkIssueAsResolved(
+        val issueId: String,
+    ) : OrchestratorCommand()
+
+    data class RemoveGithubIssue(
+        val issueId: String,
+    ) : OrchestratorCommand()
+
     data object DeleteStateFile : OrchestratorCommand()
+
     data object GenerateKnowledgeMap : OrchestratorCommand()
-    data class ClearPrCache(val prNumber: String) : OrchestratorCommand()
-    data class TriggerJulesSession(val issueId: String) : OrchestratorCommand()
+
+    data class ClearPrCache(
+        val prNumber: String,
+    ) : OrchestratorCommand()
+
+    data class TriggerJulesSession(
+        val issueId: String,
+    ) : OrchestratorCommand()
 }
 
 data class Transition(
     val nextState: OrchestratorState,
-    val commands: List<OrchestratorCommand> = emptyList()
+    val commands: List<OrchestratorCommand> = emptyList(),
 )
 
 sealed interface OrchestratorState {
     val name: String
-    fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+
+    fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         return Transition(this)
     }
-    fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState
+
+    fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState
 
     fun updateSlot(slot: SlotContext) {
         slot.state = this
@@ -104,7 +202,10 @@ sealed interface OrchestratorState {
         }
     }
 
-    fun execute(env: OrchestratorEnvironment, context: OrchestratorContext): OrchestratorState {
+    fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+    ): OrchestratorState {
         // Find existing slot or create a default/fallback slot from the legacy context properties
         val issueId = context.currentIssueId ?: "dummy-issue-id"
         var slot = context.activeSlots.firstOrNull { it.currentIssueId == issueId }
@@ -199,7 +300,10 @@ sealed interface OrchestratorState {
             }
         }
 
-        fun fromSlot(slot: SlotContext, stateName: String? = null): OrchestratorState {
+        fun fromSlot(
+            slot: SlotContext,
+            stateName: String? = null,
+        ): OrchestratorState {
             val name = stateName ?: slot.state.name
             return when (name) {
                 "SELECT_TASK" -> SelectTaskState
@@ -259,7 +363,10 @@ sealed interface OrchestratorState {
             }
         }
 
-        fun fromContext(context: OrchestratorContext, stateName: String? = null): OrchestratorState {
+        fun fromContext(
+            context: OrchestratorContext,
+            stateName: String? = null,
+        ): OrchestratorState {
             val name = stateName ?: context.state.name
             return when (name) {
                 "SELECT_TASK" -> SelectTaskState
@@ -324,7 +431,10 @@ sealed interface OrchestratorState {
 data object SelectTaskState : OrchestratorState {
     override val name = "SELECT_TASK"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         return when (event) {
             is OrchestratorEvent.TaskSelected -> {
                 val selected = event.issue
@@ -333,15 +443,33 @@ data object SelectTaskState : OrchestratorState {
                         issueId = selected.id,
                         issueTitle = selected.title,
                         issueFile = selected.file.path,
-                        githubIssueNumber = selected.githubIssue?.toString()
-                    )
+                        githubIssueNumber = selected.githubIssue?.toString(),
+                    ),
                 )
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.IssueClosedDetected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         // SELECT_TASK is handled globally by the daemon runner to support multi-issue parallel execution,
         // but we implement a compliant single-slot fallback for backwards compatibility / unit tests.
         val allIssues = env.parseAllIssues()
@@ -368,11 +496,14 @@ data class PendingApprovalState(
     val issueId: String,
     val issueTitle: String,
     val issueFile: String,
-    val githubIssueNumber: String? = null
+    val githubIssueNumber: String? = null,
 ) : OrchestratorState {
     override val name = "PENDING_APPROVAL"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -384,8 +515,8 @@ data class PendingApprovalState(
                     nextState = SelectTaskState,
                     commands = listOf(
                         OrchestratorCommand.PrintLog("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m"),
-                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                    )
+                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                    ),
                 )
             }
             is OrchestratorEvent.TelegramApprovalReceived -> {
@@ -393,8 +524,8 @@ data class PendingApprovalState(
                     Transition(
                         nextState = SelectTaskState,
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("⏭️ Task $issueId skipped by user. Postponing.")
-                        )
+                            OrchestratorCommand.PrintLog("⏭️ Task $issueId skipped by user. Postponing."),
+                        ),
                     )
                 } else {
                     val commands = mutableListOf<OrchestratorCommand>()
@@ -404,12 +535,12 @@ data class PendingApprovalState(
                     } else {
                         return Transition(
                             nextState = AwaitingJulesStartState(issueId, githubIssueNumber),
-                            commands = commands
+                            commands = commands,
                         )
                     }
                     Transition(
                         nextState = AwaitingJulesStartState(issueId, "PENDING"),
-                        commands = commands
+                        commands = commands,
                     )
                 }
             }
@@ -421,7 +552,7 @@ data class PendingApprovalState(
                     }
                     Transition(
                         nextState = AwaitingJulesStartState(issueId, githubIssueNumber),
-                        commands = commands
+                        commands = commands,
                     )
                 } else {
                     if (!slot.approvalRequestSent) {
@@ -433,7 +564,7 @@ data class PendingApprovalState(
                         val text = if (issueFileObj.exists()) {
                             val rawBody = issueFileObj.readText().trim()
                             """
-                            🤖 *Approval Request: Start Task ${issueId}*
+                            🤖 *Approval Request: Start Task $issueId*
 
                             $rawBody
 
@@ -447,21 +578,71 @@ data class PendingApprovalState(
                         commands.add(OrchestratorCommand.SendApprovalRequest(issueId, truncatedText))
                         Transition(
                             nextState = this,
-                            commands = commands
+                            commands = commands,
                         )
                     } else {
                         Transition(this)
                     }
                 }
             }
-            else -> Transition(this)
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
+        }
+
+        // Validate issue context and needed fields before processing (MAZ-118 / MAZ-700)
+        val issueFileObj = File(issueFile)
+        val parsedIssue = if (issueFileObj.exists()) {
+            BacklogParser.parseIssueFile(issueFileObj)
+        } else {
+            null
+        }
+
+        if (parsedIssue != null) {
+            // Check for missing required fields: context and needed
+            if (parsedIssue.context.isNullOrBlank() || parsedIssue.needed.isNullOrBlank()) {
+                val msg = "⚠️ Task $issueId is missing required Context or Needed sections. " +
+                          "Fix the backlog file and retry. Skipping for now."
+                env.errPrintln(msg)
+                env.sendNotification(msg)
+                context.skippedIds.add(issueId)
+                context.activeSlots.remove(slot)
+                return SelectTaskState
+            }
+
+            // Check for warnings: unknown component or LOW priority
+            if (parsedIssue.component == "unknown" || parsedIssue.priority == BacklogPriority.LOW) {
+                val warningMsg = "⚠️ Task $issueId has ${if (parsedIssue.component == "unknown") "unknown component" else ""}${if (parsedIssue.component == "unknown" && parsedIssue.priority == BacklogPriority.LOW) {
+                    " and "
+                } else if (parsedIssue.priority == BacklogPriority.LOW) {
+                    "LOW priority"
+                } else {
+                    ""
+                }}. Proceeding with caution."
+                env.errPrintln(warningMsg)
+                env.sendNotification(warningMsg)
+            }
         }
 
         val event = if (githubIssueNumber != null) {
@@ -525,11 +706,14 @@ data class PendingApprovalState(
 
 data class AwaitingJulesStartState(
     val issueId: String,
-    val githubIssueNumber: String
+    val githubIssueNumber: String,
 ) : OrchestratorState {
     override val name = "AWAITING_JULES_START"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -541,24 +725,24 @@ data class AwaitingJulesStartState(
                     nextState = SelectTaskState,
                     commands = listOf(
                         OrchestratorCommand.PrintLog("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m"),
-                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                    )
+                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                    ),
                 )
             }
             is OrchestratorEvent.LinkedPrDetected -> {
                 Transition(
                     nextState = CiRunningState(issueId, githubIssueNumber, "dummy-session-id", event.prNumber),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("🎉 Found already existing/linked PR #${event.prNumber} for issue #$githubIssueNumber ($issueId). Transitioning straight to CI_RUNNING...")
-                    )
+                        OrchestratorCommand.PrintLog("🎉 Found already existing/linked PR #${event.prNumber} for issue #$githubIssueNumber ($issueId). Transitioning straight to CI_RUNNING..."),
+                    ),
                 )
             }
             is OrchestratorEvent.JulesSessionDetected -> {
                 Transition(
                     nextState = AwaitingPrState(issueId, githubIssueNumber, event.session.id),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("Linked Jules session: ID=${event.session.id}, Status=${event.session.status}")
-                    )
+                        OrchestratorCommand.PrintLog("Linked Jules session: ID=${event.session.id}, Status=${event.session.status}"),
+                    ),
                 )
             }
             is OrchestratorEvent.Tick -> {
@@ -567,30 +751,45 @@ data class AwaitingJulesStartState(
                         nextState = this,
                         commands = listOf(
                             OrchestratorCommand.TriggerJulesSession(issueId),
-                            OrchestratorCommand.PrintLog("Waiting for Jules session to be automatically triggered via REST API (attempt ${slot.julesTriggerAttempts + 1}/12)...")
-                        )
+                            OrchestratorCommand.PrintLog("Waiting for Jules session to be automatically triggered via REST API (attempt ${slot.julesTriggerAttempts + 1}/12)..."),
+                        ),
                     )
                 } else if (isTaskTimedOut(slot, OrchestratorConfig())) {
                     Transition(
                         nextState = SelectTaskState,
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("[ERROR] Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.", isErr = true)
-                        )
+                            OrchestratorCommand.PrintLog("[ERROR] Task $issueId timed out waiting for Jules session. Returning to SELECT_TASK.", isErr = true),
+                        ),
                     )
                 } else {
                     Transition(
                         nextState = this,
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("⚠️ Jules session did not trigger. Retrying in 1 minute...")
-                        )
+                            OrchestratorCommand.PrintLog("⚠️ Jules session did not trigger. Retrying in 1 minute..."),
+                        ),
                     )
                 }
             }
-            else -> Transition(this)
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -671,11 +870,14 @@ data class AwaitingJulesStartState(
 data class AwaitingPrState(
     val issueId: String,
     val githubIssueNumber: String,
-    val julesSessionId: String
+    val julesSessionId: String,
 ) : OrchestratorState {
     override val name = "AWAITING_PR"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -687,16 +889,16 @@ data class AwaitingPrState(
                     nextState = SelectTaskState,
                     commands = listOf(
                         OrchestratorCommand.PrintLog("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m"),
-                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                    )
+                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                    ),
                 )
             }
             is OrchestratorEvent.PrCreated -> {
                 Transition(
                     nextState = CiRunningState(issueId, githubIssueNumber, julesSessionId, event.prNumber),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("🎉 Jules opened PR #${event.prNumber}")
-                    )
+                        OrchestratorCommand.PrintLog("🎉 Jules opened PR #${event.prNumber}"),
+                    ),
                 )
             }
             is OrchestratorEvent.JulesSessionStatusFetched -> {
@@ -711,8 +913,8 @@ data class AwaitingPrState(
                             commands = listOf(
                                 OrchestratorCommand.PrintLog("\n⚠️ [RETRY] Jules task $issueId failed with status: ${session.status}. Retrying (Attempt ${slot.julesRetries + 1}/2)..."),
                                 OrchestratorCommand.SendTelegramNotification("⚠️ *Jules task failed* for $issueId (Status: ${session.status}). Sending 'Retry' message to Jules."),
-                                OrchestratorCommand.SendJulesMessage(session.id, "Retry")
-                            )
+                                OrchestratorCommand.SendJulesMessage(session.id, "Retry"),
+                            ),
                         )
                     } else {
                         Transition(
@@ -720,8 +922,8 @@ data class AwaitingPrState(
                             commands = listOf(
                                 OrchestratorCommand.PrintLog("\n❌ [FAILED] Jules task $issueId failed after ${slot.julesRetries} retries."),
                                 OrchestratorCommand.SendTelegramNotification("❌ *Jules task failed* for $issueId after ${slot.julesRetries} retries. Returning to SELECT_TASK."),
-                                OrchestratorCommand.RemoveGithubIssue(issueId)
-                            )
+                                OrchestratorCommand.RemoveGithubIssue(issueId),
+                            ),
                         )
                     }
                 } else {
@@ -731,8 +933,12 @@ data class AwaitingPrState(
 
                         if (session.status.contains("Awaiting", ignoreCase = true) || session.status.contains("Feedback", ignoreCase = true)) {
                             val sessionUrl = "https://jules.google.com/session/${session.id.substringAfterLast("/")}"
-                            commands.add(OrchestratorCommand.SendTelegramNotification("⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"))
-                            commands.add(OrchestratorCommand.PrintLog("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task $issueId. Status: ${session.status}\u001B[0m"))
+                            commands.add(
+                                OrchestratorCommand.SendTelegramNotification("⚠️ *Jules needs feedback on task $issueId!* Status: `${session.status}`. Please check and respond here: $sessionUrl"),
+                            )
+                            commands.add(
+                                OrchestratorCommand.PrintLog("\n\u001B[1;31m🔔 [FEEDBACK REQUIRED] Jules is blocked waiting for feedback on task $issueId. Status: ${session.status}\u001B[0m"),
+                            )
                             commands.add(OrchestratorCommand.PrintLog("👉 Respond here: $sessionUrl"))
                             commands.add(OrchestratorCommand.RingBell(5))
                         } else if (session.status.equals("Completed", ignoreCase = true)) {
@@ -743,9 +949,11 @@ data class AwaitingPrState(
                                     nextState = SelectTaskState,
                                     commands = listOf(
                                         OrchestratorCommand.PrintLog("\n\u001B[1;32m🟢 [REVIEW TASK COMPLETED] Review task $issueId is Completed!\u001B[0m"),
-                                        OrchestratorCommand.SendTelegramNotification("🟢 *Review Task Completed!* `$issueId` (GitHub Issue #$githubIssueNumber)\n👉 Check results on GitHub issue #$githubIssueNumber or Jules UI: $sessionUrl"),
-                                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                                    )
+                                        OrchestratorCommand.SendTelegramNotification(
+                                            "🟢 *Review Task Completed!* `$issueId` (GitHub Issue #$githubIssueNumber)\n👉 Check results on GitHub issue #$githubIssueNumber or Jules UI: $sessionUrl",
+                                        ),
+                                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                                    ),
                                 )
                             } else {
                                 val now = System.currentTimeMillis()
@@ -760,11 +968,27 @@ data class AwaitingPrState(
                     Transition(this, commands)
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -863,11 +1087,14 @@ data class CiRunningState(
     val issueId: String,
     val githubIssueNumber: String,
     val julesSessionId: String,
-    val prNumber: String
+    val prNumber: String,
 ) : OrchestratorState {
     override val name = "CI_RUNNING"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -878,8 +1105,8 @@ data class CiRunningState(
                 Transition(
                     nextState = ResolveTaskState(issueId),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally...")
-                    )
+                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally..."),
+                    ),
                 )
             }
             is OrchestratorEvent.IssueClosedDetected -> {
@@ -887,8 +1114,8 @@ data class CiRunningState(
                     nextState = SelectTaskState,
                     commands = listOf(
                         OrchestratorCommand.PrintLog("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m"),
-                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                    )
+                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                    ),
                 )
             }
             is OrchestratorEvent.JulesSessionStatusFetched -> {
@@ -900,10 +1127,14 @@ data class CiRunningState(
                         Transition(
                             nextState = this,
                             commands = listOf(
-                                OrchestratorCommand.PrintLog("\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${slot.julesRetries + 1}/2)..."),
-                                OrchestratorCommand.SendTelegramNotification("⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${slot.julesRetries + 1}/2)."),
-                                OrchestratorCommand.SendJulesMessage(session.id, "Retry")
-                            )
+                                OrchestratorCommand.PrintLog(
+                                    "\n⚠️ [RETRY] Jules session failed during CI: $statText (or has unable to complete activity). Retrying (Attempt ${slot.julesRetries + 1}/2)...",
+                                ),
+                                OrchestratorCommand.SendTelegramNotification(
+                                    "⚠️ *Jules session failed* during CI for $issueId (Status: $statText). Sending 'Retry' message to Jules (Attempt ${slot.julesRetries + 1}/2).",
+                                ),
+                                OrchestratorCommand.SendJulesMessage(session.id, "Retry"),
+                            ),
                         )
                     } else {
                         Transition(
@@ -911,16 +1142,16 @@ data class CiRunningState(
                             commands = listOf(
                                 OrchestratorCommand.PrintLog("\n❌ [FAILED] Jules session failed during CI: $statText after ${slot.julesRetries} retries."),
                                 OrchestratorCommand.SendTelegramNotification("❌ *Jules session failed* during CI for $issueId after ${slot.julesRetries} retries. Returning to SELECT_TASK."),
-                                OrchestratorCommand.RemoveGithubIssue(issueId)
-                            )
+                                OrchestratorCommand.RemoveGithubIssue(issueId),
+                            ),
                         )
                     }
                 } else if (session.status.lowercase() == "in_progress") {
                     Transition(
                         nextState = this,
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("Jules session ${session.id} is actively running (IN_PROGRESS). Waiting...")
-                        )
+                            OrchestratorCommand.PrintLog("Jules session ${session.id} is actively running (IN_PROGRESS). Waiting..."),
+                        ),
                     )
                 } else {
                     Transition(this)
@@ -962,11 +1193,25 @@ data class CiRunningState(
                     }
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -990,9 +1235,11 @@ data class CiRunningState(
         if (slot.julesSessionFailureWaitAttempts > 0) {
             val retriedSession = env.julesClient.getActiveSession(issueId)
             val isStillFailed = retriedSession != null &&
-                    (retriedSession.status.lowercase() == "failed" ||
+                    (
+                        retriedSession.status.lowercase() == "failed" ||
                      retriedSession.status.lowercase() == "cancelled" ||
-                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id))
+                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id)
+                    )
             if (isStillFailed && slot.julesSessionFailureWaitAttempts < 15) {
                 env.println("Waiting for Jules session status to transition out of failure state (attempt ${slot.julesSessionFailureWaitAttempts}/15)...")
                 slot.julesSessionFailureWaitAttempts++
@@ -1129,11 +1376,14 @@ data class AwaitingReviewState(
     val githubIssueNumber: String,
     val julesSessionId: String,
     val prNumber: String,
-    val lastHeadSha: String
+    val lastHeadSha: String,
 ) : OrchestratorState {
     override val name = "AWAITING_REVIEW"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -1145,16 +1395,16 @@ data class AwaitingReviewState(
                     nextState = SelectTaskState,
                     commands = listOf(
                         OrchestratorCommand.PrintLog("\n\u001B[1;33m⚠️ GitHub issue #$githubIssueNumber was closed. Resolving and canceling task $issueId.\u001B[0m"),
-                        OrchestratorCommand.MarkIssueAsResolved(issueId)
-                    )
+                        OrchestratorCommand.MarkIssueAsResolved(issueId),
+                    ),
                 )
             }
             is OrchestratorEvent.PrMergedDetected -> {
                 Transition(
                     nextState = ResolveTaskState(issueId),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally...")
-                    )
+                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally..."),
+                    ),
                 )
             }
             is OrchestratorEvent.JulesSessionStatusFetched -> {
@@ -1167,15 +1417,15 @@ data class AwaitingReviewState(
                         commands = listOf(
                             OrchestratorCommand.PrintLog("\n⚠️ [RETRY] Jules session failed during review: $statText (or has unable to complete activity). Retrying..."),
                             OrchestratorCommand.SendTelegramNotification("⚠️ *Jules session failed* during review on PR #$prNumber. Sending 'Retry' message to Jules."),
-                            OrchestratorCommand.SendJulesMessage(session.id, "Retry")
-                        )
+                            OrchestratorCommand.SendJulesMessage(session.id, "Retry"),
+                        ),
                     )
                 } else if (session.status.lowercase() == "in_progress") {
                     Transition(
                         nextState = this,
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("Jules session ${session.id} is actively running (IN_PROGRESS) in AWAITING_REVIEW. Waiting...")
-                        )
+                            OrchestratorCommand.PrintLog("Jules session ${session.id} is actively running (IN_PROGRESS) in AWAITING_REVIEW. Waiting..."),
+                        ),
                     )
                 } else {
                     Transition(this)
@@ -1188,15 +1438,15 @@ data class AwaitingReviewState(
                         commands = listOf(
                             OrchestratorCommand.PrintLog("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber"),
                             OrchestratorCommand.SendTelegramNotification("⚠️ Jules pushed an empty commit during review phase on PR #$prNumber"),
-                            OrchestratorCommand.RingBell(5)
-                        )
+                            OrchestratorCommand.RingBell(5),
+                        ),
                     )
                 } else {
                     Transition(
                         nextState = CiRunningState(issueId, githubIssueNumber, julesSessionId, prNumber),
                         commands = listOf(
-                            OrchestratorCommand.PrintLog("🟢 Jules pushed a non-empty commit on PR #$prNumber. Treating as real problem resolution. Resetting push count and returning to CI_RUNNING.")
-                        )
+                            OrchestratorCommand.PrintLog("🟢 Jules pushed a non-empty commit on PR #$prNumber. Treating as real problem resolution. Resetting push count and returning to CI_RUNNING."),
+                        ),
                     )
                 }
             }
@@ -1214,8 +1464,8 @@ data class AwaitingReviewState(
                         nextState = AwaitingMergeState(issueId, githubIssueNumber, julesSessionId, prNumber, lastHeadSha),
                         commands = listOf(
                             OrchestratorCommand.PrintLog("⚠️ PR #$prNumber Build Passed, but Jules review attempt count exceeded limit (3). Bypassing review."),
-                            OrchestratorCommand.SendTelegramNotification("⚠️ PR #$prNumber: Bypassing Jules review (attempt count exceeded limit).")
-                        )
+                            OrchestratorCommand.SendTelegramNotification("⚠️ PR #$prNumber: Bypassing Jules review (attempt count exceeded limit)."),
+                        ),
                     )
                 } else {
                     val searchSha = slot.lastRequestedReviewSha ?: lastHeadSha
@@ -1229,20 +1479,25 @@ data class AwaitingReviewState(
                             "\n\n🚨 **IMPORTANT — PREVIOUS ATTEMPT PUSHED CODE**: Your previous review attempt " +
                             "resulted in a commit push instead of a comment. This is incorrect. " +
                             "You must NOT push anything. Read the instructions below carefully before acting."
-                        } else ""
+                        } else {
+                            ""
+                        }
                         val prompt = OrchestratorPrompts.reviewPrompt(prNumber, shaPrefix, pushWarning)
                         Transition(
                             nextState = this,
                             commands = listOf(
                                 OrchestratorCommand.PrintLog("🤖 PR #$prNumber Build Passed. Requesting Jules review for SHA: $lastHeadSha (Attempt ${slot.julesReviewAttemptCount + 1}/3)"),
-                                OrchestratorCommand.CommentOnPr(prNumber, prompt)
-                            )
+                                OrchestratorCommand.CommentOnPr(prNumber, prompt),
+                            ),
                         )
                     } else {
                         val requestTime = java.time.Instant.parse(requestComment.createdAt)
                         val julesReply = comments.firstOrNull { comment ->
                             val author = comment.author?.login ?: ""
-                            author.contains("jules", ignoreCase = true) && java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
+                            author.contains("jules", ignoreCase = true) &&
+                                java.time.Instant
+                                .parse(comment.createdAt)
+                                .isAfter(requestTime)
                         }
 
                         if (julesReply != null) {
@@ -1258,25 +1513,37 @@ data class AwaitingReviewState(
                                     OrchestratorCommand.PrintLog("🟢 Jules review received for SHA $lastHeadSha."),
                                     OrchestratorCommand.PrintLog("Jules verdict on PR #$prNumber: $verdict"),
                                     OrchestratorCommand.SendTelegramNotification("🟢 *Jules reviewed PR #$prNumber!* Verdict: $verdict\nReady for merge: mock url"),
-                                    OrchestratorCommand.RingBell(3)
-                                )
+                                    OrchestratorCommand.RingBell(3),
+                                ),
                             )
                         } else {
                             Transition(
                                 nextState = this,
                                 commands = listOf(
-                                    OrchestratorCommand.PrintLog("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)...")
-                                )
+                                    OrchestratorCommand.PrintLog("⌛ Waiting for Jules (@jules) to complete review on PR #$prNumber (SHA: $shaPrefix)..."),
+                                ),
                             )
                         }
                     }
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -1294,9 +1561,11 @@ data class AwaitingReviewState(
         if (slot.julesSessionFailureWaitAttempts > 0) {
             val retriedSession = env.julesClient.getActiveSession(issueId)
             val isStillFailed = retriedSession != null &&
-                    (retriedSession.status.lowercase() == "failed" ||
+                    (
+                        retriedSession.status.lowercase() == "failed" ||
                      retriedSession.status.lowercase() == "cancelled" ||
-                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id))
+                     env.julesClient.hasUnableToCompleteActivity(retriedSession.id)
+                    )
             if (isStillFailed && slot.julesSessionFailureWaitAttempts < 15) {
                 env.println("Waiting for Jules session status to transition out of failure state (attempt ${slot.julesSessionFailureWaitAttempts}/15)...")
                 slot.julesSessionFailureWaitAttempts++
@@ -1424,7 +1693,9 @@ data class AwaitingReviewState(
                 val julesReply = comments.firstOrNull { comment ->
                     val author = comment.author?.login ?: ""
                     (author.contains("jules", ignoreCase = true)) &&
-                    java.time.Instant.parse(comment.createdAt).isAfter(requestTime)
+                    java.time.Instant
+                        .parse(comment.createdAt)
+                        .isAfter(requestTime)
                 }
 
                 if (julesReply != null) {
@@ -1446,11 +1717,14 @@ data class AwaitingMergeState(
     val githubIssueNumber: String,
     val julesSessionId: String,
     val prNumber: String,
-    val lastHeadSha: String
+    val lastHeadSha: String,
 ) : OrchestratorState {
     override val name = "AWAITING_MERGE"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return Transition(this)
@@ -1461,8 +1735,8 @@ data class AwaitingMergeState(
                 Transition(
                     nextState = ResolveTaskState(issueId),
                     commands = listOf(
-                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally...")
-                    )
+                        OrchestratorCommand.PrintLog("🎉 PR #$prNumber merged! resolving issue locally..."),
+                    ),
                 )
             }
             is OrchestratorEvent.PrBuildStatusFetched -> {
@@ -1472,11 +1746,27 @@ data class AwaitingMergeState(
                     Transition(this)
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.IssueClosedDetected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked -> Transition(this)
         }
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -1514,11 +1804,15 @@ data class CreateGenerationState(
     val issueId: String,
     val githubIssueNumber: String,
     val julesSessionId: String,
-    val prNumber: String
+    val prNumber: String,
 ) : OrchestratorState {
     override val name = "CREATE_GENERATION"
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val currentTime = System.currentTimeMillis()
         if (currentTime < slot.retryAfterTime) {
             return this
@@ -1552,7 +1846,7 @@ data class CreateGenerationState(
                 githubIssueNumber = githubIssueNumber,
                 previousPrUrl = prUrl,
                 previousBranch = "PR #$prNumber (SHA: $previousBranch)",
-                originalTaskDescription = issueDescription
+                originalTaskDescription = issueDescription,
             )
         } catch (e: Exception) {
             env.errPrintln("❌ Failed to create generation session via Jules API: ${e.message}")
@@ -1579,7 +1873,7 @@ data class CreateGenerationState(
         try {
             env.gitHubClient.commentOnIssue(
                 githubIssueNumber,
-                "🚨 Merge conflict detected on PR #$prNumber. Started new Jules session (Generation ${slot.generation}) to resolve conflicts against master: https://jules.google.com/session/${newSession.id}"
+                "🚨 Merge conflict detected on PR #$prNumber. Started new Jules session (Generation ${slot.generation}) to resolve conflicts against master: https://jules.google.com/session/${newSession.id}",
             )
         } catch (e: Exception) {
             env.errPrintln("⚠️ Failed to comment on issue #$githubIssueNumber after creating generation session ${newSession.id}: ${e.message}")
@@ -1590,11 +1884,14 @@ data class CreateGenerationState(
 }
 
 data class ResolveTaskState(
-    val issueId: String
+    val issueId: String,
 ) : OrchestratorState {
     override val name = "RESOLVE_TASK"
 
-    override fun evaluate(slot: SlotContext, event: OrchestratorEvent): Transition {
+    override fun evaluate(
+        slot: SlotContext,
+        event: OrchestratorEvent,
+    ): Transition {
         return Transition(
             nextState = SelectTaskState,
             commands = listOf(
@@ -1602,12 +1899,16 @@ data class ResolveTaskState(
                 OrchestratorCommand.PrintLog("Regenerating architectural maps..."),
                 OrchestratorCommand.GenerateKnowledgeMap,
                 OrchestratorCommand.PrintLog("✅ Resolved issue `$issueId`. Picking next task..."),
-                OrchestratorCommand.DeleteStateFile
-            )
+                OrchestratorCommand.DeleteStateFile,
+            ),
         )
     }
 
-    override fun execute(env: OrchestratorEnvironment, context: OrchestratorContext, slot: SlotContext): OrchestratorState {
+    override fun execute(
+        env: OrchestratorEnvironment,
+        context: OrchestratorContext,
+        slot: SlotContext,
+    ): OrchestratorState {
         val transition = evaluate(slot, OrchestratorEvent.Tick)
         val interpreter = CommandInterpreter(env, context, slot)
         for (cmd in transition.commands) {
@@ -1618,7 +1919,10 @@ data class ResolveTaskState(
     }
 }
 
-fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
+fun isTaskTimedOut(
+    slot: SlotContext,
+    config: OrchestratorConfig,
+): Boolean {
     if (slot.startTime == 0L) return false
     val now = System.currentTimeMillis()
     val elapsedMinutes = TimeUnit.MILLISECONDS.toMinutes(now - slot.startTime)
@@ -1628,10 +1932,17 @@ fun isTaskTimedOut(slot: SlotContext, config: OrchestratorConfig): Boolean {
 enum class RebaseOutcome {
     ALREADY_SANITIZED,
     WAITING_RETRY,
-    CREATE_NEW_GENERATION
+    CREATE_NEW_GENERATION,
 }
 
-private fun handleRebaseAndConflicts(env: OrchestratorEnvironment, slot: SlotContext, prNumber: String, issueId: String, githubIssueNumber: String, julesSessionId: String): RebaseOutcome {
+private fun handleRebaseAndConflicts(
+    env: OrchestratorEnvironment,
+    slot: SlotContext,
+    prNumber: String,
+    issueId: String,
+    githubIssueNumber: String,
+    julesSessionId: String,
+): RebaseOutcome {
     val currentTime = System.currentTimeMillis()
     var status = env.gitHubClient.getPrMergeStatus(prNumber)
     if (status.isError) {

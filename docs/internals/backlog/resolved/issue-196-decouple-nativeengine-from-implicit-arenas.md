@@ -11,6 +11,8 @@ solution_approved: true
 blast_radius: "high"
 reversible: false
 github_issue: 247
+paperclip_issue_id: 50d3af32-84a8-45da-b3ea-065f41431b8e
+paperclip_identifier: MAZ-375
 ---
 
 # 🟡 [Severity: MEDIUM]: Decouple NativeEngine from Implicit Arenas

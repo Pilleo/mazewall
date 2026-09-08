@@ -7,12 +7,11 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
 class StraceLogParserTest {
-
     @Test
     fun `execve only extracts first path`() {
         val line = "12345 execve(\"/usr/bin/bash\", [\"bash\", \"-c\", \"echo hello\"], 0x7ffd42a3b4d0 /* 84 vars */) = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("EXECVE", syscall.name)
@@ -23,7 +22,7 @@ class StraceLogParserTest {
     fun `readlink buffer is ignored`() {
         val line = "12345 readlink(\"/proc/self/exe\", \"buffer\", 1024) = 15"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("READLINK", syscall.name)
@@ -34,7 +33,7 @@ class StraceLogParserTest {
     fun `symlinkat extracts both operands`() {
         val line = "12345 symlinkat(\"/source\", AT_FDCWD, \"/target\") = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("SYMLINKAT", syscall.name)
@@ -45,7 +44,7 @@ class StraceLogParserTest {
     fun `linkat extracts both operands`() {
         val line = "12345 linkat(AT_FDCWD, \"/source\", AT_FDCWD, \"/target\", 0) = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("LINKAT", syscall.name)
@@ -56,7 +55,7 @@ class StraceLogParserTest {
     fun `renameat extracts both operands`() {
         val line = "12345 renameat(AT_FDCWD, \"/old\", AT_FDCWD, \"/new\") = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("RENAMEAT", syscall.name)
@@ -67,7 +66,7 @@ class StraceLogParserTest {
     fun `renameat2 extracts both operands`() {
         val line = "12345 renameat2(AT_FDCWD, \"/old\", AT_FDCWD, \"/new\", 0) = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("RENAMEAT2", syscall.name)
@@ -78,7 +77,7 @@ class StraceLogParserTest {
     fun `link extracts both operands`() {
         val line = "12345 link(\"/source\", \"/target\") = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("LINK", syscall.name)
@@ -89,7 +88,7 @@ class StraceLogParserTest {
     fun `symlink extracts both operands`() {
         val line = "12345 symlink(\"/source\", \"/target\") = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("SYMLINK", syscall.name)
@@ -100,7 +99,7 @@ class StraceLogParserTest {
     fun `rename extracts both operands`() {
         val line = "12345 rename(\"/old\", \"/new\") = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("RENAME", syscall.name)
@@ -111,7 +110,7 @@ class StraceLogParserTest {
     fun `open extracts first path`() {
         val line = "12345 open(\"/etc/passwd\", O_RDONLY) = 3"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("OPEN", syscall.name)
@@ -122,7 +121,7 @@ class StraceLogParserTest {
     fun `openat extracts first path`() {
         val line = "12345 openat(AT_FDCWD, \"/etc/passwd\", O_RDONLY) = 3"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("OPENAT", syscall.name)
@@ -133,7 +132,7 @@ class StraceLogParserTest {
     fun `rename with single quoted string extracts first path`() {
         val line = "12345 rename(\"/old\", 0x7ffd42a3b4d0) = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("RENAME", syscall.name)
@@ -144,7 +143,7 @@ class StraceLogParserTest {
     fun `linkat with single quoted string extracts first path`() {
         val line = "12345 linkat(AT_FDCWD, \"/source\", AT_FDCWD, 0x7ffd42a3b4d0) = 0"
         val result = StraceLogParser.parseLine(line)
-        
+
         assert(result is ProfileObservation.Syscall)
         val syscall = result as ProfileObservation.Syscall
         assertEquals("LINKAT", syscall.name)

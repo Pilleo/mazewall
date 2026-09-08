@@ -12,6 +12,8 @@ target_files:
 effort: "small"
 autonomy: "autonomous"
 github_issue: 446
+paperclip_issue_id: b046cfd7-5715-401a-bc11-f3c2743e7f7a
+paperclip_identifier: MAZ-424
 ---
 
 # 🔴 [Severity: HIGH]: Automatically Resume and Re-import Orphaned In-Progress Backlog Tasks into Active Slots

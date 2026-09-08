@@ -1,12 +1,11 @@
 package io.mazewall.orchestrator
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import java.io.File
 
 class DependencyGraphTest {
-
     @Test
     fun `selectNextIssue returns null if no issues`() {
         assertNull(DependencyGraph.selectNextIssue(emptyList()))
@@ -21,7 +20,7 @@ class DependencyGraphTest {
             title = "Parent Task",
             priority = BacklogPriority.MEDIUM,
             status = "in_progress",
-            dependencies = emptyList()
+            dependencies = emptyList(),
         )
 
         // Dependent task is 'open' but has dependency on issue-001.
@@ -31,7 +30,7 @@ class DependencyGraphTest {
             title = "Dependent Task",
             priority = BacklogPriority.HIGH,
             status = "open",
-            dependencies = listOf("issue-001")
+            dependencies = listOf("issue-001"),
         )
 
         // Dependent task should be blocked because the parent is active / unresolved (in allActiveIds)
@@ -50,7 +49,7 @@ class DependencyGraphTest {
             title = "Dependent Task",
             priority = BacklogPriority.HIGH,
             status = "open",
-            dependencies = listOf("issue-001")
+            dependencies = listOf("issue-001"),
         )
 
         val selected = DependencyGraph.selectNextIssue(listOf(dependentIssue))

@@ -1,6 +1,5 @@
 package io.mazewall.ffi.memory
 
-
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -25,7 +24,10 @@ public sealed interface ManagedSegment {
     /**
      * Returns a slice of this segment.
      */
-    public fun asSlice(offset: Long, newSize: Long): ManagedSegment
+    public fun asSlice(
+        offset: Long,
+        newSize: Long,
+    ): ManagedSegment
 
     public companion object {
         /**
@@ -36,20 +38,34 @@ public sealed interface ManagedSegment {
         /**
          * Wraps a raw native address and size into a ManagedSegment.
          */
-        public fun ofAddress(address: Long, size: Long): ManagedSegment =
-            SharedSegment(MemorySegment.ofAddress(address).reinterpret(size))
+        public fun ofAddress(
+            address: Long,
+            size: Long,
+        ): ManagedSegment = SharedSegment(MemorySegment.ofAddress(address).reinterpret(size))
 
         /**
          * Copies a byte array into a managed segment.
          */
-        public fun copy(src: ByteArray, srcOffset: Int, dest: ManagedSegment, destOffset: Long, size: Int) {
+        public fun copy(
+            src: ByteArray,
+            srcOffset: Int,
+            dest: ManagedSegment,
+            destOffset: Long,
+            size: Int,
+        ) {
             MemorySegment.copy(src, srcOffset, dest.native, ValueLayout.JAVA_BYTE, destOffset, size)
         }
 
         /**
          * Copies from a managed segment into a byte array.
          */
-        public fun copy(src: ManagedSegment, srcOffset: Long, dest: ByteArray, destOffset: Int, size: Int) {
+        public fun copy(
+            src: ManagedSegment,
+            srcOffset: Long,
+            dest: ByteArray,
+            destOffset: Int,
+            size: Int,
+        ) {
             MemorySegment.copy(src.native, ValueLayout.JAVA_BYTE, srcOffset, dest, destOffset, size)
         }
     }
@@ -59,20 +75,34 @@ public sealed interface ManagedSegment {
  * A segment that is confined to a single thread and a deterministic lifecycle ([Arena]).
  */
 @JvmInline
-public value class ConfinedSegment(internal val native: MemorySegment) : ManagedSegment {
+public value class ConfinedSegment(
+    internal val native: MemorySegment,
+) : ManagedSegment {
     override fun address(): Long = native.address()
+
     override fun byteSize(): Long = native.byteSize()
-    override fun asSlice(offset: Long, newSize: Long): ConfinedSegment = ConfinedSegment(native.asSlice(offset, newSize))
+
+    override fun asSlice(
+        offset: Long,
+        newSize: Long,
+    ): ConfinedSegment = ConfinedSegment(native.asSlice(offset, newSize))
 }
 
 /**
  * A segment that can be shared across multiple threads.
  */
 @JvmInline
-public value class SharedSegment(internal val native: MemorySegment) : ManagedSegment {
+public value class SharedSegment(
+    internal val native: MemorySegment,
+) : ManagedSegment {
     override fun address(): Long = native.address()
+
     override fun byteSize(): Long = native.byteSize()
-    override fun asSlice(offset: Long, newSize: Long): SharedSegment = SharedSegment(native.asSlice(offset, newSize))
+
+    override fun asSlice(
+        offset: Long,
+        newSize: Long,
+    ): SharedSegment = SharedSegment(native.asSlice(offset, newSize))
 }
 
 /**
@@ -85,24 +115,50 @@ public val ManagedSegment.native: MemorySegment
     }
 
 public fun ManagedSegment.readByte(offset: Long): Byte = this.native.readByte(offset)
-public fun ManagedSegment.writeByte(offset: Long, value: Byte): Unit = this.native.writeByte(offset, value)
+
+public fun ManagedSegment.writeByte(
+    offset: Long,
+    value: Byte,
+): Unit = this.native.writeByte(offset, value)
 
 public fun ManagedSegment.readShort(offset: Long): Short = this.native.readShort(offset)
-public fun ManagedSegment.writeShort(offset: Long, value: Short): Unit = this.native.writeShort(offset, value)
+
+public fun ManagedSegment.writeShort(
+    offset: Long,
+    value: Short,
+): Unit = this.native.writeShort(offset, value)
 
 public fun ManagedSegment.readInt(offset: Long): Int = this.native.readInt(offset)
-public fun ManagedSegment.writeInt(offset: Long, value: Int): Unit = this.native.writeInt(offset, value)
+
+public fun ManagedSegment.writeInt(
+    offset: Long,
+    value: Int,
+): Unit = this.native.writeInt(offset, value)
 
 public fun ManagedSegment.readIntUnaligned(offset: Long): Int = this.native.readIntUnaligned(offset)
-public fun ManagedSegment.writeIntUnaligned(offset: Long, value: Int): Unit = this.native.writeIntUnaligned(offset, value)
+
+public fun ManagedSegment.writeIntUnaligned(
+    offset: Long,
+    value: Int,
+): Unit = this.native.writeIntUnaligned(offset, value)
 
 public fun ManagedSegment.readLong(offset: Long): Long = this.native.readLong(offset)
-public fun ManagedSegment.writeLong(offset: Long, value: Long): Unit = this.native.writeLong(offset, value)
+
+public fun ManagedSegment.writeLong(
+    offset: Long,
+    value: Long,
+): Unit = this.native.writeLong(offset, value)
 
 public fun ManagedSegment.readLongUnaligned(offset: Long): Long = this.native.readLongUnaligned(offset)
-public fun ManagedSegment.writeLongUnaligned(offset: Long, value: Long): Unit = this.native.writeLongUnaligned(offset, value)
 
-public fun ManagedSegment.fill(value: Byte): Unit { this.native.fill(value) }
+public fun ManagedSegment.writeLongUnaligned(
+    offset: Long,
+    value: Long,
+): Unit = this.native.writeLongUnaligned(offset, value)
+
+public fun ManagedSegment.fill(value: Byte) {
+    this.native.fill(value)
+}
 
 public val NativeArena.unwrap: java.lang.foreign.Arena get() = this.arena
 

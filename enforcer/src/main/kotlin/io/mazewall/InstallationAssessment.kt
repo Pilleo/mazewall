@@ -62,84 +62,22 @@ public object InstallationAssessor {
         val scope = if (processWide) InstallationScope.PROCESS else InstallationScope.THREAD
         val virtual = Thread.currentThread().isVirtual
         val fallback = Platform.configuredFallback()
-        val warnings = mutableListOf<String>()
-        val reasons = mutableListOf<String>()
-        val stages = mutableListOf<InstallationStage>()
-
-        if (fallback != Platform.FallbackBehavior.FAIL) {
-            warnings.add("fallback=$fallback does not make an unsupported platform installable")
-        }
-
-        if (!Platform.isLinux) {
-            reasons.add("not Linux")
-            stages.add(InstallationStage.PLATFORM)
-        }
-
-        val matrix = if (Platform.isLinux) Platform.featureMatrix else KernelFeatureMatrix(
-            seccompSupported = false,
-            seccompTsyncSupported = false,
-            seccompUserNotifSupported = false,
-            landlockAbiVersion = 0,
-            cetSupported = false,
-        )
-        if (!Platform.isSupported()) {
-            reasons.add("seccomp is not available or sanity check failed")
-            stages.add(InstallationStage.SECCOMP)
-        }
-        if (virtual) {
-            reasons.add("current thread is virtual; seccomp would poison the carrier")
-            stages.add(InstallationStage.VIRTUAL_THREAD)
-        }
-
+        val matrix = featureMatrix()
         val tsyncRequired = processWide
-        if (tsyncRequired && !matrix.seccompTsyncSupported) {
-            reasons.add("process-wide install needs SECCOMP_FILTER_FLAG_TSYNC")
-            stages.add(InstallationStage.TSYNC)
-        }
-
         val userNotifRequired = policy.hasSupervisedSyscalls
-        if (userNotifRequired && !matrix.seccompUserNotifSupported) {
-            reasons.add("policy uses USER_NOTIF but the kernel probe failed")
-            stages.add(InstallationStage.USER_NOTIF)
-        }
-        if (processWide && userNotifRequired) {
-            reasons.add("process-wide USER_NOTIF is unsupported (NEW_LISTENER cannot combine with TSYNC)")
-            stages.add(InstallationStage.USER_NOTIF)
-        }
-
         val landlockRequired = policy.enforceLandlock
-        if (landlockRequired && !matrix.landlockSupported) {
-            reasons.add("policy has Landlock paths but landlock ABI is 0")
-            stages.add(InstallationStage.LANDLOCK)
-        }
-        if (processWide && landlockRequired && !matrix.landlockTsyncSupported) {
-            reasons.add("process-wide Landlock needs TSYNC (Landlock ABI 8+)")
-            stages.add(InstallationStage.LANDLOCK)
-        }
-
-        if (policy.lockIntelCet && !matrix.cetSupported) {
-            reasons.add("lockIntelCet is true but Intel CET is not supported on this platform")
-            stages.add(InstallationStage.INTEL_CET)
-        }
-
-        if (processWide && !policy.allowMmapExec) {
-            warnings.add("allowMmapExec=false on process-wide policy can fatal a JIT JVM")
-        }
+        val blockers = blockers(policy, processWide, virtual, matrix, userNotifRequired, landlockRequired)
+        val warnings = warnings(fallback, policy, processWide)
 
         return InstallationAssessment(
             scope = scope,
-            installable = reasons.isEmpty(),
+            installable = blockers.isEmpty(),
             fallback = fallback,
             argumentRules = policy.argumentRules,
-            mode =
-                if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) {
-                    PolicyMode.ALLOW_LIST
-                } else {
-                    PolicyMode.DENY_LIST
-                },
+            mode = policyMode(policy),
             warnings = warnings,
-            blockingReasons = reasons,
-            blockedStages = stages.distinct(),
+            blockingReasons = blockers.map { it.reason },
+            blockedStages = blockers.map { it.stage }.distinct(),
             landlockRequired = landlockRequired,
             landlockAbi = matrix.landlockAbiVersion,
             userNotifRequired = userNotifRequired,
@@ -148,4 +86,55 @@ public object InstallationAssessor {
             seccompSupported = Platform.isSupported(),
         )
     }
+
+    private fun blockers(
+        policy: PolicyDefinition<*>,
+        processWide: Boolean,
+        virtualThread: Boolean,
+        matrix: KernelFeatureMatrix,
+        userNotifRequired: Boolean,
+        landlockRequired: Boolean,
+    ): List<InstallationBlocker> =
+        listOf(
+            InstallationBlocker(InstallationStage.PLATFORM, !Platform.isLinux, "not Linux"),
+            InstallationBlocker(InstallationStage.SECCOMP, !Platform.isSupported(), "seccomp is not available or sanity check failed"),
+            InstallationBlocker(InstallationStage.VIRTUAL_THREAD, virtualThread, "current thread is virtual; seccomp would poison the carrier"),
+            InstallationBlocker(InstallationStage.TSYNC, processWide && !matrix.seccompTsyncSupported, "process-wide install needs SECCOMP_FILTER_FLAG_TSYNC"),
+            InstallationBlocker(InstallationStage.USER_NOTIF, userNotifRequired && !matrix.seccompUserNotifSupported, "policy uses USER_NOTIF but the kernel probe failed"),
+            InstallationBlocker(InstallationStage.USER_NOTIF, processWide && userNotifRequired, "process-wide USER_NOTIF is unsupported (NEW_LISTENER cannot combine with TSYNC)"),
+            InstallationBlocker(InstallationStage.LANDLOCK, landlockRequired && !matrix.landlockSupported, "policy has Landlock paths but landlock ABI is 0"),
+            InstallationBlocker(InstallationStage.LANDLOCK, processWide && landlockRequired && !matrix.landlockTsyncSupported, "process-wide Landlock needs TSYNC (Landlock ABI 8+)"),
+            InstallationBlocker(InstallationStage.INTEL_CET, policy.lockIntelCet && !matrix.cetSupported, "lockIntelCet is true but Intel CET is not supported on this platform"),
+        ).filter(InstallationBlocker::applies)
+
+    private fun warnings(
+        fallback: Platform.FallbackBehavior,
+        policy: PolicyDefinition<*>,
+        processWide: Boolean,
+    ): List<String> =
+        listOfNotNull(
+            "fallback=$fallback does not make an unsupported platform installable".takeIf { fallback != Platform.FallbackBehavior.FAIL },
+            "allowMmapExec=false on process-wide policy can fatal a JIT JVM".takeIf { processWide && !policy.allowMmapExec },
+        )
+
+    private fun featureMatrix(): KernelFeatureMatrix =
+        if (Platform.isLinux) {
+            Platform.featureMatrix
+        } else {
+            KernelFeatureMatrix(
+                seccompSupported = false,
+                seccompTsyncSupported = false,
+                seccompUserNotifSupported = false,
+                landlockAbiVersion = 0,
+                cetSupported = false,
+            )
+        }
+
+    private fun policyMode(policy: PolicyDefinition<*>): PolicyMode = if (policy.defaultAction is io.mazewall.core.SeccompAction.ACT_ERRNO) PolicyMode.ALLOW_LIST else PolicyMode.DENY_LIST
+
+    private data class InstallationBlocker(
+        val stage: InstallationStage,
+        val applies: Boolean,
+        val reason: String,
+    )
 }

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 297
+paperclip_issue_id: 8efb8c70-a49a-48f8-a030-4603e54a0bb5
+paperclip_identifier: MAZ-315
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `IOCTL` fallbacks during legacy JVM syscall tracing

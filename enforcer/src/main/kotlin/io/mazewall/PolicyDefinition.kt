@@ -1,15 +1,14 @@
 package io.mazewall
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.core.Arch
 import io.mazewall.core.SandboxedPath
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import java.util.TreeMap
 
 /**
@@ -37,13 +36,14 @@ public data class PolicyDefinition<out S : PolicyScope>(
     public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
     internal val enforceLandlock: Boolean = false,
     public val customViolationPhrases: List<String> = emptyList(),
-    public val customViolationRegexes: List<Regex> = emptyList()
+    public val customViolationRegexes: List<Regex> = emptyList(),
 ) {
     public val hasSupervisedSyscalls: Boolean get() =
         syscallActions.values.any { it == SeccompAction.ACT_NOTIFY } ||
             defaultAction == SeccompAction.ACT_NOTIFY
 
     public val argumentRules: PolicyArgumentRules get() = PolicyArgumentRules.of(this)
+
     /** Returns true if the given [syscall] is unconditionally allowed by this policy. */
     public fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
@@ -130,7 +130,6 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO()
             }
 
-            @Suppress("UNCHECKED_CAST")
             return PolicyDefinition<S>(
                 defaultAction = combinedDefaultAction,
                 syscallActions = combinedSyscalls,
@@ -142,13 +141,12 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 allowedFsWritePaths = fsWrites,
                 enforceLandlock = enforceLandlock,
                 customViolationPhrases = combinedPhrases,
-                customViolationRegexes = combinedRegexes
+                customViolationRegexes = combinedRegexes,
             )
         }
 
         /** Same as [combine]; name states that the result is never more permissive. */
-        public fun <S : PolicyScope> intersection(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> =
-            combine(*policies)
+        public fun <S : PolicyScope> intersection(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> = combine(*policies)
 
         private fun intersectPaths(
             set1: Set<SandboxedPath>,

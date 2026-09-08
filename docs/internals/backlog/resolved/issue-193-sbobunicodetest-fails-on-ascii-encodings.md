@@ -8,6 +8,8 @@ dependencies: []
 target_files:
   - "io.mazewall.SbobUnicodeTest"
 github_issue: 114
+paperclip_issue_id: 8e954e18-bbe3-4d9a-93b6-5c0be14f30c3
+paperclip_identifier: MAZ-372
 ---
 
 # Description

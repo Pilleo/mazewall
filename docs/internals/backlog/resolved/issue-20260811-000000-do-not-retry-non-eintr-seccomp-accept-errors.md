@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngineTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 5acda092-abb2-428f-bca9-02bd46b2d1e9
+paperclip_identifier: MAZ-479
 ---
 
 # 🟡 [Severity: MEDIUM]: Do Not Retry Non-EINTR Seccomp Accept Errors With a Blocking Accept

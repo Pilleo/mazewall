@@ -1,12 +1,16 @@
 package io.mazewall.orchestrator
 
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.util.concurrent.TimeUnit
 
 class CommandInterpreter(
     private val env: OrchestratorEnvironment,
     private val context: OrchestratorContext,
-    private val slot: SlotContext
+    private val slot: SlotContext,
 ) {
     fun interpret(command: OrchestratorCommand): Any? {
         return when (command) {
@@ -128,14 +132,13 @@ class CommandInterpreter(
                 env.gitHubClient.clearPrCache(command.prNumber)
                 Unit
             }
-
         }
     }
 }
 
 class OrchestratorDaemonRunner(
     private val env: OrchestratorEnvironment,
-    private val stateFile: File
+    private val stateFile: File,
 ) {
     val context = OrchestratorContext()
 
@@ -152,7 +155,14 @@ class OrchestratorDaemonRunner(
     fun saveState() {
         val props = java.util.Properties()
         context.save(props)
-        stateFile.outputStream().use { props.store(it, "Orchestrator state") }
+        val parent = stateFile.parentFile ?: File(".")
+        val temporary = File(parent, "${stateFile.name}.tmp")
+        temporary.outputStream().use { props.store(it, "Orchestrator state") }
+        try {
+            Files.move(temporary.toPath(), stateFile.toPath(), REPLACE_EXISTING, ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary.toPath(), stateFile.toPath(), REPLACE_EXISTING)
+        }
     }
 
     fun run() {
@@ -182,7 +192,7 @@ class OrchestratorDaemonRunner(
                                 is PendingApprovalState -> 3
                                 else -> 4
                             }
-                        }
+                        },
                     )
                     for (slot in slotsToProcess) {
                         try {
@@ -199,7 +209,9 @@ class OrchestratorDaemonRunner(
                             env.errPrintln("⚠️ Error in state ${slot.state.name} for slot ${slot.currentIssueId}: ${e.message}")
                             e.printStackTrace()
                             try {
-                                env.sendNotification("⚠️ *Daemon Error in State ${slot.state.name} for slot ${slot.currentIssueId}:* `${e.message}`. Retrying in ${env.config.daemonErrorRetryMinutes} minutes...")
+                                env.sendNotification(
+                                    "⚠️ *Daemon Error in State ${slot.state.name} for slot ${slot.currentIssueId}:* `${e.message}`. Retrying in ${env.config.daemonErrorRetryMinutes} minutes...",
+                                )
                             } catch (notificationEx: Exception) {
                                 env.errPrintln("⚠️ Failed to send error notification: ${notificationEx.message}")
                             }
@@ -296,24 +308,15 @@ class OrchestratorDaemonRunner(
                 if (activeIssues.isEmpty()) {
                     true
                 } else {
-                    val issueIsEmptyAndInterfering = (issue.targetFiles.isEmpty() || issue.targetModules.isEmpty()) && !issue.isNonInterfering()
-                    if (issueIsEmptyAndInterfering) {
-                        false
-                    } else {
-                        activeIssues.none { active ->
-                            val activeIsEmptyAndInterfering = (active.targetFiles.isEmpty() || active.targetModules.isEmpty()) && !active.isNonInterfering()
-                            activeIsEmptyAndInterfering ||
-                                issue.targetFiles.any { it in active.targetFiles } ||
-                                issue.targetModules.any { it in active.targetModules }
-                        }
-                    }
+                    activeIssues.none { active -> active.conflictsWith(issue) }
                 }
             }
 
             // Sort by priority descending, then ID descending
-            val nextIssue = conflictFreeIssues.sortedWith(
+            val nextIssue = conflictFreeIssues
+                .sortedWith(
                 compareByDescending<BacklogIssue> { it.priority.rank }
-                    .thenByDescending { it.id }
+                    .thenByDescending { it.id },
             ).firstOrNull()
 
             if (nextIssue == null) {
@@ -382,7 +385,7 @@ fun main() {
         maxRetries = getEnvOr("MAX_RETRIES", "3").toInt(),
         initialRetryDelayMs = getEnvOr("INITIAL_RETRY_DELAY_MS", "1000").toLong(),
         githubCacheTtlMs = getEnvOr("GITHUB_CACHE_TTL_MS", "10000").toLong(),
-        stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "900000").toLong()
+        stuckPendingThresholdMs = getEnvOr("STUCK_PENDING_THRESHOLD_MS", "900000").toLong(),
     )
 
     val gitHubClient = RealGitHubClient(config)
@@ -400,7 +403,11 @@ private fun loadDotEnv() {
             val trimmed = line.trim()
             if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
                 val key = trimmed.substringBefore("=").trim()
-                val value = trimmed.substringAfter("=").trim().removeSurrounding("\"").removeSurrounding("'")
+                val value = trimmed
+                    .substringAfter("=")
+                    .trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
                 System.setProperty(key, value)
             }
         }
@@ -415,13 +422,16 @@ private fun getEnv(key: String): String {
     return System.getenv(key) ?: System.getProperty(key) ?: throw IllegalStateException("Environment variable $key is not set.")
 }
 
-private fun getEnvOr(key: String, default: String): String {
+private fun getEnvOr(
+    key: String,
+    default: String,
+): String {
     return System.getenv(key) ?: System.getProperty(key) ?: default
 }
 
 private class LoggingOutputStream(
     private val original: java.io.OutputStream,
-    private val logFile: File
+    private val logFile: File,
 ) : java.io.OutputStream() {
     private val fileStream = java.io.FileOutputStream(logFile, true)
 
@@ -432,7 +442,11 @@ private class LoggingOutputStream(
     }
 
     @Synchronized
-    override fun write(b: ByteArray, off: Int, len: Int) {
+    override fun write(
+        b: ByteArray,
+        off: Int,
+        len: Int,
+    ) {
         original.write(b, off, len)
         fileStream.write(b, off, len)
     }

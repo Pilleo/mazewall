@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3825912190
+paperclip_issue_id: 0a49a06c-3455-4626-a9cc-3f1109f9f6e1
+paperclip_identifier: MAZ-563
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject unenforceable io_uring opcodes before compiling

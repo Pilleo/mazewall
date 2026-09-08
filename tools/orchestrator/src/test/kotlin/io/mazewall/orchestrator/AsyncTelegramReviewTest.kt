@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class AsyncTelegramReviewTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest
@@ -44,7 +43,7 @@ class AsyncTelegramReviewTest {
                                     }
                                 ]
                             }
-                            """.trimIndent()
+                            """.trimIndent(),
                         )
                     }
                 }

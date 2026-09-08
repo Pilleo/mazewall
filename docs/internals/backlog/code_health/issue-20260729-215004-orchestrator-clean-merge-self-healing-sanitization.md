@@ -11,7 +11,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BranchRebaser.kt"
 effort: "medium"
 autonomy: "autonomous"
-paperclip_issue_id: 9244fd60-d138-4599-acd3-e338e27db371
+paperclip_issue_id: "5ec18eb4-a6a0-469e-875c-7ee376df5437"
+paperclip_identifier: "MAZ-1081"
 ---
 
 # 🔴 [Severity: HIGH]: Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser

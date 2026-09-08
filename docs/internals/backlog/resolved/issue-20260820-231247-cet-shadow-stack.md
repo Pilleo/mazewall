@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/RealPlatformProvider.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 7d86a0d6-0e9e-47c8-bdb6-565d12673901
+paperclip_identifier: MAZ-497
 ---
 
 # Require Shadow-Stack Support for the CET Probe

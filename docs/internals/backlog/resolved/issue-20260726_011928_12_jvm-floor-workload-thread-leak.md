@@ -1,0 +1,32 @@
+---
+title: JvmFloorWorkload OS Thread leak due to infinite retry loop on exception
+severity: MEDIUM
+type: issue
+status: resolved
+priority: medium
+labels:
+- security
+- enforcer
+- resource-exhaustion
+component: enforcer
+target_modules:
+- :enforcer
+target_files:
+- enforcer/src/main/kotlin/io/mazewall/enforcer/JvmFloorWorkload.kt
+github_issue: 365
+paperclip_issue_id: 1fa4d138-b1fe-4c79-8533-d8c92f17f3e0
+paperclip_identifier: MAZ-720
+---
+
+# Issue: `JvmFloorWorkload` Background OS Thread Leak
+
+**Context:**
+`JvmFloorWorkload` executes various background operations (Loom carrier threads, GC threads) to trigger JVM internal syscalls like `mprotect`, `futex`, etc.
+
+## The Bug
+The operations are submitted to an executor or run in a background loop that catches `Exception` and potentially loops infinitely, ignoring interrupted status or failing to propagate it properly to the daemon. While standard executors in production code are banned, `JvmFloorWorkload` is exempt.
+
+If it spins quickly ignoring interruptions during a shutdown, it leaks the background thread and increases CPU utilization to 100%.
+
+**Needed:**
+Audit `JvmFloorWorkload` to ensure it properly checks `Thread.currentThread().isInterrupted` and exits cleanly instead of infinitely catching and spinning on exceptions during teardown.

@@ -22,7 +22,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicReference
-import java.util.logging.Logger
 
 /**
  * High-level API for system call profiling and Bill of Behavior (SBoB) generation.
@@ -44,12 +43,15 @@ object Profiler {
     private const val WORKER_JOIN_TIMEOUT_MS = 60_000L
     private const val GRACE_PERIOD_MS = 5_000L
 
-    private val logger = Logger.getLogger(Profiler::class.java.name)
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     internal val threadRegistry = ConcurrentHashMap<Tid, Thread>()
 
-    internal var daemonManagerProvider: () -> io.mazewall.profiler.internal.ProfilerDaemonManager = { io.mazewall.profiler.internal.ProfilerDaemonManager.getInstance() }
+    internal var daemonManagerProvider: () -> io.mazewall.profiler.internal.ProfilerDaemonManager = {
+        io.mazewall.profiler.internal.ProfilerDaemonManager
+        .getInstance()
+    }
     internal var installerProvider: io.mazewall.profiler.engine.ProfilerInstallerInterface = io.mazewall.profiler.engine.RealProfilerInstaller
+    internal var tidProvider: () -> Tid = { LinuxNative.process.gettid() }
 
     /**
      * Profiles the given [block] and returns a [BillOfBehavior].
@@ -77,13 +79,13 @@ object Profiler {
 
         var tid: io.mazewall.core.Tid? = null
         val workerThread = Thread {
-            tid = LinuxNative.process.gettid()
-            threadRegistry[tid!!] = Thread.currentThread()
+            val workerTid = tidProvider()
+            tid = workerTid
+            threadRegistry[workerTid] = Thread.currentThread()
             try {
                 // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
                 // The resolver daemon needs to be notified by the kernel, which then notifies
                 // our JVM listener thread to record the event.
-                @Suppress("TooGenericExceptionCaught")
                 try {
                     installProfilingFilterForThread(
                         context.socketPath,
@@ -97,8 +99,10 @@ object Profiler {
 
                     val res = block()
                     blockResult.set(res)
-                } catch (e: Throwable) {
-                    errorRef.set(e)
+                } catch (expectedWorkerFailure: Exception) {
+                    errorRef.set(expectedWorkerFailure)
+                } catch (expectedWorkerError: Error) {
+                    errorRef.set(expectedWorkerError)
                 }
             } finally {
                 // Do not remove tid here. Wait until listener drains events.
@@ -115,7 +119,7 @@ object Profiler {
             workerThread.join(GRACE_PERIOD_MS)
             errorRef.get()?.let { throw it }
             throw IllegalStateException(
-                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms"
+                "Profiler worker '${workerThread.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms",
             )
         }
 
@@ -134,13 +138,14 @@ object Profiler {
             listeners.remove(listener)
             listener.passThrough()
         }
-        
-        if (tid != null) {
-            threadRegistry.remove(tid!!)
-        }
+
+        tid?.let(threadRegistry::remove)
 
         val bob = BobCompiler.compile(localLogs).copy(stackProfile = localStackProfile)
-        val observations = localLogs.map { io.mazewall.profiler.ProfileObservation.fromTraceEvent(it) }
+        val observations = localLogs.map {
+            io.mazewall.profiler.ProfileObservation
+            .fromTraceEvent(it)
+        }
         val listener = sessionListener.get()
         val dropped = (listener?.eventQueue?.droppedCount?.toInt() ?: 0) + (listener?.droppedEvents ?: 0)
         val coverage = ProfilingCoverage.infer(
@@ -228,10 +233,10 @@ object Profiler {
             processWide = processWide,
             startTraceListener = { fd, logs, traces, cache, readyLatch ->
                 val listener = ProfilerTraceListener(
-                    FileDescriptor.unixSocket(fd),
+                    FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
                     logs,
                     traces,
-                    cache
+                    cache,
                 )
                 listeners.add(listener)
                 onListenerCreated?.invoke(listener)
@@ -248,8 +253,8 @@ object Profiler {
         synchronized(this) {
             listeners.forEach { it.passThrough() }
             listeners.clear()
-            // Do not call ProfilerDaemonManager.stop() here. 
-            // We want the daemon to stay alive in PassThrough mode to service background threads 
+            // Do not call ProfilerDaemonManager.stop() here.
+            // We want the daemon to stay alive in PassThrough mode to service background threads
             // until the parent JVM exits (which triggers the daemon's stdin EOF monitor).
         }
     }
@@ -267,17 +272,21 @@ object Profiler {
         private val pathCache = ConcurrentHashMap<String, Long>()
 
         override fun <T : Any?> submit(task: Callable<T>): Future<T> {
-            return delegate.submit(Callable {
+            return delegate.submit(
+                Callable {
                 applyProfilingIfNecessary()
                 task.call()
-            })
+            },
+            )
         }
 
         override fun submit(task: Runnable): Future<*> {
-            return delegate.submit(Runnable {
+            return delegate.submit(
+                Runnable {
                 applyProfilingIfNecessary()
                 task.run()
-            })
+            },
+            )
         }
 
         override fun execute(command: Runnable) {
@@ -294,7 +303,7 @@ object Profiler {
             if (!threadApplied) {
                 val currentThread = Thread.currentThread()
                 validateNotVirtual()
-                threadRegistry[LinuxNative.process.gettid()] = currentThread
+                threadRegistry[tidProvider()] = currentThread
                 installProfilingFilterForThread(
                     socketPath = context.socketPath,
                     policy = policy,
@@ -302,7 +311,7 @@ object Profiler {
                     stackTracesMap = if (captureStackTraces) recentStackProfiles else null,
                     pathCache = pathCache,
                     processWide = false,
-                    onListenerCreated = {}
+                    onListenerCreated = {},
                 )
                 threadApplied = true
             }

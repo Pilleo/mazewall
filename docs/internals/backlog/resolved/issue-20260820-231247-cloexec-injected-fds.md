@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/supervisor/SupervisorSessionHandler.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: c39865bd-dfda-42d3-9506-bc6df9af62a8
+paperclip_identifier: MAZ-498
 ---
 
 # Preserve Requested Close-on-Exec State on Injected FDs

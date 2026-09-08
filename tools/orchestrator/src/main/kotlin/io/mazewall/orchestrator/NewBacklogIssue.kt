@@ -12,6 +12,39 @@ fun main(args: Array<String>) {
         val parsed = IssueCli.parse(args)
         val repoRoot = File(parsed.root).canonicalFile
         var request = parsed.request
+        val generator = IssueTemplateGenerator(repoRoot = repoRoot)
+        var result = generator.scaffold(request, write = false)
+        val hits = FilesystemImpactScanner(repoRoot).scan(
+            impactSymbols(result.request, result.files),
+            result.files,
+        )
+        val codannaCallers = if (codannaOnPath()) {
+            val pkg = WorkPackage.collect(result.files + result.request.symbols) { cmd ->
+                try {
+                    val process = ProcessBuilder(listOf("codanna") + cmd)
+                        .redirectErrorStream(true)
+                        .start()
+                    val out = process.inputStream.bufferedReader().readText()
+                    process.waitFor()
+                    out
+                } catch (_: Exception) {
+                    ""
+                }
+            }
+            pkg.impact.map { file ->
+                WorkPackageCaller(symbol = File(file).nameWithoutExtension, file = file)
+            }
+        } else {
+            emptyList()
+        }
+        val callers = (hits.map { WorkPackageCaller(it.symbol, it.file) } + codannaCallers).distinct()
+        val stages = WorkPackage.decomposeDag(
+            title = request.title,
+            files = result.files,
+            symbols = result.request.symbols,
+            callers = callers,
+        )
+
         if (parsed.interactive && !parsed.nonInteractive) {
             request = IssueInterview.complete(
                 request = request,
@@ -19,14 +52,11 @@ fun main(args: Array<String>) {
                 askOpenQuestions = parsed.openQuestionsSpecified == null && !parsed.clarify,
                 askKernel = !parsed.needsKernelSpecified,
                 askSideEffects = parsed.sideEffectsSpecified == null,
+                stages = stages,
             )
+            result = generator.scaffold(request, write = false)
         }
-        val generator = IssueTemplateGenerator(repoRoot = repoRoot)
-        var result = generator.scaffold(request, write = false)
-        val hits = FilesystemImpactScanner(repoRoot).scan(
-            impactSymbols(result.request, result.files),
-            result.files,
-        )
+
         val pkg = WorkPackage.fromHits(result.files, result.request.symbols, hits)
         result = result.copy(
             request = result.request.copy(needsKernel = result.request.needsKernel || pkg.kernelTests),
@@ -35,8 +65,25 @@ fun main(args: Array<String>) {
         )
         result = IssueClarifier.enrichWithoutAcp(result, repoRoot, hits)
         result = IssueClarifier.hostFillPlaceholders(result, hits)
-        if (parsed.clarify) {
-            val (weak, strong) = ClarifyModels.resolve(repoRoot) { System.getenv(it) }
+        if (stages.size > 1) {
+            val mermaid = WorkPackage.formatMermaidDag(stages)
+            val updatedDetails = (result.request.importantDetails + "### Work Package DAG\n$mermaid").distinct()
+            val nextReq = result.request.copy(importantDetails = updatedDetails)
+            result = result.copy(
+                request = nextReq,
+                markdown = IssueClarifier.reRender(result, nextReq),
+            )
+        }
+        var clarify = parsed.clarify
+        val (weak, strong) = if (!parsed.noClarify) {
+            ClarifyModels.resolve(repoRoot) { System.getenv(it) }
+        } else {
+            null to null
+        }
+        if (weak != null && !parsed.noClarify) {
+            clarify = true
+        }
+        if (clarify && weak != null) {
             val scratch = File(repoRoot, "build/issue-clarify-scratch").apply { mkdirs() }
             try {
                 result = IssueClarifier.tryClarify(
@@ -51,14 +98,34 @@ fun main(args: Array<String>) {
                 (strong as? AutoCloseable)?.close()
             }
         }
-        if (parsed.dryRun) {
-            print(result.markdown)
-        } else {
+        if (!parsed.dryRun) {
             result.file.parentFile.mkdirs()
             result.file.writeText(result.markdown)
-            System.err.println("Wrote ${repoRoot.toPath().relativize(result.file.toPath())}")
-            System.err.println("id: ${result.id}")
-            result.request.reviewVerdict?.let { System.err.println("review: $it") }
+            if (!parsed.json) {
+                System.err.println("Wrote ${repoRoot.toPath().relativize(result.file.toPath())}")
+                System.err.println("id: ${result.id}")
+                result.request.reviewVerdict?.let { System.err.println("review: $it") }
+            }
+        }
+        if (parsed.json) {
+            val stagesJson = stages.joinToString(prefix = "[\n", postfix = "\n  ]", separator = ",\n") { s ->
+                """    {
+      "stage": ${s.stageNumber},
+      "title": "${s.title.replace("\"", "\\\"")}",
+      "module": "${s.module}",
+      "files": ${s.files.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }},
+      "dependencies": ${s.dependencies.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }}
+    }"""
+            }
+            println(
+                """{
+  "id": "${result.id}",
+  "file": "${repoRoot.toPath().relativize(result.file.toPath())}",
+  "stages": $stagesJson
+}""",
+            )
+        } else if (parsed.dryRun) {
+            print(result.markdown)
         }
     } catch (e: IllegalArgumentException) {
         System.err.println(e.message)
@@ -74,9 +141,12 @@ internal data class ParsedCli(
     val interactive: Boolean = false,
     val nonInteractive: Boolean = false,
     val clarify: Boolean = false,
+    val noClarify: Boolean = false,
     val openQuestionsSpecified: Boolean? = null,
     val needsKernelSpecified: Boolean = false,
     val sideEffectsSpecified: Boolean? = null,
+    val decompose: Boolean = false,
+    val json: Boolean = false,
 )
 
 internal object IssueCli {
@@ -103,6 +173,8 @@ Options:
   --side-effects              change may impact callers / other modules / ABI / tests
   --no-side-effects           declare no external impact
   --side-effect TEXT          (repeatable; known impact line; implies --side-effects)
+  --decompose                 decompose cross-module work packages into a dependency DAG
+  --json                      output machine-readable JSON plan to stdout
   --interactive               prompt for open questions / kernel / side effects / context
   --non-interactive           never prompt (default for agents / non-TTY)
   --clarify                   optional ACP loop (never aborts the file).
@@ -131,9 +203,12 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
         var interactive = false
         var nonInteractive = false
         var clarify = false
+        var noClarify = false
         var openQuestionsSpecified: Boolean? = null
         var sideEffectsSpecified: Boolean? = null
         var hasSideEffects: Boolean? = null
+        var decompose = false
+        var json = false
         var root = System.getProperty("user.dir")
         val files = mutableListOf<String>()
         val modules = mutableListOf<String>()
@@ -188,9 +263,12 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
                     sideEffectsSpecified = true
                 }
 
+                "--decompose" -> decompose = true
+                "--json" -> json = true
                 "--interactive" -> interactive = true
                 "--non-interactive" -> nonInteractive = true
                 "--clarify" -> clarify = true
+                "--no-clarify" -> noClarify = true
                 "--dry-run" -> dryRun = true
                 "--root" -> root = args.getOrNull(++i) ?: root
                 "-h", "--help" -> throw IllegalArgumentException("help")
@@ -224,9 +302,12 @@ Agents: pass flags, no TTY. Humans: TTY auto-adds --interactive unless --non-int
             interactive = interactive,
             nonInteractive = nonInteractive,
             clarify = clarify,
+            noClarify = noClarify,
             openQuestionsSpecified = openQuestionsSpecified,
             needsKernelSpecified = needsKernelSpecified,
             sideEffectsSpecified = sideEffectsSpecified,
+            decompose = decompose,
+            json = json,
         )
     }
 }

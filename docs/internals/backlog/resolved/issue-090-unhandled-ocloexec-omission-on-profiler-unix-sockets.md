@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 229
+paperclip_issue_id: 8df49d01-f6d5-4e1c-aa54-b5d7fadf627b
+paperclip_identifier: MAZ-269
 ---
 
 # 🔴 [Severity: MEDIUM]: Unhandled `O_CLOEXEC` Omission on Profiler Unix Sockets

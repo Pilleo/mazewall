@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/PolicyDefinition.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 58bb93e8-d65f-4dfa-880a-3da4f52a731c
+paperclip_identifier: MAZ-502
 ---
 
 # Give ERRNO Precedence Over TRACE During Intersection

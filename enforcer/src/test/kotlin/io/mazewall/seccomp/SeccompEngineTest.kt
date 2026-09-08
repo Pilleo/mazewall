@@ -1,6 +1,6 @@
 package io.mazewall.seccomp
-import io.mazewall.Policy
 import io.mazewall.CompiledSandbox
+import io.mazewall.Policy
 import io.mazewall.compile
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -15,7 +15,6 @@ class SeccompEngineTest {
                 get() = object : EngineState.Unprivileged {}
 
             override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
-                @Suppress("UNCHECKED_CAST")
                 return this as SeccompEngine<EngineState.Loaded>
             }
 
@@ -24,7 +23,8 @@ class SeccompEngineTest {
         }
 
         val emptyPolicy = Policy.builder().build()
-        val arch = io.mazewall.core.Arch.current()
+        val arch = io.mazewall.core.Arch
+            .current()
         val compiledSandbox = emptyPolicy.definition.compile(arch)
 
         val exception = assertFailsWith<UnsupportedOperationException> {

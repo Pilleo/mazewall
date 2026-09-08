@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 237
+paperclip_issue_id: 587b83c7-0afd-483f-ae48-770093e7008a
+paperclip_identifier: MAZ-261
 ---
 
 # 🔴 [Severity: MEDIUM]: `PureJavaBpfEngine` Thread State Synchronization

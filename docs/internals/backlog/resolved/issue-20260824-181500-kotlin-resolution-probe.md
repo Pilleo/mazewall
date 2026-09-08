@@ -7,7 +7,8 @@ component: tools
 target_modules: [":tools"]
 target_files: ["tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogResolver.kt"]
 open_questions: false
-paperclip_issue_id: 09ae6278-0238-4746-9bea-124208a162d5
+paperclip_issue_id: af6e0be5-2017-44e0-8222-1aa701b8e872
+paperclip_identifier: MAZ-734
 ---
 
 # 🟡 [Severity: LOW]: Kotlin Supervisor Resolution Probe

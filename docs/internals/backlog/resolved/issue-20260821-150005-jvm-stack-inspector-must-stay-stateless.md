@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/JvmStackInspectorTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 8bb35fed-924c-457d-ba32-5cc94bef7266
+paperclip_identifier: MAZ-571
 ---
 
 # 🔴 [Severity: HIGH]: JvmStackInspector must not cache stacks (no fields + inspect freshness)

@@ -5,23 +5,10 @@ package io.mazewall.enforcer.supervisor
  * slice 1 of the decomposition). Pure /proc reading with conservative fallbacks; no engine state.
  */
 internal object ProcFsInspector {
+    private const val PPID_FIELD_AFTER_COMM = 2
+
     /** Reads `Tgid:` from /proc/<tid>/status, falling back to [tid] itself. */
-    fun getTgid(tid: Int): Int {
-        try {
-            val statusFile = java.io.File("/proc/$tid/status")
-            if (statusFile.exists()) {
-                statusFile.bufferedReader().use { reader ->
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        if (line.startsWith("Tgid:")) {
-                            return line.substringAfter("Tgid:").trim().toInt()
-                        }
-                    }
-                }
-            }
-        } catch (ignored: Exception) {}
-        return tid
-    }
+    fun getTgid(tid: Int): Int = readStatusLine(tid, "Tgid:")?.substringAfter("Tgid:")?.trim()?.toIntOrNull() ?: tid
 
     /**
      * Reads the parent pid from /proc/<pid>/stat (field 4, after the parenthesized comm),
@@ -34,11 +21,26 @@ internal object ProcFsInspector {
                 val content = statFile.readText()
                 // Format: pid (comm) state ppid ...
                 val parts = content.substringAfterLast(')').split(' ')
-                if (parts.size >= 3) {
-                    return parts[2].toInt()
+                if (parts.size > PPID_FIELD_AFTER_COMM) {
+                    return parts[PPID_FIELD_AFTER_COMM].toInt()
                 }
             }
-        } catch (ignored: Exception) {}
+        } catch (ignored: Exception) {
+            }
         return 0
     }
+
+    private fun readStatusLine(
+        tid: Int,
+        prefix: String,
+    ): String? =
+        try {
+            java.io
+                .File("/proc/$tid/status")
+                .takeIf(java.io.File::exists)
+                ?.bufferedReader()
+                ?.useLines { lines -> lines.firstOrNull { it.startsWith(prefix) } }
+        } catch (_: Exception) {
+            null
+        }
 }

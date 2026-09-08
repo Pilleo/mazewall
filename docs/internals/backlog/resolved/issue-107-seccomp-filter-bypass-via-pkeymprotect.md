@@ -3,6 +3,8 @@ title: "🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 78fff3a1-fe38-47f0-93a1-1dfe1522e034
+paperclip_identifier: MAZ-284
 ---
 
 # 🟢 [RESOLVED]: Seccomp Filter Bypass via `pkey_mprotect`

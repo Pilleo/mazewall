@@ -13,6 +13,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982863
+paperclip_issue_id: ecdabc4b-e996-4d31-906b-3eeca6812e0e
+paperclip_identifier: MAZ-529
 ---
 
 # 🔴 [Severity: HIGH]: Do not revive retired descriptors through unsafe wrappers

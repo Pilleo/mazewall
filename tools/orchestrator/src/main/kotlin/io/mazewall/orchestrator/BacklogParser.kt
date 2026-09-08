@@ -17,11 +17,43 @@ data class BacklogIssue(
     val needed: String? = null,
     val targetFiles: List<String> = emptyList(),
     val targetModules: List<String> = emptyList(),
+    val targetSymbols: List<String> = emptyList(),
+    val hasSideEffects: Boolean = true,
     val openQuestions: String? = null,
-    val hasOpenQuestions: Boolean = false
+    val hasOpenQuestions: Boolean = false,
 ) {
     fun isNonInterfering(): Boolean {
         return component == "docs" || component == "ci" || id.contains("review-task")
+    }
+
+    /**
+     * Checks if this issue conflicts with [other].
+     * If both issues explicitly specify disjoint target_symbols and have no side effects,
+     * they do not conflict even if they share target_files or target_modules.
+     */
+    fun conflictsWith(other: BacklogIssue): Boolean {
+        if (this.isNonInterfering() || other.isNonInterfering()) return false
+
+        // Empty targets conservative global lock
+        val thisEmpty = this.targetFiles.isEmpty() || this.targetModules.isEmpty()
+        val otherEmpty = other.targetFiles.isEmpty() || other.targetModules.isEmpty()
+        if (thisEmpty || otherEmpty) return true
+
+        // Method / Symbol Granularity:
+        // If both have explicit symbols, no side effects, and disjoint symbol sets -> no conflict
+        if (this.targetSymbols.isNotEmpty() &&
+            other.targetSymbols.isNotEmpty() &&
+            !this.hasSideEffects &&
+            !other.hasSideEffects
+        ) {
+            val sharedSymbols = this.targetSymbols.intersect(other.targetSymbols.toSet())
+            return sharedSymbols.isNotEmpty()
+        }
+
+        val hasSharedModules = this.targetModules.any { it in other.targetModules }
+        val hasSharedFiles = this.targetFiles.any { it in other.targetFiles }
+
+        return hasSharedModules || hasSharedFiles
     }
 }
 
@@ -31,7 +63,8 @@ object BacklogParser {
             return emptyList()
         }
 
-        return backlogDir.walkTopDown()
+        return backlogDir
+            .walkTopDown()
             .filter { it.isFile && it.name.startsWith("issue-") && it.name.endsWith(".md") }
             .filter { !it.absolutePath.contains("${File.separator}resolved${File.separator}") }
             .mapNotNull { parseIssueFile(it) }
@@ -61,6 +94,11 @@ object BacklogParser {
             val targetModulesRaw = frontmatter["target_modules"] ?: ""
             val targetModules = parseList(targetModulesRaw, content)
 
+            val targetSymbolsRaw = frontmatter["target_symbols"] ?: ""
+            val targetSymbols = parseList(targetSymbolsRaw, content)
+
+            val hasSideEffects = frontmatter["has_side_effects"]?.equals("false", ignoreCase = true) != true
+
             val id = frontmatter["id"]?.removeSurrounding("\"")?.removeSurrounding("'") ?: run {
                 val nameWithoutExt = file.name.removeSuffix(".md")
                 val parts = nameWithoutExt.split("-")
@@ -84,9 +122,24 @@ object BacklogParser {
                 (!openQuestions.isNullOrBlank())
 
             return BacklogIssue(
-                file, id, title, priority, status, dependencies, githubIssue,
-                severity, component, effort, context, needed, targetFiles, targetModules,
-                openQuestions, hasOpenQuestions
+                file,
+                id,
+                title,
+                priority,
+                status,
+                dependencies,
+                githubIssue,
+                severity,
+                component,
+                effort,
+                context,
+                needed,
+                targetFiles,
+                targetModules,
+                targetSymbols,
+                hasSideEffects,
+                openQuestions,
+                hasOpenQuestions,
             )
         } catch (e: Exception) {
             System.err.println("Error parsing issue file ${file.name}: ${e.message}")
@@ -136,13 +189,19 @@ object BacklogParser {
         return frontmatter
     }
 
-    private fun parseList(raw: String, fullContent: String): List<String> {
+    private fun parseList(
+        raw: String,
+        fullContent: String,
+    ): List<String> {
         val cleanRaw = raw.trim()
         val cleaner = { s: String ->
             var current = s.trim()
             while (true) {
-                val next = current.removeSurrounding("\"").removeSurrounding("'")
-                    .removeSurrounding("\\\"").removeSurrounding("\\'")
+                val next = current
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
+                    .removeSurrounding("\\\"")
+                    .removeSurrounding("\\'")
                     .trim()
                 if (next == current) break
                 current = next
@@ -151,21 +210,26 @@ object BacklogParser {
         }
 
         if (cleanRaw.startsWith("[") && cleanRaw.endsWith("]")) {
-            return cleanRaw.substring(1, cleanRaw.length - 1)
+            return cleanRaw
+                .substring(1, cleanRaw.length - 1)
                 .split(",")
                 .map { cleaner(it) }
                 .filter { it.isNotEmpty() }
         }
 
         // If it was multiline, split by lines starting with '-'
-        return cleanRaw.lines()
+        return cleanRaw
+            .lines()
             .map { it.trim() }
             .filter { it.startsWith("-") }
             .map { cleaner(it.removePrefix("-")) }
             .filter { it.isNotEmpty() }
     }
 
-    fun writeGithubIssue(issue: BacklogIssue, issueNumber: Int) {
+    fun writeGithubIssue(
+        issue: BacklogIssue,
+        issueNumber: Int,
+    ) {
         val content = issue.file.readText()
         val lines = content.lines().toMutableList()
         val index = lines.indexOfFirst { it.trim() == "---" }
@@ -186,7 +250,10 @@ object BacklogParser {
         issue.file.writeText(lines.joinToString("\n"))
     }
 
-    private fun extractSection(body: String, sectionName: String): String? {
+    private fun extractSection(
+        body: String,
+        sectionName: String,
+    ): String? {
         val markers = listOf(
             "**$sectionName:**",
             "**$sectionName**:",
@@ -195,7 +262,7 @@ object BacklogParser {
             "## ❓ $sectionName",
             "### ❓ $sectionName",
             "**❓ $sectionName:**",
-            "**❓ $sectionName**:"
+            "**❓ $sectionName**:",
         )
         var startIndex = -1
         for (marker in markers) {
@@ -233,10 +300,14 @@ object BacklogParser {
         return contentLines.joinToString("\n").trim()
     }
 
-    fun markIssueAsResolved(issue: BacklogIssue, resolvedDir: File) {
+    fun markIssueAsResolved(
+        issue: BacklogIssue,
+        resolvedDir: File,
+    ) {
         val content = issue.file.readText()
         // Replace status: "open" with status: "resolved" in frontmatter
-        val updatedContent = content.replaceFirst("status: \"open\"", "status: \"resolved\"")
+        val updatedContent = content
+            .replaceFirst("status: \"open\"", "status: \"resolved\"")
             .replaceFirst("status: 'open'", "status: 'resolved'")
 
         // Write the updated file back

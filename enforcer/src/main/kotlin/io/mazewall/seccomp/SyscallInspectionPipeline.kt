@@ -1,12 +1,11 @@
 package io.mazewall.seccomp
 
+import io.mazewall.core.Arch
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.state.*
 
 /**
  * Pipeline to execute and build syscall inspections.
@@ -14,12 +13,17 @@ import io.mazewall.core.Arch
  */
 internal interface SyscallInspectionPipeline {
     val inspectors: List<SyscallInspector>
-    fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection>
+
+    fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection>
+
     fun emitSpecial(
         builder: BpfBuilder<BpfState.Active>,
         arch: Arch,
         context: InspectionContext,
-        handledNrs: MutableSet<Int>
+        handledNrs: MutableSet<Int>,
     )
 }
 
@@ -27,9 +31,12 @@ internal interface SyscallInspectionPipeline {
  * Default implementation of the SyscallInspectionPipeline.
  */
 internal class DefaultSyscallInspectionPipeline(
-    override val inspectors: List<SyscallInspector>
+    override val inspectors: List<SyscallInspector>,
 ) : SyscallInspectionPipeline {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+    override fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> {
         return inspectors.flatMap { it.getInspections(arch, context) }
     }
 
@@ -37,7 +44,7 @@ internal class DefaultSyscallInspectionPipeline(
         builder: BpfBuilder<BpfState.Active>,
         arch: Arch,
         context: InspectionContext,
-        handledNrs: MutableSet<Int>
+        handledNrs: MutableSet<Int>,
     ) {
         for (inspector in inspectors) {
             inspector.emitSpecial(builder, arch, context, handledNrs)

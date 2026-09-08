@@ -4,21 +4,21 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeFileSystem
 import io.mazewall.MockNativeMemory
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.ffi.memory.*
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
-import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.*
-import io.mazewall.profiler.engine.TraceEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
-
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `close should close the socket exactly once on graceful drain`() {
@@ -27,32 +27,40 @@ class ProfilerTraceListenerTest {
 
         val mock = MockNativeEngine(
             fileSystem = object : MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     closeCount.incrementAndGet()
                     return LinuxNative.SyscallResult.Success(0L)
                 }
             },
             memory = object : MockNativeMemory() {
-                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     readLatch.await(5, TimeUnit.SECONDS)
                     return LinuxNative.SyscallResult.Success(0L)
                 }
 
-                override fun write(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     readLatch.countDown()
                     return LinuxNative.SyscallResult.Success(count)
                 }
-            }
+            },
         )
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(300)
+            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(300)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
-                pathCache = mutableMapOf()
+                pathCache = mutableMapOf(),
             )
 
             val readyLatch = CountDownLatch(1)
@@ -74,27 +82,31 @@ class ProfilerTraceListenerTest {
         val closeCount = AtomicInteger(0)
         val mock = MockNativeEngine(
             fileSystem = object : MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     closeCount.incrementAndGet()
                     return LinuxNative.SyscallResult.Success(0L)
                 }
             },
             memory = object : MockNativeMemory() {
-                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     // Simulate EOF immediately
                     return LinuxNative.SyscallResult.Success(0L)
                 }
-            }
+            },
         )
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(301)
+            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(301)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
-                pathCache = mutableMapOf()
+                pathCache = mutableMapOf(),
             )
 
             val readyLatch = CountDownLatch(1)
@@ -102,7 +114,8 @@ class ProfilerTraceListenerTest {
 
             readyLatch.await(2, TimeUnit.SECONDS)
             val workerTerminated = listener.workerTerminatedLatch.await(2, TimeUnit.SECONDS)
-            org.junit.jupiter.api.Assertions.assertTrue(workerTerminated, "Worker thread should terminate cleanly on EOF")
+            org.junit.jupiter.api.Assertions
+                .assertTrue(workerTerminated, "Worker thread should terminate cleanly on EOF")
 
             // Verify worker thread has closed it exactly once
             assertEquals(1, closeCount.get())
@@ -126,7 +139,12 @@ class ProfilerTraceListenerTest {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 private var callCount = 0
-                override fun read(fd: FileDescriptor<*, FdState.Open>, buf: ManagedSegment, count: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (callCount == 0) {
                         buf.writeByte(0L, 0xAC.toByte())
                         callCount++
@@ -168,17 +186,17 @@ class ProfilerTraceListenerTest {
                         return LinuxNative.SyscallResult.Success(0L)
                     }
                 }
-            }
+            },
         )
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(302)
+            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(302)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
                 stackTracesMap = stackTracesMap,
-                pathCache = mutableMapOf()
+                pathCache = mutableMapOf(),
             )
 
             val eventCollectedLatch = CountDownLatch(1)
@@ -189,11 +207,13 @@ class ProfilerTraceListenerTest {
             readyLatch.await(2, TimeUnit.SECONDS)
 
             val collected = eventCollectedLatch.await(5, TimeUnit.SECONDS)
-            org.junit.jupiter.api.Assertions.assertTrue(collected, "Event should be collected by collector thread")
+            org.junit.jupiter.api.Assertions
+                .assertTrue(collected, "Event should be collected by collector thread")
 
             listener.close()
             val collectorTerminated = listener.collectorTerminatedLatch.await(2, TimeUnit.SECONDS)
-            org.junit.jupiter.api.Assertions.assertTrue(collectorTerminated, "Collector thread should terminate cleanly on close")
+            org.junit.jupiter.api.Assertions
+                .assertTrue(collectorTerminated, "Collector thread should terminate cleanly on close")
 
             assertEquals(1, accumulatedLogs.size)
             assertEquals("OPEN", accumulatedLogs[0].syscallName)
@@ -209,21 +229,21 @@ class ProfilerTraceListenerTest {
         val closeCount = AtomicInteger(0)
         val mock = MockNativeEngine(
             fileSystem = object : MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     closeCount.incrementAndGet()
                     return LinuxNative.SyscallResult.Success(0L)
                 }
-            }
+            },
         )
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(303)
+            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(303)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
-                pathCache = mutableMapOf()
+                pathCache = mutableMapOf(),
             )
 
             // Concurrently invoke close() multiple times to ensure idempotency is strictly enforced
@@ -249,21 +269,21 @@ class ProfilerTraceListenerTest {
         val closeCount = AtomicInteger(0)
         val mock = MockNativeEngine(
             fileSystem = object : MockNativeFileSystem() {
-                override fun close(fd: FileDescriptor<*, FdState.Open>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     closeCount.incrementAndGet()
                     return LinuxNative.SyscallResult.Success(0L)
                 }
-            }
+            },
         )
 
         LinuxNative.setEngine(mock)
         try {
-            val socketFd = FileDescriptor.unsafe<FileDescriptorRole.UnixSocket>(304)
+            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(304)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
-                pathCache = mutableMapOf()
+                pathCache = mutableMapOf(),
             )
 
             // Trigger close across all possible sequences:

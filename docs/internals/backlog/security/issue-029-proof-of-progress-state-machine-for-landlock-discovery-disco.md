@@ -10,7 +10,8 @@ target_modules:
 - :profiler
 component: profiler
 effort: medium
-paperclip_issue_id: 2883709d-3490-4441-ad54-5603f8625386
+paperclip_issue_id: "c55b054c-13f0-4d18-8011-18df398a0302"
+paperclip_identifier: "MAZ-1157"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Proof-of-Progress State Machine for Landlock Discovery (`DiscoveryTask<Status>`)

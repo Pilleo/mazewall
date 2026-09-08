@@ -12,6 +12,8 @@ effort: "large"
 autonomy: "supervised"
 open_questions: true
 dependencies: []
+paperclip_issue_id: 3aec1122-cd62-44b6-970d-243354731d5e
+paperclip_identifier: MAZ-595
 ---
 
 # 🟠 [Severity: MEDIUM]: Decompose SupervisorSessionHandler God File

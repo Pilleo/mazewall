@@ -1,13 +1,12 @@
 package io.mazewall.seccomp
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 
 /**
@@ -38,7 +37,10 @@ internal interface SyscallInspector {
     /**
      * Returns a list of standard, argument-based inspections to be emitted.
      */
-    fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> = emptyList()
+    fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> = emptyList()
 
     /**
      * Emits special, non-standard BPF logic directly into the builder.
@@ -48,7 +50,7 @@ internal interface SyscallInspector {
         builder: BpfBuilder<BpfState.Active>,
         arch: Arch,
         context: InspectionContext,
-        handledNrs: MutableSet<Int>
+        handledNrs: MutableSet<Int>,
     ) {
     }
 }
@@ -62,7 +64,7 @@ internal class Clone3Inspector : SyscallInspector {
         builder: BpfBuilder<BpfState.Active>,
         arch: Arch,
         context: InspectionContext,
-        handledNrs: MutableSet<Int>
+        handledNrs: MutableSet<Int>,
     ) {
         if (arch.clone3 >= 0) {
             val enosysAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.ENOSYS
@@ -79,7 +81,10 @@ internal class Clone3Inspector : SyscallInspector {
  * when execution is not explicitly allowed.
  */
 internal class MmapExecInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+    override fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> {
         if (context.allowMmapExec) return emptyList()
 
         return listOf(arch.mmap, arch.mprotect, arch.pkeyMprotect)
@@ -115,7 +120,10 @@ internal class MmapExecInspector : SyscallInspector {
  * is set, bypassing seccomp interception entirely for Java thread creation.
  */
 internal class ThreadCloneInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+    override fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> {
         if (arch.clone < 0) return emptyList()
 
         val nr = arch.clone
@@ -126,7 +134,7 @@ internal class ThreadCloneInspector : SyscallInspector {
                 check = ArgCheck.MaskEquals(CLONE_THREAD, CLONE_THREAD),
                 ifMatched = SeccompAction.ACT_ALLOW, // Bypass supervisor for JVM threads
                 ifNotMatched = context.resolveEffectiveAction(nr),
-            )
+            ),
         )
     }
 
@@ -146,7 +154,10 @@ internal class ThreadCloneInspector : SyscallInspector {
  * pointer argument concurrently after the BPF check but before kernel execution.
  */
 internal class UnsafePrctlInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+    override fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> {
         if (context.allowUnsafePrctl || arch.prctl < 0) return emptyList()
 
         val nr = arch.prctl
@@ -157,12 +168,27 @@ internal class UnsafePrctlInspector : SyscallInspector {
                 check = ArgCheck.EqualsAny32(SAFE_PRCTL_OPTIONS),
                 ifMatched = context.resolveEffectiveAction(nr),
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
-            )
+            ),
         )
     }
 
     private companion object {
-        private val SAFE_PRCTL_OPTIONS = listOf(15, 16, 21, 22, 38, 39)
+        // linux/prctl.h values are kept named so the BPF allow-list is reviewable.
+        private const val PR_SET_NAME = 15
+        private const val PR_GET_NAME = 16
+        private const val PR_GET_SECCOMP = 21
+        private const val PR_SET_SECCOMP = 22
+        private const val PR_SET_NO_NEW_PRIVS = 38
+        private const val PR_GET_NO_NEW_PRIVS = 39
+
+        private val SAFE_PRCTL_OPTIONS = listOf(
+            PR_SET_NAME,
+            PR_GET_NAME,
+            PR_GET_SECCOMP,
+            PR_SET_SECCOMP,
+            PR_SET_NO_NEW_PRIVS,
+            PR_GET_NO_NEW_PRIVS,
+        )
     }
 }
 
@@ -171,7 +197,10 @@ internal class UnsafePrctlInspector : SyscallInspector {
  * while denying IP and other remote network families when the policy restricts sockets.
  */
 internal class SocketAddressFamilyInspector : SyscallInspector {
-    override fun getInspections(arch: Arch, context: InspectionContext): List<SyscallInspection> {
+    override fun getInspections(
+        arch: Arch,
+        context: InspectionContext,
+    ): List<SyscallInspection> {
         if (arch.socket < 0) return emptyList()
 
         val socketNr = arch.socket
@@ -187,7 +216,7 @@ internal class SocketAddressFamilyInspector : SyscallInspector {
                 check = ArgCheck.EqualsAny32(listOf(AF_UNIX.toInt())),
                 ifMatched = SeccompAction.ACT_ALLOW, // Preserve local Unix Domain Sockets (AF_UNIX)
                 ifNotMatched = effectiveAction,
-            )
+            ),
         )
     }
 

@@ -15,6 +15,8 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
+paperclip_issue_id: 5180e2f3-5b0c-412b-bc4e-5f8da521490a
+paperclip_identifier: MAZ-247
 ---
 
 # 🔴 [Severity: HIGH]: `IterativeProfiler` infinite retry loop and failure on disjoint prefix file paths

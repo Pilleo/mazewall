@@ -4,7 +4,6 @@ import java.io.File
 import kotlin.test.*
 
 class BacklogValidatorTest {
-
     private var tempDir: File = File("")
 
     @BeforeTest
@@ -22,7 +21,8 @@ class BacklogValidatorTest {
     @Test
     fun testValidBacklogPasses() {
         val validFile = File(tempDir, "issue-20260726-123456-valid.md")
-        validFile.writeText("""
+        validFile.writeText(
+            """
             ---
             title: "Valid Title"
             severity: "HIGH"
@@ -37,7 +37,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Valid Title
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertTrue(errors.isEmpty(), "Expected no errors for valid backlog, but got: $errors")
@@ -46,7 +47,8 @@ class BacklogValidatorTest {
     @Test
     fun testInvalidBacklogFlagsErrors() {
         val invalidFile = File(tempDir, "issue-20260726-02-invalid.md")
-        invalidFile.writeText("""
+        invalidFile.writeText(
+            """
             ---
             title: "Invalid Issue"
             severity: "UNKNOWN_SEVERITY"
@@ -56,7 +58,8 @@ class BacklogValidatorTest {
             ---
 
             # Invalid Issue
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -89,7 +92,8 @@ class BacklogValidatorTest {
     @Test
     fun testEmptyTargetModulesFailsValidation() {
         val file = File(tempDir, "issue-20260726-111111-empty-modules.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Empty Target Modules"
             severity: "HIGH"
@@ -104,7 +108,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Empty Target Modules
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Empty target_modules should fail validation")
@@ -114,7 +119,8 @@ class BacklogValidatorTest {
     @Test
     fun testInvalidTargetModulesFailsValidation() {
         val file = File(tempDir, "issue-20260726-222222-invalid-modules.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Invalid Target Modules"
             severity: "HIGH"
@@ -129,7 +135,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Invalid Target Modules
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Invalid target_modules should fail validation")
@@ -139,7 +146,8 @@ class BacklogValidatorTest {
     @Test
     fun testInvalidFilenameFormat() {
         val file = File(tempDir, "issue-invalid.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Valid Title"
             severity: "HIGH"
@@ -150,7 +158,8 @@ class BacklogValidatorTest {
             target_modules: [":enforcer"]
             target_files: ["some/file.kt"]
             ---
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -160,10 +169,12 @@ class BacklogValidatorTest {
     @Test
     fun testMissingFrontmatterHeader() {
         val file = File(tempDir, "issue-20260726-123456-no-header.md")
-        file.writeText("""
+        file.writeText(
+            """
             title: "No Header"
             status: "open"
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -173,7 +184,8 @@ class BacklogValidatorTest {
     @Test
     fun testMissingTitle() {
         val file = File(tempDir, "issue-20260726-123456-missing-title.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: ""
             severity: "HIGH"
@@ -184,7 +196,8 @@ class BacklogValidatorTest {
             target_modules: [":enforcer"]
             target_files: ["some/file.kt"]
             ---
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -194,7 +207,8 @@ class BacklogValidatorTest {
     @Test
     fun testInvalidComponent() {
         val file = File(tempDir, "issue-20260726-123456-invalid-comp.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Invalid Comp"
             severity: "HIGH"
@@ -205,7 +219,8 @@ class BacklogValidatorTest {
             target_modules: [":enforcer"]
             target_files: ["some/file.kt"]
             ---
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -215,7 +230,8 @@ class BacklogValidatorTest {
     @Test
     fun testMissingTargetFiles() {
         val file = File(tempDir, "issue-20260726-123456-missing-files.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Missing Files"
             severity: "HIGH"
@@ -225,7 +241,8 @@ class BacklogValidatorTest {
             component: "enforcer"
             target_modules: [":enforcer"]
             ---
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -235,7 +252,8 @@ class BacklogValidatorTest {
     @Test
     fun testMissingTargetModules() {
         val file = File(tempDir, "issue-20260726-123456-missing-modules.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Missing Modules"
             severity: "HIGH"
@@ -245,7 +263,8 @@ class BacklogValidatorTest {
             component: "enforcer"
             target_files: ["some/file.kt"]
             ---
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty())
@@ -255,7 +274,8 @@ class BacklogValidatorTest {
     @Test
     fun testEmptyTargetFilesFailsValidation() {
         val file = File(tempDir, "issue-20260726-111111-empty-files.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Empty Target Files"
             severity: "HIGH"
@@ -270,7 +290,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Empty Target Files
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Empty target_files should fail validation")
@@ -280,7 +301,8 @@ class BacklogValidatorTest {
     @Test
     fun testEmptyTargetFilesAllowedForDeferred() {
         val file = File(tempDir, "issue-20260726-111111-deferred-empty-files.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Deferred Empty Target Files"
             severity: "HIGH"
@@ -295,7 +317,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Deferred Empty Target Files
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertTrue(errors.isEmpty(), "Expected no errors for deferred backlog with empty target_files, but got: $errors")
@@ -304,7 +327,8 @@ class BacklogValidatorTest {
     @Test
     fun testResolvedStatusOutsideResolvedDirectoryFails() {
         val file = File(tempDir, "issue-20260726-111111-resolved-wrong-dir.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Resolved In Wrong Dir"
             severity: "HIGH"
@@ -319,7 +343,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Resolved In Wrong Dir
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Resolved issue outside resolved dir should fail validation")
@@ -330,7 +355,8 @@ class BacklogValidatorTest {
     fun testNonResolvedStatusInsideResolvedDirectoryFails() {
         val resolvedDir = File(tempDir, "resolved").apply { mkdirs() }
         val file = File(resolvedDir, "issue-20260726-111111-open-in-resolved.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Open In Resolved Dir"
             severity: "HIGH"
@@ -345,7 +371,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Open In Resolved Dir
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Open issue inside resolved dir should fail validation")
@@ -356,7 +383,8 @@ class BacklogValidatorTest {
     fun testResolvedStatusInsideResolvedDirectoryPasses() {
         val resolvedDir = File(tempDir, "resolved").apply { mkdirs() }
         val file = File(resolvedDir, "issue-20260726-111111-valid-resolved.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Valid Resolved Issue"
             severity: "HIGH"
@@ -371,7 +399,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Valid Resolved Issue
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertTrue(errors.isEmpty(), "Expected no errors for properly placed resolved issue, but got: $errors")
@@ -380,7 +409,8 @@ class BacklogValidatorTest {
     @Test
     fun testOpenQuestionsTrueWithoutSectionFailsValidation() {
         val file = File(tempDir, "issue-20260726-111111-open-questions-missing-section.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Missing Questions Section"
             severity: "HIGH"
@@ -396,7 +426,8 @@ class BacklogValidatorTest {
             # 🔴 [Severity: HIGH]: Missing Questions Section
             **Context:** valid context
             **Needed:** valid needed
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "open_questions: true without section should fail validation")
@@ -406,7 +437,8 @@ class BacklogValidatorTest {
     @Test
     fun testOpenQuestionsSectionWithoutFrontmatterDeclarationFailsValidation() {
         val file = File(tempDir, "issue-20260726-111111-open-questions-missing-frontmatter.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Missing Frontmatter Flag"
             severity: "HIGH"
@@ -424,7 +456,8 @@ class BacklogValidatorTest {
 
             ## ❓ Open Questions
             1. What is the expected behavior?
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertFalse(errors.isEmpty(), "Open Questions section without frontmatter flag should fail validation")
@@ -434,7 +467,8 @@ class BacklogValidatorTest {
     @Test
     fun testValidOpenQuestionsPassesValidation() {
         val file = File(tempDir, "issue-20260726-111111-valid-open-questions.md")
-        file.writeText("""
+        file.writeText(
+            """
             ---
             title: "Valid Open Questions"
             severity: "HIGH"
@@ -453,7 +487,8 @@ class BacklogValidatorTest {
 
             ## ❓ Open Questions
             1. What is the expected behavior?
-        """.trimIndent())
+        """.trimIndent(),
+        )
 
         val errors = BacklogValidator.validateBacklog(tempDir)
         assertTrue(errors.isEmpty(), "Expected no errors for valid open_questions issue, but got: $errors")

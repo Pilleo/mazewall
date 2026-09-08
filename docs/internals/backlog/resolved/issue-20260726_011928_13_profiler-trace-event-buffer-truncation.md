@@ -14,7 +14,8 @@ target_modules:
 - :profiler
 target_files:
 - enforcer/src/main/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReader.kt
-paperclip_issue_id: 564d8b05-ca6f-49c5-88bd-603106471956
+paperclip_issue_id: 9f13f153-4ec2-44ce-8f1c-9d401739464a
+paperclip_identifier: MAZ-724
 ---
 
 # Issue: TraceEvent Path Truncation Vulnerability

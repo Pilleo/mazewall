@@ -7,20 +7,19 @@ import io.mazewall.MockNativeProcess
 import io.mazewall.Policy
 import io.mazewall.compile
 import io.mazewall.core.Arch
-import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.ManagedSegment
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
 
 class PureJavaBpfEngineReproductionTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -38,8 +37,7 @@ class PureJavaBpfEngineReproductionTest {
             mockProcess.prctlResult
         }
         val mockMemory = object : MockNativeMemory() {
-            context(arena: NativeArena)
-            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
+            context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 throw RuntimeException("Simulated filter building failure")
             }
         }
@@ -63,8 +61,7 @@ class PureJavaBpfEngineReproductionTest {
         PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val mockMemory = object : MockNativeMemory() {
-            context(arena: NativeArena)
-            override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
+            context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 throw AssertionError("Simulated fatal AssertionError")
             }
         }

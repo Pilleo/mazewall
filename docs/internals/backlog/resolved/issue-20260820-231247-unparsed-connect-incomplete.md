@@ -11,6 +11,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/ProfilingCoverage.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 36af41cb-1d8e-472e-af2d-1adef86487cd
+paperclip_identifier: MAZ-511
 ---
 
 # Count Each Unparsed Connect as Incomplete

@@ -2,11 +2,22 @@ package io.mazewall.orchestrator
 
 internal sealed interface ClarifyStage {
     data object Author : ClarifyStage
+
     data object SideEffectLlm : ClarifyStage
-    data class Investigate(val round: Int) : ClarifyStage
+
+    data class Investigate(
+        val round: Int,
+    ) : ClarifyStage
+
     data object Leftover : ClarifyStage
-    data class Review(val loop: Int) : ClarifyStage
-    data class Done(val verdict: String?) : ClarifyStage
+
+    data class Review(
+        val loop: Int,
+    ) : ClarifyStage
+
+    data class Done(
+        val verdict: String?,
+    ) : ClarifyStage
 }
 
 internal data class ClarifyView(
@@ -27,7 +38,10 @@ internal object ClarifyPolicy {
         return afterImpact(view, investigateRound = 1)
     }
 
-    fun afterImpact(view: ClarifyView, investigateRound: Int): ClarifyStage {
+    fun afterImpact(
+        view: ClarifyView,
+        investigateRound: Int,
+    ): ClarifyStage {
         if (view.questions.isNotEmpty()) {
             return if (investigateRound <= view.maxWeakRounds) {
                 ClarifyStage.Investigate(investigateRound)
@@ -38,7 +52,12 @@ internal object ClarifyPolicy {
         return leftoverOrReview(view)
     }
 
-    fun afterInvestigate(view: ClarifyView, round: Int, previous: Set<String>, next: Set<String>): ClarifyStage {
+    fun afterInvestigate(
+        view: ClarifyView,
+        round: Int,
+        previous: Set<String>,
+        next: Set<String>,
+    ): ClarifyStage {
         if (noProgress(previous, next)) return leftoverOrReview(view)
         if (next.isNotEmpty() && round < view.maxWeakRounds) {
             return ClarifyStage.Investigate(round + 1)
@@ -58,9 +77,13 @@ internal object ClarifyPolicy {
         return view.questions.none { questionKind(it) == QuestionKind.FACTUAL }
     }
 
-    fun needSideEffectsLlm(hasSideEffects: Boolean?, hitCount: Int): Boolean =
-        (hasSideEffects == true && hitCount == 0) || (hasSideEffects == false && hitCount > 0)
+    fun needSideEffectsLlm(
+        hasSideEffects: Boolean?,
+        hitCount: Int,
+    ): Boolean = (hasSideEffects == true && hitCount == 0) || (hasSideEffects == false && hitCount > 0)
 
-    fun noProgress(previous: Set<String>, next: Set<String>): Boolean =
-        (previous - next).isEmpty() && next.isNotEmpty()
+    fun noProgress(
+        previous: Set<String>,
+        next: Set<String>,
+    ): Boolean = (previous - next).isEmpty() && next.isNotEmpty()
 }

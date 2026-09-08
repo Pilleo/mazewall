@@ -3,6 +3,8 @@ title: "`poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 3b0ed9b8-82e8-4970-a18f-6ab550ad1cd1
+paperclip_identifier: MAZ-333
 ---
 
 # ✅ [RESOLVED]: `poll` EINTR Logic Bug Causes Process Deadlock via Blocking `read`

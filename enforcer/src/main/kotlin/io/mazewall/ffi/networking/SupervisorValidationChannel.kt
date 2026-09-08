@@ -1,20 +1,20 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
 import io.mazewall.LinuxNative
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketIo
-import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.supervisor.JvmVerdict
 import io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
+import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.writeByte
 import java.io.InputStream
@@ -24,17 +24,21 @@ import java.io.InputStream
  * This class exposes a high-level safe interface to the enforcer packages, hiding MemorySegments and Arenas.
  */
 public class SupervisorValidationChannel(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
 ) : AutoCloseable {
     private val arena = NativeArena.ofShared()
     public val inputStream: InputStream = SupervisorSocketInputStream(socketFd, arena)
     private val responseSegment = with(arena) { SupervisorResponseSegment.allocate() }
 
-    public fun sendResponse(id: Long, decision: Byte, errorNr: Int, path: String? = null) {
+    public fun sendResponse(
+        id: Long,
+        decision: Byte,
+        errorNr: Int,
+        path: String? = null,
+    ) {
         sendResponse(
             id,
-            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr)
-                ?: JvmVerdict.Deny(io.mazewall.ffi.NativeConstants.EPERM),
+            SupervisorNotificationMachine.parseJvmVerdict(decision.toInt(), errorNr),
             path,
         )
     }
@@ -56,7 +60,10 @@ public class SupervisorValidationChannel(
         writeFully(responseSegment.managed, Layouts.SUPERVISOR_RESPONSE_SIZE)
     }
 
-    private fun writeFully(buf: io.mazewall.ffi.memory.ManagedSegment, total: Long) {
+    private fun writeFully(
+        buf: io.mazewall.ffi.memory.ManagedSegment,
+        total: Long,
+    ) {
         when (val res = SocketIo.writeFully(LinuxNative.memory, socketFd, buf, total)) {
             is LinuxNative.SyscallResult.Error<*> -> error("Supervisor validation write failed errno=${res.errno}")
             is LinuxNative.SyscallResult.Success -> check(res.value == total) { "Supervisor validation short write ${res.value}" }

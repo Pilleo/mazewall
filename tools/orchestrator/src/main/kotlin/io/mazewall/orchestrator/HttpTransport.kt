@@ -8,7 +8,9 @@ interface HttpTransport {
     fun send(request: HttpRequest): HttpResponse<String>
 }
 
-class RealHttpTransport(private val client: HttpClient) : HttpTransport {
+class RealHttpTransport(
+    private val client: HttpClient,
+) : HttpTransport {
     override fun send(request: HttpRequest): HttpResponse<String> {
         return client.send(request, HttpResponse.BodyHandlers.ofString())
     }

@@ -12,7 +12,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt
 effort: medium
 autonomy: autonomous
-paperclip_issue_id: 99013182-b7d2-489f-b401-ad20b917027a
+paperclip_issue_id: "db644277-8b6b-4641-9759-f0187c6e9f22"
+paperclip_identifier: "MAZ-1072"
 ---
 
 # 🔴 [Severity: HIGH]: Implement Pre-Commit Working Tree Sanitization Barrier in Orchestrator Tasks

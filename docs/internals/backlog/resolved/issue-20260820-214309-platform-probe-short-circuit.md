@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdW
+paperclip_issue_id: d68be288-f0c2-4dfc-97b1-fef67e4c74a1
+paperclip_identifier: MAZ-492
 ---
 
 # 🟠 [Severity: MEDIUM]: Check the platform before probing Linux kernel features

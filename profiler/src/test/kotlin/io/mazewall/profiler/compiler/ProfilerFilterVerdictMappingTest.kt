@@ -20,13 +20,13 @@ import kotlin.test.assertTrue
  * probe matrix as :enforcer's kernel-differential suite.
  */
 class ProfilerFilterVerdictMappingTest {
-
     private val arch = Arch.AMD64
 
     @Test
     fun `profiling mode maps errno decisions to USER_NOTIF for structural probes`() {
         // NOTE: do not allow READ here — nr==0 is also the structural nr-zero-edge probe.
-        val policy = Policy.threadLocalBuilder()
+        val policy = Policy
+            .threadLocalBuilder()
             .defaultAction(SeccompAction.ACT_ERRNO())
             .allow(Syscall.GETPID)
             .build()
@@ -49,7 +49,8 @@ class ProfilerFilterVerdictMappingTest {
 
     @Test
     fun `profiling mode force-allows ioctl for the tracer`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .defaultAction(SeccompAction.ACT_ERRNO())
             .block(Syscall.CONNECT)
             .build()

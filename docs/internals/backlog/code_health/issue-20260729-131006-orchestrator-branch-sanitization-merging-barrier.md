@@ -11,7 +11,8 @@ target_files:
   - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
 effort: "medium"
 autonomy: "autonomous"
-paperclip_issue_id: 78c1f2fe-341d-4fb8-a1be-28919a12745c
+paperclip_issue_id: "bed93933-ec3f-4bbf-be42-cc2e7cccb7a0"
+paperclip_identifier: "MAZ-1079"
 ---
 
 # 🔴 [Severity: HIGH]: Introduce Branch Sanitization and Checkout Checks in Orchestrator Merging Logic

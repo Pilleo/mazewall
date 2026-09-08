@@ -11,6 +11,8 @@ target_files:
   - "platform/src/main/kotlin/io/mazewall/core/FileDescriptor.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: a90cd63b-4e8b-4870-876d-ec5308c557d7
+paperclip_identifier: MAZ-507
 ---
 
 # Do Not Reject Reused Live Descriptors During Poll

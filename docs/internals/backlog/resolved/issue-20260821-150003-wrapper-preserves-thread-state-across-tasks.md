@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/internal/ContainedExecutorWrapperStateTest.kt"
 effort: "medium"
 autonomy: "autonomous"
+paperclip_issue_id: 82b39b22-0790-441b-9285-b9eb2e39f280
+paperclip_identifier: MAZ-569
 ---
 
 # 🔴 [Severity: HIGH]: ContainedExecutorWrapper must not rewind ThreadLocal after a successful install

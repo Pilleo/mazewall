@@ -1,18 +1,21 @@
 package io.mazewall.enforcer
 
 import io.mazewall.Policy
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
+import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.diagnostics.ViolationMatcher
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.net.URLClassLoader
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.test.assertEquals
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import io.mazewall.enforcer.diagnostics.ViolationMatcher
-import io.mazewall.enforcer.api.ContainmentViolationException
 
 class ContainmentViolationDetectorExtensibilityTest {
-
     @AfterEach
     fun teardown() {
         ContainmentViolationDetector.resetToDefaults()
@@ -31,7 +34,7 @@ class ContainmentViolationDetectorExtensibilityTest {
         }
 
         // Now should be true
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(customException)?.evidence)
     }
 
     @Test
@@ -45,7 +48,7 @@ class ContainmentViolationDetectorExtensibilityTest {
         ContainmentViolationDetector.registerPhrase("blocked by sandbox engine")
 
         // Now should be true
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(customException)?.evidence)
 
         // Verify word boundaries
         assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("This action was blocked by sandbox enginely")))
@@ -62,7 +65,7 @@ class ContainmentViolationDetectorExtensibilityTest {
         ContainmentViolationDetector.registerRegex(Regex("""Access restricted: error \d+"""))
 
         // Now should be true
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(customException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(customException)?.evidence)
     }
 
     @Test
@@ -84,21 +87,22 @@ class ContainmentViolationDetectorExtensibilityTest {
             initialCustomPhrases = listOf("blocked by sandbox"),
             initialCustomRegexes = listOf(Regex("""restricted: \d+""")),
             useDefaults = false,
-            loadServices = false
+            loadServices = false,
         )
 
         val customException1 = IOException("blocked by sandbox")
         val customException2 = IOException("restricted: 123")
         val defaultException = IOException("Permission denied")
 
-        assertTrue(detector.isContainmentViolation(customException1))
-        assertTrue(detector.isContainmentViolation(customException2))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, detector.diagnose(customException1)?.evidence)
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, detector.diagnose(customException2)?.evidence)
         assertFalse(detector.isContainmentViolation(defaultException))
     }
 
     @Test
     fun `can configure custom phrases and regexes via Policy and PolicyBuilder`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .customViolationPhrase("blocked by sandbox")
             .customViolationRegex(Regex("""restricted: \d+"""))
             .build()
@@ -115,24 +119,29 @@ class ContainmentViolationDetectorExtensibilityTest {
         val falsePositiveCandidate = IOException("SomePermission deniedly")
 
         // With \b word boundaries, this should now be FALSE
-        assertFalse(ContainmentViolationDetector.isContainmentViolation(falsePositiveCandidate),
-            "Refactored implementation should NOT have false positive for 'SomePermission deniedly'")
+        assertFalse(
+            ContainmentViolationDetector.isContainmentViolation(falsePositiveCandidate),
+            "Refactored implementation should NOT have false positive for 'SomePermission deniedly'",
+        )
 
         // While the exact phrase should still be TRUE
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("Permission denied")))
+        assertEquals(
+            ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+            ContainmentViolationDetector.diagnose(IOException("Permission denied"))?.evidence,
+        )
     }
 
     @Test
     fun `verify consolidated regex matches various violation phrases`() {
         // Phrases from DENIED_PHRASES
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("Operation not permitted")))
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("refusé")))
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("verweigert")))
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("negado")))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("Operation not permitted"))?.evidence)
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("refusé"))?.evidence)
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("verweigert"))?.evidence)
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("negado"))?.evidence)
 
         // "Cannot run" phrase
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("Cannot run program \"ls\": error=13, Permission denied")))
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(IOException("Cannot run program \"foo\"")))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("Cannot run program \"ls\": error=13, Permission denied"))?.evidence)
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(IOException("Cannot run program \"foo\""))?.evidence)
     }
 
     @Test
@@ -153,10 +162,33 @@ class ContainmentViolationDetectorExtensibilityTest {
         val spiException = IOException("This is a SPI_VIOLATION_TRIGGER_KEYWORD error!")
 
         // This should be true because of TestServiceViolationMatcher registered via META-INF/services
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(spiException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(spiException)?.evidence)
 
         // Unrelated exception should still be false
         assertFalse(ContainmentViolationDetector.isContainmentViolation(IOException("Unrelated message")))
+    }
+
+    @Test
+    fun `fatal service matcher initialization is not swallowed`() {
+        val services = Files.createTempDirectory("mazewall-fatal-matcher").resolve("META-INF/services")
+        Files.createDirectories(services)
+        Files.writeString(
+            services.resolve("io.mazewall.enforcer.diagnostics.ViolationMatcher"),
+            "io.mazewall.enforcer.TestFatalServiceViolationMatcher",
+        )
+
+        URLClassLoader(
+            arrayOf(
+                services.parent.parent
+            .toUri()
+            .toURL(),
+            ),
+                javaClass.classLoader,
+        ).use { classLoader ->
+            assertFailsWith<java.util.ServiceConfigurationError> {
+                ContainmentViolationDetector(useDefaults = false, classLoader = classLoader)
+            }
+        }
     }
 
     @Test
@@ -165,18 +197,18 @@ class ContainmentViolationDetectorExtensibilityTest {
         val customDetector = ContainmentViolationDetector(
             customMatchers = listOf(ViolationMatcher { t -> t.message?.contains("SPECIFIC_TEST_KEYWORD") == true }),
             useDefaults = false,
-            loadServices = false // Disables service loader for this instance
+            loadServices = false, // Disables service loader for this instance
         )
 
         val customException = IOException("contains SPECIFIC_TEST_KEYWORD")
         val defaultException = IOException("Permission denied")
 
         // Custom detector matches custom keyword but NOT standard defaults
-        assertTrue(customDetector.isContainmentViolation(customException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, customDetector.diagnose(customException)?.evidence)
         assertFalse(customDetector.isContainmentViolation(defaultException))
 
         // Default detector matches standard defaults but NOT custom keyword
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(defaultException))
+        assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(defaultException)?.evidence)
         assertFalse(ContainmentViolationDetector.isContainmentViolation(customException))
     }
 }

@@ -17,16 +17,75 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class LandlockApplyResultTest {
-
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
         System.clearProperty("io.mazewall.fallback")
+    }
+
+    @Test
+    fun `beginning installation evaluates to a ruleset creation effect without native work`() {
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Uninitialized,
+            LandlockInstallEvent.Begin(abi = 6, filesystemAccess = 15L, networkAccess = 3L),
+        )
+
+        assertEquals(LandlockState.CreatingRuleset(6), transition.state)
+        assertEquals(
+            listOf(LandlockInstallEffect.CreateRuleset(15L, 3L, 6)),
+            transition.effects,
+        )
+    }
+
+    @Test
+    fun `ruleset creation evaluates to rule addition before restriction`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.CreatingRuleset(6),
+            LandlockInstallEvent.RulesetCreated(ruleset, abi = 6, policy = null),
+        )
+
+        assertEquals(LandlockState.ConfiguringRuleset(ruleset.fd, 6), transition.state)
+        assertEquals(
+            listOf(LandlockInstallEffect.AddRules(ruleset, abi = 6, policy = null)),
+            transition.effects,
+        )
+    }
+
+    @Test
+    fun `successful restriction evaluates to applied and closes the owned ruleset`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Enforcing(ruleset.fd),
+            LandlockInstallEvent.RestrictionApplied,
+        )
+
+        assertEquals(LandlockState.Applied, transition.state)
+        assertEquals(listOf(LandlockInstallEffect.CloseFd(ruleset.fd)), transition.effects)
+    }
+
+    @Test
+    fun `failed restriction retains enforcing phase and closes the owned ruleset`() {
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val failure = IllegalStateException("landlock_restrict_self failed")
+
+        val transition = LandlockInstall.evaluate(
+            LandlockState.Enforcing(ruleset.fd),
+            LandlockInstallEvent.Failed(failure),
+        )
+
+        val failed = assertIs<LandlockState.Failed>(transition.state)
+        assertEquals(LandlockState.Enforcing(ruleset.fd), failed.previous)
+        assertEquals(listOf(LandlockInstallEffect.CloseFd(ruleset.fd)), transition.effects)
     }
 
     @Test
@@ -74,8 +133,34 @@ class LandlockApplyResultTest {
             }
         })
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.unsafe(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
         val result = Landlock.tryEnforceRuleset(ruleset, false)
+        val error = assertIs<LandlockRestrictOutcome.Err>(result)
+        assertEquals(NativeConstants.EPERM, error.errno)
+    }
+
+    @Test
+    fun `rules-added lifecycle transition returns restrict-self failure`() {
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
+                    return LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                }
+                return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val result = LandlockLifecycle.RulesAdded(ruleset).tryRestrictSelf()
+
         val error = assertIs<LandlockRestrictOutcome.Err>(result)
         assertEquals(NativeConstants.EPERM, error.errno)
     }
@@ -100,20 +185,117 @@ class LandlockApplyResultTest {
     }
 
     @Test
-    fun `applyRuleset still fail-closes by unpacking tryApplyRuleset`(@TempDir dir: Path) {
+    fun `applyRuleset still fail-closes by unpacking tryApplyRuleset`(
+        @TempDir dir: Path,
+    ) {
         System.setProperty("io.mazewall.fallback", "FAIL")
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(enosysCreateEngine())
 
         assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.applyRuleset(
-                Policy.builder().allowFsRead(dir.toString()).build().definition,
+                Policy
+                    .builder()
+                    .allowFsRead(dir.toString())
+                    .build()
+                    .definition,
             )
         }
     }
 
     @Test
-    fun `ContainedExecutors install receipt is not installed when landlock is rejected`(@TempDir dir: Path) {
+    fun `process-wide rejection identifies the required Landlock ABI capability`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider().apply { mockLandlockAbiVersion = 5 })
+
+        val result = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition, processWide = true).tryApplyRuleset()
+        val rejected = assertIs<LandlockApplyResult.Rejected>(result)
+
+        assertContains(rejected.reason, "ABI v8")
+        assertContains(rejected.reason, "LANDLOCK_RESTRICT_SELF_TSYNC")
+        assertTrue(!rejected.reason.contains("Linux 7.0"))
+    }
+
+    @Test
+    fun `create-ruleset failure retains the lifecycle phase`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(enosysCreateEngine())
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.CreatingRuleset>(failed.previous)
+    }
+
+    @Test
+    fun `add-rule failure retains the configuring lifecycle phase`(
+        @TempDir dir: Path,
+    ) {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                when (nr) {
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_ADD_RULE_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val policy = Policy
+            .builder()
+            .allowFsRead(dir.toString())
+            .build()
+            .definition
+        val session = LandlockSession(policy)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.ConfiguringRuleset>(failed.previous)
+    }
+
+    @Test
+    fun `restrict-self failure retains the enforcing lifecycle phase`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        LinuxNative.setEngine(object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.core.NativeArg,
+                a2: io.mazewall.core.NativeArg,
+                a3: io.mazewall.core.NativeArg,
+                a4: io.mazewall.core.NativeArg,
+                a5: io.mazewall.core.NativeArg,
+                a6: io.mazewall.core.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                when (nr) {
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_RESTRICT_SELF_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+        })
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.Enforcing>(failed.previous)
+    }
+
+    @Test
+    fun `ContainedExecutors install receipt is not installed when landlock is rejected`(
+        @TempDir dir: Path,
+    ) {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(enosysCreateEngine())
@@ -126,7 +308,8 @@ class LandlockApplyResultTest {
         }
     }
 
-    private fun enosysCreateEngine(): MockNativeEngine = object : MockNativeEngine() {
+    private fun enosysCreateEngine(): MockNativeEngine =
+        object : MockNativeEngine() {
         override fun syscall(
             nr: Long,
             a1: io.mazewall.core.NativeArg,

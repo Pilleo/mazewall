@@ -14,6 +14,8 @@ effort: "medium"
 autonomy: "autonomous"
 open_questions: false
 dependencies: []
+paperclip_issue_id: 86684d82-134e-46d6-b773-c7160bbb6a1d
+paperclip_identifier: MAZ-599
 ---
 
 # 🟠 [Severity: MEDIUM]: Test Infrastructure Hygiene
@@ -51,4 +53,3 @@ capable of producing WRONG conclusions during debugging:
    `cleanAllTestResults --rerun-tasks`; add the same note to `.agents/skills/review/SKILL.md`.
 4. Optional CI guard: after each test task, assert every result XML's timestamp is newer than the
    oldest compiled class it covers (cheap staleness tripwire).
-

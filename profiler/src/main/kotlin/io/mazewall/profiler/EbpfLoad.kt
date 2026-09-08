@@ -11,8 +11,12 @@ import java.nio.file.Path
  */
 public sealed interface EbpfLoad {
     public data object Available : EbpfLoad
+
     public data object UserNamespaceRoot : EbpfLoad
-    public data class Denied(val reason: String) : EbpfLoad
+
+    public data class Denied(
+        val reason: String,
+    ) : EbpfLoad
 }
 
 public object EbpfCapability {
@@ -62,7 +66,10 @@ public object EbpfCapability {
         return inside == 0L && outside == 0L && length >= 4294967295L
     }
 
-    internal fun hasCap(capEff: Long, cap: Int): Boolean = (capEff ushr cap) and 1L == 1L
+    internal fun hasCap(
+        capEff: Long,
+        cap: Int,
+    ): Boolean = (capEff ushr cap) and 1L == 1L
 
     internal fun parseEuid(statusText: String): Int? {
         val line = statusText.lineSequence().firstOrNull { it.startsWith("Uid:") } ?: return null
@@ -70,7 +77,11 @@ public object EbpfCapability {
         return parts.getOrNull(1)?.toIntOrNull() ?: parts.getOrNull(0)?.toIntOrNull()
     }
 
-    private fun sameNamespace(selfNs: Path, initNs: Path, uidMap: Path): Boolean {
+    private fun sameNamespace(
+        selfNs: Path,
+        initNs: Path,
+        uidMap: Path,
+    ): Boolean {
         val fromUidMap = runCatching {
             if (Files.exists(uidMap)) {
                 parseInitUserNamespace(Files.readString(uidMap))

@@ -3,6 +3,8 @@ title: "`allowMmapExec=false` silently kills JIT on process-wide DENY_LIST polic
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: b113212a-a152-4b14-ab9e-36b7cd99fa43
+paperclip_identifier: MAZ-285
 ---
 
 # ✅ [RESOLVED]: `allowMmapExec=false` silently kills JIT on process-wide DENY_LIST policies

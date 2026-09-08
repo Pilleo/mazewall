@@ -214,8 +214,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
      */
     @Test
     @EnabledIfLinuxAndSupported
-    @Suppress("ThrowsCount")
-    fun `pkey_mprotect with PROT_EXEC is blocked`() {
+        fun `pkey_mprotect with PROT_EXEC is blocked`() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 
@@ -265,12 +264,14 @@ class MmapProtectionTest : BaseIntegrationTest() {
                         val res =
                         io.mazewall.LinuxNative.raw.syscall(
                             nr.toLong(),
-                            io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(addr)),
-                            io.mazewall.core.NativeArg.LongArg(4096L),
-                            io.mazewall.core.NativeArg.LongArg((PROT_READ or PROT_EXEC).toLong()),
+                            io.mazewall.core.NativeArg
+                                .MemoryArg(ConfinedSegment(addr)),
+                            io.mazewall.core.NativeArg
+                                .LongArg(4096L),
+                            io.mazewall.core.NativeArg
+                                .LongArg((PROT_READ or PROT_EXEC).toLong()),
                             io.mazewall.core.NativeArg.NullArg,
                         )
-
 
                         when (res) {
                             is io.mazewall.LinuxNative.SyscallResult.Error -> {

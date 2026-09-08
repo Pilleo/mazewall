@@ -1,15 +1,14 @@
 package io.mazewall
 
-import io.mazewall.seccomp.BpfInstruction
+import io.mazewall.LinuxNative
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.LinuxNative
-import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.seccomp.BpfInstruction
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -29,7 +28,10 @@ internal object BpfNativeCache {
      * engine was active are garbage for the real engine and must never be reused
      * (kernel-visible as spurious seccomp EINVAL).
      */
-    private data class NativeCacheKey(val filters: List<BpfInstruction>, val engine: Any)
+    private data class NativeCacheKey(
+        val filters: List<BpfInstruction>,
+        val engine: Any,
+    )
 
     /**
      * Gets a cached [ManagedSegment] for the given [filters], or computes it using

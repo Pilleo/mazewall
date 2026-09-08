@@ -7,6 +7,8 @@ dependencies: []
 component: "enforcer"
 effort: "medium"
 github_issue: 253
+paperclip_issue_id: e6f851f8-3618-44fc-9014-43b3fa951fcf
+paperclip_identifier: MAZ-624
 ---
 
 # 🔴 [Severity: HIGH]: Deprecate and Eliminate Redundant NativeTransaction Scaffolding

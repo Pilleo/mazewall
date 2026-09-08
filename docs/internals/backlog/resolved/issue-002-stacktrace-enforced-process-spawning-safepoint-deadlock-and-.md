@@ -6,6 +6,8 @@ priority: high
 dependencies: []
 component: "unknown"
 effort: "medium"
+paperclip_issue_id: 637c94d1-988c-43ef-8b37-f2fb29580092
+paperclip_identifier: MAZ-207
 ---
 
 # 🔴 [Severity: HIGH]: Stacktrace-Enforced Process Spawning Safepoint Deadlock and Trace Propagation Gotchas

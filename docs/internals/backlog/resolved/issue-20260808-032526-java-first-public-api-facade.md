@@ -3,8 +3,6 @@ title: "Provide an Intentional Java Public API Facade"
 severity: "ENHANCEMENT"
 status: "resolved"
 priority: high
-dependencies:
-  - "issue-20260808-032523"
 component: "enforcer"
 target_modules:
   - ":enforcer"
@@ -19,7 +17,8 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: fd1ea5f9-1634-471f-9f10-46792da11279
+paperclip_issue_id: b94cafef-08c1-4641-9525-13da895c6713
+paperclip_identifier: MAZ-705
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Provide an Intentional Java Public API Facade
@@ -42,3 +41,7 @@ paperclip_issue_id: fd1ea5f9-1634-471f-9f10-46792da11279
    - Added `@JvmStatic` and `Callable`/`Runnable` overloads to `Profiler.profile(...)`, `Profiler.wrap(...)`, and `Profiler.shutdown()`.
    - Added `@JvmOverloads` on `toPolicy()` and `toDsl()` in `ProfilingResult` and `BillOfBehavior`.
 5. **Java Test Fixtures:** Created pure Java test fixtures in `enforcer/src/test/java/io/mazewall/MazewallJavaApiTest.java` and `profiler/src/test/java/io/mazewall/profiler/ProfilerJavaApiTest.java` verifying all happy paths, builders, contained executors, and fail-closed boundary enforcement.
+6. **JavaDoc Enhancements:** Added comprehensive JavaDoc to `Mazewall` and `JavaPolicyBuilder` documenting:
+   - **Irreversibility:** Seccomp/Landlock filters cannot be removed once installed
+   - **Ownership:** Clarified thread vs process scope, executor lifecycle management
+   - **Fail-Closed Behavior:** Default behavior throws exceptions rather than bypassing security

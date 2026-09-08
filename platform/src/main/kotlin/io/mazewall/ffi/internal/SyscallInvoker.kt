@@ -1,6 +1,5 @@
 package io.mazewall.ffi.internal
 
-
 import io.mazewall.LinuxNative
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ErrnoSegment
@@ -12,6 +11,18 @@ import java.lang.invoke.MethodHandle
  * ensuring atomicity and preventing the JVM from overwriting errno.
  */
 internal object SyscallInvoker {
+    private fun intCall(invoke: (MemorySegment) -> Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = invoke(capturedState.segment)
+        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+
+    private fun longCall(invoke: (MemorySegment) -> Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val capturedState = ErrnoSegment.getThreadLocal()
+        val ret = invoke(capturedState.segment)
+        return RealNativeHelper.result(ret, capturedState.getErrno())
+    }
+
     fun syscall(
         handle: MethodHandle,
         nr: Long,
@@ -22,18 +33,7 @@ internal object SyscallInvoker {
         a5: Long,
         a6: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(
-            capturedState.segment,
-            nr,
-            a1,
-            a2,
-            a3,
-            a4,
-            a5,
-            a6,
-        ) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, nr, a1, a2, a3, a4, a5, a6) as Long }
     }
 
     fun ioctlAddr(
@@ -42,9 +42,7 @@ internal object SyscallInvoker {
         request: Long,
         arg: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd, request, arg) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, fd, request, arg) as Int }
     }
 
     fun ioctlLong(
@@ -53,9 +51,7 @@ internal object SyscallInvoker {
         request: Long,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd, request, arg) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, fd, request, arg) as Int }
     }
 
     fun fcntl(
@@ -64,9 +60,7 @@ internal object SyscallInvoker {
         cmd: Int,
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd, cmd, arg) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, fd, cmd, arg) as Int }
     }
 
     fun poll(
@@ -75,9 +69,7 @@ internal object SyscallInvoker {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fds, nfds, timeout) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, fds, nfds, timeout) as Int }
     }
 
     fun open(
@@ -86,9 +78,7 @@ internal object SyscallInvoker {
         flags: Int,
         mode: Int = 0,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, path, flags, mode) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, path, flags, mode) as Int }
     }
 
     fun openat(
@@ -98,9 +88,7 @@ internal object SyscallInvoker {
         flags: Int,
         mode: Int = 0,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, dirfd, path, flags, mode) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, dirfd, path, flags, mode) as Int }
     }
 
     fun mmap(
@@ -113,15 +101,7 @@ internal object SyscallInvoker {
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(
-            capturedState.segment,
-            addr,
-            length,
-            prot,
-            flags,
-            fd,
-            offset,
-        ) as MemorySegment
+        val ret = handle.invokeExact(capturedState.segment, addr, length, prot, flags, fd, offset) as MemorySegment
         return RealNativeHelper.result(ret.address(), capturedState.getErrno())
     }
 
@@ -129,9 +109,7 @@ internal object SyscallInvoker {
         handle: MethodHandle,
         fd: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, fd) as Int }
     }
 
     fun readlink(
@@ -140,9 +118,7 @@ internal object SyscallInvoker {
         buf: MemorySegment,
         bufsiz: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, path, buf, bufsiz) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, path, buf, bufsiz) as Long }
     }
 
     fun socketpair(
@@ -152,9 +128,7 @@ internal object SyscallInvoker {
         protocol: Int,
         sv: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, domain, type, protocol, sv) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, domain, type, protocol, sv) as Int }
     }
 
     fun accept4(
@@ -164,9 +138,7 @@ internal object SyscallInvoker {
         addrlen: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, addr, addrlen, flags) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, sockfd, addr, addrlen, flags) as Int }
     }
 
     fun socket(
@@ -175,9 +147,7 @@ internal object SyscallInvoker {
         type: Int,
         protocol: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, domain, type, protocol) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, domain, type, protocol) as Int }
     }
 
     fun bind(
@@ -186,9 +156,7 @@ internal object SyscallInvoker {
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, addr, addrlen) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, sockfd, addr, addrlen) as Int }
     }
 
     fun listen(
@@ -196,9 +164,7 @@ internal object SyscallInvoker {
         sockfd: Int,
         backlog: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, backlog) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, sockfd, backlog) as Int }
     }
 
     fun accept(
@@ -207,9 +173,7 @@ internal object SyscallInvoker {
         addr: MemorySegment,
         addrlen: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, addr, addrlen) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, sockfd, addr, addrlen) as Int }
     }
 
     fun connect(
@@ -218,9 +182,7 @@ internal object SyscallInvoker {
         addr: MemorySegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, addr, addrlen) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, sockfd, addr, addrlen) as Int }
     }
 
     fun sendmsg(
@@ -229,9 +191,7 @@ internal object SyscallInvoker {
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, msg, flags) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, sockfd, msg, flags) as Long }
     }
 
     fun recvmsg(
@@ -240,9 +200,7 @@ internal object SyscallInvoker {
         msg: MemorySegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, msg, flags) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, sockfd, msg, flags) as Long }
     }
 
     fun recv(
@@ -252,17 +210,15 @@ internal object SyscallInvoker {
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, sockfd, buf, len, flags) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, sockfd, buf, len, flags) as Long }
     }
 
-    fun gettid(
-        handle: MethodHandle,
-    ): Tid {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        return Tid(handle.invokeExact(capturedState.segment) as Int)
-    }
+    fun gettid(handle: MethodHandle): Tid =
+        Tid(
+            intCall { handle.invokeExact(it) as Int }
+                .getOrThrow("gettid")
+                .toInt(),
+        )
 
     fun prctl(
         handle: MethodHandle,
@@ -272,16 +228,7 @@ internal object SyscallInvoker {
         arg4: Long,
         arg5: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(
-            capturedState.segment,
-            option,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-        ) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, option, arg2, arg3, arg4, arg5) as Int }
     }
 
     fun pidfdOpen(
@@ -289,9 +236,7 @@ internal object SyscallInvoker {
         pid: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, pid, flags) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, pid, flags) as Int }
     }
 
     fun pidfdGetFd(
@@ -300,9 +245,7 @@ internal object SyscallInvoker {
         targetFd: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, pidfd, targetFd, flags) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, pidfd, targetFd, flags) as Int }
     }
 
     fun processVmReadv(
@@ -314,17 +257,7 @@ internal object SyscallInvoker {
         riovcnt: Long,
         flags: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(
-            capturedState.segment,
-            pid,
-            localIov,
-            liovcnt,
-            remoteIov,
-            riovcnt,
-            flags,
-        ) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, pid, localIov, liovcnt, remoteIov, riovcnt, flags) as Long }
     }
 
     fun processVmWritev(
@@ -336,17 +269,7 @@ internal object SyscallInvoker {
         riovcnt: Long,
         flags: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(
-            capturedState.segment,
-            pid,
-            localIov,
-            liovcnt,
-            remoteIov,
-            riovcnt,
-            flags,
-        ) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, pid, localIov, liovcnt, remoteIov, riovcnt, flags) as Long }
     }
 
     fun read(
@@ -355,9 +278,7 @@ internal object SyscallInvoker {
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd, buf, count) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, fd, buf, count) as Long }
     }
 
     fun write(
@@ -366,9 +287,7 @@ internal object SyscallInvoker {
         buf: MemorySegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, fd, buf, count) as Long
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return longCall { handle.invokeExact(it, fd, buf, count) as Long }
     }
 
     fun archPrctlLong(
@@ -376,9 +295,7 @@ internal object SyscallInvoker {
         code: Int,
         addr: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, code, addr) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, code, addr) as Int }
     }
 
     fun archPrctlAddr(
@@ -386,8 +303,6 @@ internal object SyscallInvoker {
         code: Int,
         addr: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, code, addr) as Int
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return intCall { handle.invokeExact(it, code, addr) as Int }
     }
 }

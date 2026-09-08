@@ -19,17 +19,23 @@ import java.util.concurrent.ExecutorService
 public object ContainedExecutors {
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread")
     public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
-        io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(*policies)
+        io.mazewall.enforcer.api.ContainedExecutors
+            .installOnCurrentThread(*policies)
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread")
-    public fun installOnCurrentThread(policy: Policy<*, Uncompiled>, scopingPolicy: StacktraceScopingPolicy) {
-        io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
+    public fun installOnCurrentThread(
+        policy: Policy<*, Uncompiled>,
+        scopingPolicy: StacktraceScopingPolicy,
+    ) {
+        io.mazewall.enforcer.api.ContainedExecutors
+            .installOnCurrentThread(policy, scopingPolicy)
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnProcess")
     public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
-        io.mazewall.enforcer.api.ContainedExecutors.installOnProcess(*policies)
+        io.mazewall.enforcer.api.ContainedExecutors
+            .installOnProcess(*policies)
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.wrap")
@@ -37,7 +43,8 @@ public object ContainedExecutors {
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
     ): ExecutorService {
-        return io.mazewall.enforcer.api.ContainedExecutors.wrap(delegate, *policies)
+        return io.mazewall.enforcer.api.ContainedExecutors
+            .wrap(delegate, *policies)
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.wrap")
@@ -46,6 +53,7 @@ public object ContainedExecutors {
         policy: Policy<*, Uncompiled>,
         scopingPolicy: StacktraceScopingPolicy,
     ): ExecutorService {
-        return io.mazewall.enforcer.api.ContainedExecutors.wrap(delegate, policy, scopingPolicy)
+        return io.mazewall.enforcer.api.ContainedExecutors
+            .wrap(delegate, policy, scopingPolicy)
     }
 }

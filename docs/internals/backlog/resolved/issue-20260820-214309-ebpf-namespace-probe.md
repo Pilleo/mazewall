@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: PRRC_kwDOScnnEM7kBdU
+paperclip_issue_id: 91f160cd-df3c-4dc9-abf7-78a8cd447fb1
+paperclip_identifier: MAZ-491
 ---
 
 # 🟠 [Severity: MEDIUM]: Do not use container PID 1 to identify the initial user namespace

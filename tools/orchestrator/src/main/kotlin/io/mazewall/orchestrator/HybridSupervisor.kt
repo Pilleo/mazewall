@@ -24,12 +24,17 @@ class HybridSupervisor(
     private val err: (String) -> Unit = System.err::println,
     private val sleepMs: (Long) -> Unit = { Thread.sleep(it) },
 ) {
-    fun tick(maxDispatch: Int, forceIdentifier: String? = null): Int {
+    fun tick(
+        maxDispatch: Int,
+        forceIdentifier: String? = null,
+    ): Int {
         val allowedLoopAdapters = ALLOWED_LOOP_ADAPTERS + extraLoopAdapters()
         // External failures degrade to a skipped tick, never a crash (orchestrator rule 4).
         val issues = runCatching { client.listIssues(companyId) }
-            .onFailure { err("listIssues failed: ${it.message}"); return 0 }
-            .getOrThrow()
+            .onFailure {
+                err("listIssues failed: ${it.message}")
+                return 0
+            }.getOrThrow()
         // Drain pcapprove/pcreject callbacks; without this the approval buttons
         // render but never fire (Codex P1, PR #513).
         telegramBot?.pollUpdates()
@@ -44,8 +49,10 @@ class HybridSupervisor(
                 }
         }
         val agents = runCatching { client.listAgents(companyId) }
-            .onFailure { err("listAgents failed: ${it.message}"); return 0 }
-            .getOrThrow()
+            .onFailure {
+                err("listAgents failed: ${it.message}")
+                return 0
+            }.getOrThrow()
         val agentsByUrlKey = agents.associateBy { it.urlKey }
         val agentsByAdapter = agents.associateBy { it.adapterType }
 
@@ -53,8 +60,10 @@ class HybridSupervisor(
         while (dispatched < maxDispatch) {
             // Re-select after each assignment: the board changed under us.
             val fresh = runCatching { client.listIssues(companyId) }
-                .onFailure { err("listIssues failed mid-tick: ${it.message}"); return dispatched }
-                .getOrThrow()
+                .onFailure {
+                    err("listIssues failed mid-tick: ${it.message}")
+                    return dispatched
+                }.getOrThrow()
             val candidate = DispatchSelector.select(fresh, forceIdentifier) ?: break
 
             val component = router.componentOf(candidate.description)
@@ -72,7 +81,7 @@ class HybridSupervisor(
                 err(
                     "REFUSED dispatch of ${candidate.identifier}: adapterType " +
                         "'${agent.adapterType}' is not an approved experiment worker " +
-                        "(allowed: ${allowedLoopAdapters}). Unlock via " +
+                        "(allowed: $allowedLoopAdapters). Unlock via " +
                         "PAPERCLIP_EXTRA_LOOP_ADAPTERS=<type> if the operator permits.",
                 )
                 return dispatched
@@ -144,7 +153,8 @@ class HybridSupervisor(
                 ?: System.getProperty(key)?.takeIf { it.isNotBlank() }
 
         fun parseExtra(raw: String?): Set<String> =
-            raw.orEmpty()
+            raw
+                .orEmpty()
                 ?.split(',')
                 ?.map { it.trim().lowercase() }
                 ?.filter { it.isNotEmpty() }
@@ -165,7 +175,11 @@ fun main(args: Array<String>) {
             val trimmed = line.trim()
             if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
                 val key = trimmed.substringBefore("=").trim()
-                val value = trimmed.substringAfter("=").trim().removeSurrounding("\"").removeSurrounding("'")
+                val value = trimmed
+                    .substringAfter("=")
+                    .trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
                 if (System.getenv(key) == null) System.setProperty(key, value)
             }
         }
@@ -190,7 +204,8 @@ fun main(args: Array<String>) {
         // HTTP/1.1 forced: the local board is a Node server that closes h2c-upgrade
         // connections mid-handshake ("header parser received no bytes").
         transport = RealHttpTransport(
-            HttpClient.newBuilder()
+            HttpClient
+                .newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build(),
@@ -201,7 +216,12 @@ fun main(args: Array<String>) {
     val router = ComponentRouter(
         customRoutes = ComponentRouter.parseOverrides(HybridSupervisor.env("PAPERCLIP_COMPONENT_ROUTES")),
     )
-    val resolver = BacklogResolver(repoRoot = java.nio.file.Path.of("").toAbsolutePath(), git = ProcessGitRunner)
+    val resolver = BacklogResolver(
+        repoRoot = java.nio.file.Path
+        .of("")
+        .toAbsolutePath(),
+            git = ProcessGitRunner,
+    )
 
     val tgToken = HybridSupervisor.env("TELEGRAM_BOT_TOKEN")
     val tgChat = HybridSupervisor.env("TELEGRAM_CHAT_ID")
@@ -213,7 +233,7 @@ fun main(args: Array<String>) {
         bot.onPaperclipApproval = { action, approvalId, callbackQueryId, messageId ->
             val outcome = runCatching { client.decideApproval(approvalId, action) }
                 .map { "Successfully ${action}d" }
-                .getOrElse { "${action} failed: ${it.message}" }
+                .getOrElse { "$action failed: ${it.message}" }
             bot.answerCallbackWith(callbackQueryId, outcome)
             messageId?.let { bot.clearReplyMarkup(it) }
         }
@@ -223,7 +243,8 @@ fun main(args: Array<String>) {
     }
 
     val supervisor = HybridSupervisor(
-        client, router,
+        client,
+        router,
         ciWatch = CiWatch(PaperclipIssueSignals(client), ProcessGhCheckSource(), notify = notifyHook),
         resolver = resolver,
         notifier = notifier,
@@ -236,15 +257,21 @@ fun main(args: Array<String>) {
         val byAdapter = client.listAgents(companyId).associateBy { it.adapterType }
         val scoped = client.listIssues(companyId).let { all ->
             val force = HybridSupervisor.env("PAPERCLIP_FORCE_IDENTIFIER")
-            if (force.isNullOrBlank()) all else all.filter {
+            if (force.isNullOrBlank()) {
+                all
+            } else {
+                all.filter {
                 it.identifier.equals(force, ignoreCase = true)
             }
+            }
         }
-        DispatchSelector.ordered(scoped)
+        DispatchSelector
+            .ordered(scoped)
             .take(5)
             .forEach { issue ->
                 val component = router.componentOf(issue.description)
-                val target = router.urlKeyFor(component)
+                val target = router
+                    .urlKeyFor(component)
                     ?.let { byUrlKey[it]?.urlKey }
                     ?: ("adapter:" + router.defaultAdapter + " (" + (byAdapter[router.defaultAdapter]?.urlKey ?: "?") + ")")
                 println("  would dispatch ${issue.identifier} component=${component ?: "-"} -> $target")

@@ -2,17 +2,17 @@ package io.mazewall.enforcer.internal
 
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.PolicyDefinition
+import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import java.nio.file.AccessDeniedException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.nio.file.AccessDeniedException
 
 @EnabledIfLinuxAndSupported
 class ContainedExecutorWrapperTest {
-
     val policyDefinition = PolicyDefinition<io.mazewall.PolicyScope.ProcessWideSafe>()
 
     @Test
@@ -46,7 +46,8 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is ContainmentViolationException)
+        val containmentFailure = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertInstanceOf(AccessDeniedException::class.java, containmentFailure.cause)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)
@@ -104,7 +105,58 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is ContainmentViolationException)
+        val containmentFailure = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertInstanceOf(AccessDeniedException::class.java, containmentFailure.cause)
+
+        delegate.shutdown()
+        delegate.awaitTermination(1, TimeUnit.SECONDS)
+    }
+
+    @Test
+    fun `test submit preserves structured containment metadata`() {
+        val delegate = Executors.newSingleThreadExecutor()
+        val wrapper = ContainedExecutorWrapper(delegate, policyDefinition)
+        val denial = ContainmentViolationException(
+            message = "kernel denial",
+            errno = 1,
+            syscallNr = 59,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
+        )
+
+        val ex = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            wrapper.submit(Callable { throw denial }).get()
+        }
+
+        val propagated = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertEquals(1, propagated.errno)
+        assertEquals(59, propagated.syscallNr)
+        assertEquals(ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL, propagated.evidence)
+
+        delegate.shutdown()
+        delegate.awaitTermination(1, TimeUnit.SECONDS)
+    }
+
+    @Test
+    fun `test submit promotes nested structured metadata without losing the original failure`() {
+        val delegate = Executors.newSingleThreadExecutor()
+        val wrapper = ContainedExecutorWrapper(delegate, policyDefinition)
+        val denial = ContainmentViolationException(
+            message = "kernel denial",
+            errno = 13,
+            syscallNr = 257,
+            evidence = ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL,
+        )
+        val outer = IllegalStateException("task context", denial)
+
+        val ex = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            wrapper.submit(Callable { throw outer }).get()
+        }
+
+        val propagated = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertEquals(13, propagated.errno)
+        assertEquals(257, propagated.syscallNr)
+        assertEquals(ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL, propagated.evidence)
+        assertTrue(propagated.cause === outer)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)
@@ -135,7 +187,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val futures = wrapper.invokeAll(callables)
@@ -154,7 +206,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val futures = wrapper.invokeAll(callables, 1, TimeUnit.SECONDS)
@@ -173,7 +225,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val result = wrapper.invokeAny(callables)
@@ -190,7 +242,7 @@ class ContainedExecutorWrapperTest {
 
         val callables = listOf(
             Callable { "r1" },
-            Callable { "r2" }
+            Callable { "r2" },
         )
 
         val result = wrapper.invokeAny(callables, 1, TimeUnit.SECONDS)

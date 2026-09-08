@@ -1,12 +1,11 @@
 package io.mazewall.enforcer.diagnostics
 
+import io.mazewall.Platform
+import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.*
-
-import io.mazewall.Platform
+import io.mazewall.enforcer.state.*
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 

@@ -1,6 +1,5 @@
 package io.mazewall.ffi
 
-
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.StructLayout
 
@@ -8,7 +7,7 @@ import java.lang.foreign.StructLayout
  * Validates FFM memory layout size and member offsets dynamically at runtime on initialization
  * to ensure they match target ABI expectations.
  */
-@Suppress("MagicNumber")
+
 object LayoutValidator {
     fun validate() {
         validateLayout(Layouts.SOCK_FILTER, expectedSize = 8, expectedAlignment = 4) {
@@ -84,9 +83,10 @@ object LayoutValidator {
             assertOffset("revents", 6)
         }
 
-        validateLayout(Layouts.LANDLOCK_RULESET_ATTR, expectedSize = 16, expectedAlignment = 8) {
+        validateLayout(Layouts.LANDLOCK_RULESET_ATTR, expectedSize = 24, expectedAlignment = 8) {
             assertOffset("handled_access_fs", 0)
             assertOffset("handled_access_net", 8)
+            assertOffset("scoped", 16)
         }
 
         validateLayout(Layouts.LANDLOCK_PATH_BENEATH_ATTR, expectedSize = 12, expectedAlignment = 1) {
@@ -116,13 +116,17 @@ object LayoutValidator {
         LayoutValidationScope(layout).block()
     }
 
-    internal class LayoutValidationScope(private val layout: StructLayout) {
-        @Suppress("TooGenericExceptionCaught")
-        fun assertOffset(fieldName: String, expectedOffset: Long) {
+    internal class LayoutValidationScope(
+        private val layout: StructLayout,
+    ) {
+        fun assertOffset(
+            fieldName: String,
+            expectedOffset: Long,
+        ) {
             val actualOffset = try {
                 layout.byteOffset(MemoryLayout.PathElement.groupElement(fieldName))
-            } catch (e: Exception) {
-                throw IllegalStateException("Field '$fieldName' not found in layout", e)
+            } catch (expectedFieldLookupFailure: Exception) {
+                throw IllegalStateException("Field '$fieldName' not found in layout", expectedFieldLookupFailure)
             }
             if (actualOffset != expectedOffset) {
                 throw IllegalStateException("FFM StructLayout offset mismatch for field '$fieldName': expected offset $expectedOffset but got $actualOffset")

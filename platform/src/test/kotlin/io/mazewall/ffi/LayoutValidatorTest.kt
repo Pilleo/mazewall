@@ -8,7 +8,6 @@ import java.lang.foreign.MemoryLayout
 import java.lang.foreign.ValueLayout
 
 class LayoutValidatorTest {
-
     @Test
     fun `validate passes cleanly on standard layouts`() {
         assertDoesNotThrow {

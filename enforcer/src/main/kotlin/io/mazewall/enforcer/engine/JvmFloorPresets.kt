@@ -74,6 +74,5 @@ public object JvmFloorPresets {
      * Deliberately does NOT include exec/memfd families; socket usage requires additionally
      * allowing [NETWORK_STABILITY_FLOOR] plus the connect/bind/listen/accept/send family.
      */
-    public fun fullJvmFloor(): Array<Syscall> =
-        BOOTSTRAP_READ_CLOSURE + THREAD_COORDINATION_CLOSURE
+    public fun fullJvmFloor(): Array<Syscall> = BOOTSTRAP_READ_CLOSURE + THREAD_COORDINATION_CLOSURE
 }

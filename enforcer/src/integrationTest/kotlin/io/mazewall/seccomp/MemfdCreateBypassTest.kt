@@ -38,7 +38,6 @@ LinuxNative.raw.syscall(
     NativeArg.NullArg,
     NativeArg.NullArg,
 )
-
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()
@@ -73,7 +72,6 @@ LinuxNative.raw.syscall(
     NativeArg.NullArg,
     NativeArg.NullArg,
 )
-
                         }
                     assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "Expected EPERM, got $res")
                 }.get()

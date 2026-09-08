@@ -5,7 +5,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class RetryUtilsTest {
-
     @Test
     fun `retry returns success on first try`() {
         var attempts = 0

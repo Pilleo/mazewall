@@ -7,6 +7,8 @@ dependencies: []
 component: "unknown"
 effort: "large"
 github_issue: 273
+paperclip_issue_id: 1359ca25-8db8-4a53-ba16-0b7892665214
+paperclip_identifier: MAZ-231
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: `SeccompAction` Violates Open/Closed Principle (OCP)

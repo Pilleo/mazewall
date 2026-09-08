@@ -11,6 +11,8 @@ solution_approved: true
 blast_radius: "medium"
 reversible: true
 github_issue: 171
+paperclip_issue_id: 2be28961-5b2e-4c6e-a49b-013e1308b6fe
+paperclip_identifier: MAZ-316
 ---
 
 # 🔴 [Severity: MEDIUM]: Potential Race Condition in Async IO Thread Shutdown

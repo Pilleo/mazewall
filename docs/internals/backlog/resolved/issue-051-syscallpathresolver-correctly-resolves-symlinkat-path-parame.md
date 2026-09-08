@@ -3,6 +3,8 @@ title: "`SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 2a8d0f27-18d6-4894-bc73-b2ac52af9afa
+paperclip_identifier: MAZ-242
 ---
 
 # ✅ [RESOLVED]: `SyscallPathResolver` correctly resolves `SYMLINKAT` path parameters

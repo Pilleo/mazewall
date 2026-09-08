@@ -11,6 +11,8 @@ target_files:
   - "tools/orchestrator/src/test/kotlin/io/mazewall/orchestrator/BranchRebaserGitIntegrationTest.kt"
 effort: "medium"
 autonomy: "supervised"
+paperclip_issue_id: df3b1518-38c2-4f4f-b753-8a18a4a9e17a
+paperclip_identifier: MAZ-428
 ---
 
 # 🔴 [Severity: MEDIUM]: Implement Real Git Repository Integration Tests for Orchestrator BranchRebaser

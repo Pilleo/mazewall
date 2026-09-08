@@ -13,7 +13,8 @@ target_files:
 - tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/DependencyGraph.kt
 effort: medium
 autonomy: autonomous
-paperclip_issue_id: 9495de1c-db57-4c2a-81e5-9fff45eb4134
+paperclip_issue_id: 0763a704-500d-4fa0-acfb-47f0f69a8980
+paperclip_identifier: MAZ-637
 ---
 
 # 🔴 [Severity: HIGH]: Implement Subsystem Domain Locking and Core File Exclusive Execution in Dependency Graph

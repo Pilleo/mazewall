@@ -11,6 +11,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/ArchitectureTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 6eb0c9b9-945e-41e4-9c61-c526177b11ea
+paperclip_identifier: MAZ-487
 ---
 
 # 🟢 [Severity: LOW]: ArchUnit FileDescriptor.unsafe ban excludes io.mazewall.core callers

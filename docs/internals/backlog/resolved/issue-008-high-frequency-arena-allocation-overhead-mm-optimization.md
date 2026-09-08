@@ -7,6 +7,8 @@ dependencies: []
 component: "ffi"
 effort: "medium"
 github_issue: 259
+paperclip_issue_id: e021ec64-4511-4fe0-9303-b0c893106f98
+paperclip_identifier: MAZ-213
 ---
 
 # 🟡 [Severity: LOW]: High-Frequency Arena Allocation Overhead (MM Optimization)

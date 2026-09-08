@@ -1,6 +1,5 @@
 package io.mazewall.core
 
-
 import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
@@ -21,11 +20,14 @@ import java.nio.file.Paths
  * a symlink that resolves to a restricted target.
  */
 @JvmInline
-public value class SandboxedPath private constructor(public val value: String) {
+public value class SandboxedPath private constructor(
+    public val value: String,
+) {
     public companion object {
         /**
          * Resolves and validates a raw [path] string into a [SandboxedPath].
          *
+         * @param path raw path to normalize and validate.
          * @param allowNonExistent If true, the path is absolute-normalized but existence is not checked.
          *                         Useful for unit tests and base presets.
          * @throws java.io.IOException if the path does not exist and [allowNonExistent] is false.
@@ -33,9 +35,15 @@ public value class SandboxedPath private constructor(public val value: String) {
         @JvmName("of")
         @JvmStatic
         @JvmOverloads
-        public fun of(path: String, allowNonExistent: Boolean = false): SandboxedPath {
+        public fun of(
+            path: String,
+            allowNonExistent: Boolean = false,
+        ): SandboxedPath {
             val p = Paths.get(path).toAbsolutePath().normalize()
-            if (!allowNonExistent && !java.nio.file.Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
+            if (!allowNonExistent &&
+                !java.nio.file.Files
+                .exists(p, LinkOption.NOFOLLOW_LINKS)
+            ) {
                 throw java.nio.file.NoSuchFileException(p.toString())
             }
             return SandboxedPath(p.toString())
@@ -58,31 +66,29 @@ public value class SandboxedPath private constructor(public val value: String) {
  * absolute and normalized (guaranteed for [SandboxedPath] values by [SandboxedPath.of]); a relative
  * or unnormalized operand is never contained.
  */
-public fun isUnder(path: java.nio.file.Path, ancestor: java.nio.file.Path): Boolean =
-    path.isAbsolute && ancestor.isAbsolute && path.startsWith(ancestor)
+public fun isUnder(
+    path: java.nio.file.Path,
+    ancestor: java.nio.file.Path,
+): Boolean = path.isAbsolute && ancestor.isAbsolute && path.startsWith(ancestor)
 
 /**
  * True when this path equals [ancestor] or lies beneath it (component-wise; see [isUnder]).
  */
-public infix fun SandboxedPath.isUnder(ancestor: SandboxedPath): Boolean =
-    isUnder(Paths.get(value), Paths.get(ancestor.value))
+public infix fun SandboxedPath.isUnder(ancestor: SandboxedPath): Boolean = isUnder(Paths.get(value), Paths.get(ancestor.value))
 
 /**
  * True when every child path lies beneath at least one of [parents].
  * An empty [children] set is trivially covered; no child can be covered by an empty parent set.
  */
-public fun Set<SandboxedPath>.coveredBy(parents: Set<SandboxedPath>): Boolean =
-    all { child -> parents.any { child isUnder it } }
+public fun Set<SandboxedPath>.coveredBy(parents: Set<SandboxedPath>): Boolean = all { child -> parents.any { child isUnder it } }
 
 /** Alias mirroring policy vocabulary: parents cover all children. */
-public fun Set<SandboxedPath>.coversAll(children: Set<SandboxedPath>): Boolean =
-    children.coveredBy(this)
+public fun Set<SandboxedPath>.coversAll(children: Set<SandboxedPath>): Boolean = children.coveredBy(this)
 
 /**
  * True when this path lies beneath at least one of [ancestors] (see [isUnder]).
  */
-public fun SandboxedPath.isUnderAny(ancestors: Set<SandboxedPath>): Boolean =
-    ancestors.any { this isUnder it }
+public fun SandboxedPath.isUnderAny(ancestors: Set<SandboxedPath>): Boolean = ancestors.any { this isUnder it }
 
 /**
  * Best-effort symlink resolution for comparison purposes.
@@ -100,7 +106,7 @@ public fun SandboxedPath.resolveReal(): SandboxedPath {
                 resolved = resolved.resolve(segment)
             }
             return SandboxedPath.unsafe(resolved.toString())
-        } catch (e: java.io.IOException) {
+        } catch (_: java.io.IOException) {
             val name = current.fileName ?: return this
             unresolvedTail.addLast(name.toString())
             current = current.parent ?: return this

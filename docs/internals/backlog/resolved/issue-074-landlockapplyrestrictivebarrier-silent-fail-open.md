@@ -3,6 +3,8 @@ title: "Landlock.applyRestrictiveBarrier() Silent Fail-Open"
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: d20df5f5-a3a8-4e0e-87d7-c33efe666b6b
+paperclip_identifier: MAZ-258
 ---
 
 # ✅ [RESOLVED]: Landlock.applyRestrictiveBarrier() Silent Fail-Open

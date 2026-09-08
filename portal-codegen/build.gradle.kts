@@ -1,10 +1,7 @@
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     `java-gradle-plugin`
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 dependencies {

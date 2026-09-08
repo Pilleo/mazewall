@@ -736,53 +736,6 @@ public abstract interface class io/mazewall/profiler/engine/DaemonRunner {
 	public abstract fun runDaemon ([Ljava/lang/String;)V
 }
 
-public abstract class io/mazewall/profiler/engine/HandshakeSession {
-	public abstract fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	public abstract fun getNotifId ()J
-}
-
-public final class io/mazewall/profiler/engine/HandshakeSession$Active : io/mazewall/profiler/engine/HandshakeSession {
-	public fun <init> (JLio/mazewall/core/FileDescriptor;)V
-	public final fun acknowledged (Ljava/lang/String;)Lio/mazewall/profiler/engine/HandshakeSession$Success;
-	public static synthetic fun acknowledged$default (Lio/mazewall/profiler/engine/HandshakeSession$Active;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/profiler/engine/HandshakeSession$Success;
-	public final fun failed ()Lio/mazewall/profiler/engine/HandshakeSession$Failed;
-	public fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	public fun getNotifId ()J
-	public final fun passedThrough ()Lio/mazewall/profiler/engine/HandshakeSession$PassedThrough;
-	public final fun performHandshake (Lio/mazewall/core/FileDescriptor;Lio/mazewall/profiler/engine/NativeIoOperations;Ljava/lang/foreign/MemorySegment;Ljava/lang/foreign/MemorySegment;Lkotlin/jvm/functions/Function1;)Lio/mazewall/profiler/engine/HandshakeSession;
-}
-
-public final class io/mazewall/profiler/engine/HandshakeSession$Failed : io/mazewall/profiler/engine/HandshakeSession {
-	public fun <init> (JLio/mazewall/core/FileDescriptor;)V
-	public fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	public fun getNotifId ()J
-}
-
-public final class io/mazewall/profiler/engine/HandshakeSession$PassedThrough : io/mazewall/profiler/engine/HandshakeSession {
-	public fun <init> (JLio/mazewall/core/FileDescriptor;)V
-	public final fun acknowledged ()Lio/mazewall/profiler/engine/HandshakeSession$Success;
-	public fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	public fun getNotifId ()J
-}
-
-public final class io/mazewall/profiler/engine/HandshakeSession$Success : io/mazewall/profiler/engine/HandshakeSession {
-	public fun <init> (JLio/mazewall/core/FileDescriptor;Ljava/lang/String;)V
-	public synthetic fun <init> (JLio/mazewall/core/FileDescriptor;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getDeferredShutdownReason ()Ljava/lang/String;
-	public fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	public fun getNotifId ()J
-}
-
-public abstract interface class io/mazewall/profiler/engine/NativeIoOperations {
-	public abstract fun close (Lio/mazewall/core/FileDescriptor;)V
-	public abstract fun getRaw ()Lio/mazewall/RawSyscallOperations;
-	public abstract fun ioctl (Lio/mazewall/core/FileDescriptor;JLjava/lang/foreign/MemorySegment;)Lio/mazewall/LinuxNative$SyscallResult;
-	public abstract fun poll (Ljava/lang/foreign/MemorySegment;JI)Lio/mazewall/LinuxNative$SyscallResult;
-	public abstract fun read (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/LinuxNative$SyscallResult;
-	public abstract fun recv (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;JI)Lio/mazewall/LinuxNative$SyscallResult;
-	public abstract fun write (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/LinuxNative$SyscallResult;
-}
-
 public final class io/mazewall/profiler/engine/ProfilerDaemon {
 	public static final field INSTANCE Lio/mazewall/profiler/engine/ProfilerDaemon;
 	public static final fun main ([Ljava/lang/String;)V
@@ -817,9 +770,6 @@ public final class io/mazewall/profiler/engine/ProfilerMemoryReader$DefaultImpls
 	public static fun resolveLink-4I0HFv8 (Lio/mazewall/profiler/engine/ProfilerMemoryReader;Lio/mazewall/ffi/memory/NativeArena;ILjava/lang/String;)Ljava/lang/String;
 }
 
-public abstract interface class io/mazewall/profiler/engine/ProfilerTransport : io/mazewall/core/SocketManager, io/mazewall/profiler/engine/NativeIoOperations, io/mazewall/profiler/engine/SeccompResponder, io/mazewall/profiler/engine/TraceEventPublisher {
-}
-
 public final class io/mazewall/profiler/engine/ProfilerTransport$DefaultImpls {
 	public static fun recvDescriptor (Lio/mazewall/profiler/engine/ProfilerTransport;Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;)Lio/mazewall/core/FileDescriptor;
 }
@@ -837,31 +787,6 @@ public final class io/mazewall/profiler/engine/RealMemoryReader : io/mazewall/ff
 	public fun readString-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)Ljava/lang/String;
 	public fun readStringFromProcess-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)Ljava/lang/String;
 	public fun resolveLink-4I0HFv8 (Lio/mazewall/ffi/memory/NativeArena;ILjava/lang/String;)Ljava/lang/String;
-}
-
-public final class io/mazewall/profiler/engine/RealProfilerTransport : io/mazewall/profiler/engine/ProfilerTransport {
-	public static final field INSTANCE Lio/mazewall/profiler/engine/RealProfilerTransport;
-	public fun accept (Lio/mazewall/core/FileDescriptor;)Lio/mazewall/core/FileDescriptor;
-	public fun close (Lio/mazewall/core/FileDescriptor;)V
-	public fun connect (Ljava/lang/String;)Lio/mazewall/core/FileDescriptor;
-	public fun createUnixServer (Ljava/lang/String;)Lio/mazewall/core/FileDescriptor;
-	public fun getRaw ()Lio/mazewall/RawSyscallOperations;
-	public fun ioctl (Lio/mazewall/core/FileDescriptor;JLjava/lang/foreign/MemorySegment;)Lio/mazewall/LinuxNative$SyscallResult;
-	public fun poll (Ljava/lang/foreign/MemorySegment;JI)Lio/mazewall/LinuxNative$SyscallResult;
-	public fun read (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/LinuxNative$SyscallResult;
-	public fun recv (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;JI)Lio/mazewall/LinuxNative$SyscallResult;
-	public fun recvDescriptor (Lio/mazewall/core/FileDescriptor;)Lio/mazewall/core/FileDescriptor;
-	public fun recvDescriptor (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;)Lio/mazewall/core/FileDescriptor;
-	public fun sendDescriptor (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;)Z
-	public fun sendSeccompContinue (Ljava/lang/foreign/Arena;Lio/mazewall/profiler/engine/HandshakeSession$Success;Ljava/lang/foreign/MemorySegment;)V
-	public fun sendSeccompError (Ljava/lang/foreign/Arena;Lio/mazewall/profiler/engine/HandshakeSession$Failed;Ljava/lang/foreign/MemorySegment;I)V
-	public fun sendTraceEvent (Ljava/lang/foreign/Arena;Lio/mazewall/core/FileDescriptor;Lio/mazewall/profiler/engine/SyscallEvent;)V
-	public fun write (Lio/mazewall/core/FileDescriptor;Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/LinuxNative$SyscallResult;
-}
-
-public abstract interface class io/mazewall/profiler/engine/SeccompResponder {
-	public abstract fun sendSeccompContinue (Ljava/lang/foreign/Arena;Lio/mazewall/profiler/engine/HandshakeSession$Success;Ljava/lang/foreign/MemorySegment;)V
-	public abstract fun sendSeccompError (Ljava/lang/foreign/Arena;Lio/mazewall/profiler/engine/HandshakeSession$Failed;Ljava/lang/foreign/MemorySegment;I)V
 }
 
 public abstract interface class io/mazewall/profiler/engine/SessionEvent {
@@ -1090,10 +1015,6 @@ public final class io/mazewall/profiler/engine/TraceEvent$Socket : io/mazewall/p
 	public fun hashCode ()I
 	public final fun isIpSocket ()Z
 	public fun toString ()Ljava/lang/String;
-}
-
-public abstract interface class io/mazewall/profiler/engine/TraceEventPublisher {
-	public abstract fun sendTraceEvent (Ljava/lang/foreign/Arena;Lio/mazewall/core/FileDescriptor;Lio/mazewall/profiler/engine/SyscallEvent;)V
 }
 
 public final class io/mazewall/profiler/internal/DaemonContext {
@@ -1382,7 +1303,6 @@ public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent {
 
 public final class io/mazewall/profiler/tierE/ringbuf/ContextEvent$Companion {
 	public final fun fromBytes ([B)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
-	public final fun fromSegment (Ljava/lang/foreign/MemorySegment;J)Lio/mazewall/profiler/tierE/ringbuf/ContextEvent;
 }
 
 public final class io/mazewall/profiler/tierE/stress/StressDriverMainKt {

@@ -28,7 +28,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             ProcessBuilder("echo", "should-fail").start()
             throw IllegalStateException("Should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -49,7 +49,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
                     ProcessBuilder("echo", "should-fail").start()
                     throw IllegalStateException("Child thread should have been contained")
                 } catch (e: Exception) {
-                    if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+                    if (ContainmentViolationDetector.diagnose(e) == null) {
                         throw e
                     }
                 }
@@ -81,7 +81,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             java.net.Socket().connect(java.net.InetSocketAddress("127.0.0.1", 80))
             throw IllegalStateException("Connect should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -169,7 +169,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             ProcessBuilder("echo", "should-fail").start()
             throw IllegalStateException("Should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -206,18 +206,22 @@ class ProcessContainmentTest : BaseIntegrationTest() {
     }
 
     fun testLandlockSupportLimits() {
-        val policyWithFs = Policy.builder().allowMmapExec().allowFsRead("/etc").build()
+        val policyWithFs = Policy
+            .builder()
+            .allowMmapExec()
+            .allowFsRead("/etc")
+            .build()
         val features = Platform.featureMatrix
 
         if (features.landlockTsyncSupported) {
             // On modern kernels, this should at least pass our internal guard
             // (might still fail with EACCES if sibling threads aren't ready, but that's a different error)
             try {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
                 // EACCES is acceptable in this test context as it proves we bypassed the version guard
-                val strerror13 = io.mazewall.ffi.memory.getSystemStrerror(13)
+                val strerror13 = io.mazewall.ffi.memory
+                    .getSystemStrerror(13)
                 val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
                 if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
                     throw e
@@ -225,7 +229,6 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             }
         } else {
             org.junit.jupiter.api.assertThrows<io.mazewall.UnsupportedKernelFeatureException> {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             }
         }

@@ -13,6 +13,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/ffi/memory/SupervisorProcessMemoryReaderTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 16728651-b47d-4db0-b1d0-706e93fa6148
+paperclip_identifier: MAZ-468
 ---
 
 # 🔴 [Severity: HIGH]: Fail Closed on Supervisor Memory Read EPERM

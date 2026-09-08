@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/compiler/StraceLogParser.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 6532ca3b-d8b9-45de-830d-89c57cd95114
+paperclip_identifier: MAZ-508
 ---
 
 # Mark Discarded Strace Records as Dropped

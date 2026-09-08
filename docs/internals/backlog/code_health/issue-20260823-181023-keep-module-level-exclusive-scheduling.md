@@ -14,7 +14,8 @@ target_files:
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 86bbfe6b-4443-4675-a8ef-6b2f6edb9710
+paperclip_issue_id: 69cdc2a7-e8d2-4903-b59a-40841de76e3f
+paperclip_identifier: MAZ-667
 ---
 
 # 🔴 [Severity: HIGH]: Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel

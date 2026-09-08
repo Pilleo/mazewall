@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -49,7 +50,8 @@ public class ProcessBroker(
     private val trackedSlots: MutableSet<WorkerSlot> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
-    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val closed = java.util.concurrent.atomic
+        .AtomicBoolean(false)
 
     public fun start() {
         check(started.compareAndSet(0, 1)) { "broker already started" }
@@ -60,21 +62,22 @@ public class ProcessBroker(
 
     /** Test/diagnostics view of live (tracked) worker slots. */
     internal fun trackedWorkers(): Int = trackedSlots.size
+
     internal fun idleSize(): Int = idle.size
 
     public fun echo(text: String): String {
-        val payload = call(PortalMethods.ECHO, text.toByteArray(StandardCharsets.UTF_8), emptyList())
+        val payload = call(PortalMethod.Echo, text.toByteArray(StandardCharsets.UTF_8), emptyList())
         return payload.toString(StandardCharsets.UTF_8)
     }
 
     public fun invoke(
-        methodId: Int,
+        method: PortalMethod,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,
-    ): ByteArray = call(methodId, payload, granted.map { it.fd })
+    ): ByteArray = call(method, payload, granted.map { it.fd })
 
     public fun checksum(fd: Capability.ReadFd): Int {
-        val payload = call(PortalMethods.CHECKSUM, ByteArray(0), listOf(fd.fd))
+        val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd.fd))
         require(payload.size == 4) { "checksum must be 4 bytes" }
         return ((payload[0].toInt() and 0xff) shl 24) or
             ((payload[1].toInt() and 0xff) shl 16) or
@@ -82,8 +85,10 @@ public class ProcessBroker(
             (payload[3].toInt() and 0xff)
     }
 
-    public fun openReadOnly(rootDir: java.nio.file.Path, relative: String): Capability.ReadFd =
-        openGrantedRead(rootDir, relative)
+    public fun openReadOnly(
+        rootDir: java.nio.file.Path,
+        relative: String,
+    ): Capability.ReadFd = openGrantedRead(rootDir, relative)
 
     internal fun sleep(millis: Int) {
         val buf = ByteArray(4)
@@ -91,11 +96,11 @@ public class ProcessBroker(
         buf[1] = (millis ushr 16).toByte()
         buf[2] = (millis ushr 8).toByte()
         buf[3] = millis.toByte()
-        call(PortalMethods.SLEEP, buf, emptyList())
+        call(PortalMethod.Sleep, buf, emptyList())
     }
 
     internal fun tryOpenHostPasswd() {
-        call(PortalMethods.TRY_OPEN_HOST_PASSWD, ByteArray(0), emptyList())
+        call(PortalMethod.TryOpenHostPasswd, ByteArray(0), emptyList())
     }
 
     internal fun spawnedWorkers(): Int = spawned.get()
@@ -109,9 +114,9 @@ public class ProcessBroker(
     }
 
     internal fun call(
-        methodId: Int,
+        method: PortalMethod,
         payload: ByteArray,
-        fds: List<FileDescriptor<*, FdState.Open>>,
+        fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>,
     ): ByteArray {
         check(started.get() == 1) { "broker not started" }
         val slot =
@@ -120,29 +125,39 @@ public class ProcessBroker(
         var returnedToPool = false
         return try {
             val id = nextId.getAndIncrement()
-            slot.channel.send(PortalFrame(PortalKind.REQUEST, id, methodId, payload, fds.size), fds)
+            val request = PortalFrame(PortalKind.Request, id, method, PortalPayload(payload), fds.size)
+            var callState = PortalBrokerCallMachine
+                .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
+                .state
+            slot.channel.send(request, fds)
             val (reply, extra) = slot.channel.receive(callTimeoutMs)
             extra.forEach { sockets.close(it) }
-            check(reply.requestId == id) { "request id mismatch" }
-            if (reply.kind == PortalKind.ERROR) {
-                returnToPoolOrDestroy(slot)
-                returnedToPool = true
-                throw PortalCallException(reply.payload.toString(StandardCharsets.UTF_8))
+            val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
+            callState = transition.state
+            when (val effect = transition.effect) {
+                is PortalBrokerCallEffect.ReturnPayload -> {
+                    returnToPoolOrDestroy(slot)
+                    returnedToPool = true
+                    effect.payload.copyToByteArray()
+                }
+                is PortalBrokerCallEffect.RemoteError -> {
+                    returnToPoolOrDestroy(slot)
+                    returnedToPool = true
+                    throw PortalCallException(effect.message)
+                }
+                is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
+                PortalBrokerCallEffect.None -> throw PortalCallException("portal RPC produced no terminal result")
             }
-            check(reply.kind == PortalKind.RESPONSE) { "unexpected kind ${reply.kind}" }
-            returnToPoolOrDestroy(slot)
-            returnedToPool = true
-            reply.payload
         } catch (e: PortalCallException) {
             if (!returnedToPool) {
                 recycleDeadWorker(slot)
             }
             throw e
-        } catch (e: Exception) {
+        } catch (expectedRpcFailure: Exception) {
             if (!returnedToPool) {
                 recycleDeadWorker(slot)
             }
-            throw PortalCallException("portal RPC failed", e)
+            throw PortalCallException("portal RPC failed", expectedRpcFailure)
         }
     }
 
@@ -200,7 +215,9 @@ public class ProcessBroker(
         // must (a) surface its exit code and command line, and (b) break the
         // blocking accept() below by closing the listener, so the cleanup path runs
         // instead of hanging until an external timeout.
-        proc.onExit().thenAccept {
+        proc
+            .onExit()
+            .thenAccept {
             if (it.exitValue() != 0) {
                 System.err.println(
                     "[PORTAL-WORKER-EXIT] code=${it.exitValue()} cmd=${JvmChildProcess.commandLine(spec).joinToString(" ")}",
@@ -211,12 +228,16 @@ public class ProcessBroker(
             // (its peer is discarded by the !proc.isAlive guard below); closing the
             // listener afterwards prevents any further accepts.
             runCatching {
-                java.nio.channels.SocketChannel.open(
+                java.nio.channels.SocketChannel
+                    .open(
                     java.net.UnixDomainSocketAddress.of(ep.path),
                 ).use { ch -> ch.write(java.nio.ByteBuffer.wrap(ByteArray(1))) }
             }
             runCatching { sockets.close(listen) }
-        }.exceptionally { System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}"); null }
+        }.exceptionally {
+            System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}")
+            null
+        }
         val pump =
             JvmChildProcess.startStdoutPump(
                 proc,
@@ -231,14 +252,19 @@ public class ProcessBroker(
             )
         val peer = try {
             sockets.accept(listen)
-        } catch (e: Exception) {
+        } catch (expectedWorkerTeardown: Exception) {
             // Listener closed by the death watcher (or teardown racing accept).
             runCatching { proc.destroyForcibly() }
             ep.close()
-            throw IllegalStateException("portal worker died before connecting: ${e.message}", e)
+            throw IllegalStateException(
+                "portal worker died before connecting: ${expectedWorkerTeardown.message}",
+                expectedWorkerTeardown,
+            )
         }
         if (!proc.isAlive) {
-            sockets.close(peer); sockets.close(listen); ep.close()
+            sockets.close(peer)
+            sockets.close(listen)
+            ep.close()
             proc.destroyForcibly()
             error("portal worker exited during handshake")
         }
@@ -292,6 +318,6 @@ public class ProcessBroker(
         val process: Process,
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
-        val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
+        val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     )
 }

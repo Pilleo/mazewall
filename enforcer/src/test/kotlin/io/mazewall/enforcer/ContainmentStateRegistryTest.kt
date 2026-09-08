@@ -8,11 +8,10 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 internal class ContainmentStateRegistryTest {
-
     @AfterEach
     fun teardown() {
         ContainmentStateRegistry.threadState = ContainerState()
@@ -39,8 +38,10 @@ internal class ContainmentStateRegistryTest {
     @Test
     fun `test ProcessStateRegistry concurrent updates and state resolutions`() {
         val originalState = ContainmentStateRegistry.processState
-        val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
-        val stopFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+        val executor = java.util.concurrent.Executors
+            .newFixedThreadPool(8)
+        val stopFlag = java.util.concurrent.atomic
+            .AtomicBoolean(false)
         val exceptions = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
 
         try {
@@ -48,7 +49,8 @@ internal class ContainmentStateRegistryTest {
 
             // Spawn 4 threads updating the process state
             repeat(4) {
-                tasks.add(executor.submit {
+                tasks.add(
+                    executor.submit {
                     while (!stopFlag.get()) {
                         try {
                             ContainmentStateRegistry.updateProcessState { state ->
@@ -58,12 +60,14 @@ internal class ContainmentStateRegistryTest {
                             exceptions.add(t)
                         }
                     }
-                })
+                },
+                )
             }
 
             // Spawn 4 threads concurrently resolving current state
             repeat(4) {
-                tasks.add(executor.submit {
+                tasks.add(
+                    executor.submit {
                     while (!stopFlag.get()) {
                         try {
                             val resolved = ContainmentStateRegistry.resolveCurrentState()
@@ -72,7 +76,8 @@ internal class ContainmentStateRegistryTest {
                             exceptions.add(t)
                         }
                     }
-                })
+                },
+                )
             }
 
             // Let them run for 300ms
@@ -84,7 +89,6 @@ internal class ContainmentStateRegistryTest {
 
             // Check if any exceptions were thrown
             assertTrue(exceptions.isEmpty(), "Expected no concurrent modification exceptions, but got: ${exceptions.map { it.stackTraceToString() }}")
-
         } finally {
             executor.shutdownNow()
             executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
@@ -138,7 +142,7 @@ internal class ContainmentStateRegistryTest {
         val message = exception.message ?: ""
         assertTrue(
             message.contains("permanent") || message.contains("thread") || message.contains("lifetime"),
-            "Exception message should mention permanent restrictions or thread lifetime, got: $message"
+            "Exception message should mention permanent restrictions or thread lifetime, got: $message",
         )
     }
 
@@ -148,8 +152,9 @@ internal class ContainmentStateRegistryTest {
         // The Java reflection API returns java.lang.Void.class for the return type.
         val method = ContainmentStateRegistry::class.java.getDeclaredMethod("sanitizeThreadState")
         assertEquals(
-            Void::class.java, method.returnType,
-            "Return type should be java.lang.Void (which represents Kotlin's Nothing)"
+            Void::class.java,
+            method.returnType,
+            "Return type should be java.lang.Void (which represents Kotlin's Nothing)",
         )
     }
 
@@ -163,8 +168,9 @@ internal class ContainmentStateRegistryTest {
         }
 
         assertEquals(
-            3, ContainmentStateRegistry.threadState.filterDepth,
-            "threadState should not be cleared after sanitizeThreadState throws"
+            3,
+            ContainmentStateRegistry.threadState.filterDepth,
+            "threadState should not be cleared after sanitizeThreadState throws",
         )
     }
 
@@ -174,45 +180,37 @@ internal class ContainmentStateRegistryTest {
         private val dummyFilterBuilt = SeccompInstallationState.FilterBuilt(ManagedSegment.NULL)
         private val dummyPrivLocked = SeccompInstallationState.PrivilegesLocked(ManagedSegment.NULL)
 
+        data class RankedEngineState(
+            val name: String,
+            val state: SeccompInstallationState,
+            val rank: Int,
+        )
+
+        private val rankedEngineStates = listOf(
+            RankedEngineState("uninitialized", SeccompInstallationState.Uninitialized, 0),
+            RankedEngineState("failed", dummyFailed, 1),
+            RankedEngineState("filter built", dummyFilterBuilt, 2),
+            RankedEngineState("privileges locked", dummyPrivLocked, 3),
+            RankedEngineState("syscall applied", SeccompInstallationState.SystemCallApplied, 4),
+            RankedEngineState("prctl applied", SeccompInstallationState.FallbackPrctlApplied, 4),
+            RankedEngineState("verified", SeccompInstallationState.Verified, 5),
+        )
+
         @JvmStatic
         fun engineStateCombinations(): java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> =
-            java.util.stream.Stream.of(
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Uninitialized,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Verified,
-                    SeccompInstallationState.Verified,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.Verified,
-                    SeccompInstallationState.Uninitialized,
-                    SeccompInstallationState.Verified,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyPrivLocked,
-                    dummyFilterBuilt,
-                    dummyPrivLocked,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyFilterBuilt,
-                    SeccompInstallationState.SystemCallApplied,
-                    SeccompInstallationState.SystemCallApplied,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    SeccompInstallationState.FallbackPrctlApplied,
-                    SeccompInstallationState.SystemCallApplied,
-                    SeccompInstallationState.FallbackPrctlApplied,
-                ),
-                org.junit.jupiter.params.provider.Arguments.of(
-                    dummyFailed,
-                    SeccompInstallationState.Uninitialized,
-                    dummyFailed,
-                ),
-            )
+            rankedEngineStates
+                .flatMap { thread ->
+                rankedEngineStates.map { process ->
+                    val expected = if (thread.rank >= process.rank) thread else process
+                    org.junit.jupiter.params.provider.Arguments.of(
+                        thread.name,
+                        process.name,
+                        thread.state,
+                        process.state,
+                        expected.state,
+                    )
+                }
+            }.stream()
 
         @JvmStatic
         fun allowedSyscallsCombinations(): java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> =
@@ -240,9 +238,11 @@ internal class ContainmentStateRegistryTest {
             )
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> merged {2}")
+    @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> highest-ranked state")
     @org.junit.jupiter.params.provider.MethodSource("engineStateCombinations")
     fun `test composite mergeEngineStates resolution`(
+        threadName: String,
+        processName: String,
         threadEngineState: SeccompInstallationState,
         processEngineState: SeccompInstallationState,
         expectedMergedEngineState: SeccompInstallationState,
@@ -251,7 +251,11 @@ internal class ContainmentStateRegistryTest {
         ContainmentStateRegistry.processState = ContainerState(engineState = processEngineState)
 
         val resolved = ContainmentStateRegistry.resolveCurrentState()
-        assertEquals(expectedMergedEngineState, resolved.engineState)
+        assertEquals(
+            expectedMergedEngineState,
+            resolved.engineState,
+            "thread $threadName plus process $processName must retain the highest-ranked state",
+        )
     }
 
     @org.junit.jupiter.params.ParameterizedTest(name = "thread allows={0}, process allows={1} -> merged allows={2}")
@@ -297,11 +301,14 @@ internal class ContainmentStateRegistryTest {
         assertEquals(expectedMerged, resolved.allowedSyscalls)
     }
 
-    private fun parseAction(name: String): io.mazewall.core.SeccompAction = when (name.trim()) {
+    private fun parseAction(name: String): io.mazewall.core.SeccompAction =
+        when (name.trim()) {
         "ACT_KILL_PROCESS" -> io.mazewall.core.SeccompAction.ACT_KILL_PROCESS
         "ACT_KILL_THREAD" -> io.mazewall.core.SeccompAction.ACT_KILL_THREAD
         "ACT_TRAP" -> io.mazewall.core.SeccompAction.ACT_TRAP
-        "ACT_ERRNO" -> io.mazewall.core.SeccompAction.ACT_ERRNO()
+        "ACT_ERRNO" ->
+            io.mazewall.core.SeccompAction
+            .ACT_ERRNO()
         "ACT_NOTIFY" -> io.mazewall.core.SeccompAction.ACT_NOTIFY
         "ACT_LOG" -> io.mazewall.core.SeccompAction.ACT_LOG
         else -> io.mazewall.core.SeccompAction.ACT_ALLOW
@@ -336,30 +343,5 @@ internal class ContainmentStateRegistryTest {
         val resolved = ContainmentStateRegistry.resolveCurrentState()
         assertEquals(expectedMergedAction, resolved.defaultAction)
         assertEquals(expectedMergedAction, resolved.syscallActions[io.mazewall.core.Syscall.READ])
-    }
-
-    @Test
-    fun `compile-time exhaustive check on SeccompInstallationState variants`() {
-        val states: List<SeccompInstallationState> = listOf(
-            SeccompInstallationState.Uninitialized,
-            dummyFailed,
-            dummyFilterBuilt,
-            dummyPrivLocked,
-            SeccompInstallationState.SystemCallApplied,
-            SeccompInstallationState.FallbackPrctlApplied,
-            SeccompInstallationState.Verified,
-        )
-
-        for (state in states) {
-            when (state) {
-                is SeccompInstallationState.Uninitialized -> Unit
-                is SeccompInstallationState.Failed -> Unit
-                is SeccompInstallationState.FilterBuilt -> Unit
-                is SeccompInstallationState.PrivilegesLocked -> Unit
-                is SeccompInstallationState.SystemCallApplied -> Unit
-                is SeccompInstallationState.FallbackPrctlApplied -> Unit
-                is SeccompInstallationState.Verified -> Unit
-            }
-        }
     }
 }

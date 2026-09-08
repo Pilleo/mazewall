@@ -1,44 +1,42 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
-import java.io.IOException
-import java.lang.foreign.Arena
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
+import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.ffi.memory.unwrap
-import io.mazewall.ffi.memory.writeInt
-import io.mazewall.ffi.memory.writeShort
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.SegmentPool
+import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.readShort
-import io.mazewall.ffi.memory.readByte
-import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.unwrap
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeShort
 import io.mazewall.map
 import io.mazewall.onSuccess
-import io.mazewall.recover
-import io.mazewall.ffi.Layouts
-import io.mazewall.ffi.memory.SegmentPool
-import java.lang.foreign.MemorySegment
-import java.lang.foreign.ValueLayout
-
-import io.mazewall.profiler.engine.SeccompResponder
-import io.mazewall.platform.seccomp.daemon.NotifResult
 import io.mazewall.platform.seccomp.daemon.LoopAction
+import io.mazewall.platform.seccomp.daemon.NotifResult
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-
+import io.mazewall.profiler.ffi.HandshakeSession
+import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.SeccompResponder
+import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.recover
+import java.io.IOException
 
 /**
  * Internal logic for handling active seccomp listeners and shutdown requests.
  */
 internal class ProfilerSessionHandler(
-    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val publisher: TraceEventPublisher,
     private val responder: SeccompResponder,
     private val ioOps: NativeIoOperations,
@@ -46,8 +44,8 @@ internal class ProfilerSessionHandler(
     private val syscallMap: Map<Int, String>,
     private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
     private val onShutdown: (String) -> Unit,
-) : AutoCloseable, SeccompNotifHandler {
-
+) : AutoCloseable,
+    SeccompNotifHandler {
     val ledger = SessionEventLedger()
 
     private val sessionArena = NativeArena.ofConfined()
@@ -55,8 +53,6 @@ internal class ProfilerSessionHandler(
     val socketPollFd: ManagedSegment = sessionArena.allocate(Layouts.POLLFD)
 
     private val resolver = SyscallPathResolver(memoryReader, ledger)
-
-    private var isPassThrough = false
 
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
@@ -82,13 +78,11 @@ internal class ProfilerSessionHandler(
      * are deterministically freed when the iteration completes, completely eliminating the overhead of
      * creating a new confined arena per notification or operation.
      */
-    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
-    context(arena: NativeArena)
-    override fun processNotification(
+    context(arena: NativeArena) override fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
-        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open>
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ): NotifResult {
         val currentState = state as? ProfilerState.ActiveSession ?: return NotifResult.TERMINATE
 
@@ -105,26 +99,7 @@ internal class ProfilerSessionHandler(
         try {
             ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
 
-            val args = parsedNotif.args
-            val syscallName = syscallMap[nr] ?: "SYSCALL_$nr"
-
-            // RESOLVE: Transform raw event into a resolved event (read path from tracee memory).
-            val paths = with(arena) {
-                resolver.resolvePaths(Tid(pidVal), syscallName, args)
-            }
-
-            val argList = ArrayList<Long>(args.size).apply {
-                for (a in args) {
-                    add(a)
-                }
-            }
-
-            val resolvedEvent = SyscallEvent<SyscallEventState.Resolved>(
-                tid = Tid(pidVal),
-                syscallName = syscallName,
-                args = argList,
-                paths = paths
-            )
+            val resolvedEvent = resolveNotificationEvent(pidVal, nr, parsedNotif.args)
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
@@ -132,36 +107,16 @@ internal class ProfilerSessionHandler(
                 return NotifResult.HANDLED
             }
 
-            val notified = ProfilerSessionMachine.evaluate(
-                currentState,
-                ProfilerSessionEvent.NotificationReceived(id, resolvedEvent),
-            )
-            val waiting = ProfilerSessionMachine.evaluate(
-                notified.state,
-                ProfilerSessionEvent.EventDelivered,
-            )
-            state = waiting.state
+            val waitingState = transitionToAckWait(currentState, id, resolvedEvent)
+            state = waitingState
 
-            parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
-
-            // DELIVER: Write event to JVM listener socket.
-            System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pidVal, syscall=${resolvedEvent.syscallName}, paths=${resolvedEvent.paths}")
-            with(arena.unwrap) {
-                publisher.sendTraceEvent(socketFd, resolvedEvent)
-            }
-            System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
-            ledger.record(SessionEvent.EventSent(System.nanoTime(), pidVal.toLong()))
-
-            // HANDSHAKE: Wait for the JVM listener to ACK the event before letting the tracee continue.
-            // This blocking synchronization is physically required: if the daemon sends CONTINUE immediately
-            // (asynchronous fire-and-forget), the tracee thread resumes and moves past the system call frame
-            // before the JVM listener thread can capture its stack trace, resulting in empty or incorrect traces.
-            val result = handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
+            val result = deliverAndAwaitAck(pidVal, resolvedEvent, handshake)
             return when (result) {
                 is HandshakeSession.Success -> {
                     ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                    state = ProfilerSessionMachine.evaluate(
-                        waiting.state,
+                    state = ProfilerSessionMachine
+                        .evaluate(
+                        waitingState,
                         ProfilerSessionEvent.AckSucceeded,
                     ).state
                     with(arena.unwrap) {
@@ -174,8 +129,9 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.Failed -> {
                     System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
-                    state = ProfilerSessionMachine.evaluate(
-                        waiting.state,
+                    state = ProfilerSessionMachine
+                        .evaluate(
+                        waitingState,
                         ProfilerSessionEvent.HandshakeFailed,
                     ).state
                     with(arena.unwrap) {
@@ -186,8 +142,9 @@ internal class ProfilerSessionHandler(
                 }
                 is HandshakeSession.PassedThrough -> {
                     System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
-                    state = ProfilerSessionMachine.evaluate(
-                        waiting.state,
+                    state = ProfilerSessionMachine
+                        .evaluate(
+                        waitingState,
                         ProfilerSessionEvent.PassedThrough,
                     ).state
                     with(arena.unwrap) {
@@ -198,8 +155,9 @@ internal class ProfilerSessionHandler(
                     NotifResult.PASS_THROUGH
                 }
                 is HandshakeSession.Active -> {
-                    state = ProfilerSessionMachine.evaluate(
-                        waiting.state,
+                    state = ProfilerSessionMachine
+                        .evaluate(
+                        waitingState,
                         ProfilerSessionEvent.HandshakeFailed,
                     ).state
                     NotifResult.TERMINATE
@@ -212,27 +170,84 @@ internal class ProfilerSessionHandler(
             Thread.currentThread().interrupt()
             throw e
         } catch (e: IOException) {
-            logger.severe {
-                "IOException in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
-                    ledger.dump().joinToString("\n")
-            }
+            logSessionFailure("IOException", e)
             if (continueSent) {
-                state = ProfilerState.ActiveSession(socketFd, listenerFd)
+                state = ProfilerSessionMachine
+                    .evaluate(state, ProfilerSessionEvent.AckSucceeded)
+                    .state
                 return NotifResult.HANDLED
             }
+            state = ProfilerSessionMachine
+                .evaluate(state, ProfilerSessionEvent.TransportFailed)
+                .state
             try {
                 with(arena.unwrap) {
                     responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
                 }
-            } catch (ignored: Throwable) {}
+            } catch (ignored: Throwable) {
+                }
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return NotifResult.TERMINATE
-        } catch (e: Throwable) {
-            logger.severe {
-                "Structural or unrecoverable error in processNotification: ${e.message}. Dumping SessionEventLedger:\n" +
-                    ledger.dump().joinToString("\n")
-            }
-            throw e
+        } catch (expectedStructuralFailure: Exception) {
+            logSessionFailure("Structural or unrecoverable error", expectedStructuralFailure)
+            throw expectedStructuralFailure
+        } catch (expectedStructuralError: Error) {
+            logSessionFailure("Structural or unrecoverable error", expectedStructuralError)
+            throw expectedStructuralError
+        }
+    }
+
+    private fun logSessionFailure(
+        category: String,
+        failure: Throwable,
+    ) {
+        logger.severe { "$category in processNotification: ${failure.message}. Dumping SessionEventLedger:\n${ledger.dump().joinToString("\n")}" }
+    }
+
+    /** Materializes native notification fields into a heap-only event before publication. */
+    context(arena: NativeArena) private fun resolveNotificationEvent(
+        pid: Int,
+        syscallNr: Int,
+        args: LongArray,
+    ): SyscallEvent<SyscallEventState.Resolved> {
+        val tid = Tid(pid)
+        val syscallName = syscallMap[syscallNr] ?: "SYSCALL_$syscallNr"
+        val paths = resolver.resolvePaths(tid, syscallName, args)
+        return SyscallEvent(
+            tid = tid,
+            syscallName = syscallName,
+            args = args.toCollection(ArrayList(args.size)),
+            paths = paths,
+        )
+    }
+
+    private fun transitionToAckWait(
+        currentState: ProfilerState.ActiveSession,
+        notificationId: Long,
+        event: SyscallEvent<SyscallEventState.Resolved>,
+    ): ProfilerState =
+        ProfilerSessionMachine
+        .evaluate(currentState, ProfilerSessionEvent.NotificationReceived(notificationId, event))
+        .let { ProfilerSessionMachine.evaluate(it.state, ProfilerSessionEvent.EventDelivered).state }
+
+    /**
+     * Publishes a heap event and waits for its required listener acknowledgement before the
+     * tracee may receive a kernel response. This boundary must never send a seccomp reply.
+     */
+    context(arena: NativeArena) private fun deliverAndAwaitAck(
+        pid: Int,
+        event: SyscallEvent<SyscallEventState.Resolved>,
+        handshake: HandshakeSession.Active,
+    ): HandshakeSession {
+        parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
+        System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pid, syscall=${event.syscallName}, paths=${event.paths}")
+        with(arena.unwrap) {
+            publisher.sendTraceEvent(socketFd, event)
+        }
+        System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
+        ledger.record(SessionEvent.EventSent(System.nanoTime(), pid.toLong()))
+        return with(arena.unwrap) {
+            handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
         }
     }
 
@@ -246,16 +261,30 @@ internal class ProfilerSessionHandler(
         handshake: HandshakeSession.Active,
         resp: ManagedSegment,
     ): Boolean {
-        if (io.mazewall.platform.seccomp.SupervisedKind.classify(nr, io.mazewall.core.Arch.current())
+        if (io.mazewall.platform.seccomp.SupervisedKind
+            .classify(
+                io.mazewall.core.SyscallNumber(nr),
+                io.mazewall.core.Arch
+                .current(),
+            )
             is io.mazewall.platform.seccomp.SupervisedKind.Open &&
             resolvedEvent.paths.isNotEmpty()
         ) {
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
-                val matched = io.mazewall.enforcer.supervisor.BypassPaths.isBypassPath(java.nio.file.Paths.get(normalizedPathStr))
+                val matched = io.mazewall.enforcer.supervisor.BypassPaths
+                    .isBypassPath(
+                        java.nio.file.Paths
+                        .get(normalizedPathStr),
+                    )
                 System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
                 if (matched) {
+                    // No JVM event was published, so there is no 0xAC ACK to wait for.
+                    // CONTINUE the tracee immediately; waiting for handshake deadlocks the session.
+                    val transition = ProfilerSessionMachine.evaluate(state, ProfilerSessionEvent.NoisePathBypassed)
+                    check(transition.passThrough) { "Noise bypass requires an explicit CONTINUE effect" }
+                    state = transition.state
                     with(arena.unwrap) {
                         responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
                     }
@@ -267,18 +296,15 @@ internal class ProfilerSessionHandler(
             } catch (e: java.nio.channels.ClosedByInterruptException) {
                 Thread.currentThread().interrupt()
                 throw e
-            } catch (ignored: Exception) {}
+            } catch (ignored: Exception) {
+                }
         }
         return false
     }
 
-
     companion object {
-        private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte() // 'S'
-        private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte() // 'T' / 'P'
-
         private const val ECONNRESET = 104
-        private val logger = java.util.logging.Logger.getLogger(ProfilerSessionHandler::class.java.name)
-
+        private val logger = java.util.logging.Logger
+            .getLogger(ProfilerSessionHandler::class.java.name)
     }
 }

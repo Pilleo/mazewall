@@ -13,6 +13,8 @@ effort: "medium"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819982838
+paperclip_issue_id: 58bd2931-6962-42c6-bb23-82886c445c8b
+paperclip_identifier: MAZ-530
 ---
 
 # 🔴 [Severity: HIGH]: Perform the exec rewrite before acknowledging it

@@ -10,7 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: ff2ab246-e708-4dd3-8a4c-19827c33b14a
+paperclip_issue_id: "f15ee614-8e03-4c9e-aa92-efc272e400c2"
+paperclip_identifier: "MAZ-1121"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Introduce Context Parameters for Memory and Engine Scopes

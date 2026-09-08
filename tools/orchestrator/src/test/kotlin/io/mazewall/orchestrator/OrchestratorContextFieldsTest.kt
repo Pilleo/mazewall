@@ -1,13 +1,12 @@
 package io.mazewall.orchestrator
 
+import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import java.util.Properties
 
 class OrchestratorContextFieldsTest {
-
     @Test
     fun `save and load properties with missing values`() {
         val context = OrchestratorContext()

@@ -11,6 +11,8 @@ solution_approved: false
 blast_radius: "medium"
 reversible: true
 github_issue: 221
+paperclip_issue_id: 7068c8c2-9852-4487-a5e8-7b811ec325ca
+paperclip_identifier: MAZ-273
 ---
 
 # 🔴 [Severity: LOW]: Overly Broad Catch Block in `ProfilerDaemon.reactorLoop`

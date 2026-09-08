@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/collector/EbpfEventParser.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 95a80d47-6121-4e9d-a4ad-5c4753d49698
+paperclip_identifier: MAZ-501
 ---
 
 # eBPF Event Field Value Whitespace Preservation

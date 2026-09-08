@@ -14,6 +14,8 @@ target_files:
   - "enforcer/src/main/kotlin/io/mazewall/PolicyPresets.kt"
 effort: "large"
 autonomy: "supervised"
+paperclip_issue_id: 1a601c7b-7696-486e-9a44-c1fa32ec2539
+paperclip_identifier: MAZ-455
 ---
 
 # 🟡 [Severity: MEDIUM]: Replace Hidden Policy Defaults with Runtime-Aware Baselines

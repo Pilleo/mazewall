@@ -18,7 +18,6 @@ import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 
 class PureJavaBpfEngineThreadStateSynchronizationTest {
-
     @BeforeEach
     fun setUp() {
         ContainmentStateRegistry.processState = ContainerState()
@@ -70,7 +69,8 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
         // Sibling thread should also see LoadedImpl (Verified)
         val executor = Executors.newSingleThreadExecutor()
         try {
-            val siblingState = executor.submit<EngineState> {
+            val siblingState = executor
+                .submit<EngineState> {
                 PureJavaBpfEngine.state
             }.get()
             assertEquals(EngineState.LoadedImpl, siblingState, "Sibling thread must see the process-wide seccomp state as Loaded")

@@ -3,6 +3,8 @@ title: "🟢 [RESOLVED]: Temporal State Mutation Leak in `ContainerStateRegistry
 severity: "RESOLVED"
 status: "resolved"
 priority: medium
+paperclip_issue_id: 12f74fd8-43ac-4723-a353-b1641f7df8e9
+paperclip_identifier: MAZ-281
 ---
 
 # 🟢 [RESOLVED]: Temporal State Mutation Leak in `ContainerStateRegistry` via Thread-Local Delegates

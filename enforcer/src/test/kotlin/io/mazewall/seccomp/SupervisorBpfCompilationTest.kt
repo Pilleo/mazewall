@@ -14,7 +14,8 @@ class SupervisorBpfCompilationTest {
 
     @Test
     fun `policy builder with supervise produces notify action in bpf filter`() {
-        val policy = Policy.builder()
+        val policy = Policy
+            .builder()
             .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
             .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.CONNECT)
             .build()

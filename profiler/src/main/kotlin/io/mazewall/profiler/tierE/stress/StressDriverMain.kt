@@ -25,10 +25,22 @@ public fun main(args: Array<String>) {
     var i = 0
     while (i < args.size) {
         when (args[i]) {
-            "--port" -> { port = args[i + 1].toInt(); i += 2 }
-            "--workers" -> { workers = args[i + 1].toInt(); i += 2 }
-            "--batches" -> { batches = args[i + 1].toInt(); i += 2 }
-            "--syscalls" -> { syscallsPerBatch = args[i + 1].toInt(); i += 2 }
+            "--port" -> {
+                port = args[i + 1].toInt()
+                i += 2
+            }
+            "--workers" -> {
+                workers = args[i + 1].toInt()
+                i += 2
+            }
+            "--batches" -> {
+                batches = args[i + 1].toInt()
+                i += 2
+            }
+            "--syscalls" -> {
+                syscallsPerBatch = args[i + 1].toInt()
+                i += 2
+            }
             else -> i++
         }
     }

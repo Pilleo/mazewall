@@ -16,7 +16,9 @@ class OpenGrantedReadTest {
     }
 
     @Test
-    fun `symlink escaping the root does not yield a granted FD`(@TempDir root: Path) {
+    fun `symlink escaping the root does not yield a granted FD`(
+        @TempDir root: Path,
+    ) {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         val outside = Files.createTempFile("mazewall-outside-", ".txt")
         Files.writeString(outside, "secret")
@@ -29,7 +31,9 @@ class OpenGrantedReadTest {
     }
 
     @Test
-    fun `dot-dot escape does not yield a granted FD`(@TempDir root: Path) {
+    fun `dot-dot escape does not yield a granted FD`(
+        @TempDir root: Path,
+    ) {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         assertThrows(IllegalStateException::class.java) {
             openGrantedRead(root, "../passwd")

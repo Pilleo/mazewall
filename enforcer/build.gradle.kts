@@ -1,15 +1,11 @@
 import java.math.BigDecimal
 
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
-    alias(libs.plugins.bcv)
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 sourceSets {
@@ -31,41 +27,28 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
-val compileVulnerableRop = tasks.register<Exec>("compileVulnerableRop") {
-    group = "build"
-    description = "Compiles the vulnerable C library for CET testing"
-    commandLine("bash", "${rootDir}/scripts/run_cet_demo.sh")
-}
-
-val integrationTestJvmArgs =
-    listOf(
-        "--enable-native-access=ALL-UNNAMED",
-        "-Xmx256m",
-        "-Xms128m",
-        "-Dfile.encoding=UTF-8",
-        "-Dsun.jnu.encoding=UTF-8",
-    ) + (
-        if (System.getProperty("debug.disableSelfVerify") == "true") listOf("-Ddebug.disableSelfVerify=true")
-        else emptyList()
-    ) + (
-        if (System.getProperty("debug.enableSelfVerify") == "true") listOf("-Dio.mazewall.selfVerify=true")
-        else emptyList()
-    )
-
+val compileVulnerableRop =
+    tasks.register<Exec>("compileVulnerableRop") {
+        group = "build"
+        description = "Compiles the vulnerable C library for CET testing"
+        commandLine("bash", "$rootDir/scripts/run_cet_demo.sh")
+    }
 
 // issue-20260823-172001: CLI --tests filters that match only 'needs-fresh-jvm' classes fail on
 // :enforcer:integrationTest with "No tests found", silently hiding the correct task. Emit a
 // routing hint at CONFIGURATION time (Gradle 9 does not expose CLI patterns to Test tasks).
-val cliTestFilterArgs = gradle.startParameter.taskRequests
-    .flatMap { it.args }
+val cliTestFilterArgs =
+    gradle.startParameter.taskRequests
+        .flatMap { it.args }
+
 fun extractCliTestPatterns(args: List<String>): List<String> {
     val out = mutableListOf<String>()
     var i = 0
@@ -73,7 +56,10 @@ fun extractCliTestPatterns(args: List<String>): List<String> {
         val a = args[i]
         when {
             a.startsWith("--tests=") -> out += a.substringAfter("=")
-            a == "--tests" && i + 1 < args.size -> { out += args[i + 1]; i++ }
+            a == "--tests" && i + 1 < args.size -> {
+                out += args[i + 1]
+                i++
+            }
         }
         i++
     }
@@ -81,18 +67,21 @@ fun extractCliTestPatterns(args: List<String>): List<String> {
 }
 val cliTestPatterns = extractCliTestPatterns(cliTestFilterArgs)
 
-fun findMatchingTaggedClasses(patterns: List<String>, wantTag: Boolean): List<String> {
+fun findMatchingTaggedClasses(
+    patterns: List<String>,
+    wantTag: Boolean,
+): List<String> {
     if (patterns.isEmpty()) return emptyList()
     val hits = mutableListOf<String>()
     sourceSets["integrationTest"].output.classesDirs.forEach { dir ->
         if (!dir.isDirectory) return@forEach
-        dir.walkTopDown()
+        dir
+            .walkTopDown()
             .filter { it.isFile && it.extension == "class" }
             .filter { cls ->
                 val simple = cls.nameWithoutExtension.substringAfterLast('/')
                 patterns.any { pat -> simple.contains(pat.substringAfterLast('.'), ignoreCase = true) }
-            }
-            .forEach { cls ->
+            }.forEach { cls ->
                 val bytes = String(cls.readBytes(), Charsets.ISO_8859_1)
                 val tagged = bytes.contains("NeedsFreshJvm")
                 if (tagged == wantTag) {
@@ -103,6 +92,11 @@ fun findMatchingTaggedClasses(patterns: List<String>, wantTag: Boolean): List<St
     return hits.distinct()
 }
 
+/**
+ * Gradle's tag filter runs after class discovery. With forkEvery = 1 that
+ * otherwise starts a fresh JVM for every untagged integration class. Select
+ * tagged classes before forking, then let JUnit retain method-level tagging.
+ */
 if (cliTestPatterns.isNotEmpty()) {
     val freshOnly = findMatchingTaggedClasses(cliTestPatterns, wantTag = true)
     val plain = findMatchingTaggedClasses(cliTestPatterns, wantTag = false)
@@ -114,14 +108,15 @@ if (cliTestPatterns.isNotEmpty()) {
     }
 }
 
-fun Test.configureIntegrationHarness() {
+fun Test.configureEnforcerIntegrationPrerequisites() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
-    jvmArgs(integrationTestJvmArgs)
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    testLogging {
-        showStandardStreams = true
+    if (System.getProperty("debug.disableSelfVerify") == "true") {
+        jvmArgs("-Ddebug.disableSelfVerify=true")
+    }
+    if (System.getProperty("debug.enableSelfVerify") == "true") {
+        jvmArgs("-Dio.mazewall.selfVerify=true")
     }
     dependsOn(compileVulnerableRop)
     // issue-20260823-172001: routing hints are emitted at CONFIGURATION time (see
@@ -130,7 +125,7 @@ fun Test.configureIntegrationHarness() {
 
 val integrationTest =
     tasks.register<Test>("integrationTest") {
-        configureIntegrationHarness()
+        configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
@@ -141,25 +136,19 @@ val integrationTest =
 
 val integrationTestFreshJvm =
     tasks.register<Test>("integrationTestFreshJvm") {
-        configureIntegrationHarness()
+        configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
         useJUnitPlatform {
             includeTags("needs-fresh-jvm")
         }
         forkEvery = 1
+        doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
-tasks.check {
-    dependsOn(integrationTest, integrationTestFreshJvm)
-}
-
 tasks.test {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m", "-Xms128m", "-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
-    systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
 }
 
-val plantumlConfig by configurations.creating
+val plantumlConfig = configurations.create("plantumlConfig")
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
@@ -177,7 +166,6 @@ dependencies {
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.slf4j.nop)
 }
-
 
 publishing {
     publications {
@@ -246,6 +234,12 @@ pitest {
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
     threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
+
+    // These are host-unit floors for the deterministic security-policy slice above.
+    // They are intentionally not a substitute for kernelCheck's native contracts.
+    coverageThreshold.set(89)
+    mutationThreshold.set(61)
+    testStrengthThreshold.set(76)
 }
 
 classDiagrams {
@@ -302,10 +296,3 @@ tasks.named("generateClassDiagrams") {
         cleanup(svgFile)
     }
 }
-
-tasks.named("build") {
-    if (System.getenv("CI") != "true" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
-        dependsOn("generateClassDiagrams")
-    }
-}
-

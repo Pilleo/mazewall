@@ -8,7 +8,6 @@ import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 
 class ThreadLocalDelegateTest {
-
     private var stringValue by threadLocal { "default" }
     private var nullableValue: String? by threadLocal { null }
 

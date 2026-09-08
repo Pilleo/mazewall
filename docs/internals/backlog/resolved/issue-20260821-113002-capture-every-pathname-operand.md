@@ -15,6 +15,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3819590949
+paperclip_issue_id: e857ddf0-4221-4f48-aaa3-ae99095d343e
+paperclip_identifier: MAZ-542
 ---
 
 # 🟡 [Severity: MEDIUM]: Capture every pathname operand from strace

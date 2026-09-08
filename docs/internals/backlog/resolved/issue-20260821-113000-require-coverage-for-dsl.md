@@ -14,6 +14,8 @@ effort: "small"
 autonomy: "autonomous"
 related_pr: 512
 related_thread: 3823789280
+paperclip_issue_id: 06870947-2a1a-45dc-9d9b-43998c754edf
+paperclip_identifier: MAZ-531
 ---
 
 # 🔴 [Severity: HIGH]: Require coverage evidence when generating DSL

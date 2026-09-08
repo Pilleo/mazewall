@@ -12,7 +12,6 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SegmentPoolTest {
-
     @Test
     fun `test SegmentPool size-based allocation renting and releasing`() {
         val pool = SegmentPool(32L, poolSize = 3)

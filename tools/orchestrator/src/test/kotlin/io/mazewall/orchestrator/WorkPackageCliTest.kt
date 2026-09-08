@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WorkPackageCliTest {
-
     @Test
     fun syscallPathIsExclusiveAndNeedsKernelTests() {
         val pkg = WorkPackage.assemble(
@@ -56,7 +55,8 @@ class WorkPackageCliTest {
 
     @Test
     fun jsonUsesPlainKeys() {
-        val json = WorkPackage.assemble(
+        val json = WorkPackage
+            .assemble(
             files = listOf("platform/src/main/kotlin/io/mazewall/core/Syscall.kt"),
         ).toJson()
         assertContains(json, "\"edit\"")
@@ -100,5 +100,57 @@ class WorkPackageCliTest {
     fun missingCodannaIsDetected() {
         assertFalse(codannaOnPath(""))
         assertFalse(codannaOnPath("/tmp"))
+    }
+
+    @Test
+    fun testDagDecompositionAndFormatters() {
+        val stages = WorkPackage.decomposeDag(
+            title = "Refactor Memory Barriers",
+            files = listOf(
+                "platform/src/main/kotlin/io/mazewall/core/Syscall.kt",
+                "enforcer/src/main/kotlin/io/mazewall/Policy.kt",
+                "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt",
+            ),
+        )
+        assertEquals(3, stages.size)
+        assertEquals(1, stages[0].stageNumber)
+        assertEquals(":platform", stages[0].module)
+        assertTrue(stages[0].dependencies.isEmpty())
+
+        assertEquals(2, stages[1].stageNumber)
+        assertEquals(":enforcer", stages[1].module)
+        assertEquals(listOf(stages[0].title), stages[1].dependencies)
+
+        assertEquals(3, stages[2].stageNumber)
+        assertEquals(":profiler", stages[2].module)
+        assertEquals(listOf(stages[1].title), stages[2].dependencies)
+
+        val ascii = WorkPackage.formatAsciiDag(stages)
+        assertContains(ascii, "Work Package Blast Radius & DAG Decomposition")
+        assertContains(ascii, "[Stage 1: :platform]")
+        assertContains(ascii, "[Stage 2: :enforcer]")
+        assertContains(ascii, "[Stage 3: :profiler]")
+
+        val mermaid = WorkPackage.formatMermaidDag(stages)
+        assertContains(mermaid, "graph TD")
+        assertContains(mermaid, "Stage1[\":platform: Part 1\"]")
+        assertContains(mermaid, "Stage1 --> Stage2")
+        assertContains(mermaid, "Stage2 --> Stage3")
+    }
+
+    @Test
+    fun testCliDecomposeAndJsonFlags() {
+        val parsed = IssueCli.parse(
+            arrayOf(
+                "--title",
+                "Add Syscall X",
+                "--decompose",
+                "--json",
+                "--file",
+                "platform/src/main/kotlin/io/mazewall/core/Syscall.kt",
+            ),
+        )
+        assertTrue(parsed.decompose)
+        assertTrue(parsed.json)
     }
 }

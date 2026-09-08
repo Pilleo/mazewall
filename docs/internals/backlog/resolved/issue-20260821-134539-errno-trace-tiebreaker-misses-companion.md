@@ -12,6 +12,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/PolicyTest.kt"
 effort: "small"
 autonomy: "autonomous"
+paperclip_issue_id: 1f4cb647-755f-4d6b-8f85-bb9bd2d4d41b
+paperclip_identifier: MAZ-564
 ---
 
 # 🟡 [Severity: MEDIUM]: ERRNO/TRACE intersection tie-breaker misses ACT_ERRNO companion and defaultAction

@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
@@ -15,19 +16,30 @@ import io.mazewall.platform.seccomp.UserNotifReply
  */
 internal class SupervisorResponseWriter(
     private val engine: io.mazewall.NativeEngine,
-    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open>,
+    private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
 ) {
-    fun sendContinue(id: Long, resp: ManagedSegment) {
+    fun sendContinue(
+        id: Long,
+        resp: ManagedSegment,
+    ) {
         UserNotifReply.encodeContinue(resp, id)
         UserNotifReply.send(engine.raw, listenerFd, resp)
     }
 
-    fun sendSuccess(id: Long, value: Long, resp: ManagedSegment) {
+    fun sendSuccess(
+        id: Long,
+        value: Long,
+        resp: ManagedSegment,
+    ) {
         UserNotifReply.encodeSuccess(resp, id, value)
         UserNotifReply.send(engine.raw, listenerFd, resp)
     }
 
-    fun sendError(id: Long, errorNr: Int, resp: ManagedSegment) {
+    fun sendError(
+        id: Long,
+        errorNr: Int,
+        resp: ManagedSegment,
+    ) {
         UserNotifReply.encodeError(resp, id, errorNr)
         UserNotifReply.send(engine.raw, listenerFd, resp)
     }

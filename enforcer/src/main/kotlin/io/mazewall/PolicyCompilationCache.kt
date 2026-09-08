@@ -38,17 +38,15 @@ internal object PolicyCompilationCache {
     private const val MAX_ENTRIES = 256
 
     private val cache = object : LinkedHashMap<CacheKey, CompiledSandbox<*>>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, CompiledSandbox<*>>): Boolean =
-            size > MAX_ENTRIES
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, CompiledSandbox<*>>): Boolean = size > MAX_ENTRIES
     }
 
     fun <S : PolicyScope> getOrCompile(
         definition: PolicyDefinition<S>,
-        arch: Arch
+        arch: Arch,
     ): CompiledSandbox<S> {
         val key = CacheKey(definition, arch)
         synchronized(cache) {
-            @Suppress("UNCHECKED_CAST")
             cache[key]?.let {
                 return it as CompiledSandbox<S>
             }
@@ -56,7 +54,6 @@ internal object PolicyCompilationCache {
         // Compile OUTSIDE the lock: BpfFilter.build is pure CPU work on immutable inputs.
         val compiled = definition.compile(arch)
         synchronized(cache) {
-            @Suppress("UNCHECKED_CAST")
             return cache.getOrPut(key) { compiled } as CompiledSandbox<S>
         }
     }

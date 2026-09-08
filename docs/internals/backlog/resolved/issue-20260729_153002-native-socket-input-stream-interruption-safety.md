@@ -12,6 +12,8 @@ target_files:
 effort: "medium"
 autonomy: "autonomous"
 github_issue: 431
+paperclip_issue_id: 7a97d6ac-cec3-4d5c-83d3-7879629f1932
+paperclip_identifier: MAZ-427
 ---
 
 # 🔴 [Severity: HIGH]: Enhance NativeSocketInputStream with Interruption Checking and Backoff Throttling to Prevent CPU Spinning
