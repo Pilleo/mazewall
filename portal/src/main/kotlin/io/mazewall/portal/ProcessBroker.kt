@@ -146,6 +146,7 @@ public class ProcessBroker(
                     throw PortalCallException(effect.message)
                 }
                 is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
+                is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
                 PortalBrokerCallEffect.None -> throw PortalCallException("portal RPC produced no terminal result")
             }
         } catch (e: PortalCallException) {

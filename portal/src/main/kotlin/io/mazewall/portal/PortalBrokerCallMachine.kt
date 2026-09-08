@@ -40,6 +40,11 @@ internal sealed interface PortalBrokerCallEffect {
         val reason: String,
     ) : PortalBrokerCallEffect
 
+    /** The worker crossed the broker protocol boundary out of order; recycle it fail-closed. */
+    data class ProtocolViolation(
+        val reason: String,
+    ) : PortalBrokerCallEffect
+
     data object None : PortalBrokerCallEffect
 }
 
@@ -56,12 +61,11 @@ internal object PortalBrokerCallMachine {
         when (state) {
         PortalBrokerCallState.Idle -> when (event) {
             is PortalBrokerCallEvent.RequestSent -> PortalBrokerCallTransition(PortalBrokerCallState.AwaitingReply(event.request), PortalBrokerCallEffect.None)
-            is PortalBrokerCallEvent.ReplyReceived,
-            PortalBrokerCallEvent.TransportFailed,
-            -> failed("portal RPC failed")
+            is PortalBrokerCallEvent.ReplyReceived -> protocolViolation("reply received before request")
+            PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
         }
         is PortalBrokerCallState.AwaitingReply -> when (event) {
-            is PortalBrokerCallEvent.RequestSent -> failed("portal RPC failed")
+            is PortalBrokerCallEvent.RequestSent -> protocolViolation("request sent while awaiting reply")
             PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
             is PortalBrokerCallEvent.ReplyReceived -> evaluateReply(state.request, event.reply)
         }
@@ -74,13 +78,15 @@ internal object PortalBrokerCallMachine {
         request: PortalFrame,
         reply: PortalFrame,
     ): PortalBrokerCallTransition {
-        if (reply.requestId != request.requestId) return failed("request id mismatch")
+        if (reply.requestId != request.requestId) return protocolViolation("request id mismatch")
         return when (reply.kind) {
             PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReturnPayload(reply.payload))
             PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload.copyToByteArray().toString(StandardCharsets.UTF_8)))
-            PortalKind.Request -> failed("unexpected request frame")
+            PortalKind.Request -> protocolViolation("unexpected request frame")
         }
     }
 
     private fun failed(reason: String) = PortalBrokerCallTransition(PortalBrokerCallState.Failed, PortalBrokerCallEffect.RecycleWorker(reason))
+
+    private fun protocolViolation(reason: String) = PortalBrokerCallTransition(PortalBrokerCallState.Failed, PortalBrokerCallEffect.ProtocolViolation(reason))
 }

@@ -58,7 +58,7 @@ public object PortalWorkerMain {
         println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
         var state: PortalWorkerState = PortalWorkerState.AwaitingRequest
         try {
-            while (true) {
+            serve@ while (true) {
                 val (frame, fds) =
                     try {
                         channel.receive(idleTimeoutMs)
@@ -75,11 +75,14 @@ public object PortalWorkerMain {
                     is PortalWorkerTransition.Dispatch -> received
                     is PortalWorkerTransition.Await,
                     is PortalWorkerTransition.Close,
-                    is PortalWorkerTransition.Drop,
                     is PortalWorkerTransition.Send,
                     -> {
                         fds.forEach { sockets.close(it) }
                         continue
+                    }
+                    is PortalWorkerTransition.ProtocolViolation -> {
+                        fds.forEach { sockets.close(it) }
+                        break@serve
                     }
                 }
                 try {
@@ -124,7 +127,7 @@ public object PortalWorkerMain {
             is PortalWorkerTransition.Await,
             is PortalWorkerTransition.Close,
             is PortalWorkerTransition.Dispatch,
-            is PortalWorkerTransition.Drop,
+            is PortalWorkerTransition.ProtocolViolation,
             -> error("dispatch completion must send a reply")
         }
 }

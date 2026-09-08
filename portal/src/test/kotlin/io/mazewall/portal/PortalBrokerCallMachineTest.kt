@@ -18,7 +18,7 @@ class PortalBrokerCallMachineTest {
     }
 
     @Test
-    fun `rejects a mismatched response id and a remote error`() {
+    fun `rejects a mismatched response id and accepts a remote error`() {
         val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, ByteArray(0), 0)
         val waiting = PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
 
@@ -31,8 +31,18 @@ class PortalBrokerCallMachineTest {
             PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Error, 7, PortalMethod.Echo, "no".encodeToByteArray(), 0)),
         )
 
-        assertEquals(PortalBrokerCallEffect.RecycleWorker("request id mismatch"), mismatch.effect)
+        assertEquals(PortalBrokerCallEffect.ProtocolViolation("request id mismatch"), mismatch.effect)
         assertEquals(PortalBrokerCallEffect.RemoteError("no"), remoteError.effect)
+    }
+
+    @Test
+    fun `reply without a request is a protocol violation`() {
+        val reply = PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, ByteArray(0), 0)
+
+        val violation = PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.ReplyReceived(reply))
+
+        assertTrue(violation.state is PortalBrokerCallState.Failed)
+        assertEquals(PortalBrokerCallEffect.ProtocolViolation("reply received before request"), violation.effect)
     }
 
     @Test

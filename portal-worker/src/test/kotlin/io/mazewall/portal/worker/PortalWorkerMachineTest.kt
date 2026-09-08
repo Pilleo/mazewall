@@ -28,12 +28,13 @@ class PortalWorkerMachineTest {
     }
 
     @Test
-    fun `non-request frame is dropped and peer closure stops the worker`() {
+    fun `non-request frame is a protocol violation and peer closure stops the worker`() {
         val response = PortalFrame(PortalKind.Response, 5, PortalMethod.Echo, ByteArray(0), 0)
         val dropped = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(response))
         val stopped = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.PeerClosed)
 
-        assertTrue(dropped is PortalWorkerTransition.Drop)
+        assertTrue(dropped is PortalWorkerTransition.ProtocolViolation)
+        assertTrue(dropped.state is PortalWorkerState.Stopped)
         assertTrue(stopped.state is PortalWorkerState.Stopped)
     }
 }

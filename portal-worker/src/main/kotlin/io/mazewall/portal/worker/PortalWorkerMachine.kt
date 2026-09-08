@@ -46,8 +46,10 @@ internal sealed interface PortalWorkerTransition {
         val frame: PortalFrame,
     ) : PortalWorkerTransition
 
-    data class Drop(
-        override val state: PortalWorkerState,
+    /** A peer or local driver violated the one-request-at-a-time worker protocol. */
+    data class ProtocolViolation(
+        override val state: PortalWorkerState.Stopped,
+        val reason: String,
     ) : PortalWorkerTransition
 
     data class Await(
@@ -69,21 +71,20 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.FrameReceived -> if (event.frame.kind == PortalKind.Request) {
                 PortalWorkerTransition.Dispatch(PortalWorkerState.Dispatching(event.frame), event.frame)
             } else {
-                PortalWorkerTransition.Drop(state)
+                violation("expected a request frame")
             }
             PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.DispatchSucceeded,
             is PortalWorkerEvent.DispatchFailed,
-            -> PortalWorkerTransition.Drop(state)
+            -> violation("received a dispatch result without a request")
         }
         is PortalWorkerState.Dispatching -> when (event) {
             is PortalWorkerEvent.DispatchSucceeded -> reply(state.request, PortalKind.Response, event.payload)
             is PortalWorkerEvent.DispatchFailed -> reply(state.request, PortalKind.Error, event.message)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
-            is PortalWorkerEvent.FrameReceived,
-            PortalWorkerEvent.IdleTick,
-            -> PortalWorkerTransition.Drop(state)
+            is PortalWorkerEvent.FrameReceived -> violation("received a second frame while dispatching")
+            PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
         }
         PortalWorkerState.Stopped -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
     }
@@ -96,4 +97,6 @@ internal object PortalWorkerMachine {
         val frame = PortalFrame(kind, request.requestId, request.method, payload, 0)
         return PortalWorkerTransition.Send(PortalWorkerState.AwaitingRequest, frame)
     }
+
+    private fun violation(reason: String): PortalWorkerTransition.ProtocolViolation = PortalWorkerTransition.ProtocolViolation(PortalWorkerState.Stopped, reason)
 }
