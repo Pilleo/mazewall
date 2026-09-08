@@ -80,8 +80,9 @@ internal class UnixListenDaemonMachineTest {
                 expectedState = UnixListenDaemonState.Terminated,
                 expectedEffectTypes = listOf(
                     UnixListenDaemonEffect.CloseServer::class,
-                    UnixListenDaemonEffect.ClearConnectionTables::class,
                     UnixListenDaemonEffect.StopConnectionWorkers::class,
+                    UnixListenDaemonEffect.CloseTrackedConnections::class,
+                    UnixListenDaemonEffect.ClearConnectionTables::class,
                 ),
             ),
             TransitionTestCase(
@@ -138,8 +139,9 @@ internal class UnixListenDaemonMachineTest {
                 event = UnixListenDaemonEvent.AcceptLoopFinished(),
                 expectedState = UnixListenDaemonState.Terminated,
                 expectedEffectTypes = listOf(
-                    UnixListenDaemonEffect.ClearConnectionTables::class,
                     UnixListenDaemonEffect.StopConnectionWorkers::class,
+                    UnixListenDaemonEffect.CloseTrackedConnections::class,
+                    UnixListenDaemonEffect.ClearConnectionTables::class,
                 ),
             ),
             TransitionTestCase(

@@ -70,9 +70,12 @@ internal sealed interface UnixListenDaemonEffect {
         val serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ) : UnixListenDaemonEffect
 
-    public data object ClearConnectionTables : UnixListenDaemonEffect
-
     public data object StopConnectionWorkers : UnixListenDaemonEffect
+
+    /** Close the engine-owned client and notification descriptors before forgetting them. */
+    public data object CloseTrackedConnections : UnixListenDaemonEffect
+
+    public data object ClearConnectionTables : UnixListenDaemonEffect
 }
 
 internal data class UnixListenDaemonTransition(
@@ -182,8 +185,9 @@ internal object UnixListenDaemonMachine {
             if (serverFd != null) {
                 add(UnixListenDaemonEffect.CloseServer(serverFd))
             }
-            add(UnixListenDaemonEffect.ClearConnectionTables)
             add(UnixListenDaemonEffect.StopConnectionWorkers)
+            add(UnixListenDaemonEffect.CloseTrackedConnections)
+            add(UnixListenDaemonEffect.ClearConnectionTables)
         }
         return UnixListenDaemonTransition(UnixListenDaemonState.Terminated, effects)
     }

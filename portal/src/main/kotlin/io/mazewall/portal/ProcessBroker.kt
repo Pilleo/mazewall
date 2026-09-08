@@ -135,7 +135,13 @@ public class ProcessBroker(
                 .state
             slot.channel.send(request, fds)
             val (reply, extra) = slot.channel.receive(callTimeoutMs)
-            extra.forEach { sockets.close(it) }
+            val descriptorCleanup = CleanupCollector()
+            extra.forEachIndexed { index, descriptor ->
+                descriptorCleanup.attempt("reply descriptor[$index]") { sockets.close(descriptor) }
+            }
+            descriptorCleanup.outcome().failures.firstOrNull()?.let { failure ->
+                throw IllegalStateException("failed to close ${failure.resource}", failure.cause)
+            }
             val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
             callState = transition.state
             when (val effect = transition.effect) {

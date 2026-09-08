@@ -130,12 +130,16 @@ public class SeccompDaemonEngine(
                     System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: ${effect.source}.")
                 is UnixListenDaemonEffect.CloseServer ->
                     socketManager.close(effect.serverFd)
+                is UnixListenDaemonEffect.StopConnectionWorkers ->
+                    connectionExecutor.shutdownNow()
+                is UnixListenDaemonEffect.CloseTrackedConnections -> {
+                    clientSockets.forEach(socketManager::close)
+                    activeListeners.forEach(socketManager::close)
+                }
                 is UnixListenDaemonEffect.ClearConnectionTables -> {
                     clientSockets.clear()
                     activeListeners.clear()
                 }
-                is UnixListenDaemonEffect.StopConnectionWorkers ->
-                    connectionExecutor.shutdownNow()
             }
         }
     }
