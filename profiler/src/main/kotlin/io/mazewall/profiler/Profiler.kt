@@ -93,6 +93,7 @@ object Profiler {
         val localLogs = CopyOnWriteArrayList<TraceEvent>()
         val localStackProfile = ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         val localPathCache = ConcurrentHashMap<String, Long>()
+        val sessionState = ProfilerSessionState()
 
         val blockResult = AtomicReference<T>()
         val errorRef = AtomicReference<Throwable>()
@@ -113,14 +114,14 @@ object Profiler {
                     cleanupFailure = failure
                 }
             }
-            tid?.let(threadRegistry::remove)
+            tid?.let(sessionState::remove)
             cleanupFailure?.let { throw it }
         }
 
         val workerThread = Thread {
             val workerTid = runtime.tid()
             tid = workerTid
-            threadRegistry[workerTid] = Thread.currentThread()
+            sessionState.register(workerTid, Thread.currentThread())
             try {
                 // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
                 // The resolver daemon needs to be notified by the kernel, which then notifies
@@ -134,6 +135,7 @@ object Profiler {
                         if (captureStackTraces) localStackProfile else null,
                         localPathCache,
                         processWide,
+                        sessionState,
                         onListenerCreated = { sessionListener.set(it) },
                     )
 
@@ -266,6 +268,7 @@ object Profiler {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean,
+        sessionState: ProfilerSessionState = ProfilerSessionState(),
         onListenerCreated: ((ProfilerTraceListener) -> Unit)? = null,
     ) {
         installer.installProfilingFilterForThread(
@@ -281,6 +284,7 @@ object Profiler {
                     logs,
                     traces,
                     cache,
+                    sessionState::threadFor,
                 )
                 listeners.add(listener)
                 onListenerCreated?.invoke(listener)
@@ -315,6 +319,7 @@ object Profiler {
         val recentStackProfiles =
             ConcurrentHashMap<TraceEvent, MutableList<Array<StackTraceElement>>>()
         private val pathCache = ConcurrentHashMap<String, Long>()
+        private val sessionState = ProfilerSessionState()
 
         override fun <T : Any?> submit(task: Callable<T>): Future<T> {
             return delegate.submit(
@@ -348,7 +353,7 @@ object Profiler {
             if (!threadApplied) {
                 val currentThread = Thread.currentThread()
                 validateNotVirtual()
-                threadRegistry[runtime.tid()] = currentThread
+                sessionState.register(runtime.tid(), currentThread)
                 installProfilingFilterForThread(
                     installer = runtime.installer,
                     socketPath = context.socketPath,
@@ -357,6 +362,7 @@ object Profiler {
                     stackTracesMap = if (captureStackTraces) recentStackProfiles else null,
                     pathCache = pathCache,
                     processWide = false,
+                    sessionState = sessionState,
                     onListenerCreated = {},
                 )
                 threadApplied = true

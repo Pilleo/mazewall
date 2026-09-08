@@ -35,6 +35,7 @@ internal class ProfilerTraceListener(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
+    private val threadFor: (Tid) -> Thread? = { Profiler.threadRegistry[it] },
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
@@ -429,7 +430,7 @@ internal class ProfilerTraceListener(
 
     private fun captureStackTrace(event: TraceEvent): Array<StackTraceElement>? {
         if (stackTracesMap == null || event.tid.value == 0) return null
-        val threadToProfile = Profiler.threadRegistry[event.tid]
+        val threadToProfile = threadFor(event.tid)
         return if (threadToProfile != null) {
             threadToProfile.stackTrace
         } else {
