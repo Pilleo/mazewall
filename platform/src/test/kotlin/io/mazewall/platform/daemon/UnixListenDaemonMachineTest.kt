@@ -81,6 +81,7 @@ internal class UnixListenDaemonMachineTest {
                 expectedEffectTypes = listOf(
                     UnixListenDaemonEffect.CloseServer::class,
                     UnixListenDaemonEffect.StopConnectionWorkers::class,
+                    UnixListenDaemonEffect.AwaitConnectionWorkers::class,
                     UnixListenDaemonEffect.CloseTrackedConnections::class,
                     UnixListenDaemonEffect.ClearConnectionTables::class,
                 ),
@@ -140,6 +141,7 @@ internal class UnixListenDaemonMachineTest {
                 expectedState = UnixListenDaemonState.Terminated,
                 expectedEffectTypes = listOf(
                     UnixListenDaemonEffect.StopConnectionWorkers::class,
+                    UnixListenDaemonEffect.AwaitConnectionWorkers::class,
                     UnixListenDaemonEffect.CloseTrackedConnections::class,
                     UnixListenDaemonEffect.ClearConnectionTables::class,
                 ),

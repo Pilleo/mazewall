@@ -78,6 +78,7 @@ public class SeccompDaemonEngine(
         private const val POLL_TIMEOUT_MS = 1000
         private const val POLLFD_STRUCT_SIZE = 8L
         private const val ACK_BUF_SIZE = 1L
+        private const val CONNECTION_WORKER_DRAIN_TIMEOUT_MS = 5_000L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
     }
 
@@ -132,6 +133,16 @@ public class SeccompDaemonEngine(
                     socketManager.close(effect.serverFd)
                 is UnixListenDaemonEffect.StopConnectionWorkers ->
                     connectionExecutor.shutdownNow()
+                UnixListenDaemonEffect.AwaitConnectionWorkers -> {
+                    try {
+                        if (!connectionExecutor.awaitTermination(CONNECTION_WORKER_DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                            System.err.println("[SECCOMP-DAEMON] Connection workers did not terminate before owned descriptor cleanup")
+                        }
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        System.err.println("[SECCOMP-DAEMON] Interrupted while waiting for connection workers to terminate")
+                    }
+                }
                 is UnixListenDaemonEffect.CloseTrackedConnections -> {
                     clientSockets.forEach(socketManager::close)
                     activeListeners.forEach(socketManager::close)

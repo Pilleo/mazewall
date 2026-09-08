@@ -72,6 +72,9 @@ internal sealed interface UnixListenDaemonEffect {
 
     public data object StopConnectionWorkers : UnixListenDaemonEffect
 
+    /** Waits for interrupted connection workers before owned descriptors are released. */
+    public data object AwaitConnectionWorkers : UnixListenDaemonEffect
+
     /** Close the engine-owned client and notification descriptors before forgetting them. */
     public data object CloseTrackedConnections : UnixListenDaemonEffect
 
@@ -186,6 +189,7 @@ internal object UnixListenDaemonMachine {
                 add(UnixListenDaemonEffect.CloseServer(serverFd))
             }
             add(UnixListenDaemonEffect.StopConnectionWorkers)
+            add(UnixListenDaemonEffect.AwaitConnectionWorkers)
             add(UnixListenDaemonEffect.CloseTrackedConnections)
             add(UnixListenDaemonEffect.ClearConnectionTables)
         }
