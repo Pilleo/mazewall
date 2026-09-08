@@ -299,7 +299,7 @@ internal class ProfilerTraceListener(
 
     private fun sendCommand(commandByte: Byte) {
         try {
-            val res = ProfilerNativeCommandWriter.writeByte(LinuxNative, socketFd, commandByte)
+            val res = ProfilerNativeCommandWriter.writeByte(LinuxNative.memory, socketFd, commandByte)
             if (res is LinuxNative.SyscallResult.Error<*>) {
                 System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
             } else {

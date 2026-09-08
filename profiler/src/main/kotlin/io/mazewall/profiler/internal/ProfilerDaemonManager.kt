@@ -171,7 +171,7 @@ public class ProfilerDaemonManager(
         try {
             val fd = socketManager.connect(socketPath)
             try {
-                ProfilerNativeCommandWriter.writeByte(engine, fd, SHUTDOWN_COMMAND_BYTE)
+                ProfilerNativeCommandWriter.writeByte(engine.memory, fd, SHUTDOWN_COMMAND_BYTE)
             } finally {
                 socketManager.close(fd)
             }
