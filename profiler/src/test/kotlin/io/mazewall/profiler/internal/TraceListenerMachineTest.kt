@@ -41,4 +41,18 @@ class TraceListenerMachineTest {
             TraceListenerMachine.evaluate(TraceListenerState.Disconnected, TraceListenerEvent.HeaderRead(42)),
         )
     }
+
+    @Test
+    fun `rejected handshake remains terminal when the socket closes`() {
+        val rejected = TraceListenerMachine.evaluate(
+            TraceListenerState.Disconnected,
+            TraceListenerEvent.HandshakeRejected,
+        )
+
+        assertEquals(TraceListenerState.HandshakeRejected, rejected)
+        assertEquals(
+            TraceListenerState.HandshakeRejected,
+            TraceListenerMachine.evaluate(rejected, TraceListenerEvent.SocketClosed),
+        )
+    }
 }

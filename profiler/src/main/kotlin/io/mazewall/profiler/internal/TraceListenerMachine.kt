@@ -6,6 +6,8 @@ import io.mazewall.profiler.engine.TraceEvent
 internal sealed interface TraceListenerEvent {
     data object HandshakeReceived : TraceListenerEvent
 
+    data object HandshakeRejected : TraceListenerEvent
+
     data object AwaitEvent : TraceListenerEvent
 
     data class HeaderRead(
@@ -37,7 +39,9 @@ internal object TraceListenerMachine {
         event: TraceListenerEvent,
     ): TraceListenerState =
         when (event) {
-            TraceListenerEvent.HandshakeReceived,
+            TraceListenerEvent.HandshakeReceived ->
+                if (state is TraceListenerState.Disconnected) TraceListenerState.AwaitingEvent else state
+            TraceListenerEvent.HandshakeRejected -> TraceListenerState.HandshakeRejected
             TraceListenerEvent.AwaitEvent,
             -> TraceListenerState.AwaitingEvent
             is TraceListenerEvent.HeaderRead ->
@@ -60,6 +64,7 @@ internal object TraceListenerMachine {
                 } else {
                     state
                 }
-            TraceListenerEvent.SocketClosed -> TraceListenerState.Disconnected
+            TraceListenerEvent.SocketClosed ->
+                if (state is TraceListenerState.HandshakeRejected) state else TraceListenerState.Disconnected
         }
 }

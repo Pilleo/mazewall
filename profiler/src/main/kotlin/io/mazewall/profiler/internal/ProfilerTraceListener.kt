@@ -318,11 +318,13 @@ internal class ProfilerTraceListener(
         try {
             try {
                 // Read handshake ACK from the daemon confirming the listener FD was received.
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
-                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
+                    state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeRejected)
+                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck; rejecting trace stream")
+                    return
                 }
+                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
                 // No config bytes are sent. The daemon uses fire-and-forget delivery;
                 // no bypassedTids or captureStackTraces negotiation is required.
             } finally {
