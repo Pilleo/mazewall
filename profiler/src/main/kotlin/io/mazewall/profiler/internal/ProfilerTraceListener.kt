@@ -179,11 +179,7 @@ internal class ProfilerTraceListener(
             // Step 1: Signal the daemon to finish up. The daemon receives this byte,
             // enters pass-through mode for this session, and closes its side of the socket.
             // This triggers EOF on our read side without shutting down the global daemon.
-            try {
-                sendCommand(PASS_THROUGH_COMMAND_BYTE)
-            } catch (expectedTransportCloseFailure: Exception) {
-                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${expectedTransportCloseFailure.message}")
-            }
+            logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
 
             var workerJoined = false
             var collectorJoined = false
@@ -248,7 +244,7 @@ internal class ProfilerTraceListener(
         gracefulDrainRequested.set(true)
 
         try {
-            sendCommand(PASS_THROUGH_COMMAND_BYTE)
+            logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
 
             var workerJoined = false
             var collectorJoined = false
@@ -297,16 +293,20 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun sendCommand(commandByte: Byte) {
+    private fun sendCommand(commandByte: Byte): TraceCommandWriteResult {
         try {
             val res = ProfilerNativeCommandWriter.writeByte(LinuxNative.memory, socketFd, commandByte)
-            if (res is LinuxNative.SyscallResult.Error<*>) {
-                System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
-            } else {
-                System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
-            }
+            return TraceCommandWriteResult.from(res)
         } catch (expectedCommandFailure: Exception) {
-            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${expectedCommandFailure.message}")
+            return TraceCommandWriteResult.Threw(expectedCommandFailure)
+        }
+    }
+
+    private fun logCommandWrite(result: TraceCommandWriteResult) {
+        when (result) {
+            TraceCommandWriteResult.Written -> Unit
+            is TraceCommandWriteResult.NativeFailure -> logger.fine("Failed to send pass-through command: errno=${result.errno}")
+            is TraceCommandWriteResult.Threw -> logger.fine("Failed to send pass-through command: ${result.cause.message}")
         }
     }
 
@@ -366,41 +366,29 @@ internal class ProfilerTraceListener(
         System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
         val tidValue = dis.readInt()
         state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
-
-        val syscallNameLen = dis.readInt()
-        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SyscallRead(tidValue, syscallNameLen))
-
-        val syscallNameBytes = ByteArray(syscallNameLen)
-        dis.readFully(syscallNameBytes)
-        val syscallName = String(syscallNameBytes, Charsets.UTF_8)
-
-        val argsCount = dis.readInt()
+        val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
+        if (decoded is TraceEventDecodeResult.ProtocolViolation) {
+            throw java.io.IOException(decoded.reason)
+        }
+        decoded as TraceEventDecodeResult.Event
         state = TraceListenerMachine.evaluate(
             state,
-            TraceListenerEvent.ArgumentsRead(tidValue, syscallName, argsCount),
+            TraceListenerEvent.SyscallRead(tidValue, decoded.syscallNameLength),
         )
-
-        val args = LongArray(argsCount)
-        for (i in 0 until argsCount) {
-            args[i] = dis.readLong()
-        }
-
-        val pathsCount = dis.readInt()
-        val paths = mutableListOf<String>()
-        repeat(pathsCount) {
-            val pathLen = dis.readInt()
-            val pathBytes = ByteArray(pathLen)
-            dis.readFully(pathBytes)
-            paths.add(String(pathBytes, Charsets.UTF_8))
-        }
-
-        System.err.println("[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, syscall=$syscallName, paths=$paths")
+        state = TraceListenerMachine.evaluate(
+            state,
+            TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount),
+        )
+        System.err.println(
+            "[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, " +
+                "syscall=${decoded.event.syscallName}, paths=${decoded.event.paths}",
+        )
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
         // in kernel space using seccomp and awaits an ACK from this listener thread. While the
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
         // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
-        return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
+        return decoded.event
     }
 
     private fun processEvent(event: TraceEvent) {
@@ -447,5 +435,25 @@ internal class ProfilerTraceListener(
         } else {
             arrayOf(StackTraceElement("<untracked_descendant_thread>", "run", null, -1))
         }
+    }
+}
+
+internal sealed interface TraceCommandWriteResult {
+    data object Written : TraceCommandWriteResult
+
+    data class NativeFailure(
+        val errno: Int,
+    ) : TraceCommandWriteResult
+
+    data class Threw(
+        val cause: Exception,
+    ) : TraceCommandWriteResult
+
+    companion object {
+        fun from(result: LinuxNative.SyscallResult<Long, *>): TraceCommandWriteResult =
+            when (result) {
+                is LinuxNative.SyscallResult.Success -> Written
+                is LinuxNative.SyscallResult.Error -> NativeFailure(result.errno)
+            }
     }
 }
