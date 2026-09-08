@@ -235,6 +235,7 @@ internal class SupervisorSessionHandler(
      * Interprets the reducer's fail-closed effect for failures that occur before a route context
      * can be constructed. This is intentionally the only raw-notification exception bridge.
      */
+    @Suppress("TooGenericExceptionCaught") // The native write boundary reports implementation-specific runtime failures.
     context(arena: NativeArena) private fun failUnhandledNotification(
         id: Long,
         resp: ManagedSegment,

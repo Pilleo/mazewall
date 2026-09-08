@@ -60,13 +60,15 @@ class ForeignFdGuard :
 
     private fun currentFds(): Set<FdInfo> =
         Files.list(Path.of("/proc/self/fd")).use { stream ->
+            val inspectionDirectory = "/proc/${ProcessHandle.current().pid()}/fd"
             stream
                 .map { p ->
                 val id = p.fileName.toString().toInt()
                 val target = runCatching { Files.readSymbolicLink(p).toString() }
                     .fold({ it }, { _ -> "unreadable" })
                 FdInfo(id, target)
-            }.toList()
+            }.filter { it.target != inspectionDirectory }
+                .toList()
                 .toSet()
         }
 
