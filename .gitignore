@@ -114,4 +114,4 @@ target/
 
 ### Local Work Coordination ###
 /.worktrees/
-/.taskplane-kb/**/*.lock
+/.taskplane-kb/
