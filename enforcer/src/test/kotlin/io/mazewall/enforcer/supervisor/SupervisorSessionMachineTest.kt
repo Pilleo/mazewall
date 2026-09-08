@@ -82,4 +82,32 @@ class SupervisorSessionMachineTest {
         assertEquals(SupervisorSessionState.Terminated, failed.state)
         assertEquals(null, failed.effect)
     }
+
+    @Test
+    fun `out of order verdict is a protocol violation rather than a silent no-op`() {
+        val violation = SupervisorSessionMachine.evaluate(
+            SupervisorSessionState.AwaitingNotification,
+            SupervisorSessionEvent.JvmVerdictReceived(SupervisorRoute.Continue),
+        )
+
+        assertEquals(SupervisorSessionState.Terminated, violation.state)
+        assertEquals(
+            SupervisorSessionEffect.ProtocolViolation(
+                SupervisorSessionState.AwaitingNotification,
+                SupervisorSessionEvent.JvmVerdictReceived(SupervisorRoute.Continue),
+            ),
+            violation.effect,
+        )
+    }
+
+    @Test
+    fun `post terminal observations are explicit and do not reply twice`() {
+        val observed = SupervisorSessionMachine.evaluate(
+            SupervisorSessionState.Replied,
+            SupervisorSessionEvent.NotificationReceived,
+        )
+
+        assertEquals(SupervisorSessionState.Replied, observed.state)
+        assertEquals(SupervisorSessionEffect.PostTerminalObservation, observed.effect)
+    }
 }

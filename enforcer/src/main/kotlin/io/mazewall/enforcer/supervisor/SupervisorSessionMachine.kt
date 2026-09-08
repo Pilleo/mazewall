@@ -54,6 +54,15 @@ internal sealed interface SupervisorSessionEffect {
     data class Abort(
         val errno: Int = NativeConstants.EPERM,
     ) : SupervisorSessionEffect
+
+    /** An impossible lifecycle edge; terminate/recycle without attempting another kernel reply. */
+    data class ProtocolViolation(
+        val from: SupervisorSessionState,
+        val event: SupervisorSessionEvent,
+    ) : SupervisorSessionEffect
+
+    /** An explicitly harmless observation after this single-notification session is terminal. */
+    data object PostTerminalObservation : SupervisorSessionEffect
 }
 
 internal data class SupervisorSessionTransition(
@@ -67,12 +76,18 @@ internal object SupervisorSessionMachine {
         event: SupervisorSessionEvent,
     ): SupervisorSessionTransition =
         when (state) {
-            SupervisorSessionState.AwaitingNotification ->
-                if (event is SupervisorSessionEvent.NotificationReceived) {
+            SupervisorSessionState.AwaitingNotification -> when (event) {
+                SupervisorSessionEvent.NotificationReceived ->
                     SupervisorSessionTransition(SupervisorSessionState.ResolvingPath, SupervisorSessionEffect.ResolvePath)
-                } else {
-                    SupervisorSessionTransition(state)
-                }
+                is SupervisorSessionEvent.PathResolved,
+                is SupervisorSessionEvent.JvmVerdictReceived,
+                SupervisorSessionEvent.JvmRequestSent,
+                SupervisorSessionEvent.JvmRequestFailed,
+                SupervisorSessionEvent.ReplySucceeded,
+                SupervisorSessionEvent.ReplyFailed,
+                SupervisorSessionEvent.Failed,
+                -> protocolViolation(state, event)
+            }
             SupervisorSessionState.ResolvingPath ->
                 when (event) {
                     is SupervisorSessionEvent.PathResolved -> routeTransition(event.route)
@@ -83,7 +98,7 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.JvmRequestFailed,
                     SupervisorSessionEvent.ReplySucceeded,
                     SupervisorSessionEvent.ReplyFailed,
-                    -> SupervisorSessionTransition(state)
+                    -> protocolViolation(state, event)
                 }
             SupervisorSessionState.SendingJvmRequest ->
                 when (event) {
@@ -96,7 +111,7 @@ internal object SupervisorSessionMachine {
                     is SupervisorSessionEvent.JvmVerdictReceived,
                     SupervisorSessionEvent.ReplySucceeded,
                     SupervisorSessionEvent.ReplyFailed,
-                    -> SupervisorSessionTransition(state)
+                    -> protocolViolation(state, event)
                 }
             SupervisorSessionState.AwaitingJvmVerdict ->
                 when (event) {
@@ -108,7 +123,7 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.JvmRequestFailed,
                     SupervisorSessionEvent.ReplySucceeded,
                     SupervisorSessionEvent.ReplyFailed,
-                    -> SupervisorSessionTransition(state)
+                    -> protocolViolation(state, event)
                 }
             SupervisorSessionState.ExecutingReply ->
                 when (event) {
@@ -121,11 +136,11 @@ internal object SupervisorSessionMachine {
                     is SupervisorSessionEvent.JvmVerdictReceived,
                     SupervisorSessionEvent.JvmRequestSent,
                     SupervisorSessionEvent.JvmRequestFailed,
-                    -> SupervisorSessionTransition(state)
+                    -> protocolViolation(state, event)
                 }
             SupervisorSessionState.Replied,
             SupervisorSessionState.Terminated,
-            -> SupervisorSessionTransition(state)
+            -> SupervisorSessionTransition(state, SupervisorSessionEffect.PostTerminalObservation)
         }
 
     private fun routeTransition(route: SupervisorRoute): SupervisorSessionTransition =
@@ -146,4 +161,9 @@ internal object SupervisorSessionMachine {
         }
 
     private fun abort(): SupervisorSessionTransition = SupervisorSessionTransition(SupervisorSessionState.ExecutingReply, SupervisorSessionEffect.Abort())
+
+    private fun protocolViolation(
+        state: SupervisorSessionState,
+        event: SupervisorSessionEvent,
+    ): SupervisorSessionTransition = SupervisorSessionTransition(SupervisorSessionState.Terminated, SupervisorSessionEffect.ProtocolViolation(state, event))
 }

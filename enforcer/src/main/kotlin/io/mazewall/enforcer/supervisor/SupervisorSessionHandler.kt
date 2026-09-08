@@ -304,6 +304,9 @@ internal class SupervisorSessionHandler(
                             terminalRoutes.abort(routeContext, effect.errno)
                             return false
                         }
+                        is SupervisorSessionEffect.ProtocolViolation,
+                        SupervisorSessionEffect.PostTerminalObservation,
+                        -> return false
                         SupervisorSessionEffect.ResolvePath,
                         null,
                         -> error("path resolution must produce a terminal route or JVM request")
