@@ -1,7 +1,7 @@
 ---
 title: "ArchUnit-forbid profiler MemorySegment outside ffi"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -37,6 +37,10 @@ Enforcer ArchitectureTest already forbids `java.lang.foreign` outside `io.mazewa
 
 ## Side effects
 - Profiler engine packages that touch Arena or MemorySegment must move behind io.mazewall.ffi
+
+**Resolution (2026-09-08):** The architecture rule rejects raw FFM outside
+profiler FFI and dedicated Tier-E native packages. Daemon-manager and listener
+control writes now use `ProfilerNativeCommandWriter` in the FFI boundary.
 
 ---
 
