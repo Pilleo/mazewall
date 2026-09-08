@@ -16,10 +16,10 @@ import io.mazewall.profiler.engine.TraceEvent
  * Do not call [BillOfBehavior.toDsl] without [ProfilingCoverage]; the default is [ProfilingCoverage.absent]
  * which is incomplete.
  */
-data class ProfilingResult<T>(
+class ProfilingResult<T>(
     val value: T,
     val behavior: BillOfBehavior,
-    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>,
+    stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>,
     val coverage: ProfilingCoverage = ProfilingCoverage(
         strategy = ProfileStrategy.USER_NOTIF,
         strategyReason = "legacy result without coverage",
@@ -32,8 +32,23 @@ data class ProfilingResult<T>(
         environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
         complete = false,
     ),
-    val observations: List<ProfileObservation> = emptyList(),
+    observations: List<ProfileObservation> = emptyList(),
 ) {
+    private val stackProfileStorage = freezeStackProfile(stackProfile)
+    val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
+        get() = freezeStackProfile(stackProfileStorage)
+    val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+
+    fun copy(
+        value: T = this.value,
+        behavior: BillOfBehavior = this.behavior,
+        stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = this.stackProfile,
+        coverage: ProfilingCoverage = this.coverage,
+        observations: List<ProfileObservation> = this.observations,
+    ): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations)
+
+    private fun freezeStackProfile(value: Map<TraceEvent, List<Array<StackTraceElement>>>) = java.util.Map.copyOf(value.mapValues { (_, frames) -> java.util.List.copyOf(frames.map { it.copyOf() }) })
+
     @JvmOverloads
     fun toPolicy(
         base: io.mazewall.Policy<*, io.mazewall.Uncompiled> = io.mazewall.Policy.PURE_COMPUTE_UNSAFE,

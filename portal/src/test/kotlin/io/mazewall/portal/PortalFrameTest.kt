@@ -1,10 +1,22 @@
 package io.mazewall.portal
 
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class PortalFrameTest {
+    @Test
+    fun `frame owns a stable payload copy`() {
+        val source = byteArrayOf(1, 2)
+        val frame = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, source, 0)
+        source[0] = 9
+        assertArrayEquals(byteArrayOf(1, 2), frame.payload.copyToByteArray())
+        val exposed = frame.payload.copyToByteArray()
+        exposed[0] = 8
+        assertArrayEquals(byteArrayOf(1, 2), frame.payload.copyToByteArray())
+    }
+
     @Test
     fun `header round trip`() {
         val frame = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, byteArrayOf(1, 2, 3), 1)

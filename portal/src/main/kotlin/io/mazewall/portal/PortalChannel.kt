@@ -35,8 +35,8 @@ public class PortalChannel(
     ) {
         require(fds.size == frame.fdCount) { "fd list ${fds.size} != header ${frame.fdCount}" }
         writeBytes(frame.headerBytes())
-        if (frame.payload.isNotEmpty()) {
-            writeBytes(frame.payload)
+        if (!frame.payload.isEmpty()) {
+            writeBytes(frame.payload.copyToByteArray())
         }
         for (fd in fds) {
             check(sockets.sendDescriptor(socket, fd)) { "SCM_RIGHTS send failed" }
@@ -54,7 +54,7 @@ public class PortalChannel(
                     ?: error("expected granted FD")
             fds.add(granted)
         }
-        return PortalFrame(header.kind, header.requestId, header.method, payload, header.fdCount) to fds
+        return PortalFrame(header.kind, header.requestId, header.method, PortalPayload(payload), header.fdCount) to fds
     }
 
     override fun close() {

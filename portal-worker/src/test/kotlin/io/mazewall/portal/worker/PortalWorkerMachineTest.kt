@@ -3,6 +3,7 @@ package io.mazewall.portal.worker
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
 import io.mazewall.portal.PortalMethod
+import io.mazewall.portal.PortalPayload
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -12,14 +13,18 @@ class PortalWorkerMachineTest {
     fun `request dispatches then replies with the matching response`() {
         val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, byteArrayOf(1), 0)
         val dispatch = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(request))
-        val reply = PortalWorkerMachine.evaluate(dispatch.state, PortalWorkerEvent.DispatchSucceeded(byteArrayOf(2)))
+        val reply = PortalWorkerMachine.evaluate(dispatch.state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(byteArrayOf(2))))
 
-        assertTrue(dispatch.effect is PortalWorkerEffect.Dispatch)
-        val sent = reply.effect as PortalWorkerEffect.Send
+        assertTrue(dispatch is PortalWorkerTransition.Dispatch)
+        val sent = reply as PortalWorkerTransition.Send
         assertEquals(PortalKind.Response, sent.frame.kind)
         assertEquals(5, sent.frame.requestId)
         assertEquals(PortalMethod.Echo, sent.frame.method)
-        assertTrue(sent.frame.payload.contentEquals(byteArrayOf(2)))
+        assertTrue(
+            sent.frame.payload
+            .copyToByteArray()
+            .contentEquals(byteArrayOf(2)),
+        )
     }
 
     @Test
@@ -28,7 +33,7 @@ class PortalWorkerMachineTest {
         val dropped = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(response))
         val stopped = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.PeerClosed)
 
-        assertEquals(PortalWorkerEffect.Drop, dropped.effect)
+        assertTrue(dropped is PortalWorkerTransition.Drop)
         assertTrue(stopped.state is PortalWorkerState.Stopped)
     }
 }

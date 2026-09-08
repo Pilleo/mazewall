@@ -2,6 +2,7 @@ package io.mazewall.portal.worker
 
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
+import io.mazewall.portal.PortalPayload
 
 /** Pure worker RPC lifecycle; socket I/O and received descriptor ownership stay in the serve loop. */
 internal sealed interface PortalWorkerState {
@@ -20,11 +21,11 @@ internal sealed interface PortalWorkerEvent {
     ) : PortalWorkerEvent
 
     data class DispatchSucceeded(
-        val payload: ByteArray,
+        val payload: PortalPayload,
     ) : PortalWorkerEvent
 
     data class DispatchFailed(
-        val message: ByteArray,
+        val message: PortalPayload,
     ) : PortalWorkerEvent
 
     data object IdleTick : PortalWorkerEvent
@@ -32,26 +33,31 @@ internal sealed interface PortalWorkerEvent {
     data object PeerClosed : PortalWorkerEvent
 }
 
-internal sealed interface PortalWorkerEffect {
+internal sealed interface PortalWorkerTransition {
+    val state: PortalWorkerState
+
     data class Dispatch(
+        override val state: PortalWorkerState.Dispatching,
         val request: PortalFrame,
-    ) : PortalWorkerEffect
+    ) : PortalWorkerTransition
 
     data class Send(
+        override val state: PortalWorkerState,
         val frame: PortalFrame,
-    ) : PortalWorkerEffect
+    ) : PortalWorkerTransition
 
-    data object Drop : PortalWorkerEffect
+    data class Drop(
+        override val state: PortalWorkerState,
+    ) : PortalWorkerTransition
 
-    data object Await : PortalWorkerEffect
+    data class Await(
+        override val state: PortalWorkerState,
+    ) : PortalWorkerTransition
 
-    data object Close : PortalWorkerEffect
+    data class Close(
+        override val state: PortalWorkerState.Stopped,
+    ) : PortalWorkerTransition
 }
-
-internal data class PortalWorkerTransition(
-    val state: PortalWorkerState,
-    val effect: PortalWorkerEffect,
-)
 
 internal object PortalWorkerMachine {
     fun evaluate(
@@ -61,33 +67,33 @@ internal object PortalWorkerMachine {
         when (state) {
         PortalWorkerState.AwaitingRequest -> when (event) {
             is PortalWorkerEvent.FrameReceived -> if (event.frame.kind == PortalKind.Request) {
-                PortalWorkerTransition(PortalWorkerState.Dispatching(event.frame), PortalWorkerEffect.Dispatch(event.frame))
+                PortalWorkerTransition.Dispatch(PortalWorkerState.Dispatching(event.frame), event.frame)
             } else {
-                PortalWorkerTransition(state, PortalWorkerEffect.Drop)
+                PortalWorkerTransition.Drop(state)
             }
-            PortalWorkerEvent.IdleTick -> PortalWorkerTransition(state, PortalWorkerEffect.Await)
-            PortalWorkerEvent.PeerClosed -> PortalWorkerTransition(PortalWorkerState.Stopped, PortalWorkerEffect.Close)
+            PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
+            PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.DispatchSucceeded,
             is PortalWorkerEvent.DispatchFailed,
-            -> PortalWorkerTransition(state, PortalWorkerEffect.Drop)
+            -> PortalWorkerTransition.Drop(state)
         }
         is PortalWorkerState.Dispatching -> when (event) {
             is PortalWorkerEvent.DispatchSucceeded -> reply(state.request, PortalKind.Response, event.payload)
             is PortalWorkerEvent.DispatchFailed -> reply(state.request, PortalKind.Error, event.message)
-            PortalWorkerEvent.PeerClosed -> PortalWorkerTransition(PortalWorkerState.Stopped, PortalWorkerEffect.Close)
+            PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.FrameReceived,
             PortalWorkerEvent.IdleTick,
-            -> PortalWorkerTransition(state, PortalWorkerEffect.Drop)
+            -> PortalWorkerTransition.Drop(state)
         }
-        PortalWorkerState.Stopped -> PortalWorkerTransition(state, PortalWorkerEffect.Close)
+        PortalWorkerState.Stopped -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
     }
 
     private fun reply(
         request: PortalFrame,
         kind: PortalKind,
-        payload: ByteArray,
+        payload: PortalPayload,
     ): PortalWorkerTransition {
         val frame = PortalFrame(kind, request.requestId, request.method, payload, 0)
-        return PortalWorkerTransition(PortalWorkerState.AwaitingRequest, PortalWorkerEffect.Send(frame))
+        return PortalWorkerTransition.Send(PortalWorkerState.AwaitingRequest, frame)
     }
 }

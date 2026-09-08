@@ -125,7 +125,7 @@ public class ProcessBroker(
         var returnedToPool = false
         return try {
             val id = nextId.getAndIncrement()
-            val request = PortalFrame(PortalKind.Request, id, method, payload, fds.size)
+            val request = PortalFrame(PortalKind.Request, id, method, PortalPayload(payload), fds.size)
             var callState = PortalBrokerCallMachine
                 .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
                 .state
@@ -138,7 +138,7 @@ public class ProcessBroker(
                 is PortalBrokerCallEffect.ReturnPayload -> {
                     returnToPoolOrDestroy(slot)
                     returnedToPool = true
-                    effect.payload
+                    effect.payload.copyToByteArray()
                 }
                 is PortalBrokerCallEffect.RemoteError -> {
                     returnToPoolOrDestroy(slot)

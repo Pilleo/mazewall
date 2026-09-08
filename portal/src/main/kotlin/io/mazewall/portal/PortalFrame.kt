@@ -66,13 +66,16 @@ public sealed class PortalMethod(
  * Fixed 24-byte big-endian header plus payload. File descriptors travel in
  * a following `SCM_RIGHTS` burst, never in the payload.
  */
-public data class PortalFrame(
-    val kind: PortalKind,
-    val requestId: Int,
-    val method: PortalMethod,
-    val payload: ByteArray,
-    val fdCount: Int,
+public class PortalFrame(
+    public val kind: PortalKind,
+    public val requestId: Int,
+    public val method: PortalMethod,
+    public val payload: PortalPayload,
+    public val fdCount: Int,
 ) {
+    public constructor(kind: PortalKind, requestId: Int, method: PortalMethod, payload: ByteArray, fdCount: Int) :
+        this(kind, requestId, method, PortalPayload(payload), fdCount)
+
     init {
         require(payload.size <= MAX_PAYLOAD) { "payload ${payload.size} exceeds $MAX_PAYLOAD" }
         require(fdCount in 0..MAX_FDS) { "fdCount $fdCount not in 0..$MAX_FDS" }
@@ -96,6 +99,18 @@ public data class PortalFrame(
         buf.put(0)
         return buf.array()
     }
+
+    override fun equals(other: Any?): Boolean =
+        other is PortalFrame &&
+            kind == other.kind &&
+            requestId == other.requestId &&
+            method == other.method &&
+            payload == other.payload &&
+        fdCount == other.fdCount
+
+    override fun hashCode(): Int = listOf(kind, requestId, method, payload, fdCount).hashCode()
+
+    override fun toString(): String = "PortalFrame(kind=$kind, requestId=$requestId, method=$method, payload=$payload, fdCount=$fdCount)"
 
     public companion object {
         public const val HEADER_SIZE: Int = 24
