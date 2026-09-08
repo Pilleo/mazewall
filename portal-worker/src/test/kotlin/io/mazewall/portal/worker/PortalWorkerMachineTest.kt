@@ -5,6 +5,7 @@ import io.mazewall.portal.PortalKind
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalPayload
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -13,7 +14,8 @@ class PortalWorkerMachineTest {
     fun `request dispatches then replies with the matching response`() {
         val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, byteArrayOf(1), 0)
         val dispatch = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(request))
-        val reply = PortalWorkerMachine.evaluate(dispatch.state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(byteArrayOf(2))))
+        val dispatchState = assertInstanceOf(PortalWorkerState.Dispatching::class.java, dispatch.state)
+        val reply = PortalWorkerMachine.dispatchSucceeded(dispatchState, PortalPayload(byteArrayOf(2)))
 
         assertTrue(dispatch is PortalWorkerTransition.Dispatch)
         val sent = reply as PortalWorkerTransition.Send

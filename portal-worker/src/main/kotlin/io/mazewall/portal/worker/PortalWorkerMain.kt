@@ -87,9 +87,9 @@ public object PortalWorkerMain {
                 }
                 try {
                     val result = PortalBuiltinDispatch.handle(dispatch.request.method, dispatch.request.payload.copyToByteArray(), fds)
-                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(result)))
+                    val replied = PortalWorkerMachine.dispatchSucceeded(dispatch.state, PortalPayload(result))
                     state = replied.state
-                    channel.send(sendFrame(replied))
+                    channel.send(replied.frame)
                 } catch (e: UnknownPortalMethod) {
                     val generated = PortalDispatcherRegistry.dispatchOrNull(
                         e.method,
@@ -97,21 +97,21 @@ public object PortalWorkerMain {
                         fds,
                     )
                     if (generated != null) {
-                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(generated)))
+                        val replied = PortalWorkerMachine.dispatchSucceeded(dispatch.state, PortalPayload(generated))
                         state = replied.state
-                        channel.send(sendFrame(replied))
+                        channel.send(replied.frame)
                     } else {
                         val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
+                        val replied = PortalWorkerMachine.dispatchFailed(dispatch.state, PortalPayload(msg))
                         state = replied.state
-                        channel.send(sendFrame(replied))
+                        channel.send(replied.frame)
                     }
                 } catch (expectedDispatchFailure: Exception) {
                     val msg = (expectedDispatchFailure.message ?: expectedDispatchFailure::class.java.simpleName)
                         .toByteArray(StandardCharsets.UTF_8)
-                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
+                    val replied = PortalWorkerMachine.dispatchFailed(dispatch.state, PortalPayload(msg))
                     state = replied.state
-                    channel.send(sendFrame(replied))
+                    channel.send(replied.frame)
                 } finally {
                     fds.forEach { sockets.close(it) }
                 }
@@ -120,14 +120,4 @@ public object PortalWorkerMain {
             channel.close()
         }
     }
-
-    private fun sendFrame(transition: PortalWorkerTransition): PortalFrame =
-        when (transition) {
-            is PortalWorkerTransition.Send -> transition.frame
-            is PortalWorkerTransition.Await,
-            is PortalWorkerTransition.Close,
-            is PortalWorkerTransition.Dispatch,
-            is PortalWorkerTransition.ProtocolViolation,
-            -> error("dispatch completion must send a reply")
-        }
 }
