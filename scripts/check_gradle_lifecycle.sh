@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workflow=".github/workflows/ci.yml"
+
+# Pull-request reruns must be able to reuse the Gradle User Home produced by the
+# first attempt. setup-gradle scopes PR caches to the PR merge ref, so allowing
+# writes here does not make the entry available to the default branch.
+if ! rg -U -q 'uses: gradle/actions/setup-gradle@v6\n[[:space:]]+with:\n(?:[[:space:]]+[^\n]+\n)*[[:space:]]+cache-read-only: false' "${workflow}"; then
+    echo "setup-gradle must allow cache writes so reruns of the same PR can restore Gradle state" >&2
+    exit 1
+fi
+
+if rg -q 'actions/cache/(restore|save)@v4' "${workflow}" \
+    && rg -q '~/.gradle/build-cache' "${workflow}"; then
+    echo "manual Gradle build-cache actions duplicate setup-gradle and target the wrong default path" >&2
+    exit 1
+fi
+
 # Unit verification must remain executable on an ordinary host. Kernel suites are
 # intentionally exposed through the separate kernelCheck lifecycle.
 modules=(platform enforcer profiler portal)

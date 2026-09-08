@@ -36,19 +36,14 @@ jobs:
                           - '**/Containerfile'
                           - 'scripts/**'
 
-            - name: Restore Gradle Build Cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: ~/.gradle/build-cache
-                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
-                  restore-keys: |
-                      gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-
-                      gradle-build-cache-${{ runner.os }}-
-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  # GitHub scopes PR caches to the PR merge ref. Allowing writes
+                  # lets reruns restore the first attempt without exposing the
+                  # entry to the default branch.
+                  cache-read-only: false
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
             - name: Run Host-Safe Unit Quality Gate
@@ -161,12 +156,6 @@ jobs:
                       ~/.gradle/dependency-check-data
                       ${{ github.workspace }}/.gradle/dependency-check-data
                   key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
-            - name: Save Gradle Build Cache (Master Only)
-              uses: actions/cache/save@v4
-              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-              with:
-                  path: ~/.gradle/build-cache
-                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
