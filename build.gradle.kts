@@ -1,5 +1,6 @@
 import org.gradle.api.publish.PublishingExtension
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
@@ -701,37 +702,41 @@ tasks.register("updateClassDiagrams") {
  * The reviewed warning inventory is a ceiling, rather than permission for new warning-level
  * debt. Adjusting a budget is an intentional, reviewable quality decision.
  */
-val detektWarningBudgets =
+val detektWarningFingerprints =
     mapOf(
-        "enforcer" to 374,
-        "platform" to 101,
-        "portal-codegen" to 22,
-        "portal-worker" to 2,
-        "portal" to 23,
-        "profiler" to 181,
+        "enforcer" to "959cb2aea1110a1a7c0906ce1d2804ffb507ef55fe56d41c23ad133d7d4b0117",
+        "platform" to "075eaa680f51cbe824d17495458958150fe352e1604748ddde5d0f3324b7d896",
+        "portal-codegen" to "8c066157e3101d69e60ffbc164a7a9dccfa0c98fe1ee3a10a6b592c5240b8388",
+        "portal-worker" to "e76dacb8464ed0b4a83e7f95cebebaa2f26b7fea491659a1cbe2efaf8f0e6d36",
+        "portal" to "df9e7bd024e19cfbf1ce0c2534d0f5776904c8ed3f2f180f658a6854461c4414",
+        "profiler" to "bef5f0bd2c0067772df4ea6ad6b569d34f7fe0af172db8ad5fe2c27ae2a8fec1",
     )
 
 tasks.register("detektWarningRatchet") {
     group = "verification"
     description = "Fails when a production module adds Detekt warning-level debt"
-    dependsOn(detektWarningBudgets.keys.map { module -> ":$module:detektMain" })
+    dependsOn(detektWarningFingerprints.keys.map { module -> ":$module:detektMain" })
 
     doLast {
         val violations =
-            detektWarningBudgets.mapNotNull { (module, budget) ->
+            detektWarningFingerprints.mapNotNull { (module, expectedFingerprint) ->
                 val report =
                     project(":$module")
                         .layout.buildDirectory
                         .file("reports/detekt/main.xml")
                         .get()
                         .asFile
-                val warning = "severity=\"warning\""
-                val warnings = report.readText().windowed(warning.length, 1).count { it == warning }
-                if (warnings > budget) "$module: $warnings warnings (budget $budget)" else null
+                val normalized = report.readText().replace(Regex("""(line|column)=\"\\d+\""""), "")
+                val fingerprint =
+                    MessageDigest
+                        .getInstance("SHA-256")
+                        .digest(normalized.toByteArray())
+                        .joinToString("") { "%02x".format(it) }
+                if (fingerprint != expectedFingerprint) "$module: finding inventory changed" else null
             }
         check(violations.isEmpty()) {
             "Detekt warning ratchet exceeded: ${violations.joinToString()}. " +
-                "Remove the new warning or update the reviewed budget deliberately."
+                "Remove the changed finding or update the reviewed fingerprint deliberately."
         }
     }
 }

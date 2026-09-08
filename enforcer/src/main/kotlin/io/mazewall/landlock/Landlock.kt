@@ -221,7 +221,7 @@ object Landlock {
      * Queries the kernel for the highest Landlock ABI version it supports.
      */
     fun getAbiVersion(): Int {
-        return LinuxNative.raw
+        val result = LinuxNative.raw
             .syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
             io.mazewall.core.NativeArg
@@ -230,8 +230,17 @@ object Landlock {
                 .LongArg(0L),
             io.mazewall.core.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
-        ).recover { _, _ -> 0L }
-            .toInt()
+        )
+        return when (result) {
+            is LinuxNative.SyscallResult.Success -> result.value.toInt()
+            is LinuxNative.SyscallResult.Error -> when (result.errno) {
+                // These mean the optional kernel facility is unavailable, not that enforcement was denied.
+                NativeConstants.ENOSYS,
+                NativeConstants.EOPNOTSUPP,
+                -> 0
+                else -> result.throwErrno("query Landlock ABI version")
+            }
+        }
     }
 
     /**

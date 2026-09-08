@@ -14,26 +14,48 @@ public sealed class SeccompConnection(
     protected val socketClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
     protected val listenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
 ) : AutoCloseable {
+    /** Result of an attempted close. A failed descriptor remains owned for a later retry. */
+    public sealed interface CloseResult {
+        public data object Closed : CloseResult
+
+        public data class Failed(
+            public val failures: List<Exception>,
+        ) : CloseResult
+    }
+
     public abstract val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
     public open val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? get() = null
 
     /** Optional custom socket manager used during close(). Defaults to RealSocketManager. */
     public var socketManager: SocketManager = RealSocketManager
 
-    override fun close() {
-        if (socketClosedFlag.compareAndSet(false, true)) {
+    @Suppress("TooGenericExceptionCaught")
+    @Synchronized
+    public fun closeWithResult(): CloseResult {
+        val failures = mutableListOf<Exception>()
+        if (!socketClosedFlag.get()) {
             try {
                 socketManager.close(socketFd)
-            } catch (_: Exception) {
-                }
+                socketClosedFlag.set(true)
+            } catch (failure: Exception) {
+                failures += failure
+            }
         }
 
-        listenerFd?.takeIf { listenerClosedFlag.compareAndSet(false, true) }?.let { lFd ->
+        listenerFd?.takeIf { !listenerClosedFlag.get() }?.let { lFd ->
             try {
                 socketManager.close(lFd)
-            } catch (_: Exception) {
-                }
+                listenerClosedFlag.set(true)
+            } catch (failure: Exception) {
+                failures += failure
+            }
         }
+        return if (failures.isEmpty()) CloseResult.Closed else CloseResult.Failed(failures)
+    }
+
+    override fun close() {
+        // Keep AutoCloseable source compatibility; callers needing recovery use closeWithResult().
+        closeWithResult()
     }
 
     /** Records that the session reactor closed the control socket while retaining listener ownership. */

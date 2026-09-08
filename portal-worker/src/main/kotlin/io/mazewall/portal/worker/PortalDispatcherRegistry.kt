@@ -29,11 +29,21 @@ public object PortalDispatcherRegistry {
 
     private val handlers = ConcurrentHashMap<PortalMethod.Generated, Handler>()
 
+    @Volatile private var frozen: Boolean = false
+
     public fun register(
         ids: IntArray,
         handler: Handler,
     ) {
-        for (id in ids) handlers[PortalMethod.Generated(id)] = handler
+        check(!frozen) { "portal dispatcher registry is frozen" }
+        for (id in ids) {
+            check(handlers.putIfAbsent(PortalMethod.Generated(id), handler) == null) { "duplicate portal method id: $id" }
+        }
+    }
+
+    /** Prevents runtime mutation after startup wiring has completed. */
+    public fun freeze() {
+        frozen = true
     }
 
     /** Attempts registered dispatch; null when no handler claims [method]. */
@@ -44,9 +54,8 @@ public object PortalDispatcherRegistry {
     ): ByteArray? = handlers[method]?.invoke(method, payload, granted)
 
     /**
-     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Tolerant of malformed
-     * entries so one bad flag cannot take down the worker before policy
-     * installation - each failure logs and skips.
+     * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Compatibility bootstrap
+     * remains tolerant; callers that require a sealed startup explicitly call [freeze].
      */
     public fun bootstrapFromProperty(raw: String?): Int {
         if (raw.isNullOrBlank()) return 0

@@ -10,16 +10,16 @@ package io.mazewall.profiler.tierE.collector
  * Drop accounting: [droppedCount] tracks ring-buffer losses.
  */
 public class LiveEbpfCollector {
-    private val events = java.util.concurrent.CopyOnWriteArrayList<AttributedEvent>()
+    private val events = mutableListOf<AttributedEvent>()
 
-    @Volatile public var droppedCount: Int = 0
+    public var droppedCount: Int = 0
     private set
 
-    @Volatile public var drainComplete: Boolean = true
+    public var drainComplete: Boolean = true
     private set
 
     /** Records an event from the BPF ring buffer. Called by the consumer thread. */
-    public fun record(
+    @Synchronized public fun record(
         tid: Long,
         syscallNr: Int,
         contextId: UInt,
@@ -28,18 +28,27 @@ public class LiveEbpfCollector {
         events.add(AttributedEvent(tid, syscallNr, contextId, ktimeNs))
     }
 
-    public fun recordDrop() {
+    @Synchronized public fun recordDrop() {
         droppedCount++
         drainComplete = false
     }
 
     /** Returns a snapshot of all collected events. */
-    public fun drain(): List<AttributedEvent> = events.toList()
+    @Synchronized public fun drain(): List<AttributedEvent> = events.toList()
+
+    /** Atomically captures events and the loss marker from one collection epoch. */
+    @Synchronized public fun snapshot(): Snapshot = Snapshot(events.toList(), droppedCount, drainComplete)
 
     /** Clears accumulated events after drain. */
-    public fun clear() {
+    @Synchronized public fun clear() {
         events.clear()
     }
+
+    public data class Snapshot(
+        public val events: List<AttributedEvent>,
+        public val droppedCount: Int,
+        public val drainComplete: Boolean,
+    )
 
     public data class AttributedEvent(
         public val tid: Long,
