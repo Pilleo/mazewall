@@ -1,6 +1,58 @@
 package io.mazewall.profiler.engine
 
+import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import java.util.Locale
+
+/** A syscall identity that keeps forward-compatible names explicit. */
+public sealed interface ObservedSyscall {
+    public data class Known(
+        public val syscall: Syscall,
+    ) : ObservedSyscall
+
+    public data class Unknown(
+        public val raw: String,
+    ) : ObservedSyscall
+
+    public companion object {
+        public fun parse(raw: String): ObservedSyscall =
+            runCatching { Known(Syscall.valueOf(raw.uppercase(Locale.ROOT))) }
+                .getOrElse { Unknown(raw) }
+    }
+}
+
+/** Linux socket address-family values, including future or platform-specific values. */
+public sealed interface AddressFamily {
+    public enum class Known : AddressFamily {
+        INET,
+        INET6,
+    }
+
+    public data class Unknown(
+        public val raw: Int,
+    ) : AddressFamily
+
+    public companion object {
+        public fun fromRaw(raw: Int): AddressFamily =
+            when (raw) {
+                2 -> Known.INET
+                10 -> Known.INET6
+                else -> Unknown(raw)
+            }
+    }
+}
+
+/** Raw socket type bits remain available while preventing accidental protocol mixing. */
+@JvmInline
+public value class SocketType(
+    public val raw: Int,
+)
+
+/** Raw IP protocol numbers remain available while preventing accidental socket-type mixing. */
+@JvmInline
+public value class IpProtocol(
+    public val raw: Int,
+)
 
 /** Linux `mmap(2)` protection bits kept distinct from unrelated integer arguments. */
 @JvmInline
@@ -44,6 +96,7 @@ public sealed class TraceEvent {
     public abstract val tid: Tid
     public abstract val syscallName: String
     public abstract val stackTrace: List<String>?
+    public val observedSyscall: ObservedSyscall get() = ObservedSyscall.parse(syscallName)
 
     /**
      * List of filesystem paths associated with this event.
@@ -229,6 +282,9 @@ public sealed class TraceEvent {
         override val stackTrace: List<String>? = null,
     ) : TraceEvent() {
         override val syscallName: String = "SOCKET"
+        public val addressFamily: AddressFamily get() = AddressFamily.fromRaw(domain)
+        public val socketType: SocketType get() = SocketType(type)
+        public val ipProtocol: IpProtocol get() = IpProtocol(protocol)
 
         /** Returns true if this is an AF_INET or AF_INET6 socket. */
         val isIpSocket: Boolean get() = domain == 2 || domain == 10

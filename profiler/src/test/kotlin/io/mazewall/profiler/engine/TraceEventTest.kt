@@ -1,5 +1,6 @@
 package io.mazewall.profiler.engine
 
+import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -45,5 +46,16 @@ class TraceEventTest {
         assertEquals("Owner", event.jvmStackTrace?.single()?.className)
         event.jvmStackTrace = null
         assertNull(event.jvmStackTrace)
+    }
+
+    @Test
+    fun `typed profiler boundaries retain known and unknown raw values`() {
+        assertEquals(ObservedSyscall.Known(Syscall.OPENAT), ObservedSyscall.parse("openat"))
+        assertEquals(ObservedSyscall.Unknown("future_call"), ObservedSyscall.parse("future_call"))
+
+        val socket = TraceEvent.Socket(Tid(7), domain = 2, type = 1, protocol = 6)
+        assertEquals(AddressFamily.Known.INET, socket.addressFamily)
+        assertEquals(SocketType(1), socket.socketType)
+        assertEquals(IpProtocol(6), socket.ipProtocol)
     }
 }
