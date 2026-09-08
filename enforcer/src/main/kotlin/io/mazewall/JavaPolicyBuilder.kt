@@ -83,7 +83,6 @@ public class JavaPolicyBuilder(
     }
 
     public fun base(policy: Policy<*, *>): JavaPolicyBuilder {
-        @Suppress("UNCHECKED_CAST")
         builder.base(policy.definition as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
         return this
     }
@@ -234,7 +233,7 @@ public class JavaPolicyBuilder(
                     "Filesystem rules must be ThreadLocalOnly.",
             )
         }
-        @Suppress("UNCHECKED_CAST")
+
         return Policy(definition as PolicyDefinition<PolicyScope.ProcessWideSafe>)
     }
 

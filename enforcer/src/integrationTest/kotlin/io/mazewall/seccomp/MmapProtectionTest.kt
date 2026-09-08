@@ -214,8 +214,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
      */
     @Test
     @EnabledIfLinuxAndSupported
-    @Suppress("ThrowsCount")
-    fun `pkey_mprotect with PROT_EXEC is blocked`() {
+        fun `pkey_mprotect with PROT_EXEC is blocked`() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 

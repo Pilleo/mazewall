@@ -6,7 +6,7 @@ import io.mazewall.ffi.NativeConstants
  * A type-safe sealed class hierarchy representing Linux prctl options and their arguments,
  * preventing misaligned parameters or invalid command configurations at compile time.
  */
-@Suppress("MagicNumber")
+
 public sealed class PrctlCommand(
     public val option: Int,
 ) {

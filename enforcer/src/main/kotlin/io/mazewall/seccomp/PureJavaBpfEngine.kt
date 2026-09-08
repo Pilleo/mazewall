@@ -56,7 +56,6 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         installInternal(policy, useTsync = false)
-        @Suppress("UNCHECKED_CAST")
         return this as SeccompEngine<EngineState.Loaded>
     }
 
@@ -65,11 +64,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
         installInternal(policy, useTsync = true)
-        @Suppress("UNCHECKED_CAST")
         return this as SeccompEngine<EngineState.Loaded>
     }
 
-    @Suppress("TooGenericExceptionCaught")
     private fun installInternal(
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
@@ -101,17 +98,21 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             updateState(applied, useTsync)
             val verified = applied.verify(policy.definition)
             updateState(verified, useTsync)
-        } catch (e: Exception) {
+        } catch (expectedInstallFailure: Exception) {
             val stepName = getStepName()
-            val errno = getErrno(e)
-            updateState(SeccompInstallationState.Failed(stepName, errno, e), useTsync)
-            throw e
-        } catch (e: Error) {
+            val errno = getErrno(expectedInstallFailure)
+            updateState(SeccompInstallationState.Failed(stepName, errno, expectedInstallFailure), useTsync)
+            throw expectedInstallFailure
+        } catch (expectedFatalFailure: Error) {
             val stepName = getStepName()
-            logger.log(Level.SEVERE, "FATAL: Uncaught native or JVM error during seccomp installation at step $stepName", e)
-            val errno = getErrno(e)
-            updateState(SeccompInstallationState.Failed(stepName, errno, e), useTsync)
-            throw e
+            logger.log(
+                Level.SEVERE,
+                "FATAL: Uncaught native or JVM error during seccomp installation at step $stepName",
+                expectedFatalFailure,
+            )
+            val errno = getErrno(expectedFatalFailure)
+            updateState(SeccompInstallationState.Failed(stepName, errno, expectedFatalFailure), useTsync)
+            throw expectedFatalFailure
         }
     }
 

@@ -945,7 +945,6 @@ class ProfilerDaemonTest {
         } finally {
             arenaField.set(pool, originalArena)
             for (seg in tempQueue) {
-                @Suppress("UNCHECKED_CAST")
                 (queue as java.util.concurrent.ConcurrentLinkedQueue<Any>).offer(seg)
             }
         }

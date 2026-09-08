@@ -79,7 +79,6 @@ object JvmFloorWorkload {
         val retainedGarbage = garbage.take(10)
         garbage.clear()
 
-        @Suppress("ExplicitGarbageCollectionCall")
         System.gc() // Trigger safepoints and signal-based handshakes
 
         // Use the retained garbage to prevent premature optimization/collection

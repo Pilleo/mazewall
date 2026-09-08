@@ -17,7 +17,7 @@ internal object ProfilerSocket {
             val sockaddrUn = SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
-            @Suppress("UnusedVariable")
+
             for (retryAttempt in 0 until maxRetries) {
                 val fdRes =
                 LinuxNative.networking.socket(

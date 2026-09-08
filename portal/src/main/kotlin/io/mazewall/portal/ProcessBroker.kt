@@ -153,11 +153,11 @@ public class ProcessBroker(
                 recycleDeadWorker(slot)
             }
             throw e
-        } catch (e: Exception) {
+        } catch (expectedRpcFailure: Exception) {
             if (!returnedToPool) {
                 recycleDeadWorker(slot)
             }
-            throw PortalCallException("portal RPC failed", e)
+            throw PortalCallException("portal RPC failed", expectedRpcFailure)
         }
     }
 
@@ -252,11 +252,14 @@ public class ProcessBroker(
             )
         val peer = try {
             sockets.accept(listen)
-        } catch (e: Exception) {
+        } catch (expectedWorkerTeardown: Exception) {
             // Listener closed by the death watcher (or teardown racing accept).
             runCatching { proc.destroyForcibly() }
             ep.close()
-            throw IllegalStateException("portal worker died before connecting: ${e.message}", e)
+            throw IllegalStateException(
+                "portal worker died before connecting: ${expectedWorkerTeardown.message}",
+                expectedWorkerTeardown,
+            )
         }
         if (!proc.isAlive) {
             sockets.close(peer)

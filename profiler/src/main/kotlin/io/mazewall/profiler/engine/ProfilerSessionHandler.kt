@@ -78,7 +78,6 @@ internal class ProfilerSessionHandler(
      * are deterministically freed when the iteration completes, completely eliminating the overhead of
      * creating a new confined arena per notification or operation.
      */
-    @Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod", "ThrowsCount") // Interrupted and structural failures must escape; only transport failure terminates the session.
     context(arena: NativeArena) override fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
@@ -189,9 +188,12 @@ internal class ProfilerSessionHandler(
                 }
             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
             return NotifResult.TERMINATE
-        } catch (e: Throwable) {
-            logSessionFailure("Structural or unrecoverable error", e)
-            throw e
+        } catch (expectedStructuralFailure: Exception) {
+            logSessionFailure("Structural or unrecoverable error", expectedStructuralFailure)
+            throw expectedStructuralFailure
+        } catch (expectedStructuralError: Error) {
+            logSessionFailure("Structural or unrecoverable error", expectedStructuralError)
+            throw expectedStructuralError
         }
     }
 

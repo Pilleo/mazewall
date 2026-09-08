@@ -130,7 +130,6 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 combinedSyscalls[Syscall.IO_URING_SETUP] = SeccompAction.ACT_ERRNO()
             }
 
-            @Suppress("UNCHECKED_CAST")
             return PolicyDefinition<S>(
                 defaultAction = combinedDefaultAction,
                 syscallActions = combinedSyscalls,

@@ -53,7 +53,6 @@ public object Platform {
      * Swaps the active platform provider. Used for testing and fault injection.
      */
     @JvmStatic
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
             provider = newProvider
@@ -66,7 +65,6 @@ public object Platform {
      * Restores the default RealPlatformProvider.
      */
     @JvmStatic
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     public fun resetToDefault() {
         synchronized(this) {
             provider = RealPlatformProvider

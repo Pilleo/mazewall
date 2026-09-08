@@ -145,7 +145,6 @@ public class SeccompDaemonEngine(
         return curr is UnixListenDaemonState.ShuttingDown || curr is UnixListenDaemonState.Terminated
     }
 
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     public fun handleNewConnection(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
         var clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         try {
@@ -186,37 +185,26 @@ public class SeccompDaemonEngine(
                 }
                 return
             }
-        } catch (e: InterruptedException) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try {
-                    socketManager.close(clientFd)
-                } catch (_: Exception) {
-                    }
-            }
+        } catch (_: InterruptedException) {
+            cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
-        } catch (e: java.nio.channels.ClosedByInterruptException) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try {
-                    socketManager.close(clientFd)
-                } catch (_: Exception) {
-                    }
-            }
+        } catch (_: java.nio.channels.ClosedByInterruptException) {
+            cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
-        } catch (t: Throwable) {
-            if (clientFd != null) {
-                clientSockets.remove(clientFd)
-                try {
-                    socketManager.close(clientFd)
-                } catch (_: Exception) {
-                    }
-            }
-            if (t is Error) throw t
+        } catch (expectedAcceptFailure: Exception) {
+            cleanupFailedConnection(clientFd)
+        } catch (expectedAcceptError: Error) {
+            cleanupFailedConnection(clientFd)
+            throw expectedAcceptError
         }
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    private fun cleanupFailedConnection(clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?) {
+        clientFd ?: return
+        clientSockets.remove(clientFd)
+        runCatching { socketManager.close(clientFd) }
+    }
+
     public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
         var connection: SeccompConnection = SeccompConnection.Accepted(socketFd).apply {
             this.socketManager = this@SeccompDaemonEngine.socketManager
@@ -235,14 +223,14 @@ public class SeccompDaemonEngine(
                     connection = next
                 }
             }
-        } catch (e: InterruptedException) {
-            System.err.println("[SECCOMP-DAEMON] Connection handler interrupted: ${e.message}")
+        } catch (expectedInterrupt: InterruptedException) {
+            System.err.println("[SECCOMP-DAEMON] Connection handler interrupted: ${expectedInterrupt.message}")
             interrupted = true
-        } catch (e: java.nio.channels.ClosedByInterruptException) {
-            System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${e.message}")
+        } catch (expectedInterruptedChannel: java.nio.channels.ClosedByInterruptException) {
+            System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${expectedInterruptedChannel.message}")
             interrupted = true
-        } catch (e: Exception) {
-            System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${e.message}")
+        } catch (expectedConnectionFailure: Exception) {
+            System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${expectedConnectionFailure.message}")
         } finally {
             clientSockets.remove(socketFd)
             connection.listenerFd?.let { activeListeners.remove(it) }

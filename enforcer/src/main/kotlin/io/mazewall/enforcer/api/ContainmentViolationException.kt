@@ -36,7 +36,7 @@ enum class ContainmentViolationEvidence {
  * @param syscallNr syscall number whose execution was denied, when known.
  * @param evidence whether Mazewall observed the denial or only has incomplete provenance.
  */
-@Suppress("DEPRECATION")
+
 class ContainmentViolationException(
     message: String,
     cause: Throwable? = null,

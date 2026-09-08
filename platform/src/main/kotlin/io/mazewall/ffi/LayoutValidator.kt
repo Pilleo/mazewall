@@ -7,7 +7,7 @@ import java.lang.foreign.StructLayout
  * Validates FFM memory layout size and member offsets dynamically at runtime on initialization
  * to ensure they match target ABI expectations.
  */
-@Suppress("MagicNumber")
+
 object LayoutValidator {
     fun validate() {
         validateLayout(Layouts.SOCK_FILTER, expectedSize = 8, expectedAlignment = 4) {
@@ -119,15 +119,14 @@ object LayoutValidator {
     internal class LayoutValidationScope(
         private val layout: StructLayout,
     ) {
-        @Suppress("TooGenericExceptionCaught")
         fun assertOffset(
             fieldName: String,
             expectedOffset: Long,
         ) {
             val actualOffset = try {
                 layout.byteOffset(MemoryLayout.PathElement.groupElement(fieldName))
-            } catch (e: Exception) {
-                throw IllegalStateException("Field '$fieldName' not found in layout", e)
+            } catch (expectedFieldLookupFailure: Exception) {
+                throw IllegalStateException("Field '$fieldName' not found in layout", expectedFieldLookupFailure)
             }
             if (actualOffset != expectedOffset) {
                 throw IllegalStateException("FFM StructLayout offset mismatch for field '$fieldName': expected offset $expectedOffset but got $actualOffset")

@@ -87,9 +87,9 @@ object MazewallEvents {
         for (listener in listeners) {
             try {
                 listener.onEvent(event)
-            } catch (e: Exception) {
-                if (failOnListenerError) throw e
-                logger.log(java.util.logging.Level.WARNING, "MazewallEvents listener threw", e)
+            } catch (expectedListenerFailure: Exception) {
+                if (failOnListenerError) throw expectedListenerFailure
+                logger.log(java.util.logging.Level.WARNING, "MazewallEvents listener threw", expectedListenerFailure)
             }
         }
     }

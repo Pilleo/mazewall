@@ -39,7 +39,7 @@ internal sealed class HandshakeSession {
          * Performs the byte-level protocol handshake with the parent JVM.
          * Decouples IPC polling from orchestration.
          */
-        @Suppress("ReturnCount", "NestedBlockDepth", "CyclomaticComplexMethod")
+
         fun performHandshake(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,
@@ -69,7 +69,6 @@ internal sealed class HandshakeSession {
             }
         }
 
-        @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
         private fun readAndProcessAck(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,

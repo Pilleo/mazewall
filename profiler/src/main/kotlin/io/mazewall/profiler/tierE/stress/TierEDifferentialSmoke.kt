@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.stress
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Locale
 
 /** Privileged acceptance gate comparing Tier E with the USER_NOTIF stack oracle. */
 public object TierEDifferentialSmoke {
@@ -35,7 +36,7 @@ public object TierEDifferentialSmoke {
             }
             println(
                 "tier-e-differential: tierENs=$tierNanos userNotifNs=$oracleNanos " +
-                "speedup=${"%.2f".format(oracleNanos.toDouble() / tierNanos)}x",
+                "speedup=${String.format(Locale.ROOT, "%.2f", oracleNanos.toDouble() / tierNanos)}x",
             )
         } finally {
             Files.deleteIfExists(definitions)

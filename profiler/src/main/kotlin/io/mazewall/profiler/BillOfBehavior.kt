@@ -134,7 +134,7 @@ class BillOfBehavior(
             }
         }
         requireComplete(evidence, allowIncomplete)
-        @Suppress("UNCHECKED_CAST")
+
         var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.core.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }

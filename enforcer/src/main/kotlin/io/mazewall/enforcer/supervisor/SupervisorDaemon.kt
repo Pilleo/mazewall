@@ -55,8 +55,8 @@ public object SupervisorDaemon {
 
         try {
             engine.run()
-        } catch (t: Throwable) {
-            logger.log(java.util.logging.Level.SEVERE, "[SUPERVISOR-FATAL] Fatal error in SupervisorDaemon", t)
+        } catch (expectedFatalFailure: Throwable) {
+            logger.log(java.util.logging.Level.SEVERE, "[SUPERVISOR-FATAL] Fatal error in SupervisorDaemon", expectedFatalFailure)
             exitProcess(1)
         }
     }

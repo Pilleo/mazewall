@@ -12,6 +12,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 /**
  * Shared utility for reading memory and resolving paths from remote processes/threads using process_vm_readv and readlink.
@@ -52,7 +53,7 @@ public interface TraceeMemoryReader {
                 len++
             }
             if (!hasNullTerminator) {
-                val preview = bytes.take(64).joinToString("") { "%02X".format(it) }
+                val preview = bytes.take(64).joinToString("") { String.format(Locale.ROOT, "%02X", it) }
                 throw IllegalStateException(
                     "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview",
                 )

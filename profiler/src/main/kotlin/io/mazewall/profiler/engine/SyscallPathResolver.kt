@@ -86,7 +86,7 @@ internal class SyscallPathResolver(
         if (addr == 0L) return null
         val path = try {
             memoryReader.readStringFromProcess(tid, addr)
-        } catch (e: io.mazewall.enforcer.api.ContainmentViolationException) {
+        } catch (_: io.mazewall.enforcer.api.ContainmentViolationException) {
             // Yama can deny grandchild memory reads. Record the failed inspection and
             // keep the session alive so the syscall can be continued; the event is
             // published without a resolved path rather than as a successful empty read.

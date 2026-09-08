@@ -54,8 +54,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
 
     @Test
     @EnabledIfLinuxAndSupported
-    @Suppress("ThrowsCount")
-    fun `reproduce prctl PR_CAP_AMBIENT_RAISE bypass`() {
+        fun `reproduce prctl PR_CAP_AMBIENT_RAISE bypass`() {
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 

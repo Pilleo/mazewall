@@ -111,7 +111,7 @@ internal interface ProfilerTransport :
 /**
  * Real implementation of [ProfilerTransport] using standard Linux syscalls.
  */
-@Suppress("MagicNumber", "ReturnCount", "ThrowsCount")
+
 internal object RealProfilerTransport : ProfilerTransport {
     private val logger = java.util.logging.Logger
         .getLogger(RealProfilerTransport::class.java.name)

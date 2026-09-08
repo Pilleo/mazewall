@@ -86,7 +86,6 @@ object Profiler {
                 // We must use a separate thread because seccomp USER_NOTIF stops the calling thread.
                 // The resolver daemon needs to be notified by the kernel, which then notifies
                 // our JVM listener thread to record the event.
-                @Suppress("TooGenericExceptionCaught")
                 try {
                     installProfilingFilterForThread(
                         context.socketPath,
@@ -100,8 +99,10 @@ object Profiler {
 
                     val res = block()
                     blockResult.set(res)
-                } catch (e: Throwable) {
-                    errorRef.set(e)
+                } catch (expectedWorkerFailure: Exception) {
+                    errorRef.set(expectedWorkerFailure)
+                } catch (expectedWorkerError: Error) {
+                    errorRef.set(expectedWorkerError)
                 }
             } finally {
                 // Do not remove tid here. Wait until listener drains events.

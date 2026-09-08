@@ -48,13 +48,13 @@ public value class ContextId(
         require(offset >= 0 && dst.size - offset >= WIRE_SIZE_BYTES) {
             "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${dst.size}, offset=$offset"
         }
-        @Suppress("MagicNumber")
+
         val v = value.toInt()
-        @Suppress("MagicNumber")
+
         dst[offset] = (v ushr 24).toByte()
-        @Suppress("MagicNumber")
+
         dst[offset + 1] = ((v ushr 16) and 0xFF).toByte()
-        @Suppress("MagicNumber")
+
         dst[offset + 2] = ((v ushr 8) and 0xFF).toByte()
         dst[offset + 3] = (v and 0xFF).toByte()
     }
@@ -86,7 +86,7 @@ public value class ContextId(
             require(offset >= 0 && src.size - offset >= WIRE_SIZE_BYTES) {
                 "buffer too small for ${WIRE_SIZE_BYTES}-byte context id: size=${src.size}, offset=$offset"
             }
-            @Suppress("MagicNumber")
+
             val v = ((src[offset].toInt() and 0xFF) shl 24) or
                 ((src[offset + 1].toInt() and 0xFF) shl 16) or
                 ((src[offset + 2].toInt() and 0xFF) shl 8) or

@@ -62,7 +62,7 @@ public fun main() {
                         }
                     }
                 }
-            } catch (_: Exception) {
+            } catch (expectedClientDisconnect: Exception) {
                 // peer disconnected or timed out — session over
             } finally {
                 runCatching { client.close() }
@@ -99,9 +99,9 @@ private fun handleCommand(
                 eng.attachMarker(pid, agent, offset)
                 setCurrent(eng)
                 "OK attached pid=$pid"
-            } catch (t: Throwable) {
+            } catch (expectedAttachFailure: Exception) {
                 runCatching { eng.close() }
-                "ERR ${t.message}"
+                "ERR ${expectedAttachFailure.message}"
             }
         }
         "DETACH" -> {

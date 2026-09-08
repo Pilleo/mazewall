@@ -55,6 +55,7 @@ plan.md
 ### Logs & Results ###
 *.log
 hs_err_pid*
+*.hprof
 replay_pid*
 *_results.json
 *results_new.json
@@ -111,3 +112,6 @@ target/
 .codegraph/
 .graphify/
 
+### Local Work Coordination ###
+/.worktrees/
+/.taskplane-kb/**/*.lock

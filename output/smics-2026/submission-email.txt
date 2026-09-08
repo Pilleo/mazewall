@@ -1,0 +1,27 @@
+DRAFT — complete author review before sending.
+
+To: smics@lnu.edu.ua
+Subject: SMICS-2026 abstract submission — mazewall: restricting application workers on Linux
+
+Dear SMICS-2026 Organizing Committee,
+
+Please consider the attached abstract, “mazewall: restricting application workers on Linux,” for the track “Cyber Defense of Communication Systems and Cloud Infrastructure, Incident Management.”
+
+The work presents a Linux containment model combining process-wide and worker-specific syscall restrictions with filesystem access controls. The current implementation targets JVM applications; the paper explains how the model can extend to other language runtimes and which integration constraints require validation.
+
+Author: Leanid Piliptsevich
+Affiliation: Independent researcher
+Corresponding author: Leanid Piliptsevich, pilleo19@gmail.com
+
+The editable ODT manuscript and its PDF rendering are attached.
+
+Please confirm receipt.
+
+Kind regards,
+Leanid Piliptsevich
+
+Sending notes (remove these before sending):
+- Complete registration separately using the official form.
+- Review the manuscript and AI disclosure.
+- Rename the final attachments consistently after removing DRAFT.
+- Attach only the final manuscript ODT and PDF, not the template or internal preparation notes.

@@ -30,6 +30,10 @@ object IsolatedProcessTester {
             "-XX:+UnlockExperimentalVMOptions",
             "-XX:-EnableJVMCI",
             "-XX:-UseJVMCICompiler",
+            // Seccomp process-wide tests must exercise execve in the JVM process itself.
+            // JDK 25's posix_spawn helper performs an earlier exec that the NO_EXEC filter
+            // correctly denies, hiding the behavior under test.
+            "-Djdk.lang.Process.launchMechanism=FORK",
             "-cp",
             classpath,
             "--enable-native-access=ALL-UNNAMED",

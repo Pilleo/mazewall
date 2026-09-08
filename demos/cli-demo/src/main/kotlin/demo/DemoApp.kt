@@ -1,8 +1,8 @@
 package demo
 
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.enforcer.api.ContainmentViolationException
 import java.io.File
-import java.util.concurrent.ExecutionException
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
@@ -103,7 +103,7 @@ fun runSafe() {
     try {
         println("Action:   Attempting unauthorized execve()...")
         SafeRunner.run(payload)
-    } catch (e: ExecutionException) {
+    } catch (e: ContainmentViolationException) {
         val diagnostic = ContainmentViolationDetector.diagnose(e) ?: throw e
         println("\u001b[32;1m[BOUNCER] SYSCALL INTERCEPTED!\u001b[0m")
         println("The operation was blocked; evidence: ${diagnostic.evidence}.")

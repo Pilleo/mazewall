@@ -36,7 +36,7 @@ public object Portal {
                     e,
                 )
             }
-        @Suppress("UNCHECKED_CAST")
+
         return ctor.newInstance(broker) as T
     }
 }

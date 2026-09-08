@@ -31,7 +31,6 @@ import java.util.logging.Logger
  * and the underlying Unix domain socket is explicitly released, preventing "half-dead"
  * listeners or socket leaks during consecutive profiling runs.
  */
-@Suppress("SwallowedException")
 internal class ProfilerTraceListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val accumulatedLogs: MutableList<TraceEvent>,
@@ -115,8 +114,8 @@ internal class ProfilerTraceListener(
         val thread = Thread {
             try {
                 runListenerLoop(inputStream, readyLatch)
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed with fatal error", t)
+            } catch (expectedWorkerFailure: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed", expectedWorkerFailure)
             } finally {
                 if (closed.compareAndSet(false, true)) {
                     // Safe socket closure unifies cleanup across worker and main threads.
@@ -149,8 +148,8 @@ internal class ProfilerTraceListener(
                         onEventCollected?.invoke(event)
                     }
                 }
-            } catch (t: Throwable) {
-                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed with fatal error", t)
+            } catch (expectedCollectorFailure: Exception) {
+                logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed", expectedCollectorFailure)
             } finally {
                 collectorTerminatedLatch.countDown()
             }
@@ -183,8 +182,8 @@ internal class ProfilerTraceListener(
             // This triggers EOF on our read side without shutting down the global daemon.
             try {
                 sendCommand(PASS_THROUGH_COMMAND_BYTE)
-            } catch (e: Exception) {
-                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${e.message}")
+            } catch (expectedTransportCloseFailure: Exception) {
+                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${expectedTransportCloseFailure.message}")
             }
 
             var workerJoined = false
@@ -202,7 +201,7 @@ internal class ProfilerTraceListener(
                     } else {
                         workerJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -216,7 +215,7 @@ internal class ProfilerTraceListener(
                     } else {
                         collectorJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -264,7 +263,7 @@ internal class ProfilerTraceListener(
                     } else {
                         workerJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -278,7 +277,7 @@ internal class ProfilerTraceListener(
                     } else {
                         collectorJoined = true
                     }
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
             }
@@ -311,12 +310,11 @@ internal class ProfilerTraceListener(
                     System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
                 }
             }
-        } catch (e: Exception) {
-            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${e.message}")
+        } catch (expectedCommandFailure: Exception) {
+            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${expectedCommandFailure.message}")
         }
     }
 
-    @Suppress("MagicNumber")
     private fun runListenerLoop(
         inputStream: InputStream,
         readyLatch: CountDownLatch,
@@ -341,15 +339,19 @@ internal class ProfilerTraceListener(
                 state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
-                } catch (e: java.io.EOFException) {
+                } catch (_: java.io.EOFException) {
                     System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
                     break
-                } catch (e: java.io.IOException) {
+                } catch (expectedCloseIoFailure: java.io.IOException) {
                     if (closed.get()) {
-                        logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", e)
+                        logger.log(
+                            java.util.logging.Level.FINE,
+                            "Trace listener loop interrupted by close",
+                            expectedCloseIoFailure,
+                        )
                         break
                     }
-                    throw e
+                    throw expectedCloseIoFailure
                 }
 
                 state = TraceListenerMachine.evaluate(state, TraceListenerEvent.EventRead(event))

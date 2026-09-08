@@ -82,7 +82,7 @@ private fun Logger.log(
     t: Throwable,
 ) {
     System.err.println("[SUPERVISOR-$level] $msg")
-    t.printStackTrace()
+    System.err.print(t.stackTraceToString())
 }
 
 internal class SupervisorSessionHandler(
@@ -208,7 +208,6 @@ internal class SupervisorSessionHandler(
         return LoopAction.Continue
     }
 
-    @Suppress("SwallowedException")
     internal fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
@@ -220,8 +219,12 @@ internal class SupervisorSessionHandler(
                 val id = parsed.id
                 try {
                     processParsedNotification(parsed, resp)
-                } catch (e: Exception) {
-                    logger.log(java.util.logging.Level.SEVERE, "Fatal error processing notification $id", e)
+                } catch (expectedNotificationFailure: Exception) {
+                    logger.log(
+                        java.util.logging.Level.SEVERE,
+                        "Fatal error processing notification $id",
+                        expectedNotificationFailure,
+                    )
                     try {
                         sendSeccompError(id, NativeConstants.EPERM, resp)
                     } catch (ignored: Exception) {
@@ -321,9 +324,9 @@ internal class SupervisorSessionHandler(
     ): ResolvedFastPath {
         try {
             return SupervisorFastPathResolution.resolve(pid, kind, extracted)
-        } catch (e: Exception) {
-            logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${e.message}" }
-            throw e
+        } catch (expectedFastPathFailure: Throwable) {
+            logger.severe { "[SUPERVISOR-DEBUG] Fast-path check failed with critical error: ${expectedFastPathFailure.message}" }
+            throw expectedFastPathFailure
         }
     }
 
@@ -887,8 +890,8 @@ internal class SupervisorSessionHandler(
                 NativeArena.ofConfined().use { arena ->
                     with(arena) { acceptAndInject(id, nr, args, tid, traceeArch) }
                 }
-            } catch (e: Exception) {
-                reportAsyncAcceptFailure(id, e)
+            } catch (expectedAsyncAcceptFailure: Exception) {
+                reportAsyncAcceptFailure(id, expectedAsyncAcceptFailure)
             }
         }.apply {
             isDaemon = true

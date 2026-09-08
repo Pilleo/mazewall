@@ -54,7 +54,6 @@ sealed interface SessionEvent {
     }
 }
 
-@Suppress("MagicNumber")
 class SessionEventLedger {
     private val buffer = AtomicReferenceArray<SessionEvent>(CAPACITY)
     private val writeIndex = AtomicLong(0)

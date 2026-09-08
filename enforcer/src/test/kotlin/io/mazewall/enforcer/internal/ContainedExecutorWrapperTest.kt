@@ -46,7 +46,8 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is AccessDeniedException)
+        val containmentFailure = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertInstanceOf(AccessDeniedException::class.java, containmentFailure.cause)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)
@@ -104,7 +105,8 @@ class ContainedExecutorWrapperTest {
             future.get()
         }
 
-        assertTrue(ex.cause is AccessDeniedException)
+        val containmentFailure = assertInstanceOf(ContainmentViolationException::class.java, ex.cause)
+        assertInstanceOf(AccessDeniedException::class.java, containmentFailure.cause)
 
         delegate.shutdown()
         delegate.awaitTermination(1, TimeUnit.SECONDS)

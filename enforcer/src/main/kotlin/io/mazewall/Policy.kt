@@ -346,7 +346,6 @@ public fun <S : PolicyScope> Policy<S, Uncompiled>.restrictFurtherWith(other: Po
  */
 @JvmName("plusThreadLocal")
 public operator fun <S : PolicyScope> Policy<S, Uncompiled>.plus(other: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
-    @Suppress("UNCHECKED_CAST")
     return Policy.combine(this, other) as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
 }
 

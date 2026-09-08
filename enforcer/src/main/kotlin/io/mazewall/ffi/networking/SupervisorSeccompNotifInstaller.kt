@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicReference
  * to prevent deadlocks when supervising critical JVM operations (like open/openat).
  */
 public object SupervisorSeccompNotifInstaller {
-    @Suppress("LongParameterList", "ThrowsCount", "MagicNumber", "TooGenericExceptionCaught", "CyclomaticComplexMethod", "LongMethod")
     public fun install(
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
@@ -104,15 +103,26 @@ public object SupervisorSeccompNotifInstaller {
 
                     // Wait until the listener is fully initialized and ready
                     readyLatch.await()
-                } catch (t: Throwable) {
+
+                    // Registry bookkeeping can load application classes. Run it on the
+                    // uncontained coordinator after the listener is live, never on the
+                    // tracee after NEW_LISTENER has made openat subject to USER_NOTIF.
+                    onFilterApplied()
+                } catch (expectedCoordinatorFailure: Exception) {
                     FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
-                    throw t
+                    throw expectedCoordinatorFailure
+                } catch (expectedCoordinatorError: Error) {
+                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
+                    throw expectedCoordinatorError
                 }
 
                 // Handshake is fully configured, wake up tracee thread
                 proceedLatch.countDown()
-            } catch (t: Throwable) {
-                setupError.set(t)
+            } catch (expectedCoordinatorFailure: Exception) {
+                setupError.set(expectedCoordinatorFailure)
+                proceedLatch.countDown()
+            } catch (expectedCoordinatorError: Error) {
+                setupError.set(expectedCoordinatorError)
                 proceedLatch.countDown()
             }
         }.apply {
@@ -143,7 +153,6 @@ public object SupervisorSeccompNotifInstaller {
             }
 
             listenerFdVal.set(FileDescriptor.adopt(rawFd, FileDescriptorRole.SeccompNotif))
-            onFilterApplied()
             installLatch.countDown() // Release the coordinator to connect & send descriptor
 
             // Block tracee thread until the coordinator completes descriptor passing and listener startup
@@ -154,7 +163,7 @@ public object SupervisorSeccompNotifInstaller {
                 try {
                     proceedLatch.await()
                     break
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     interrupted = true
                 }
             }
@@ -194,12 +203,18 @@ public object SupervisorSeccompNotifInstaller {
                         }
                 }
             }
-        } catch (t: Throwable) {
+        } catch (expectedInstallFailure: Exception) {
             val fdRef = listenerFdVal.get()
             if (fdRef.value >= 0) {
                 fdRef.close()
             }
-            throw t
+            throw expectedInstallFailure
+        } catch (expectedInstallError: Error) {
+            val fdRef = listenerFdVal.get()
+            if (fdRef.value >= 0) {
+                fdRef.close()
+            }
+            throw expectedInstallError
         }
     }
 }

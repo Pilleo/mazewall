@@ -239,8 +239,8 @@ public class TierEbpfEngine(
         var cleanupFailure: Throwable? = null
         try {
             ringReader?.close()
-        } catch (failure: Throwable) {
-            cleanupFailure = failure
+        } catch (expectedCleanupFailure: Throwable) {
+            cleanupFailure = expectedCleanupFailure
         } finally {
             ringReader = null
         }

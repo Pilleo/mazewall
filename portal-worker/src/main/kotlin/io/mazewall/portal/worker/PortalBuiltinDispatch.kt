@@ -16,7 +16,7 @@ import java.util.zip.Adler32
  * Worker-side builtins. The broker must never call this; it only exists so the
  * hand-written worker loop can dispatch before KotlinPoet exists.
  */
-@Suppress("DMI_HARDCODED_ABSOLUTE_FILENAME")
+
 internal object PortalBuiltinDispatch {
     fun handle(
         method: PortalMethod,

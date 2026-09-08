@@ -29,7 +29,7 @@ import java.lang.invoke.MethodHandles
  * hot paths. It does not utilize [nativeScope] or create internal [Arena] instances.
  * Captured error states are optimized using thread-local segments via [ErrnoSegment].
  */
-@Suppress("TooManyFunctions")
+
 public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
@@ -525,8 +525,8 @@ internal object RealNativeProcess : NativeProcess {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
             Linker.Option.captureCallState("errno"),
         )
-    private val ARCH_PRCTL_LONG: MethodHandle? = try {
-        RealNativeHelper.downcall(
+    private val ARCH_PRCTL_LONG: MethodHandle? =
+        optionalDowncall(
             "arch_prctl",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
@@ -535,11 +535,8 @@ internal object RealNativeProcess : NativeProcess {
             ),
             Linker.Option.captureCallState("errno"),
         )
-    } catch (e: Throwable) {
-        null
-    }
-    private val ARCH_PRCTL_ADDR: MethodHandle? = try {
-        RealNativeHelper.downcall(
+    private val ARCH_PRCTL_ADDR: MethodHandle? =
+        optionalDowncall(
             "arch_prctl",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
@@ -548,9 +545,6 @@ internal object RealNativeProcess : NativeProcess {
             ),
             Linker.Option.captureCallState("errno"),
         )
-    } catch (e: Throwable) {
-        null
-    }
 
     override fun gettid(): io.mazewall.core.Tid {
         return SyscallInvoker.gettid(GETTID)
@@ -598,6 +592,18 @@ internal object RealNativeProcess : NativeProcess {
         val handle = ARCH_PRCTL_ADDR ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         return SyscallInvoker.archPrctlAddr(handle, code, addr.native)
     }
+
+    /** A malformed optional libc binding is represented as the kernel's unsupported-operation result. */
+    private fun optionalDowncall(
+        name: String,
+        descriptor: FunctionDescriptor,
+        vararg options: Linker.Option,
+    ): MethodHandle? =
+        try {
+            RealNativeHelper.downcall(name, descriptor, *options)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
 }
 
 internal object RealNativeMemory : NativeMemory {

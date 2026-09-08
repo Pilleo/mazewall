@@ -65,7 +65,6 @@ public class SeccompSessionHandler(
         sessionArena.close()
     }
 
-    @Suppress("ReturnCount")
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
         if (isTerminated) {
             return LoopAction.Break

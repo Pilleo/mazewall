@@ -67,7 +67,6 @@ public value class MemoryAddress(
 ) {
     public fun toLong(): Long = value
 
-    @Suppress("MagicNumber")
     override fun toString(): String = "0x${value.toString(16)}"
 }
 

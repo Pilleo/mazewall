@@ -119,16 +119,24 @@ internal data class SelfVerificationPlan(
             val index = instructions.indexOfFirst {
                 it is BpfInstruction.Jmp && it.code == JEQ_OPCODE && it.k == nr
             }
-            return index >= 0 &&
-                instructions
-                .asSequence()
-                .drop(index + 1)
-                .takeWhile { it !is BpfInstruction.Ret }
-                .filterIsInstance<BpfInstruction.Ld>()
-                .any { instruction ->
-                    instruction.k in BpfSimulator.SECCOMP_DATA_ARGS_OFFSET until
-                        BpfSimulator.SECCOMP_DATA_ARGS_OFFSET + SECCOMP_ARGUMENT_BYTES
+            if (index < 0) return false
+            for (instruction in instructions.drop(index + 1)) {
+                when (instruction) {
+                    is BpfInstruction.Ret -> return false
+                    is BpfInstruction.Ld -> {
+                        if (instruction.k in BpfSimulator.SECCOMP_DATA_ARGS_OFFSET until
+                            BpfSimulator.SECCOMP_DATA_ARGS_OFFSET + SECCOMP_ARGUMENT_BYTES
+                        ) {
+                            return true
+                        }
+                    }
+
+                    is BpfInstruction.Alu,
+                    is BpfInstruction.Jmp,
+                    -> Unit
                 }
+            }
+            return false
         }
     }
 }

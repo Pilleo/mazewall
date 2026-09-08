@@ -30,7 +30,6 @@ class FileDescriptorReproductionTest {
         val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
 
-        @Suppress("CAST_NEVER_SUCCEEDS", "USELESS_CAST")
         val isAutoCloseable = fd as? AutoCloseable
         assertNull(isAutoCloseable, "FileDescriptor should not directly be AutoCloseable")
 
@@ -39,7 +38,6 @@ class FileDescriptorReproductionTest {
         assertFalse(fd.isValid)
         assertFalse(closedFd.isValid)
 
-        @Suppress("USELESS_CAST")
         assertTrue(closedFd is FileDescriptor<*, FdState.Closed, FdOwnership>)
     }
 

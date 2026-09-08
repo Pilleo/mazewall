@@ -111,7 +111,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
         println("================================\n")
 
         val reportDir = File("build/reports")
-        @Suppress("RV_RETURN_VALUE_IGNORED_BAD_PRACTICE")
+
         reportDir.mkdirs()
         val reportFile = File(reportDir, "test-tier-health.json")
         reportFile.writeText("{\n" + jsonLines.joinToString(",\n") + "\n}\n")

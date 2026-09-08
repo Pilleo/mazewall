@@ -42,7 +42,7 @@ internal object FilterInstallationPlanner {
      * most restrictive (highest priority) action across all stacked filters. Thus, a new filter
      * block is only strictly required if the new action has a higher priority than the current one.
      */
-    @Suppress("CyclomaticComplexMethod")
+
     fun calculateNewFilter(
         policy: PolicyDefinition<*>,
         state: ContainerState,

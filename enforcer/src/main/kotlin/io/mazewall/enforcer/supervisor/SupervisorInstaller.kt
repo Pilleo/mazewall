@@ -49,7 +49,6 @@ public object SupervisorInstaller {
         threadRegistry.remove(tid)
     }
 
-    @Suppress("LongParameterList", "TooGenericExceptionCaught")
     public fun installSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
@@ -79,9 +78,12 @@ public object SupervisorInstaller {
                 listener.start(readyLatch)
             }
             return SupervisorSession(tid)
-        } catch (t: Throwable) {
+        } catch (expectedInstallFailure: Exception) {
             unregisterThread(tid)
-            throw t
+            throw expectedInstallFailure
+        } catch (expectedInstallError: Error) {
+            unregisterThread(tid)
+            throw expectedInstallError
         }
     }
 }
@@ -113,7 +115,6 @@ internal class JVMValidationListener(
         }
     }
 
-    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth", "LongMethod")
     private fun runValidationReactor(
         channel: SupervisorValidationChannel,
         readyLatch: CountDownLatch,
@@ -266,11 +267,11 @@ internal class JVMValidationListener(
             // for identity. Register rewrite is not yet implemented (issue-20260817-033800),
             // so always deny exec rewrite requests.
             channel.sendExecRewriteAck(false)
-        } catch (e: Exception) {
-            logger.warning("parent exec register rewrite failed: ${e.message}")
+        } catch (expectedRewriteFailure: Exception) {
+            logger.warning("parent exec register rewrite failed: ${expectedRewriteFailure.message}")
             try {
                 channel.sendExecRewriteAck(false)
-            } catch (_: Exception) {
+            } catch (expectedDenyAckTransportFailure: Exception) {
             }
         }
     }
@@ -300,8 +301,8 @@ internal class JVMValidationListener(
                     path
                 }
             }
-        } catch (e: Exception) {
-            logger.warning("JVM could not read exec path from pid=$pidVal: ${e.message}")
+        } catch (expectedTraceeReadFailure: Exception) {
+            logger.warning("JVM could not read exec path from pid=$pidVal: ${expectedTraceeReadFailure.message}")
             null
         }
         return raw?.let { canonicalizeExecPath(it) }

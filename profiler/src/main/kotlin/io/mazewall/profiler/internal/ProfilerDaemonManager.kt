@@ -145,7 +145,6 @@ public class ProfilerDaemonManager(
                 threadName = "profiler-daemon-output",
             )
 
-        @Suppress("MagicNumber")
         val ready = JvmChildProcess.awaitReady(pump, 30)
 
         if (!ready) {
@@ -192,7 +191,7 @@ public class ProfilerDaemonManager(
             while (process.isAlive && System.currentTimeMillis() < deadline) {
                 Thread.sleep(10)
             }
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
     }

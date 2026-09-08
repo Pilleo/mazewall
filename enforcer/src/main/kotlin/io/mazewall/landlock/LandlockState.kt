@@ -281,7 +281,6 @@ internal class LandlockSession(
         effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { it.rulesetFd.close() }
     }
 
-    @Suppress("TooGenericExceptionCaught")
     fun tryApplyRuleset(): LandlockApplyResult {
         try {
             val features = Platform.featureMatrix
@@ -290,10 +289,16 @@ internal class LandlockSession(
                 handleProcessWideUnsupported()
             }
             return if (abi < 1) applyUnsupportedAbi() else applySupportedRuleset(abi)
-        } catch (t: Throwable) {
-            interpretTerminalEffects(transition(LandlockInstallEvent.Failed(t)))
-            return LandlockApplyResult.Rejected(t.message ?: t.javaClass.name, cause = t)
+        } catch (expectedInstallFailure: Exception) {
+            return rejectInstallFailure(expectedInstallFailure)
+        } catch (expectedFatalFailure: Error) {
+            return rejectInstallFailure(expectedFatalFailure)
         }
+    }
+
+    private fun rejectInstallFailure(failure: Throwable): LandlockApplyResult {
+        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(failure)))
+        return LandlockApplyResult.Rejected(failure.message ?: failure.javaClass.name, cause = failure)
     }
 
     private fun applyUnsupportedAbi(): LandlockApplyResult {

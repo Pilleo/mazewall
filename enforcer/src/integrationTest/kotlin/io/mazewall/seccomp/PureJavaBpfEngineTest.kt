@@ -35,7 +35,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                             ProcessBuilder("echo", "hello").start()
                             false
                         } catch (e: java.io.IOException) {
-                            ContainmentViolationDetector.isContainmentViolation(e)
+                            ContainmentViolationDetector.diagnose(e) != null
                         }
                     }.get()
             assertTrue(result == true, "execve should have been blocked by PureJavaBpfEngine")
@@ -101,7 +101,6 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 override val isSupported: Boolean = true
 
                 override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
-                    @Suppress("UNCHECKED_CAST")
                     return this as SeccompEngine<EngineState.Loaded>
                 }
             }

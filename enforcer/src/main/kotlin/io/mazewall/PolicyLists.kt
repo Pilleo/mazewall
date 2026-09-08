@@ -35,7 +35,7 @@ public object PolicyLists {
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val spec = DenyListSpec(runtime)
         spec.configure()
-        @Suppress("UNCHECKED_CAST")
+
         return spec.build() as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
     }
 
@@ -95,17 +95,14 @@ public class DenyListSpec internal constructor(
 
     /** Escape hatch for raw syscall actions. */
     public fun advanced(block: Policy.Builder<PolicyScope.ProcessWideSafe>.() -> Unit): DenyListSpec {
-        @Suppress("UNCHECKED_CAST")
         (inner as Policy.Builder<PolicyScope.ProcessWideSafe>).apply(block)
         return this
     }
 
     internal fun build(): Policy<out PolicyScope, Uncompiled> =
         if (isThreadLocal) {
-            @Suppress("UNCHECKED_CAST")
             (inner as Policy.Builder<PolicyScope.ThreadLocalOnly>).build()
         } else {
-            @Suppress("UNCHECKED_CAST")
             (inner as Policy.Builder<PolicyScope.ProcessWideSafe>).build()
         }
 }

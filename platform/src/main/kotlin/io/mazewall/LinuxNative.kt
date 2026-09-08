@@ -19,7 +19,7 @@ import kotlin.contracts.contract
  * raw FFM [Arena] allocations. All wrappers require pre-allocated [ManagedSegment]s,
  * shifting transient memory lifecycle management entirely to the caller.
  */
-@Suppress("TooManyFunctions")
+
 public object LinuxNative : NativeEngine {
     @Volatile
     private var engine: NativeEngine = RealNativeEngine
@@ -41,7 +41,6 @@ public object LinuxNative : NativeEngine {
     /**
      * Swaps the active native engine. Used for testing and fault injection.
      */
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     fun setEngine(newEngine: NativeEngine) {
         engine = newEngine
     }
@@ -49,7 +48,6 @@ public object LinuxNative : NativeEngine {
     /**
      * Restores the default RealNativeEngine.
      */
-    @Suppress("spotbugs:ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD")
     fun resetToDefault() {
         engine = RealNativeEngine
     }
@@ -171,7 +169,7 @@ public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.Syscal
 /**
  * Executes [action] if the call succeeded.
  */
-@Suppress("UNCHECKED_CAST")
+
 @OptIn(ExperimentalContracts::class)
 public inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> Unit): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
     contract {
@@ -184,7 +182,7 @@ public inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> U
 /**
  * Executes [action] if the call failed.
  */
-@Suppress("UNCHECKED_CAST")
+
 @OptIn(ExperimentalContracts::class)
 public inline fun <T> LinuxNative.SyscallResult<T, *>.onFailure(
     action: (errno: Int, rawValue: Long) -> Unit

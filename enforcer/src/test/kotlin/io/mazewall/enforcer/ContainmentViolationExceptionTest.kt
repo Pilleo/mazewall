@@ -6,7 +6,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-@Suppress("DEPRECATION")
 class ContainmentViolationExceptionTest {
     @Test
     fun `thrown API exception is caught as historical package type`() {

@@ -49,7 +49,6 @@ class NativeEngineTest {
         val dummyFd = FileDescriptor.generic(100)
         val dummySegment = io.mazewall.ffi.memory.ManagedSegment.NULL
 
-        @Suppress("UNCHECKED_CAST")
         val result = LinuxNative.raw.ioctl(dummyFd, command as IoctlCommand<Any, Any>, dummySegment.typed<IoctlPayload.SeccompNotif>())
         assertEquals(99L, result.getOrThrow("test"))
         assertEquals(command.code, lastCommandCode)

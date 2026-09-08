@@ -68,7 +68,7 @@ object DiagnosticTriageRunner {
             val future = executor.submit(Callable { process.inputStream.bufferedReader().readText() })
             try {
                 future.get(CAPTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            } catch (e: TimeoutException) {
+            } catch (_: TimeoutException) {
                 future.cancel(true)
                 process.destroyForcibly()
                 "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s."
@@ -79,7 +79,9 @@ object DiagnosticTriageRunner {
     }
 
     private fun captureDmesg(): String {
-        return try {
+        return captureOptional(
+            onFailure = { "Unable to capture dmesg: ${it.message}" },
+        ) {
             val process = ProcessBuilder("dmesg").start()
             readProcessOutputBounded(process)
                 .lineSequence()
@@ -89,8 +91,6 @@ object DiagnosticTriageRunner {
                         line.contains("audit", ignoreCase = true)
                 }.take(100)
                 .joinToString("\n")
-        } catch (e: Exception) {
-            "Unable to capture dmesg: ${e.message}"
         }
     }
 
@@ -111,13 +111,14 @@ object DiagnosticTriageRunner {
         val sb = StringBuilder()
         for (pid in pids) {
             sb.append("=== JVM Thread Dump for PID $pid ===\n")
-            try {
+            sb.append(
+                captureOptional(
+                    onFailure = { "Failed to capture thread dump for PID $pid: ${it.message}\n" },
+                ) {
                 val process = ProcessBuilder("jcmd", pid.toString(), "Thread.print").start()
-                val output = readProcessOutputBounded(process)
-                sb.append(output)
-            } catch (e: Exception) {
-                sb.append("Failed to capture thread dump for PID $pid: ${e.message}\n")
-            }
+                    readProcessOutputBounded(process)
+                },
+            )
             sb.append("\n")
         }
         return sb.toString()
@@ -137,11 +138,7 @@ object DiagnosticTriageRunner {
 
         for (file in files) {
             sb.append("=== Error Report File: ${file.path} ===\n")
-            try {
-                sb.append(file.readText())
-            } catch (e: Exception) {
-                sb.append("Failed to read ${file.path}: ${e.message}\n")
-            }
+            sb.append(captureOptional(onFailure = { "Failed to read ${file.path}: ${it.message}\n" }) { file.readText() })
             sb.append("\n")
         }
         return sb.toString()
@@ -153,11 +150,10 @@ object DiagnosticTriageRunner {
         // 1. Read Yama ptrace_scope
         val yamaFile = File("/proc/sys/kernel/yama/ptrace_scope")
         if (yamaFile.exists()) {
-            try {
-                sb.append("Yama ptrace_scope: ").append(yamaFile.readText().trim()).append("\n")
-            } catch (e: Exception) {
-                sb.append("Yama ptrace_scope: read failed (${e.message})\n")
-            }
+            sb
+                .append("Yama ptrace_scope: ")
+                .append(captureOptional(onFailure = { "read failed (${it.message})" }) { yamaFile.readText().trim() })
+                .append("\n")
         } else {
             sb.append("Yama ptrace_scope: not present\n")
         }
@@ -165,11 +161,10 @@ object DiagnosticTriageRunner {
         // 2. Read active LSMs
         val lsmFile = File("/sys/kernel/security/lsm")
         if (lsmFile.exists()) {
-            try {
-                sb.append("Active LSMs: ").append(lsmFile.readText().trim()).append("\n")
-            } catch (e: Exception) {
-                sb.append("Active LSMs: read failed (${e.message})\n")
-            }
+            sb
+                .append("Active LSMs: ")
+                .append(captureOptional(onFailure = { "read failed (${it.message})" }) { lsmFile.readText().trim() })
+                .append("\n")
         } else {
             sb.append("Active LSMs list: not present\n")
         }
@@ -190,20 +185,34 @@ object DiagnosticTriageRunner {
         for (pathStr in paths) {
             val file = File(pathStr)
             if (file.exists()) {
-                return try {
+                return captureOptional(
+                    onFailure = { "Failed reading $pathStr: ${it.message}" },
+                ) {
                     file.useLines { lines ->
                         lines
                             .filter { it.startsWith("#define __NR_") }
                             .map { it.removePrefix("#define __NR_").trim() }
                             .joinToString("\n")
                     }
-                } catch (e: Exception) {
-                    "Failed reading $pathStr: ${e.message}"
                 }
             }
         }
         return "Local unistd_64.h not found. Syscall mapping unavailable."
     }
+
+    /**
+     * Host diagnostic collection is deliberately non-authoritative: a failed optional probe is
+     * rendered into the report while containment and policy decisions remain unaffected.
+     */
+    private inline fun captureOptional(
+        onFailure: (Exception) -> String,
+        action: () -> String,
+    ): String =
+        try {
+            action()
+        } catch (expectedOptionalFailure: Exception) {
+            onFailure(expectedOptionalFailure)
+        }
 
     private fun escapeJson(value: String): String {
         return "\"" +

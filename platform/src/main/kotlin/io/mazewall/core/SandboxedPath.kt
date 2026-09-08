@@ -106,7 +106,7 @@ public fun SandboxedPath.resolveReal(): SandboxedPath {
                 resolved = resolved.resolve(segment)
             }
             return SandboxedPath.unsafe(resolved.toString())
-        } catch (e: java.io.IOException) {
+        } catch (_: java.io.IOException) {
             val name = current.fileName ?: return this
             unresolvedTail.addLast(name.toString())
             current = current.parent ?: return this

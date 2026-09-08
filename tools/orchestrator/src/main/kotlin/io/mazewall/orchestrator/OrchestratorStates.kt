@@ -447,7 +447,21 @@ data object SelectTaskState : OrchestratorState {
                     ),
                 )
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.IssueClosedDetected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
@@ -571,7 +585,19 @@ data class PendingApprovalState(
                     }
                 }
             }
-            else -> Transition(this)
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
@@ -744,7 +770,18 @@ data class AwaitingJulesStartState(
                     )
                 }
             }
-            else -> Transition(this)
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
@@ -931,7 +968,19 @@ data class AwaitingPrState(
                     Transition(this, commands)
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrBuildStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked,
+            is OrchestratorEvent.PrMergedDetected,
+            -> Transition(this)
         }
     }
 
@@ -1144,7 +1193,17 @@ data class CiRunningState(
                     }
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked -> Transition(this)
         }
     }
 
@@ -1468,7 +1527,15 @@ data class AwaitingReviewState(
                     }
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated -> Transition(this)
         }
     }
 
@@ -1679,7 +1746,19 @@ data class AwaitingMergeState(
                     Transition(this)
                 }
             }
-            else -> Transition(this)
+            OrchestratorEvent.Tick,
+            is OrchestratorEvent.TaskSelected,
+            OrchestratorEvent.NoTaskSelected,
+            is OrchestratorEvent.TelegramApprovalReceived,
+            is OrchestratorEvent.IssueClosedDetected,
+            is OrchestratorEvent.GitHubIssueCreated,
+            is OrchestratorEvent.LinkedPrDetected,
+            is OrchestratorEvent.JulesSessionDetected,
+            OrchestratorEvent.JulesStartTimeout,
+            is OrchestratorEvent.PrCreated,
+            is OrchestratorEvent.JulesSessionStatusFetched,
+            is OrchestratorEvent.PrCommentsFetched,
+            is OrchestratorEvent.CommitEmptyChecked -> Transition(this)
         }
     }
 

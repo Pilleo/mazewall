@@ -1,5 +1,31 @@
 package io.mazewall.orchestrator
 
+internal enum class GradleProjectIdentity(
+    val pathPrefix: String,
+    val gradlePath: String,
+    val component: String,
+) {
+    Enforcer("enforcer/", ":enforcer", "enforcer"),
+    Profiler("profiler/", ":profiler", "profiler"),
+    Platform("platform/", ":platform", "platform"),
+    PortalCodegen("portal-codegen/", ":portal-codegen", "docs"),
+    PortalWorker("portal-worker/", ":portal-worker", "docs"),
+    Portal("portal/", ":portal", "docs"),
+    Orchestrator("tools/orchestrator/", ":tools:orchestrator", "orchestrator"),
+    CliDemo("demos/cli-demo/", ":demos:cli-demo", "testing"),
+    VulnerableWebDemo("demos/vulnerable-web-app/", ":demos:vulnerable-web-app", "testing"),
+    AgentSandboxDemo("demos/agent-sandbox-demo/", ":demos:agent-sandbox-demo", "testing"),
+    ;
+
+    companion object {
+        fun fromPath(path: String): GradleProjectIdentity? =
+            entries.firstOrNull { path.startsWith(it.pathPrefix) }
+
+        fun fromGradlePath(gradlePath: String): GradleProjectIdentity? =
+            entries.firstOrNull { it.gradlePath == gradlePath }
+    }
+}
+
 object PathModules {
     /** Single source of truth for work-package `core_lock_hit` and scheduler CORE locks. */
     val CORE_LOCK_SUFFIXES = listOf(
@@ -15,22 +41,9 @@ object PathModules {
 
     fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./").trimStart('/')
 
-    fun moduleFor(path: String): String? {
-        val n = normalize(path)
-        return when {
-            n.startsWith("enforcer/") || n == "enforcer/AGENTS.md" -> ":enforcer"
-            n.startsWith("profiler/") || n == "profiler/AGENTS.md" -> ":profiler"
-            n.startsWith("platform/") || n == "platform/AGENTS.md" -> ":platform"
-            n.startsWith("portal-codegen/") -> ":portal-codegen"
-            n.startsWith("portal-worker/") -> ":portal-worker"
-            n.startsWith("portal/") -> ":portal"
-            n.startsWith("tools/orchestrator/") -> ":tools:orchestrator"
-            n.startsWith("demos/cli-demo/") -> ":demos:cli-demo"
-            n.startsWith("demos/vulnerable-web-app/") -> ":demos:vulnerable-web-app"
-            n.startsWith("demos/agent-sandbox-demo/") -> ":demos:agent-sandbox-demo"
-            else -> null
-        }
-    }
+    internal fun identityFor(path: String): GradleProjectIdentity? = GradleProjectIdentity.fromPath(normalize(path))
+
+    fun moduleFor(path: String): String? = identityFor(path)?.gradlePath
 
     fun isCoreLock(path: String): Boolean {
         val n = normalize(path)
@@ -41,14 +54,9 @@ object PathModules {
     }
 
     fun componentFor(module: String): String =
-        when (module) {
-        ":enforcer" -> "enforcer"
-        ":profiler" -> "profiler"
-        ":platform" -> "platform"
-        ":tools:orchestrator" -> "orchestrator"
-        ":portal", ":portal-codegen", ":portal-worker" -> "docs"
-        else -> "testing"
-    }
+        requireNotNull(GradleProjectIdentity.fromGradlePath(module)) {
+            "unknown Gradle module '$module'; add it to GradleProjectIdentity"
+        }.component
 
     fun verifyCheapCommand(testFile: String): String? {
         val n = normalize(testFile)

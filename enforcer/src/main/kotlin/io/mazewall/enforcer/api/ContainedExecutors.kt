@@ -101,8 +101,10 @@ object ContainedExecutors {
         for (c in classes) {
             try {
                 Class.forName(c.name)
-            } catch (e: Exception) {
-                System.err.println("WARNING: Failed to preload class ${c.name} for Seccomp: ${e.message}")
+            } catch (e: ClassNotFoundException) {
+                throw IllegalStateException("Failed to preload ${c.name} before Seccomp installation", e)
+            } catch (e: LinkageError) {
+                throw IllegalStateException("Failed to link ${c.name} before Seccomp installation", e)
             }
         }
         // Warm the self-verification transitive closure (method-level, not just Class objects):
@@ -111,8 +113,8 @@ object ContainedExecutors {
         try {
             io.mazewall.seccomp.InstallSelfVerifier
                 .warmup()
-        } catch (t: Throwable) {
-            System.err.println("WARNING: Self-verification warmup failed: $t")
+        } catch (e: IllegalStateException) {
+            throw IllegalStateException("Failed to warm self-verification before Seccomp installation", e)
         }
     }
 
@@ -269,7 +271,6 @@ object ContainedExecutors {
         return ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy)
     }
 
-    @Suppress("TooGenericExceptionCaught", "noGenericExceptionCatchingInEnforcer")
     /**
      * Concurrency model (issue-20260823-135557 resolution):
      *
@@ -309,7 +310,7 @@ object ContainedExecutors {
             return installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy) {
                 landlockSuccessfullyApplied = true
             }
-        } catch (t: Throwable) {
+        } catch (expectedInstallFailure: Throwable) {
             // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
             // if Landlock was NOT applied during this installation attempt.
             if (!processWide && initialState != null && !landlockSuccessfullyApplied) {
@@ -331,11 +332,11 @@ object ContainedExecutors {
                 if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                     if (landlockInForce) {
                         logger.warning(
-                            "Seccomp installation failed after Landlock applied: ${t.message}. " +
+                            "Seccomp installation failed after Landlock applied: ${expectedInstallFailure.message}. " +
                                 "Filesystem Landlock remains in force; seccomp did not install.",
                         )
                     } else {
-                        logger.warning("Seccomp installation failed: ${t.message}. Code will run uncontained.")
+                        logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. Code will run uncontained.")
                     }
                 }
                 return io.mazewall.InstallationReceipt(
@@ -345,7 +346,7 @@ object ContainedExecutors {
                     landlockApplied = landlockInForce,
                 )
             }
-            throw t
+            throw expectedInstallFailure
         }
     }
 

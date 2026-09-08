@@ -100,14 +100,14 @@ public object PathNormalizer {
                 // Try to resolve the current parent prefix physically
                 val real = current.toRealPath()
                 return real.resolve(suffix).normalize()
-            } catch (e: IOException) {
+            } catch (_: IOException) {
                 // Parent component doesn't exist or can't be resolved, move up
                 val fileName = current.fileName
                 if (fileName != null) {
                     suffix = Paths.get(fileName.toString()).resolve(suffix)
                 }
                 current = current.parent
-            } catch (e: SecurityException) {
+            } catch (_: SecurityException) {
                 val fileName = current.fileName
                 if (fileName != null) {
                     suffix = Paths.get(fileName.toString()).resolve(suffix)

@@ -40,26 +40,28 @@ public object BypassPaths {
         ) : PathResolution
     }
 
+     // Expected filesystem states are deliberately mapped to a deny-safe PathResolution.
     public fun resolveForPolicy(path: Path): PathResolution {
         return try {
             PathResolution.Resolved(toRealPathWithFallback(path))
-        } catch (e: FileSystemLoopException) {
+        } catch (_: FileSystemLoopException) {
             PathResolution.Unsafe("symlink-loop")
-        } catch (e: AccessDeniedException) {
+        } catch (_: AccessDeniedException) {
             PathResolution.Unsafe("access-denied")
-        } catch (e: NoSuchFileException) {
+        } catch (_: NoSuchFileException) {
             PathResolution.Missing(path.toAbsolutePath().normalize())
-        } catch (e: FileNotFoundException) {
+        } catch (_: FileNotFoundException) {
             PathResolution.Missing(path.toAbsolutePath().normalize())
-        } catch (e: FileSystemException) {
+        } catch (_: FileSystemException) {
             PathResolution.Unsafe("filesystem")
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             PathResolution.Unsafe("security")
-        } catch (e: InvalidPathException) {
+        } catch (_: InvalidPathException) {
             PathResolution.Unsafe("invalid")
         }
     }
 
+     // A missing suffix is reconstructed only below an already-canonical parent.
     internal fun toRealPathWithFallback(path: Path): Path {
         val abs = path.toAbsolutePath().normalize()
         var current = abs
@@ -72,10 +74,10 @@ public object BypassPaths {
                     resolved = resolved.resolve(nonExistentParts[i])
                 }
                 return resolved.normalize()
-            } catch (e: NoSuchFileException) {
+            } catch (_: NoSuchFileException) {
                 nonExistentParts.add(current.fileName.toString())
                 current = current.parent ?: break
-            } catch (e: FileNotFoundException) {
+            } catch (_: FileNotFoundException) {
                 nonExistentParts.add(current.fileName.toString())
                 current = current.parent ?: break
             }
@@ -87,7 +89,6 @@ public object BypassPaths {
         return resolved.normalize()
     }
 
-    @Suppress("SwallowedException", "TooGenericExceptionCaught")
     public val safeBypassPaths: List<Path> = mutableListOf<Path>().apply {
         fun addPathAndReal(path: Path) {
             val abs = path.toAbsolutePath().normalize()
@@ -121,10 +122,10 @@ public object BypassPaths {
                             if (entry.endsWith(".jar")) {
                                 parseManifestClassPath(path)
                             }
-                        } catch (e: InvalidPathException) {
+                        } catch (_: InvalidPathException) {
                             // Normal
-                        } catch (e: Exception) {
-                            logger.warning { "Failed to process classpath entry $entry: ${e.message}" }
+                        } catch (expectedClasspathFailure: Exception) {
+                            logger.warning { "Failed to process classpath entry $entry: ${expectedClasspathFailure.message}" }
                         }
                     }
                 }
@@ -138,10 +139,10 @@ public object BypassPaths {
                     if (agentPath.isNotEmpty()) {
                         try {
                             addPathAndReal(Paths.get(agentPath))
-                        } catch (e: InvalidPathException) {
+                        } catch (_: InvalidPathException) {
                             // Normal
-                        } catch (e: Exception) {
-                            logger.warning { "Failed to process javaagent argument $arg: ${e.message}" }
+                        } catch (expectedAgentPathFailure: Exception) {
+                            logger.warning { "Failed to process javaagent argument $arg: ${expectedAgentPathFailure.message}" }
                         }
                     }
                 }
@@ -151,10 +152,10 @@ public object BypassPaths {
             try {
                 addPathAndReal(Paths.get("build"))
                 addPathAndReal(Paths.get(".gradle"))
-            } catch (e: InvalidPathException) {
+            } catch (_: InvalidPathException) {
                 // Normal
-            } catch (e: Exception) {
-                logger.warning { "Failed to add build/.gradle paths: ${e.message}" }
+            } catch (expectedBuildPathFailure: Exception) {
+                logger.warning { "Failed to add build/.gradle paths: ${expectedBuildPathFailure.message}" }
             }
 
             // Add GRADLE_USER_HOME if set to support container/CI cache directories
@@ -163,19 +164,18 @@ public object BypassPaths {
                 if (!gradleUserHome.isNullOrEmpty()) {
                     addPathAndReal(Paths.get(gradleUserHome))
                 }
-            } catch (e: InvalidPathException) {
+            } catch (_: InvalidPathException) {
                 // Normal
-            } catch (e: Exception) {
-                logger.warning { "Failed to add GRADLE_USER_HOME: ${e.message}" }
+            } catch (expectedGradleHomeFailure: Exception) {
+                logger.warning { "Failed to add GRADLE_USER_HOME: ${expectedGradleHomeFailure.message}" }
             }
 
             // (Removed user.dir bypass because it breaks profiler tests by bypassing all project files)
-        } catch (e: Exception) {
-            logger.severe { "Fatal exception during safeBypassPaths initialization: ${e.message}" }
+        } catch (expectedInitializationFailure: Exception) {
+            logger.severe { "Fatal exception during safeBypassPaths initialization: ${expectedInitializationFailure.message}" }
         }
     }
 
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun manifestClassPathEntries(jarPath: Path): List<Path> =
         try {
             JarFile(jarPath.toFile()).use { jar ->
@@ -185,12 +185,11 @@ public object BypassPaths {
             }
         } catch (_: FileNotFoundException) {
             emptyList()
-        } catch (e: Exception) {
-            logger.warning { "Failed to process manifest Class-Path for $jarPath: ${e.message}" }
+        } catch (expectedManifestFailure: Exception) {
+            logger.warning { "Failed to process manifest Class-Path for $jarPath: ${expectedManifestFailure.message}" }
             emptyList()
         }
 
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun resolveManifestEntry(
         entry: String,
         parentDir: Path,
@@ -202,8 +201,8 @@ public object BypassPaths {
             if (uri.isAbsolute) Paths.get(uri) else parentDir.resolve(uri.path).normalize()
         } catch (_: URISyntaxException) {
             null
-        } catch (e: Exception) {
-            logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${e.message}" }
+        } catch (expectedManifestEntryFailure: Exception) {
+            logger.warning { "Failed to parse manifest entry $entry in $jarPath: ${expectedManifestEntryFailure.message}" }
             null
         }
     }

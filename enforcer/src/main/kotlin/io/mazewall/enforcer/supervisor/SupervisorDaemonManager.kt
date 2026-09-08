@@ -277,8 +277,8 @@ public class SupervisorDaemonManager(
     ) {
         try {
             sendShutdownCommand(socketPath)
-        } catch (e: Exception) {
-            logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", e)
+        } catch (expectedTransportFailure: Exception) {
+            logger.log(java.util.logging.Level.FINE, "Daemon shutdown command could not be delivered", expectedTransportFailure)
             return // destroyForcibly() by the caller is the authoritative escalation.
         }
         awaitDaemonExit(process)
@@ -316,7 +316,7 @@ public class SupervisorDaemonManager(
             while (process.isAlive && System.currentTimeMillis() < deadline) {
                 Thread.sleep(10)
             }
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
     }

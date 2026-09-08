@@ -107,9 +107,9 @@ public object TierEKernelSmoke {
                     "virtual-thread proxy intervals did not report their pinning cost"
                 }
             }
-        } catch (failure: Throwable) {
+        } catch (expectedFailure: Exception) {
             process.destroyForcibly()
-            failure.printStackTrace()
+            System.err.print(expectedFailure.stackTraceToString())
             exitProcess(1)
         } finally {
             session.close()

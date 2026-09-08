@@ -179,6 +179,27 @@ class SupervisorSocketUtilsTest {
     }
 
     @Test
+    fun `recvDescriptor returns null after a successful message without SCM_RIGHTS`() {
+        var callCount = 0
+        val mockNetworking = object : MockNativeNetworking() {
+            override fun recvmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                callCount++
+                return LinuxNative.SyscallResult.Success(1L)
+            }
+        }
+
+        LinuxNative.setEngine(object : MockNativeEngine(networking = mockNetworking) {})
+
+        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        assertNull(SupervisorSocketUtils.recvDescriptor(socketFd))
+        assertEquals(1, callCount)
+    }
+
+    @Test
     fun `connectWithRetry specifies SOCK_CLOEXEC`() {
         var socketTypeArg = 0
         val mockNetworking = object : MockNativeNetworking() {

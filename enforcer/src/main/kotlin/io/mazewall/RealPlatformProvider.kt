@@ -9,7 +9,6 @@ import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import java.io.File
 
-@Suppress("SwallowedException")
 internal object RealPlatformProvider : PlatformProvider {
     @JvmField
     internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
@@ -45,7 +44,7 @@ internal object RealPlatformProvider : PlatformProvider {
                 }
             }
         }
-    } catch (e: IllegalStateException) {
+    } catch (_: IllegalStateException) {
         SeccompMode.Error(-1)
     }
 
@@ -68,11 +67,10 @@ internal object RealPlatformProvider : PlatformProvider {
                 false
             }
         }
-    } catch (e: IllegalStateException) {
+    } catch (_: IllegalStateException) {
         false
     }
 
-    @Suppress("MagicNumber")
     override fun getYamaPtraceScope(): YamaPtraceScope {
         if (!getOsName().equals("Linux", ignoreCase = true)) return YamaPtraceScope.Unavailable
         val file = File(yamaPath)
@@ -87,9 +85,9 @@ internal object RealPlatformProvider : PlatformProvider {
                 3 -> YamaPtraceScope.Disabled
                 else -> YamaPtraceScope.Unknown(intVal)
             }
-        } catch (e: java.io.IOException) {
+        } catch (_: java.io.IOException) {
             YamaPtraceScope.Unavailable
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             YamaPtraceScope.Unavailable
         }
     }
@@ -102,9 +100,9 @@ internal object RealPlatformProvider : PlatformProvider {
             io.mazewall.landlock.Landlock
                 .getAbiVersion()
         }
-    } catch (e: UnsupportedOperationException) {
+    } catch (_: UnsupportedOperationException) {
         0
-    } catch (e: IllegalStateException) {
+    } catch (_: IllegalStateException) {
         0
     }
 
@@ -128,9 +126,9 @@ internal object RealPlatformProvider : PlatformProvider {
             } else {
                 false
             }
-        } catch (e: java.io.IOException) {
+        } catch (_: java.io.IOException) {
             false
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             false
         }
 
@@ -150,7 +148,7 @@ internal object RealPlatformProvider : PlatformProvider {
         val arch = try {
             io.mazewall.core.Arch
                 .current()
-        } catch (e: UnsupportedOperationException) {
+        } catch (_: UnsupportedOperationException) {
             return false
         }
         val res = LinuxNative.raw.syscall(
@@ -179,9 +177,9 @@ internal object RealPlatformProvider : PlatformProvider {
                         content.contains("kubepods") ||
                         content.contains("containerd")
                 }
-            } catch (e: java.io.IOException) {
+            } catch (_: java.io.IOException) {
                 // Ignore
-            } catch (e: SecurityException) {
+            } catch (_: SecurityException) {
                 // Ignore
             }
         }

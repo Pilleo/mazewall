@@ -8,7 +8,6 @@ import java.util.concurrent.Callable
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-@Suppress("DEPRECATION")
 class SandboxDispatcherCacheTest {
     @AfterEach
     fun tearDown() {

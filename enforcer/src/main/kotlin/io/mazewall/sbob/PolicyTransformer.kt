@@ -36,7 +36,7 @@ internal object PolicyTransformer {
             }.toSet()
 
         // SBoB parsing may result in Landlock rules, so we transition to ThreadLocalOnly
-        @Suppress("UNCHECKED_CAST")
+
         var builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>().base(base as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
 
         builder = if (base.defaultAction == SeccompAction.ACT_ALLOW) {

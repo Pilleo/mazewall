@@ -88,7 +88,7 @@ class FileDescriptorTest {
 
         val closed = fd.close()
         assertEquals(value, closed.value)
-        @Suppress("USELESS_IS_CHECK")
+
         assertTrue(closed is FileDescriptor<*, FdState.Closed, FdOwnership>)
         assertTrue(closed.isClosedType())
         assertFalse(closed.isValid)

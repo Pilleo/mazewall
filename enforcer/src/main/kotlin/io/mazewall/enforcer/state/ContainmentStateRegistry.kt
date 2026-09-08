@@ -74,7 +74,7 @@ internal object ContainmentStateRegistry {
         val ps = processState
 
         if (h.cachedProcessState === ps && h.cachedMergedState != null) {
-            return h.cachedMergedState!!
+            return checkNotNull(h.cachedMergedState) { "cached process state requires a cached merged state" }
         }
 
         val merged = mergeStates(ts, ps)

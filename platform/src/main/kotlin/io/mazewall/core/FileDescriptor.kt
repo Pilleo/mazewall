@@ -346,7 +346,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
          * Represents an invalid or uninitialized file descriptor.
          * Uses Nothing role to be compatible with all specific FD roles.
          */
-        @Suppress("UNCHECKED_CAST")
+
         public val INVALID: FileDescriptor<Nothing, FdState.Closed, FdOwnership.Unowned> =
             FileDescriptor<FileDescriptorRole.Generic, FdState.Closed, FdOwnership.Unowned>(
                 FdLifecycle(-1, null, generation = 0L, role = FileDescriptorRole.Generic, ownership = FdOwnership.Unowned, closed = true),
@@ -392,7 +392,6 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
                 "This method creates non-live tokens for retired FDs and should not be used in production code.",
             level = DeprecationLevel.WARNING,
         )
-        @Suppress("UNCHECKED_CAST")
         public fun <R : FileDescriptorRole> unsafe(
             value: Int,
             arena: NativeArena? = null,
@@ -479,7 +478,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
          * Kernel replaced this integer (dup2, SECCOMP_ADDFD SETFD).
          * Any leftover generation is retired first, then a new generation is claimed.
          */
-        @Suppress("UNCHECKED_CAST")
+
         public fun <R : FileDescriptorRole> replace(
             value: Int,
             arena: NativeArena? = null,
@@ -495,7 +494,6 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
             return result
         }
 
-        @Suppress("UNCHECKED_CAST")
         private fun <R : FileDescriptorRole, O : FdOwnership> open(
             value: Int,
             arena: NativeArena?,
@@ -584,7 +582,6 @@ public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhan
 public fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(): FileDescriptor<R, FdState.Closed, FdOwnership.Owned> {
     if (value >= 0 && !isClosedType()) {
         if (FdEpoch.auditClose(value, generation)) {
-            @Suppress("UNCHECKED_CAST")
             LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
         }
         arena?.close()

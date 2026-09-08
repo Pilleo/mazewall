@@ -143,7 +143,7 @@ public object SupervisorSocketUtils {
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
-        return Arena.ofConfined().use { arena ->
+        Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
             controlBuf.fill(0)
@@ -164,21 +164,21 @@ public object SupervisorSocketUtils {
                 val res = LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     val value = res.value
-                    if (value == 0L) return@use null
+                    if (value == 0L) return null
 
                     val cmsgLen = cmsg.getCmsgLen()
                     val cmsgLevel = cmsg.getCmsgLevel()
                     val cmsgType = cmsg.getCmsgType()
                     if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return@use FileDescriptor.adopt(cmsg.getDataFd(), role)
+                        return FileDescriptor.adopt(cmsg.getDataFd(), role)
                     }
+                    return null
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
                     if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue // EINTR
-                    return@use null
+                    return null
                 }
             }
-            null
         }
     }
 }

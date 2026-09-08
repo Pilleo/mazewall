@@ -86,14 +86,14 @@ internal class BpfRingBufferReader(
         val consumerMapping = map(fd, pageSize, PROT_READ or PROT_WRITE, 0)
         return try {
             consumerMapping to map(fd, producerMappingSize, PROT_READ, pageSize)
-        } catch (failure: Throwable) {
+        } catch (expectedMappingFailure: Throwable) {
             try {
                 unmap(consumerMapping, pageSize)
-            } catch (cleanupFailure: Throwable) {
-                failure.addSuppressed(cleanupFailure)
+            } catch (expectedCleanupFailure: Throwable) {
+                expectedMappingFailure.addSuppressed(expectedCleanupFailure)
             }
             arena.close()
-            throw failure
+            throw expectedMappingFailure
         }
     }
 

@@ -16,7 +16,7 @@ class ManagedSegmentTest {
             assertEquals(raw, confined.native)
             assertEquals(raw.address(), confined.address())
             assertEquals(10L, confined.byteSize())
-            @Suppress("USELESS_IS_CHECK")
+
             assertTrue(confined is ManagedSegment)
         }
     }
@@ -29,7 +29,7 @@ class ManagedSegmentTest {
             assertEquals(raw, shared.native)
             assertEquals(raw.address(), shared.address())
             assertEquals(10L, shared.byteSize())
-            @Suppress("USELESS_IS_CHECK")
+
             assertTrue(shared is ManagedSegment)
         }
     }

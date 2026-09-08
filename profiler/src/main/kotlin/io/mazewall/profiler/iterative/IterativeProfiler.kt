@@ -99,7 +99,6 @@ object IterativeProfiler {
         currentPolicy: Policy<*, Uncompiled>,
         path: String,
     ): Policy<*, Uncompiled> {
-        @Suppress("UNCHECKED_CAST")
         var builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
         // Canonical component-wise containment (issue-20260823-135558): /base/dir must not match
         // /base/dir-extra, and relative paths are never contained.
@@ -176,9 +175,7 @@ object IterativeProfiler {
                     .toAbsolutePath()
                     .normalize()
                     .toString()
-            } catch (
-                @Suppress("SwallowedException") e: java.nio.file.InvalidPathException,
-            ) {
+            } catch (_: java.nio.file.InvalidPathException) {
                 null
             }
         }

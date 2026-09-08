@@ -12,7 +12,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-@Suppress("DMI_HARDCODED_ABSOLUTE_FILENAME")
 class PolicyTest {
     @Test
     fun `default policy allows everything`() {

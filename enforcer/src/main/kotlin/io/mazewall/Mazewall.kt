@@ -255,7 +255,7 @@ public fun <T> runContained(
     return try {
         SandboxDispatcher.execute(policy, task)
     } catch (e: java.util.concurrent.ExecutionException) {
-        val cause = e.cause
+        val cause = e.cause ?: throw e
         if (cause is RuntimeException) throw cause
         if (cause is Error) throw cause
         if (cause is Exception) throw cause

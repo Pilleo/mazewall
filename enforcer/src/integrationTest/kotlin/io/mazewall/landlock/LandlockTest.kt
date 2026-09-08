@@ -120,7 +120,7 @@ class LandlockTest : BaseIntegrationTest() {
             safeExecutor.submit { Files.readString(Path.of("/etc/passwd")) }.get()
             throw IllegalStateException("Should have failed")
         } catch (
-            @Suppress("SwallowedException") e: ExecutionException,
+             e: ExecutionException,
         ) {
             // Expected
         }
@@ -160,7 +160,7 @@ class LandlockTest : BaseIntegrationTest() {
             safeExecutor.submit(java.util.concurrent.Callable { ProcessBuilder("/bin/echo", "fail").start() }).get()
             throw IllegalStateException("Should have failed")
         } catch (
-            @Suppress("SwallowedException") e: ExecutionException,
+             e: ExecutionException,
         ) {
             // Expected
         } finally {
@@ -258,7 +258,7 @@ class LandlockTest : BaseIntegrationTest() {
             safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(allowed).resolve("../forbidden/secret.txt")) }).get()
             throw IllegalStateException("Should have failed")
         } catch (
-            @Suppress("SwallowedException") e: ExecutionException,
+             e: ExecutionException,
         ) {
             // Expected
         } finally {
@@ -283,7 +283,7 @@ class LandlockTest : BaseIntegrationTest() {
                         Files.readString(Path.of(linkA))
                         "success"
                     } catch (
-                        @Suppress("SwallowedException") _: java.io.IOException,
+                         _: java.io.IOException,
                     ) {
                         "eloop"
                     }

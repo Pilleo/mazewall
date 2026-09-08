@@ -63,20 +63,26 @@ internal class ContainedExecutorWrapper(
 
     private fun wrapRunnable(task: Runnable): Runnable = Runnable { runContained(task::run) }
 
-    @Suppress("TooGenericExceptionCaught") // Roll back bookkeeping for every pre-receipt failure, including Error.
     private fun <T> runContained(task: () -> T): T {
         val initialState = ContainmentStateRegistry.threadState
         var receipt: io.mazewall.InstallationReceipt? = null
         try {
             receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
             return runTask(task)
-        } catch (failure: Throwable) {
+        } catch (expectedInstallFailure: Exception) {
             if (receipt == null) {
                 ContainmentRegistryEffectInterpreter.apply(
                     ContainmentRegistryEffect.RestoreThreadState(initialState),
                 )
             }
-            throw failure
+            throw expectedInstallFailure
+        } catch (expectedInstallError: Error) {
+            if (receipt == null) {
+                ContainmentRegistryEffectInterpreter.apply(
+                    ContainmentRegistryEffect.RestoreThreadState(initialState),
+                )
+            }
+            throw expectedInstallError
         } finally {
             receipt?.supervisorSession?.close()
         }
@@ -87,14 +93,15 @@ internal class ContainedExecutorWrapper(
     private fun failureForCaller(failure: Throwable): Throwable = (failure as? Exception)?.asContainmentViolation() ?: failure
 
     private fun Exception.asContainmentViolation(): Exception {
-        val structured = ContainmentViolationDetector.findStructuredViolation(this) ?: return this
+        val diagnostic = ContainmentViolationDetector.diagnose(this) ?: return this
+        val structured = diagnostic.violation
         if (this === structured) return structured
         return ContainmentViolationException(
             message = "Task reported a containment policy violation",
             cause = this,
-            errno = structured.errno,
-            syscallNr = structured.syscallNr,
-            evidence = structured.evidence,
+            errno = structured?.errno,
+            syscallNr = structured?.syscallNr,
+            evidence = diagnostic.evidence,
         )
     }
 

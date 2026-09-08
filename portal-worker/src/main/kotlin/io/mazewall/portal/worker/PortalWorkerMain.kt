@@ -65,7 +65,7 @@ public object PortalWorkerMain {
                     } catch (_: io.mazewall.portal.PortalReadTimeoutException) {
                         state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
                         continue
-                    } catch (_: Exception) {
+                    } catch (expectedPeerClose: Exception) {
                         state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
                         break
                     }
@@ -103,8 +103,9 @@ public object PortalWorkerMain {
                         state = replied.state
                         channel.send(sendFrame(replied))
                     }
-                } catch (e: Exception) {
-                    val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
+                } catch (expectedDispatchFailure: Exception) {
+                    val msg = (expectedDispatchFailure.message ?: expectedDispatchFailure::class.java.simpleName)
+                        .toByteArray(StandardCharsets.UTF_8)
                     val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
                     state = replied.state
                     channel.send(sendFrame(replied))

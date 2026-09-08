@@ -258,19 +258,19 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `isContainmentViolation handles nested exceptions with error code`() {
+    fun `diagnose handles nested exceptions with error code`() {
         val root = java.io.IOException("something went wrong (error=1)")
         val nested = RuntimeException("wrapper", root)
         val deeplyNested = RuntimeException("outer", nested)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(deeplyNested))
+        assertTrue(ContainmentViolationDetector.diagnose(deeplyNested) != null)
     }
 
     @Test
-    fun `isContainmentViolation handles suppressed exceptions with error code`() {
+    fun `diagnose handles suppressed exceptions with error code`() {
         val root = java.io.IOException("failed (error: 13)")
         val main = RuntimeException("main")
         main.addSuppressed(root)
-        assertTrue(ContainmentViolationDetector.isContainmentViolation(main))
+        assertTrue(ContainmentViolationDetector.diagnose(main) != null)
     }
 
     fun testInstallOnProcessRejectsPoliciesWithLandlockRequirement() {
@@ -281,7 +281,6 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val features = Platform.featureMatrix
         if (features.landlockTsyncSupported) {
             try {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
                 val strerror13 = io.mazewall.ffi.memory
@@ -293,7 +292,6 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             }
         } else {
             val ex = assertFailsWith<UnsupportedOperationException> {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             }
             assertTrue(

@@ -27,7 +27,6 @@ internal class TransportNativeMemory(
     private val transport: ProfilerTransport,
     private val delegate: io.mazewall.NativeMemory,
 ) : io.mazewall.NativeMemory by delegate {
-    @Suppress("UNCHECKED_CAST")
     override fun read(
         fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership>,
         buf: io.mazewall.ffi.memory.ManagedSegment,
@@ -35,7 +34,6 @@ internal class TransportNativeMemory(
     ): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
         transport.read(fd, buf.native, count) as io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled>
 
-    @Suppress("UNCHECKED_CAST")
     override fun write(
         fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership>,
         buf: io.mazewall.ffi.memory.ManagedSegment,

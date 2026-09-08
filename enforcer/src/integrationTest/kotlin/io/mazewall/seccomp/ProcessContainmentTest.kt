@@ -28,7 +28,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             ProcessBuilder("echo", "should-fail").start()
             throw IllegalStateException("Should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -49,7 +49,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
                     ProcessBuilder("echo", "should-fail").start()
                     throw IllegalStateException("Child thread should have been contained")
                 } catch (e: Exception) {
-                    if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+                    if (ContainmentViolationDetector.diagnose(e) == null) {
                         throw e
                     }
                 }
@@ -81,7 +81,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             java.net.Socket().connect(java.net.InetSocketAddress("127.0.0.1", 80))
             throw IllegalStateException("Connect should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -169,7 +169,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             ProcessBuilder("echo", "should-fail").start()
             throw IllegalStateException("Should have failed")
         } catch (e: Exception) {
-            if (!ContainmentViolationDetector.isContainmentViolation(e)) {
+            if (ContainmentViolationDetector.diagnose(e) == null) {
                 throw e
             }
         }
@@ -217,7 +217,6 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             // On modern kernels, this should at least pass our internal guard
             // (might still fail with EACCES if sibling threads aren't ready, but that's a different error)
             try {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             } catch (e: Exception) {
                 // EACCES is acceptable in this test context as it proves we bypassed the version guard
@@ -230,7 +229,6 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             }
         } else {
             org.junit.jupiter.api.assertThrows<io.mazewall.UnsupportedKernelFeatureException> {
-                @Suppress("UNCHECKED_CAST")
                 ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
             }
         }

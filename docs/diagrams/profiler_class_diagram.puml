@@ -131,6 +131,8 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setDaemonManagerProvider(Function0<ProfilerDaemonManager>)
   +ProfilerInstallerInterface getInstallerProvider()
   +void setInstallerProvider(ProfilerInstallerInterface)
+  +Function0<Tid> getTidProvider()
+  +void setTidProvider(Function0<Tid>)
   + {static}void shutdown()
 }
 class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
@@ -160,8 +162,8 @@ class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
 class "ProfilingResult" as io.mazewall.profiler.ProfilingResult<T> {
   +T getValue()
   +BillOfBehavior getBehavior()
-  +Map<TraceEvent, List<StackTraceElement[]>> getStackProfile()
   +ProfilingCoverage getCoverage()
+  +Map<TraceEvent, List<StackTraceElement[]>> getStackProfile()
   +List<ProfileObservation> getObservations()
 }
 enum "StackAttribution" as io.mazewall.profiler.StackAttribution {
@@ -451,10 +453,6 @@ class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
 interface "DaemonRunner" as io.mazewall.profiler.engine.DaemonRunner {
   + {abstract}void runDaemon(String[])
 }
-abstract class "HandshakeSession" as io.mazewall.profiler.engine.HandshakeSession {
-  + {abstract}long getNotifId()
-  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
-}
 class "MmapFileDescriptor" as io.mazewall.profiler.engine.MmapFileDescriptor {
   +int getValue()
   + {static}String toString-impl(int)
@@ -479,15 +477,6 @@ class "MmapProtection" as io.mazewall.profiler.engine.MmapProtection {
   + {static}boolean equals-impl(int, Object)
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
-}
-interface "NativeIoOperations" as io.mazewall.profiler.engine.NativeIoOperations {
-  + {abstract}RawSyscallOperations getRaw()
-  + {abstract}SyscallResult poll(MemorySegment, long, int)
-  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
-  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
-  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
-  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
-  + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
 }
 class "PathNormalizerHelper" as io.mazewall.profiler.engine.PathNormalizerHelper {
   + {static}PathNormalizerHelper INSTANCE
@@ -561,10 +550,6 @@ interface "ProfilerState" as io.mazewall.profiler.engine.ProfilerState {
   + {abstract}FileDescriptor<UnixSocket, Open, Owned> getSocketFd()
   + {abstract}FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
 }
-interface "ProfilerTransport" as io.mazewall.profiler.engine.ProfilerTransport {
-}
-class "ProfilerTransportKt" as io.mazewall.profiler.engine.ProfilerTransportKt {
-}
 class "RealDaemonRunner" as io.mazewall.profiler.engine.RealDaemonRunner {
   +void runDaemon(String[])
 }
@@ -580,26 +565,6 @@ class "RealProfilerInstaller" as io.mazewall.profiler.engine.RealProfilerInstall
   + {static}RealProfilerInstaller INSTANCE
   __
   +void installProfilingFilterForThread(String, PolicyDefinition<?>, List<TraceEvent>, Map<TraceEvent, List<StackTraceElement[]>>, Map<String, Long>, boolean, Function5<? super Integer, ? super List<TraceEvent>, ? super Map<TraceEvent, List<StackTraceElement[]>>, ? super Map<String, Long>, ? super CountDownLatch, Unit>)
-}
-class "RealProfilerTransport" as io.mazewall.profiler.engine.RealProfilerTransport {
-  + {static}RealProfilerTransport INSTANCE
-  __
-  +RawSyscallOperations getRaw()
-  +void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
-  +void sendSeccompContinue(Arena, Success, MemorySegment)
-  +void sendSeccompError(Arena, Failed, MemorySegment, int)
-  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
-  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
-  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
-  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
-  +SyscallResult poll(MemorySegment, long, int)
-  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
-  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
-  +SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
-  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
-  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +void close(FileDescriptor<?, ? extends Open, Owned>)
 }
 class "RealSeccompNotificationParser" as io.mazewall.profiler.engine.RealSeccompNotificationParser {
   + {static}RealSeccompNotificationParser INSTANCE
@@ -618,10 +583,6 @@ interface "SeccompNotificationParser" as io.mazewall.profiler.engine.SeccompNoti
   + {abstract}SeccompNotification readNotif(ManagedSegment)
   + {abstract}PollEvents readPollEvents(ManagedSegment)
   + {abstract}void writeSocketPoll(ManagedSegment, int, short)
-}
-interface "SeccompResponder" as io.mazewall.profiler.engine.SeccompResponder {
-  + {abstract}void sendSeccompContinue(Arena, Success, MemorySegment)
-  + {abstract}void sendSeccompError(Arena, Failed, MemorySegment, int)
 }
 interface "SessionEvent" as io.mazewall.profiler.engine.SessionEvent {
   + {abstract}long getTimestampNanos()
@@ -660,9 +621,6 @@ abstract class "TraceEvent" as io.mazewall.profiler.engine.TraceEvent {
   +StackTraceElement[] getJvmStackTrace()
   +void setJvmStackTrace(StackTraceElement[])
 }
-interface "TraceEventPublisher" as io.mazewall.profiler.engine.TraceEventPublisher {
-  + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
-}
 class "TransportNativeEngine" as io.mazewall.profiler.engine.TransportNativeEngine {
   +RawSyscallOperations getRaw()
   +NativeFileSystem getFileSystem()
@@ -677,6 +635,50 @@ class "TransportNativeMemory" as io.mazewall.profiler.engine.TransportNativeMemo
   +SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
   +ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
 }
+abstract class "HandshakeSession" as io.mazewall.profiler.ffi.HandshakeSession {
+  + {abstract}long getNotifId()
+  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
+}
+interface "NativeIoOperations" as io.mazewall.profiler.ffi.NativeIoOperations {
+  + {abstract}RawSyscallOperations getRaw()
+  + {abstract}SyscallResult poll(MemorySegment, long, int)
+  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
+  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
+  + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
+}
+interface "ProfilerTransport" as io.mazewall.profiler.ffi.ProfilerTransport {
+}
+class "ProfilerTransportKt" as io.mazewall.profiler.ffi.ProfilerTransportKt {
+}
+class "RealProfilerTransport" as io.mazewall.profiler.ffi.RealProfilerTransport {
+  + {static}RealProfilerTransport INSTANCE
+  __
+  +RawSyscallOperations getRaw()
+  +void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
+  +void sendSeccompContinue(Arena, Success, MemorySegment)
+  +void sendSeccompError(Arena, Failed, MemorySegment, int)
+  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
+  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
+  +SyscallResult poll(MemorySegment, long, int)
+  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long)
+  +SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, MemorySegment, long, int)
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
+  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
+  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +void close(FileDescriptor<?, ? extends Open, Owned>)
+}
+interface "SeccompResponder" as io.mazewall.profiler.ffi.SeccompResponder {
+  + {abstract}void sendSeccompContinue(Arena, Success, MemorySegment)
+  + {abstract}void sendSeccompError(Arena, Failed, MemorySegment, int)
+}
+interface "TraceEventPublisher" as io.mazewall.profiler.ffi.TraceEventPublisher {
+  + {abstract}void sendTraceEvent(Arena, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, SyscallEvent<? extends Resolved>)
+}
 class "DaemonContext" as io.mazewall.profiler.internal.DaemonContext {
   +String getSocketPath()
   +Path getSocketDir()
@@ -689,11 +691,6 @@ class "DescendantStrace" as io.mazewall.profiler.internal.DescendantStrace {
   +BillOfBehavior compile(Class<? extends TraceableWorkload>)
 }
 class "NativeSocketInputStream" as io.mazewall.profiler.internal.NativeSocketInputStream {
-  + {static}Companion Companion
-  __
-  +int read()
-  +int read(byte[], int, int)
-  +void close()
 }
 class "ProfilerDaemonManager" as io.mazewall.profiler.internal.ProfilerDaemonManager {
   + {static}Companion Companion
@@ -734,6 +731,13 @@ class "TraceEventQueue" as io.mazewall.profiler.internal.TraceEventQueue {
   +long getDroppedCount()
   +boolean offer(TraceEvent)
   +void close()
+}
+interface "TraceListenerEvent" as io.mazewall.profiler.internal.TraceListenerEvent {
+}
+class "TraceListenerMachine" as io.mazewall.profiler.internal.TraceListenerMachine {
+  + {static}TraceListenerMachine INSTANCE
+  __
+  +TraceListenerState evaluate(TraceListenerState, TraceListenerEvent)
 }
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
 }
@@ -1032,44 +1036,44 @@ io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.
 io.mazewall.profiler.engine.PathNormalizerHelper --> io.mazewall.profiler.engine.PathNormalizerHelper
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon
-io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerTransport
-io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.SeccompResponder
-io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.TraceEventPublisher
-io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.NativeIoOperations
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.TraceEventPublisher
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.NativeIoOperations
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.SeccompResponder
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.ProfilerTransport
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerMemoryReader
 io.mazewall.profiler.engine.ProfilerInstaller --> io.mazewall.profiler.engine.ProfilerInstaller
 io.mazewall.profiler.engine.ProfilerInstallerSession --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SeccompNotificationParser
+io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.ffi.TraceEventPublisher
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SyscallPathResolver
-io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SeccompResponder
+io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.ffi.NativeIoOperations
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.ProfilerState
-io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.TraceEventPublisher
+io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.ffi.SeccompResponder
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SessionEventLedger
-io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.NativeIoOperations
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.ProfilerMemoryReader
 io.mazewall.profiler.engine.ProfilerSessionMachine --> io.mazewall.profiler.engine.ProfilerSessionMachine
 io.mazewall.profiler.engine.ProfilerSessionTransition --> io.mazewall.profiler.engine.ProfilerState
-io.mazewall.profiler.engine.ProfilerTransport .u.|> io.mazewall.profiler.engine.TraceEventPublisher
-io.mazewall.profiler.engine.ProfilerTransport .u.|> io.mazewall.profiler.engine.SeccompResponder
-io.mazewall.profiler.engine.ProfilerTransport .u.|> io.mazewall.profiler.engine.NativeIoOperations
 io.mazewall.profiler.engine.RealDaemonRunner .u.|> io.mazewall.profiler.engine.DaemonRunner
 io.mazewall.profiler.engine.RealDaemonRunner --> io.mazewall.profiler.engine.ProfilerDaemonEngine
 io.mazewall.profiler.engine.RealMemoryReader .u.|> io.mazewall.profiler.engine.ProfilerMemoryReader
 io.mazewall.profiler.engine.RealMemoryReader --> io.mazewall.profiler.engine.RealMemoryReader
 io.mazewall.profiler.engine.RealProfilerInstaller .u.|> io.mazewall.profiler.engine.ProfilerInstallerInterface
 io.mazewall.profiler.engine.RealProfilerInstaller --> io.mazewall.profiler.engine.RealProfilerInstaller
-io.mazewall.profiler.engine.RealProfilerTransport .u.|> io.mazewall.profiler.engine.ProfilerTransport
-io.mazewall.profiler.engine.RealProfilerTransport .u.|> io.mazewall.profiler.engine.TraceEventPublisher
-io.mazewall.profiler.engine.RealProfilerTransport .u.|> io.mazewall.profiler.engine.SeccompResponder
-io.mazewall.profiler.engine.RealProfilerTransport .u.|> io.mazewall.profiler.engine.NativeIoOperations
-io.mazewall.profiler.engine.RealProfilerTransport --> io.mazewall.profiler.engine.RealProfilerTransport
 io.mazewall.profiler.engine.RealSeccompNotificationParser .u.|> io.mazewall.profiler.engine.SeccompNotificationParser
 io.mazewall.profiler.engine.RealSeccompNotificationParser --> io.mazewall.profiler.engine.RealSeccompNotificationParser
 io.mazewall.profiler.engine.SessionEventLedger --> io.mazewall.profiler.engine.SessionEvent
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.SessionEventLedger
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.ProfilerMemoryReader
-io.mazewall.profiler.engine.TransportNativeEngine --> io.mazewall.profiler.engine.ProfilerTransport
-io.mazewall.profiler.engine.TransportNativeMemory --> io.mazewall.profiler.engine.ProfilerTransport
+io.mazewall.profiler.engine.TransportNativeEngine --> io.mazewall.profiler.ffi.ProfilerTransport
+io.mazewall.profiler.engine.TransportNativeMemory --> io.mazewall.profiler.ffi.ProfilerTransport
+io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.TraceEventPublisher
+io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.SeccompResponder
+io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.NativeIoOperations
+io.mazewall.profiler.ffi.RealProfilerTransport .u.|> io.mazewall.profiler.ffi.ProfilerTransport
+io.mazewall.profiler.ffi.RealProfilerTransport .u.|> io.mazewall.profiler.ffi.TraceEventPublisher
+io.mazewall.profiler.ffi.RealProfilerTransport .u.|> io.mazewall.profiler.ffi.SeccompResponder
+io.mazewall.profiler.ffi.RealProfilerTransport .u.|> io.mazewall.profiler.ffi.NativeIoOperations
+io.mazewall.profiler.ffi.RealProfilerTransport --> io.mazewall.profiler.ffi.RealProfilerTransport
 io.mazewall.profiler.internal.DescendantStrace --> io.mazewall.profiler.internal.DescendantStrace
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.internal.ProfilerDaemonManager --> io.mazewall.profiler.internal.DaemonContext
@@ -1078,6 +1082,7 @@ io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.int
 io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.internal.ProfilerTraceListener --> io.mazewall.profiler.internal.TraceListenerState
 io.mazewall.profiler.internal.TraceEventQueue --> io.mazewall.profiler.engine.TraceEvent
+io.mazewall.profiler.internal.TraceListenerMachine --> io.mazewall.profiler.internal.TraceListenerMachine
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeProfiler
 io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor

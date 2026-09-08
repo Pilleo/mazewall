@@ -47,7 +47,6 @@ internal object PolicyCompilationCache {
     ): CompiledSandbox<S> {
         val key = CacheKey(definition, arch)
         synchronized(cache) {
-            @Suppress("UNCHECKED_CAST")
             cache[key]?.let {
                 return it as CompiledSandbox<S>
             }
@@ -55,7 +54,6 @@ internal object PolicyCompilationCache {
         // Compile OUTSIDE the lock: BpfFilter.build is pure CPU work on immutable inputs.
         val compiled = definition.compile(arch)
         synchronized(cache) {
-            @Suppress("UNCHECKED_CAST")
             return cache.getOrPut(key) { compiled } as CompiledSandbox<S>
         }
     }
