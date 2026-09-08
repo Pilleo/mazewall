@@ -1,7 +1,7 @@
 ---
 title: "Make containment exception classification and extraction reliable for callers"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -55,6 +55,10 @@ Exception-based application handling currently conflates inferred permission fai
 
 **Out of scope:**
 Callbacks, IP attribution or banning, automatic incident responses, new USER_NOTIF interception, kernel-policy changes, dependencies, and breaking public API changes. This issue improves diagnostics and propagation; it does not make exceptions a complete attack-detection channel.
+
+**Resolution (2026-09-08):** provenance, structured-first graph extraction,
+cycle protection, compatible normalization, and regression coverage are present
+in the detector, exception API, and contained-executor wrapper.
 
 ---
 <!-- id: issue-20260907-094634-079-make-containment-exception-classification-and-extr  file: issue-20260907-094634-079-make-containment-exception-classification-and-extr.md -->

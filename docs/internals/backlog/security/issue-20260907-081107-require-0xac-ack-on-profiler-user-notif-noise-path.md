@@ -1,7 +1,7 @@
 ---
 title: "Require 0xAC ACK on profiler USER_NOTIF noise path"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -38,6 +38,10 @@ Profiler `processNotification` is a suppressed cyclomatic mix of parse, path, so
 ## Side effects
 - Suppressed-noise CONTINUE remains ACK-free because no JVM event was published;
   only that explicitly documented branch may bypass the handshake.
+
+**Resolution (2026-09-08):** `ProfilerSessionMachine` explicitly models
+`NoisePathBypassed` as the only active-session pass-through transition; its
+transition matrix separately covers the ACK-required delivery path.
 
 ---
 

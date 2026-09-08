@@ -455,11 +455,19 @@ internal class SupervisorSessionHandler(
                 state,
                 SupervisorSessionEvent.JvmVerdictReceived(route),
             )
-            val effect = transition.effect as? SupervisorSessionEffect.ExecuteRoute
-                ?: run {
+            val effect = when (val transitionEffect = transition.effect) {
+                is SupervisorSessionEffect.ExecuteRoute -> transitionEffect
+                is SupervisorSessionEffect.Abort,
+                is SupervisorSessionEffect.ProtocolViolation,
+                SupervisorSessionEffect.PostTerminalObservation,
+                SupervisorSessionEffect.RequestJvmVerdict,
+                SupervisorSessionEffect.ResolvePath,
+                null,
+                -> {
                     failClosed(context, state)
                     return false
                 }
+            }
             val replied = routeDispatcher.execute(
                 effect.route,
                 context,
@@ -483,7 +491,16 @@ internal class SupervisorSessionHandler(
         event: SupervisorSessionEvent = SupervisorSessionEvent.Failed,
     ): Boolean {
         val transition = SupervisorSessionMachine.evaluate(state, event)
-        val effect = transition.effect as? SupervisorSessionEffect.Abort ?: return false
+        val effect = when (val transitionEffect = transition.effect) {
+            is SupervisorSessionEffect.Abort -> transitionEffect
+            is SupervisorSessionEffect.ExecuteRoute,
+            is SupervisorSessionEffect.ProtocolViolation,
+            SupervisorSessionEffect.PostTerminalObservation,
+            SupervisorSessionEffect.RequestJvmVerdict,
+            SupervisorSessionEffect.ResolvePath,
+            null,
+            -> return false
+        }
         val replied = terminalRoutes.execute(SupervisorRoute.Abort(effect.errno, "supervisor session failure"), context) == true
         return SupervisorSessionMachine
             .evaluate(
