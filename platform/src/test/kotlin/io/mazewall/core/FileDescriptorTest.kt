@@ -80,6 +80,17 @@ class FileDescriptorTest {
         }
 
     @Test
+    fun `audit ownership is qualified by descriptor generation`() =
+        withArena {
+            val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+
+            assertTrue(FdEpoch.isOwnedThroughEpoch(fd.value, fd.generation))
+            assertFalse(FdEpoch.isOwnedThroughEpoch(fd.value, fd.generation + 1))
+
+            fd.close()
+        }
+
+    @Test
     fun `test FileDescriptor creation and close`() =
         withArena {
         val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)

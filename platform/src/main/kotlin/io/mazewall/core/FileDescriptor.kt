@@ -79,7 +79,12 @@ internal object FdEpoch {
     private val table = ConcurrentHashMap<Int, AtomicReference<Slot>>()
 
     // Audit ledger: tracks which fds were explicitly marked as owned through this epoch
-    private val ownedThroughEpoch = ConcurrentHashMap.newKeySet<Int>()
+    private data class OwnershipKey(
+        val fd: Int,
+        val generation: Long,
+    )
+
+    private val ownedThroughEpoch = ConcurrentHashMap.newKeySet<OwnershipKey>()
 
     /** Returns true if audit mode is enabled via -Dmazewall.fd.audit=true */
     private fun isAuditEnabled(): Boolean = System.getProperty("mazewall.fd.audit")?.lowercase() == "true"
@@ -171,14 +176,18 @@ internal object FdEpoch {
     /**
      * Marks an fd as owned (opened by this process via adopt).
      */
-    fun markOwned(fd: Int) {
+    fun markOwned(
+        fd: Int,
+        generation: Long,
+    ) {
         if (fd >= 0) {
             val ref = table[fd] ?: return
             while (true) {
                 val cur = ref.get()
                 if (cur.owned) return
                 if (ref.compareAndSet(cur, Slot(cur.generation, cur.live, true))) {
-                    ownedThroughEpoch.add(fd)
+                    ownedThroughEpoch.removeIf { it.fd == fd && it.generation != generation }
+                    ownedThroughEpoch.add(OwnershipKey(fd, generation))
                     return
                 }
             }
@@ -188,8 +197,11 @@ internal object FdEpoch {
     /**
      * Returns true if this fd was explicitly marked as owned through this epoch.
      */
-    fun isOwnedThroughEpoch(fd: Int): Boolean {
-        return ownedThroughEpoch.contains(fd)
+    fun isOwnedThroughEpoch(
+        fd: Int,
+        generation: Long,
+    ): Boolean {
+        return ownedThroughEpoch.contains(OwnershipKey(fd, generation))
     }
 
     /**
@@ -212,7 +224,7 @@ internal object FdEpoch {
     ): Boolean {
         if (!isAuditEnabled()) return true
 
-        val wasOwned = isOwnedThroughEpoch(fd)
+        val wasOwned = isOwnedThroughEpoch(fd, generation)
         val isLive = isLive(fd, generation)
         val existsInKernel = verifyKernelLiveness(fd)
 
@@ -467,7 +479,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
             val closed = value < 0
             val generation = if (closed) 0L else FdEpoch.adoptKernelReuse(value)
             if (value >= 0) {
-                FdEpoch.markOwned(value)
+                FdEpoch.markOwned(value, generation)
             }
             return FileDescriptor(
                 FdLifecycle(value, arena, generation, role, ownership = FdOwnership.Owned, closed = closed),
@@ -489,7 +501,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
             // Claim a new generation for the replaced FD
             val result = open<FileDescriptorRole.Generic, FdOwnership.Owned>(value, arena, FileDescriptorRole.Generic, FdOwnership.Owned) as FileDescriptor<R, FdState.Open, FdOwnership.Owned>
             if (value >= 0) {
-                FdEpoch.markOwned(value)
+                FdEpoch.markOwned(value, result.generation)
             }
             return result
         }

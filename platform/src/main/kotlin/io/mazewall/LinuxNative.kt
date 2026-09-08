@@ -33,6 +33,12 @@ public object LinuxNative : NativeEngine {
         get() = engine
 
     /**
+     * Captures every native capability from one engine identity for a logical operation.
+     * A later test-engine replacement cannot mix implementations into this snapshot.
+     */
+    public fun snapshot(): RuntimeSnapshot = RuntimeSnapshot(engine)
+
+    /**
      * True when the active engine is the production [RealNativeEngine]. Metadata probe used by
      * runtime self-verification gates (see io.mazewall.seccomp.InstallSelfVerifier).
      */
@@ -118,6 +124,13 @@ public object LinuxNative : NativeEngine {
                 is Error -> null
             }
     }
+}
+
+/** Immutable view of one [NativeEngine] selected by [LinuxNative.snapshot]. */
+public class RuntimeSnapshot internal constructor(
+    private val engine: NativeEngine,
+) : NativeEngine by engine {
+    public val engineIdentity: Any get() = engine
 }
 
 @OptIn(ExperimentalContracts::class)
