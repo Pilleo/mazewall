@@ -17,6 +17,20 @@ import kotlin.test.assertTrue
 
 class BillOfBehaviorTest {
     @Test
+    fun `behavior and result snapshot stack-frame arrays`() {
+        val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
+        val source = arrayOf(StackTraceElement("Original", "read", "File.kt", 1))
+        val behavior = BillOfBehavior(opens = mutableSetOf("/tmp"), stackProfile = mapOf(event to listOf(source)))
+        val result = ProfilingResult("value", behavior, mapOf(event to listOf(source)))
+        source[0] = StackTraceElement("Mutated", "read", "File.kt", 2)
+        behavior.stackProfile[event]!![0][0] = StackTraceElement("Exposed", "read", "File.kt", 3)
+        result.stackProfile[event]!![0][0] = StackTraceElement("Exposed", "read", "File.kt", 3)
+
+        assertEquals("Original", behavior.stackProfile[event]!![0][0].className)
+        assertEquals("Original", result.stackProfile[event]!![0][0].className)
+    }
+
+    @Test
     fun `stack trace JSON preserves syscall and frame identity`() {
         val event = TraceEvent(1, "OPEN", longArrayOf(1), listOf("/tmp"))
         val stack = arrayOf(StackTraceElement("Class", "method", "File.kt", 1))

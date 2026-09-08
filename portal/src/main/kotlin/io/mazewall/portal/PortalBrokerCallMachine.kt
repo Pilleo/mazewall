@@ -29,7 +29,7 @@ internal sealed interface PortalBrokerCallEvent {
 
 internal sealed interface PortalBrokerCallEffect {
     data class ReturnPayload(
-        val payload: ByteArray,
+        val payload: PortalPayload,
     ) : PortalBrokerCallEffect
 
     data class RemoteError(
@@ -77,7 +77,7 @@ internal object PortalBrokerCallMachine {
         if (reply.requestId != request.requestId) return failed("request id mismatch")
         return when (reply.kind) {
             PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReturnPayload(reply.payload))
-            PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload.toString(StandardCharsets.UTF_8)))
+            PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload.copyToByteArray().toString(StandardCharsets.UTF_8)))
             PortalKind.Request -> failed("unexpected request frame")
         }
     }

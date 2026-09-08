@@ -7,6 +7,7 @@ import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
+import io.mazewall.portal.PortalPayload
 import java.nio.charset.StandardCharsets
 import kotlin.system.exitProcess
 
@@ -70,37 +71,43 @@ public object PortalWorkerMain {
                     }
                 val received = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FrameReceived(frame))
                 state = received.state
-                val dispatch = received.effect as? PortalWorkerEffect.Dispatch
-                if (dispatch == null) {
-                    fds.forEach { sockets.close(it) }
-                    continue
+                val dispatch = when (received) {
+                    is PortalWorkerTransition.Dispatch -> received
+                    is PortalWorkerTransition.Await,
+                    is PortalWorkerTransition.Close,
+                    is PortalWorkerTransition.Drop,
+                    is PortalWorkerTransition.Send,
+                    -> {
+                        fds.forEach { sockets.close(it) }
+                        continue
+                    }
                 }
                 try {
-                    val result = PortalBuiltinDispatch.handle(dispatch.request.method, dispatch.request.payload, fds)
-                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(result))
+                    val result = PortalBuiltinDispatch.handle(dispatch.request.method, dispatch.request.payload.copyToByteArray(), fds)
+                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(result)))
                     state = replied.state
-                    channel.send((replied.effect as PortalWorkerEffect.Send).frame)
+                    channel.send(sendFrame(replied))
                 } catch (e: UnknownPortalMethod) {
                     val generated = PortalDispatcherRegistry.dispatchOrNull(
                         e.method,
-                        dispatch.request.payload,
+                        dispatch.request.payload.copyToByteArray(),
                         fds,
                     )
                     if (generated != null) {
-                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(generated))
+                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(generated)))
                         state = replied.state
-                        channel.send((replied.effect as PortalWorkerEffect.Send).frame)
+                        channel.send(sendFrame(replied))
                     } else {
                         val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(msg))
+                        val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
                         state = replied.state
-                        channel.send((replied.effect as PortalWorkerEffect.Send).frame)
+                        channel.send(sendFrame(replied))
                     }
                 } catch (e: Exception) {
                     val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(msg))
+                    val replied = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.DispatchFailed(PortalPayload(msg)))
                     state = replied.state
-                    channel.send((replied.effect as PortalWorkerEffect.Send).frame)
+                    channel.send(sendFrame(replied))
                 } finally {
                     fds.forEach { sockets.close(it) }
                 }
@@ -109,4 +116,14 @@ public object PortalWorkerMain {
             channel.close()
         }
     }
+
+    private fun sendFrame(transition: PortalWorkerTransition): PortalFrame =
+        when (transition) {
+            is PortalWorkerTransition.Send -> transition.frame
+            is PortalWorkerTransition.Await,
+            is PortalWorkerTransition.Close,
+            is PortalWorkerTransition.Dispatch,
+            is PortalWorkerTransition.Drop,
+            -> error("dispatch completion must send a reply")
+        }
 }
