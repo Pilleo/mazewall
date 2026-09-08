@@ -62,18 +62,23 @@ class ForeignFdGuard :
         Files.list(Path.of("/proc/self/fd")).use { stream ->
             stream
                 .map { p ->
-                val id = p.fileName.toString().toInt()
-                // A descriptor can close after directory enumeration but before
-                // readlink. Such an entry has no stable identity to audit.
-                val target = runCatching { Files.readSymbolicLink(p).toString() }.getOrNull() ?: UNREADABLE_TARGET
-                FdInfo(id, target)
-            }.toList()
+                    val id = p.fileName.toString().toInt()
+                    // An FD may close at any point while /proc/self/fd is being
+                    // enumerated. Re-read the target below so only entries that
+                    // remain stable for the full snapshot can be audited.
+                    FdInfo(id, targetFor(p))
+                }.toList()
                 // The directory stream owns an fd pointing at this directory. It is
                 // necessarily closed when the snapshot completes, so it is not a
                 // descriptor the test could have closed.
-                .filterNot { it.target == UNREADABLE_TARGET || it.target == SELF_FD_DIRECTORY_TARGET }
-                .toSet()
+                .filter { fd ->
+                    fd.target != UNREADABLE_TARGET &&
+                        fd.target != SELF_FD_DIRECTORY_TARGET &&
+                        targetFor(Path.of("/proc/self/fd", fd.id.toString())) == fd.target
+                }.toSet()
         }
+
+    private fun targetFor(path: Path): String = runCatching { Files.readSymbolicLink(path).toString() }.getOrNull() ?: UNREADABLE_TARGET
 
     private fun isDisabled(): Boolean = System.getProperty("mazewall.fdguard")?.lowercase() == "off"
 
