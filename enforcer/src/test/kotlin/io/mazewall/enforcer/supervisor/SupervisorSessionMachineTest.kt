@@ -1,9 +1,40 @@
 package io.mazewall.enforcer.supervisor
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SupervisorSessionMachineTest {
+    @Test
+    fun `all bounded event traces require a successful reply before replied`() {
+        val events = listOf(
+            SupervisorSessionEvent.NotificationReceived,
+            SupervisorSessionEvent.PathResolved(SupervisorRoute.Continue),
+            SupervisorSessionEvent.JvmRequestSent,
+            SupervisorSessionEvent.JvmRequestFailed,
+            SupervisorSessionEvent.JvmVerdictReceived(SupervisorRoute.Continue),
+            SupervisorSessionEvent.ReplySucceeded,
+            SupervisorSessionEvent.ReplyFailed,
+        )
+
+        fun explore(
+            state: SupervisorSessionState,
+            successfulReply: Boolean,
+            depth: Int,
+        ) {
+            if (state is SupervisorSessionState.Replied) {
+                assertTrue(successfulReply, "Replied must be reachable only after ReplySucceeded")
+            }
+            if (depth == 4) return
+            events.forEach { event ->
+                val transition = SupervisorSessionMachine.evaluate(state, event)
+                explore(transition.state, successfulReply || event is SupervisorSessionEvent.ReplySucceeded, depth + 1)
+            }
+        }
+
+        explore(SupervisorSessionState.AwaitingNotification, successfulReply = false, depth = 0)
+    }
+
     @Test
     fun `every state and event pair has an explicit transition`() {
         val states = listOf(
