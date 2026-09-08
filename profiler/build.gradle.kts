@@ -268,8 +268,5 @@ tasks.named("generateClassDiagrams") {
     }
 }
 
-tasks.named("build") {
-    if (System.getenv("CI") != "true" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
-        dependsOn("generateClassDiagrams")
-    }
-}
+// Diagram generation writes checked-in documentation. Keep it explicit (`generateClassDiagrams`)
+// so ordinary builds remain read-only with respect to the source tree.

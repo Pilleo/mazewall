@@ -687,6 +687,59 @@ tasks.named("check") {
     dependsOn(tasks.named("refactorFirstReport"))
 }
 
+/**
+ * Checked-in PlantUML/SVG files are documentation artifacts, not build outputs. Keeping
+ * regeneration opt-in means that a normal verification run cannot silently dirty the tree.
+ */
+tasks.register("updateClassDiagrams") {
+    group = "documentation"
+    description = "Regenerates the checked-in enforcer and profiler class diagrams"
+    dependsOn(":enforcer:generateClassDiagrams", ":profiler:generateClassDiagrams")
+}
+
+/**
+ * The reviewed warning inventory is a ceiling, rather than permission for new warning-level
+ * debt. Adjusting a budget is an intentional, reviewable quality decision.
+ */
+val detektWarningBudgets =
+    mapOf(
+        "enforcer" to 374,
+        "platform" to 101,
+        "portal-codegen" to 22,
+        "portal-worker" to 2,
+        "portal" to 23,
+        "profiler" to 181,
+    )
+
+tasks.register("detektWarningRatchet") {
+    group = "verification"
+    description = "Fails when a production module adds Detekt warning-level debt"
+    dependsOn(detektWarningBudgets.keys.map { module -> ":$module:detektMain" })
+
+    doLast {
+        val violations =
+            detektWarningBudgets.mapNotNull { (module, budget) ->
+                val report =
+                    project(":$module")
+                        .layout.buildDirectory
+                        .file("reports/detekt/main.xml")
+                        .get()
+                        .asFile
+                val warning = "severity=\"warning\""
+                val warnings = report.readText().windowed(warning.length, 1).count { it == warning }
+                if (warnings > budget) "$module: $warnings warnings (budget $budget)" else null
+            }
+        check(violations.isEmpty()) {
+            "Detekt warning ratchet exceeded: ${violations.joinToString()}. " +
+                "Remove the new warning or update the reviewed budget deliberately."
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn("detektWarningRatchet")
+}
+
 // RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
 // file), so the informational report is skipped there; normal checkouts are unaffected.
 // The worktree branch is decided at configuration time (plain file inspection); the 'mvn'
