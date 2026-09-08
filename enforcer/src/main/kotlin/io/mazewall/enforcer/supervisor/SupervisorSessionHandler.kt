@@ -225,15 +225,39 @@ internal class SupervisorSessionHandler(
                         "Fatal error processing notification $id",
                         expectedNotificationFailure,
                     )
-                    try {
-                        sendSeccompError(id, NativeConstants.EPERM, resp)
-                    } catch (ignored: Exception) {
-                        // Ignore secondary errors during best-effort EPERM response
-                    }
-                    false
+                    failUnhandledNotification(id, resp)
                 }
             }
         }
+    }
+
+    /**
+     * Interprets the reducer's fail-closed effect for failures that occur before a route context
+     * can be constructed. This is intentionally the only raw-notification exception bridge.
+     */
+    context(arena: NativeArena) private fun failUnhandledNotification(
+        id: Long,
+        resp: ManagedSegment,
+    ): Boolean {
+        val resolving = SupervisorSessionMachine
+            .evaluate(
+            SupervisorSessionState.AwaitingNotification,
+            SupervisorSessionEvent.NotificationReceived,
+        ).state
+        val transition = SupervisorSessionMachine.evaluate(resolving, SupervisorSessionEvent.Failed)
+        val effect = transition.effect as? SupervisorSessionEffect.Abort ?: return false
+        val replied = try {
+            sendSeccompError(id, effect.errno, resp)
+            true
+        } catch (failure: RuntimeException) {
+            logger.log(java.util.logging.Level.WARNING, "Unable to deliver fail-closed supervisor reply for $id", failure)
+            false
+        }
+        return SupervisorSessionMachine
+            .evaluate(
+            transition.state,
+            if (replied) SupervisorSessionEvent.ReplySucceeded else SupervisorSessionEvent.ReplyFailed,
+        ).state == SupervisorSessionState.Replied
     }
 
     context(arena: NativeArena) private fun processParsedNotification(
