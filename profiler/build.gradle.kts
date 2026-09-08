@@ -56,27 +56,36 @@ abstract class GenerateInvocationStateBtf
             require(sectionHeaderSize >= ELF64_SECTION_HEADER_SIZE && namesSection < sectionCount) { "invalid ELF section headers: $objectFile" }
 
             fun sectionHeader(index: Int): Int = sectionHeadersOffset + index * sectionHeaderSize
+
             fun sectionOffset(header: Int): Int = checkedInt(elf.getLong(header + SECTION_OFFSET_OFFSET))
+
             fun sectionSize(header: Int): Int = checkedInt(elf.getLong(header + SECTION_SIZE_OFFSET))
-            fun checkedRange(offset: Int, size: Int): IntRange {
+
+            fun checkedRange(
+                offset: Int,
+                size: Int,
+            ): IntRange {
                 require(offset >= 0 && size >= 0 && offset <= image.size - size) { "invalid ELF section range: $objectFile" }
                 return offset until offset + size
             }
 
             val namesHeader = sectionHeader(namesSection)
             val names = checkedRange(sectionOffset(namesHeader), sectionSize(namesHeader))
+
             fun sectionName(header: Int): String {
                 val start = names.first + elf.getInt(header)
                 require(start in names) { "invalid ELF section name: $objectFile" }
-                val end = generateSequence(start) { index -> (index + 1).takeIf { it in names } }
-                    .first { image[it] == 0.toByte() }
+                val end =
+                    generateSequence(start) { index -> (index + 1).takeIf { it in names } }
+                        .first { image[it] == 0.toByte() }
                 return image.copyOfRange(start, end).decodeToString()
             }
 
-            val btfHeader = (0 until sectionCount)
-                .map(::sectionHeader)
-                .firstOrNull { sectionName(it) == BTF_SECTION }
-                ?: error("ELF BTF section is missing: $objectFile")
+            val btfHeader =
+                (0 until sectionCount)
+                    .map(::sectionHeader)
+                    .firstOrNull { sectionName(it) == BTF_SECTION }
+                    ?: error("ELF BTF section is missing: $objectFile")
             val btf = checkedRange(sectionOffset(btfHeader), sectionSize(btfHeader))
             resourceFile.writeBytes(image.copyOfRange(btf.first, btf.last + 1))
         }

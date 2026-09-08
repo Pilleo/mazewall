@@ -67,6 +67,10 @@ class ForeignFdGuard :
                     .fold({ it }, { _ -> "unreadable" })
                 FdInfo(id, target)
             }.toList()
+                // The directory stream owns an fd pointing at this directory. It is
+                // necessarily closed when the snapshot completes, so it is not a
+                // descriptor the test could have closed.
+                .filterNot { it.target == SELF_FD_DIRECTORY_TARGET }
                 .toSet()
         }
 
@@ -75,5 +79,6 @@ class ForeignFdGuard :
     companion object {
         private val NAMESPACE = Namespace.create(ForeignFdGuard::class.java)
         private val FD_KEY = "fds"
+        private val SELF_FD_DIRECTORY_TARGET = "/proc/${ProcessHandle.current().pid()}/fd"
     }
 }
