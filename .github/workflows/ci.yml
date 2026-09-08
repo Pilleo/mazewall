@@ -52,9 +52,31 @@ jobs:
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
             - name: Run Host-Safe Unit Quality Gate
+              id: host_unit
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
               run: ./gradlew unitCheck --no-daemon
+            - name: Verify reproducible dependency state
+              run: ./gradlew verifyGradleReproducibility --no-daemon
+            - name: Prove configuration-cache reuse
+              run: |
+                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+            - name: Verify host/kernel Gradle lifecycle split
+              run: ./scripts/check_gradle_lifecycle.sh
+            - name: Triage failed host verification
+              if: steps.host_unit.outcome == 'failure'
+              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
+            - name: Upload Gradle diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gradle-diagnostics
+                  path: |
+                      build/reports/problems/
+                      build/reports/triage/
+                      build/reports/gradle-baseline/
+                  if-no-files-found: ignore
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -79,13 +101,14 @@ jobs:
                   if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar ]; then
                       podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar
                   fi
-            - name: Run Containerized Build, Lint, Tests & Coverage Verification
+            - name: Run Privileged Kernel Gate and Assemble
               run: |
                   set -o pipefail
-                  ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
+                  # unitCheck already ran on the host for this exact checkout.
+                  ./scripts/run_containerized_tests.sh kernelCheck assemble 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
               if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Dpitest.threads=2
+              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
             - name: Run Vulnerability Exploitation Demo
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh

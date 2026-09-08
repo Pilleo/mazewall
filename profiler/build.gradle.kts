@@ -115,15 +115,12 @@ abstract class GenerateInvocationStateBtf
     }
 
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     application
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 application {
@@ -170,11 +167,11 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
@@ -206,14 +203,10 @@ val integrationTestFreshJvm =
         doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
-tasks.check {
-    dependsOn(integrationTest, integrationTestFreshJvm)
-}
-
 tasks.test {
 }
 
-val plantumlConfig by configurations.creating
+val plantumlConfig = configurations.create("plantumlConfig")
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
@@ -277,7 +270,7 @@ pitest {
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
-    threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
+    threads.set(providers.gradleProperty("mazewall.pitest.threads").orElse("2").map(String::toInt))
 
     // Host-unit floor for profile-evidence and policy-compilation behavior.
     coverageThreshold.set(93)
@@ -335,11 +328,5 @@ tasks.named("generateClassDiagrams") {
 
         cleanup(pumlFile)
         cleanup(svgFile)
-    }
-}
-
-tasks.named("build") {
-    if (System.getenv("CI") != "true" && System.getenv("MAZEWALL_IN_CONTAINER") != "true") {
-        dependsOn("generateClassDiagrams")
     }
 }

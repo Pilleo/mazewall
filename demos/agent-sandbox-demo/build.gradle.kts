@@ -1,16 +1,6 @@
 plugins {
-    kotlin("jvm")
+    id("mazewall.test-conventions")
     application
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(25))
-    }
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 application {
@@ -26,28 +16,10 @@ dependencies {
     implementation(project(":profiler"))
 
     // LangChain4j dependencies
-    implementation("dev.langchain4j:langchain4j:0.33.0")
-    implementation("dev.langchain4j:langchain4j-core:0.33.0")
+    implementation(libs.langchain4j)
+    implementation(libs.langchain4j.core)
 
     testImplementation(libs.junit.jupiter)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(kotlin("test"))
-}
-
-tasks.withType<Test> {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
-    testLogging {
-        showStandardStreams = true
-    }
-}
-
-// Disable static analysis for this demo
-tasks.configureEach {
-    if (name.contains("detekt", ignoreCase = true) ||
-        name.contains("spotbugs", ignoreCase = true) ||
-        name.contains("ktlint", ignoreCase = true)
-    ) {
-        enabled = false
-    }
 }

@@ -1,12 +1,9 @@
 import java.math.BigDecimal
 
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     id("info.solidsoft.pitest")
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 sourceSets {
@@ -23,11 +20,11 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
@@ -66,10 +63,6 @@ tasks.register<Exec>("verifyCAbi") {
     description = "Runs the mandatory C-header ABI oracle."
     dependsOn(compileCAbiOracle)
     commandLine(cAbiOracle.get().asFile.absolutePath)
-}
-
-tasks.check {
-    dependsOn(integrationTest)
 }
 
 tasks.test {

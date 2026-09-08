@@ -70,6 +70,8 @@ Run the merge gate once after focused checks pass:
 ./gradlew build
 ```
 
+Build maintenance commands are explicit: `./gradlew format`, `./gradlew updateDiagrams`, and `./gradlew installGitHooks` mutate source, documentation, and checkout setup respectively. Use `./gradlew unitCheck` for host-safe verification and `./gradlew kernelCheck` for privileged integration verification. When dependency declarations change, regenerate and review locks and checksums with `./gradlew dependencies --write-locks --write-verification-metadata sha256`.
+
 ## Code intelligence and backlog
 
 - Prefer Codanna for symbols and callers, `./scripts/code_atlas.sh blast-radius <Symbol>` before changing public or cross-module symbols, and `./scripts/sg.sh` for structural search.

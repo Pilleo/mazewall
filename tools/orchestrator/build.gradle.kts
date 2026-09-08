@@ -1,15 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlin)
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     alias(libs.plugins.kotlinPluginSerialization)
     application
-}
-
-kotlin {
-    jvmToolchain(25)
-}
-
-repositories {
-    mavenCentral()
 }
 
 dependencies {

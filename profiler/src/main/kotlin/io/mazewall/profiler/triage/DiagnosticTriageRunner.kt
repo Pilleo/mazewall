@@ -17,8 +17,9 @@ import java.util.concurrent.TimeoutException
 object DiagnosticTriageRunner {
     @JvmStatic
     fun main(args: Array<String>) {
+        val options = parseOptions(args)
         println("==> Initiating mazewall local diagnostic triage...")
-        val targetFile = File("build/triage_report.json")
+        val targetFile = options.output
         targetFile.parentFile.mkdirs()
 
         // 1. Capture local kernel audit logs for blocked syscalls (SECCOMP/Landlock)
@@ -40,6 +41,7 @@ object DiagnosticTriageRunner {
         val jsonContent = """
             {
               "timestamp": ${System.currentTimeMillis()},
+              "failed_task": ${escapeJson(options.failedTask)},
               "diagnostics": {
                 "dmesg_seccomp_logs": ${escapeJson(dmesgLogs)},
                 "jvm_thread_dump": ${escapeJson(jvmThreadDump)},
@@ -51,7 +53,28 @@ object DiagnosticTriageRunner {
         """.trimIndent()
 
         targetFile.writeText(jsonContent)
-        println("==> Local diagnostic triage complete. Report written to: build/triage_report.json")
+        println("==> Local diagnostic triage complete. Report written to: ${targetFile.path}")
+    }
+
+    private data class Options(
+        val failedTask: String,
+        val output: File,
+    )
+
+    private fun parseOptions(args: Array<String>): Options {
+        var failedTask = "unknown"
+        var output = File("build/triage_report.json")
+        var index = 0
+        while (index < args.size) {
+            require(index + 1 < args.size) { "Missing value for ${args[index]}" }
+            when (val option = args[index]) {
+                "--failed-task" -> failedTask = args[index + 1]
+                "--output" -> output = File(args[index + 1])
+                else -> error("Unknown triage option: $option")
+            }
+            index += 2
+        }
+        return Options(failedTask, output)
     }
 
     /** Upper bound for any single external process capture; diagnostics must never hang the caller. */

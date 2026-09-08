@@ -1,9 +1,6 @@
 plugins {
-    kotlin("jvm")
-}
-
-kotlin {
-    jvmToolchain(25)
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
 }
 
 sourceSets {
@@ -20,8 +17,6 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-evaluationDependsOn(":portal-worker")
-
 /**
  * Full runtime classpath for spawned portal workers (issue: worker JVM must load
  * PortalWorkerMain + :portal/:platform/:enforcer). Referencing the FileCollection directly
@@ -29,11 +24,11 @@ evaluationDependsOn(":portal-worker")
  * inside a systemProperty MUST stay lazy (providers.provider) — eager resolution at
  * configuration time is forbidden by Gradle 9 and produced empty paths (CNFE in workers).
  */
-val portalWorkerClasspath by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    isVisible = false
-}
+val portalWorkerClasspath =
+    configurations.create("portalWorkerClasspath") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
 
 // Plain FileCollection view so task doFirst blocks don't capture the script object
 // (configuration-cache requirement).
@@ -54,11 +49,11 @@ abstract class PortalWorkerClasspathArgProvider
 val portalWorkerCpArgProvider =
     objects.newInstance(PortalWorkerClasspathArgProvider::class.java, portalWorkerCpFiles)
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
@@ -84,10 +79,6 @@ val integrationTest =
         jvmArgumentProviders.add(portalWorkerCpArgProvider)
     }
 
-tasks.check {
-    dependsOn(integrationTest)
-}
-
 tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m")
@@ -107,7 +98,7 @@ dependencies {
     testImplementation(libs.kotest.assertions)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.slf4j.nop)
-    integrationTestImplementation(kotlin("test"))
-    integrationTestImplementation(libs.junit.jupiter.api)
-    integrationTestRuntimeOnly(libs.junit.jupiter.engine)
+    add("integrationTestImplementation", kotlin("test"))
+    add("integrationTestImplementation", libs.junit.jupiter.api)
+    add("integrationTestRuntimeOnly", libs.junit.jupiter.engine)
 }

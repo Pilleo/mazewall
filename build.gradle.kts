@@ -1,66 +1,17 @@
-import org.gradle.api.publish.PublishingExtension
+import io.mazewall.build.TriageArguments
+import io.mazewall.build.VerifyDependencyState
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-/** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
-fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path.startsWith(":tools")
-
 plugins {
-    alias(libs.plugins.kotlin)
-    alias(libs.plugins.detekt)
-    alias(libs.plugins.ktlint)
-    alias(libs.plugins.spotbugs)
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     alias(libs.plugins.dependencyCheck)
     alias(libs.plugins.pitest) apply false
-    id("jacoco")
     id("base")
 }
 
 allprojects {
-    group = "io.mazewall"
-    version = "0.0.1-prealpha-SNAPSHOT"
-
-    repositories {
-        mavenCentral()
-    }
-
-    if (skipsKotlinStyleTools()) {
-        tasks.configureEach {
-            if (name.contains("detekt", ignoreCase = true) || name.contains("ktlint", ignoreCase = true)) {
-                enabled = false
-            }
-        }
-    }
-
-    // Gradle 9 ships an older JaCoCo agent that cannot instrument JDK 25
-    // classes. Configure the catalogued agent for every project, including
-    // demos, so a coverage run never silently loses JVM classes.
-    plugins.withId("jacoco") {
-        extensions.configure<JacocoPluginExtension> {
-            toolVersion =
-                rootProject.extensions
-                    .getByType<VersionCatalogsExtension>()
-                    .named("libs")
-                    .findVersion("jacoco")
-                    .get()
-                    .requiredVersion
-        }
-    }
-
-    if (!skipsKotlinStyleTools()) {
-        apply(plugin = "org.jlleitschuh.gradle.ktlint")
-        configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
-            version.set("1.7.0")
-            verbose.set(true)
-            outputToConsole.set(true)
-            coloredOutput.set(true)
-            reporters {
-                reporter(org.jlleitschuh.gradle.ktlint.reporter.ReporterType.PLAIN)
-                reporter(org.jlleitschuh.gradle.ktlint.reporter.ReporterType.HTML)
-            }
-        }
-    }
-
     // JitPack Shim: Satisfy JitPack's broken 'listDeps' task by injecting
     // the missing 'configurations' property into the task instance.
     tasks.matching { it.name == "listDeps" }.configureEach {
@@ -79,18 +30,7 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
-        // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
-        systemProperty("junit.jupiter.execution.timeout.default", "2 m")
-        systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
         if (project.path in setOf(":enforcer", ":platform", ":profiler")) {
-            useJUnitPlatform()
-            jvmArgs(
-                "--enable-native-access=ALL-UNNAMED",
-                "-Xmx256m",
-                "-Xms128m",
-                "-Dfile.encoding=UTF-8",
-                "-Dsun.jnu.encoding=UTF-8",
-            )
             systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         }
 
@@ -154,56 +94,34 @@ allprojects {
             )
         }
     }
-
-    // Ensure code is formatted before compilation or check to prevent build failures
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
-            freeCompilerArgs.add("-Xcontext-parameters")
-            freeCompilerArgs.add("-opt-in=io.mazewall.MazewallInternal")
-        }
-    }
-
-    tasks.withType<JavaCompile>().configureEach {
-        options.release.set(22)
-    }
-
-    tasks.matching { it.name == "ktlintCheck" || it.name == "ktlintTestSourceSetCheck" || it.name == "ktlintMainSourceSetCheck" }.configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
-    }
-
-    // Also format Kotlin scripts (like build.gradle.kts)
-    tasks.matching { it.name == "kotlinSourcesJar" }.configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
-    }
 }
 
-tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
-    enabled = false
-}
-
-val checkGradleLazyResolution by tasks.registering(Exec::class) {
-    group = "verification"
-    description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
-    commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
-}
+val checkGradleLazyResolution =
+    tasks.register<Exec>("checkGradleLazyResolution") {
+        group = "verification"
+        description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
+        commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
+    }
 
 tasks.named("check") {
     dependsOn(checkGradleLazyResolution)
+}
+
+tasks.register("format") {
+    group = "formatting"
+    description = "Formats Kotlin sources in projects that opt into KtLint."
+    dependsOn("ktlintFormat")
+    dependsOn(
+        listOf(":platform", ":enforcer", ":profiler", ":portal", ":portal-codegen", ":portal-worker")
+            .map { "$it:ktlintFormat" },
+    )
 }
 dependencies {
     testImplementation(kotlin("test"))
 }
 
 sourceSets {
-    val sharedTest by creating {
+    create("sharedTest") {
         kotlin.srcDir("src/sharedTest/kotlin")
         resources.srcDir("src/sharedTest/resources")
     }
@@ -220,7 +138,7 @@ dependencies {
     "sharedTestImplementation"(project(":enforcer"))
     "sharedTestImplementation"(project(":platform"))
     "sharedTestImplementation"(libs.junit.jupiter.api)
-    "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+    "sharedTestImplementation"(libs.junit.platform.launcher)
 }
 
 dependencyCheck {
@@ -259,13 +177,7 @@ subprojects {
     if (project.path.startsWith(":demos")) {
         return@subprojects
     }
-    apply(plugin = "java")
-    apply(plugin = "maven-publish")
-    apply(plugin = "base")
-    apply(plugin = "jacoco")
-    apply(plugin = "com.github.spotbugs")
-    if (!path.startsWith(":tools")) {
-        apply(plugin = "dev.detekt")
+    plugins.withId("mazewall.quality-conventions") {
         detekt {
             baseline = file("$rootDir/config/detekt/${project.name}-baseline.xml")
             source.setFrom(files("src/main/kotlin"))
@@ -276,247 +188,144 @@ subprojects {
                 dependsOn("detektMain")
             }
         }
-    }
-
-    tasks.configureEach {
-        if (name.startsWith("detekt")) {
-            try {
-                val method = this.javaClass.getMethod("getJdkHome")
-                val property = method.invoke(this) as org.gradle.api.file.DirectoryProperty
-                property.set(layout.projectDirectory.dir(providers.systemProperty("java.home")))
-            } catch (_: NoSuchMethodException) {
-                // Ignore tasks that do not have getJdkHome
-            }
+        spotbugs {
+            onlyAnalyze.set(listOf("io.mazewall.*", "demo.vulnapp.*"))
+            excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
         }
-    }
 
-    extensions.configure<PublishingExtension> {
-        repositories {
-            System.getenv("GITHUB_ACTOR")?.let { actor ->
-                maven {
-                    name = "GitHubPackages"
-                    url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-                    credentials {
-                        username = actor
-                        password = System.getenv("GITHUB_TOKEN")
-                    }
-                }
-            }
+        tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
+            enabled = false
         }
-    }
-
-    spotbugs {
-        ignoreFailures.set(false)
-        showStackTraces.set(true)
-        showProgress.set(false)
-        effort.set(com.github.spotbugs.snom.Effort.DEFAULT)
-        reportLevel.set(com.github.spotbugs.snom.Confidence.HIGH)
-        onlyAnalyze.set(listOf("io.mazewall.*", "demo.vulnapp.*"))
-        excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
-    }
-
-    tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach {
-        maxHeapSize.set("1g")
-    }
-
-    tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
-        enabled = false
-    }
-    dependencies {
-        "spotbugsPlugins"(
-            rootProject.extensions
-                .getByType<VersionCatalogsExtension>()
-                .named("libs")
-                .findLibrary("findsecbugs")
-                .get(),
-        )
-        "testImplementation"(rootProject.sourceSets["sharedTest"].output)
-        "testRuntimeOnly"(rootProject.sourceSets["sharedTest"].output)
-    }
-
-    tasks.withType<Test>().configureEach {
-        systemProperty("io.mazewall.test", "true")
-        if (project.hasProperty("io.mazewall.strictTestTier")) {
-            systemProperty("io.mazewall.strictTestTier", project.property("io.mazewall.strictTestTier") as String)
-        }
-    }
-
-    val jacocoExcludes =
-        listOf(
-            "**/io/mazewall/RealNative*",
-            "**/io/mazewall/RealTransactionManager*",
-            "**/io/mazewall/enforcer/JvmFloorWorkload*",
-            "**/io/mazewall/enforcer/supervisor/JVMValidationListener*",
-            "**/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorSessionHandler*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorInstaller*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorDaemon*",
-            "**/io/mazewall/profiler/engine/ProfilerDaemonEngine*",
-            "**/io/mazewall/profiler/engine/RealProfilerTransport*",
-            "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
-            "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
-            "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
-            // Privileged standalone acceptance executables are exercised by
-            // the Docker kernel gate, not by in-process JaCoCo unit tests.
-            "**/io/mazewall/profiler/tierE/stress/*",
-            "**/io/mazewall/orchestrator/OrchestratorDaemonKt*",
-            "**/io/mazewall/orchestrator/RealGitHubClient*",
-            "**/io/mazewall/orchestrator/RealJulesClient*",
-            "**/io/mazewall/orchestrator/TelegramBot*",
-            "**/io/mazewall/orchestrator/RealOrchestratorEnvironment*",
-        )
-
-    val unitTest = tasks.named<Test>("test")
-    val unitExecutionData = project.layout.buildDirectory.file("jacoco/test.exec")
-    val kernelExecutionData =
-        fileTree(project.layout.buildDirectory.dir("jacoco")) {
-            include("integrationTest.exec", "integrationTestFreshJvm.exec")
-        }
-    val combinedExecutionData =
-        if (project.name == "platform") {
-            files(
-                unitExecutionData,
-                kernelExecutionData,
-                fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco")).include("*.exec"),
+        dependencies {
+            "spotbugsPlugins"(
+                rootProject.extensions
+                    .getByType<VersionCatalogsExtension>()
+                    .named("libs")
+                    .findLibrary("findsecbugs")
+                    .get(),
             )
-        } else {
-            files(unitExecutionData, kernelExecutionData)
+            "testImplementation"(rootProject.sourceSets["sharedTest"].output)
+            "testRuntimeOnly"(rootProject.sourceSets["sharedTest"].output)
         }
 
-    fun org.gradle.testing.jacoco.tasks.JacocoReport.configureClasses() {
-        // Explicit dependencies to satisfy Gradle 9 validation
-        // The JacocoReport task uses classDirectories which includes outputs from classes and processResources
-        dependsOn(tasks.named("classes"))
-        tasks.findByName("processResources")?.let { processResources ->
-            dependsOn(processResources)
+        tasks.withType<Test>().configureEach {
+            systemProperty("io.mazewall.test", "true")
+            if (project.hasProperty("io.mazewall.strictTestTier")) {
+                systemProperty("io.mazewall.strictTestTier", project.property("io.mazewall.strictTestTier") as String)
+            }
         }
-        classDirectories.setFrom(
-            files(
-                classDirectories.files.map {
-                    fileTree(it) {
+
+        val jacocoExcludes =
+            listOf(
+                "**/io/mazewall/RealNative*",
+                "**/io/mazewall/RealTransactionManager*",
+                "**/io/mazewall/enforcer/JvmFloorWorkload*",
+                "**/io/mazewall/enforcer/supervisor/JVMValidationListener*",
+                "**/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller*",
+                "**/io/mazewall/enforcer/supervisor/SupervisorSessionHandler*",
+                "**/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine*",
+                "**/io/mazewall/enforcer/supervisor/SupervisorInstaller*",
+                "**/io/mazewall/enforcer/supervisor/SupervisorDaemon*",
+                "**/io/mazewall/profiler/engine/ProfilerDaemonEngine*",
+                "**/io/mazewall/profiler/engine/RealProfilerTransport*",
+                "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
+                "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
+                "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
+                // Privileged standalone acceptance executables are exercised by
+                // the Docker kernel gate, not by in-process JaCoCo unit tests.
+                "**/io/mazewall/profiler/tierE/stress/*",
+                "**/io/mazewall/orchestrator/OrchestratorDaemonKt*",
+                "**/io/mazewall/orchestrator/RealGitHubClient*",
+                "**/io/mazewall/orchestrator/RealJulesClient*",
+                "**/io/mazewall/orchestrator/TelegramBot*",
+                "**/io/mazewall/orchestrator/RealOrchestratorEnvironment*",
+            )
+
+        val unitTest = tasks.named<Test>("test")
+        val mainOutput = sourceSets.named("main").map { it.output }
+        val unitExecutionData = project.layout.buildDirectory.file("jacoco/test.exec")
+        val kernelExecutionData =
+            fileTree(project.layout.buildDirectory.dir("jacoco")) {
+                include("integrationTest.exec", "integrationTestFreshJvm.exec")
+            }
+        val combinedExecutionData =
+            if (project.name == "platform") {
+                files(
+                    unitExecutionData,
+                    kernelExecutionData,
+                    fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco")).include("*.exec"),
+                )
+            } else {
+                files(unitExecutionData, kernelExecutionData)
+            }
+
+        fun org.gradle.testing.jacoco.tasks.JacocoReport.configureClasses() {
+            // Explicit dependencies to satisfy Gradle 9 validation
+            // The JacocoReport task uses classDirectories which includes outputs from classes and processResources
+            dependsOn(tasks.named("classes"))
+            classDirectories.setFrom(
+                mainOutput.map { output ->
+                    output.classesDirs.asFileTree.matching {
                         exclude(jacocoExcludes)
                     }
                 },
-            ),
-        )
-        reports {
-            xml.required.set(true)
-            html.required.set(true)
-        }
-    }
-
-    tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
-        description = "Generates host-safe unit-test coverage only."
-        dependsOn(unitTest)
-        mustRunAfter(unitTest)
-        executionData.setFrom(unitExecutionData)
-        configureClasses()
-    }
-
-    tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoKernelTestReport") {
-        group = "verification"
-        description = "Generates privileged kernel-test coverage only."
-        dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
-        executionData.setFrom(kernelExecutionData)
-        configureClasses()
-    }
-
-    tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoCombinedReport") {
-        group = "verification"
-        description = "Generates informational combined unit and kernel coverage."
-        dependsOn(unitTest)
-        dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
-        // Platform's native wrappers are also exercised by enforcer containment
-        // tests.  Make those execution-data producers explicit so Gradle does not
-        // reject this cross-project report as an implicit dependency.
-        if (project.name == "platform") {
-            dependsOn(
-                ":enforcer:test",
-                ":enforcer:integrationTest",
-                ":enforcer:integrationTestFreshJvm",
             )
+            reports {
+                xml.required.set(true)
+                html.required.set(true)
+            }
         }
-        executionData.setFrom(combinedExecutionData)
-        configureClasses()
-    }
 
-    tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoTestCoverageVerification") {
-        description = "Verifies host-safe unit-test coverage only."
-        dependsOn(tasks.named("jacocoTestReport"))
-        mustRunAfter(tasks.named("jacocoTestReport"))
-        dependsOn(tasks.named("classes"))
-        tasks.findByName("processResources")?.let { processResources -> dependsOn(processResources) }
-        executionData.setFrom(unitExecutionData)
-        classDirectories.setFrom(
-            files(
-                classDirectories.files.map {
-                    fileTree(it) {
+        tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
+            description = "Generates host-safe unit-test coverage only."
+            dependsOn(unitTest)
+            mustRunAfter(unitTest)
+            executionData.setFrom(unitExecutionData)
+            configureClasses()
+        }
+
+        tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoKernelTestReport") {
+            group = "verification"
+            description = "Generates privileged kernel-test coverage only."
+            dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+            executionData.setFrom(kernelExecutionData)
+            configureClasses()
+        }
+
+        tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoCombinedReport") {
+            group = "verification"
+            description = "Generates informational combined unit and kernel coverage."
+            dependsOn(unitTest)
+            dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+            // Platform's native wrappers are also exercised by enforcer containment
+            // tests.  Make those execution-data producers explicit so Gradle does not
+            // reject this cross-project report as an implicit dependency.
+            if (project.name == "platform") {
+                dependsOn(
+                    ":enforcer:test",
+                    ":enforcer:integrationTest",
+                    ":enforcer:integrationTestFreshJvm",
+                )
+            }
+            executionData.setFrom(combinedExecutionData)
+            configureClasses()
+        }
+
+        tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+            description = "Verifies host-safe unit-test coverage only."
+            dependsOn(tasks.named("jacocoTestReport"))
+            mustRunAfter(tasks.named("jacocoTestReport"))
+            dependsOn(tasks.named("classes"))
+            executionData.setFrom(unitExecutionData)
+            classDirectories.setFrom(
+                mainOutput.map { output ->
+                    output.classesDirs.asFileTree.matching {
                         exclude(jacocoExcludes)
                     }
                 },
-            ),
-        )
-        violationRules {
-            if (project.name == "enforcer") {
-                rule {
-                    element = "BUNDLE"
-                    limit {
-                        counter = "INSTRUCTION"
-                        value = "COVEREDRATIO"
-                        minimum = "0.82".toBigDecimal()
-                    }
-                }
-            } else if (project.name == "profiler") {
-                rule {
-                    element = "BUNDLE"
-                    limit {
-                        counter = "INSTRUCTION"
-                        value = "COVEREDRATIO"
-                        minimum = "0.70".toBigDecimal()
-                    }
-                }
-            } else if (project.name == "platform") {
-                rule {
-                    element = "BUNDLE"
-                    limit {
-                        counter = "INSTRUCTION"
-                        value = "COVEREDRATIO"
-                        // Unit-only baseline measured after removing kernel
-                        // execution data; native bridges stay in kernelCheck.
-                        minimum = "0.65".toBigDecimal()
-                    }
-                }
-            } else if (project.name == "orchestrator") {
-                rule {
-                    element = "BUNDLE"
-                    limit {
-                        counter = "INSTRUCTION"
-                        value = "COVEREDRATIO"
-                        minimum = "0.78".toBigDecimal()
-                    }
-                }
-            }
-        }
-    }
-
-    tasks.register<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoKernelCoverageVerification") {
-        group = "verification"
-        description = "Verifies combined host and privileged-kernel coverage for native contracts."
-        dependsOn(tasks.named("jacocoCombinedReport"))
-        mustRunAfter(tasks.named("jacocoCombinedReport"))
-        dependsOn(tasks.named("classes"))
-        executionData.setFrom(combinedExecutionData)
-        classDirectories.setFrom(
-            files(
-                classDirectories.files.map {
-                    fileTree(it) { exclude(jacocoExcludes) }
-                },
-            ),
-        )
-        violationRules {
-            when (project.name) {
-                "enforcer" ->
+            )
+            violationRules {
+                if (project.name == "enforcer") {
                     rule {
                         element = "BUNDLE"
                         limit {
@@ -525,65 +334,103 @@ subprojects {
                             minimum = "0.82".toBigDecimal()
                         }
                     }
-                "profiler" ->
+                } else if (project.name == "profiler") {
                     rule {
                         element = "BUNDLE"
-                        limit {
-                            counter = "INSTRUCTION"
-                            value = "COVEREDRATIO"
-                            minimum = "0.68".toBigDecimal()
-                        }
-                    }
-                "platform" -> {
-                    rule {
-                        element = "CLASS"
-                        includes = listOf("io.mazewall.LinuxNative")
-                        limit {
-                            counter = "INSTRUCTION"
-                            value = "COVEREDRATIO"
-                            minimum = "0.78".toBigDecimal()
-                        }
-                    }
-                    rule {
-                        element = "CLASS"
-                        includes =
-                            listOf(
-                                "io.mazewall.ffi.Layouts",
-                                "io.mazewall.ffi.LayoutValidator",
-                                "io.mazewall.ffi.memory.SegmentPool",
-                                "io.mazewall.ffi.memory.NativeArena",
-                                "io.mazewall.ffi.internal.RealNativeFileSystem",
-                                "io.mazewall.ffi.internal.RealNativeProcess",
-                            )
                         limit {
                             counter = "INSTRUCTION"
                             value = "COVEREDRATIO"
                             minimum = "0.70".toBigDecimal()
                         }
                     }
+                } else if (project.name == "platform") {
+                    rule {
+                        element = "BUNDLE"
+                        limit {
+                            counter = "INSTRUCTION"
+                            value = "COVEREDRATIO"
+                            // Unit-only baseline measured after removing kernel
+                            // execution data; native bridges stay in kernelCheck.
+                            minimum = "0.65".toBigDecimal()
+                        }
+                    }
+                } else if (project.name == "orchestrator") {
+                    rule {
+                        element = "BUNDLE"
+                        limit {
+                            counter = "INSTRUCTION"
+                            value = "COVEREDRATIO"
+                            minimum = "0.78".toBigDecimal()
+                        }
+                    }
                 }
             }
         }
-    }
 
-    plugins.withId("java") {
-        tasks.register("unitCheck") {
+        tasks.register<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoKernelCoverageVerification") {
             group = "verification"
-            description = "Runs host-safe unit tests and enforces unit-only coverage."
-            dependsOn(unitTest, tasks.named("jacocoTestCoverageVerification"))
-        }
-        tasks.register("kernelCheck") {
-            group = "verification"
-            description = "Runs privileged kernel and fresh-JVM integration tests."
-            dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
-            dependsOn(tasks.named("jacocoKernelTestReport"))
-            dependsOn(tasks.named("jacocoKernelCoverageVerification"))
-        }
-        tasks.named("check") {
-            dependsOn(tasks.withType<Test>())
+            description = "Verifies combined host and privileged-kernel coverage for native contracts."
             dependsOn(tasks.named("jacocoCombinedReport"))
-            dependsOn(tasks.named("jacocoTestCoverageVerification"))
-            dependsOn(tasks.named("jacocoKernelCoverageVerification"))
+            mustRunAfter(tasks.named("jacocoCombinedReport"))
+            dependsOn(tasks.named("classes"))
+            executionData.setFrom(combinedExecutionData)
+            classDirectories.setFrom(
+                mainOutput.map { output ->
+                    output.classesDirs.asFileTree.matching {
+                        exclude(jacocoExcludes)
+                    }
+                },
+            )
+            violationRules {
+                when (project.name) {
+                    "enforcer" ->
+                        rule {
+                            element = "BUNDLE"
+                            limit {
+                                counter = "INSTRUCTION"
+                                value = "COVEREDRATIO"
+                                minimum = "0.82".toBigDecimal()
+                            }
+                        }
+                    "profiler" ->
+                        rule {
+                            element = "BUNDLE"
+                            limit {
+                                counter = "INSTRUCTION"
+                                value = "COVEREDRATIO"
+                                minimum = "0.68".toBigDecimal()
+                            }
+                        }
+                    "platform" -> {
+                        rule {
+                            element = "CLASS"
+                            includes = listOf("io.mazewall.LinuxNative")
+                            limit {
+                                counter = "INSTRUCTION"
+                                value = "COVEREDRATIO"
+                                minimum = "0.78".toBigDecimal()
+                            }
+                        }
+                        rule {
+                            element = "CLASS"
+                            includes =
+                                listOf(
+                                    "io.mazewall.ffi.Layouts",
+                                    "io.mazewall.ffi.LayoutValidator",
+                                    "io.mazewall.ffi.memory.SegmentPool",
+                                    "io.mazewall.ffi.memory.NativeArena",
+                                    "io.mazewall.ffi.internal.RealNativeFileSystem",
+                                    "io.mazewall.ffi.internal.RealNativeProcess",
+                                )
+                            limit {
+                                counter = "INSTRUCTION"
+                                value = "COVEREDRATIO"
+                                minimum = "0.70".toBigDecimal()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -600,12 +447,43 @@ tasks.register("kernelCheck") {
     dependsOn(subprojects.filterNot { it.path.startsWith(":demos") }.map { "${it.path}:kernelCheck" })
 }
 
-evaluationDependsOn(":profiler")
-
-val triageRuntimeClasspath by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
+tasks.register("mergeCheck") {
+    group = "verification"
+    description = "Runs the complete host and privileged-kernel merge gate."
+    dependsOn(tasks.named("check"), tasks.named("unitCheck"), tasks.named("kernelCheck"), "verifyGradleReproducibility")
 }
+
+tasks.register<VerifyDependencyState>("verifyGradleReproducibility") {
+    group = "verification"
+    description = "Verifies that dependency locks and checksum metadata are checked in."
+    verificationMetadata.set(layout.projectDirectory.file("gradle/verification-metadata.xml"))
+    val expectedLockfiles =
+        listOf(
+            "gradle.lockfile",
+            "settings-gradle.lockfile",
+            "buildSrc/gradle.lockfile",
+            "platform/gradle.lockfile",
+            "enforcer/gradle.lockfile",
+            "profiler/gradle.lockfile",
+            "portal/gradle.lockfile",
+            "portal-codegen/gradle.lockfile",
+            "portal-worker/gradle.lockfile",
+            "demos/cli-demo/gradle.lockfile",
+            "demos/agent-sandbox-demo/gradle.lockfile",
+            "demos/vulnerable-web-app/gradle.lockfile",
+        ).map(layout.projectDirectory::file)
+    lockfiles.from(expectedLockfiles)
+}
+
+tasks.named("build") {
+    dependsOn(tasks.named("mergeCheck"))
+}
+
+val triageRuntimeClasspath =
+    configurations.create("triageRuntimeClasspath") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
 
 dependencies {
     add(triageRuntimeClasspath.name, project(":profiler"))
@@ -613,30 +491,23 @@ dependencies {
 
 tasks.register<JavaExec>("runTriage") {
     group = "verification"
-    description = "Gathers system telemetry and diagnostics on failure."
+    description = "Gathers telemetry for an explicitly named failed Gradle task."
     classpath = triageRuntimeClasspath
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
 
-    val testFailures =
-        objects.listProperty<Boolean>().apply {
-            set(
-                provider {
-                    subprojects.flatMap { it.tasks.withType<Test>() }.map { it.state.failure != null }
-                },
-            )
-        }
-
-    // Only run this diagnostic triage task if the test execution actually failed.
-    onlyIf {
-        testFailures.get().any { it }
-    }
-}
-
-// Wire the triage runner to finalize test execution across all subprojects
-subprojects {
-    tasks.withType<Test>().configureEach {
-        finalizedBy(rootProject.tasks.named("runTriage"))
-    }
+    val failedTask = providers.gradleProperty("triage.failedTask")
+    val reportFile =
+        layout.buildDirectory.file(
+            failedTask.map { taskPath ->
+                val safePath = taskPath.trim(':').replace(Regex("[^A-Za-z0-9._-]+"), "-").ifEmpty { "unknown" }
+                "reports/triage/$safePath/report.json"
+            },
+        )
+    val triageArguments = objects.newInstance<TriageArguments>()
+    triageArguments.failedTaskPath.set(failedTask)
+    triageArguments.reportFile.set(reportFile)
+    argumentProviders.add(triageArguments)
+    onlyIf("a failed task was supplied") { failedTask.isPresent }
 }
 
 // Resolves the hooks directory for both normal checkouts (.git is a directory) and
@@ -666,7 +537,7 @@ val gitHooksDir: File by lazy {
     }
 }
 
-val installGitHooks by tasks.registering(Copy::class) {
+tasks.register<Copy>("installGitHooks") {
     group = "git"
     description = "Installs the pre-commit audit and verification hook"
     from("$rootDir/scripts/git-audit-hook.sh") {
@@ -680,11 +551,15 @@ val installGitHooks by tasks.registering(Copy::class) {
 }
 
 tasks.named("check") {
-    dependsOn(installGitHooks)
     findProject(":tools:orchestrator")?.let { orchestrator ->
         dependsOn(orchestrator.tasks.named("checkBacklog"))
     }
-    dependsOn(tasks.named("refactorFirstReport"))
+}
+
+tasks.register("updateDiagrams") {
+    group = "documentation"
+    description = "Regenerates the checked-in class diagrams."
+    dependsOn(":enforcer:generateClassDiagrams", ":profiler:generateClassDiagrams")
 }
 
 // RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
