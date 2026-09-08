@@ -5,6 +5,42 @@ import org.junit.jupiter.api.Test
 
 class SupervisorSessionMachineTest {
     @Test
+    fun `every state and event pair has an explicit transition`() {
+        val states = listOf(
+            SupervisorSessionState.AwaitingNotification,
+            SupervisorSessionState.ResolvingPath,
+            SupervisorSessionState.SendingJvmRequest,
+            SupervisorSessionState.AwaitingJvmVerdict,
+            SupervisorSessionState.ExecutingReply,
+            SupervisorSessionState.Replied,
+            SupervisorSessionState.Terminated,
+        )
+        val events = listOf(
+            SupervisorSessionEvent.NotificationReceived,
+            SupervisorSessionEvent.PathResolved(SupervisorRoute.Continue),
+            SupervisorSessionEvent.JvmVerdictReceived(SupervisorRoute.Abort(1, "test")),
+            SupervisorSessionEvent.JvmRequestSent,
+            SupervisorSessionEvent.JvmRequestFailed,
+            SupervisorSessionEvent.ReplySucceeded,
+            SupervisorSessionEvent.ReplyFailed,
+            SupervisorSessionEvent.Failed,
+        )
+
+        for (state in states) {
+            for (event in events) {
+                val transition = SupervisorSessionMachine.evaluate(state, event)
+                if (state == SupervisorSessionState.Replied || state == SupervisorSessionState.Terminated) {
+                    assertEquals(state, transition.state)
+                    assertEquals(SupervisorSessionEffect.PostTerminalObservation, transition.effect)
+                } else {
+                    org.junit.jupiter.api.Assertions
+                        .assertNotNull(transition.state)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `JVM verdict resolver rejects a response for another notification`() {
         val arch = io.mazewall.core.Arch
             .current()
