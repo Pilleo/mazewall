@@ -161,6 +161,7 @@ internal class JVMValidationListener(
                 System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppidVal, nr=$nr, args=$argsList")
 
                 val traceeArch = Arch.fromAudit(archVal)
+                val syscallResolution = SupervisorSyscallResolver.resolve(nr, traceeArch)
                 val forkNr = traceeArch.fork
                 val vforkNr = traceeArch.vfork
                 val cloneNr = traceeArch.clone
@@ -208,15 +209,25 @@ internal class JVMValidationListener(
                             stackTrace.forEach { sb.append("  $it\n") }
                         }
                         ValidationLog.logs.add(sb.toString())
-                        val syscall = Syscall.entries.find { it.numberFor(traceeArch) == validationState.nr } ?: Syscall.OPEN
-                        val authStartMs = System.currentTimeMillis()
-                        val handler = scopingPolicy.handlers[syscall]
-                        val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
-                        val authMs = System.currentTimeMillis() - authStartMs
-                        if (authMs > SLOW_AUTH_THRESHOLD_MS) {
-                            logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall $syscall")
+                        when (syscallResolution) {
+                            is SupervisorSyscallResolution.Known -> {
+                                val authStartMs = System.currentTimeMillis()
+                                val handler = scopingPolicy.handlers[syscallResolution.syscall]
+                                val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
+                                val authMs = System.currentTimeMillis() - authStartMs
+                                if (authMs > SLOW_AUTH_THRESHOLD_MS) {
+                                    logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall ${syscallResolution.syscall}")
+                                }
+                                res
+                            }
+                            is SupervisorSyscallResolution.Unknown -> {
+                                logger.warning(
+                                    "[SUPERVISOR-DIAGNOSTIC] Refusing unmapped syscall " +
+                                        "nr=${syscallResolution.number.nr} arch=${syscallResolution.arch}",
+                                )
+                                false
+                            }
                         }
-                        res
                     }
                 }
 
@@ -227,7 +238,7 @@ internal class JVMValidationListener(
 
                 val kind = io.mazewall.platform.seccomp.SupervisedKind
                     .classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
-                val verdict = if (!isAllowed) {
+                val verdict = if (syscallResolution is SupervisorSyscallResolution.Unknown || !isAllowed) {
                     JvmVerdict.Deny(NativeConstants.EPERM)
                 } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {
                     JvmVerdict.InjectFd
