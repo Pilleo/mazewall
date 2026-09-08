@@ -8,7 +8,11 @@ internal sealed interface SupervisorSessionState {
 
     data object ResolvingPath : SupervisorSessionState
 
+    data object SendingJvmRequest : SupervisorSessionState
+
     data object AwaitingJvmVerdict : SupervisorSessionState
+
+    data object ExecutingReply : SupervisorSessionState
 
     data object Replied : SupervisorSessionState
 }
@@ -23,6 +27,14 @@ internal sealed interface SupervisorSessionEvent {
     data class JvmVerdictReceived(
         val route: SupervisorRoute,
     ) : SupervisorSessionEvent
+
+    data object JvmRequestSent : SupervisorSessionEvent
+
+    data object JvmRequestFailed : SupervisorSessionEvent
+
+    data object ReplySucceeded : SupervisorSessionEvent
+
+    data object ReplyFailed : SupervisorSessionEvent
 
     data object Failed : SupervisorSessionEvent
 }
@@ -64,6 +76,23 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.Failed -> abort()
                     SupervisorSessionEvent.NotificationReceived,
                     is SupervisorSessionEvent.JvmVerdictReceived,
+                    SupervisorSessionEvent.JvmRequestSent,
+                    SupervisorSessionEvent.JvmRequestFailed,
+                    SupervisorSessionEvent.ReplySucceeded,
+                    SupervisorSessionEvent.ReplyFailed,
+                    -> SupervisorSessionTransition(state)
+                }
+            SupervisorSessionState.SendingJvmRequest ->
+                when (event) {
+                    SupervisorSessionEvent.JvmRequestSent -> SupervisorSessionTransition(SupervisorSessionState.AwaitingJvmVerdict)
+                    SupervisorSessionEvent.JvmRequestFailed,
+                    SupervisorSessionEvent.Failed,
+                    -> abort()
+                    SupervisorSessionEvent.NotificationReceived,
+                    is SupervisorSessionEvent.PathResolved,
+                    is SupervisorSessionEvent.JvmVerdictReceived,
+                    SupervisorSessionEvent.ReplySucceeded,
+                    SupervisorSessionEvent.ReplyFailed,
                     -> SupervisorSessionTransition(state)
                 }
             SupervisorSessionState.AwaitingJvmVerdict ->
@@ -72,6 +101,23 @@ internal object SupervisorSessionMachine {
                     SupervisorSessionEvent.Failed -> abort()
                     SupervisorSessionEvent.NotificationReceived,
                     is SupervisorSessionEvent.PathResolved,
+                    SupervisorSessionEvent.JvmRequestSent,
+                    SupervisorSessionEvent.JvmRequestFailed,
+                    SupervisorSessionEvent.ReplySucceeded,
+                    SupervisorSessionEvent.ReplyFailed,
+                    -> SupervisorSessionTransition(state)
+                }
+            SupervisorSessionState.ExecutingReply ->
+                when (event) {
+                    SupervisorSessionEvent.ReplySucceeded -> SupervisorSessionTransition(SupervisorSessionState.Replied)
+                    SupervisorSessionEvent.ReplyFailed,
+                    SupervisorSessionEvent.Failed,
+                    -> SupervisorSessionTransition(SupervisorSessionState.Replied, SupervisorSessionEffect.Abort())
+                    SupervisorSessionEvent.NotificationReceived,
+                    is SupervisorSessionEvent.PathResolved,
+                    is SupervisorSessionEvent.JvmVerdictReceived,
+                    SupervisorSessionEvent.JvmRequestSent,
+                    SupervisorSessionEvent.JvmRequestFailed,
                     -> SupervisorSessionTransition(state)
                 }
             SupervisorSessionState.Replied -> SupervisorSessionTransition(state)
@@ -79,7 +125,7 @@ internal object SupervisorSessionMachine {
 
     private fun routeTransition(route: SupervisorRoute): SupervisorSessionTransition =
         if (route is SupervisorRoute.AskJvm) {
-            SupervisorSessionTransition(SupervisorSessionState.AwaitingJvmVerdict, SupervisorSessionEffect.RequestJvmVerdict)
+            SupervisorSessionTransition(SupervisorSessionState.SendingJvmRequest, SupervisorSessionEffect.RequestJvmVerdict)
         } else {
             terminalRouteTransition(route)
         }
@@ -91,8 +137,8 @@ internal object SupervisorSessionMachine {
             is SupervisorRoute.Abort,
             is SupervisorRoute.InjectFd,
             is SupervisorRoute.SecureExec,
-            -> SupervisorSessionTransition(SupervisorSessionState.Replied, SupervisorSessionEffect.ExecuteRoute(route))
+            -> SupervisorSessionTransition(SupervisorSessionState.ExecutingReply, SupervisorSessionEffect.ExecuteRoute(route))
         }
 
-    private fun abort(): SupervisorSessionTransition = SupervisorSessionTransition(SupervisorSessionState.Replied, SupervisorSessionEffect.Abort())
+    private fun abort(): SupervisorSessionTransition = SupervisorSessionTransition(SupervisorSessionState.ExecutingReply, SupervisorSessionEffect.Abort())
 }

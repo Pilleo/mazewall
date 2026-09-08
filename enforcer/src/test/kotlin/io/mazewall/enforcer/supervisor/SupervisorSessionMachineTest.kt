@@ -27,38 +27,48 @@ class SupervisorSessionMachineTest {
     }
 
     @Test
-    fun `ask JVM path yields one request then one terminal effect`() {
+    fun `JVM route is replied only after a confirmed reply effect`() {
         val resolving = SupervisorSessionMachine.evaluate(
             SupervisorSessionState.AwaitingNotification,
             SupervisorSessionEvent.NotificationReceived,
         )
         assertEquals(SupervisorSessionEffect.ResolvePath, resolving.effect)
 
-        val waiting = SupervisorSessionMachine.evaluate(
+        val sending = SupervisorSessionMachine.evaluate(
             resolving.state,
             SupervisorSessionEvent.PathResolved(SupervisorRoute.AskJvm),
         )
-        assertEquals(SupervisorSessionEffect.RequestJvmVerdict, waiting.effect)
+        assertEquals(SupervisorSessionState.SendingJvmRequest, sending.state)
+        assertEquals(SupervisorSessionEffect.RequestJvmVerdict, sending.effect)
 
-        val replied = SupervisorSessionMachine.evaluate(
+        val waiting = SupervisorSessionMachine.evaluate(
+            sending.state,
+            SupervisorSessionEvent.JvmRequestSent,
+        )
+        assertEquals(SupervisorSessionState.AwaitingJvmVerdict, waiting.state)
+
+        val executing = SupervisorSessionMachine.evaluate(
             waiting.state,
             SupervisorSessionEvent.JvmVerdictReceived(SupervisorRoute.Continue),
         )
         assertEquals(
             SupervisorSessionEffect.ExecuteRoute(SupervisorRoute.Continue),
-            replied.effect,
+            executing.effect,
         )
+        assertEquals(SupervisorSessionState.ExecutingReply, executing.state)
+
+        val replied = SupervisorSessionMachine.evaluate(executing.state, SupervisorSessionEvent.ReplySucceeded)
         assertEquals(SupervisorSessionState.Replied, replied.state)
     }
 
     @Test
-    fun `failure always produces the single fail closed reply`() {
+    fun `failure enters reply execution with the single fail closed reply`() {
         val transition = SupervisorSessionMachine.evaluate(
             SupervisorSessionState.ResolvingPath,
             SupervisorSessionEvent.Failed,
         )
 
-        assertEquals(SupervisorSessionState.Replied, transition.state)
+        assertEquals(SupervisorSessionState.ExecutingReply, transition.state)
         assertEquals(SupervisorSessionEffect.Abort(), transition.effect)
     }
 }

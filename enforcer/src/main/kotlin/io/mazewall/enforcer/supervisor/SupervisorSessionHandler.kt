@@ -312,7 +312,10 @@ internal class SupervisorSessionHandler(
                         return false
                     }
 
-                    val res = readAndHandleJvmResponse(routeContext)
+                    sessionState = SupervisorSessionMachine
+                        .evaluate(sessionState, SupervisorSessionEvent.JvmRequestSent)
+                        .state
+                    val res = readAndHandleJvmResponse(routeContext, sessionState)
                     logger.info { "[SUPERVISOR-DEBUG] JVM validation handler response result=$res" }
                     return res
     }
@@ -365,7 +368,10 @@ internal class SupervisorSessionHandler(
         return writeRes is LinuxNative.SyscallResult.Success<*, *>
     }
 
-    context(arena: NativeArena) internal fun readAndHandleJvmResponse(context: SupervisorRouteContext): Boolean {
+    context(arena: NativeArena) internal fun readAndHandleJvmResponse(
+        context: SupervisorRouteContext,
+        state: SupervisorSessionState = SupervisorSessionState.AwaitingJvmVerdict,
+    ): Boolean {
         val (request, _, resp) = context
         val (id, header, pathStr) = request
         val (nr, _, traceeArch) = header
@@ -438,17 +444,22 @@ internal class SupervisorSessionHandler(
 
             val jvmPath = respSeg.getPath()
             val transition = SupervisorSessionMachine.evaluate(
-                SupervisorSessionState.AwaitingJvmVerdict,
+                state,
                 SupervisorSessionEvent.JvmVerdictReceived(route),
             )
             val effect = transition.effect as? SupervisorSessionEffect.ExecuteRoute
                 ?: return terminalRoutes.abort(context, NativeConstants.EPERM)
-            return routeDispatcher.execute(
+            val replied = routeDispatcher.execute(
                 effect.route,
                 context,
                 jvmPath,
                 routeExecutor,
             )
+            return SupervisorSessionMachine
+                .evaluate(
+                transition.state,
+                if (replied) SupervisorSessionEvent.ReplySucceeded else SupervisorSessionEvent.ReplyFailed,
+            ).state == SupervisorSessionState.Replied
         } else {
             sendSeccompError(id, NativeConstants.EPERM, resp)
             return false

@@ -8,20 +8,26 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.OpenFlags
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Isolated
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@Isolated
 class SupervisorDaemonEngineTest {
     @AfterEach
     fun tearDown() {
@@ -41,20 +47,35 @@ class SupervisorDaemonEngineTest {
             }
         }
 
-        LinuxNative.setEngine(mockEngine)
-        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
-        val connection = io.mazewall.ffi.networking.SeccompConnection
-            .FdAttached(socketFd, listenerFd)
-        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val pollFd = PollFdSegment.of(arena.allocate(8))
-            mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
+        val (socketFd, listenerFd) = NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val path = arena.allocateFrom("/dev/null")
+                val socket = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
+                val listener = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
+                FileDescriptor.adopt(socket, FileDescriptorRole.UnixSocket) to
+                    FileDescriptor.adopt(listener, FileDescriptorRole.SeccompNotif)
+            }
+        }
+        try {
+            assertEquals("/dev/null", Files.readSymbolicLink(Path.of("/proc/self/fd/${socketFd.value}")).toString())
+            assertEquals("/dev/null", Files.readSymbolicLink(Path.of("/proc/self/fd/${listenerFd.value}")).toString())
+            LinuxNative.setEngine(mockEngine)
+            val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
+            val connection = io.mazewall.ffi.networking.SeccompConnection
+                .FdAttached(socketFd, listenerFd)
+            NativeArena.ofConfined().use { arena ->
+                val pollFd = PollFdSegment.of(arena.allocate(8))
+                mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
 
-            val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
+                val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
 
-            assertNotNull(result, "processConnectionStep should return non-null on successful retry")
-            assertEquals(2, writeCalls)
+                assertNotNull(result, "processConnectionStep should return non-null on successful retry")
+                assertEquals(2, writeCalls)
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+            RealNativeEngine.fileSystem.close(socketFd)
+            RealNativeEngine.fileSystem.close(listenerFd)
         }
     }
 
