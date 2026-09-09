@@ -43,7 +43,8 @@ When conducting a Pull Request review on a branch with Green CI:
    - Browse: `docs/diagrams/enforcer_class_diagram.puml`, `docs/diagrams/profiler_class_diagram.puml`
 
 2. **Knowledge Maps (links source, design docs, and open issues):**
-   - Browse: `docs/internals/designs/core/maps/enforcer_map.md`, `docs/internals/designs/core/maps/profiler_map.md`
+   - Browse: `docs/internals/designs/core/architectural-map.md` (canonical cross-module ownership and dependency map).
+   - Follow its links to `docs/internals/designs/enforcer/enforcer-architecture.md` and `docs/internals/designs/profiler/profiler-design.md` for the canonical generated diagrams and module details. Historical `core/maps/*_map.md` files are redirects, not independent architecture sources.
    - Check issues already filed for each source file to avoid duplicate backlog entries.
 
 3. **Symbol Outline (Codanna — for JVM classes, methods, call graphs):**

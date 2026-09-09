@@ -53,6 +53,14 @@ Worker first lines after IPC connect:
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
+Before serving the first request, `PortalWorkerMain` strictly validates generated dispatcher entries
+and captures a local `PortalDispatcherTable`. Its startup builder copies method IDs into immutable
+keys, rejects duplicates, and publishes a copied handler map exactly once; publication invalidates
+the builder. Malformed strict entries abort startup. The legacy registry's tolerant bootstrap is
+available only before publication, and no registry method can replace the published mapping.
+This freezes dispatch authority, not mutable application state inside a guest implementation.
+Portal method IDs, frame bytes, payload copy boundaries, and capability-FD ownership are unchanged.
+
 ## IPC and FDs
 
 Transport: `PrivateUnixEndpoint` + `SocketManager` (`AF_UNIX`, `SOCK_CLOEXEC`).

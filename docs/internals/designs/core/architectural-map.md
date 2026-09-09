@@ -7,11 +7,15 @@ This document provides a high-level "Knowledge Graph" of the `mazewall` system. 
 | Component | Responsibility | Process/Thread | Lifecycle |
 |-----------|----------------|----------------|-----------|
 | **Enforcer Engine** | BPF compilation and filter installation. | Target JVM (Worker Thread) | Final / Immutable once applied. |
-| **Container Registry** | Tracks thread-scoped seccomp/Landlock state. | Target JVM (ThreadLocal) | Transient JVM state. |
-| **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Long-lived per session. |
-| **Trace Listener** | Bridge between Daemon and JVM Thread Registry. | Target JVM (Dedicated Thread) | Bound to session. |
+| **Containment Registry** | Tracks process-wide and thread-scoped seccomp/Landlock state. | Target JVM | Mirrors irreversible kernel installation. |
+| **Supervisor Runtime Context** | Owns TID lookup and consume-once spawn authorization keyed by PID + process start time. | Target JVM validation listener | Installation/session-owned; never a sidecar authorization cache. |
+| **Supervisor Session Handler** | Coordinates the notification reducer, JVM exchange, route executors and sole reply interpreter. | Supervisor sidecar process | One connection; terminal reply failure ends the session. |
+| **Profiler Service / Session** | Captures runtime dependencies; sessions own listeners, TID mappings, evidence buffers and cleanup outcomes. | Target JVM | Internal owners behind the public `Profiler` facade. |
+| **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Per-connection sessions; remains available for permanent filters in pass-through mode. |
+| **Trace Listener** | Captures stack/evidence through its session's injected TID resolver. | Target JVM (Dedicated Thread) | Bound to one profiler session. |
 | **BobCompiler** | Generates `BillOfBehavior` JSON from trace events. | Target JVM (Tooling) | Static/Post-process. |
 | **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Implemented (`:portal`, `:portal-worker`). Workers use a curated classpath; guest types are not on the broker runtime. Distinct from the syscall supervisor. |
+| **Portal Dispatcher Table** | Immutable method-to-handler authority, strictly validated at worker startup. | Worker JVM | Built once before serving requests; no mutation through the legacy registry after publication. |
 
 ## 2. The Profiler-Enforcer ACK Loop (The "Deadlock Zone")
 
@@ -29,95 +33,120 @@ sequenceDiagram
     K->>D: Sends SECCOMP_USER_NOTIF via FD
     D->>D: Resolve Paths via process_vm_readv
     D-->>L: Sends TraceEvent via UNIX Socket
-    L->>L: Capture JVM Stack Trace (ThreadRegistry)
+    L->>L: Capture JVM Stack Trace (session TID resolver)
     L-->>D: Sends ACK byte (Mandatory 0xAC)
     D->>K: Sends SECCOMP_USER_NOTIF_FLAG_CONTINUE
     K->>W: Resumes W
-    W->>W: Syscall completes in user-space
+    K-->>W: Syscall result returns to user-space
 ```
 
 ### ⚠️ Agent Safety Rules for the ACK Loop:
 - **No Blocking in Daemon:** The Daemon must never block on a resource that requires the JVM Worker Thread to be active (e.g., a JVM-held lock).
 - **Socket Interruption:** The Trace Listener must handle `EINTR` on its socket reads to prevent missing an event.
-- **FD Management:** The Daemon must correctly `close()` the seccomp listener FD when the session ends or it will leak in the parent process.
+- **FD Management:** The daemon owns its received listener FD. Cleanup outcomes must remain visible to the session owner; closing a local duplicate does not close another process's descriptor. Profiler shutdown first moves permanent filters into pass-through mode.
+- **Rejected Frames:** After a complete TID header, a rejected profiler event body still receives one ACK before listener termination. It counts as dropped evidence, not as a valid observation.
 
 ## 3. Security Boundary Stacking (Tiers)
 
 Mazewall operates in Tiers. An agent must know which Tier a change affects.
 
-- **Tier 1 (Process-Wide):** Applied via `installOnProcess`. Uses `TSYNC`. 
-    - *Constraint:* Requires `no_new_privs` on all threads.
+- **Tier 1 (Process-Wide):** Applied via `installOnProcess`. Uses `TSYNC`.
+    - *Constraint:* Preserve the process-wide JVM-safe baseline and surface synchronization failures; see the [containment design](../enforcer/containment-design.md).
 - **Tier 2 (Thread-Scoped):** Applied via `wrap()` or `installOnCurrentThread`.
-    - *Boundary:* Standard Java thread pools (ForkJoin) bypass this if not wrapped.
-- **Tier H (Hybrid/Profiler):** Uses `USER_NOTIF`.
-    - *Boundary:* Requires `ptrace` capabilities or `PR_SET_PTRACER` authorization.
+    - *Boundary:* Other threads do not acquire these restrictions merely by sharing the JVM. Thread-scoped containment is not a complete native ACE boundary; retain Tier 1 or use a separate process.
+- **Tier S Profiling:** Uses an out-of-process `USER_NOTIF` daemon on trusted diagnostic workloads.
+    - *Boundary:* Tracee-memory inspection needs the appropriate ptrace authorization. The caller installs NEW_LISTENER and optional TSYNC in separate calls; typed inspection failures remain incomplete evidence.
 
 ## 4. Cross-Module Dependency Graph
 
 ```mermaid
 graph TD
+    subgraph platform [":platform"]
+        S[Syscall / Arch]
+        NE[NativeEngine traits]
+        LN[LinuxNative compatibility facade] --> NE
+        FFI[FFM implementations / Layouts]
+        NE --> FFI
+    end
+
     subgraph enforcer [":enforcer"]
-        direction TB
-        subgraph core ["io.mazewall.core"]
-            S[Syscall.kt]
-            A[Arch.kt]
-            SA[SeccompAction.kt]
-        end
         PD[PolicyDefinition.kt] --> CS[CompiledSandbox.kt]
         CS --> S
-        CS --> A
-        CS --> C[NativeEngine.kt]
-        C -- traits --> LN[LinuxNative.kt]
-        LN --> NC[NativeConstants.kt]
-        LN --> L[Layouts.kt]
+        CS --> NE
         D[ContainedExecutors.kt] --> PD
-        D --> E[StateRegistries.kt]
-        H[SbobParser.kt]
-        SD[SandboxDispatcher.kt] --> PD
+        D --> E[ContainmentStateRegistry]
+        D --> SI[SupervisorInstaller]
+        SI --> RC[SupervisorRuntimeContext]
+        RC --> AS[SpawnAuthorizationStore]
+        SH[SupervisorSessionHandler] --> SM[SupervisorSessionMachine]
+        SH --> JVE[JvmVerdictExchange]
+        SH --> ROUTES[Route executors]
+        ROUTES --> FX[SupervisorReplyEffect]
+        SH --> RI[SupervisorReplyInterpreter]
+        RI --> FX
+        RI --> NE
     end
 
     subgraph profiler [":profiler"]
-        F[Profiler.kt] --> G[ProfilerDaemonEngine.kt]
-        G -- delegates --> PS[ProfilerSessionHandler.kt]
-        I[IterativeProfiler.kt] -- "uses" --> D
+        F[Profiler compatibility facade] --> SERVICE[ProfilerService]
+        SERVICE --> SESSION[ProfilerSession]
+        SERVICE --> RUNTIME[ProfilerRuntime]
+        RUNTIME --> NE
+        SESSION --> J
+        SESSION --> RESULT[ProfilingResult / ProfilingCoverage]
+        G[ProfilerDaemonEngine] --> PS[ProfilerSessionHandler]
+        PS --> PATH[PathResolution]
         J[ProfilerTraceListener.kt]
     end
 
-    subgraph demos ["demos"]
-        D1[cli-demo]
-        D2[vulnerable-web-app]
+    subgraph portal [":portal + :portal-worker"]
+        BROKER[ProcessBroker] --> WORKER[PortalWorkerMain]
+        WORKER --> TABLE[PortalDispatcherTable]
+        WORKER --> D
     end
 
-    F -- "Passes seccomp FD (SCM_RIGHTS)" --> G
-    G -- "Sends TraceEvents" --> J
-    F -- "Thread Registry" --> J
-    D1 --> enforcer
-    D1 --> profiler
-    D2 --> enforcer
+    SESSION -- "Captured installer / SCM_RIGHTS" --> G
+    PS -- "Versioned typed events" --> J
+    J -- "0xAC ACK" --> PS
+    SI -- "Validated JVM verdict" --> JVE
 ```
 
+The graph groups Gradle modules, not process address spaces: the supervisor handler and profiler
+daemon execute in sidecars, while their JVM listeners retain session-local state. Spawn authorization
+is consumed only in the JVM validation listener; the sidecar receives the validated verdict and must
+not duplicate or consume a second authorization store. Only the supervisor reply interpreter issues
+terminal kernel replies. The profiler's listener ACK is a distinct socket-protocol obligation.
+
 For detailed class diagrams and relationship maps of the individual modules:
-- See the [Enforcer Architecture Document](../designs/enforcer/enforcer-architecture.md) for the `:enforcer` module.
-- See the [Profiler Design Document](../designs/profiler/profiler-design.md) for the `:profiler` module.
+
+- See the [Enforcer Architecture Document](../enforcer/enforcer-architecture.md) for the `:enforcer` module.
+- See the [Profiler Design Document](../profiler/profiler-design.md) for the `:profiler` module.
+- See the [Process Portal Design](../enforcer/process-portal-design.md) for the broker/worker boundary.
 
 `architectural-map.md` is the canonical cross-module knowledge map. The module design documents
 above are the canonical locations for their generated PlantUML/SVG class diagrams; do not rely on
-historical `enforcer_map.md` or `profiler_map.md` paths.
+historical module maps for independent architecture claims. Those entry points redirect here.
+Canonical generated outputs live in `docs/diagrams/`; the unreferenced root `class_diagram.puml`
+is a historical artifact, not a generated source of truth.
 
 ## 5. Critical Memory Layouts (FFM)
 
 If you modify these, you must update both the Kotlin side and the C-side (if applicable).
 
-- **`sock_filter` (BpfFilter.kt):** 8-byte structure.
-- **`seccomp_notif` (ProfilerDaemon.kt):** Variable size, requires alignment for `data` field.
-- **`msghdr` / `cmsghdr` (LinuxNative.kt):** Used for FD passing. Byte-alignment is architecture-dependent (x86_64 vs aarch64).
+- **`sock_filter`:** 8-byte structure used by the BPF compiler.
+- **`seccomp_notif`:** Native notification structure, including the aligned `data` field.
+- **`msghdr` / `cmsghdr`:** Used for FD passing; fields and alignment must match the native ABI.
+
+Their canonical Kotlin layouts live in `platform`'s `io.mazewall.ffi.Layouts`; platform layout
+tests and the compiled C ABI oracle validate those definitions. Task-local runtime refactors must
+not change them.
 
 ## 6. Failure Modes & Recovery
 
 | Symptom | Probable Cause | Investigation Path |
 |---------|----------------|--------------------|
 | **JVM Hangs on Startup** | Blocked critical syscall (futex, clone). | Check `BpfFilter.jvmCriticalNrs`. |
-| **Profiler returns null paths** | Yama `ptrace_scope` or symlink mismatch. | Check `ProfilerDaemon.resolveCanonicalPath`. |
+| **Profiler coverage has missing or partial paths** | Denied memory read, missing operand, unresolved dirfd, or truncated string. | Inspect `ProfilingCoverage.pathFailures` and `SyscallPathResolver`; do not infer completeness from the paths list. |
 | **"IllegalStateException: Already restricted"** | Redundant Landlock application on pooled thread. | Check `StateRegistries` usage in `wrap()`. |
 | **E2BIG on Landlock install** | Exceeded Landlock domain nesting limit (max 16). | Investigate stacked policy logic in `FilterInstallationPlanner`. |
 
