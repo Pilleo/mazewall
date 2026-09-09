@@ -5,120 +5,123 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.portal.PortalMethod
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Registry bridging generated `<Service>PortalDispatcher` objects into the worker
- * loop. Builtins are dispatched first; generated [PortalMethod.Generated] values are looked
- * up here, so a generated service invocation reaches its generated dispatcher
- * instead of falling into `unknown method`.
+ * Compatibility registry for callers using the original global startup API.
  *
- * Bootstrap: set `-Dio.mazewall.portal.worker.dispatchers` to a comma-separated
+ * New worker startup builds a local [PortalDispatcherTable]. Legacy registrations are
+ * collected only until this registry publishes its immutable compatibility table.
+ * Set `-Dio.mazewall.portal.worker.dispatchers` to a comma-separated
  * list of `fqcn.Service=fqcn.ServiceImpl[;fqcn.DispatcherObject]` entries. The
  * dispatcher object defaults to `<simple-name>PortalDispatcher` in the service's
  * package and must expose `METHOD_IDS: IntArray` plus
  * `handle(impl, method, payload, granted): ByteArray`.
  */
 public object PortalDispatcherRegistry {
-    public typealias Handler =
-        (
-            method: PortalMethod.Generated,
-            payload: ByteArray,
-            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
-        ) -> ByteArray
+    public typealias Handler = PortalDispatcherHandler
 
-    private val handlers = ConcurrentHashMap<PortalMethod.Generated, Handler>()
+    private var startupBuilder: PortalDispatcherTable.Builder? = PortalDispatcherTable.Builder()
 
-    @Volatile private var frozen: Boolean = false
+    @Volatile private var publishedTable: PortalDispatcherTable? = null
 
+    @Synchronized
     public fun register(
         ids: IntArray,
         handler: Handler,
     ) {
-        check(!frozen) { "portal dispatcher registry is frozen" }
-        for (id in ids) {
-            check(handlers.putIfAbsent(PortalMethod.Generated(id), handler) == null) { "duplicate portal method id: $id" }
-        }
+        startupBuilder().register(ids, handler)
     }
 
     /** Prevents runtime mutation after startup wiring has completed. */
+    @Synchronized
     public fun freeze() {
-        frozen = true
+        publish()
     }
 
-    /** Attempts registered dispatch; null when no handler claims [method]. */
+    /** Publishes on first dispatch for compatibility, then routes only through the immutable table. */
     public fun dispatchOrNull(
         method: PortalMethod.Generated,
         payload: ByteArray,
         granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
-    ): ByteArray? = handlers[method]?.invoke(method, payload, granted)
+    ): ByteArray? {
+        val table = publishedTable ?: synchronized(this) { publishedTable ?: publish() }
+        return table.dispatchOrNull(method, payload, granted)
+    }
 
     /**
      * Reflectively wires `Interface=Impl(;Dispatcher)?` pairs. Compatibility bootstrap
-     * remains tolerant; callers that require a sealed startup explicitly call [freeze].
+     * remains tolerant before publication; callers that require sealed startup call [freeze].
      */
+    @Synchronized
     public fun bootstrapFromProperty(raw: String?): Int {
-        if (raw.isNullOrBlank()) return 0
-        var count = 0
-        for (entry in raw.split(',')) {
-            runCatching { registerEntry(entry.trim()) }
-                .onSuccess { count++ }
-                .onFailure { System.err.println("[PORTAL-DISPATCH] skipping '$entry': ${it.message}") }
-        }
-        return count
+        return startupBuilder().bootstrapFromProperty(raw)
     }
 
     /** Startup-only bootstrap: malformed or duplicate handlers abort before dispatch is enabled. */
+    @Synchronized
     public fun bootstrapStrict(raw: String?): Int {
-        if (raw.isNullOrBlank()) {
-            freeze()
-            return 0
-        }
-        val entries = raw.split(',').map(String::trim)
-        entries.forEach { registerEntry(it, replace = false) }
-        freeze()
-        return entries.size
+        val count = startupBuilder().bootstrapStrict(raw)
+        publish()
+        return count
     }
 
-    private fun registerEntry(
-        entry: String,
-        replace: Boolean = true,
-    ) {
-        require(entry.isNotEmpty()) { "empty entry" }
-        val parts = entry.split(';')
-        val servicePair = parts[0].split('=')
-        require(servicePair.size == 2) { "expected Interface=Impl(;Dispatcher)" }
-        val serviceClass = Class.forName(servicePair[0].trim())
-        val impl = Class.forName(servicePair[1].trim()).getDeclaredConstructor().newInstance()
+    private fun startupBuilder(): PortalDispatcherTable.Builder = checkNotNull(startupBuilder) { "portal dispatcher registry is published" }
 
-        val defaultName =
-            serviceClass.packageName.let { pkg ->
-                (if (pkg.isNotEmpty()) "$pkg." else "") + serviceClass.simpleName + "PortalDispatcher"
-            }
-        val dispatcherName = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultName
-        val dispatcherObject =
-            Class.forName(dispatcherName).getDeclaredField("INSTANCE").get(null)
-                ?: error("dispatcher $dispatcherName is not a Kotlin object")
-
-        val methodIds =
-            dispatcherObject.javaClass.getMethod("getMETHOD_IDS").invoke(dispatcherObject) as IntArray
-        require(methodIds.isNotEmpty()) { "dispatcher $dispatcherName declares no methods" }
-        val handle =
-            dispatcherObject.javaClass.methods.single {
-                it.name == "handle" && it.parameterCount == 4
-            }
-
-        // One closure per id keeps the typed generated method exact without re-parsing.
-        for (id in methodIds) {
-            val method = PortalMethod.Generated(id)
-            val registered: Handler = { generatedMethod, payload, granted ->
-                handle.invoke(dispatcherObject, impl, generatedMethod, payload, granted) as ByteArray
-            }
-            if (replace) {
-                handlers[method] = registered
-            } else {
-                check(handlers.putIfAbsent(method, registered) == null) { "duplicate portal method id: $id" }
-            }
-        }
+    private fun publish(): PortalDispatcherTable {
+        publishedTable?.let { return it }
+        val table = startupBuilder().build()
+        startupBuilder = null
+        publishedTable = table
+        return table
     }
+}
+
+internal fun PortalDispatcherTable.Builder.bootstrapFromProperty(raw: String?): Int {
+    if (raw.isNullOrBlank()) return 0
+    var count = 0
+    for (entry in raw.split(',')) {
+        runCatching { registerEntry(entry.trim(), replace = true) }
+            .onSuccess { count++ }
+            .onFailure { System.err.println("[PORTAL-DISPATCH] skipping '$entry': ${it.message}") }
+    }
+    return count
+}
+
+internal fun PortalDispatcherTable.Builder.bootstrapStrict(raw: String?): Int {
+    if (raw.isNullOrBlank()) return 0
+    val entries = raw.split(',').map(String::trim)
+    entries.forEach { registerEntry(it, replace = false) }
+    return entries.size
+}
+
+private fun PortalDispatcherTable.Builder.registerEntry(
+    entry: String,
+    replace: Boolean,
+) {
+    require(entry.isNotEmpty()) { "empty entry" }
+    val parts = entry.split(';')
+    require(parts.size <= 2) { "expected Interface=Impl(;Dispatcher)" }
+    val servicePair = parts[0].split('=')
+    require(servicePair.size == 2 && servicePair.all { it.isNotBlank() }) {
+        "expected Interface=Impl(;Dispatcher)"
+    }
+    val serviceClass = Class.forName(servicePair[0].trim())
+    val impl = Class.forName(servicePair[1].trim()).getDeclaredConstructor().newInstance()
+
+    val defaultName =
+        serviceClass.packageName.let { pkg ->
+            (if (pkg.isNotEmpty()) "$pkg." else "") + serviceClass.simpleName + "PortalDispatcher"
+        }
+    val dispatcherName = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultName
+    val dispatcherObject =
+        Class.forName(dispatcherName).getDeclaredField("INSTANCE").get(null)
+            ?: error("dispatcher $dispatcherName is not a Kotlin object")
+
+    val methodIds = dispatcherObject.javaClass.getMethod("getMETHOD_IDS").invoke(dispatcherObject) as IntArray
+    require(methodIds.isNotEmpty()) { "dispatcher $dispatcherName declares no methods" }
+    val handle = dispatcherObject.javaClass.methods.single { it.name == "handle" && it.parameterCount == 4 }
+    val registered: PortalDispatcherHandler = { generatedMethod, payload, granted ->
+        handle.invoke(dispatcherObject, impl, generatedMethod, payload, granted) as ByteArray
+    }
+    if (replace) registerReplacing(methodIds, registered) else register(methodIds, registered)
 }

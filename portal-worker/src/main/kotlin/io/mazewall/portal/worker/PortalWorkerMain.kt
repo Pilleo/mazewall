@@ -42,9 +42,11 @@ public object PortalWorkerMain {
         System.out.flush()
         // Generated service dispatchers must be registered before the first request
         // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
-        val registered = PortalDispatcherRegistry.bootstrapStrict(
+        val dispatcherBuilder = PortalDispatcherTable.Builder()
+        val registered = dispatcherBuilder.bootstrapStrict(
             System.getProperty("io.mazewall.portal.worker.dispatchers"),
         )
+        val dispatcherTable = dispatcherBuilder.build()
         if (registered > 0) println("[DBG-W] registered=$registered generated dispatcher(s)")
         val channel = PortalChannel(connected, sockets)
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
@@ -88,7 +90,7 @@ public object PortalWorkerMain {
                     state = replied.state
                     channel.send(replied.frame)
                 } catch (e: UnknownPortalMethod) {
-                    val generated = PortalDispatcherRegistry.dispatchOrNull(
+                    val generated = dispatcherTable.dispatchOrNull(
                         e.method,
                         dispatch.request.payload.copyToByteArray(),
                         fds,
