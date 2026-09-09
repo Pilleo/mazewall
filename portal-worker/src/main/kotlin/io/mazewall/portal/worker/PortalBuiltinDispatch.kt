@@ -7,6 +7,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -21,11 +22,11 @@ internal object PortalBuiltinDispatch {
     fun handle(
         method: PortalMethod,
         payload: ByteArray,
-        fds: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        fds: List<Capability.ReadFd>,
     ): ByteArray =
         when (method) {
             PortalMethod.Echo -> payload
-            PortalMethod.Checksum -> checksum(fds.single())
+            PortalMethod.Checksum -> fds.single().borrow { checksum(it) }
             PortalMethod.Sleep -> {
                 val ms =
                     if (payload.size >= 4) {

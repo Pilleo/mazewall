@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 109 | *Total Resolved Issues:* 506
+*Total Active Issues:* 109 | *Total Resolved Issues:* 507
+
+Task 6 resolved: [Bound portal RPC transport and share closeable capability ownership](resolved/issue-20260909-205031-376-bound-portal-rpc-transport-and-share-closeable-cap.md).
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|

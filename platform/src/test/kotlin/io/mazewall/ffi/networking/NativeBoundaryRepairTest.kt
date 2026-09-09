@@ -26,6 +26,41 @@ import org.junit.jupiter.api.extension.ExtendWith
 class NativeBoundaryRepairTest {
     private val real = RealNativeEngine
 
+    @Test
+    fun `deadline descriptor transport rechecks readiness after EAGAIN without blocking`() =
+        withPair { _, sender, receiver ->
+        var attempts = 0
+        var polls = 0
+        val transport = object : NativeNetworking by real.networking {
+            override fun sendmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                assertEquals(0x40, flags)
+                if (++attempts == 1) return LinuxNative.SyscallResult.Error(NativeConstants.EAGAIN, -1)
+                return real.networking.sendmsg(sockfd, msg, flags)
+            }
+        }
+        assertTrue(SupervisorSocketUtils.sendDescriptor(sender.value, sender.value, transport) { polls++ })
+        val received = requireNotNull(SupervisorSocketUtils.recvDescriptor(receiver))
+        real.fileSystem.close(received).getOrThrow("close received")
+        assertEquals(2, polls)
+    }
+
+    @Test
+    fun `zero-byte descriptor send is not successful delivery`() =
+        withPair { _, sender, _ ->
+        val transport = object : NativeNetworking by real.networking {
+            override fun sendmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0)
+        }
+        assertFalse(SupervisorSocketUtils.sendDescriptor(sender.value, sender.value, transport) {})
+    }
+
     private fun installNetworking(transport: NativeNetworking) {
         LinuxNative.setEngine(object : NativeEngine by real {
             override val networking: NativeNetworking = transport

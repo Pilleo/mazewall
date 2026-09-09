@@ -109,6 +109,7 @@ public object SupervisorSocketUtils {
         socketFd: Int,
         fdToSend: Int,
         networking: NativeNetworking,
+        beforeAttempt: (() -> Unit)? = null,
     ): Boolean {
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
@@ -133,12 +134,14 @@ public object SupervisorSocketUtils {
             msg.setMsgControllen(CMSG_RIGHTS_LEN)
 
             while (true) {
-                val res = networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), 0)
+                beforeAttempt?.invoke()
+                val res = networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), if (beforeAttempt == null) 0 else 0x40)
                 if (res is LinuxNative.SyscallResult.Success) {
-                    return true
+                    return res.value == 1L
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
                     if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue
+                    if (beforeAttempt != null && errno == NativeConstants.EAGAIN) continue
                     return false
                 }
             }
@@ -151,6 +154,7 @@ public object SupervisorSocketUtils {
     public fun <R : FileDescriptorRole> recvDescriptor(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
+        beforeAttempt: (() -> Unit)? = null,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
         val runtime = LinuxNative.snapshot()
         Arena.ofConfined().use { arena ->
@@ -169,11 +173,12 @@ public object SupervisorSocketUtils {
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
             while (true) {
+                beforeAttempt?.invoke()
                 // recvmsg mutates these in/out fields; restore capacity for EINTR retries.
                 controlBuf.fill(0)
                 msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
                 msg.setMsgFlags(0)
-                val res = runtime.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC)
+                val res = runtime.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC or if (beforeAttempt == null) 0 else 0x40)
                 if (res is LinuxNative.SyscallResult.Success) {
                     val cmsg = CmsghdrSegment(controlBuf)
                     val controlLength = msg.getMsgControllen()
@@ -205,6 +210,7 @@ public object SupervisorSocketUtils {
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
                     if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue // EINTR
+                    if (beforeAttempt != null && errno == NativeConstants.EAGAIN) continue
                     return null
                 }
             }

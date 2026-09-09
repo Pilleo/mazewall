@@ -4,6 +4,7 @@ import io.mazewall.ProcessPolicies
 import io.mazewall.RuntimeProfile
 import io.mazewall.core.RealSocketManager
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalKind
@@ -77,11 +78,11 @@ public object PortalWorkerMain {
                 val dispatch = when (val action = PortalWorkerTransitionInterpreter.interpret(received)) {
                     is PortalWorkerLoopAction.Dispatch -> action
                     PortalWorkerLoopAction.Continue -> {
-                        fds.forEach { sockets.close(it) }
+                        Capability.closeAll(fds)
                         continue
                     }
                     is PortalWorkerLoopAction.Terminate -> {
-                        fds.forEach { sockets.close(it) }
+                        Capability.closeAll(fds)
                         break@serve
                     }
                 }
@@ -113,7 +114,7 @@ public object PortalWorkerMain {
                     state = replied.state
                     channel.send(replied.frame)
                 } finally {
-                    fds.forEach { sockets.close(it) }
+                    Capability.closeAll(fds)
                 }
             }
         } finally {

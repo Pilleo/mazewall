@@ -73,6 +73,27 @@ v1 forbids worker → broker FDs (confused deputy). Return values are data only.
 
 Timeouts kill/restart the **worker process**. Do not `Thread.interrupt()` the broker.
 
+Every broker RPC creates one monotonic absolute deadline before worker checkout. The same
+budget covers request bytes, every descriptor transfer, and response bytes; frame stages
+never reset it. Portal-owned sockets use `O_NONBLOCK`, readiness polling, and nonblocking
+`SCM_RIGHTS` attempts. Readiness is advisory: `EAGAIN`/`EINTR` retries recheck the deadline.
+Only a timeout before the first header byte is an idle tick. After any frame progress,
+timeout is a terminal incomplete frame and the channel cannot be reused. A partial received
+descriptor collection remains locally owned until successful delivery and is closed on failure.
+
+### Capability ownership migration
+
+`Capability.ReadFd` is now `AutoCloseable`: broker code must use `openReadOnly(...).use { ... }`
+(Java: try-with-resources). The broker retains its original owner while `SCM_RIGHTS` creates
+a separate worker-owned descriptor. Each in-process alias shares one owner, including generated
+dispatcher arguments and worker final cleanup; do not re-adopt an alias as another owner.
+`PortalChannel.receive` and dispatcher handler lists now contain `Capability.ReadFd`, not raw
+owned descriptor tokens. Native consumers use `capability.borrow { fd -> ... }`; the token must
+not escape the callback. Close waits for an active borrow, is idempotent, and later borrows fail.
+Closing from inside that same borrow is rejected. Broker sends borrow one capability at a time
+under the RPC deadline, avoiding multi-capability lock-order deadlocks. Frame encoding, existing
+method IDs, descriptor order, and the broker-to-worker-only authority boundary are unchanged.
+
 ## Reuse (already in tree)
 
 | Primitive | Role |

@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -78,10 +79,10 @@ public class ProcessBroker(
         method: PortalMethod,
         payload: ByteArray,
         vararg granted: Capability.ReadFd,
-    ): ByteArray = call(method, payload, granted.map { it.fd })
+    ): ByteArray = call(method, payload, granted.toList())
 
     public fun checksum(fd: Capability.ReadFd): Int {
-        val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd.fd))
+        val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd))
         require(payload.size == 4) { "checksum must be 4 bytes" }
         return ((payload[0].toInt() and 0xff) shl 24) or
             ((payload[1].toInt() and 0xff) shl 16) or
@@ -120,11 +121,12 @@ public class ProcessBroker(
     internal fun call(
         method: PortalMethod,
         payload: ByteArray,
-        fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>,
+        fds: List<Capability.ReadFd>,
     ): ByteArray {
         check(started.get() == 1) { "broker not started" }
+        val deadline = Deadline.afterMillis(callTimeoutMs)
         val slot =
-            idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
+            idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("timed out waiting for an idle portal worker")
         var returnedToPool = false
         return try {
@@ -133,15 +135,9 @@ public class ProcessBroker(
             var callState = PortalBrokerCallMachine
                 .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
                 .state
-            slot.channel.send(request, fds)
-            val (reply, extra) = slot.channel.receive(callTimeoutMs)
-            val descriptorCleanup = CleanupCollector()
-            extra.forEachIndexed { index, descriptor ->
-                descriptorCleanup.attempt("reply descriptor[$index]") { sockets.close(descriptor) }
-            }
-            descriptorCleanup.outcome().failures.firstOrNull()?.let { failure ->
-                throw IllegalStateException("failed to close ${failure.resource}", failure.cause)
-            }
+            slot.channel.sendCapabilities(request, fds, deadline)
+            val (reply, extra) = slot.channel.receive(deadline)
+            Capability.closeAll(extra)
             val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
             callState = transition.state
             when (val effect = transition.effect) {

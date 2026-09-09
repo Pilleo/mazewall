@@ -4,6 +4,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 
 /**
@@ -42,7 +43,7 @@ public object PortalDispatcherRegistry {
     public fun dispatchOrNull(
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        granted: List<Capability.ReadFd>,
     ): ByteArray? {
         val table = publishedTable ?: synchronized(this) { publishedTable ?: publish() }
         return table.dispatchOrNull(method, payload, granted)

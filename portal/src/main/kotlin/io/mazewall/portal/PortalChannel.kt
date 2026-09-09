@@ -8,15 +8,10 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketIo
 import io.mazewall.core.SocketManager
-import io.mazewall.core.SocketPoll
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.ffi.memory.readByte
-import io.mazewall.ffi.memory.writeByte
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.getFdOrThrow
 import java.nio.file.Path
@@ -25,82 +20,98 @@ import java.nio.file.Path
  *  workers can keep polling (issue: pooled-worker 30s self-exit). */
 public class PortalReadTimeoutException : java.io.IOException("portal read timed out")
 
+public class PortalIncompleteFrameException : java.io.IOException("portal frame incomplete at deadline")
+
 public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
 ) : AutoCloseable {
+    private val closed = java.util.concurrent.atomic
+        .AtomicBoolean()
+    private val ioGate = Any()
+    private val io = PortalIo(socket) { closed.get() }
+
     fun send(
         frame: PortalFrame,
         fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> = emptyList(),
+        deadline: Deadline = Deadline.afterMillis(30_000),
     ) {
         require(fds.size == frame.fdCount) { "fd list ${fds.size} != header ${frame.fdCount}" }
-        writeBytes(frame.headerBytes())
-        if (!frame.payload.isEmpty()) {
-            writeBytes(frame.payload.copyToByteArray())
-        }
-        for (fd in fds) {
-            check(sockets.sendDescriptor(socket, fd)) { "SCM_RIGHTS send failed" }
+        terminalOnFailure {
+            writeFrame(frame, deadline)
+            for (fd in fds) io.sendDescriptor(fd, deadline)
         }
     }
 
-    fun receive(timeoutMs: Long = 30_000L): Pair<PortalFrame, List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>>> {
-        val headerBytes = readBytes(PortalFrame.HEADER_SIZE, timeoutMs)
-        val header = PortalFrame.parseHeader(headerBytes)
-        val payload = if (header.payloadLen == 0) ByteArray(0) else readBytes(header.payloadLen, timeoutMs)
-        val fds = ArrayList<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>>(header.fdCount)
-        repeat(header.fdCount) {
-            val granted =
-                sockets.recvDescriptor(socket, FileDescriptorRole.Granted)
-                    ?: error("expected granted FD")
-            fds.add(granted)
+    internal fun sendCapabilities(
+        frame: PortalFrame,
+        capabilities: List<Capability.ReadFd>,
+        deadline: Deadline,
+    ) {
+        require(capabilities.size == frame.fdCount)
+        terminalOnFailure {
+            writeFrame(frame, deadline)
+            capabilities.forEach { capability -> capability.borrowUntil(deadline) { io.sendDescriptor(it, deadline) } }
         }
-        return PortalFrame(header.kind, header.requestId, header.method, PortalPayload(payload), header.fdCount) to fds
+    }
+
+    fun receive(timeoutMs: Long = 30_000L): Pair<PortalFrame, List<Capability.ReadFd>> = receive(Deadline.afterMillis(timeoutMs))
+
+    @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // Partial receipt owns all FDs; drain them even for fatal allocation failures.
+    fun receive(deadline: Deadline): Pair<PortalFrame, List<Capability.ReadFd>> {
+        val owned = ArrayList<Capability.ReadFd>(PortalFrame.MAX_FDS)
+        return terminalOnFailure {
+            try {
+                val header = PortalFrame.parseHeader(io.read(PortalFrame.HEADER_SIZE, deadline, idleAllowed = true))
+                val payload = io.read(header.payloadLen, deadline, idleAllowed = false)
+                repeat(header.fdCount) { owned.add(io.receiveDescriptor(deadline)) }
+                PortalFrame(header.kind, header.requestId, header.method, PortalPayload(payload), header.fdCount) to owned.toList()
+            } catch (failure: Throwable) {
+                try {
+                    Capability.closeAll(owned)
+                } catch (cleanup: Throwable) {
+                    if (cleanup is Error && failure !is Error) {
+                        cleanup.addSuppressed(failure)
+                        throw cleanup
+                    }
+                    if (cleanup !== failure) failure.addSuppressed(cleanup)
+                }
+                throw failure
+            }
+        }
     }
 
     override fun close() {
-        sockets.close(socket)
+        // Signal first so bounded polling leaves the I/O gate before releasing the integer.
+        if (closed.compareAndSet(false, true)) synchronized(ioGate) { sockets.close(socket) }
     }
 
-    private fun writeBytes(bytes: ByteArray) {
-        NativeArena.ofConfined().use { arena ->
-            val buf = arena.allocate(bytes.size.toLong())
-            bytes.forEachIndexed { i, b -> buf.writeByte(i.toLong(), b) }
-            when (val res = SocketIo.writeFully(LinuxNative.memory, socket, buf, bytes.size.toLong())) {
-                is LinuxNative.SyscallResult.Error<*> -> error("portal write errno=${res.errno}")
-                is LinuxNative.SyscallResult.Success -> check(res.value == bytes.size.toLong())
-            }
-        }
+    private fun writeFrame(
+        frame: PortalFrame,
+        deadline: Deadline,
+    ) {
+        io.write(frame.headerBytes(), deadline)
+        io.write(frame.payload.copyToByteArray(), deadline)
     }
 
-    private fun readBytes(
-        len: Int,
-        timeoutMs: Long,
-    ): ByteArray {
-        NativeArena.ofConfined().use { arena ->
-            val buf = arena.allocate(len.toLong())
-            val deadline = Deadline.afterMillis(timeoutMs)
-            val poll = SocketPoll { timeout -> pollReadable(timeout) }
-            when (val res = SocketIo.readFully(LinuxNative.memory, socket, buf, len.toLong(), deadline, poll)) {
-                is LinuxNative.SyscallResult.Error<*> -> {
-                    if (res.errno == NativeConstants.ETIMEDOUT) throw PortalReadTimeoutException()
-                    error("portal read errno=${res.errno}")
+    @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // All partial transfers invalidate framing; cleanup must preserve fatal precedence.
+    private fun <T> terminalOnFailure(action: () -> T): T = synchronized(ioGate) {
+        check(!closed.get()) { "portal channel is closed" }
+        try {
+            action()
+        } catch (idle: PortalReadTimeoutException) {
+            throw idle
+        } catch (failure: Throwable) {
+            try {
+                close()
+            } catch (cleanup: Throwable) {
+                if (cleanup is Error && failure !is Error) {
+                    cleanup.addSuppressed(failure)
+                    throw cleanup
                 }
-                is LinuxNative.SyscallResult.Success -> check(res.value == len.toLong())
+                if (cleanup !== failure) failure.addSuppressed(cleanup)
             }
-            val out = ByteArray(len)
-            for (i in 0 until len) {
-                out[i] = buf.readByte(i.toLong())
-            }
-            return out
-        }
-    }
-
-    private fun pollReadable(timeoutMs: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        NativeArena.ofConfined().use { arena ->
-            val pfd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
-            pfd.setFd(socket.value)
-            pfd.setEvents(NativeConstants.POLLIN)
-            return LinuxNative.raw.poll(pfd.managed, 1, timeoutMs)
+            throw failure
         }
     }
 }

@@ -13,6 +13,17 @@ import java.util.zip.Adler32
 
 class ProcessBrokerIntegrationTest {
     @Test
+    fun `worker checkout consumes the same budget as the subsequent RPC`() {
+        ProcessBroker(callTimeoutMs = 2_000).use { broker ->
+            broker.start()
+            val first = CompletableFuture.runAsync { broker.sleep(1_500) }
+            io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(2), "first RPC checked out the worker") { broker.idleSize() == 0 }
+            assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
+            first.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
     fun `granted-fd checksum works and worker cannot open host passwd`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         assumeTrue(
@@ -28,8 +39,9 @@ class ProcessBrokerIntegrationTest {
             broker.start()
             assertEquals(1, broker.spawnedWorkers())
             val expected = Adler32().also { it.update(byteArrayOf(1, 2, 3, 4, 5)) }.value.toInt()
-            val granted = broker.openReadOnly(payload.parent, payload.fileName.toString())
-            assertEquals(expected, broker.checksum(granted))
+            broker.openReadOnly(payload.parent, payload.fileName.toString()).use { granted ->
+                assertEquals(expected, broker.checksum(granted))
+            }
             val ex = assertThrows(PortalCallException::class.java) { broker.tryOpenHostPasswd() }
             val msg = ex.message ?: ""
             val strerror13 = io.mazewall.ffi.memory
@@ -58,8 +70,9 @@ class ProcessBrokerIntegrationTest {
             broker.start()
             assertEquals("hello-portal", broker.echo("hello-portal"))
             val expected = Adler32().also { it.update(byteArrayOf(1, 2, 3, 4, 5)) }.value.toInt()
-            val granted = broker.openReadOnly(payload.parent, payload.fileName.toString())
-            assertEquals(expected, broker.checksum(granted))
+            broker.openReadOnly(payload.parent, payload.fileName.toString()).use { granted ->
+                assertEquals(expected, broker.checksum(granted))
+            }
         }
         Files.deleteIfExists(payload)
     }

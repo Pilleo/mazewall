@@ -4,6 +4,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import java.util.LinkedHashMap
 
@@ -11,7 +12,7 @@ public typealias PortalDispatcherHandler =
     (
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        granted: List<Capability.ReadFd>,
     ) -> ByteArray
 
 /** Immutable generated-method dispatch authority published after worker startup. */
@@ -22,7 +23,7 @@ public class PortalDispatcherTable private constructor(
     public fun dispatchOrNull(
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        granted: List<Capability.ReadFd>,
     ): ByteArray? = handlers[method]?.invoke(method, payload, granted)
 
     /** Mutable startup-only collector. [build] permanently invalidates this builder. */

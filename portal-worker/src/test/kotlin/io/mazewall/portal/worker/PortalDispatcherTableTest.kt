@@ -4,6 +4,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
@@ -14,6 +15,31 @@ public interface PublishedTableEchoService
 
 public class PublishedTableEchoServiceImpl : PublishedTableEchoService
 
+/** Same owner-list signature emitted by the generator; the guest closes its capability. */
+public object ClosingCapabilityPortalDispatcher {
+    public val METHOD_IDS: IntArray = intArrayOf(1101)
+
+    public fun handle(
+        impl: PublishedTableEchoService,
+        method: PortalMethod.Generated,
+        payload: ByteArray,
+        granted: List<Capability.ReadFd>,
+    ): ByteArray =
+        granted.single().use { owner ->
+            owner.borrow { fd ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val buffer = arena.allocate(1)
+                check(
+                    io.mazewall.LinuxNative.memory
+                    .read(fd, buffer, 1)
+                    .getOrThrow("guest read") == 1L,
+                )
+                payload
+            }
+        }
+        }
+}
+
 public object PublishedTableEchoServicePortalDispatcher {
     public val METHOD_IDS: IntArray = intArrayOf(1100)
 
@@ -21,12 +47,35 @@ public object PublishedTableEchoServicePortalDispatcher {
         impl: PublishedTableEchoService,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+        granted: List<Capability.ReadFd>,
     ): ByteArray = payload
 }
 
 class PortalDispatcherTableTest {
-    private val granted = emptyList<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>()
+    private val granted = emptyList<Capability.ReadFd>()
+
+    @Test
+    fun `reflective generated handler and final cleanup share the capability owner`() {
+        val path = java.nio.file.Files
+            .createTempFile("portal-owner", ".txt")
+        java.nio.file.Files
+            .writeString(path, "x")
+        val owner = io.mazewall.portal
+            .ProcessBroker()
+            .openReadOnly(path.parent, path.fileName.toString())
+        try {
+            val builder = PortalDispatcherTable.Builder()
+            builder.bootstrapStrict("${PublishedTableEchoService::class.java.name}=${PublishedTableEchoServiceImpl::class.java.name};${ClosingCapabilityPortalDispatcher::class.java.name}")
+            val payload = byteArrayOf(7)
+            assertSame(payload, builder.build().dispatchOrNull(PortalMethod.Generated(1101), payload, listOf(owner)))
+            Capability.closeAll(listOf(owner))
+            assertFailsWith<IllegalStateException> { owner.borrow { error("closed owner reached native code") } }
+        } finally {
+            owner.close()
+            java.nio.file.Files
+                .delete(path)
+        }
+    }
 
     @Test
     fun `build publishes a stable dispatch table and invalidates its builder`() {

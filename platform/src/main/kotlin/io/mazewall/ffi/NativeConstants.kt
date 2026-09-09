@@ -81,6 +81,7 @@ object NativeConstants {
     const val ENOSYS = 38
     const val EFAULT = 14
     const val ETIMEDOUT = 110
+    const val EAGAIN = 11
 
     // File options
     const val O_PATH = 0x00200000

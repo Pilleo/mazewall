@@ -4,6 +4,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,7 +24,7 @@ class PortalDispatcherRegistryTest {
             impl: EchoService,
             method: PortalMethod.Generated,
             payload: ByteArray,
-            granted: List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>>,
+            granted: List<Capability.ReadFd>,
         ): ByteArray =
             when (method.wire) {
             1000 -> ((impl as EchoServiceImpl).tag + ":" + payload.decodeToString()).toByteArray()
@@ -40,7 +41,7 @@ class PortalDispatcherRegistryTest {
         constructor() : this("impl")
     }
 
-    private fun grantedFds(): List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>> = emptyList()
+    private fun grantedFds(): List<Capability.ReadFd> = emptyList()
 
     @Test
     fun `strict bootstrap rejects malformed entries before a valid dispatcher is published`() {
