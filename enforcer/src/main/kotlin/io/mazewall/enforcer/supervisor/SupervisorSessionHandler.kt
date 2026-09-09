@@ -65,7 +65,7 @@ internal class SupervisorSessionHandler(
                     interpret(transition, prepared.context)
                 } catch (expectedExecutionFailure: Exception) {
                     logger.log(Level.WARNING, "Notification execution failed for ${notification.id}", expectedExecutionFailure)
-                    failClosed(prepared.context, transition.state, SupervisorSessionEvent.Failed)
+                    if (terminated.get()) false else failClosed(prepared.context, transition.state, SupervisorSessionEvent.Failed)
                 }
             }
         }
@@ -140,17 +140,31 @@ internal class SupervisorSessionHandler(
         context: SupervisorRouteContext,
     ): Boolean {
         val id = context.request.id
+        val caller = Thread.currentThread()
+        var callerFatal: Throwable? = null
         val completion = result.handle { effect, failure ->
-            if (failure != null) {
-                completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
-            } else {
-                NativeArena.ofConfined().use { workerArena ->
-                    with(workerArena) {
-                        finish(effect, SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
+            try {
+                if (failure != null) {
+                    completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
+                } else {
+                    NativeArena.ofConfined().use { workerArena ->
+                        with(workerArena) {
+                            finish(effect, SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
+                        }
                     }
                 }
+            } catch (expectedCompletionFailure: Exception) {
+                recordTerminalFailure(id, expectedCompletionFailure)
+                false
+            } catch (expectedFatalFailure: Throwable) {
+                recordTerminalFailure(id, expectedFatalFailure)
+                // Future callbacks capture throws. Propagate outside the callback on the
+                // caller, or explicitly deliver uncaught failure before this worker exits.
+                if (Thread.currentThread() === caller) callerFatal = expectedFatalFailure else reportUncaught(expectedFatalFailure)
+                false
             }
         }
+        callerFatal?.let { throw it }
         // Accepted async work remains ExecutingReply; only finish can produce Replied.
         return completion.getNow(true)
     }
@@ -158,7 +172,34 @@ internal class SupervisorSessionHandler(
     context(arena: NativeArena) private fun finish(
         effect: SupervisorReplyEffect,
         context: SupervisorReplyContext,
-    ): Boolean = completeReply(context.id, replies.execute(effect, context))
+    ): Boolean =
+        try {
+            completeReply(context.id, replies.execute(effect, context))
+        } catch (expectedTerminalFailure: Throwable) {
+            recordTerminalFailure(context.id, expectedTerminalFailure)
+            throw expectedTerminalFailure
+        }
+
+    private fun recordTerminalFailure(
+        id: Long,
+        failure: Throwable,
+    ) {
+        try {
+            completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
+        } catch (expectedShutdownFailure: Throwable) {
+            if (expectedShutdownFailure !== failure) failure.addSuppressed(expectedShutdownFailure)
+        }
+    }
+
+    private fun reportUncaught(failure: Throwable) {
+        val worker = Thread.currentThread()
+        try {
+            worker.uncaughtExceptionHandler.uncaughtException(worker, failure)
+        } catch (expectedHandlerFailure: Throwable) {
+            // Match JVM uncaught-handler isolation, while retaining secondary evidence.
+            if (expectedHandlerFailure !== failure) failure.addSuppressed(expectedHandlerFailure)
+        }
+    }
 
     private fun completeReply(
         id: Long,
