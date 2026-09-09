@@ -43,18 +43,44 @@ internal class SupervisorReplyInterpreter(
         try {
             when (effect) {
                 SupervisorReplyEffect.Continue -> sendContinue(context)
-                is SupervisorReplyEffect.Error -> sendError(context, effect.errno)
-                is SupervisorReplyEffect.AddFdAndReply -> effect.descriptor.use {
-                    when (val result = inject(context.id, it, effect.flags, NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())) {
-                        is FdInjectionResult.Injected -> ReplyExecutionResult.ReplySucceeded
-                        is FdInjectionResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor injection failed with errno=${result.errno}"))
-                    }
+                is SupervisorReplyEffect.Value -> {
+                    UserNotifReply.encodeSuccess(context.response, context.id, effect.value)
+                    confirmed(UserNotifReply.send(engine.raw, listener, context.response))
                 }
+                is SupervisorReplyEffect.Error -> sendError(context, effect.errno)
+                is SupervisorReplyEffect.AddFdAndReply -> effect.descriptor.use { injectReply(context, it, effect.flags) }
+                is SupervisorReplyEffect.AcceptedSocket -> acceptedReply(effect, context)
                 is SupervisorReplyEffect.SecureExecAndReply -> secureExec(effect, context)
                 is SupervisorReplyEffect.Recycle -> ReplyExecutionResult.ReplyFailed(IllegalStateException(effect.reason))
             }
         } catch (expectedReplyFailure: Exception) {
             ReplyExecutionResult.ReplyFailed(expectedReplyFailure)
+        }
+
+    context(arena: NativeArena) private fun acceptedReply(
+        effect: SupervisorReplyEffect.AcceptedSocket,
+        context: SupervisorReplyContext,
+    ): ReplyExecutionResult =
+        effect.descriptor.use { descriptor ->
+            val snapshot = effect.address
+            val address = arena.allocate(maxOf(1, snapshot.size).toLong())
+            io.mazewall.ffi.memory.ManagedSegment
+                .copy(snapshot, 0, address, 0, snapshot.size)
+            if (SupervisorPeerAddress().copy(effect.request, address, effect.length)) {
+                injectReply(context, descriptor, NewFdFlags.forAccept(effect.request.flags))
+            } else {
+                sendError(context, NativeConstants.EFAULT)
+            }
+        }
+
+    context(arena: NativeArena) private fun injectReply(
+        context: SupervisorReplyContext,
+        descriptor: SupervisorOwnedFd,
+        flags: NewFdFlags,
+    ): ReplyExecutionResult =
+        when (val result = inject(context.id, descriptor, flags, NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())) {
+            is FdInjectionResult.Injected -> ReplyExecutionResult.ReplySucceeded
+            is FdInjectionResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor injection failed with errno=${result.errno}"))
         }
 
     private fun sendContinue(context: SupervisorReplyContext): ReplyExecutionResult {

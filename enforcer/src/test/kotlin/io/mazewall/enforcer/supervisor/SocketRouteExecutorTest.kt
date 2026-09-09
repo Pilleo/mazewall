@@ -27,34 +27,31 @@ class SocketRouteExecutorTest {
 
     @ParameterizedTest
     @ValueSource(ints = [2, 32770])
-    fun `socket domain uses unsigned bytes and transfers successful ownership`(domain: Int) {
+    fun `connect imports the original socket and returns zero without injection`(domain: Int) {
         val fixture = SupervisorBoundaryFixture()
-        fixture.engine.networking.onSocket = { actual, type, protocol ->
-            assertEquals(domain, actual)
-            assertEquals(1, type)
-            assertEquals(0, protocol)
-            SupervisorBoundaryFixture.success(51003)
+        fixture.engine.networking.onSocket = { _, _, _ -> error("connect must not create a replacement socket") }
+        fixture.engine.networking.onConnect = { fd, _, _ ->
+            assertEquals(51006, fd.value)
+            SupervisorBoundaryFixture.success(0)
         }
         NativeArena.ofConfined().use { arena ->
             val address = byteArrayOf(domain.toByte(), (domain shr 8).toByte())
-            val effect = with(arena) { sockets(fixture).connect(address) }
-            val add = assertInstanceOf(SupervisorReplyEffect.AddFdAndReply::class.java, effect)
+            val effect = with(arena) { sockets(fixture).connect(Tid(77), 55, address) }
+            assertEquals(SupervisorReplyEffect.Value(0), effect)
             assertEquals(0, fixture.replies.size)
-            assertEquals(emptyList<Int>(), fixture.closed)
-            add.descriptor.close()
-            assertEquals(listOf(51003), fixture.closed)
+            assertEquals(listOf(51005, 51006), fixture.closed)
         }
     }
 
     @ParameterizedTest
-    @ValueSource(ints = [1, 13])
+    @ValueSource(ints = [1, 13, 11, 115, 110])
     fun `connect permission denial releases its own socket and cannot continue`(errno: Int) {
         val fixture = SupervisorBoundaryFixture()
         fixture.engine.networking.connectResult = SupervisorBoundaryFixture.failure(errno)
         NativeArena.ofConfined().use { arena ->
-            assertEquals(SupervisorReplyEffect.Error(errno), with(arena) { sockets(fixture).connect(byteArrayOf(2, 0)) })
+            assertEquals(SupervisorReplyEffect.Error(errno), with(arena) { sockets(fixture).connect(Tid(77), 55, byteArrayOf(2, 0)) })
         }
-        assertEquals(listOf(51003), fixture.closed)
+        assertEquals(listOf(51005, 51006), fixture.closed)
         assertEquals(0, fixture.replies.size)
     }
 

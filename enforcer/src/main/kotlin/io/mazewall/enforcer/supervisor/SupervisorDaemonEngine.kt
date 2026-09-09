@@ -14,12 +14,13 @@ internal class SupervisorDaemonEngine(
     private val socketPath: String,
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = io.mazewall.core.RealSocketManager,
+    private val socketHelpers: SocketHelperPool = SocketHelperPool(factory = SocketHelperProcess::start),
 ) {
     private val delegate = SeccompDaemonEngine(
         socketPath = socketPath,
         readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
         notifHandlerFactory = { socketFd, listenerFd ->
-            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager)
+            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers)
         },
         handshakeAckByte = 0xAC.toByte(),
         maxConnections = MAX_CONNECTIONS,
@@ -38,7 +39,11 @@ internal class SupervisorDaemonEngine(
     }
 
     fun run(block: (() -> Unit)? = null) {
-        delegate.run()
+        try {
+            delegate.run()
+        } finally {
+            socketHelpers.close()
+        }
     }
 
     internal fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
@@ -60,6 +65,10 @@ internal class SupervisorDaemonEngine(
     }
 
     fun triggerGlobalShutdown(source: String = "unknown") {
-        delegate.triggerGlobalShutdown(source)
+        try {
+            delegate.triggerGlobalShutdown(source)
+        } finally {
+            socketHelpers.close()
+        }
     }
 }

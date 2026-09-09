@@ -39,6 +39,20 @@ internal class SupervisorBoundaryFixture {
     val closed = CopyOnWriteArrayList<Int>()
     val replied = CountDownLatch(1)
     private val replyThread = AtomicReference<Thread>()
+    private val completion = CountDownLatch(1)
+    private val sessionClosed = CountDownLatch(1)
+    private val helperPool by lazy {
+        SocketHelperPool(1, 64) {
+            object : SocketHelper {
+                override fun execute(
+                    operation: SocketOperation,
+                    socket: SupervisorOwnedFd,
+                ): SocketHelperResult = NativeArena.ofConfined().use { arena -> with(arena) { SocketOperationExecutor(engine).execute(operation, socket) } }
+
+                override fun close() = Unit
+            }
+        }
+    }
     var replyResult: NativeResult = success(0)
     var injectionResult: NativeResult = success(61)
     var decision = 1
@@ -107,18 +121,46 @@ internal class SupervisorBoundaryFixture {
         }
     }
 
-    fun handler(socketManager: SocketManager = sockets) = SupervisorSessionHandler(socket, listener, engine, socketManager, SupervisorRoutePreparation(memory) { 0 })
+    fun handler(socketManager: SocketManager = sockets) =
+        SupervisorSessionHandler(
+        socket,
+            listener,
+            engine,
+            socketManager,
+            SupervisorRoutePreparation(memory) { 0 },
+        {
+            io.mazewall.ffi.memory.FaultingNativeArena
+            .observingClose { completion.countDown() }
+        },
+            helperPool,
+    )
 
-    fun handlerWithReplyArena(replyArena: () -> NativeArena) = SupervisorSessionHandler(socket, listener, engine, sockets, SupervisorRoutePreparation(memory) { 0 }, replyArena)
+    fun handlerWithReplyArena(replyArena: () -> NativeArena) =
+        SupervisorSessionHandler(
+        socket,
+            listener,
+            engine,
+        object : SocketManager by sockets {
+            override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+                try {
+                    sockets.close(fd)
+                } finally {
+                    sessionClosed.countDown()
+                }
+            }
+        },
+            SupervisorRoutePreparation(memory) { 0 },
+            replyArena,
+            helperPool,
+    )
+
+    fun awaitSessionClosed() = sessionClosed.awaitOrFail("session terminal cleanup")
 
     /** Worker exit follows synchronous future callbacks, reply cleanup, and the terminal transition. */
     fun awaitTerminalProcessing() {
         replied.awaitOrFail("terminal kernel operation")
         val thread = checkNotNull(replyThread.get())
-        if (thread !== Thread.currentThread()) {
-            thread.join(5_000)
-            assertFalse(thread.isAlive, "reply worker must finish interpretation, cleanup, and state transition")
-        }
+        if (thread !== Thread.currentThread()) completion.awaitOrFail("reply cleanup and terminal transition")
     }
 
     private val memory = object : TraceeMemoryReader {

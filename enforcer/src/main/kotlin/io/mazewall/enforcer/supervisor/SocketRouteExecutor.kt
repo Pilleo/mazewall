@@ -28,10 +28,13 @@ internal class SocketRouteExecutor(
     private val descriptors: TraceeDescriptorImporter,
     private val peerAddress: SupervisorPeerAddress = SupervisorPeerAddress(),
 ) {
-    context(arena: NativeArena) fun connect(address: ByteArray): SupervisorReplyEffect {
+    context(arena: NativeArena) fun connect(
+        tid: Tid,
+        fd: Int,
+        address: ByteArray,
+    ): SupervisorReplyEffect {
         if (address.size < Short.SIZE_BYTES) return SupervisorReplyEffect.Error()
-        val domain = (address[0].toInt() and BYTE_MASK) or ((address[1].toInt() and BYTE_MASK) shl Byte.SIZE_BITS)
-        return when (val socket = SupervisorDescriptorResult.from(engine.networking.socket(domain, SOCK_STREAM, 0), engine)) {
+        return when (val socket = descriptors.import(tid, fd)) {
             is SupervisorDescriptorResult.Denied -> SupervisorReplyEffect.Error(socket.errno)
             is SupervisorDescriptorResult.Opened -> connectOwned(socket.descriptor, address)
         }
@@ -41,19 +44,15 @@ internal class SocketRouteExecutor(
         socket: SupervisorOwnedFd,
         address: ByteArray,
     ): SupervisorReplyEffect {
-        var transferred = false
         try {
             val bytes = arena.allocate(address.size.toLong())
             ManagedSegment.copy(address, 0, bytes, 0, address.size)
             return when (val result = engine.networking.connect(socket.handle, bytes, address.size)) {
                 is LinuxNative.SyscallResult.Error -> SupervisorReplyEffect.Error(result.errno)
-                is LinuxNative.SyscallResult.Success -> {
-                    transferred = true
-                    SupervisorReplyEffect.AddFdAndReply(socket, NewFdFlags.NONE)
-                }
+                is LinuxNative.SyscallResult.Success -> SupervisorReplyEffect.Value(0)
             }
         } finally {
-            if (!transferred) socket.close()
+            socket.close()
         }
     }
 
@@ -96,8 +95,6 @@ internal class SocketRouteExecutor(
     }
 
     private companion object {
-        const val BYTE_MASK = 0xff
-        const val SOCK_STREAM = 1
         const val MAX_ADDRESS_LENGTH = 128
     }
 }

@@ -31,7 +31,7 @@ class SupervisorSessionMatrixTest {
             Case("open", Arch.AMD64.open, expectedInjection = true),
             Case("openat", Arch.AMD64.openat, expectedInjection = true),
             Case("openat2", Arch.AMD64.openat2, expectedInjection = true),
-            Case("connect", Arch.AMD64.connect, expectedInjection = true),
+            Case("connect", Arch.AMD64.connect),
             Case("accept", Arch.AMD64.accept, expectedInjection = true),
             Case("secure exec without path", Arch.AMD64.execve, expectedError = -1),
             Case("async failure", Arch.AMD64.accept, { it.engine.networking.acceptResult = SupervisorBoundaryFixture.failure(13) }, expectedError = -13),

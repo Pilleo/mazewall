@@ -15,6 +15,15 @@ public final class FaultingNativeArena {
         return new NativeArena(new ScriptedArena(0, () -> {}, ordinal), false);
     }
 
+    public static NativeArena observingClose(Runnable observation) {
+        Arena delegate = Arena.ofConfined();
+        return new NativeArena(new Arena() {
+            public MemorySegment allocate(long bytes, long alignment) { return delegate.allocate(bytes, alignment); }
+            public MemorySegment.Scope scope() { return delegate.scope(); }
+            public void close() { try { delegate.close(); } finally { observation.run(); } }
+        }, false);
+    }
+
     private static final class ScriptedArena implements Arena {
         private final Arena delegate = Arena.ofConfined();
         private final int failAt;

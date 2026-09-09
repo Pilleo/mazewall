@@ -31,13 +31,17 @@ internal class SupervisorSessionHandler(
     socketManager: SocketManager = RealSocketManager,
     private val preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
     private val replyArena: () -> NativeArena = NativeArena::ofConfined,
-) : SeccompNotifHandler {
+    socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
+) : SeccompNotifHandler,
+    AutoCloseable {
     private val reader = NotificationReader(engine, logger)
     private val exchange = JvmVerdictExchange(engine, socketFd, socketManager)
     private val descriptors = TraceeDescriptorImporter(engine)
-    private val routes = SupervisorRouteDispatcher(SupervisorRouteExecutor(engine, descriptors))
+    private val routeExecutor = SupervisorRouteExecutor(engine, descriptors, socketHelpers)
+    private val routes = SupervisorRouteDispatcher(routeExecutor)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)
     private val terminated = AtomicBoolean(false)
+    private val replyGate = Any()
 
     context(arena: NativeArena) override fun processNotification(
         notif: ManagedSegment,
@@ -144,7 +148,12 @@ internal class SupervisorSessionHandler(
         val caller = Thread.currentThread()
         var callerFatal: Throwable? = null
         val completion = result.handle { effect, failure ->
-            try {
+            synchronized(replyGate) {
+                try {
+                if (terminated.get()) {
+                    if (effect != null) SupervisorReplyHandoff(effect).close()
+                    return@handle false
+                }
                 if (failure != null) {
                     completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
                 } else {
@@ -166,6 +175,7 @@ internal class SupervisorSessionHandler(
                 // caller, or explicitly deliver uncaught failure before this worker exits.
                 if (Thread.currentThread() === caller) callerFatal = expectedFatalFailure else reportUncaught(expectedFatalFailure)
                 false
+            }
             }
         }
         callerFatal?.let { throw it }
@@ -220,13 +230,21 @@ internal class SupervisorSessionHandler(
     }
 
     private fun recycle() {
-        if (!terminated.compareAndSet(false, true)) return
+        synchronized(replyGate) {
+            if (!terminated.compareAndSet(false, true)) return
+        }
         try {
-            exchange.close()
-        } catch (expectedCloseFailure: Exception) {
-            logger.log(Level.WARNING, "Unable to close supervisor control socket", expectedCloseFailure)
+            routeExecutor.close()
+        } finally {
+            try {
+                exchange.close()
+            } catch (expectedCloseFailure: Exception) {
+                logger.log(Level.WARNING, "Unable to close supervisor control socket", expectedCloseFailure)
+            }
         }
     }
+
+    override fun close() = recycle()
 
     context(arena: NativeArena) fun handleActiveListener(
         pollFds: ManagedSegment,

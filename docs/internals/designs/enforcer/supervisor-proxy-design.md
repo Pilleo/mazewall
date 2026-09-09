@@ -30,7 +30,7 @@ To maintain the high performance required of a JVM sandboxing library, we do not
 3.  Supervisor Daemon validates the request (see Authorization below).
 4.  If approved, the Supervisor Daemon takes action based on the syscall type:
     *   **Value-only arguments:** Instructs the kernel to resume the syscall (`SECCOMP_USER_NOTIF_FLAG_CONTINUE`).
-    *   **Pointer arguments:** MUST execute the operation itself and inject the resulting FD/return value via `SECCOMP_IOCTL_NOTIF_ADDFD` to prevent TOCTTOU attacks (never use `FLAG_CONTINUE` here).
+    *   **Pointer arguments:** Execute the authorized snapshot itself. `open` and `accept` inject newly created descriptors via `SECCOMP_IOCTL_NOTIF_ADDFD`; `connect` operates on an imported reference to the original socket and uses a zero-valued terminal reply. Never replace the original socket or use `FLAG_CONTINUE` for these pointer routes.
 5.  If denied, the Supervisor Daemon instructs the kernel to spoof an `EPERM` or `EACCES` failure.
 
 ---

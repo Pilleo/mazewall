@@ -1072,9 +1072,6 @@ class "AcceptRequest" as io.mazewall.enforcer.supervisor.AcceptRequest {
   +int getFlags()
   +AcceptRequest copy(int, int, long, long, int)
 }
-class "AsyncSocketRouteExecutor" as io.mazewall.enforcer.supervisor.AsyncSocketRouteExecutor {
-  +CompletableFuture<SupervisorReplyEffect> execute(long, AcceptRequest)
-}
 class "BypassPaths" as io.mazewall.enforcer.supervisor.BypassPaths {
   + {static}BypassPaths INSTANCE
   __
@@ -1153,6 +1150,11 @@ class "OpenHow" as io.mazewall.enforcer.supervisor.OpenHow {
 class "OpenRouteExecutor" as io.mazewall.enforcer.supervisor.OpenRouteExecutor {
   +SupervisorReplyEffect execute(NativeArena, SupervisedOpen, int)
 }
+class "PoolSocketRouteExecutor" as io.mazewall.enforcer.supervisor.PoolSocketRouteExecutor {
+  +CompletableFuture<SupervisorReplyEffect> connect(int, int, byte[])
+  +CompletableFuture<SupervisorReplyEffect> accept(AcceptRequest)
+  +void close()
+}
 class "PreparedSupervisorRoute" as io.mazewall.enforcer.supervisor.PreparedSupervisorRoute {
   +SupervisorRouteContext getContext()
   +SupervisorRoute getRoute()
@@ -1194,12 +1196,65 @@ class "SecureExecRequest" as io.mazewall.enforcer.supervisor.SecureExecRequest {
 class "SecureExecRouteExecutor" as io.mazewall.enforcer.supervisor.SecureExecRouteExecutor {
   +SupervisorReplyEffect execute(NativeArena, SupervisorRouteContext, String)
 }
+class "SocketCleanup" as io.mazewall.enforcer.supervisor.SocketCleanup {
+  + {static}Companion Companion
+  __
+  +Throwable getFailure()
+  +void attempt(Function0<Unit>)
+  +void rethrow()
+}
+interface "SocketHelper" as io.mazewall.enforcer.supervisor.SocketHelper {
+  + {abstract}SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
+}
+class "SocketHelperMain" as io.mazewall.enforcer.supervisor.SocketHelperMain {
+  + {static}SocketHelperMain INSTANCE
+  __
+  + {static}void main(String[])
+}
+class "SocketHelperPool" as io.mazewall.enforcer.supervisor.SocketHelperPool {
+  + {static}Companion Companion
+  __
+  +Session session()
+  +void close()
+}
+class "SocketHelperProcess" as io.mazewall.enforcer.supervisor.SocketHelperProcess {
+  + {static}Companion Companion
+  __
+  +SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
+  +void close()
+}
+class "SocketHelperProtocol" as io.mazewall.enforcer.supervisor.SocketHelperProtocol {
+  + {static}SocketHelperProtocol INSTANCE
+  + {static}int MAX_ADDRESS_BYTES
+  + {static}int MAX_ERRNO
+  __
+  +SocketHelperResult readResult(DataInputStream, Function0<SupervisorOwnedFd>)
+  +void writeOperation(DataOutputStream, SocketOperation)
+  +SocketOperation readOperation(DataInputStream)
+  +void writeBytes(DataOutputStream, byte[])
+  +byte[] readBytes(DataInputStream)
+}
+interface "SocketHelperResult" as io.mazewall.enforcer.supervisor.SocketHelperResult {
+}
+class "SocketJobOutcome" as io.mazewall.enforcer.supervisor.SocketJobOutcome {
+  +SocketCleanup getCleanup()
+  +SocketHelperResult getOutput()
+  +void setOutput(SocketHelperResult)
+  +void dispose()
+  +void publish(CompletableFuture<SocketHelperResult>)
+}
+interface "SocketOperation" as io.mazewall.enforcer.supervisor.SocketOperation {
+}
+class "SocketOperationExecutor" as io.mazewall.enforcer.supervisor.SocketOperationExecutor {
+  +SocketHelperResult execute(NativeArena, SocketOperation, SupervisorOwnedFd)
+}
+class "SocketOperationKt" as io.mazewall.enforcer.supervisor.SocketOperationKt {
+  + {static}void dispose(SocketHelperResult)
+}
 class "SocketRouteExecutor" as io.mazewall.enforcer.supervisor.SocketRouteExecutor {
-  + {static}int BYTE_MASK
-  + {static}int SOCK_STREAM
   + {static}int MAX_ADDRESS_LENGTH
   __
-  +SupervisorReplyEffect connect(NativeArena, byte[])
+  +SupervisorReplyEffect connect(NativeArena, int, int, byte[])
   +SupervisorReplyEffect accept(NativeArena, AcceptRequest)
 }
 interface "SpawnAuthorizationResult" as io.mazewall.enforcer.supervisor.SpawnAuthorizationResult {
@@ -1383,6 +1438,7 @@ class "SupervisorRouteExecutor" as io.mazewall.enforcer.supervisor.SupervisorRou
   __
   +CompletableFuture<SupervisorReplyEffect> inject(NativeArena, SupervisorRouteContext)
   +SupervisorReplyEffect secureExec(NativeArena, SupervisorRouteContext, String)
+  +void close()
 }
 class "SupervisorRoutePreparation" as io.mazewall.enforcer.supervisor.SupervisorRoutePreparation {
   + {static}int MAX_PATH_LENGTH
@@ -1408,6 +1464,7 @@ class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSe
   +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +boolean processNotification(ManagedSegment, ManagedSegment)
   +boolean readAndHandleJvmResponse(NativeArena, SupervisorRouteContext, SupervisorSessionState)
+  +void close()
   +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment)
 }
 class "SupervisorSessionMachine" as io.mazewall.enforcer.supervisor.SupervisorSessionMachine {
@@ -1420,6 +1477,11 @@ interface "SupervisorSessionState" as io.mazewall.enforcer.supervisor.Supervisor
 class "SupervisorSessionTransition" as io.mazewall.enforcer.supervisor.SupervisorSessionTransition {
   +SupervisorSessionState getState()
   +SupervisorSessionEffect getEffect()
+}
+class "SupervisorSocketHelpers" as io.mazewall.enforcer.supervisor.SupervisorSocketHelpers {
+  + {static}SupervisorSocketHelpers INSTANCE
+  __
+  +SocketHelperPool getPool()
 }
 interface "SupervisorSyscallResolution" as io.mazewall.enforcer.supervisor.SupervisorSyscallResolution {
 }
@@ -2499,7 +2561,6 @@ io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter --> io.mazewall.
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainerState
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.core.ThreadLocalDelegate
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainmentStateRegistry
-io.mazewall.enforcer.supervisor.AsyncSocketRouteExecutor --> io.mazewall.enforcer.supervisor.SocketRouteExecutor
 io.mazewall.enforcer.supervisor.BypassPaths --> io.mazewall.enforcer.supervisor.BypassPaths
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
@@ -2516,12 +2577,22 @@ io.mazewall.enforcer.supervisor.JvmVerdictRequest --> io.mazewall.enforcer.super
 io.mazewall.enforcer.supervisor.NotificationReader --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.OpenRouteExecutor --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.OpenRouteExecutor --> io.mazewall.enforcer.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.supervisor.PoolSocketRouteExecutor --> io.mazewall.enforcer.supervisor.TraceeDescriptorImporter
 io.mazewall.enforcer.supervisor.PreparedSupervisorRoute --> io.mazewall.enforcer.supervisor.SupervisorRouteContext
 io.mazewall.enforcer.supervisor.PreparedSupervisorRoute --> io.mazewall.enforcer.supervisor.SupervisorRoute
 io.mazewall.enforcer.supervisor.ProcFsInspector --> io.mazewall.enforcer.supervisor.ProcFsInspector
 io.mazewall.enforcer.supervisor.ProcProcessIdentityResolver .u.|> io.mazewall.enforcer.supervisor.ProcessIdentityResolver
 io.mazewall.enforcer.supervisor.ProcProcessIdentityResolver --> io.mazewall.core.Pid
 io.mazewall.enforcer.supervisor.SecureExecRouteExecutor --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SocketHelperMain --> io.mazewall.enforcer.supervisor.SocketHelperMain
+io.mazewall.enforcer.supervisor.SocketHelperPool --> io.mazewall.enforcer.supervisor.SocketHelper
+io.mazewall.enforcer.supervisor.SocketHelperProcess .u.|> io.mazewall.enforcer.supervisor.SocketHelper
+io.mazewall.enforcer.supervisor.SocketHelperProcess --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SocketHelperProcess --> io.mazewall.core.PrivateUnixEndpoint
+io.mazewall.enforcer.supervisor.SocketHelperProtocol --> io.mazewall.enforcer.supervisor.SocketHelperProtocol
+io.mazewall.enforcer.supervisor.SocketJobOutcome --> io.mazewall.enforcer.supervisor.SocketHelperResult
+io.mazewall.enforcer.supervisor.SocketJobOutcome --> io.mazewall.enforcer.supervisor.SocketCleanup
+io.mazewall.enforcer.supervisor.SocketOperationExecutor --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SocketRouteExecutor --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SocketRouteExecutor --> io.mazewall.enforcer.supervisor.SupervisorPeerAddress
 io.mazewall.enforcer.supervisor.SocketRouteExecutor --> io.mazewall.enforcer.supervisor.TraceeDescriptorImporter
@@ -2531,6 +2602,7 @@ io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.superv
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.SocketManager
+io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.supervisor.SocketHelperPool
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.SocketManager
@@ -2560,8 +2632,7 @@ io.mazewall.enforcer.supervisor.SupervisorRouteContext --> io.mazewall.enforcer.
 io.mazewall.enforcer.supervisor.SupervisorRouteContext --> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.enforcer.supervisor.SupervisorRouteDispatcher --> io.mazewall.enforcer.supervisor.SupervisorRouteExecutor
 io.mazewall.enforcer.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.supervisor.OpenRouteExecutor
-io.mazewall.enforcer.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.supervisor.SocketRouteExecutor
-io.mazewall.enforcer.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.supervisor.AsyncSocketRouteExecutor
+io.mazewall.enforcer.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.supervisor.PoolSocketRouteExecutor
 io.mazewall.enforcer.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.supervisor.SecureExecRouteExecutor
 io.mazewall.enforcer.supervisor.SupervisorRoutePreparation --> io.mazewall.ffi.memory.TraceeMemoryReader
 io.mazewall.enforcer.supervisor.SupervisorRuntimeContext --> io.mazewall.enforcer.supervisor.SpawnAuthorizationStore
@@ -2576,9 +2647,11 @@ io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforce
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorRouteDispatcher
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.NotificationReader
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorRouteExecutor
 io.mazewall.enforcer.supervisor.SupervisorSessionMachine --> io.mazewall.enforcer.supervisor.SupervisorSessionMachine
 io.mazewall.enforcer.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.supervisor.SupervisorSessionEffect
 io.mazewall.enforcer.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.supervisor.SupervisorSessionState
+io.mazewall.enforcer.supervisor.SupervisorSocketHelpers --> io.mazewall.enforcer.supervisor.SupervisorSocketHelpers
 io.mazewall.enforcer.supervisor.SupervisorSyscallResolver --> io.mazewall.enforcer.supervisor.SupervisorSyscallResolver
 io.mazewall.enforcer.supervisor.SupervisorValidationDecoder --> io.mazewall.enforcer.supervisor.SupervisorValidationDecoder
 io.mazewall.enforcer.supervisor.SyscallArguments --> io.mazewall.enforcer.supervisor.OpenHow

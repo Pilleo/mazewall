@@ -43,9 +43,13 @@ class SupervisorReplyAllocationTest {
         val release = CountDownLatch(1)
         val worker = AtomicReference<Thread>()
         val uncaught = AtomicReference<Throwable>()
+        val fatalObserved = CountDownLatch(1)
         fixture.engine.networking.onAccept4 = { _, _, _, _ ->
             worker.set(Thread.currentThread())
-            Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) }
+            Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error ->
+                uncaught.set(error)
+                fatalObserved.countDown()
+            }
             entered.countDown()
             release.awaitOrFail("release accept after reply callback registration")
             SupervisorBoundaryFixture.success(51004)
@@ -72,8 +76,8 @@ class SupervisorReplyAllocationTest {
             }
             if (async) {
                 entered.awaitOrFail("accept worker entered")
-                worker.get().join(5_000)
-                assertFalse(worker.get().isAlive, "terminal allocation failure must not leave completion pending")
+                fixture.awaitSessionClosed()
+                if (fatal) fatalObserved.awaitOrFail("fatal completion delivered to uncaught handler")
             }
             val finalAction = with(arena) {
                 handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))

@@ -24,12 +24,13 @@ internal class SupervisorReplyHandoff(
         pending = null
         when (effect) {
             is SupervisorReplyEffect.AddFdAndReply -> effect.descriptor.close()
+            is SupervisorReplyEffect.AcceptedSocket -> effect.descriptor.close()
             is SupervisorReplyEffect.SecureExecAndReply ->
                 when (val target = effect.target) {
                     is SupervisorDescriptorResult.Opened -> target.descriptor.close()
                     is SupervisorDescriptorResult.Denied -> Unit
                 }
-            SupervisorReplyEffect.Continue, is SupervisorReplyEffect.Error, is SupervisorReplyEffect.Recycle -> Unit
+            SupervisorReplyEffect.Continue, is SupervisorReplyEffect.Value, is SupervisorReplyEffect.Error, is SupervisorReplyEffect.Recycle -> Unit
         }
     }
 }

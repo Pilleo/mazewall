@@ -8,6 +8,10 @@ import io.mazewall.ffi.memory.ManagedSegment
 internal sealed interface SupervisorReplyEffect {
     data object Continue : SupervisorReplyEffect
 
+    data class Value(
+        val value: Long,
+    ) : SupervisorReplyEffect
+
     data class Error(
         val errno: Int = NativeConstants.EPERM,
     ) : SupervisorReplyEffect
@@ -16,6 +20,16 @@ internal sealed interface SupervisorReplyEffect {
         val descriptor: SupervisorOwnedFd,
         val flags: NewFdFlags,
     ) : SupervisorReplyEffect
+
+    class AcceptedSocket(
+        val descriptor: SupervisorOwnedFd,
+        val request: AcceptRequest,
+        address: ByteArray,
+        val length: Int,
+    ) : SupervisorReplyEffect {
+        private val snapshot = address.copyOf()
+        val address: ByteArray get() = snapshot.copyOf()
+    }
 
     data class SecureExecAndReply(
         val request: SecureExecRequest,

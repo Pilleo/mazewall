@@ -532,8 +532,10 @@ class ArchitectureTest {
         val expected = mapOf(
             "io.mazewall.enforcer.supervisor.SupervisorReplyEffect" to setOf(
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Continue",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Value",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Error",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$AddFdAndReply",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$AcceptedSocket",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$SecureExecAndReply",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Recycle",
             ),
