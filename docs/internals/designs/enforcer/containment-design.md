@@ -532,6 +532,8 @@ An unusable exchange remains terminal even if closing its connection fails. Its 
 
 Open, socket, asynchronous accept, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply. Async accept uses its own confined arena and transfers only heap request data and descriptors acquired from successful native calls.
 
+Descriptor ownership also covers setup before a reply can be interpreted. The imported listening socket's cleanup scope encloses accept-buffer allocation and initialization. A completed route effect is held by a single-use `SupervisorReplyHandoff` while the handler creates its reply arena and response buffer. If setup fails, the handoff disposes any unconsumed AddFd or opened secure-exec descriptor before terminal failure accounting. Transfer goes directly to the sole reply interpreter and retires the handoff; neither a failed disposal nor a post-transfer failure can close the same descriptor again. The original setup failure stays primary, with cleanup failures retained as suppressed evidence.
+
 A fatal accept-worker failure completes its future exceptionally after resource cleanup, allowing the session owner to process `ReplyFailed` and shut down without a policy-denial reply. The worker then rethrows the original fatal failure; it is not converted to ordinary denial or successful handling. Fatal prerequisite-close failures also release any already acquired successor descriptor before propagation.
 
 Reply interpretation and its post-reply cleanup are also terminal failure boundaries. A failure after confirmed ADDFD-with-SEND cannot enter pre-reply denial recovery. A fatal failure on the calling thread is rethrown with its original identity outside the future callback. For a pending async completion, the callback first terminates the session and finishes cleanup, then explicitly delivers the original fatal failure to the replying worker's uncaught-exception handler before that worker exits. This explicit delivery is necessary because `CompletableFuture` captures callback throws; no exceptional dependent completion is left unobserved. Shutdown or uncaught-handler failures remain attached to the primary failure as suppressed evidence.
@@ -557,6 +559,6 @@ The following table clarifies which effects in mazewall are reversible and which
 | `sanitizeThreadState` | Forbidden | Throws |
 
 **Related issues:**
-- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](docs/internals/backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
-- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](docs/internals/backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
-- [issue-20260821-113003-report-already-active-landlock](docs/internals/backlog/code_health/issue-20260821-113003-report-already-active-landlock.md)
+- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
+- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](../../backlog/resolved/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
+- [issue-20260821-113003-report-already-active-landlock](../../backlog/resolved/issue-20260821-113003-report-already-active-landlock.md)

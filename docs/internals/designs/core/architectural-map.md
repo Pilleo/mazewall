@@ -9,7 +9,7 @@ This document provides a high-level "Knowledge Graph" of the `mazewall` system. 
 | **Enforcer Engine** | BPF compilation and filter installation. | Target JVM (Worker Thread) | Final / Immutable once applied. |
 | **Containment Registry** | Tracks process-wide and thread-scoped seccomp/Landlock state. | Target JVM | Mirrors irreversible kernel installation. |
 | **Supervisor Runtime Context** | Owns TID lookup and consume-once spawn authorization keyed by PID + process start time. | Target JVM validation listener | Installation/session-owned; never a sidecar authorization cache. |
-| **Supervisor Session Handler** | Coordinates the notification reducer, JVM exchange, route executors and sole reply interpreter. | Supervisor sidecar process | One connection; terminal reply failure ends the session. |
+| **Supervisor Session Handler** | Coordinates the notification reducer, JVM exchange, route executors, setup ownership handoff and sole reply interpreter. | Supervisor sidecar process | One connection; terminal reply failure ends the session. |
 | **Profiler Service / Session** | Captures runtime dependencies; sessions own listeners, TID mappings, evidence buffers and cleanup outcomes. | Target JVM | Internal owners behind the public `Profiler` facade. |
 | **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Per-connection sessions; remains available for permanent filters in pass-through mode. |
 | **Trace Listener** | Captures stack/evidence through its session's injected TID resolver. | Target JVM (Dedicated Thread) | Bound to one profiler session. |
@@ -82,7 +82,8 @@ graph TD
         SH --> JVE[JvmVerdictExchange]
         SH --> ROUTES[Route executors]
         ROUTES --> FX[SupervisorReplyEffect]
-        SH --> RI[SupervisorReplyInterpreter]
+        SH --> HANDOFF[SupervisorReplyHandoff]
+        HANDOFF --> RI[SupervisorReplyInterpreter]
         RI --> FX
         RI --> NE
     end
@@ -116,6 +117,10 @@ daemon execute in sidecars, while their JVM listeners retain session-local state
 is consumed only in the JVM validation listener; the sidecar receives the validated verdict and must
 not duplicate or consume a second authorization store. Only the supervisor reply interpreter issues
 terminal kernel replies. The profiler's listener ACK is a distinct socket-protocol obligation.
+The reply handoff owns descriptor-bearing effects throughout arena/buffer setup, then transfers
+them once to the interpreter or disposes them on setup failure. Profiler service/session cleanup
+similarly retains unattempted owners after an aborted fold; fatal propagation cannot publish a
+stale complete outcome or discard the session's remaining listeners.
 
 For detailed class diagrams and relationship maps of the individual modules:
 
