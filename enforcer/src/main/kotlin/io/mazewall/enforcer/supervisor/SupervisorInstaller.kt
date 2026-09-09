@@ -11,6 +11,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.Pid
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import io.mazewall.enforcer.*
@@ -81,10 +82,10 @@ public object SupervisorInstaller {
             }
             return SupervisorSession(tid, runtime)
         } catch (expectedInstallFailure: Exception) {
-            runtime.unregister(tid)
+            runtime.close()
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
-            runtime.unregister(tid)
+            runtime.close()
             throw expectedInstallError
         }
     }
@@ -93,7 +94,7 @@ public object SupervisorInstaller {
 internal class JVMValidationListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val scopingPolicy: StacktraceScopingPolicy,
-    private val runtime: SupervisorRuntimeContext = SupervisorInstaller.compatibilityRuntime(),
+    private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
 ) {
     private val closed = AtomicBoolean(false)
     private val logger = Logger.getLogger(JVMValidationListener::class.java.name)
@@ -173,16 +174,21 @@ internal class JVMValidationListener(
                 val startMs = System.currentTimeMillis()
                 val targetThread = runtime.resolve(Tid(pidVal))
                 var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+                var spawnContextAccepted = true
 
                 // --- STACKTRACE PROPAGATION LOGIC ---
                 if (nr == traceeArch.execve || nr == traceeArch.execveat) {
                     if (validationState is ScopingValidationState.SafeToValidate && validationState.rawStack.isEmpty()) {
                         // Empty stack trace on execve suggests a child process.
-                        // We resolve the propagated stack trace from the parent thread.
-                        val parentStack = PendingSpawnRegistry.get(Tid(ppidVal))
-                        if (parentStack != null) {
-                            System.err.println("[JVM-VALIDATION] Propagating parent stack trace (TID=$ppidVal) to child process (PID=$pidVal)")
-                            validationState = ScopingValidationState.SafeToValidate.create(parentStack.toTypedArray(), nr, argsList)
+                        // Consume this session's authorization for the parent's exact process lifetime.
+                        when (val authorization = runtime.consumeSpawn(Pid(ppidVal))) {
+                            is SpawnAuthorizationResult.Authorized -> {
+                                validationState = ScopingValidationState.SafeToValidate.create(authorization.stack.toTypedArray(), nr, argsList)
+                            }
+                            is SpawnAuthorizationResult.Rejected -> {
+                                logger.warning("Child exec authorization rejected for parent pid=$ppidVal: ${authorization.reason}")
+                                spawnContextAccepted = false
+                            }
                         }
                     }
                 }
@@ -192,18 +198,10 @@ internal class JVMValidationListener(
                     logger.warning("[SUPERVISOR-DIAGNOSTIC] JvmStackInspector.inspect took ${inspectMs}ms for syscall nr=$nr, args=$argsList")
                 }
 
-                val isAllowed = when (validationState) {
+                val isAllowed = spawnContextAccepted &&
+                    when (validationState) {
                     is ScopingValidationState.SafeToValidate -> {
                         val stackTrace = validationState.rawStack.toList()
-
-                        // --- SPAWN REGISTRATION LOGIC ---
-                        if (nr == forkNr || nr == vforkNr || nr == cloneNr) {
-                            if (stackTrace.isNotEmpty()) {
-                                val tgid = getTgid(pidVal)
-                                System.err.println("[JVM-VALIDATION] Registering pending spawn for TGID=$tgid (TID=$pidVal)")
-                                PendingSpawnRegistry.register(Tid(tgid), stackTrace)
-                            }
-                        }
 
                         val sb = StringBuilder()
                         sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
@@ -222,7 +220,14 @@ internal class JVMValidationListener(
                                 if (authMs > SLOW_AUTH_THRESHOLD_MS) {
                                     logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall ${syscallResolution.syscall}")
                                 }
-                                res
+                                if (res && (nr == forkNr || nr == vforkNr || nr == cloneNr)) {
+                                    val tgid = getTgid(pidVal)
+                                    stackTrace.isNotEmpty() &&
+                                        tgid != null &&
+                                        runtime.registerSpawn(Pid(tgid), stackTrace) == SpawnRegistrationResult.REGISTERED
+                                } else {
+                                    res
+                                }
                             }
                             is SupervisorSyscallResolution.Unknown -> {
                                 logger.warning(
@@ -250,11 +255,6 @@ internal class JVMValidationListener(
                     JvmVerdict.Allow
                 }
 
-                // We no longer remove the entry immediately on execve because of:
-                // 1. Double execve during JVM process spawn (jspawnhelper -> target).
-                // 2. Path resolution fallbacks in JVM process builder (which calls execve multiple times on different PATH locations).
-                // Instead, the registry relies on a TTL (Time-To-Live) to automatically prune entries after 10 seconds.
-
                 val execPath = if (isAllowed && kind is io.mazewall.platform.seccomp.SupervisedKind.Exec) {
                     resolveExecTargetPath(nr, argsList, pidVal, traceeArch)
                 } else {
@@ -273,6 +273,7 @@ internal class JVMValidationListener(
         } catch (ignored: IllegalStateException) {
             // Done
         } finally {
+            runtime.close()
             channel.close()
         }
     }
@@ -358,28 +359,21 @@ internal class JVMValidationListener(
         return path
     }
 
-    private fun getTgid(tid: Int): Int {
-        val statusFile = java.io.File("/proc/$tid/status")
-        if (!statusFile.exists()) return tid
-        var reader: java.io.BufferedReader? = null
+    private fun getTgid(tid: Int): Int? =
         try {
-            reader = statusFile.bufferedReader()
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.startsWith("Tgid:")) {
-                    return line.substringAfter("Tgid:").trim().toInt()
-                }
+            java.io.File("/proc/$tid/status").useLines { lines ->
+                lines
+                    .firstOrNull { it.startsWith("Tgid:") }
+                    ?.substringAfter("Tgid:")
+                    ?.trim()
+                    ?.toIntOrNull()
+                    ?.takeIf { it > 0 }
             }
-        } catch (ignored: java.io.IOException) {
-        } catch (ignored: java.lang.NumberFormatException) {
-        } finally {
-            try {
-                reader?.close()
-            } catch (ignored: java.io.IOException) {
-                }
+        } catch (_: java.io.IOException) {
+            null
+        } catch (_: SecurityException) {
+            null
         }
-        return tid
-    }
 }
 
 public object ValidationLog {

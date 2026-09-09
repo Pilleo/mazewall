@@ -511,17 +511,18 @@ Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Pr
 2. **Parent Stack Trace Capture on Spawn Entry:**
    When the parent JVM thread ($T_{parent}$) calls `vfork`, `fork`, or a process-spawning `clone`:
    - The seccomp filter traps the entry.
-   - The JVM validation listener captures the stack trace of $T_{parent}$ and registers $T_{parent}$'s TID in a global `PendingSpawnRegistry` with its authorized stack trace before allowing the syscall to continue.
+   - The JVM validation listener captures the stack trace of $T_{parent}$ and runs the spawn policy callback. Only an approved spawn with a nonempty stack may register authorization before the syscall continues.
+   - Each `SupervisorRuntimeContext` owns a `SpawnAuthorizationStore`. The key is the parent's process ID (TGID) plus `/proc/<pid>/stat` start-time ticks, so reuse of a PID does not reuse authorization. Unavailable TGID or process identity rejects the spawn; there is no TID-only fallback.
 
 3. **State-Based Propagation on Child `execve`:**
    When the child process ($PID_{child}$) calls `execve`/`execveat` to run the target binary:
    - The seccomp filter intercepts `execve`.
    - The supervisor daemon reads `PPID` from `/proc/$PID_{child}/stat` to verify it is a descendant of the JVM.
-   - Because the parent thread is suspended by the kernel in `vfork` or `clone(CLONE_VFORK)` until the child calls `execve` or exits, the spawning parent thread is guaranteed to be in the `PendingSpawnRegistry`.
-   - The JVM validation listener queries the registry to retrieve the parent thread's authorized stack trace and validates the execution context.
-   - Once the child execs, the parent thread returns and is removed from the `PendingSpawnRegistry`.
+   - For an exec with no live JVM stack, the JVM validation listener resolves the parent's current process identity and atomically consumes authorization from its own session. Missing, expired, consumed, closed, or unresolvable authorization denies exec, even when no policy callback is installed.
+   - Authorization lasts at most the existing ten-second monotonic TTL and is valid at its exact boundary. Each registration permits one consume, including when the subsequent exec policy rejects it. Session close, listener termination, and installation failure clear the store permanently.
+   - Stack containers and frames are copied at registration and when constructing or reading a successful result.
 
-This ensures process spawning validation is 100% secure, JVM-independent, and free of thread-creation deadlocks.
+The store holds one outstanding authorization per parent process identity. It does not bind a registration to a particular future child, and concurrent spawns from the same process can replace one another. Multiple exec attempts (including helper-to-target exec or PATH retries) need separately validated authority; they cannot replay one spawn entry. This experimental stack propagation does not replace the process-wide Tier 1 baseline, child ancestry checks, or the secure-exec path's existing fail-closed rewrite requirements. Thread-scoped containment remains an incomplete ACE boundary.
 
 ---
 

@@ -16,9 +16,13 @@ import io.mazewall.enforcer.state.*
  */
 public class SupervisorSession internal constructor(
     private val tid: Tid,
-    private val runtime: SupervisorRuntimeContext = SupervisorInstaller.compatibilityRuntime(),
+    private val runtime: SupervisorRuntimeContext? = null,
 ) : AutoCloseable {
     override fun close() {
-        runtime.unregister(tid)
+        if (runtime != null) {
+            runtime.close()
+        } else {
+            SupervisorInstaller.unregisterThread(tid)
+        }
     }
 }
