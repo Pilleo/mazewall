@@ -1,6 +1,7 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeNetworking
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -100,6 +101,14 @@ public object SupervisorSocketUtils {
     public fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
+    ): Boolean = sendDescriptor(socketFd, fdToSend, LinuxNative.snapshot().networking)
+
+    /** Descriptor transfer using the caller's captured native transport. */
+    @io.mazewall.MazewallInternal
+    public fun sendDescriptor(
+        socketFd: Int,
+        fdToSend: Int,
+        networking: NativeNetworking,
     ): Boolean {
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
@@ -124,7 +133,7 @@ public object SupervisorSocketUtils {
             msg.setMsgControllen(CMSG_RIGHTS_LEN)
 
             while (true) {
-                val res = LinuxNative.networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), 0)
+                val res = networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), 0)
                 if (res is LinuxNative.SyscallResult.Success) {
                     return true
                 } else {

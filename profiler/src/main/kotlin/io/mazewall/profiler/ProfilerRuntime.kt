@@ -21,7 +21,7 @@ internal data class ProfilerRuntime(
         fun default(): ProfilerRuntime {
             val native = LinuxNative.snapshot()
             val manager = ProfilerDaemonManager(native)
-            return ProfilerRuntime({ manager }, RealProfilerInstaller, { native.process.gettid() }, native)
+            return ProfilerRuntime({ manager }, RealProfilerInstaller(native), { native.process.gettid() }, native)
         }
     }
 }

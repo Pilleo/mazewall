@@ -2,6 +2,7 @@ package io.mazewall.ffi.networking
 
 import io.mazewall.BpfNativeCache
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
@@ -10,7 +11,6 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
-import io.mazewall.core.close
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
@@ -41,12 +41,42 @@ public object SupervisorSeccompNotifInstaller {
         onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
     ) {
-        if (!Platform.featureMatrix.seccompUserNotifSupported) {
+        install(
+            LinuxNative.snapshot(),
+            Platform.featureMatrix.seccompUserNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            connectWithRetry,
+            sendDescriptor,
+            onFilterApplied,
+            onSocketConnected,
+        )
+    }
+
+    /**
+     * Installation under one captured native authority, including the uncontained coordinator.
+     * [onSocketConnected] takes ownership of its socket on entry, including callback failure.
+     */
+    @io.mazewall.MazewallInternal
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit = {},
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        validateNotVirtual()
+        if (!userNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
         }
 
         // Mandatory for non-privileged seccomp
-        LinuxNative.process
+        native.process
             .prctl(
                 io.mazewall.core.PrctlCommand
                 .SetNoNewPrivs(true),
@@ -84,6 +114,7 @@ public object SupervisorSeccompNotifInstaller {
 
                 // Connect to socket and send the descriptor (runs uncontained)
                 val socketFd = connectWithRetry(socketPath)
+                var socketTransferred = false
                 try {
                     val sent = sendDescriptor(socketFd, fdRef.value)
                     if (!sent) {
@@ -94,11 +125,12 @@ public object SupervisorSeccompNotifInstaller {
                     // We must close our local copy. If we don't, the kernel will not abort
                     // pending notifications when the daemon exits (since our FD would remain open),
                     // causing tracee threads to deadlock forever in __seccomp_filter.
-                    fdRef.close()
+                    native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener")
 
                     val readyLatch = CountDownLatch(1)
 
                     // Start validation/event listener thread (which will run uncontained)
+                    socketTransferred = true
                     onSocketConnected(socketFd, readyLatch)
 
                     // Wait until the listener is fully initialized and ready
@@ -109,10 +141,14 @@ public object SupervisorSeccompNotifInstaller {
                     // tracee after NEW_LISTENER has made openat subject to USER_NOTIF.
                     onFilterApplied()
                 } catch (expectedCoordinatorFailure: Exception) {
-                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
+                    if (!socketTransferred) {
+                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                    }
                     throw expectedCoordinatorFailure
                 } catch (expectedCoordinatorError: Error) {
-                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
+                    if (!socketTransferred) {
+                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                    }
                     throw expectedCoordinatorError
                 }
 
@@ -132,10 +168,10 @@ public object SupervisorSeccompNotifInstaller {
         }
 
         try {
-            val prog = BpfNativeCache.getOrCompute(filter.instructions)
+            val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = LinuxNative.raw.syscall(
+            val r = native.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
                 NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                 NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
@@ -178,8 +214,8 @@ public object SupervisorSeccompNotifInstaller {
             // This prevents the coordinator and listener threads from being subject to the seccomp
             // filter during their startup and handshake, avoiding fatal circular deadlocks.
             if (processWide && dummyBpf != null) {
-                val dummyProg = BpfNativeCache.getOrCompute(dummyBpf)
-                val tsyncRes = LinuxNative.raw.syscall(
+                val dummyProg = BpfNativeCache.getOrCompute(dummyBpf, native)
+                val tsyncRes = native.raw.syscall(
                     arch.seccompSyscallNumber.toLong(),
                     NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
                     NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
@@ -205,14 +241,14 @@ public object SupervisorSeccompNotifInstaller {
             }
         } catch (expectedInstallFailure: Exception) {
             val fdRef = listenerFdVal.get()
-            if (fdRef.value >= 0) {
-                fdRef.close()
+            if (fdRef.isValid) {
+                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
             }
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
             val fdRef = listenerFdVal.get()
-            if (fdRef.value >= 0) {
-                fdRef.close()
+            if (fdRef.isValid) {
+                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
             }
             throw expectedInstallError
         }

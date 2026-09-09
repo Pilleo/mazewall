@@ -2,11 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
-import io.mazewall.MockPlatformProvider
-import io.mazewall.Platform
 import io.mazewall.Policy
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -14,21 +10,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertTrue
 
 class ProfilerInstallerTest {
-    @BeforeEach
-    fun setUp() {
-        val mockEngine = MockNativeEngine()
-        mockEngine.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
-        LinuxNative.setEngine(mockEngine)
-
-        val mockPlatform = MockPlatformProvider()
-        mockPlatform.mockSeccompUserNotifSupported = true
-        Platform.setProvider(mockPlatform)
-    }
-
-    @AfterEach
-    fun tearDown() {
-        LinuxNative.resetToDefault()
-        Platform.resetToDefault()
+    private val native = MockNativeEngine().apply {
+        syscallResult = LinuxNative.SyscallResult.Success(100L)
     }
 
     @Test
@@ -42,6 +25,8 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    native = native,
+                    userNotifSupported = true,
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -76,6 +61,8 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    native = native,
+                    userNotifSupported = true,
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -105,10 +92,7 @@ class ProfilerInstallerTest {
 
     @Test
     fun `test coordinator thread handles send descriptor failure`() {
-        val mock = MockNativeEngine()
-        mock.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
-        mock.networking.sendmsgResult = LinuxNative.SyscallResult.Error(9, -1) // EBADF
-        LinuxNative.setEngine(mock)
+        native.networking.sendmsgResult = LinuxNative.SyscallResult.Error(9, -1) // EBADF
 
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
@@ -119,6 +103,8 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    native = native,
+                    userNotifSupported = true,
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,

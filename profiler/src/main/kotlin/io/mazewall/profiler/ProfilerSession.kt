@@ -13,6 +13,7 @@ import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owns one operation's listeners, TID mappings, buffered observations, and cleanup result. */
 internal class ProfilerSession(
@@ -29,22 +30,34 @@ internal class ProfilerSession(
     private val pathCache = ConcurrentHashMap<String, Long>()
     private val listeners = CopyOnWriteArrayList<ProfilerTraceListener>()
     private val appliedThreads = ConcurrentHashMap.newKeySet<Thread>()
-    private var closed = false
+    private val lifecycleLock = Any()
+    private val cleanupLock = Any()
+    private val closed = AtomicBoolean(false)
+    private var installations = 0
+    private val installer = runtime.installer.forSession {
+        check(!closed.get()) { "Profiler session closed during installation" }
+    }
 
     @Volatile
     var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
         private set
 
-    @Synchronized
     fun installOnCurrentThread() {
-        // Existing wrapped workers retain their kernel filters in pass-through after session close.
-        if (closed || Thread.currentThread() in appliedThreads) return
+        val thread = Thread.currentThread()
+        synchronized(lifecycleLock) {
+            // Existing wrapped workers retain their kernel filters in pass-through after session close.
+            if (closed.get() || thread in appliedThreads) return
+        }
         validateNotVirtual()
         val tid = runtime.tid()
-        state.register(tid, Thread.currentThread())
+        synchronized(lifecycleLock) {
+            if (closed.get()) return
+            state.register(tid, thread)
+            installations++
+        }
         var installed = false
         try {
-            runtime.installer.installProfilingFilterForThread(
+            installer.installProfilingFilterForThread(
                 context.socketPath,
                 policy,
                 logs,
@@ -52,43 +65,71 @@ internal class ProfilerSession(
                 pathCache,
                 processWide,
             ) { fd, _, _, _, ready ->
-                val listener = ProfilerTraceListener(
-                    FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
-                    logs,
-                    if (captureStackTraces) stackProfiles else null,
-                    pathCache,
-                    state::threadFor,
-                    runtime.native,
-                )
-                listeners.add(listener)
-                listener.start(ready)
+                val dispose = synchronized(lifecycleLock) {
+                    val late = closed.get()
+                    // A late socket still needs the ACK/pass-through protocol, but cannot publish
+                    // observations or resolve TIDs through an already closed session.
+                    val listener = ProfilerTraceListener(
+                        FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
+                        if (late) CopyOnWriteArrayList() else logs,
+                        if (!late && captureStackTraces) stackProfiles else null,
+                        if (late) ConcurrentHashMap() else pathCache,
+                        if (late) {
+                            { null }
+                        } else {
+                            state::threadFor
+                        },
+                        runtime.native,
+                    )
+                    listeners.add(listener)
+                    // start only launches the uncontained reader/collector; it does not await I/O.
+                    listener.start(ready)
+                    late
+                }
+                if (dispose) {
+                    closeWithResult()
+                    error("Profiler session closed during installation")
+                }
             }
-            appliedThreads.add(Thread.currentThread())
-            installed = true
+            synchronized(lifecycleLock) {
+                check(!closed.get()) { "Profiler session closed during installation" }
+                appliedThreads.add(thread)
+                installed = true
+            }
         } finally {
-            if (!installed) state.remove(tid)
+            val dispose = synchronized(lifecycleLock) {
+                if (!installed) state.remove(tid)
+                installations--
+                closed.get()
+            }
+            if (dispose) closeWithResult()
         }
     }
 
-    @Synchronized
     fun closeWithResult(): SeccompCleanupOutcome {
-        closed = true
-        try {
-            val outcomes = listeners.map { it.closeWithResult() }
-            val incomplete = outcomes.filterIsInstance<SeccompCleanupOutcome.Incomplete>()
-            cleanupOutcome = if (incomplete.isEmpty()) {
-                SeccompCleanupOutcome.Complete
-            } else {
-                SeccompCleanupOutcome.Incomplete(
-                incomplete.flatMap { it.failures },
-                incomplete.flatMap { it.retryableOwnership },
-            )
+        synchronized(lifecycleLock) { closed.set(true) }
+        return synchronized(cleanupLock) {
+            try {
+                val outcomes = listeners.map { it.closeWithResult() }
+                val incomplete = outcomes.filterIsInstance<SeccompCleanupOutcome.Incomplete>()
+                cleanupOutcome = if (incomplete.isEmpty()) {
+                    SeccompCleanupOutcome.Complete
+                } else {
+                    SeccompCleanupOutcome.Incomplete(
+                        incomplete.flatMap { it.failures },
+                        incomplete.flatMap { it.retryableOwnership },
+                    )
+                }
+                cleanupOutcome
+            } finally {
+                val settled = synchronized(lifecycleLock) {
+                    state.clear()
+                    appliedThreads.clear()
+                    installations == 0
+                }
+                // Keep ownership reachable from the service until any late installation is disposed.
+                if (settled) onClosed(this)
             }
-            return cleanupOutcome
-        } finally {
-            state.clear()
-            appliedThreads.clear()
-            onClosed(this)
         }
     }
 

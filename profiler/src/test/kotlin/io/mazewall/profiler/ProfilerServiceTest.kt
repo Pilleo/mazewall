@@ -29,6 +29,7 @@ import java.nio.file.Files
 import java.util.concurrent.Callable
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -42,6 +43,82 @@ import kotlin.test.assertTrue
 
 @io.mazewall.EnabledIfLinuxAndSupported
 class ProfilerServiceTest {
+    @Test
+    @Timeout(20)
+    fun `service retains cleanup failures from a listener acquired after close`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        StreamInstaller {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        }.use { stream ->
+            val actual = LinuxNative.snapshot()
+            val closes = AtomicInteger()
+            val native = object : NativeEngine by actual {
+                override val fileSystem = object : NativeFileSystem by actual.fileSystem {
+                    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        closes.incrementAndGet()
+                        actual.fileSystem.close(fd).getOrThrow("close late session fixture")
+                        return LinuxNative.SyscallResult.Error(13, -1L)
+                    }
+                }
+            }
+            val service = ProfilerService(runtime(stream).copy(native = native))
+            val session = service.openSession()
+            val callers = Executors.newFixedThreadPool(2)
+            val installation = callers.submit { session.installOnCurrentThread() }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                callers.submit { service.shutdown() }.get(1, TimeUnit.SECONDS)
+                release.countDown()
+                assertFailsWith<ExecutionException> { installation.get(5, TimeUnit.SECONDS) }
+                val outcome = assertIs<SeccompCleanupOutcome.Incomplete>(session.cleanupOutcome)
+                assertTrue(outcome.retryableOwnership.isEmpty())
+                assertFailsWith<IllegalStateException> { service.shutdown() }
+                assertEquals(outcome, service.cleanupOutcome)
+                assertEquals(1, closes.get(), "Late terminal native errors must not lose or reacquire ownership")
+            } finally {
+                release.countDown()
+                callers.shutdown()
+                assertTrue(callers.awaitTermination(5, TimeUnit.SECONDS))
+                session.closeWithResult()
+            }
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    fun `close returns during stalled installation and disposes its late listener`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        StreamInstaller {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        }.use { stream ->
+            val session = ProfilerService(runtime(stream)).openSession()
+            val callers = Executors.newFixedThreadPool(2)
+            val installation = callers.submit { session.installOnCurrentThread() }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                val close = callers.submit(Callable { session.closeWithResult() })
+                assertEquals(SeccompCleanupOutcome.Complete, close.get(1, TimeUnit.SECONDS))
+                assertNull(session.state.threadFor(Tid(73)))
+                release.countDown()
+                val failure = assertFailsWith<ExecutionException> { installation.get(5, TimeUnit.SECONDS) }
+                assertIs<IllegalStateException>(failure.cause)
+                assertEquals(0x54, stream.commands.poll(5, TimeUnit.SECONDS), "A late listener must enter pass-through")
+                assertTrue(session.logs.isEmpty(), "A closed session must not publish late observations")
+                assertNull(session.state.threadFor(Tid(73)))
+                assertEquals(SeccompCleanupOutcome.Complete, session.cleanupOutcome)
+            } finally {
+                release.countDown()
+                callers.shutdown()
+                assertTrue(callers.awaitTermination(5, TimeUnit.SECONDS))
+                session.close()
+            }
+        }
+    }
+
     @Test
     @Timeout(20)
     fun `closing a session unregisters only its own tid mapping`() {
@@ -217,8 +294,9 @@ class ProfilerServiceTest {
         return ProfilerRuntime({ manager }, installer, { Tid(73) }, native)
     }
 
-    private class StreamInstaller :
-        ProfilerInstallerInterface,
+    private class StreamInstaller(
+        private val beforeInstall: () -> Unit = {},
+    ) : ProfilerInstallerInterface,
         AutoCloseable {
         private val directory = Files.createTempDirectory("profiler-service-test-")
         private val path = directory.resolve("trace.sock")
@@ -245,6 +323,7 @@ class ProfilerServiceTest {
                 CountDownLatch,
             ) -> Unit,
         ) {
+            beforeInstall()
             val fd = ProfilerSocket.connectWithRetry(path.toString())
             listenerFd = fd
             peer = server.accept()

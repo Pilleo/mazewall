@@ -35,11 +35,19 @@ internal object BpfNativeCache {
 
     /**
      * Gets a cached [ManagedSegment] for the given [filters], or computes it using
-     * [LinuxNative.memory.newSockFProg] if not present.
+     * the current captured native engine if not present.
      */
     fun getOrCompute(filters: List<BpfInstruction>): ManagedSegment {
-        return filterCache.computeIfAbsent(NativeCacheKey(filters, LinuxNative.engineIdentity)) {
-            with(sharedArena) { LinuxNative.memory.newSockFProg(it.filters) }
+        return getOrCompute(filters, LinuxNative.snapshot())
+    }
+
+    fun getOrCompute(
+        filters: List<BpfInstruction>,
+        native: NativeEngine,
+    ): ManagedSegment {
+        val identity = (native as? RuntimeSnapshot)?.engineIdentity ?: native
+        return filterCache.computeIfAbsent(NativeCacheKey(filters, identity)) {
+            with(sharedArena) { native.memory.newSockFProg(it.filters) }
         }
     }
 

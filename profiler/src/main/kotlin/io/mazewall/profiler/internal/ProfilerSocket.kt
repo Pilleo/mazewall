@@ -1,6 +1,7 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
@@ -12,6 +13,13 @@ internal object ProfilerSocket {
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
+    ): Int = connectWithRetry(socketPath, LinuxNative.snapshot(), maxRetries, delayMs)
+
+    fun connectWithRetry(
+        socketPath: String,
+        native: NativeEngine,
+        maxRetries: Int = 500,
+        delayMs: Long = 10L,
     ): Int {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
@@ -20,7 +28,7 @@ internal object ProfilerSocket {
 
             for (retryAttempt in 0 until maxRetries) {
                 val fdRes =
-                LinuxNative.networking.socket(
+                native.networking.socket(
                     SupervisorSocketUtils.AF_UNIX,
                     SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
                     0,
@@ -36,7 +44,7 @@ internal object ProfilerSocket {
                 }
                 val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
                 val connRes =
-                LinuxNative.networking.connect(
+                native.networking.connect(
                     fd,
                     ConfinedSegment(sockaddrUn.segment),
                     SupervisorSocketUtils.SOCKADDR_UN_SIZE,
@@ -46,7 +54,7 @@ internal object ProfilerSocket {
                     return fdVal
                 }
                 lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                LinuxNative.fileSystem.close(fd)
+                native.fileSystem.close(fd).getOrThrow("close failed profiler connection")
 
                 Thread.sleep(delayMs)
             }
@@ -59,7 +67,13 @@ internal object ProfilerSocket {
     fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
+    ): Boolean = sendDescriptor(socketFd, fdToSend, LinuxNative.snapshot())
+
+    fun sendDescriptor(
+        socketFd: Int,
+        fdToSend: Int,
+        native: NativeEngine,
     ): Boolean {
-        return SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend)
+        return SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend, native.networking)
     }
 }
