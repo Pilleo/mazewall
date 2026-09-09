@@ -524,6 +524,16 @@ Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Pr
 
 The store holds one outstanding authorization per parent process identity. It does not bind a registration to a particular future child, and concurrent spawns from the same process can replace one another. Multiple exec attempts (including helper-to-target exec or PATH retries) need separately validated authority; they cannot replay one spawn entry. This experimental stack propagation does not replace the process-wide Tier 1 baseline, child ancestry checks, or the secure-exec path's existing fail-closed rewrite requirements. Thread-scoped containment remains an incomplete ACE boundary.
 
+### Supervisor session and reply ownership
+
+`SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
+
+Open, socket, asynchronous accept, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply. Async accept uses its own confined arena and transfers only heap request data and descriptors acquired from successful native calls.
+
+The process boundary is also the authorization boundary: `SupervisorInstaller`'s JVM validation listener registers and consumes its session's spawn authorization. The sidecar routes carry the resulting JVM decision alongside their request context; neither argument preparation nor a route executor mirrors, consumes again, or independently grants that authority. Duplicating the store across processes would risk replay or incorrectly deny a legitimately consumed authorization.
+
+Two pre-existing secure-exec limitations remain explicitly tracked: the native `O_PATH` value needs an ABI correction ([backlog](../../backlog/issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md)), and `pidfd_getfd` plus local close does not remove an injected descriptor from the tracee's FD table ([backlog](../../backlog/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md)). Failed rewrite remains denied, but the injected remote descriptor can remain until tracee teardown. This refactor does not introduce a remote-close protocol or change native flag values.
+
 ---
 
 

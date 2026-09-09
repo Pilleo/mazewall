@@ -52,18 +52,12 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `unresolvable relative path is not remapped onto a daemon bypass root`() {
-        val handler = SupervisorSessionHandler(
-            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
-        )
-
         val resolvedPath = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(999), "build/secret")
 
         if (resolvedPath == null) {
             return
         }
-        val bypass = handler.resolveBypassPath(resolvedPath)
-        assertNull(bypass)
+        assertFalse(BypassPaths.isBypassPath(resolvedPath))
         assertFalse(
             BypassPaths.safeBypassPaths.any { root ->
             resolvedPath.normalize().startsWith(root.normalize())
@@ -73,10 +67,6 @@ class ResolveAbsolutePathTest {
 
     @Test
     fun `relative bypass path is matched only after tracee dirfd resolution`() {
-        val handler = SupervisorSessionHandler(
-            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(-1),
-            FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1),
-        )
         val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
         val tracee = ProcessBuilder(
             "bash",
@@ -91,9 +81,7 @@ class ResolveAbsolutePathTest {
 
             // "build" is beneath the daemon working directory and is normally bypassed. It must not
             // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
-            val result = handler.resolveBypassPath(resolvedPath)
-
-            assertNull(result)
+            assertFalse(BypassPaths.isBypassPath(resolvedPath))
         } finally {
             tracee.destroyForcibly()
             tracee.waitFor()
