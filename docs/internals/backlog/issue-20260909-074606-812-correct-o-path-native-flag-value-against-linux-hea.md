@@ -11,6 +11,9 @@ target_files:
 target_symbols:
   - "NativeConstants"
 open_questions: false
+
+paperclip_issue_id: "0d8e770a-f03a-48eb-b45e-96330432a38e"
+paperclip_identifier: "MAZ-1371"
 ---
 
 # 🟡 [Severity: HIGH]: Correct O_PATH native flag value against Linux headers

@@ -11,6 +11,9 @@ target_files:
 target_symbols:
   - "RealIterativeTaskExecutor"
 open_questions: false
+
+paperclip_issue_id: "dc8702c6-355c-40c2-9667-14c2d76f2432"
+paperclip_identifier: "MAZ-1369"
 ---
 
 # 🟡 [Severity: HIGH]: Preload HotSpot clock wrappers before restrictive iterative profiling
