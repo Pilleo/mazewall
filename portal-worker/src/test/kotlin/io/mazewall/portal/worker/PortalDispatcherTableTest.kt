@@ -46,6 +46,7 @@ class PortalDispatcherTableTest {
             builder.register(intArrayOf(1001), second)
         }
         assertFailsWith<IllegalStateException> { builder.build() }
+        assertFailsWith<IllegalStateException> { builder.bootstrapFromProperty("malformed") }
     }
 
     @Test
@@ -66,14 +67,21 @@ class PortalDispatcherTableTest {
     }
 
     @Test
-    fun `compatibility bootstrap cannot mutate after publication`() {
-        val registeredResult = byteArrayOf(11)
-        PortalDispatcherRegistry.register(intArrayOf(1100)) { _, _, _ -> registeredResult }
-        PortalDispatcherRegistry.freeze()
+    fun `production publication seals compatibility registration`() {
+        val dispatchers = PortalWorkerMain.publishDispatcherTable(
+            "${PublishedTableEchoService::class.java.name}=" +
+                "${PublishedTableEchoServiceImpl::class.java.name};" +
+                PublishedTableEchoServicePortalDispatcher::class.java.name,
+        )
+        val payload = byteArrayOf(11)
 
         assertSame(
-            registeredResult,
-            PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(1100), ByteArray(0), granted),
+            payload,
+            dispatchers.table.dispatchOrNull(PortalMethod.Generated(1100), payload, granted),
+        )
+        assertSame(
+            payload,
+            PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(1100), payload, granted),
         )
 
         assertFailsWith<IllegalStateException> {

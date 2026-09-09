@@ -42,12 +42,13 @@ public object PortalWorkerMain {
         System.out.flush()
         // Generated service dispatchers must be registered before the first request
         // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
-        val dispatcherBuilder = PortalDispatcherTable.Builder()
-        val registered = dispatcherBuilder.bootstrapStrict(
+        val dispatchers = publishDispatcherTable(
             System.getProperty("io.mazewall.portal.worker.dispatchers"),
         )
-        val dispatcherTable = dispatcherBuilder.build()
-        if (registered > 0) println("[DBG-W] registered=$registered generated dispatcher(s)")
+        val dispatcherTable = dispatchers.table
+        if (dispatchers.registeredEntries > 0) {
+            println("[DBG-W] registered=${dispatchers.registeredEntries} generated dispatcher(s)")
+        }
         val channel = PortalChannel(connected, sockets)
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
         // while genuine socket death (ECONNRESET/POLLHUP from a dead broker) still breaks the
@@ -119,4 +120,6 @@ public object PortalWorkerMain {
             channel.close()
         }
     }
+
+    internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)
 }

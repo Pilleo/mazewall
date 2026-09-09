@@ -58,11 +58,17 @@ public object PortalDispatcherRegistry {
     }
 
     /** Startup-only bootstrap: malformed or duplicate handlers abort before dispatch is enabled. */
-    @Synchronized
     public fun bootstrapStrict(raw: String?): Int {
+        return publishStrict(raw).registeredEntries
+    }
+
+    @Synchronized
+    internal fun publishStrict(raw: String?): PortalDispatcherPublication {
         val count = startupBuilder().bootstrapStrict(raw)
-        publish()
-        return count
+        return PortalDispatcherPublication(
+            table = publish(),
+            registeredEntries = count,
+        )
     }
 
     private fun startupBuilder(): PortalDispatcherTable.Builder = checkNotNull(startupBuilder) { "portal dispatcher registry is published" }
@@ -76,7 +82,13 @@ public object PortalDispatcherRegistry {
     }
 }
 
+internal data class PortalDispatcherPublication(
+    val table: PortalDispatcherTable,
+    val registeredEntries: Int,
+)
+
 internal fun PortalDispatcherTable.Builder.bootstrapFromProperty(raw: String?): Int {
+    requireActive()
     if (raw.isNullOrBlank()) return 0
     var count = 0
     for (entry in raw.split(',')) {
@@ -88,6 +100,7 @@ internal fun PortalDispatcherTable.Builder.bootstrapFromProperty(raw: String?): 
 }
 
 internal fun PortalDispatcherTable.Builder.bootstrapStrict(raw: String?): Int {
+    requireActive()
     if (raw.isNullOrBlank()) return 0
     val entries = raw.split(',').map(String::trim)
     entries.forEach { registerEntry(it, replace = false) }

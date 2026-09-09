@@ -55,6 +55,10 @@ public class PortalDispatcherTable private constructor(
             return this
         }
 
+        internal fun requireActive() {
+            activeHandlers()
+        }
+
         public fun build(): PortalDispatcherTable {
             val target = activeHandlers()
             val table = PortalDispatcherTable(java.util.Map.copyOf(target))
