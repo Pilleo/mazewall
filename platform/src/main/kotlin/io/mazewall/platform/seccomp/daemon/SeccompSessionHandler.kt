@@ -6,6 +6,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeCloseFailure
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.IoctlCommand
@@ -201,7 +202,12 @@ public class SeccompSessionHandler(
     }
 
     private fun closeControlSocket() {
-        socketManager.close(socketFd)
+        try {
+            socketManager.close(socketFd)
+        } catch (failure: NativeCloseFailure) {
+            onSocketClosed()
+            throw failure
+        }
         onSocketClosed()
     }
 

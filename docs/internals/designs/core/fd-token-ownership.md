@@ -58,8 +58,11 @@ Every such call is a real `close(int)` syscall in the shared test JVM:
 
 Daemon and session owners interpret `SeccompCleanupInterpreter.close(connection)` as
 `Complete` or `Incomplete(failures, retryableOwnership)`. Independent descriptor
-closes are all attempted; a successful close retires only that descriptor, while a
-failed close stays on the original connection for retry. Retrying the connection
+closes are all attempted. A failure before native dispatch stays on the original
+connection for retry. A native close error is observable but terminal: Linux may
+already have released the integer, so its ownership is retired even on error.
+`RealSocketManager` reports these errors distinctly, preserving `FdEpoch` retirement
+before native close; no generation is revived. Retrying the connection
 does not close descriptors already released by an earlier attempt or by the reactor.
 The compatibility `AutoCloseable.close()` on `SeccompConnection` remains best-effort;
 owners that manage shutdown must consume the typed result.
@@ -67,7 +70,8 @@ owners that manage shutdown must consume the typed result.
 The shared daemon retains failed connections and server descriptors, exposes
 `cleanupOutcome`, and offers `retryCleanup()`. Its diagnostic outcome keeps earlier
 failures visible after a successful retry, with an empty ownership list when no
-failed descriptor remains. Worker drain failure is recorded, and tracked client
+pre-dispatch failure retains a descriptor. Native close errors likewise have empty
+retryable ownership. Worker drain failure is recorded, and tracked client
 descriptors are not closed while workers still run. Session buffer returns and arena
 closure are independent cleanup attempts; their exceptions are aggregated. Cleanup
 restores interruption and propagates cancellation after independent releases.

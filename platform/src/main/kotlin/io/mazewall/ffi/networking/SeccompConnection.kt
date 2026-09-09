@@ -4,6 +4,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeCloseFailure
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import java.nio.channels.ClosedByInterruptException
@@ -16,7 +17,7 @@ public sealed class SeccompConnection(
     protected val socketClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
     protected val listenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
 ) : AutoCloseable {
-    /** Result of an attempted close. A failed descriptor remains owned for a later retry. */
+    /** Failed pre-dispatch closes remain owned; native close results are terminal even on error. */
     public sealed interface CloseResult {
         public data object Closed : CloseResult
 
@@ -49,6 +50,7 @@ public sealed class SeccompConnection(
                 socketManager.close(socketFd)
                 socketClosedFlag.set(true)
             } catch (failure: Exception) {
+                if (failure is NativeCloseFailure) socketClosedFlag.set(true)
                 failures += failure
             }
         }
@@ -58,6 +60,7 @@ public sealed class SeccompConnection(
                 socketManager.close(lFd)
                 listenerClosedFlag.set(true)
             } catch (failure: Exception) {
+                if (failure is NativeCloseFailure) listenerClosedFlag.set(true)
                 failures += failure
             }
         }
@@ -71,7 +74,7 @@ public sealed class SeccompConnection(
         return if (failures.isEmpty()) CloseResult.Closed else CloseResult.Failed(failures.toList())
     }
 
-    /** Only descriptors whose close has not succeeded remain available for owner retry. */
+    /** Only descriptors whose native close has not been attempted remain available for retry. */
     @Synchronized
     internal fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> =
         buildList {

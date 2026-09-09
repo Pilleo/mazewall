@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp.daemon
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.MockNativeFileSystem
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -9,6 +10,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
 import io.mazewall.ffi.networking.SeccompConnection
@@ -41,6 +43,75 @@ class SeccompCleanupInterpreterTest {
     @AfterEach
     fun closeOwnedFixtures() {
         ownedDescriptors.forEach(RealSocketManager::close)
+    }
+
+    @Test
+    fun `native close error remains observable without retrying a consumed descriptor`() {
+        val socket = owned(FileDescriptorRole.UnixSocket)
+        var attempts = 0
+        val realNative = LinuxNative.snapshot()
+        val native = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                assertEquals(socket, fd)
+                attempts++
+                    realNative.fileSystem.close(fd).getOrThrow("close owned test descriptor")
+                    ownedDescriptors.remove(socket)
+                    return LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+            }
+        },
+        )
+        val connection = SeccompConnection.Accepted(socket)
+        LinuxNative.setEngine(native)
+        try {
+            // Catches discarding the native error or retrying an integer released by the native close attempt.
+            val incomplete = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, SeccompCleanupInterpreter.close(connection))
+            assertTrue(incomplete.retryableOwnership.isEmpty())
+            assertTrue(
+                incomplete.failures
+                .single()
+                .message!!
+                .contains("EPERM"),
+            )
+            assertEquals(SeccompCleanupOutcome.Complete, SeccompCleanupInterpreter.close(connection))
+            assertEquals(1, attempts)
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `daemon records native server close failure without keeping a retry token`() {
+        val server = owned(FileDescriptorRole.UnixSocket)
+        val realNative = LinuxNative.snapshot()
+        var attempts = 0
+        val native = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                attempts++
+                if (attempts == 1) {
+                    realNative.fileSystem.close(fd).getOrThrow("close owned server fixture")
+                    ownedDescriptors.remove(server)
+                }
+                return LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+            }
+        },
+        )
+        val daemon = SeccompDaemonEngine(
+            socketPath = "/tmp/cleanup-test.sock",
+            notifHandlerFactory = { _, _ -> error("unused") },
+            engine = native,
+        )
+        LinuxNative.setEngine(native)
+        try {
+            daemon.applyEvent(UnixListenDaemonEvent.AcceptLoopFinished(server))
+            val incomplete = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, daemon.cleanupOutcome)
+            assertTrue(incomplete.retryableOwnership.isEmpty())
+            daemon.retryCleanup()
+            assertEquals(1, attempts)
+        } finally {
+            LinuxNative.resetToDefault()
+        }
     }
 
     @Test

@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeCloseFailure
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
@@ -152,8 +153,7 @@ public class SeccompDaemonEngine(
                     failedServerCloses.addIfAbsent(effect.serverFd)
                     recordCleanup(
                         SeccompCleanupInterpreter.closeResources({
-                        socketManager.close(effect.serverFd)
-                        failedServerCloses.remove(effect.serverFd)
+                        closeServer(effect.serverFd)
                     }),
                     )
                 }
@@ -251,6 +251,16 @@ public class SeccompDaemonEngine(
         cleanupConnection(connection)
     }
 
+    private fun closeServer(server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
+        try {
+            socketManager.close(server)
+        } catch (failure: NativeCloseFailure) {
+            failedServerCloses.remove(server)
+            throw failure
+        }
+        failedServerCloses.remove(server)
+    }
+
     private fun recordCleanup(outcome: SeccompCleanupOutcome) {
         when (outcome) {
             SeccompCleanupOutcome.Complete -> Unit
@@ -286,9 +296,7 @@ public class SeccompDaemonEngine(
         val releases = connections.map { connection -> { cleanupConnection(connection) } } +
             failedServerCloses.map { server ->
                 {
-                    socketManager.close(server)
-                    failedServerCloses.remove(server)
-                    Unit
+                    closeServer(server)
                 }
             }
         recordCleanup(SeccompCleanupInterpreter.closeResources(releases))
@@ -321,6 +329,8 @@ public class SeccompDaemonEngine(
             interrupted = true
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (failedClose: NativeCloseFailure) {
+            recordCleanup(SeccompCleanupOutcome.Incomplete(listOf(failedClose), emptyList()))
         } catch (expectedConnectionFailure: Exception) {
             System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${expectedConnectionFailure.message}")
         } finally {

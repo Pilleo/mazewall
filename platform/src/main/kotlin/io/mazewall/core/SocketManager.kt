@@ -16,6 +16,7 @@ public interface SocketManager {
 
     public fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
 
+    /** Native result failures are terminal; other thrown failures must precede native dispatch. */
     public fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
 
     public fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?
@@ -36,6 +37,11 @@ public interface SocketManager {
         fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
     ): Boolean
 }
+
+/** A native close result failed; the integer may already be reused and must never be retried. */
+internal class NativeCloseFailure(
+    message: String,
+) : IllegalStateException(message)
 
 /**
  * Real implementation of [SocketManager] using [LinuxNative].
@@ -88,7 +94,10 @@ public object RealSocketManager : SocketManager {
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
-        LinuxNative.fileSystem.close(fd)
+        when (val result = LinuxNative.fileSystem.close(fd)) {
+            is LinuxNative.SyscallResult.Success -> Unit
+            is LinuxNative.SyscallResult.Error -> throw NativeCloseFailure("close(fd=${fd.value}) failed: $result")
+        }
     }
 
     override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
