@@ -11,18 +11,27 @@ import io.mazewall.ffi.memory.readByte
 import java.io.InputStream
 import java.io.InterruptedIOException
 
-/** EINTR-safe reader over an externally owned descriptor and caller-owned confined arena. */
+/**
+ * EINTR-safe reader over an externally owned descriptor and caller-owned confined arena.
+ * The public primary constructor captures the current native memory dependency once;
+ * the additive constructor captures an explicitly supplied dependency instead.
+ */
 public open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
-    private val description: String,
-    private val memory: NativeMemory,
+    private val description: String = "native descriptor",
 ) : InputStream() {
+    // Assigned only during construction: an extra primary parameter would break Kotlin metadata.
+    private var memory: NativeMemory = LinuxNative.snapshot().memory
+
     public constructor(
         socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
         arena: NativeArena,
-        description: String = "native descriptor",
-    ) : this(socketFd, arena, description, LinuxNative.snapshot().memory)
+        description: String,
+        memory: NativeMemory,
+    ) : this(socketFd, arena, description) {
+        this.memory = memory
+    }
 
     private val readBuf = arena.allocate(1)
     private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())

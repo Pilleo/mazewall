@@ -18,6 +18,10 @@ public sealed interface SyscallEventState {
  *
  * This class ensures that diagnostic events carry strongly-typed identifiers ([Tid])
  * and maintain immutability for the captured system call arguments and paths.
+ * The original public primary constructor retains its named/default arguments. [fromResolution]
+ * carries typed evidence through an immutable [paths] projection; passing that projection to
+ * the same syscall preserves the evidence. An ordinary path list or a different syscall name
+ * selects the conservative legacy adapter. All caller-supplied collections are snapshotted.
  *
  * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
  * To prevent memory segment lifetime leaks, high GC pressure, and native memory leaks,
@@ -34,23 +38,17 @@ public sealed interface SyscallEventState {
  * @property paths The list of resolved filesystem paths extracted from the tracee's memory.
  * @property stackTrace The captured JVM stack trace of the triggering thread, if available.
  */
-public class SyscallEvent<out S : SyscallEventState> private constructor(
+public class SyscallEvent<out S : SyscallEventState>(
     val tid: Tid,
     val syscallName: String,
     args: List<Long>,
-    val pathResolution: PathResolution,
-    stackTrace: List<String>?,
+    paths: List<String> = emptyList(),
+    stackTrace: List<String>? = null,
 ) {
-    public constructor(
-        tid: Tid,
-        syscallName: String,
-        args: List<Long>,
-        paths: List<String> = emptyList(),
-        stackTrace: List<String>? = null,
-    ) : this(tid, syscallName, args, legacyPathResolution(syscallName, paths), stackTrace)
-
     val args: List<Long> = java.util.List.copyOf(args)
-    val paths: List<String> get() = pathResolution.paths
+    val pathResolution: PathResolution =
+        if (paths is SyscallPaths && paths.syscallName == syscallName) paths.resolution else legacyPathResolution(syscallName, paths)
+    val paths: List<String> = SyscallPaths(syscallName, pathResolution)
     val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
 
     override fun equals(other: Any?): Boolean {
@@ -84,15 +82,24 @@ public class SyscallEvent<out S : SyscallEventState> private constructor(
             args: List<Long>,
             pathResolution: PathResolution,
             stackTrace: List<String>? = null,
-        ): SyscallEvent<S> = SyscallEvent(tid, syscallName, args, pathResolution, stackTrace)
+        ): SyscallEvent<S> = SyscallEvent(tid, syscallName, args, SyscallPaths(syscallName, pathResolution), stackTrace)
     }
+}
+
+/** Ordinary immutable list semantics with heap-only evidence bound to its operation. */
+private class SyscallPaths(
+    val syscallName: String,
+    val resolution: PathResolution,
+) : java.util.AbstractList<String>() {
+    override val size: Int get() = resolution.paths.size
+
+    override fun get(index: Int): String = resolution.paths[index]
 }
 
 /**
  * Extension function to safely transition a raw syscall event to a resolved state by attaching the resolved paths.
  */
-internal fun SyscallEvent<SyscallEventState.Raw>.resolved(paths: List<String>): SyscallEvent<SyscallEventState.Resolved> =
-    SyscallEvent(tid, syscallName, args, java.util.List.copyOf(paths), stackTrace)
+internal fun SyscallEvent<SyscallEventState.Raw>.resolved(paths: List<String>): SyscallEvent<SyscallEventState.Resolved> = SyscallEvent(tid, syscallName, args, paths, stackTrace)
 
 internal fun SyscallEvent<SyscallEventState.Raw>.resolved(resolution: PathResolution): SyscallEvent<SyscallEventState.Resolved> =
     SyscallEvent.fromResolution(tid, syscallName, args, resolution, stackTrace)
