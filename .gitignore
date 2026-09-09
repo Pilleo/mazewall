@@ -115,3 +115,4 @@ target/
 ### Local Work Coordination ###
 /.worktrees/
 /.taskplane-kb/**/*.lock
+/docs/superpowers/

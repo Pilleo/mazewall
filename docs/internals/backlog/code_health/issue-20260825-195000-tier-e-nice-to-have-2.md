@@ -13,8 +13,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: "63fb41c9-ae72-40f8-a695-1407b8f469f2"
-paperclip_identifier: "MAZ-1113"
+paperclip_issue_id: "c85da0b7-b3ff-41b6-84e3-fcab92e0028f"
+paperclip_identifier: "MAZ-1254"
 ---
 
 # 🟢 [Severity: LOW]: Add SO_RCVTIMEO to daemon session socket

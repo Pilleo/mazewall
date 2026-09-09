@@ -12,8 +12,8 @@ effort: "small"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: "7279ad9d-3bcb-4eba-ab9c-b465c883097c"
-paperclip_identifier: "MAZ-1112"
+paperclip_issue_id: "f963ff0e-8e57-4671-8c1d-ff372b990a94"
+paperclip_identifier: "MAZ-1253"
 ---
 
 # 🟢 [Severity: LOW]: Extract --probe/--probe-stdin/--probe-cmdfile modes to ProbeMain.kt

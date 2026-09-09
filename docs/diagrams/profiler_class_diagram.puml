@@ -138,6 +138,8 @@ class "Profiler" as io.mazewall.profiler.Profiler {
   +void setInstallerProvider(ProfilerInstallerInterface)
   +Function0<Tid> getTidProvider()
   +void setTidProvider(Function0<Tid>)
+  +ProfilerRuntime currentRuntime()
+  +T withRuntime(ProfilerRuntime, Function0<? extends T>)
   + {static}void shutdown()
 }
 class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
@@ -145,6 +147,11 @@ class "ProfilerAckPreload" as io.mazewall.profiler.ProfilerAckPreload {
   __
   +List<String> getRequiredBinaryNames()
   +void ensureLoaded()
+}
+class "ProfilerRuntime" as io.mazewall.profiler.ProfilerRuntime {
+  +Function0<ProfilerDaemonManager> getDaemonManager()
+  +ProfilerInstallerInterface getInstaller()
+  +Function0<Tid> getTid()
 }
 class "ProfilingCoverage" as io.mazewall.profiler.ProfilingCoverage {
   + {static}Companion Companion
@@ -684,6 +691,12 @@ interface "NativeIoOperations" as io.mazewall.profiler.ffi.NativeIoOperations {
   + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, MemorySegment)
   + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
 }
+class "ProfilerNativeCommandWriter" as io.mazewall.profiler.ffi.ProfilerNativeCommandWriter {
+  + {static}ProfilerNativeCommandWriter INSTANCE
+  __
+  +void preload()
+  +SyscallResult writeByte(NativeMemory, FileDescriptor<? extends FileDescriptorRole, ? extends Open, ? extends FdOwnership>, byte)
+}
 interface "ProfilerTransport" as io.mazewall.profiler.ffi.ProfilerTransport {
 }
 class "ProfilerTransportKt" as io.mazewall.profiler.ffi.ProfilerTransportKt {
@@ -773,6 +786,7 @@ interface "TraceListenerEvent" as io.mazewall.profiler.internal.TraceListenerEve
 class "TraceListenerMachine" as io.mazewall.profiler.internal.TraceListenerMachine {
   + {static}TraceListenerMachine INSTANCE
   __
+  +void preload()
   +TraceListenerState evaluate(TraceListenerState, TraceListenerEvent)
 }
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
@@ -1006,9 +1020,12 @@ io.mazewall.profiler.ProfileEnvironment --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.ProfileOptions --> io.mazewall.profiler.ProfileStrategy
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerTraceListener
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.Profiler
+io.mazewall.profiler.Profiler --> io.mazewall.profiler.ProfilerRuntime
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.internal.ProfilerDaemonManager
 io.mazewall.profiler.Profiler --> io.mazewall.profiler.engine.ProfilerInstallerInterface
 io.mazewall.profiler.ProfilerAckPreload --> io.mazewall.profiler.ProfilerAckPreload
+io.mazewall.profiler.ProfilerRuntime --> io.mazewall.profiler.internal.ProfilerDaemonManager
+io.mazewall.profiler.ProfilerRuntime --> io.mazewall.profiler.engine.ProfilerInstallerInterface
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.IoUringVisibility
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.ProfileStrategy
 io.mazewall.profiler.ProfilingCoverage --> io.mazewall.profiler.StackAttribution
@@ -1103,6 +1120,7 @@ io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.
 io.mazewall.profiler.engine.SyscallPathResolver --> io.mazewall.profiler.engine.ProfilerMemoryReader
 io.mazewall.profiler.engine.TransportNativeEngine --> io.mazewall.profiler.ffi.ProfilerTransport
 io.mazewall.profiler.engine.TransportNativeMemory --> io.mazewall.profiler.ffi.ProfilerTransport
+io.mazewall.profiler.ffi.ProfilerNativeCommandWriter --> io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.TraceEventPublisher
 io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.SeccompResponder
 io.mazewall.profiler.ffi.ProfilerTransport .u.|> io.mazewall.profiler.ffi.NativeIoOperations
@@ -1136,7 +1154,6 @@ io.mazewall.profiler.tierE.engine.BpfRawTracepointOpenLayout --> io.mazewall.pro
 io.mazewall.profiler.tierE.engine.InvocationStateBtf --> io.mazewall.profiler.tierE.engine.InvocationStateBtf
 io.mazewall.profiler.tierE.engine.PerfEventAttrLayout --> io.mazewall.profiler.tierE.engine.PerfEventAttrLayout
 io.mazewall.profiler.tierE.engine.TierEbpfEngine --> io.mazewall.profiler.attribution.TierEOptions
-io.mazewall.profiler.tierE.engine.TierEbpfEngine --> io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader
 io.mazewall.profiler.tierE.stress.TierEDifferentialSmoke --> io.mazewall.profiler.tierE.stress.TierEDifferentialSmoke
 io.mazewall.profiler.tierE.stress.TierEKernelSmoke --> io.mazewall.profiler.tierE.stress.TierEKernelSmoke
 io.mazewall.profiler.tierE.stress.UserNotifOracleSmoke --> io.mazewall.profiler.tierE.stress.UserNotifOracleSmoke

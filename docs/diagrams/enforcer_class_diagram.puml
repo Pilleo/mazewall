@@ -858,6 +858,13 @@ class "SandboxDispatcher" as io.mazewall.enforcer.SandboxDispatcher {
   +T executeBlock(Policy<?, ?>, Function0<? extends T>)
   + {static}void shutdownAll()
 }
+interface "ContainedExecutor" as io.mazewall.enforcer.api.ContainedExecutor<S extends PolicyScope> {
+  + {abstract}Policy<S, Uncompiled> getPolicy()
+}
+class "ContainedExecutorView" as io.mazewall.enforcer.api.ContainedExecutorView<S extends PolicyScope> {
+  +Policy<S, Uncompiled> getPolicy()
+  +void execute(Runnable)
+}
 class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   + {static}ContainedExecutors INSTANCE
   __
@@ -869,6 +876,7 @@ class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
   +InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
   +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
   +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  +ContainedExecutor<S> wrapTyped(ExecutorService, Policy<? extends S, ? extends Uncompiled>)
   +ExecutorService newSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
   +ExecutorService newFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
   +ExecutorService newCachedThreadPool(Policy<?, ? extends Uncompiled>)
@@ -1039,6 +1047,8 @@ class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
 interface "JvmVerdict" as io.mazewall.enforcer.supervisor.JvmVerdict {
   +int toWire()
 }
+interface "JvmVerdictParse" as io.mazewall.enforcer.supervisor.JvmVerdictParse {
+}
 class "JvmVerdictRequest" as io.mazewall.enforcer.supervisor.JvmVerdictRequest {
   +long getId()
   +NotifHeader getHeader()
@@ -1081,6 +1091,8 @@ class "ProcFsInspector" as io.mazewall.enforcer.supervisor.ProcFsInspector {
   __
   +int getTgid(int)
   +int getPpid(int)
+  +PidObservation readPpid(int)
+  +PidObservation parsePpid(String)
 }
 class "ResolvedFastPath" as io.mazewall.enforcer.supervisor.ResolvedFastPath {
   +Path getPath()
@@ -1170,6 +1182,7 @@ class "SupervisorNotificationMachine" as io.mazewall.enforcer.supervisor.Supervi
   + {static}SupervisorNotificationMachine INSTANCE
   __
   +SupervisedKind classify(int, Arch)
+  +JvmVerdictParse decodeJvmVerdict(int, int)
   +JvmVerdict parseJvmVerdict(int, int)
   +SupervisorRoute evaluateFastPath(SupervisedKind, Path, String)
   +SupervisorRoute evaluateJvm(SupervisedKind, JvmVerdict)
@@ -2231,6 +2244,8 @@ io.mazewall.core.SocketIo --> io.mazewall.core.SocketIo
 io.mazewall.core.SyscallNumberResolver --> io.mazewall.core.SyscallNumberResolver
 io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
 io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
+io.mazewall.enforcer.api.ContainedExecutorView .u.|> io.mazewall.enforcer.api.ContainedExecutor
+io.mazewall.enforcer.api.ContainedExecutorView --> io.mazewall.Policy
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
 io.mazewall.enforcer.api.ContainmentViolationException -u-|> io.mazewall.enforcer.ContainmentViolationException
 io.mazewall.enforcer.api.ContainmentViolationException --> io.mazewall.enforcer.api.ContainmentViolationEvidence
