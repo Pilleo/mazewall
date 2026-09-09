@@ -6,6 +6,7 @@ import io.mazewall.MockSocketManager
 import io.mazewall.core.Arch
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.SocketManager
 import io.mazewall.core.Tid
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
@@ -20,8 +21,11 @@ import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.testing.awaitOrFail
+import org.junit.jupiter.api.Assertions.assertFalse
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 
 internal typealias NativeResult = LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
 
@@ -34,6 +38,7 @@ internal class SupervisorBoundaryFixture {
     val replies = CopyOnWriteArrayList<KernelReply>()
     val closed = CopyOnWriteArrayList<Int>()
     val replied = CountDownLatch(1)
+    private val replyThread = AtomicReference<Thread>()
     var replyResult: NativeResult = success(0)
     var injectionResult: NativeResult = success(61)
     var decision = 1
@@ -79,6 +84,7 @@ internal class SupervisorBoundaryFixture {
         engine.onIoctl = { _, command, buffer ->
             when (command) {
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND.code -> {
+                    replyThread.set(Thread.currentThread())
                     replies += KernelReply(
                         buffer.readLong(0),
                         buffer.readInt(16),
@@ -90,6 +96,7 @@ internal class SupervisorBoundaryFixture {
                 }
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD.code -> {
                     if (buffer.readInt(8) and NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt() != 0) {
+                        replyThread.set(Thread.currentThread())
                         replies += KernelReply(buffer.readLong(0), 0, 0, true)
                         replied.countDown()
                     }
@@ -100,7 +107,17 @@ internal class SupervisorBoundaryFixture {
         }
     }
 
-    fun handler() = SupervisorSessionHandler(socket, listener, engine, sockets, SupervisorRoutePreparation(memory) { 0 })
+    fun handler(socketManager: SocketManager = sockets) = SupervisorSessionHandler(socket, listener, engine, socketManager, SupervisorRoutePreparation(memory) { 0 })
+
+    /** Worker exit follows synchronous future callbacks, reply cleanup, and the terminal transition. */
+    fun awaitTerminalProcessing() {
+        replied.awaitOrFail("terminal kernel operation")
+        val thread = checkNotNull(replyThread.get())
+        if (thread !== Thread.currentThread()) {
+            thread.join(5_000)
+            assertFalse(thread.isAlive, "reply worker must finish interpretation, cleanup, and state transition")
+        }
+    }
 
     private val memory = object : TraceeMemoryReader {
         context(arena: NativeArena) override fun readString(

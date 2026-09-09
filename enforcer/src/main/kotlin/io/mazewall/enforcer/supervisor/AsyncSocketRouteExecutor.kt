@@ -21,6 +21,10 @@ internal class AsyncSocketRouteExecutor(
                     .getLogger(AsyncSocketRouteExecutor::class.java.name)
                     .log(java.util.logging.Level.WARNING, "Async accept failed for notification $id", expectedAsyncFailure)
                 result.complete(SupervisorReplyEffect.Error())
+            } catch (expectedFatalFailure: Throwable) {
+                // Publish after arena/resource cleanup, then retain the worker's fatal semantics.
+                result.completeExceptionally(expectedFatalFailure)
+                throw expectedFatalFailure
             }
         }
         return result

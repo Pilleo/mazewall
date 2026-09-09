@@ -21,19 +21,25 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
 internal sealed interface JvmExchangeResult {
+    val cleanupFailure: Exception? get() = null
+
     data class Verdict(
         val route: SupervisorRoute,
         val path: String?,
     ) : JvmExchangeResult
 
-    data object Timeout : JvmExchangeResult
+    data class Timeout(
+        override val cleanupFailure: Exception? = null,
+    ) : JvmExchangeResult
 
     data class Malformed(
         val reason: String,
+        override val cleanupFailure: Exception? = null,
     ) : JvmExchangeResult
 
     data class TransportFailed(
         val errno: Int,
+        override val cleanupFailure: Exception? = null,
     ) : JvmExchangeResult
 }
 
@@ -74,11 +80,27 @@ internal class JvmVerdictExchange(
         }
         val decoded = when (result) {
             is LinuxNative.SyscallResult.Error ->
-                if (result.errno == NativeConstants.ETIMEDOUT) JvmExchangeResult.Timeout else JvmExchangeResult.TransportFailed(result.errno)
+                if (result.errno == NativeConstants.ETIMEDOUT) JvmExchangeResult.Timeout() else JvmExchangeResult.TransportFailed(result.errno)
             is LinuxNative.SyscallResult.Success -> decode(request, buffer)
         }
-        if (decoded !is JvmExchangeResult.Verdict) close()
-        return decoded
+        return closeUnusableExchange(decoded)
+    }
+
+    /** Cleanup evidence accompanies, and can never replace, the unusable exchange outcome. */
+    private fun closeUnusableExchange(result: JvmExchangeResult): JvmExchangeResult {
+        if (result is JvmExchangeResult.Verdict) return result
+        val failure = try {
+            close()
+            null
+        } catch (expectedCloseFailure: Exception) {
+            expectedCloseFailure
+        }
+        return when (result) {
+            is JvmExchangeResult.Timeout -> result.copy(cleanupFailure = failure)
+            is JvmExchangeResult.Malformed -> result.copy(cleanupFailure = failure)
+            is JvmExchangeResult.TransportFailed -> result.copy(cleanupFailure = failure)
+            is JvmExchangeResult.Verdict -> result
+        }
     }
 
     private fun decode(

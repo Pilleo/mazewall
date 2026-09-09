@@ -528,7 +528,11 @@ The store holds one outstanding authorization per parent process identity. It do
 
 `SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
 
+An unusable exchange remains terminal even if closing its connection fails. Its typed outcome retains the cleanup exception alongside the primary failure; the session records both and refuses subsequent notifications. Preparation-only recovery cannot reinterpret an execution or exchange failure as successfully handled work.
+
 Open, socket, asynchronous accept, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply. Async accept uses its own confined arena and transfers only heap request data and descriptors acquired from successful native calls.
+
+A fatal accept-worker failure completes its future exceptionally after resource cleanup, allowing the session owner to process `ReplyFailed` and shut down without a policy-denial reply. The worker then rethrows the original fatal failure; it is not converted to ordinary denial or successful handling. Fatal prerequisite-close failures also release any already acquired successor descriptor before propagation.
 
 The process boundary is also the authorization boundary: `SupervisorInstaller`'s JVM validation listener registers and consumes its session's spawn authorization. The sidecar routes carry the resulting JVM decision alongside their request context; neither argument preparation nor a route executor mirrors, consumes again, or independently grants that authority. Duplicating the store across processes would risk replay or incorrectly deny a legitimately consumed authorization.
 

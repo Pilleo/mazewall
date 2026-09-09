@@ -37,6 +37,6 @@ internal sealed interface ReplyExecutionResult {
     data object ReplySucceeded : ReplyExecutionResult
 
     data class ReplyFailed(
-        val cause: Exception,
+        val cause: Throwable,
     ) : ReplyExecutionResult
 }

@@ -123,7 +123,7 @@ class JvmVerdictExchangeTest {
             buffer.writeByte(0, 42)
             SupervisorBoundaryFixture.success(1)
         }
-        assertEquals(JvmExchangeResult.Timeout, receive(fixture))
+        assertEquals(JvmExchangeResult.Timeout(), receive(fixture))
         assertEquals(1, fixture.sockets.closeCalledCount.get())
         assertEquals(0, fixture.replies.size)
     }

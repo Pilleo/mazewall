@@ -19,7 +19,7 @@ internal class SupervisorOwnedFd(
         var produced: SupervisorDescriptorResult? = null
         try {
             return use { acquire().also { result -> produced = result } }
-        } catch (expectedAcquisitionFailure: Exception) {
+        } catch (expectedAcquisitionFailure: Throwable) {
             val output = produced
             if (output is SupervisorDescriptorResult.Opened) output.descriptor.use { throw expectedAcquisitionFailure }
             throw expectedAcquisitionFailure

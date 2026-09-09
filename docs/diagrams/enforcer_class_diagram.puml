@@ -1079,6 +1079,7 @@ class "JVMValidationListener" as io.mazewall.enforcer.supervisor.JVMValidationLi
   +void start(CountDownLatch)
 }
 interface "JvmExchangeResult" as io.mazewall.enforcer.supervisor.JvmExchangeResult {
+  +Exception getCleanupFailure()
 }
 class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
   + {static}JvmStackInspector INSTANCE

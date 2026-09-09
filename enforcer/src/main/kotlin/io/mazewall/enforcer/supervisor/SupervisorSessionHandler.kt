@@ -51,15 +51,21 @@ internal class SupervisorSessionHandler(
     ): Boolean =
         NativeArena.ofConfined().use { arena ->
             with(arena) {
+                if (terminated.get()) return@with false
                 val notification = SeccompNotifications.read(notif)
                 val resolving = SupervisorSessionMachine.evaluate(SupervisorSessionState.AwaitingNotification, SupervisorSessionEvent.NotificationReceived)
-                try {
-                    val prepared = preparation.prepare(notification, resp)
-                    val transition = SupervisorSessionMachine.evaluate(resolving.state, SupervisorSessionEvent.PathResolved(prepared.route))
-                    interpret(transition, prepared.context)
+                val prepared = try {
+                    preparation.prepare(notification, resp)
                 } catch (expectedPreparationFailure: Exception) {
                     logger.log(Level.WARNING, "Unable to prepare notification ${notification.id}", expectedPreparationFailure)
-                    finish(SupervisorReplyEffect.Error(), SupervisorReplyContext(notification.id, resp))
+                    return@with finish(SupervisorReplyEffect.Error(), SupervisorReplyContext(notification.id, resp))
+                }
+                val transition = SupervisorSessionMachine.evaluate(resolving.state, SupervisorSessionEvent.PathResolved(prepared.route))
+                try {
+                    interpret(transition, prepared.context)
+                } catch (expectedExecutionFailure: Exception) {
+                    logger.log(Level.WARNING, "Notification execution failed for ${notification.id}", expectedExecutionFailure)
+                    failClosed(prepared.context, transition.state, SupervisorSessionEvent.Failed)
                 }
             }
         }
@@ -106,8 +112,10 @@ internal class SupervisorSessionHandler(
                     -> false
                 }
             }
-            JvmExchangeResult.Timeout, is JvmExchangeResult.Malformed, is JvmExchangeResult.TransportFailed ->
+            is JvmExchangeResult.Timeout, is JvmExchangeResult.Malformed, is JvmExchangeResult.TransportFailed -> {
+                logger.log(Level.WARNING, "Unusable JVM exchange: $result", result.cleanupFailure)
                 failClosed(context, state, SupervisorSessionEvent.Failed)
+            }
         }
 
     context(arena: NativeArena) private fun failClosed(
@@ -131,35 +139,38 @@ internal class SupervisorSessionHandler(
         result: CompletableFuture<SupervisorReplyEffect>,
         context: SupervisorRouteContext,
     ): Boolean {
-        if (result.isDone) return finish(result.join(), SupervisorReplyContext(context.request.id, context.response))
         val id = context.request.id
-        result.whenComplete { effect, failure ->
-            NativeArena.ofConfined().use { workerArena ->
-                with(workerArena) {
-                    if (failure != null) logger.log(Level.WARNING, "Async route failed for notification $id", failure)
-                    val response = SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                    finish(effect ?: SupervisorReplyEffect.Error(), response)
+        val completion = result.handle { effect, failure ->
+            if (failure != null) {
+                completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
+            } else {
+                NativeArena.ofConfined().use { workerArena ->
+                    with(workerArena) {
+                        finish(effect, SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
+                    }
                 }
             }
         }
         // Accepted async work remains ExecutingReply; only finish can produce Replied.
-        return true
+        return completion.getNow(true)
     }
 
     context(arena: NativeArena) private fun finish(
         effect: SupervisorReplyEffect,
         context: SupervisorReplyContext,
+    ): Boolean = completeReply(context.id, replies.execute(effect, context))
+
+    private fun completeReply(
+        id: Long,
+        result: ReplyExecutionResult,
     ): Boolean {
-        val result = replies.execute(effect, context)
         val event = when (result) {
             ReplyExecutionResult.ReplySucceeded -> SupervisorSessionEvent.ReplySucceeded
-            is ReplyExecutionResult.ReplyFailed -> {
-                logger.log(Level.WARNING, "Terminal reply failed for notification ${context.id}", result.cause)
-                SupervisorSessionEvent.ReplyFailed
-            }
+            is ReplyExecutionResult.ReplyFailed -> SupervisorSessionEvent.ReplyFailed
         }
         val state = SupervisorSessionMachine.evaluate(SupervisorSessionState.ExecutingReply, event).state
         if (state == SupervisorSessionState.Terminated) recycle()
+        if (result is ReplyExecutionResult.ReplyFailed) logger.log(Level.WARNING, "Terminal reply failed for notification $id", result.cause)
         return state == SupervisorSessionState.Replied
     }
 

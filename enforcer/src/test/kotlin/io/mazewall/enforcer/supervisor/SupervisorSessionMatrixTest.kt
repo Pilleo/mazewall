@@ -3,7 +3,7 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.core.Arch
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.testing.awaitOrFail
+import io.mazewall.platform.seccomp.daemon.LoopAction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
@@ -38,6 +38,17 @@ class SupervisorSessionMatrixTest {
             Case("id mismatch", configure = { it.responseId = 99 }, expectedError = -1, expectedHandled = false),
             Case("reply failure", configure = { it.replyResult = SupervisorBoundaryFixture.failure(13) }, expectedHandled = false),
             Case("injection failure", Arch.AMD64.open, { it.injectionResult = SupervisorBoundaryFixture.failure(1) }, expectedInjection = true, expectedHandled = false),
+            Case("async injection failure", Arch.AMD64.accept, { it.injectionResult = SupervisorBoundaryFixture.failure(13) }, expectedInjection = true, expectedHandled = false),
+            Case("async denial send failure", Arch.AMD64.accept, {
+                it.engine.networking.acceptResult = SupervisorBoundaryFixture.failure(13)
+                it.replyResult = SupervisorBoundaryFixture.failure(13)
+            }, expectedError = -13, expectedHandled = false),
+            Case("async post-reply cleanup failure", Arch.AMD64.accept, { fixture ->
+                fixture.engine.fileSystem.onClose = { fd ->
+                    fixture.closed += fd.value
+                    if (fd.value == 51004) SupervisorBoundaryFixture.failure(5) else SupervisorBoundaryFixture.success(0)
+                }
+            }, expectedInjection = true, expectedHandled = false),
             Case("protocol violation", expectedReplies = 0, expectedHandled = false, invalidState = SupervisorSessionState.ResolvingPath),
         ).map { case ->
             DynamicTest.dynamicTest(case.name) {
@@ -50,8 +61,13 @@ class SupervisorSessionMatrixTest {
                     } else {
                         with(arena) { handler.readAndHandleJvmResponse(fixture.context(arena, case.nr), case.invalidState) }
                     }
-                    if (case.expectedReplies != 0) fixture.replied.awaitOrFail(description = "terminal kernel operation for ${case.name}")
-                    assertEquals(case.expectedHandled, handled, "confirmed synchronous reply or accepted asynchronous work")
+                    if (case.expectedReplies != 0) fixture.awaitTerminalProcessing()
+                    // Pending acceptance is not a terminal outcome; the worker barrier above is.
+                    if (case.nr != Arch.AMD64.accept) assertEquals(case.expectedHandled, handled, "synchronous terminal result")
+                    val finalAction = with(arena) {
+                        handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                    }
+                    assertEquals(if (case.expectedHandled) LoopAction.Continue else LoopAction.Break, finalAction, "post-cleanup session outcome")
                     assertEquals(case.expectedReplies, fixture.replies.size, "terminal failure must never attempt a second reply")
                     fixture.replies.forEach { reply ->
                         assertEquals(42L, reply.id)
