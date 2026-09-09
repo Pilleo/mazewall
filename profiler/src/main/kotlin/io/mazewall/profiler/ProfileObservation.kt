@@ -24,6 +24,11 @@ public data class ObservationCorrelation(
 /**
  * Strategy-neutral kernel observation. [TraceEvent] remains the USER_NOTIF wire shape;
  * collectors translate into this type before [io.mazewall.profiler.compiler.BobCompiler].
+ *
+ * The original data-class constructors and generated copies retain caller-supplied lists.
+ * Event factories and [ProfilingResult] publish immutable snapshots. Generated copies preserve
+ * typed evidence while retaining the paths projection and its syscall name or io_uring opcode;
+ * explicitly replacing paths with an ordinary list uses the legacy resolution adapter.
  */
 public sealed interface ProfileObservation {
     public val correlation: ObservationCorrelation
@@ -31,53 +36,20 @@ public sealed interface ProfileObservation {
     public val paths: List<String>
     public val pathResolution: PathResolution
 
-    public class Syscall private constructor(
+    public data class Syscall(
         override val correlation: ObservationCorrelation,
         override val source: ObservationSource,
         val name: String,
-        args: List<Long>,
-        override val pathResolution: PathResolution,
-        val openFlags: Long?,
-        val contextId: Long?,
+        val args: List<Long> = emptyList(),
+        override val paths: List<String> = emptyList(),
+        val openFlags: Long? = null,
+        /** Tier E semantic context; null for unattributed observations. */
+        val contextId: Long? = null,
     ) : ProfileObservation {
-        public constructor(
-            correlation: ObservationCorrelation,
-            source: ObservationSource,
-            name: String,
-            args: List<Long> = emptyList(),
-            paths: List<String> = emptyList(),
-            openFlags: Long? = null,
-            contextId: Long? = null,
-        ) : this(correlation, source, name, args, legacyPathResolution(name, paths), openFlags, contextId)
+        override val pathResolution: PathResolution
+            get() = paths.resolutionFor("syscall:$name") ?: legacyPathResolution(name, paths)
 
-        val args: List<Long> = java.util.List.copyOf(args)
-        override val paths: List<String> get() = pathResolution.paths
-
-        public fun copy(
-            correlation: ObservationCorrelation = this.correlation,
-            source: ObservationSource = this.source,
-            name: String = this.name,
-            args: List<Long> = this.args,
-            paths: List<String> = this.paths,
-            openFlags: Long? = this.openFlags,
-            contextId: Long? = this.contextId,
-        ): Syscall = Syscall(correlation, source, name, args, if (name == this.name && paths == this.paths) pathResolution else legacyPathResolution(name, paths), openFlags, contextId)
-
-        internal fun withPathResolution(resolution: PathResolution): Syscall = Syscall(correlation, source, name, args, resolution, openFlags, contextId)
-
-        public operator fun component1(): ObservationCorrelation = correlation
-
-        public operator fun component2(): ObservationSource = source
-
-        public operator fun component3(): String = name
-
-        public operator fun component4(): List<Long> = args
-
-        public operator fun component5(): List<String> = paths
-
-        public operator fun component6(): Long? = openFlags
-
-        public operator fun component7(): Long? = contextId
+        internal fun withPathResolution(resolution: PathResolution): Syscall = copy(args = java.util.List.copyOf(args), paths = ObservationPaths("syscall:$name", resolution))
 
         override fun equals(other: Any?): Boolean =
             other is Syscall &&
@@ -104,49 +76,16 @@ public sealed interface ProfileObservation {
             "Syscall(correlation=$correlation, source=$source, name=$name, args=$args, paths=$paths, openFlags=$openFlags, contextId=$contextId, pathResolution=$pathResolution)"
     }
 
-    public class IoUring private constructor(
+    public data class IoUring(
         override val correlation: ObservationCorrelation,
         override val source: ObservationSource,
         val opcode: String,
-        override val pathResolution: PathResolution,
+        override val paths: List<String> = emptyList(),
     ) : ProfileObservation {
-        public constructor(
-            correlation: ObservationCorrelation,
-            source: ObservationSource,
-            opcode: String,
-            paths: List<String> = emptyList(),
-        ) : this(correlation, source, opcode, legacyPathResolution(opcode, paths, if (UringOp.parse(opcode).isPathBearing()) 1 else 0))
+        override val pathResolution: PathResolution
+            get() = paths.resolutionFor("uring:$opcode") ?: legacyPathResolution(opcode, paths, if (UringOp.parse(opcode).isPathBearing()) 1 else 0)
 
-        override val paths: List<String> get() = pathResolution.paths
-
-        public fun copy(
-            correlation: ObservationCorrelation = this.correlation,
-            source: ObservationSource = this.source,
-            opcode: String = this.opcode,
-            paths: List<String> = this.paths,
-        ): IoUring =
-            IoUring(
-            correlation,
-                source,
-                opcode,
-            if (opcode == this.opcode &&
-            paths == this.paths
-            ) {
-                pathResolution
-            } else {
-                legacyPathResolution(opcode, paths, if (UringOp.parse(opcode).isPathBearing()) 1 else 0)
-            },
-        )
-
-        internal fun withPathResolution(resolution: PathResolution): IoUring = IoUring(correlation, source, opcode, resolution)
-
-        public operator fun component1(): ObservationCorrelation = correlation
-
-        public operator fun component2(): ObservationSource = source
-
-        public operator fun component3(): String = opcode
-
-        public operator fun component4(): List<String> = paths
+        internal fun withPathResolution(resolution: PathResolution): IoUring = copy(paths = ObservationPaths("uring:$opcode", resolution))
 
         override fun equals(other: Any?): Boolean = other is IoUring && correlation == other.correlation && source == other.source && opcode == other.opcode && pathResolution == other.pathResolution
 
@@ -161,37 +100,16 @@ public sealed interface ProfileObservation {
         override fun toString(): String = "IoUring(correlation=$correlation, source=$source, opcode=$opcode, paths=$paths, pathResolution=$pathResolution)"
     }
 
-    public class Connect private constructor(
+    public data class Connect(
         override val correlation: ObservationCorrelation,
         override val source: ObservationSource,
         val endpoint: NetworkEndpoint,
-        override val pathResolution: PathResolution,
+        override val paths: List<String> = emptyList(),
     ) : ProfileObservation {
-        public constructor(
-            correlation: ObservationCorrelation,
-            source: ObservationSource,
-            endpoint: NetworkEndpoint,
-            paths: List<String> = emptyList(),
-        ) : this(correlation, source, endpoint, legacyPathResolution("CONNECT", paths, 0))
+        override val pathResolution: PathResolution
+            get() = paths.resolutionFor("connect") ?: legacyPathResolution("CONNECT", paths, 0)
 
-        override val paths: List<String> get() = pathResolution.paths
-
-        public fun copy(
-            correlation: ObservationCorrelation = this.correlation,
-            source: ObservationSource = this.source,
-            endpoint: NetworkEndpoint = this.endpoint,
-            paths: List<String> = this.paths,
-        ): Connect = Connect(correlation, source, endpoint, if (paths == this.paths) pathResolution else legacyPathResolution("CONNECT", paths, 0))
-
-        internal fun withPathResolution(resolution: PathResolution): Connect = Connect(correlation, source, endpoint, resolution)
-
-        public operator fun component1(): ObservationCorrelation = correlation
-
-        public operator fun component2(): ObservationSource = source
-
-        public operator fun component3(): NetworkEndpoint = endpoint
-
-        public operator fun component4(): List<String> = paths
+        internal fun withPathResolution(resolution: PathResolution): Connect = copy(paths = ObservationPaths("connect", resolution))
 
         override fun equals(other: Any?): Boolean =
             other is Connect && correlation == other.correlation && source == other.source && endpoint == other.endpoint && pathResolution == other.pathResolution
@@ -250,3 +168,19 @@ public sealed interface ProfileObservation {
         }
     }
 }
+
+/**
+ * An immutable evidence record carried by the original data-class paths component.
+ * Generated copies retain it unless callers replace paths or change the operation.
+ * List equality stays structural; observation equality explicitly includes the resolution.
+ */
+private class ObservationPaths(
+    val operation: String,
+    val resolution: PathResolution,
+) : java.util.AbstractList<String>() {
+    override val size: Int get() = resolution.paths.size
+
+    override fun get(index: Int): String = resolution.paths[index]
+}
+
+private fun List<String>.resolutionFor(operation: String): PathResolution? = (this as? ObservationPaths)?.takeIf { it.operation == operation }?.resolution
