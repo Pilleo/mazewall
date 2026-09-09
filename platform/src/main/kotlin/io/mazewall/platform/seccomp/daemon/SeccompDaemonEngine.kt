@@ -136,7 +136,7 @@ public class SeccompDaemonEngine(
     }
 
     private fun executeEffects(effects: List<UnixListenDaemonEffect>) {
-        recordCleanup(SeccompCleanupInterpreter.closeResources(effects.map { effect -> { executeEffect(effect) } }))
+        SeccompCleanupInterpreter.closeResources(effects.map { effect -> { executeEffect(effect) } }, ::recordCleanup)
     }
 
     private fun executeEffect(effect: UnixListenDaemonEffect) {
@@ -151,11 +151,7 @@ public class SeccompDaemonEngine(
                     System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: ${effect.source}.")
                 is UnixListenDaemonEffect.CloseServer -> {
                     failedServerCloses.addIfAbsent(effect.serverFd)
-                    recordCleanup(
-                        SeccompCleanupInterpreter.closeResources({
-                        closeServer(effect.serverFd)
-                    }),
-                    )
+                    SeccompCleanupInterpreter.closeResources(listOf({ closeServer(effect.serverFd) }), ::recordCleanup)
                 }
                 is UnixListenDaemonEffect.StopConnectionWorkers ->
                     connectionExecutor.shutdownNow()
@@ -265,7 +261,7 @@ public class SeccompDaemonEngine(
         when (outcome) {
             SeccompCleanupOutcome.Complete -> Unit
             is SeccompCleanupOutcome.Incomplete -> {
-                cleanupFailures.addAll(outcome.failures)
+                cleanupFailures.addAllAbsent(outcome.failures)
                 outcome.failures.forEach { System.err.println("[SECCOMP-DAEMON] Incomplete cleanup: $it") }
             }
         }
@@ -274,7 +270,7 @@ public class SeccompDaemonEngine(
     private fun cleanupConnection(connection: SeccompConnection) {
         incompleteConnections.addIfAbsent(connection)
         try {
-            recordCleanup(SeccompCleanupInterpreter.close(connection))
+            SeccompCleanupInterpreter.close(connection, ::recordCleanup)
         } finally {
             val remaining = connection.retryableOwnership()
             if (connection.socketFd !in remaining) clientSockets.remove(connection.socketFd)
@@ -299,7 +295,7 @@ public class SeccompDaemonEngine(
                     closeServer(server)
                 }
             }
-        recordCleanup(SeccompCleanupInterpreter.closeResources(releases))
+        SeccompCleanupInterpreter.closeResources(releases, ::recordCleanup)
         return cleanupOutcome
     }
 
@@ -469,10 +465,10 @@ public class SeccompDaemonEngine(
                     }
                 }
             } finally {
-                recordCleanup(sessionHandler.closeWithResult())
+                sessionHandler.closeWithResult(::recordCleanup)
             }
         } finally {
-            recordCleanup(SeccompCleanupInterpreter.closeResources({ (notifHandler as? AutoCloseable)?.close() }))
+            SeccompCleanupInterpreter.closeResources(listOf({ (notifHandler as? AutoCloseable)?.close() }), ::recordCleanup)
             // The connection owner's finally block interprets listener descriptor cleanup.
         }
     }

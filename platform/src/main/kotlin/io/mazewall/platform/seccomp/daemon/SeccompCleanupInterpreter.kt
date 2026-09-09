@@ -22,20 +22,36 @@ public sealed interface SeccompCleanupOutcome {
 /** Interprets close results without discarding failed descriptor ownership. */
 @MazewallInternal
 public object SeccompCleanupInterpreter {
-    public fun close(connection: SeccompConnection): SeccompCleanupOutcome =
+    public fun close(connection: SeccompConnection): SeccompCleanupOutcome = close(connection) { }
+
+    /** Publishes the outcome to its owner before cancellation propagates or interruption is restored. */
+    public fun close(
+        connection: SeccompConnection,
+        recordOutcome: (SeccompCleanupOutcome) -> Unit,
+    ): SeccompCleanupOutcome =
         synchronized(connection) {
-        when (val result = connection.closeWithResult()) {
+        val result = connection.closeWithResult { recordOutcome(outcome(connection, it)) }
+        outcome(connection, result)
+    }
+
+    private fun outcome(
+        connection: SeccompConnection,
+        result: SeccompConnection.CloseResult,
+    ): SeccompCleanupOutcome =
+        when (result) {
             SeccompConnection.CloseResult.Closed -> SeccompCleanupOutcome.Complete
             is SeccompConnection.CloseResult.Failed ->
                 SeccompCleanupOutcome.Incomplete(result.failures, connection.retryableOwnership())
         }
-    }
 
     /** Independent releases all run; cancellation propagates after remaining releases. */
     internal fun closeResources(vararg releases: () -> Unit): SeccompCleanupOutcome = closeResources(releases.asList())
 
     @Suppress("TooGenericExceptionCaught")
-    internal fun closeResources(releases: Iterable<() -> Unit>): SeccompCleanupOutcome {
+    internal fun closeResources(
+        releases: Iterable<() -> Unit>,
+        recordOutcome: (SeccompCleanupOutcome) -> Unit = { },
+    ): SeccompCleanupOutcome {
         val failures = mutableListOf<Exception>()
         for (release in releases) {
             try {
@@ -44,6 +60,12 @@ public object SeccompCleanupInterpreter {
                 failures += failure
             }
         }
+        val outcome = if (failures.isEmpty()) {
+            SeccompCleanupOutcome.Complete
+        } else {
+            SeccompCleanupOutcome.Incomplete(failures.toList(), emptyList())
+        }
+        recordOutcome(outcome)
         if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) {
             Thread.currentThread().interrupt()
         }
@@ -51,10 +73,6 @@ public object SeccompCleanupInterpreter {
             failures.filter { it !== cancellation }.forEach(cancellation::addSuppressed)
             throw cancellation
         }
-        return if (failures.isEmpty()) {
-            SeccompCleanupOutcome.Complete
-        } else {
-            SeccompCleanupOutcome.Incomplete(failures.toList(), emptyList())
-        }
+        return outcome
     }
 }

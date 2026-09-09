@@ -275,6 +275,7 @@ internal object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
-        LinuxNative.fileSystem.close(fd)
+        io.mazewall.core.RealSocketManager
+            .close(fd)
     }
 }

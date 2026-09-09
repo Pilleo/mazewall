@@ -41,9 +41,13 @@ public sealed class SeccompConnection(
         }
     private var socketManagerInjected: Boolean = false
 
+    @Synchronized
+    public fun closeWithResult(): CloseResult = closeWithResult { }
+
+    /** Owners persist the result before cancellation propagates or interruption is restored. */
     @Suppress("TooGenericExceptionCaught")
     @Synchronized
-    public fun closeWithResult(): CloseResult {
+    internal fun closeWithResult(recordResult: (CloseResult) -> Unit): CloseResult {
         val failures = mutableListOf<Exception>()
         if (!socketClosedFlag.get()) {
             try {
@@ -64,6 +68,8 @@ public sealed class SeccompConnection(
                 failures += failure
             }
         }
+        val result = if (failures.isEmpty()) CloseResult.Closed else CloseResult.Failed(failures.toList())
+        recordResult(result)
         if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) {
             Thread.currentThread().interrupt()
         }
@@ -71,7 +77,7 @@ public sealed class SeccompConnection(
             failures.filter { it !== cancellation }.forEach(cancellation::addSuppressed)
             throw cancellation
         }
-        return if (failures.isEmpty()) CloseResult.Closed else CloseResult.Failed(failures.toList())
+        return result
     }
 
     /** Only descriptors whose native close has not been attempted remain available for retry. */

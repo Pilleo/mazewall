@@ -75,3 +75,10 @@ retryable ownership. Worker drain failure is recorded, and tracked client
 descriptors are not closed while workers still run. Session buffer returns and arena
 closure are independent cleanup attempts; their exceptions are aggregated. Cleanup
 restores interruption and propagates cancellation after independent releases.
+
+Owners use the recording overload of `SeccompCleanupInterpreter.close` and resource
+cleanup callbacks to persist the complete outcome before cancellation propagates or
+the interrupt flag is restored. Shutdown history therefore survives unobserved worker
+futures and later successful retries. `RealProfilerTransport.close` delegates to
+`RealSocketManager.close`, so the production profiler observes the same terminal
+native-error semantics as the shared daemon.

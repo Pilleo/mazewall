@@ -65,8 +65,12 @@ public class SeccompSessionHandler(
 
     @io.mazewall.MazewallInternal
     @Synchronized
-    public fun closeWithResult(): SeccompCleanupOutcome =
+    public fun closeWithResult(): SeccompCleanupOutcome = closeWithResult { }
+
+    @Synchronized
+    internal fun closeWithResult(recordOutcome: (SeccompCleanupOutcome) -> Unit): SeccompCleanupOutcome =
         SeccompCleanupInterpreter.closeResources(
+        listOf(
         {
             if (!notifReleased) {
                 SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
@@ -85,6 +89,8 @@ public class SeccompSessionHandler(
                 arenaClosed = true
             }
         },
+        ),
+        recordOutcome,
     )
 
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
