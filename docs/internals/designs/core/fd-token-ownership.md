@@ -53,3 +53,21 @@ Every such call is a real `close(int)` syscall in the shared test JVM:
    `ForeignFdGuard`, which fails a test that closes a descriptor present at start.
 4. **PID discipline**: signal-bearing paths create PID tokens only from pidfds
    returned by `pidfd_open`; never mint one around an invented process identifier.
+
+## Seccomp daemon cleanup outcomes
+
+Daemon and session owners interpret `SeccompCleanupInterpreter.close(connection)` as
+`Complete` or `Incomplete(failures, retryableOwnership)`. Independent descriptor
+closes are all attempted; a successful close retires only that descriptor, while a
+failed close stays on the original connection for retry. Retrying the connection
+does not close descriptors already released by an earlier attempt or by the reactor.
+The compatibility `AutoCloseable.close()` on `SeccompConnection` remains best-effort;
+owners that manage shutdown must consume the typed result.
+
+The shared daemon retains failed connections and server descriptors, exposes
+`cleanupOutcome`, and offers `retryCleanup()`. Its diagnostic outcome keeps earlier
+failures visible after a successful retry, with an empty ownership list when no
+failed descriptor remains. Worker drain failure is recorded, and tracked client
+descriptors are not closed while workers still run. Session buffer returns and arena
+closure are independent cleanup attempts; their exceptions are aggregated. Cleanup
+restores interruption and propagates cancellation after independent releases.

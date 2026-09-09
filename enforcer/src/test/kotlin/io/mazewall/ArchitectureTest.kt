@@ -525,6 +525,10 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome" to setOf(
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Complete",
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Incomplete",
+            ),
             "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult" to setOf(
                 "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult\$Authorized",
                 "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult\$Rejected",

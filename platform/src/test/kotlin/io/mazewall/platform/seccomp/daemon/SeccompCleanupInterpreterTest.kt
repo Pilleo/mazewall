@@ -1,0 +1,208 @@
+package io.mazewall.platform.seccomp.daemon
+
+import io.mazewall.LinuxNative
+import io.mazewall.MockNativeEngine
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.OpenFlags
+import io.mazewall.core.RealSocketManager
+import io.mazewall.core.SocketManager
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.openPath
+import io.mazewall.ffi.networking.SeccompConnection
+import io.mazewall.platform.daemon.UnixListenDaemonEvent
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import java.util.concurrent.CancellationException
+
+@ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.parallel.Isolated
+class SeccompCleanupInterpreterTest {
+    private val ownedDescriptors = mutableListOf<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>()
+
+    private fun <R : FileDescriptorRole> owned(role: R): FileDescriptor<R, FdState.Open, FdOwnership.Owned> =
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                when (val result = openPath("/dev/null", OpenFlags.RDONLY)) {
+                    is LinuxNative.SyscallResult.Success -> FileDescriptor.adopt(result.value.toInt(), role).also { ownedDescriptors += it }
+                    is LinuxNative.SyscallResult.Error -> error("Cannot open owned test descriptor: $result")
+                }
+            }
+        }
+
+    @AfterEach
+    fun closeOwnedFixtures() {
+        ownedDescriptors.forEach(RealSocketManager::close)
+    }
+
+    @Test
+    fun `daemon retains failed connection ownership for shutdown retry`() {
+        val attempts = mutableListOf<Int>()
+        val socket = owned(FileDescriptorRole.UnixSocket)
+        val manager = CleanupSocketManager { fd ->
+            attempts += fd.value
+            if (attempts.size == 1) throw IllegalStateException("close failed")
+        }
+        val daemon = SeccompDaemonEngine(
+            socketPath = "/tmp/cleanup-test.sock",
+            notifHandlerFactory = { _, _ -> error("unused") },
+            engine = MockNativeEngine(),
+            socketManager = manager,
+        )
+        daemon.clientSockets.add(socket)
+        daemon.triggerGlobalShutdown("test")
+
+        daemon.handleConnection(socket)
+
+        // Catches removing the descriptor before interpreting the failed close.
+        assertEquals(listOf(socket), daemon.clientSockets.toList())
+        val incomplete = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, daemon.cleanupOutcome)
+        assertEquals(listOf(socket), incomplete.retryableOwnership)
+        assertEquals(1, incomplete.failures.size)
+        daemon.retryCleanup()
+        assertTrue(daemon.clientSockets.isEmpty())
+        assertEquals(listOf(socket.value, socket.value), attempts)
+        // Shutdown diagnostics must not erase evidence of the earlier failed attempt.
+        assertTrue(assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, daemon.cleanupOutcome).retryableOwnership.isEmpty())
+    }
+
+    @Test
+    fun `interrupted socket close preserves interruption and still closes listener`() {
+        val attempts = mutableListOf<Int>()
+        val socket = owned(FileDescriptorRole.UnixSocket)
+        val listener = owned(FileDescriptorRole.SeccompNotif)
+        val connection = SeccompConnection
+            .Accepted(socket)
+            .apply {
+            socketManager = CleanupSocketManager { fd ->
+                attempts += fd.value
+                if (fd == socket) throw InterruptedException("interrupted close")
+            }
+        }.attachFd(listener)
+        try {
+            connection.closeWithResult()
+
+            // Catches swallowing interruption during best-effort descriptor cleanup.
+            assertTrue(Thread.currentThread().isInterrupted)
+            assertEquals(listOf(socket.value, listener.value), attempts)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun `interpreter closes listener after socket failure and retries only the socket`() {
+        val attempts = mutableListOf<Int>()
+        val failure = IllegalStateException("socket close failed")
+        val socket = owned(FileDescriptorRole.UnixSocket)
+        val listener = owned(FileDescriptorRole.SeccompNotif)
+        val connection = SeccompConnection
+            .Accepted(socket)
+            .apply {
+            socketManager = CleanupSocketManager { fd ->
+                attempts += fd.value
+                if (attempts.size == 1) throw failure
+            }
+        }.attachFd(listener)
+
+        val outcome = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, SeccompCleanupInterpreter.close(connection))
+        assertEquals(listOf(failure), outcome.failures)
+        assertEquals(listOf(connection.socketFd), outcome.retryableOwnership)
+        assertEquals(listOf(socket.value, listener.value), attempts)
+        assertEquals(SeccompCleanupOutcome.Complete, SeccompCleanupInterpreter.close(connection))
+        assertEquals(listOf(socket.value, listener.value, socket.value), attempts)
+        assertEquals(SeccompCleanupOutcome.Complete, SeccompCleanupInterpreter.close(connection))
+        assertEquals(listOf(socket.value, listener.value, socket.value), attempts)
+    }
+
+    @Test
+    fun `daemon records incomplete shutdown while closing independent clients`() {
+        val attempts = mutableListOf<Int>()
+        val server = owned(FileDescriptorRole.UnixSocket)
+        val failedClient = owned(FileDescriptorRole.UnixSocket)
+        val successfulClient = owned(FileDescriptorRole.UnixSocket)
+        val daemon = SeccompDaemonEngine(
+            socketPath = "/tmp/cleanup-test.sock",
+            notifHandlerFactory = { _, _ -> error("unused") },
+            engine = MockNativeEngine(),
+            socketManager = CleanupSocketManager { fd ->
+                attempts += fd.value
+                if (fd != successfulClient) throw IllegalStateException("owned descriptor close failed")
+            },
+        )
+        daemon.clientSockets.addAll(listOf(failedClient, successfulClient))
+
+        daemon.applyEvent(UnixListenDaemonEvent.AcceptLoopFinished(server))
+
+        assertTrue(successfulClient.value in attempts)
+        assertEquals(listOf(failedClient), daemon.clientSockets.toList())
+        val outcome = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, daemon.cleanupOutcome)
+        assertEquals(setOf(server, failedClient), outcome.retryableOwnership.toSet())
+        assertTrue(outcome.failures.isNotEmpty())
+    }
+
+    @Test
+    fun `independent resource failures include both pool releases and arena close`() {
+        val attempts = mutableListOf<String>()
+        val poolFailure = IllegalStateException("pool release failed")
+        val arenaFailure = IllegalStateException("arena close failed")
+
+        val outcome = SeccompCleanupInterpreter.closeResources(
+            {
+                attempts += "notif"
+                throw poolFailure
+            },
+            { attempts += "resp" },
+            {
+                attempts += "arena"
+                throw arenaFailure
+            },
+        )
+
+        assertEquals(listOf("notif", "resp", "arena"), attempts)
+        val incomplete = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, outcome)
+        assertEquals(listOf(poolFailure, arenaFailure), incomplete.failures)
+        assertTrue(incomplete.retryableOwnership.isEmpty())
+    }
+
+    @Test
+    fun `resource cancellation propagates after remaining independent releases`() {
+        val cancellation = CancellationException("cancel")
+        var arenaClosed = false
+        val thrown = assertThrows(CancellationException::class.java) {
+            SeccompCleanupInterpreter.closeResources(
+                { throw cancellation },
+                { arenaClosed = true },
+            )
+        }
+        assertSame(cancellation, thrown)
+        assertTrue(arenaClosed)
+    }
+}
+
+private class CleanupSocketManager(
+    private val closeDescriptor: (FileDescriptor<*, FdState.Open, FdOwnership.Owned>) -> Unit,
+) : SocketManager {
+    override fun createUnixServer(socketPath: String) = error("unused")
+
+    override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) = error("unused")
+
+    override fun connect(socketPath: String) = error("unused")
+
+    override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>) = error("unused")
+
+    override fun sendDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+    ) = error("unused")
+
+    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) = closeDescriptor(fd)
+}

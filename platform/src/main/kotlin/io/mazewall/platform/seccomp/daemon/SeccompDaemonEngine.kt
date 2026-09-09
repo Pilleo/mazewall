@@ -25,6 +25,7 @@ import io.mazewall.platform.daemon.UnixListenDaemonMachine
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -69,6 +70,21 @@ public class SeccompDaemonEngine(
     public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
 
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>>()
+    private val incompleteConnections = CopyOnWriteArrayList<SeccompConnection>()
+    private val failedServerCloses = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
+    private val cleanupFailures = CopyOnWriteArrayList<Exception>()
+
+    /** Historical failures stay visible even if a later shutdown retry releases all descriptors. */
+    @io.mazewall.MazewallInternal
+    public val cleanupOutcome: SeccompCleanupOutcome
+        get() = if (cleanupFailures.isEmpty() && incompleteConnections.isEmpty() && failedServerCloses.isEmpty()) {
+            SeccompCleanupOutcome.Complete
+        } else {
+            SeccompCleanupOutcome.Incomplete(
+                cleanupFailures.toList(),
+                (incompleteConnections.flatMap { it.retryableOwnership() } + failedServerCloses).distinct(),
+            )
+        }
     private val stateRef = AtomicReference<UnixListenDaemonState>(UnixListenDaemonState.Uninitialized)
     public var state: UnixListenDaemonState
         get() = stateRef.get()
@@ -119,7 +135,10 @@ public class SeccompDaemonEngine(
     }
 
     private fun executeEffects(effects: List<UnixListenDaemonEffect>) {
-        for (effect in effects) {
+        recordCleanup(SeccompCleanupInterpreter.closeResources(effects.map { effect -> { executeEffect(effect) } }))
+    }
+
+    private fun executeEffect(effect: UnixListenDaemonEffect) {
             when (effect) {
                 is UnixListenDaemonEffect.LogListening ->
                     System.err.println("[SECCOMP-DAEMON] Listening on ${effect.socketPath} (fd=${effect.serverFd})")
@@ -129,30 +148,37 @@ public class SeccompDaemonEngine(
                 }
                 is UnixListenDaemonEffect.LogShutdown ->
                     System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: ${effect.source}.")
-                is UnixListenDaemonEffect.CloseServer ->
-                    socketManager.close(effect.serverFd)
+                is UnixListenDaemonEffect.CloseServer -> {
+                    failedServerCloses.addIfAbsent(effect.serverFd)
+                    recordCleanup(
+                        SeccompCleanupInterpreter.closeResources({
+                        socketManager.close(effect.serverFd)
+                        failedServerCloses.remove(effect.serverFd)
+                    }),
+                    )
+                }
                 is UnixListenDaemonEffect.StopConnectionWorkers ->
                     connectionExecutor.shutdownNow()
                 UnixListenDaemonEffect.AwaitConnectionWorkers -> {
                     try {
                         if (!connectionExecutor.awaitTermination(CONNECTION_WORKER_DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                            cleanupFailures += IllegalStateException("Connection workers did not terminate before descriptor cleanup")
                             System.err.println("[SECCOMP-DAEMON] Connection workers did not terminate before owned descriptor cleanup")
                         }
                     } catch (_: InterruptedException) {
                         Thread.currentThread().interrupt()
+                        cleanupFailures += InterruptedException("Interrupted while waiting for connection workers")
                         System.err.println("[SECCOMP-DAEMON] Interrupted while waiting for connection workers to terminate")
                     }
                 }
                 is UnixListenDaemonEffect.CloseTrackedConnections -> {
-                    clientSockets.forEach(socketManager::close)
-                    activeListeners.forEach(socketManager::close)
+                    if (connectionExecutor.isTerminated) {
+                        retryCleanup()
+                    }
                 }
-                is UnixListenDaemonEffect.ClearConnectionTables -> {
-                    clientSockets.clear()
-                    activeListeners.clear()
-                }
+                // Successful closes remove their entries; failed ownership must remain retryable.
+                is UnixListenDaemonEffect.ClearConnectionTables -> Unit
             }
-        }
     }
 
     public fun isGlobalShutdown(): Boolean {
@@ -188,7 +214,7 @@ public class SeccompDaemonEngine(
 
                 if (clientSockets.size >= maxConnections) {
                     System.err.println("[SECCOMP-DAEMON] Rejecting connection: limit reached (${clientSockets.size})")
-                    socketManager.close(clientFd)
+                    cleanupFailedConnection(clientFd)
                     return
                 }
 
@@ -206,6 +232,9 @@ public class SeccompDaemonEngine(
         } catch (_: java.nio.channels.ClosedByInterruptException) {
             cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
+        } catch (cancelled: CancellationException) {
+            cleanupFailedConnection(clientFd)
+            throw cancelled
         } catch (expectedAcceptFailure: Exception) {
             cleanupFailedConnection(clientFd)
         } catch (expectedAcceptError: Error) {
@@ -216,8 +245,54 @@ public class SeccompDaemonEngine(
 
     private fun cleanupFailedConnection(clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?) {
         clientFd ?: return
-        clientSockets.remove(clientFd)
-        runCatching { socketManager.close(clientFd) }
+        clientSockets.addIfAbsent(clientFd)
+        val connection = incompleteConnections.firstOrNull { it.socketFd == clientFd }
+            ?: SeccompConnection.Accepted(clientFd).apply { socketManager = this@SeccompDaemonEngine.socketManager }
+        cleanupConnection(connection)
+    }
+
+    private fun recordCleanup(outcome: SeccompCleanupOutcome) {
+        when (outcome) {
+            SeccompCleanupOutcome.Complete -> Unit
+            is SeccompCleanupOutcome.Incomplete -> {
+                cleanupFailures.addAll(outcome.failures)
+                outcome.failures.forEach { System.err.println("[SECCOMP-DAEMON] Incomplete cleanup: $it") }
+            }
+        }
+    }
+
+    private fun cleanupConnection(connection: SeccompConnection) {
+        incompleteConnections.addIfAbsent(connection)
+        try {
+            recordCleanup(SeccompCleanupInterpreter.close(connection))
+        } finally {
+            val remaining = connection.retryableOwnership()
+            if (connection.socketFd !in remaining) clientSockets.remove(connection.socketFd)
+            connection.listenerFd?.takeIf { it !in remaining }?.let { activeListeners.remove(it) }
+            if (remaining.isEmpty()) incompleteConnections.remove(connection)
+        }
+    }
+
+    /** Retries only failed owned descriptors; prior failure diagnostics remain available. */
+    @io.mazewall.MazewallInternal
+    @Synchronized
+    public fun retryCleanup(): SeccompCleanupOutcome {
+        val connections = incompleteConnections.toMutableList()
+        if (connectionExecutor.isTerminated) {
+            clientSockets.filter { socket -> connections.none { it.socketFd == socket } }.forEach { socket ->
+                connections += SeccompConnection.Accepted(socket).apply { socketManager = this@SeccompDaemonEngine.socketManager }
+            }
+        }
+        val releases = connections.map { connection -> { cleanupConnection(connection) } } +
+            failedServerCloses.map { server ->
+                {
+                    socketManager.close(server)
+                    failedServerCloses.remove(server)
+                    Unit
+                }
+            }
+        recordCleanup(SeccompCleanupInterpreter.closeResources(releases))
+        return cleanupOutcome
     }
 
     public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
@@ -244,14 +319,15 @@ public class SeccompDaemonEngine(
         } catch (expectedInterruptedChannel: java.nio.channels.ClosedByInterruptException) {
             System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${expectedInterruptedChannel.message}")
             interrupted = true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (expectedConnectionFailure: Exception) {
             System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${expectedConnectionFailure.message}")
         } finally {
-            clientSockets.remove(socketFd)
-            connection.listenerFd?.let { activeListeners.remove(it) }
-            connection.close()
-            if (interrupted) {
-                Thread.currentThread().interrupt()
+            try {
+                cleanupConnection(connection)
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
             }
         }
     }
@@ -334,7 +410,7 @@ public class SeccompDaemonEngine(
         val listenerFd = connection.listenerFd
         val notifHandler = notifHandlerFactory(socketFd, listenerFd)
         try {
-            SeccompSessionHandler(
+            val sessionHandler = SeccompSessionHandler(
                 socketFd = socketFd,
                 listenerFd = listenerFd,
                 notifHandler = notifHandler,
@@ -342,7 +418,8 @@ public class SeccompDaemonEngine(
                 onSocketClosed = connection::markSocketClosed,
                 engine = engine,
                 socketManager = socketManager,
-            ).use { sessionHandler ->
+            )
+            try {
                 NativeArena.ofConfined().use { sessionArena ->
                     val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
                     val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
@@ -381,10 +458,12 @@ public class SeccompDaemonEngine(
                         if (isGlobalShutdown()) break
                     }
                 }
+            } finally {
+                recordCleanup(sessionHandler.closeWithResult())
             }
         } finally {
-            (notifHandler as? AutoCloseable)?.close()
-            // connection.close() in handleConnection's finally block will handle listenerFd closure.
+            recordCleanup(SeccompCleanupInterpreter.closeResources({ (notifHandler as? AutoCloseable)?.close() }))
+            // The connection owner's finally block interprets listener descriptor cleanup.
         }
     }
 }
