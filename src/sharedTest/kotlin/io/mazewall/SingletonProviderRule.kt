@@ -9,7 +9,7 @@ import com.tngtech.archunit.lang.ConditionEvents
 import com.tngtech.archunit.lang.SimpleConditionEvent
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 
-internal fun singletonProviderRule() =
+fun singletonProviderRule() =
     classes().should(object : ArchCondition<JavaClass>("keep singleton provider seams immutable") {
     override fun check(
         item: JavaClass,

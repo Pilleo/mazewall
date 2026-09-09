@@ -219,8 +219,25 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
 dependencies {
     "sharedTestImplementation"(project(":enforcer"))
     "sharedTestImplementation"(project(":platform"))
+    "sharedTestImplementation"(libs.archunit.junit5)
     "sharedTestImplementation"(libs.junit.jupiter.api)
     "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+    testImplementation(sourceSets["sharedTest"].output)
+    testImplementation(libs.archunit.junit5)
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.junit.jupiter.params)
+    testCompileOnly(project(":platform")) // Resolve the shared MazewallInternal compiler opt-in.
+    testRuntimeOnly(libs.junit.jupiter.engine)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // Aggregate architecture verification only; production module dependencies remain unchanged.
+    listOf("enforcer", "platform", "profiler", "portal", "portal-worker", "portal-codegen").forEach { module ->
+        testRuntimeOnly(project(":$module"))
+    }
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform()
 }
 
 dependencyCheck {
