@@ -1,6 +1,7 @@
 package io.mazewall.profiler.compiler
 
 import io.mazewall.core.Syscall
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.BillOfBehavior
 import io.mazewall.profiler.FsEffect
 import io.mazewall.profiler.NetworkEndpoint
@@ -18,7 +19,6 @@ object BobCompiler {
     private const val O_RDWR = 2L
     private const val O_CREAT = 64L
     private const val O_TRUNC = 512L
-    private const val O_PATH = 0x01000000L
 
     /**
      * Parses the given semantic trace events and returns a [BillOfBehavior].
@@ -75,7 +75,7 @@ object BobCompiler {
             name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
             name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
                 val flags = obs.openFlags ?: 0L
-                if ((flags and O_PATH) != 0L) {
+                if ((flags and NativeConstants.O_PATH.toLong()) != 0L) {
                     // O_PATH descriptor only, does not grant file read or write access
                 } else if (isOpenWrite(flags)) {
                     fsWritePaths.addAll(obs.paths)

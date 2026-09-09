@@ -83,7 +83,10 @@ object NativeConstants {
     const val ETIMEDOUT = 110
 
     // File options
-    const val O_PATH = 0x01000000
+    const val O_PATH = 0x00200000
+    const val MSG_CMSG_CLOEXEC = 0x40000000
+    const val MSG_CTRUNC = 0x08
+    const val MSG_TRUNC = 0x20
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
     const val O_RDONLY = 0

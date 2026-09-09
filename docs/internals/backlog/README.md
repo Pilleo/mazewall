@@ -1,10 +1,9 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 110 | *Total Resolved Issues:* 498
+*Total Active Issues:* 109 | *Total Resolved Issues:* 499
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea](issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md) | Correct O_PATH native flag value against Linux headers | high | platform |
 | [issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des](issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md) | Correct secure exec cleanup of injected tracee descriptors | medium | enforcer |
 | [issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-](issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-.md) | Preload HotSpot clock wrappers before restrictive iterative profiling | high | profiler |
 | [issue-20260907-094634-079-make-containment-exception-classification-and-extr](issue-20260907-094634-079-make-containment-exception-classification-and-extr.md) | Make containment exception classification and extraction reliable for callers | high | enforcer |

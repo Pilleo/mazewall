@@ -3,7 +3,6 @@ package io.mazewall.core
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
 
 /**
  * Interface for socket creation and connection handling.
@@ -47,35 +46,9 @@ internal class NativeCloseFailure(
  * Real implementation of [SocketManager] using [LinuxNative].
  */
 public object RealSocketManager : SocketManager {
-    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
-        val fd = LinuxNative.networking
-            .socket(
-            io.mazewall.ffi.networking.SupervisorSocketUtils.AF_UNIX,
-            io.mazewall.ffi.networking.SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
-            0,
-        ).getFdOrThrow("socket(AF_UNIX)")
-            .let { FileDescriptor.adopt(it.value, FileDescriptorRole.UnixSocket) }
-
-        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val sockaddrUn = io.mazewall.ffi.networking.SupervisorSocketUtils
-                .setupSockAddrUn(arena, socketPath)
-            val sockaddrManaged = sockaddrUn.managed
-
-            LinuxNative.networking
-                .bind(fd, sockaddrManaged, io.mazewall.ffi.networking.SupervisorSocketUtils.SOCKADDR_UN_SIZE)
-                .onFailure { _, _ ->
-                    LinuxNative.fileSystem.close(fd)
-                }.getOrThrow("bind(AF_UNIX)")
-        }
-
-        LinuxNative.networking
-            .listen(fd, io.mazewall.ffi.networking.SupervisorSocketUtils.BACKLOG_SIZE)
-            .onFailure { _, _ ->
-                LinuxNative.fileSystem.close(fd)
-            }.getOrThrow("listen")
-
-        return fd
-    }
+    override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+        io.mazewall.ffi.networking.UnixServerSocket
+        .open(socketPath)
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         val res = LinuxNative.networking.accept4(

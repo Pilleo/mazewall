@@ -152,6 +152,7 @@ public object SupervisorSocketUtils {
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
+        val runtime = LinuxNative.snapshot()
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
@@ -167,20 +168,39 @@ public object SupervisorSocketUtils {
             msg.setMsgControl(controlBuf)
             msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
 
-            val cmsg = CmsghdrSegment(controlBuf)
-
             while (true) {
-                val res = LinuxNative.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), 0)
+                // recvmsg mutates these in/out fields; restore capacity for EINTR retries.
+                controlBuf.fill(0)
+                msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
+                msg.setMsgFlags(0)
+                val res = runtime.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC)
                 if (res is LinuxNative.SyscallResult.Success) {
-                    val value = res.value
-                    if (value == 0L) return null
-
-                    val cmsgLen = cmsg.getCmsgLen()
-                    val cmsgLevel = cmsg.getCmsgLevel()
-                    val cmsgType = cmsg.getCmsgType()
-                    if (cmsgLen >= CMSG_RIGHTS_LEN && cmsgLevel == SOL_SOCKET && cmsgType == SCM_RIGHTS) {
-                        return FileDescriptor.adopt(cmsg.getDataFd(), role)
+                    val cmsg = CmsghdrSegment(controlBuf)
+                    val controlLength = msg.getMsgControllen()
+                    val rights = controlLength >= Layouts.CMSGHDR_DATA_OFFSET &&
+                        cmsg.getCmsgLevel() == SOL_SOCKET &&
+                        cmsg.getCmsgType() == SCM_RIGHTS
+                    // This fixed buffer can contain one header and up to two ints. Only
+                    // complete SCM_RIGHTS data are descriptors; never adopt padding.
+                    val dataEnd = minOf(controlLength, cmsg.getCmsgLen(), MSG_CONTROL_BUF_SIZE)
+                    val descriptors = if (rights && dataEnd >= CMSG_RIGHTS_LEN) {
+                        List(((dataEnd - Layouts.CMSGHDR_DATA_OFFSET) / Int.SIZE_BYTES).toInt()) { index ->
+                            controlBuf.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET + index * Int.SIZE_BYTES)
+                        }
+                    } else {
+                        emptyList()
                     }
+                    val truncated = msg.getMsgFlags() and (NativeConstants.MSG_CTRUNC or NativeConstants.MSG_TRUNC) != 0
+                    if (res.value == 1L &&
+                        !truncated &&
+                        controlLength in CMSG_RIGHTS_LEN..MSG_CONTROL_BUF_SIZE &&
+                        cmsg.getCmsgLen() == CMSG_RIGHTS_LEN &&
+                        descriptors.size == 1
+                    ) {
+                        return FileDescriptor.adopt(descriptors.single(), role)
+                    }
+
+                    closeRejectedDescriptors(descriptors, role, runtime.fileSystem)
                     return null
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
@@ -189,5 +209,29 @@ public object SupervisorSocketUtils {
                 }
             }
         }
+    }
+
+    // Independent received FDs must be closed before fatal/cancellation failures
+    // propagate. Broad capture here never converts failure to success.
+    @Suppress("TooGenericExceptionCaught")
+    private fun closeRejectedDescriptors(
+        descriptors: List<Int>,
+        role: FileDescriptorRole,
+        fileSystem: io.mazewall.NativeFileSystem,
+    ) {
+        var cleanupFailure: Throwable? = null
+        descriptors.forEach { received ->
+            try {
+                fileSystem.close(FileDescriptor.adopt(received, role)).getOrThrow("close rejected SCM_RIGHTS descriptor")
+            } catch (failure: Throwable) {
+                val previous = cleanupFailure
+                if (previous == null) {
+                    cleanupFailure = failure
+                } else if (previous !== failure) {
+                    previous.addSuppressed(failure)
+                }
+            }
+        }
+        cleanupFailure?.let { throw it }
     }
 }

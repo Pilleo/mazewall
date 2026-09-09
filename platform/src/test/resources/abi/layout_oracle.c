@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <linux/filter.h>
@@ -13,6 +15,7 @@
 #define OFFSET(type, member) printf("offset." #type "." #member "=%zu\n", offsetof(struct type, member))
 
 int main(void) {
+    printf("flag.O_PATH=%d\n", O_PATH);
     SIZE(sock_filter); OFFSET(sock_filter, code); OFFSET(sock_filter, jt); OFFSET(sock_filter, jf); OFFSET(sock_filter, k);
     SIZE(sock_fprog); OFFSET(sock_fprog, len); OFFSET(sock_fprog, filter);
     SIZE(seccomp_data); OFFSET(seccomp_data, nr); OFFSET(seccomp_data, arch); OFFSET(seccomp_data, args);

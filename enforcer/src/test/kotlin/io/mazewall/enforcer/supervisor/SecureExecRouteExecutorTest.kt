@@ -44,9 +44,8 @@ class SecureExecRouteExecutorTest {
         val writes = mutableListOf<ByteArray>()
         fixture.engine.fileSystem.onOpen = { path, flags, _ ->
             opened = path.readString(0)
-            // Preserve the existing native call flags during this refactor.
-            // O_PATH's existing numeric mismatch is tracked separately from Task 8.
-            assertEquals(17301504, flags.value)
+            // Linux O_PATH | O_CLOEXEC, independently of the production constants.
+            assertEquals(2621440, flags.value)
             SupervisorBoundaryFixture.success(51002)
         }
         fixture.engine.memory.onWrite = { _, buffer, size ->

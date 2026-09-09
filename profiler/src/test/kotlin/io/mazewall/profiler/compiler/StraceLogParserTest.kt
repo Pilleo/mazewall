@@ -8,6 +8,28 @@ import kotlin.test.assertEquals
 
 class StraceLogParserTest {
     @Test
+    fun `flag names inside pathnames do not suppress observed reads`() {
+        val observation = StraceLogParser.parseLine("123 open(\"/data/O_PATH\", O_RDONLY) = 4") as ProfileObservation.Syscall
+        assertEquals(0L, observation.openFlags)
+        assertEquals(setOf("/data/O_PATH"), BobCompiler.compileObservations(listOf(observation)).opens)
+    }
+
+    @Test
+    fun `O_PATH observations do not grant content access`() {
+        for (line in listOf(
+            "123 open(\"/secret\", O_PATH|O_CLOEXEC) = 4",
+            "123 openat(AT_FDCWD, \"/secret\", O_PATH) = 4",
+            "123 openat2(AT_FDCWD, \"/secret\", {flags=O_PATH, resolve=0}, 24) = 4",
+        )) {
+            val observation = StraceLogParser.parseLine(line) as ProfileObservation.Syscall
+            assertEquals(0x00200000L, observation.openFlags)
+            val bob = BobCompiler.compileObservations(listOf(observation))
+            assertEquals(emptySet(), bob.opens)
+            assertEquals(emptySet(), bob.fsWritePaths)
+        }
+    }
+
+    @Test
     fun `execve only extracts first path`() {
         val line = "12345 execve(\"/usr/bin/bash\", [\"bash\", \"-c\", \"echo hello\"], 0x7ffd42a3b4d0 /* 84 vars */) = 0"
         val result = StraceLogParser.parseLine(line)

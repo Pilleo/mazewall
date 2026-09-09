@@ -1,6 +1,7 @@
 package io.mazewall.profiler.compiler
 
 import io.mazewall.core.Tid
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.NetworkEndpoint
 import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
@@ -11,6 +12,7 @@ import io.mazewall.profiler.ProfileObservation
  * [io.mazewall.profiler.strace.StraceProfiler] must not build a BillOfBehavior itself.
  */
 public object StraceLogParser {
+    private val quotedArgument = Regex("\"(?:\\\\.|[^\"\\\\])*\"")
     private val inet = Regex("""sin_port=htons\((\d+)\).*sin_addr=inet_addr\("([^"]+)"\)""")
     private val inetRev = Regex("""sin_addr=inet_addr\("([^"]+)"\).*sin_port=htons\((\d+)\)""")
     private val inet6 = Regex("""sin6_port=htons\((\d+)\).*inet_pton\(AF_INET6,\s*"([^"]+)"""")
@@ -147,6 +149,7 @@ public object StraceLogParser {
         if (args.contains("O_RDWR")) flags = flags or 2L
         if (args.contains("O_CREAT")) flags = flags or 64L
         if (args.contains("O_TRUNC")) flags = flags or 512L
+        if (quotedArgument.replace(args, "").contains("O_PATH")) flags = flags or NativeConstants.O_PATH.toLong()
         return flags
     }
 

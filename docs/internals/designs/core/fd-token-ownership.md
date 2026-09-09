@@ -56,6 +56,14 @@ Every such call is a real `close(int)` syscall in the shared test JVM:
 
 ## Seccomp daemon cleanup outcomes
 
+SCM_RIGHTS receipt atomically applies CLOEXEC with `MSG_CMSG_CLOEXEC`. Only one
+complete descriptor in an untruncated message transfers to the caller. Rejected
+messages release every complete SCM_RIGHTS descriptor delivered into the control
+buffer; padding and non-rights ancillary data are never treated as owned integers.
+Independent closes are attempted before cleanup failures propagate. UNIX server
+address validation occurs before socket acquisition, and bind/listen failures
+release the acquired socket while preserving the primary failure.
+
 Daemon and session owners interpret `SeccompCleanupInterpreter.close(connection)` as
 `Complete` or `Incomplete(failures, retryableOwnership)`. Independent descriptor
 closes are all attempted. A failure before native dispatch stays on the original
