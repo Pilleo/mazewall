@@ -16,7 +16,8 @@ import java.io.IOException
 internal object SocketHelperMain {
     @JvmStatic
     fun main(args: Array<String>) {
-        require(args.size == 1)
+        require(args.size == 2)
+        SocketHelperOwner.watch(args[1].toLong())
         val channel = RealSocketManager.connect(args[0])
         try {
             val input = DataInputStream(System.`in`)

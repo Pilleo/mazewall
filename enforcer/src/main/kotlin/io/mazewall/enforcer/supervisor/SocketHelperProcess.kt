@@ -19,7 +19,6 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** One reusable independent JVM; killing it interrupts native accept/connect without changing OFD flags. */
 internal class SocketHelperProcess private constructor(
@@ -27,8 +26,11 @@ internal class SocketHelperProcess private constructor(
     private val channel: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val endpoint: PrivateUnixEndpoint,
 ) : SocketHelper {
-    private val closed = AtomicBoolean()
-    private var closeFailure: Throwable? = null
+    private val lifetime = SocketHelperLifetime(
+        reap = { terminate(process) },
+        closeChannel = { RealSocketManager.close(channel) },
+        closeEndpoint = endpoint::close,
+    )
     private val input = DataInputStream(process.inputStream)
     private val output = DataOutputStream(process.outputStream)
 
@@ -36,7 +38,7 @@ internal class SocketHelperProcess private constructor(
         operation: SocketOperation,
         socket: SupervisorOwnedFd,
     ): SocketHelperResult {
-        check(!closed.get()) { "Socket helper is closed" }
+        check(lifetime.accepting) { "Socket helper is stopping or closed" }
         SocketHelperProtocol.writeOperation(output, operation)
         if (!RealSocketManager.sendDescriptor(channel, socket.handle)) throw IOException("Helper descriptor send failed")
         return SocketHelperProtocol.readResult(input) {
@@ -45,28 +47,7 @@ internal class SocketHelperProcess private constructor(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Publish cleanup failure to concurrent close callers; rethrow unchanged.
-    @Synchronized
-    override fun close() {
-        if (!closed.compareAndSet(false, true)) {
-            closeFailure?.let { throw it }
-            return
-        }
-        try {
-            try {
-                terminate(process)
-            } finally {
-                try {
-                    RealSocketManager.close(channel)
-                } finally {
-                    endpoint.close()
-                }
-            }
-        } catch (failure: Throwable) {
-            closeFailure = failure
-            throw failure
-        }
-    }
+    override fun close() = lifetime.close()
 
     companion object {
         @Suppress("TooGenericExceptionCaught") // Acquisition transaction rolls back every acquired owner before rethrowing.
@@ -80,7 +61,7 @@ internal class SocketHelperProcess private constructor(
                 val command = JvmChildProcess.commandLine(
                     JvmChildSpec(
                     SocketHelperMain::class.java.name,
-                        listOf(endpoint.path),
+                        listOf(endpoint.path, ProcessHandle.current().pid().toString()),
                         javaAgents = JavaAgentSelection.None,
                 ),
                 )

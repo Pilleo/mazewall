@@ -1206,10 +1206,19 @@ class "SocketCleanup" as io.mazewall.enforcer.supervisor.SocketCleanup {
 interface "SocketHelper" as io.mazewall.enforcer.supervisor.SocketHelper {
   + {abstract}SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
 }
+class "SocketHelperLifetime" as io.mazewall.enforcer.supervisor.SocketHelperLifetime {
+  +boolean getAccepting()
+  +void close()
+}
 class "SocketHelperMain" as io.mazewall.enforcer.supervisor.SocketHelperMain {
   + {static}SocketHelperMain INSTANCE
   __
   + {static}void main(String[])
+}
+class "SocketHelperOwner" as io.mazewall.enforcer.supervisor.SocketHelperOwner {
+  + {static}SocketHelperOwner INSTANCE
+  __
+  +void watch(long)
 }
 class "SocketHelperPool" as io.mazewall.enforcer.supervisor.SocketHelperPool {
   + {static}Companion Companion
@@ -2585,9 +2594,11 @@ io.mazewall.enforcer.supervisor.ProcProcessIdentityResolver .u.|> io.mazewall.en
 io.mazewall.enforcer.supervisor.ProcProcessIdentityResolver --> io.mazewall.core.Pid
 io.mazewall.enforcer.supervisor.SecureExecRouteExecutor --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SocketHelperMain --> io.mazewall.enforcer.supervisor.SocketHelperMain
+io.mazewall.enforcer.supervisor.SocketHelperOwner --> io.mazewall.enforcer.supervisor.SocketHelperOwner
 io.mazewall.enforcer.supervisor.SocketHelperPool --> io.mazewall.enforcer.supervisor.SocketHelper
 io.mazewall.enforcer.supervisor.SocketHelperProcess .u.|> io.mazewall.enforcer.supervisor.SocketHelper
 io.mazewall.enforcer.supervisor.SocketHelperProcess --> io.mazewall.core.FileDescriptor
+io.mazewall.enforcer.supervisor.SocketHelperProcess --> io.mazewall.enforcer.supervisor.SocketHelperLifetime
 io.mazewall.enforcer.supervisor.SocketHelperProcess --> io.mazewall.core.PrivateUnixEndpoint
 io.mazewall.enforcer.supervisor.SocketHelperProtocol --> io.mazewall.enforcer.supervisor.SocketHelperProtocol
 io.mazewall.enforcer.supervisor.SocketJobOutcome --> io.mazewall.enforcer.supervisor.SocketHelperResult

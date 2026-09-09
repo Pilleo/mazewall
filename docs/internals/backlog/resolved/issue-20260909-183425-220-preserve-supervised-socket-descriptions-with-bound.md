@@ -27,5 +27,7 @@ Connect now imports the original open-file description and replies with zero; ac
 
 Evidence: full enforcer host suite (790 tests, zero failures/errors, two existing skips), three fresh-JVM USER_NOTIF tests (connect, accept, permanent registration; no skips), detektMain, and regenerated enforcer class diagrams passed. Regression coverage includes TCP/UDP identity, EINPROGRESS/native errno, overload, blocked cancellation/replenishment, helper crashes/reuse, late descriptor disposal, and interrupted ownership cleanup.
 
+Review follow-up: added an independent owner-exit monitor before helper IPC, with a fresh-process SIGKILL-owner regression proving blocked-accept helper exit and listener release. Cleanup now records successful subresources independently and retries failed reap/endpoint/channel steps; focused helper lifecycle suite passes 16 tests without skips.
+
 ---
 <!-- id: issue-20260909-183425-220-preserve-supervised-socket-descriptions-with-bound  file: issue-20260909-183425-220-preserve-supervised-socket-descriptions-with-bound.md -->
