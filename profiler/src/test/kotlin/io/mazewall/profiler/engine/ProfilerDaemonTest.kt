@@ -335,8 +335,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -353,8 +355,8 @@ class ProfilerDaemonTest {
                     assertEquals(Tid(456), transport.sentEvents[0].tid)
                     assertTrue(transport.continueSent, "Should have called sendSeccompContinue")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -379,8 +381,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -396,8 +400,8 @@ class ProfilerDaemonTest {
                     assertTrue(transport.errorSent, "Should have sent seccomp error on handshake failure")
                     assertTrue(handler.state is ProfilerState.Terminated, "State should be Terminated")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -421,8 +425,10 @@ class ProfilerDaemonTest {
             mapOf(2 to "OPEN"),
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -437,8 +443,8 @@ class ProfilerDaemonTest {
                     assertTrue(transport.continueSent, "Pass-through must continue the in-flight notification")
                     assertTrue(handler.ledger.dump().any { it is SessionEvent.ContinueReplied })
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -464,8 +470,10 @@ class ProfilerDaemonTest {
             mapOf(2 to "OPEN"),
         ) { shutdownObservedContinue = transport.continueSent }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -480,8 +488,8 @@ class ProfilerDaemonTest {
                     assertTrue(transport.continueSent)
                     assertTrue(shutdownObservedContinue, "Shutdown callback must run after CONTINUE is sent")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -508,8 +516,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -530,8 +540,8 @@ class ProfilerDaemonTest {
                     assertTrue(events.any { it is SessionEvent.AckReceived }, "Ledger should contain AckReceived event")
                     assertTrue(events.any { it is SessionEvent.ContinueReplied }, "Ledger should contain ContinueReplied event")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -609,8 +619,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     // Setup notification data
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -630,8 +642,8 @@ class ProfilerDaemonTest {
                     assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
                     Thread.interrupted()
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -753,8 +765,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     // Setup notification data
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -771,8 +785,8 @@ class ProfilerDaemonTest {
                     // It must have fallen back to send the seccomp error response
                     assertTrue(failingTransport.errorSent, "Should have sent seccomp error response on delivery failure")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -808,8 +822,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     // Setup notification data
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -823,8 +839,8 @@ class ProfilerDaemonTest {
                         }
                     }
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -860,8 +876,10 @@ class ProfilerDaemonTest {
             syscallMap,
         ) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     // Setup notification data
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -877,8 +895,8 @@ class ProfilerDaemonTest {
                     assertTrue(transport.errorSent)
                     assertTrue(handler.state is ProfilerState.Terminated)
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }
@@ -922,8 +940,10 @@ class ProfilerDaemonTest {
                 customReader,
                 mapOf(2 to "OPEN"),
             ) { }.use { noiseHandler ->
-                val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-                val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+                val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
                 try {
                     notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                     notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -937,8 +957,8 @@ class ProfilerDaemonTest {
                     assertTrue(transport.continueSent, "Should have called sendSeccompContinue directly")
                     assertEquals(0, transport.sentEvents.size, "Should NOT send trace event to JVM for noise path")
                 } finally {
-                    SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                    SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                    notifLease.close()
+                    respLease.close()
                 }
             }
         }

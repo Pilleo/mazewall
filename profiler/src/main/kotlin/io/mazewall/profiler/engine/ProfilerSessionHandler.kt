@@ -10,7 +10,6 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readInt

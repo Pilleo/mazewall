@@ -194,8 +194,10 @@ class ProfilerDaemonBenchmarkTest {
             reader,
             syscallMap,
         ) { }.use { handler ->
-            val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-            val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+            val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+            val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
             try {
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                 notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -211,8 +213,8 @@ class ProfilerDaemonBenchmarkTest {
                     }
                 }
             } finally {
-                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                notifLease.close()
+                respLease.close()
             }
         }
 

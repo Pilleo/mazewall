@@ -240,10 +240,12 @@ class ProfilerDesignSpec :
                     syscallMap,
                 ) {}.use { handler ->
                     io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                        val notif = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
+                        val notifLease = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
                             .rent()
-                        val resp = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
+                        val respLease = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
                             .rent()
+                        val notif = notifLease.segment
+                        val resp = respLease.segment
                         try {
                             notif.writeLong(0L, 123L) // id
                             notif.writeInt(8L, 456) // pid
@@ -259,10 +261,8 @@ class ProfilerDesignSpec :
                             transport.sentEvents[0].tid shouldBe Tid(456)
                             transport.sentEvents[0].paths shouldBe listOf("/tmp/test.txt")
                         } finally {
-                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
-                                .release(notif)
-                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
-                                .release(resp)
+                            notifLease.close()
+                            respLease.close()
                         }
                     }
                 }
@@ -291,10 +291,12 @@ class ProfilerDesignSpec :
                     syscallMap,
                 ) {}.use { handler ->
                     io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                        val notif = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
+                        val notifLease = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
                             .rent()
-                        val resp = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
+                        val respLease = io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
                             .rent()
+                        val notif = notifLease.segment
+                        val resp = respLease.segment
                         try {
                             notif.writeLong(0L, 123L)
                             notif.writeInt(8L, 456)
@@ -309,10 +311,8 @@ class ProfilerDesignSpec :
                             transport.sentEvents.size shouldBe 1
                             transport.sentEvents[0].paths shouldBe listOf("/home/user/relative.txt")
                         } finally {
-                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_POOL
-                                .release(notif)
-                            io.mazewall.ffi.memory.SegmentPool.SECCOMP_NOTIF_RESP_POOL
-                                .release(resp)
+                            notifLease.close()
+                            respLease.close()
                         }
                     }
                 }

@@ -16,7 +16,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.ffi.memory.SegmentPool
+import io.mazewall.ffi.memory.SeccompSessionBuffers
 import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readLong
@@ -38,10 +38,10 @@ public class SeccompSessionHandler(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
 ) : AutoCloseable {
-    private val sessionArena = NativeArena.ofConfined()
-    private val ackBuf: ManagedSegment = sessionArena.allocate(1L)
-    private val notif: ManagedSegment = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-    private val resp: ManagedSegment = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+    private val buffers = SeccompSessionBuffers.acquire()
+    private val ackBuf: ManagedSegment get() = buffers.ack
+    private val notif: ManagedSegment get() = buffers.notifLease.segment
+    private val resp: ManagedSegment get() = buffers.respLease.segment
 
     private var isPassThrough = false
 
@@ -73,19 +73,19 @@ public class SeccompSessionHandler(
         listOf(
         {
             if (!notifReleased) {
-                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                buffers.notifLease.close()
                 notifReleased = true
             }
         },
         {
             if (!respReleased) {
-                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                buffers.respLease.close()
                 respReleased = true
             }
         },
         {
             if (!arenaClosed) {
-                sessionArena.close()
+                buffers.arena.close()
                 arenaClosed = true
             }
         },

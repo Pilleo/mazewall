@@ -412,8 +412,14 @@ For reference: the exact steps performed by `PureJavaBpfEngine.installInternal()
 
 ## 7. FFM Struct Layouts
 
-All off-heap structs are allocated via `Arena.ofConfined()` to ensure automatic
-deallocation at the end of the scope. Key layouts:
+Transient off-heap structs use `Arena.ofConfined()` for automatic deallocation.
+The daemon's reusable notification and response buffers use process-lifetime shared
+`SegmentPool.owned(...)` pools. Each session holds generation-specific `SegmentLease`
+objects and closes those leases during cleanup; it never returns a raw native address
+or closes a global pool. Partial session-buffer acquisition returns any acquired lease
+and closes the session's confined ACK arena. See the
+[SegmentPool migration guide](../api/segment-pool-migration.md) for pool ownership and
+the limits of the checked segment accessor. Key layouts:
 
 ### `sock_filter` (8 bytes)
 ```
