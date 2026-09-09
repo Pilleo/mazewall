@@ -1,5 +1,13 @@
 package io.mazewall.portal.worker
 
+import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
+import io.mazewall.NativeFileSystem
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.OpenFlags
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalIncompleteFrameException
@@ -13,10 +21,50 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
+import java.nio.file.Files
+import java.nio.file.Path
 
 class PortalWorkerDriverTest {
+    @Test
+    fun `capability and transport cleanup failures are suppressed on reflected fatal error`(
+        @TempDir directory: Path,
+    ) {
+        Files.writeString(directory.resolve("grant"), "x")
+        val capability = openCapability(directory.resolve("grant"))
+        val capabilityFd = capability.borrow { it.value }
+        val fatal = AssertionError("fatal guest")
+        val capabilityCleanup = AssertionError("fatal capability cleanup")
+        val transportCleanup = IOException("transport cleanup")
+        val runtime = LinuxNative.snapshot()
+        LinuxNative.setEngine(object : NativeEngine by runtime {
+            override val fileSystem = object : NativeFileSystem by runtime.fileSystem {
+                override fun close(
+                    fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (fd.value == capabilityFd) throw capabilityCleanup
+                    return runtime.fileSystem.close(fd)
+                }
+            }
+        })
+        val transport = FakeTransport(
+            listOf(PortalWorkerReceive.Frame(request(), listOf(capability))),
+            closeFailure = transportCleanup,
+        )
+        val driver = PortalWorkerDriver(transport) { _, _, _ -> throw InvocationTargetException(fatal) }
+        try {
+            assertSame(fatal, assertThrows(AssertionError::class.java) { driver.run() })
+            assertEquals(0, transport.sendAttempts)
+            assertEquals(listOf(capabilityCleanup, transportCleanup), fatal.suppressed.toList())
+            assertEquals(PortalWorkerState.Stopped, driver.state)
+        } finally {
+            LinuxNative.resetToDefault()
+            capability.close()
+        }
+    }
+
     @Test
     fun `reflective fatal error preserves identity sends nothing and retires transport`() {
         val fatal = AssertionError("fatal guest failure")
@@ -81,7 +129,17 @@ class PortalWorkerDriverTest {
         )
     }
 
-    private fun request() = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, PortalPayload(ByteArray(0)), 0)
+    private fun request(capabilities: List<Capability.ReadFd> = emptyList()) = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, PortalPayload(ByteArray(0)), capabilities.size)
+
+    private fun openCapability(path: Path): Capability.ReadFd =
+        NativeArena.ofConfined().use { arena ->
+            val raw = LinuxNative.fileSystem
+                .open(
+                    arena.allocateFrom(path.toAbsolutePath().toString()),
+                    OpenFlags(NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC),
+                ).getOrThrow("open worker test capability")
+            Capability.readFd(FileDescriptor.adopt(raw.toInt(), FileDescriptorRole.Granted))
+        }
 
     private class FakeTransport(
         receives: List<PortalWorkerReceive>,

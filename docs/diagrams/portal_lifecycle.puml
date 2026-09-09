@@ -29,12 +29,15 @@ note right of Starting
   accept and readiness for the batch.
   No provisional worker is published.
   Shutdown cancels + joins startup;
+  late acquisitions stay registered.
+  Failed cleanup signals all waiters;
   partial owners remain retryable.
 end note
 
 note right of SendingReply
   A failed or partial write is terminal;
   no error frame may be appended.
-  Fatal reflected Throwables keep identity.
+  Fatal reflected Throwables keep identity;
+  cleanup failures are suppressed in order.
 end note
 @enduml

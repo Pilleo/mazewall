@@ -112,7 +112,10 @@ public class ProcessBroker(
                     .state
             }
         } catch (failure: Throwable) {
-            acquired.forEach { destroySlot(it) }
+            val cleanup = CleanupCollector()
+            acquired.forEach { slot ->
+                cleanup.attempt("startup worker rollback") { destroySlot(slot) }
+            }
             synchronized(lifecycleGate) {
                 if (lifecycle == ProcessBrokerLifecycle.Starting) {
                     lifecycle = ProcessBrokerLifecycleMachine
@@ -120,7 +123,8 @@ public class ProcessBroker(
                         .state
                 }
             }
-            throw failure
+            val cleanupFailure = cleanup.outcome().failureOrNull()
+            throwWithCleanupFailure(failure, cleanupFailure)
         } finally {
             startupCompletion?.countDown()
         }
@@ -239,6 +243,7 @@ public class ProcessBroker(
     override fun close() {
         var waitForOtherClose: CountDownLatch? = null
         var startupToJoin: CountDownLatch? = null
+        var completionToSignal: CountDownLatch? = null
         synchronized(lifecycleGate) {
             if (lifecycle == ProcessBrokerLifecycle.Closed) return
             if (lifecycle == ProcessBrokerLifecycle.Closing) {
@@ -249,35 +254,67 @@ public class ProcessBroker(
             lifecycle = transition.state
                 startupCancelled = true
                 startupToJoin = startupCompletion
-                closeCompletion = CountDownLatch(1)
+                completionToSignal = CountDownLatch(1)
+                closeCompletion = completionToSignal
             }
         }
         waitForOtherClose?.let {
             it.await()
             return
         }
-        maintenance.shutdownNow()
-        val maintenanceStopped = awaitMaintenance()
-        acceptedHandoffs.forEach(::retireHandoff)
-        provisionalSlots.forEach(::destroySlot)
-        val startupStopped = awaitStartup(startupToJoin)
-        val leftover = mutableListOf<WorkerSlot>()
-        idle.drainTo(leftover)
-        // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
-        synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
-        leftover.addAll(provisionalSlots)
-        val cleanupComplete = leftover.distinct().map { destroySlot(it) }.all { it }
-        val attemptsComplete = provisionalAttempts.toList().map { retireStartupAttempt(it) }.all { it }
-        acceptedHandoffs.forEach(::retireHandoff)
-        val allRetired = maintenanceStopped && startupStopped && cleanupComplete && attemptsComplete && provisionalSlots.isEmpty() && provisionalAttempts.isEmpty() && acceptedHandoffs.isEmpty()
-        synchronized(lifecycleGate) {
-            lifecycle = ProcessBrokerLifecycleMachine
-                .evaluate(
-                    lifecycle,
-                    if (allRetired) ProcessBrokerLifecycleEvent.CleanupSucceeded else ProcessBrokerLifecycleEvent.CleanupFailed("broker cleanup failed"),
-                ).state
-            closeCompletion?.countDown()
+        val cleanup = CleanupCollector()
+        var maintenanceStopped = false
+        var startupStopped = false
+        var allRetired = false
+        try {
+            cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
+            maintenanceStopped = awaitMaintenance()
+            acceptedHandoffs.toList().forEach { handoff ->
+                cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
+            }
+            provisionalSlots.toList().forEach { slot ->
+                cleanup.attempt("provisional worker") { destroySlot(slot) }
+            }
+            startupStopped = awaitStartup(startupToJoin)
+            val leftover = mutableListOf<WorkerSlot>()
+            idle.drainTo(leftover)
+            // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
+            synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
+            leftover.addAll(provisionalSlots)
+            leftover.distinct().forEach { slot ->
+                cleanup.attempt("worker") { destroySlot(slot) }
+            }
+            provisionalAttempts.toList().forEach { attempt ->
+                cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
+            }
+            acceptedHandoffs.toList().forEach { handoff ->
+                cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
+            }
+            allRetired =
+                maintenanceStopped &&
+                    startupStopped &&
+                    provisionalSlots.isEmpty() &&
+                    provisionalAttempts.isEmpty() &&
+                    acceptedHandoffs.isEmpty() &&
+                    cleanup.outcome().complete
+        } finally {
+            synchronized(lifecycleGate) {
+                try {
+                    lifecycle = ProcessBrokerLifecycleMachine
+                        .evaluate(
+                            lifecycle,
+                            if (allRetired) {
+                                ProcessBrokerLifecycleEvent.CleanupSucceeded
+                            } else {
+                                ProcessBrokerLifecycleEvent.CleanupFailed("broker cleanup failed")
+                            },
+                        ).state
+                } finally {
+                    completionToSignal?.countDown()
+                }
+            }
         }
+        cleanup.outcome().failureOrNull()?.let { throw it }
     }
 
     private fun awaitStartup(completion: CountDownLatch?): Boolean {
@@ -330,7 +367,8 @@ public class ProcessBroker(
         provisionalAttempts.add(attempt)
         try {
             check(active()) { "portal worker acquisition cancelled" }
-            attempt.server = sockets.createUnixServer(ep.path)
+            val server = sockets.createUnixServer(ep.path)
+            synchronized(attempt) { attempt.server = server }
             check(active()) { "portal worker acquisition cancelled" }
             val spec =
             JvmChildSpec(
@@ -341,11 +379,12 @@ public class ProcessBroker(
                 classpath = resolveWorkerClasspath(),
                 extraJvmArgs = workerExtraJvmArgs,
             )
-            attempt.process = JvmChildProcess.start(launcher, spec)
+            val process = JvmChildProcess.start(launcher, spec)
+            synchronized(attempt) { attempt.process = process }
             check(active()) { "portal worker acquisition cancelled" }
-            attempt.pump =
+            val pump =
             JvmChildProcess.startStdoutPump(
-                checkNotNull(attempt.process),
+                process,
                 "MAZEWALL_PORTAL_WORKER_READY",
                 { line ->
                     System.err.println("[PORTAL-WORKER] $line")
@@ -354,42 +393,53 @@ public class ProcessBroker(
                     }
                 },
                 "portal-worker-stdout",
-                { runCatching { System.err.println("[PORTAL-WORKER-EXIT] code=${attempt.process?.exitValue()}") } },
+                { runCatching { System.err.println("[PORTAL-WORKER-EXIT] code=${process.exitValue()}") } },
             )
-            attempt.peer = acceptWithin(checkNotNull(attempt.server), checkNotNull(attempt.process), ep.path, deadline, active)
-            check(checkNotNull(attempt.process).isAlive) { "portal worker exited during handshake" }
+            synchronized(attempt) { attempt.pump = pump }
+            val peer = acceptWithin(server, process, ep.path, deadline, active)
+            synchronized(attempt) { attempt.peer = peer }
+            check(process.isAlive) { "portal worker exited during handshake" }
             check(active()) { "portal worker acquisition cancelled" }
-            attempt.channel = PortalChannel(checkNotNull(attempt.peer), sockets)
-            attempt.peer = null
-            while (checkNotNull(attempt.pump).ready.count > 0L) {
+            val channel = PortalChannel(peer, sockets)
+            synchronized(attempt) {
+                attempt.channel = channel
+                attempt.peer = null
+            }
+            while (pump.ready.count > 0L) {
                 check(active()) { "portal worker acquisition cancelled" }
                 val remaining = deadline.remainingMillis()
                 check(remaining > 0) { "portal worker failed to become ready before startup deadline" }
-                checkNotNull(attempt.pump).ready.await(minOf(remaining, 50).toLong(), TimeUnit.MILLISECONDS)
+                pump.ready.await(minOf(remaining, 50).toLong(), TimeUnit.MILLISECONDS)
             }
-            check(JvmChildProcess.awaitReady(checkNotNull(attempt.pump), 0)) { "portal worker failed readiness validation" }
-            check(checkNotNull(attempt.process).isAlive) { "portal worker exited during readiness handshake" }
+            check(JvmChildProcess.awaitReady(pump, 0)) { "portal worker failed readiness validation" }
+            check(process.isAlive) { "portal worker exited during readiness handshake" }
             check(active()) { "portal worker acquisition cancelled" }
-            spawned.incrementAndGet()
             val slot = WorkerSlot(
-                checkNotNull(attempt.process),
-                checkNotNull(attempt.channel),
+                process,
+                channel,
                 attempt.endpoint,
-                checkNotNull(attempt.server),
-                checkNotNull(attempt.pump),
+                server,
+                pump,
             )
-            attempt.transferred = true
+            synchronized(attempt) {
+                check(active() && !attempt.retirementRequested) { "portal worker acquisition cancelled before publication" }
+                attempt.acquisitionFinished = true
+                attempt.transferred = true
+            }
+            spawned.incrementAndGet()
             provisionalAttempts.remove(attempt)
             return slot
         } catch (failure: Throwable) {
-            runCatching { retireStartupAttempt(attempt) }.exceptionOrNull()?.let(failure::addSuppressed)
-            throw failure
+            synchronized(attempt) { attempt.acquisitionFinished = true }
+            val cleanupFailure = runCatching { retireStartupAttempt(attempt) }.exceptionOrNull()
+            throwWithCleanupFailure(failure, cleanupFailure)
         }
     }
 
     private fun retireStartupAttempt(attempt: StartupAttempt): Boolean {
         synchronized(attempt) {
             if (attempt.transferred) return true
+            attempt.retirementRequested = true
             val cleanup = CleanupCollector()
             retireStartupChannel(attempt, cleanup)
             retireStartupProcess(attempt, cleanup)
@@ -399,6 +449,7 @@ public class ProcessBroker(
             val outcome = cleanup.outcome()
             outcome.failures.forEach { logger.log(Level.WARNING, "failed to release ${it.resource}", it.cause) }
             if (attempt.fullyRetired) provisionalAttempts.remove(attempt)
+            outcome.failureOrNull()?.let { throw it }
             return attempt.fullyRetired
         }
     }
@@ -413,10 +464,11 @@ public class ProcessBroker(
             attempt.peer != null -> ({ attempt.peer?.let(sockets::close) })
             else -> null
         }
-        if (action == null) {
+        if (action == null && attempt.acquisitionFinished) {
             attempt.channelRetired = true
             return
         }
+        if (action == null) return
         cleanup.attempt("provisional worker channel") {
             terminalClose({ action() }) { attempt.channelRetired = true }
         }
@@ -428,11 +480,12 @@ public class ProcessBroker(
     ) {
         val process = attempt.process
         if (!attempt.processDestroyed) {
-            if (process == null) {
+            if (process == null && attempt.acquisitionFinished) {
                 attempt.processDestroyed = true
                 attempt.processReaped = true
-            } else {
+            } else if (process != null) {
                 cleanup.attempt("provisional worker process") {
+                    process.descendants().forEach { it.destroyForcibly() }
                     process.destroyForcibly()
                     attempt.processDestroyed = true
                 }
@@ -452,9 +505,13 @@ public class ProcessBroker(
     ) {
         if (attempt.pumpRetired) return
         val pump = attempt.pump
-        if (pump == null) {
+        if (pump == null && attempt.acquisitionFinished) {
             attempt.pumpRetired = true
             return
+        }
+        if (pump == null) return
+        attempt.process?.let { process ->
+            cleanup.attempt("provisional worker output stream") { process.inputStream.close() }
         }
         cleanup.attempt("provisional worker output pump") {
             pump.thread.interrupt()
@@ -470,10 +527,11 @@ public class ProcessBroker(
     ) {
         if (attempt.serverRetired) return
         val server = attempt.server
-        if (server == null) {
+        if (server == null && attempt.acquisitionFinished) {
             attempt.serverRetired = true
             return
         }
+        if (server == null) return
         cleanup.attempt("provisional worker listener") {
             terminalClose({ sockets.close(server) }) { attempt.serverRetired = true }
         }
@@ -543,6 +601,7 @@ public class ProcessBroker(
         } finally {
             if (claimed == null) {
                 runCatching { handoff.cancel() }
+                process.descendants().forEach { it.destroyForcibly() }
                 process.destroyForcibly()
                 runCatching {
                     java.nio.channels.SocketChannel
@@ -566,6 +625,7 @@ public class ProcessBroker(
             logger.log(Level.WARNING, "failed to retire accepted portal socket", failure)
         }
         if (handoff.fullyRetired) acceptedHandoffs.remove(handoff)
+        failure?.let { throw it }
     }
 
     private fun scheduleRecycle(dead: WorkerSlot) {
@@ -625,6 +685,7 @@ public class ProcessBroker(
             }
             if (!slot.processDestroyed) {
                 cleanup.attempt("worker process") {
+                    slot.process.descendants().forEach { it.destroyForcibly() }
                     slot.process.destroyForcibly()
                     slot.processDestroyed = true
                 }
@@ -636,6 +697,7 @@ public class ProcessBroker(
                 }
             }
             if (!slot.pumpRetired) {
+                cleanup.attempt("worker output stream") { slot.process.inputStream.close() }
                 cleanup.attempt("worker output pump") {
                     slot.pump.thread.interrupt()
                     slot.pump.thread.join(1_000)
@@ -653,11 +715,12 @@ public class ProcessBroker(
             outcome.failures.forEach { failure ->
                 logger.log(Level.WARNING, "failed to release ${failure.resource}", failure.cause)
             }
-            if (outcome.complete) {
+            if (slot.fullyRetired) {
                 trackedSlots.remove(slot)
                 provisionalSlots.remove(slot)
             }
-            return outcome.complete
+            outcome.failureOrNull()?.let { throw it }
+            return slot.fullyRetired
         }
     }
 
@@ -686,6 +749,8 @@ public class ProcessBroker(
         var pump: ChildStdoutPump? = null
         var peer: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         var channel: PortalChannel? = null
+        var acquisitionFinished = false
+        var retirementRequested = false
         var transferred = false
         var channelRetired = false
         var serverRetired = false
@@ -694,6 +759,26 @@ public class ProcessBroker(
         var pumpRetired = false
         var endpointRetired = false
         val fullyRetired: Boolean
-            get() = channelRetired && serverRetired && processDestroyed && processReaped && pumpRetired && endpointRetired
+            get() =
+                acquisitionFinished &&
+                    channelRetired &&
+                    serverRetired &&
+                    processDestroyed &&
+                    processReaped &&
+                    pumpRetired &&
+                    endpointRetired
     }
+}
+
+@Suppress("InstanceOfCheckForException") // Cleanup aggregation deliberately promotes fatal failures.
+private fun throwWithCleanupFailure(
+    primary: Throwable,
+    cleanup: Throwable?,
+): Nothing {
+    if (cleanup is Error && primary !is Error) {
+        cleanup.addSuppressed(primary)
+        throw cleanup
+    }
+    cleanup?.takeIf { it !== primary }?.let(primary::addSuppressed)
+    throw primary
 }

@@ -81,3 +81,29 @@ follow-up commit output.
   integration, ktlint, detekt, coverage, and SpotBugs gates).
 - `./scripts/adkw check-backlog` — only the same nine pre-existing plan-frontmatter errors remain;
   neither Task 7 backlog item is reported.
+
+## Second review follow-up
+
+Three additional P2 lifecycle findings were repaired in a second independent follow-up:
+
+- Startup acquisition now serializes every resource publication with retirement and remains in the
+  provisional registry until acquisition definitively finishes. Close timeout and interruption
+  publish retryable `Failed`; a child returned later is still destroyed and reaped before retry can
+  reach `Closed`.
+- Cleanup collection includes fatal `Throwable`s, continues across independent owners, and selects
+  fatal-first failure identity. Broker close publishes its terminal lifecycle and counts down the
+  concurrent-close latch in `finally`; fatal startup rollback and fatal close retain unfinished
+  owners for a later resource-by-resource retry. Process descendants are terminated before their
+  parent so inherited stdout cannot pin the owned output pump.
+- Worker capability cleanup no longer replaces a reflected fatal target. The exact target `Error`
+  is rethrown with capability cleanup followed by transport cleanup as suppressed evidence and zero
+  response attempts.
+
+Second follow-up RED evidence covered join timeout, interrupted close, a wedged concurrent waiter,
+fatal provisional rollback, fatal-first cleanup continuation, and capability cleanup replacing a
+reflected fatal. GREEN verification:
+
+- Focused lifecycle/cleanup/worker regressions — passed.
+- `./gradlew --no-daemon :portal:test :portal:integrationTest :portal:check :portal-worker:test
+  :portal-worker:check` — passed (98 tasks; unit, integration, ktlint, detekt, coverage, and SpotBugs
+  gates).

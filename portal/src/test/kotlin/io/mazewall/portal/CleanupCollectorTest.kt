@@ -2,6 +2,7 @@ package io.mazewall.portal
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -24,5 +25,29 @@ class CleanupCollectorTest {
         assertFalse(outcome.complete)
         assertEquals("socket", outcome.failures.single().resource)
         assertTrue(outcome.failures.single().cause is IllegalStateException)
+    }
+
+    @Test
+    fun `continues after fatal cleanup and reports the fatal before ordinary failures`() {
+        val attempted = mutableListOf<String>()
+        val ordinary = IllegalStateException("ordinary")
+        val fatal = AssertionError("fatal")
+        val cleanup = CleanupCollector()
+
+        cleanup.attempt("ordinary") {
+            attempted += "ordinary"
+            throw ordinary
+        }
+        cleanup.attempt("fatal") {
+            attempted += "fatal"
+            throw fatal
+        }
+        cleanup.attempt("later") { attempted += "later" }
+
+        val failure = cleanup.outcome().failureOrNull()
+
+        assertEquals(listOf("ordinary", "fatal", "later"), attempted)
+        assertSame(fatal, failure)
+        assertEquals(listOf(ordinary), fatal.suppressed.toList())
     }
 }

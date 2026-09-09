@@ -78,23 +78,34 @@ internal class PortalWorkerDriver(
             Capability.closeAll(received.capabilities)
             return
         }
-        val dispatchEvent = try {
-            val result = dispatcher.dispatch(
+        var result: ByteArray? = null
+        var dispatchFailure: Throwable? = null
+        try {
+            result = dispatcher.dispatch(
                 dispatch.request.method,
                 dispatch.request.payload.copyToByteArray(),
                 received.capabilities,
             )
-            PortalWorkerEvent.DispatchSucceeded(PortalPayload(result))
         } catch (failure: Throwable) {
-            val actual = unwrapInvocation(failure)
-            if (actual !is Exception) {
-                state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
-                throw actual
-            }
-            val message = (actual.message ?: actual::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
+            dispatchFailure = unwrapInvocation(failure)
+        }
+        val capabilityFailure = captureFailure { Capability.closeAll(received.capabilities) }
+        val actualFailure = dispatchFailure
+        if (actualFailure != null && actualFailure !is Exception) {
+            state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
+            capabilityFailure?.let(actualFailure::addSuppressed)
+            throw actualFailure
+        }
+        if (capabilityFailure != null) {
+            state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
+            actualFailure?.let(capabilityFailure::addSuppressed)
+            throw capabilityFailure
+        }
+        val dispatchEvent = if (actualFailure == null) {
+            PortalWorkerEvent.DispatchSucceeded(PortalPayload(checkNotNull(result)))
+        } else {
+            val message = (actualFailure.message ?: actualFailure::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
             PortalWorkerEvent.DispatchFailed(PortalPayload(message))
-        } finally {
-            Capability.closeAll(received.capabilities)
         }
         val sending = PortalWorkerMachine.evaluate(state, dispatchEvent) as PortalWorkerTransition.Send
         state = sending.state

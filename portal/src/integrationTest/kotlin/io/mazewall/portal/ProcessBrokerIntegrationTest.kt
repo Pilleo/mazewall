@@ -5,6 +5,7 @@ import io.mazewall.core.RealProcessLauncher
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -20,6 +21,109 @@ import java.util.zip.Adler32
 
 @Execution(ExecutionMode.SAME_THREAD)
 class ProcessBrokerIntegrationTest {
+    @Test
+    fun `join timeout retains late process publication until it is reaped`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val launchEntered = CountDownLatch(1)
+        val releaseLaunch = CountDownLatch(1)
+        var lateChild: Process? = null
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                launchEntered.countDown()
+                assertTrue(releaseLaunch.await(5, TimeUnit.SECONDS))
+                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
+            }
+        }
+        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 100)
+        val startup = CompletableFuture.runAsync { broker.start() }
+        assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
+
+        broker.close()
+
+        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+        assertEquals(1, broker.provisionalWorkers(), "active acquisition must remain registered after join timeout")
+        releaseLaunch.countDown()
+        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+        awaitCondition(java.time.Duration.ofSeconds(5), "late child reaped") { lateChild?.isAlive == false }
+        broker.close()
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+        assertEquals(0, broker.provisionalWorkers())
+    }
+
+    @Test
+    fun `interrupted close retains active acquisition for later cleanup`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val launchEntered = CountDownLatch(1)
+        val releaseLaunch = CountDownLatch(1)
+        var lateChild: Process? = null
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                launchEntered.countDown()
+                assertTrue(releaseLaunch.await(5, TimeUnit.SECONDS))
+                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
+            }
+        }
+        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 5_000)
+        val startup = CompletableFuture.runAsync { broker.start() }
+        assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
+        val closeReturned = CountDownLatch(1)
+        val closer = Thread.ofPlatform().start {
+            broker.close()
+            closeReturned.countDown()
+        }
+        Thread.sleep(100)
+        closer.interrupt()
+        assertTrue(closeReturned.await(2, TimeUnit.SECONDS))
+
+        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+        assertEquals(1, broker.provisionalWorkers())
+        releaseLaunch.countDown()
+        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+        awaitCondition(java.time.Duration.ofSeconds(5), "late interrupted-close child reaped") { lateChild?.isAlive == false }
+        broker.close()
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+    }
+
+    @Test
+    fun `fatal close still publishes failure and releases concurrent close waiter`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val closeEntered = CountDownLatch(1)
+        val releaseClose = CountDownLatch(1)
+        val fatal = AssertionError("fatal pre-native close")
+        val attempts = AtomicInteger()
+        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
+            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+                if (attempts.incrementAndGet() == 1) {
+                    closeEntered.countDown()
+                    assertTrue(releaseClose.await(5, TimeUnit.SECONDS))
+                    throw fatal
+                }
+                io.mazewall.core.RealSocketManager
+                    .close(fd)
+            }
+        }
+        val broker = ProcessBroker(sockets = sockets)
+        broker.start()
+        val first = CompletableFuture.runAsync { broker.close() }
+        assertTrue(closeEntered.await(5, TimeUnit.SECONDS))
+        val waiter = CompletableFuture.runAsync { broker.close() }
+        releaseClose.countDown()
+
+        val thrown = assertThrows(Exception::class.java) { first.get(10, TimeUnit.SECONDS) }
+        assertSame(fatal, thrown.cause)
+        waiter.get(5, TimeUnit.SECONDS)
+        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+
+        broker.close()
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+    }
+
     @Test
     fun `close waits for cancelled startup and reaps every provisional child`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
@@ -85,6 +189,40 @@ class ProcessBrokerIntegrationTest {
         assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
         assertEquals(0, broker.provisionalWorkers())
         assertEquals(4, closes.get(), "retry only the provisional listener whose pre-native close failed")
+    }
+
+    @Test
+    fun `fatal provisional rollback remains retryable after startup publishes failure`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val starts = AtomicInteger()
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                if (starts.incrementAndGet() == 2) error("second worker launch failed")
+                return RealProcessLauncher.startProcess(args, redirectErrorStream)
+            }
+        }
+        val fatal = AssertionError("fatal provisional listener close")
+        val closes = AtomicInteger()
+        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
+            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+                if (closes.incrementAndGet() == 1) throw fatal
+                io.mazewall.core.RealSocketManager
+                    .close(fd)
+            }
+        }
+        val broker = ProcessBroker(poolSize = 2, launcher = launcher, sockets = sockets)
+
+        assertSame(fatal, assertThrows(AssertionError::class.java) { broker.start() })
+        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+        assertEquals(1, broker.provisionalWorkers())
+
+        broker.close()
+
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+        assertEquals(0, broker.provisionalWorkers())
     }
 
     @Test
