@@ -1,9 +1,10 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 108 | *Total Resolved Issues:* 496
+*Total Active Issues:* 109 | *Total Resolved Issues:* 496
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-](issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-.md) | Preload HotSpot clock wrappers before restrictive iterative profiling | high | profiler |
 | [issue-20260907-094634-079-make-containment-exception-classification-and-extr](issue-20260907-094634-079-make-containment-exception-classification-and-extr.md) | Make containment exception classification and extraction reliable for callers | high | enforcer |
 | [issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines](testing/issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines.md) | Forbid silent else on sealed lifecycle and security machines | high | testing |
 | [issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n](code_health/issue-20260907-080802-make-orchestratorevent-evaluate-exhaustive-instead-of-else-n.md) | Make OrchestratorEvent evaluate exhaustive instead of else no-op | high | orchestrator |

@@ -214,20 +214,7 @@ internal class ProfilerTraceListener(
 
             // Step 2: Wait for the listener thread to drain remaining events and see EOF.
             // The thread exits via EOFException once the daemon closes its socket end.
-            workerThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
-                        it.interrupt()
-                        it.join(INTERRUPT_JOIN_TIMEOUT_MS)
-                    } else {
-                        workerJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
+            workerThread?.let { workerJoined = joinWorkerForDrain(it) }
 
             collectorThread?.let {
                 try {
@@ -263,6 +250,22 @@ internal class ProfilerTraceListener(
      * The daemon will close its end of the socket, which sends EOF to our listener thread.
      */
     fun passThrough() = close()
+
+    private fun joinWorkerForDrain(worker: Thread): Boolean =
+        try {
+            worker.join(JOIN_TIMEOUT_MS)
+            if (worker.isAlive) {
+                logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                worker.interrupt()
+                worker.join(INTERRUPT_JOIN_TIMEOUT_MS)
+                false
+            } else {
+                true
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
 
     private fun sendCommand(commandByte: Byte): TraceCommandWriteResult {
         try {

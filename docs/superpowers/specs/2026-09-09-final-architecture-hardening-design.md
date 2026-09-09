@@ -1,3 +1,12 @@
+---
+document_type: design
+title: "Final Architecture Hardening Design"
+scope: "platform, enforcer, profiler, portal, portal-worker"
+base_revision: f3fadff5
+target_files: ["platform/src/main", "enforcer/src/main", "profiler/src/main", "portal/src/main", "portal-worker/src/main"]
+keywords: ["architecture", "ownership", "deterministic tests", "security"]
+---
+
 # Final Architecture Hardening Design
 
 ## Goal

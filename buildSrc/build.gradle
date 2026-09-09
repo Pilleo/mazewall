@@ -5,3 +5,18 @@ plugins {
 repositories {
     mavenCentral()
 }
+
+tasks.register('verificationActionsTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.mazewall.build.VerificationActionsTest'
+}
+
+tasks.named('check') {
+    dependsOn 'verificationActionsTest'
+}
+
+// buildSrc is compiled before the root build; exercise its verification logic before use.
+tasks.named('jar') {
+    dependsOn 'verificationActionsTest'
+}

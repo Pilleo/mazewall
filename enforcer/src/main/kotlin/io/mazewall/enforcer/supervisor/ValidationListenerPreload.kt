@@ -14,6 +14,7 @@ internal object ValidationListenerPreload {
     internal val requiredBinaryNames: List<String> =
         listOf(
             JVMValidationListener::class.java.name,
+            "io.mazewall.enforcer.supervisor.JVMValidationListener\$ValidationInspection",
             JvmStackInspector::class.java.name,
             ScopingValidationState::class.java.name,
             ScopingValidationState.SafeToValidate::class.java.name,

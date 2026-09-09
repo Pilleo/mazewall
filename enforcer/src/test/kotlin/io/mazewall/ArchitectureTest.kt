@@ -14,6 +14,11 @@ import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ArchitectureTest {
     @ArchTest
+    fun singletonProvidersMustBeImmutable(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        singletonProviderRule().check(allClasses)
+    }
+
+    @ArchTest
     fun enforcerShouldNotDependOnProfiler(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()

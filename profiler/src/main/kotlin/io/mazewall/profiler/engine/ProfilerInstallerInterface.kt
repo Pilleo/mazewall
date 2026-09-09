@@ -63,8 +63,7 @@ internal class RealProfilerInstaller private constructor(
         ) -> Unit,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(
-            native = native,
-            userNotifSupported = userNotifSupported,
+            context = ProfilerInstallationContext(native, userNotifSupported, checkActive),
             socketPath = socketPath,
             policy = policy,
             accumulatedLogs = accumulatedLogs,
@@ -72,7 +71,6 @@ internal class RealProfilerInstaller private constructor(
             pathCache = pathCache,
             processWide = processWide,
             connectWithRetry = { ProfilerSocket.connectWithRetry(it, native) },
-            onFilterApplied = checkActive,
             installationGate = installationGate,
             startTraceListener = startTraceListener,
         )

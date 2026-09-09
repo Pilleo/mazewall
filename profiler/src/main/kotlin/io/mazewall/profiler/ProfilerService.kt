@@ -73,7 +73,7 @@ internal class ProfilerService(
         captureStackTraces: Boolean = true,
         vararg policies: Policy<*, Uncompiled>,
     ): Profiler.ProfilerExecutorWrapper {
-        val policy = if (policies.isEmpty()) PolicyPresets.PURE_COMPUTE_UNSAFE else PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        val policy = if (policies.isEmpty()) PolicyPresets.PURE_COMPUTE_UNSAFE else PolicyDefinition.combine(policies = policies.map { it.definition }.toTypedArray())
         return Profiler.ProfilerExecutorWrapper(delegate, openSession(policy, captureStackTraces = captureStackTraces))
     }
 

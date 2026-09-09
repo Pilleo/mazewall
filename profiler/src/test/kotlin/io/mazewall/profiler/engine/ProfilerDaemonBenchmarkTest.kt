@@ -179,7 +179,6 @@ class ProfilerDaemonBenchmarkTest {
         val syscallMap = mapOf(2 to "OPEN")
 
         System.gc()
-        Thread.sleep(100)
         val heapBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
         val startTime = System.currentTimeMillis()
@@ -221,7 +220,6 @@ class ProfilerDaemonBenchmarkTest {
         System.err.println("Benchmark duration for 100,000 syscall notifications: $duration ms")
 
         System.gc()
-        Thread.sleep(100)
         val heapAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
         System.err.println("Heap memory change: before=$heapBefore, after=$heapAfter, delta=${heapAfter - heapBefore}")

@@ -171,7 +171,9 @@ internal fun SeccompCleanupOutcome.throwIfIncomplete(message: String) {
                 failures.filter { it !== cancellation && it !in cancellation.suppressed }.forEach(cancellation::addSuppressed)
                 throw cancellation
             }
-            throw IllegalStateException(message).also { failure -> failures.forEach(failure::addSuppressed) }
+            val failure = IllegalStateException(message)
+            failures.forEach(failure::addSuppressed)
+            throw failure
         }
     }
 }

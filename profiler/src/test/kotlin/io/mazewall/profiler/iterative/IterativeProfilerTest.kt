@@ -12,6 +12,17 @@ import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
 class IterativeProfilerTest {
+    companion object {
+        @org.junit.jupiter.api.BeforeAll
+        @JvmStatic
+        fun preloadClockWrappers() {
+            // The first interpreted native call can allocate executable CodeHeap memory.
+            // Prime these test clocks while no iterative worker has a restrictive filter.
+            System.currentTimeMillis()
+            System.nanoTime()
+        }
+    }
+
     private fun runPlatformTest(block: () -> Unit) {
         try {
             block()

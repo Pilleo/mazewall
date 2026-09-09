@@ -126,22 +126,7 @@ internal class JVMValidationListener(
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
         try {
             val dis = DataInputStream(BufferedInputStream(channel.inputStream))
-            try {
-                // Read handshake ACK
-                System.err.println("[JVM-VALIDATION] reading handshake ACK...")
-                val ack = dis.readUnsignedByte()
-                System.err.println("[JVM-VALIDATION] handshake ACK received: $ack")
-                when (val handshake = SupervisorValidationDecoder.handshake(ack)) {
-                    SupervisorValidationDecodeResult.HandshakeAccepted -> Unit
-                    is SupervisorValidationDecodeResult.ProtocolViolation -> {
-                        logger.warning(handshake.reason)
-                        return
-                    }
-                    is SupervisorValidationDecodeResult.Arguments -> error("handshake decoder returned arguments")
-                }
-            } finally {
-                readyLatch.countDown()
-            }
+            if (!acceptHandshake(dis, readyLatch)) return
 
             while (!closed.get()) {
                 val id = try {
@@ -167,106 +152,25 @@ internal class JVMValidationListener(
 
                 val traceeArch = Arch.fromAudit(archVal)
                 val syscallResolution = SupervisorSyscallResolver.resolve(nr, traceeArch)
-                val forkNr = traceeArch.fork
-                val vforkNr = traceeArch.vfork
-                val cloneNr = traceeArch.clone
 
                 val startMs = System.currentTimeMillis()
                 val targetThread = runtime.resolve(Tid(pidVal))
-                var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
-                var spawnContextAccepted = true
-
-                // --- STACKTRACE PROPAGATION LOGIC ---
-                if (nr == traceeArch.execve || nr == traceeArch.execveat) {
-                    if (validationState is ScopingValidationState.SafeToValidate && validationState.rawStack.isEmpty()) {
-                        // Empty stack trace on execve suggests a child process.
-                        // Consume this session's authorization for the parent's exact process lifetime.
-                        when (val authorization = runtime.consumeSpawn(Pid(ppidVal))) {
-                            is SpawnAuthorizationResult.Authorized -> {
-                                validationState = ScopingValidationState.SafeToValidate.create(authorization.stack.toTypedArray(), nr, argsList)
-                            }
-                            is SpawnAuthorizationResult.Rejected -> {
-                                logger.warning("Child exec authorization rejected for parent pid=$ppidVal: ${authorization.reason}")
-                                spawnContextAccepted = false
-                            }
-                        }
-                    }
-                }
+                val inspection = inspectWithSpawnAuthorization(nr, argsList, targetThread, ppidVal, traceeArch)
 
                 val inspectMs = System.currentTimeMillis() - startMs
                 if (inspectMs > SLOW_INSPECT_THRESHOLD_MS) {
                     logger.warning("[SUPERVISOR-DIAGNOSTIC] JvmStackInspector.inspect took ${inspectMs}ms for syscall nr=$nr, args=$argsList")
                 }
 
-                val isAllowed = spawnContextAccepted &&
-                    when (validationState) {
-                    is ScopingValidationState.SafeToValidate -> {
-                        val stackTrace = validationState.rawStack.toList()
-
-                        val sb = StringBuilder()
-                        sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
-                        if (stackTrace.isEmpty()) {
-                            sb.append("  (empty stack trace)\n")
-                        } else {
-                            stackTrace.forEach { sb.append("  $it\n") }
-                        }
-                        ValidationLog.logs.add(sb.toString())
-                        when (syscallResolution) {
-                            is SupervisorSyscallResolution.Known -> {
-                                val authStartMs = System.currentTimeMillis()
-                                val handler = scopingPolicy.handlers[syscallResolution.syscall]
-                                val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
-                                val authMs = System.currentTimeMillis() - authStartMs
-                                if (authMs > SLOW_AUTH_THRESHOLD_MS) {
-                                    logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall ${syscallResolution.syscall}")
-                                }
-                                if (res && (nr == forkNr || nr == vforkNr || nr == cloneNr)) {
-                                    val tgid = getTgid(pidVal)
-                                    stackTrace.isNotEmpty() &&
-                                        tgid != null &&
-                                        runtime.registerSpawn(Pid(tgid), stackTrace) == SpawnRegistrationResult.REGISTERED
-                                } else {
-                                    res
-                                }
-                            }
-                            is SupervisorSyscallResolution.Unknown -> {
-                                logger.warning(
-                                    "[SUPERVISOR-DIAGNOSTIC] Refusing unmapped syscall " +
-                                        "nr=${syscallResolution.number.nr} arch=${syscallResolution.arch}",
-                                )
-                                false
-                            }
-                        }
-                    }
-                }
+                val isAllowed = inspection.spawnContextAccepted &&
+                    authorizeValidation(inspection.state, syscallResolution, pidVal, nr, traceeArch, targetThread)
 
                 val totalMs = System.currentTimeMillis() - startMs
                 if (totalMs > SLOW_TOTAL_THRESHOLD_MS) {
                     logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${totalMs}ms for syscall nr=$nr")
                 }
 
-                val kind = io.mazewall.platform.seccomp.SupervisedKind
-                    .classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
-                val verdict = if (syscallResolution is SupervisorSyscallResolution.Unknown || !isAllowed) {
-                    JvmVerdict.Deny(NativeConstants.EPERM)
-                } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {
-                    JvmVerdict.InjectFd
-                } else {
-                    JvmVerdict.Allow
-                }
-
-                val execPath = if (isAllowed && kind is io.mazewall.platform.seccomp.SupervisedKind.Exec) {
-                    resolveExecTargetPath(nr, argsList, pidVal, traceeArch)
-                } else {
-                    null
-                }
-                if (execPath != null) {
-                    System.err.println("[JVM-VALIDATION] sending exec path to daemon: $execPath")
-                }
-                channel.sendResponse(id, verdict, execPath)
-                if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
-                    completeParentExecRewrite(dis, channel)
-                }
+                sendValidationResponse(dis, channel, id, nr, argsList, pidVal, traceeArch, syscallResolution, isAllowed)
             }
         } catch (ignored: java.io.IOException) {
             // Done
@@ -275,6 +179,147 @@ internal class JVMValidationListener(
         } finally {
             runtime.close()
             channel.close()
+        }
+    }
+
+    private fun acceptHandshake(
+        dis: DataInputStream,
+        readyLatch: CountDownLatch,
+    ): Boolean {
+        try {
+            // Read handshake ACK
+            System.err.println("[JVM-VALIDATION] reading handshake ACK...")
+            val ack = dis.readUnsignedByte()
+            System.err.println("[JVM-VALIDATION] handshake ACK received: $ack")
+            when (val handshake = SupervisorValidationDecoder.handshake(ack)) {
+                SupervisorValidationDecodeResult.HandshakeAccepted -> Unit
+                is SupervisorValidationDecodeResult.ProtocolViolation -> {
+                    logger.warning(handshake.reason)
+                    return false
+                }
+                is SupervisorValidationDecodeResult.Arguments -> error("handshake decoder returned arguments")
+            }
+        } finally {
+            readyLatch.countDown()
+        }
+        return true
+    }
+
+    private data class ValidationInspection(
+        val state: ScopingValidationState,
+        val spawnContextAccepted: Boolean,
+    )
+
+    private fun inspectWithSpawnAuthorization(
+        nr: Int,
+        argsList: List<Any>,
+        targetThread: Thread?,
+        ppidVal: Int,
+        traceeArch: Arch,
+    ): ValidationInspection {
+        var validationState = JvmStackInspector.inspect(nr, argsList, targetThread)
+        var spawnContextAccepted = true
+
+        // --- STACKTRACE PROPAGATION LOGIC ---
+        if (nr == traceeArch.execve || nr == traceeArch.execveat) {
+            if (validationState is ScopingValidationState.SafeToValidate && validationState.rawStack.isEmpty()) {
+                // Empty stack trace on execve suggests a child process.
+                // Consume this session's authorization for the parent's exact process lifetime.
+                when (val authorization = runtime.consumeSpawn(Pid(ppidVal))) {
+                    is SpawnAuthorizationResult.Authorized -> {
+                        validationState = ScopingValidationState.SafeToValidate.create(authorization.stack.toTypedArray(), nr, argsList)
+                    }
+                    is SpawnAuthorizationResult.Rejected -> {
+                        logger.warning("Child exec authorization rejected for parent pid=$ppidVal: ${authorization.reason}")
+                        spawnContextAccepted = false
+                    }
+                }
+            }
+        }
+        return ValidationInspection(validationState, spawnContextAccepted)
+    }
+
+    private fun authorizeValidation(
+        validationState: ScopingValidationState,
+        syscallResolution: SupervisorSyscallResolution,
+        pidVal: Int,
+        nr: Int,
+        traceeArch: Arch,
+        targetThread: Thread?,
+    ): Boolean =
+        when (validationState) {
+            is ScopingValidationState.SafeToValidate -> {
+                val stackTrace = validationState.rawStack.toList()
+
+                val sb = StringBuilder()
+                sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
+                if (stackTrace.isEmpty()) {
+                    sb.append("  (empty stack trace)\n")
+                } else {
+                    stackTrace.forEach { sb.append("  $it\n") }
+                }
+                ValidationLog.logs.add(sb.toString())
+                when (syscallResolution) {
+                    is SupervisorSyscallResolution.Known -> {
+                        val authStartMs = System.currentTimeMillis()
+                        val handler = scopingPolicy.handlers[syscallResolution.syscall]
+                        val res = handler?.invoke(Tid(pidVal), validationState.argsList, stackTrace) ?: true
+                        val authMs = System.currentTimeMillis() - authStartMs
+                        if (authMs > SLOW_AUTH_THRESHOLD_MS) {
+                            logger.warning("[SUPERVISOR-DIAGNOSTIC] scopingPolicy.authorize took ${authMs}ms for syscall ${syscallResolution.syscall}")
+                        }
+                        if (res && (nr == traceeArch.fork || nr == traceeArch.vfork || nr == traceeArch.clone)) {
+                            val tgid = getTgid(pidVal)
+                            stackTrace.isNotEmpty() &&
+                                tgid != null &&
+                                runtime.registerSpawn(Pid(tgid), stackTrace) == SpawnRegistrationResult.REGISTERED
+                        } else {
+                            res
+                        }
+                    }
+                    is SupervisorSyscallResolution.Unknown -> {
+                        logger.warning(
+                            "[SUPERVISOR-DIAGNOSTIC] Refusing unmapped syscall " +
+                                "nr=${syscallResolution.number.nr} arch=${syscallResolution.arch}",
+                        )
+                        false
+                    }
+                }
+            }
+        }
+
+    private fun sendValidationResponse(
+        dis: DataInputStream,
+        channel: SupervisorValidationChannel,
+        id: Long,
+        nr: Int,
+        argsList: List<Any>,
+        pidVal: Int,
+        traceeArch: Arch,
+        syscallResolution: SupervisorSyscallResolution,
+        isAllowed: Boolean,
+    ) {
+        val kind = io.mazewall.platform.seccomp.SupervisedKind
+            .classify(io.mazewall.core.SyscallNumber(nr), traceeArch)
+        val verdict = if (syscallResolution is SupervisorSyscallResolution.Unknown || !isAllowed) {
+            JvmVerdict.Deny(NativeConstants.EPERM)
+        } else if (kind is io.mazewall.platform.seccomp.SupervisedKind.Accept) {
+            JvmVerdict.InjectFd
+        } else {
+            JvmVerdict.Allow
+        }
+
+        val execPath = if (isAllowed && kind is io.mazewall.platform.seccomp.SupervisedKind.Exec) {
+            resolveExecTargetPath(nr, argsList, pidVal, traceeArch)
+        } else {
+            null
+        }
+        if (execPath != null) {
+            System.err.println("[JVM-VALIDATION] sending exec path to daemon: $execPath")
+        }
+        channel.sendResponse(id, verdict, execPath)
+        if (isAllowed && (nr == traceeArch.execve || nr == traceeArch.execveat)) {
+            completeParentExecRewrite(dis, channel)
         }
     }
 

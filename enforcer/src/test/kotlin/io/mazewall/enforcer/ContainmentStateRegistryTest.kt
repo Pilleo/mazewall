@@ -4,6 +4,8 @@ import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.seccomp.SeccompInstallationState
+import io.mazewall.testing.awaitOrFail
+import io.mazewall.testing.getOrFail
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -40,8 +42,8 @@ internal class ContainmentStateRegistryTest {
         val originalState = ContainmentStateRegistry.processState
         val executor = java.util.concurrent.Executors
             .newFixedThreadPool(8)
-        val stopFlag = java.util.concurrent.atomic
-            .AtomicBoolean(false)
+        val ready = java.util.concurrent.CountDownLatch(8)
+        val start = java.util.concurrent.CountDownLatch(1)
         val exceptions = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
 
         try {
@@ -51,7 +53,9 @@ internal class ContainmentStateRegistryTest {
             repeat(4) {
                 tasks.add(
                     executor.submit {
-                    while (!stopFlag.get()) {
+                    ready.countDown()
+                    start.awaitOrFail("all registry workers released")
+                    repeat(1_000) {
                         try {
                             ContainmentStateRegistry.updateProcessState { state ->
                                 state.copy(filterDepth = state.filterDepth + 1)
@@ -68,7 +72,9 @@ internal class ContainmentStateRegistryTest {
             repeat(4) {
                 tasks.add(
                     executor.submit {
-                    while (!stopFlag.get()) {
+                    ready.countDown()
+                    start.awaitOrFail("all registry workers released")
+                    repeat(1_000) {
                         try {
                             val resolved = ContainmentStateRegistry.resolveCurrentState()
                             assertNotNull(resolved)
@@ -80,18 +86,18 @@ internal class ContainmentStateRegistryTest {
                 )
             }
 
-            // Let them run for 300ms
-            Thread.sleep(300)
-            stopFlag.set(true)
+            ready.awaitOrFail("all eight registry workers ready")
+            start.countDown()
 
             // Wait for all tasks to complete
-            tasks.forEach { it.get() }
+            tasks.forEachIndexed { index, task -> task.getOrFail("registry worker $index completed 1000 operations") }
 
             // Check if any exceptions were thrown
             assertTrue(exceptions.isEmpty(), "Expected no concurrent modification exceptions, but got: ${exceptions.map { it.stackTraceToString() }}")
         } finally {
+            start.countDown()
             executor.shutdownNow()
-            executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue(executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS), "registry workers terminated")
             ContainmentStateRegistry.processState = originalState
         }
     }

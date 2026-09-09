@@ -129,9 +129,6 @@ class ProfilerDaemonTest {
             nfds: Long,
             timeout: Int,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-            if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
-                Thread.sleep(10)
-            }
             return nextPollResult
         }
 
@@ -157,9 +154,6 @@ class ProfilerDaemonTest {
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 rawPolls++
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
-                if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
-                    Thread.sleep(10)
-                }
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
                     val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
                     fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)

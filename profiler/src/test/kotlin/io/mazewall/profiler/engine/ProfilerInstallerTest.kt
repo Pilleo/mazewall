@@ -3,9 +3,12 @@ package io.mazewall.profiler.engine
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertTrue
 
@@ -25,8 +28,7 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
-                    native = native,
-                    userNotifSupported = true,
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -42,7 +44,7 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
+        awaitCondition(description = "coordinator connection failure reached installer") { !thread.isAlive }
 
         val ex = errorRef.get()
         assertTrue(ex is IllegalStateException)
@@ -54,22 +56,23 @@ class ProfilerInstallerTest {
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
-        val startTime = System.currentTimeMillis()
+        val coordinatorEntered = CountDownLatch(1)
+        val releaseCoordinator = CountDownLatch(1)
 
         // Run on a dedicated thread to avoid contaminating the main JUnit thread
         val thread = Thread {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
-                    native = native,
-                    userNotifSupported = true,
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
                     stackTracesMap = null,
                     pathCache = pathCache,
                     connectWithRetry = { _ ->
-                        Thread.sleep(500)
+                        coordinatorEntered.countDown()
+                        releaseCoordinator.awaitOrFail("test releases coordinator connection failure")
                         throw IllegalStateException("Delayed error")
                     },
                     startTraceListener = { _, _, _, _, latch -> latch.countDown() },
@@ -79,13 +82,18 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
-
-        val duration = System.currentTimeMillis() - startTime
+        try {
+            coordinatorEntered.awaitOrFail("coordinator entered connection attempt")
+            awaitCondition(description = "installer waits for coordinator completion") {
+                thread.state == Thread.State.WAITING
+            }
+            assertTrue(errorRef.get() == null, "installer cannot complete while the coordinator is blocked")
+        } finally {
+            releaseCoordinator.countDown()
+            awaitCondition(description = "installer returns coordinator failure") { !thread.isAlive }
+        }
         val ex = errorRef.get()
 
-        // This assertion will fail if the race condition is present (duration will be < 500ms)
-        assertTrue(duration >= 500, "Main thread should have waited at least 500ms, but took $duration ms")
         assertTrue(ex is IllegalStateException)
         assertTrue(ex.message?.contains("Delayed error") == true)
     }
@@ -103,8 +111,7 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
-                    native = native,
-                    userNotifSupported = true,
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -121,7 +128,7 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
+        awaitCondition(description = "descriptor send failure reached installer") { !thread.isAlive }
 
         val ex = errorRef.get()
         assertTrue(ex is IllegalStateException)

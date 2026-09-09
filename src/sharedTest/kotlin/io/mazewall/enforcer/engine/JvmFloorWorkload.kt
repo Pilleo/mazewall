@@ -43,12 +43,16 @@ object JvmFloorWorkload {
     /**
      * Executes the stress workload.
      */
-    fun run() {
+    fun run() = run(beforeWork = null)
+
+    /** The test barrier runs after entry validation and before the interruptible workload. */
+    fun run(beforeWork: (() -> Unit)?) {
         println("[JVM FLOOR] Starting stress workload...")
 
         if (Thread.currentThread().isInterrupted) {
             throw InterruptedException("Workload interrupted before start")
         }
+        beforeWork?.invoke()
 
         // 1. JIT Compiler Pressure
         // Force methods to reach the compilation threshold
@@ -99,7 +103,7 @@ object JvmFloorWorkload {
                         return@Callable 0
                     }
                     try {
-                        Thread.sleep(LOOM_SLEEP_MS)
+                        Thread.sleep(LOOM_SLEEP_MS) // Workload delay: exercise virtual-thread parking and carrier coordination.
                         Thread.yield() // Force carrier thread switch
                         id * id
                     } catch (e: InterruptedException) {
@@ -164,7 +168,7 @@ object JvmFloorWorkload {
                     if (Thread.currentThread().isInterrupted) {
                         return@Thread
                     }
-                    Thread.sleep(OS_THREAD_SLEEP_MS)
+                    Thread.sleep(OS_THREAD_SLEEP_MS) // Workload delay: exercise OS-thread sleep, wakeup, and join syscalls.
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()

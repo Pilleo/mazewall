@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Final Architecture Hardening Implementation Plan"
+base_revision: f3fadff5
+---
+
 # Final Architecture Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

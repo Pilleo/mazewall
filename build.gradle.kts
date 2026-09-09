@@ -1,6 +1,5 @@
 import org.gradle.api.publish.PublishingExtension
 import java.io.File
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
@@ -702,55 +701,23 @@ tasks.register("updateClassDiagrams") {
  * The reviewed warning inventory is a ceiling, rather than permission for new warning-level
  * debt. Adjusting a budget is an intentional, reviewable quality decision.
  */
-val detektWarningFingerprints =
-    mapOf(
-        "enforcer" to "5e6656bacf7590027364f7e5801ff39ce167c2240b9c23589ef823084bf93bd2",
-        "platform" to "5bfb2965985ee2345ba5e740a84f21e6b451b03e693cc73855aae7f375d2cfd1",
-        "portal-codegen" to "5a832f30776e0ab44844c93a735faf53e60e40d8271149c85093860709148871",
-        "portal-worker" to "4139e6ae293825d416218ae2a68c43577372b3988065c94d0ab40d526d8e0063",
-        "portal" to "7c412005e81381c78c85615582f63265af70901717c3f26efd0f62c15506f0be",
-        "profiler" to "85099423ef9e78b39ebb82fefb5c7f1fe88aafdab92645afd245f9cd8856af58",
-    )
+val detektWarningModules = listOf("enforcer", "platform", "portal-codegen", "portal-worker", "portal", "profiler")
 
 tasks.register("detektWarningRatchet") {
     group = "verification"
     description = "Fails when a production module adds Detekt warning-level debt"
-    dependsOn(detektWarningFingerprints.keys.map { module -> ":$module:detektMain" })
-
-    doLast {
-        val violations =
-            detektWarningFingerprints.mapNotNull { (module, expectedFingerprint) ->
-                val report =
-                    project(":$module")
-                        .layout.buildDirectory
-                        .file("reports/detekt/main.xml")
-                        .get()
-                        .asFile
-                var file = ""
-                val normalized =
-                    report
-                        .readLines()
-                        .mapNotNull { line ->
-                            Regex("""<file name=\"([^\"]+)\">""").find(line)?.let { file = it.groupValues[1] }
-                            if (!line.contains("severity=\"warning\"")) {
-                                null
-                            } else {
-                                "$file|${line.replace(Regex("""(line|column)=\"\d+\""""), "")}"
-                            }
-                        }.sorted()
-                        .joinToString("\n")
-                val fingerprint =
-                    MessageDigest
-                        .getInstance("SHA-256")
-                        .digest(normalized.toByteArray())
-                        .joinToString("") { "%02x".format(it) }
-                if (fingerprint != expectedFingerprint) "$module: finding inventory changed" else null
-            }
-        check(violations.isEmpty()) {
-            "Detekt warning ratchet exceeded: ${violations.joinToString()}. " +
-                "Remove the changed finding or update the reviewed fingerprint deliberately."
+    dependsOn(detektWarningModules.map { module -> ":$module:detektMain" })
+    val reports =
+        detektWarningModules.associateWith { module ->
+            project(":$module")
+                .layout.buildDirectory
+                .file("reports/detekt/main.xml")
+                .get()
+                .asFile
         }
-    }
+    val inventories = detektWarningModules.associateWith { module -> file("config/detekt/warnings/$module.txt") }
+    inputs.files(reports.values, inventories.values)
+    doLast(io.mazewall.build.DetektWarningRatchetAction(reports, inventories))
 }
 
 tasks.named("check") {
@@ -760,14 +727,9 @@ tasks.named("check") {
 tasks.register("validateBacklogIndex") {
     group = "verification"
     description = "Ensures the backlog index has one authoritative summary line"
-    doLast {
-        val index = rootProject.file("docs/internals/backlog/README.md")
-        val summaries =
-            Regex("""^\*Total Active Issues:\* \d+ \| \*Total Resolved Issues:\* \d+$""", RegexOption.MULTILINE)
-                .findAll(index.readText())
-                .count()
-        check(summaries == 1) { "Backlog index must contain exactly one total summary, found $summaries" }
-    }
+    val index = layout.projectDirectory.file("docs/internals/backlog/README.md").asFile
+    inputs.file(index)
+    doLast(io.mazewall.build.ValidateBacklogIndexAction(index))
 }
 
 // RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
