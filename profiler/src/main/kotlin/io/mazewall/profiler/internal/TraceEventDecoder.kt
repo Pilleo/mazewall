@@ -1,5 +1,8 @@
 package io.mazewall.profiler.internal
 
+import io.mazewall.core.Tid
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEvent
 import java.io.DataInputStream
 import java.io.IOException
@@ -17,6 +20,8 @@ internal object TraceEventDecoder {
         tidValue: Int,
     ): TraceEventDecodeResult =
         try {
+            val version = input.readInt()
+            require(version == PathResolutionWire.VERSION) { "unsupported profiler event version: $version" }
             val syscallNameLength = input.readInt()
             val syscallName = readUtf8(input, syscallNameLength, MAX_SYSCALL_NAME_BYTES, "syscall name")
             val argumentCount = input.readInt()
@@ -28,8 +33,9 @@ internal object TraceEventDecoder {
                 val length = input.readInt()
                 readUtf8(input, length, MAX_PATH_BYTES, "path")
             }
+            val resolution = PathResolutionWire.read(input, paths)
             TraceEventDecodeResult.Event(
-                event = TraceEvent(tidValue, syscallName, arguments, paths),
+                event = TraceEvent.fromSyscallEvent(SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(tidValue), syscallName, arguments.toList(), resolution)),
                 syscallNameLength = syscallNameLength,
                 argumentCount = argumentCount,
             )
@@ -46,9 +52,18 @@ internal object TraceEventDecoder {
         field: String,
     ): String {
         require(length in 0..limit) { "$field length $length exceeds limit $limit" }
-        return String(ByteArray(length).also(input::readFully), StandardCharsets.UTF_8)
+        return decodeTraceUtf8(ByteArray(length).also(input::readFully))
     }
 }
+
+/** Invalid UTF-8 is a malformed frame, not a different diagnostic or filesystem path. */
+internal fun decodeTraceUtf8(bytes: ByteArray): String =
+    StandardCharsets.UTF_8
+        .newDecoder()
+    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+    .decode(java.nio.ByteBuffer.wrap(bytes))
+    .toString()
 
 internal sealed interface TraceEventDecodeResult {
     data class Event(

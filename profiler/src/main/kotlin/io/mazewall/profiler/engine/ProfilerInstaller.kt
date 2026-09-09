@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
@@ -14,6 +15,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
+import io.mazewall.ffi.networking.SeccompInstallationGate
 import java.util.concurrent.CountDownLatch
 
 /**
@@ -39,19 +41,45 @@ internal object ProfilerInstaller {
             CountDownLatch
         ) -> Unit,
     ) {
-        val session = ProfilerInstallerSession(
-            socketPath = socketPath,
-            policy = policy,
-            accumulatedLogs = accumulatedLogs,
-            stackTracesMap = stackTracesMap,
-            pathCache = pathCache,
-            connectWithRetry = connectWithRetry,
-            startTraceListener = startTraceListener,
-            processWide = processWide,
+        installProfilingFilterForThread(
+            ProfilerInstallationContext(LinuxNative.snapshot(), Platform.featureMatrix.seccompUserNotifSupported),
+            socketPath, policy, accumulatedLogs, stackTracesMap, pathCache, processWide,
+            connectWithRetry, startTraceListener = startTraceListener,
         )
-        session.install()
+    }
+
+    fun installProfilingFilterForThread(
+        context: ProfilerInstallationContext,
+        socketPath: String,
+        policy: PolicyDefinition<*>,
+        accumulatedLogs: MutableList<TraceEvent>,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        pathCache: MutableMap<String, Long>,
+        processWide: Boolean = false,
+        connectWithRetry: (String) -> Int = { ProfilerSocket.connectWithRetry(it, context.native) },
+        installationGate: SeccompInstallationGate = SeccompInstallationGate.Direct,
+        startTraceListener: (
+            Int,
+            MutableList<TraceEvent>,
+            MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+            MutableMap<String, Long>,
+            CountDownLatch,
+        ) -> Unit,
+    ) {
+        val session = ProfilerInstallerSession(
+            socketPath, policy, accumulatedLogs, stackTracesMap, pathCache,
+            connectWithRetry, startTraceListener, processWide, context,
+        )
+        session.install(installationGate)
     }
 }
+
+/** Captured once by the installer; the session retains its own native engine and close check. */
+internal data class ProfilerInstallationContext(
+    val native: NativeEngine,
+    val userNotifSupported: Boolean,
+    val onFilterApplied: () -> Unit = {},
+)
 
 internal class ProfilerInstallerSession(
     private val socketPath: String,
@@ -68,17 +96,44 @@ internal class ProfilerInstallerSession(
         CountDownLatch
     ) -> Unit,
     private val processWide: Boolean = false,
+    private val context: ProfilerInstallationContext,
 ) {
-    fun install() {
+    constructor(
+        socketPath: String,
+        policy: PolicyDefinition<*>,
+        accumulatedLogs: MutableList<TraceEvent>,
+        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+        pathCache: MutableMap<String, Long>,
+        connectWithRetry: (String) -> Int,
+        startTraceListener: (
+            Int,
+            MutableList<TraceEvent>,
+            MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
+            MutableMap<String, Long>,
+            CountDownLatch,
+        ) -> Unit,
+        processWide: Boolean = false,
+    ) : this(
+        socketPath, policy, accumulatedLogs, stackTracesMap, pathCache, connectWithRetry,
+        startTraceListener, processWide, ProfilerInstallationContext(LinuxNative.snapshot(), Platform.featureMatrix.seccompUserNotifSupported),
+    )
+
+    fun install() = install(SeccompInstallationGate.Direct)
+
+    fun install(installationGate: SeccompInstallationGate) {
         val arch = Arch.current()
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
         SupervisorSeccompNotifInstaller.install(
+            native = context.native,
+            userNotifSupported = context.userNotifSupported,
             socketPath = socketPath,
             filter = filter,
             processWide = processWide,
             connectWithRetry = connectWithRetry,
-            sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd) }
+            sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd, context.native) },
+            onFilterApplied = context.onFilterApplied,
+            installationGate = installationGate,
         ) { socketFd, readyLatch ->
             // Start background thread to listen for events from the daemon (uncontained)
             startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, readyLatch)

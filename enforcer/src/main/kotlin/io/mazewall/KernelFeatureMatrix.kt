@@ -35,14 +35,6 @@ public data class KernelFeatureMatrix(
         /**
          * Resolves the [KernelFeatureMatrix] by probing the provided [provider].
          */
-        internal fun resolve(provider: PlatformProvider): KernelFeatureMatrix {
-            return KernelFeatureMatrix(
-                seccompSupported = provider.hasKernelSeccompSupport(),
-                seccompTsyncSupported = provider.probeSeccompTsync(),
-                seccompUserNotifSupported = provider.probeSeccompUserNotif(),
-                landlockAbiVersion = provider.getLandlockAbiVersion(),
-                cetSupported = provider.probeCetSupported(),
-            )
-        }
+        internal fun resolve(provider: PlatformProvider): KernelFeatureMatrix = KernelFeatureSnapshot.resolve(provider).matrix
     }
 }

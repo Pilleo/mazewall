@@ -1,24 +1,22 @@
 package io.mazewall.enforcer.supervisor
 
-import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
+import java.util.concurrent.CompletableFuture
 
-/** Executes classified routes while preserving the one-response notification invariant. */
+/** Exhaustive dispatch preserves the JVM verdict; no route preparation can authorize another route. */
 internal class SupervisorRouteDispatcher(
-    private val terminalRoutes: SupervisorTerminalRoutes,
+    private val executor: SupervisorRouteExecutor,
 ) {
     context(arena: NativeArena) fun execute(
         route: SupervisorRoute,
         context: SupervisorRouteContext,
         jvmPath: String?,
-        executor: SupervisorRouteExecutor,
-    ): Boolean =
-        terminalRoutes.execute(route, context) ?: when (route) {
-        is SupervisorRoute.InjectFd -> executor.injectFd(context)
-        is SupervisorRoute.SecureExec -> executor.secureExec(context, jvmPath)
-        is SupervisorRoute.AskJvm -> terminalRoutes.abort(context, NativeConstants.EPERM)
-        is SupervisorRoute.Continue,
-        is SupervisorRoute.Abort,
-        -> error("terminal route must have been handled")
-    }
+    ): CompletableFuture<SupervisorReplyEffect> =
+        when (route) {
+            SupervisorRoute.Continue -> CompletableFuture.completedFuture(SupervisorReplyEffect.Continue)
+            is SupervisorRoute.Abort -> CompletableFuture.completedFuture(SupervisorReplyEffect.Error(route.errno))
+            SupervisorRoute.InjectFd -> executor.inject(context)
+            SupervisorRoute.SecureExec -> CompletableFuture.completedFuture(executor.secureExec(context, jvmPath))
+            SupervisorRoute.AskJvm -> CompletableFuture.completedFuture(SupervisorReplyEffect.Recycle("JVM request used as a terminal route"))
+        }
 }

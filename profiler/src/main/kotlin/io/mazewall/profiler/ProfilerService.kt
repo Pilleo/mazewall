@@ -1,0 +1,106 @@
+package io.mazewall.profiler
+
+import io.mazewall.Policy
+import io.mazewall.PolicyDefinition
+import io.mazewall.PolicyPresets
+import io.mazewall.Uncompiled
+import io.mazewall.enforcer.diagnostics.validateNotVirtual
+import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
+import io.mazewall.profiler.internal.TraceListenerMachine
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.atomic.AtomicReference
+
+/** Owns the dependencies and active sessions of one independently usable profiler runtime. */
+internal class ProfilerService(
+    private val runtime: ProfilerRuntime,
+) {
+    private val sessions = ConcurrentHashMap.newKeySet<ProfilerSession>()
+    private val cleanupLock = Any()
+
+    fun openSession(
+        policy: PolicyDefinition<*> = PolicyPresets.PURE_COMPUTE_UNSAFE,
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+    ): ProfilerSession {
+        ProfilerNativeCommandWriter.preload()
+        TraceListenerMachine.preload()
+        ProfilerAckPreload.ensureLoaded()
+        val context = runtime.daemonManager().getOrSpawnSharedDaemon()
+        return ProfilerSession(runtime, context, policy, processWide, captureStackTraces) { session ->
+            if (session.cleanupOutcome == SeccompCleanupOutcome.Complete) sessions.remove(session)
+        }.also(sessions::add)
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Transfer every workload failure across the dedicated worker boundary.
+    fun <T> profile(
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+        block: () -> T,
+    ): ProfilingResult<T> {
+        validateNotVirtual()
+        return openSession(processWide = processWide, captureStackTraces = captureStackTraces).use { session ->
+            val result = AtomicReference<T>()
+            val failure = AtomicReference<Throwable>()
+            val worker = Thread {
+                try {
+                    session.installOnCurrentThread()
+                    result.set(block())
+                } catch (workerFailure: Exception) {
+                    failure.set(workerFailure)
+                } catch (workerFailure: Error) {
+                    failure.set(workerFailure)
+                }
+            }.apply {
+                name = "mazewall-profiler-worker"
+                start()
+            }
+            worker.join(WORKER_JOIN_TIMEOUT_MS)
+            if (worker.isAlive) {
+                worker.interrupt()
+                worker.join(GRACE_PERIOD_MS)
+                failure.get()?.let { throw it }
+                error("Profiler worker '${worker.name}' did not terminate within ${WORKER_JOIN_TIMEOUT_MS}ms")
+            }
+            failure.get()?.let { throw it }
+            session.close()
+            session.result(result.get())
+        }
+    }
+
+    fun wrap(
+        delegate: ExecutorService,
+        captureStackTraces: Boolean = true,
+        vararg policies: Policy<*, Uncompiled>,
+    ): Profiler.ProfilerExecutorWrapper {
+        val policy = if (policies.isEmpty()) PolicyPresets.PURE_COMPUTE_UNSAFE else PolicyDefinition.combine(policies = policies.map { it.definition }.toTypedArray())
+        return Profiler.ProfilerExecutorWrapper(delegate, openSession(policy, captureStackTraces = captureStackTraces))
+    }
+
+    /** Closing sessions leaves the daemon serving permanent kernel filters in pass-through mode. */
+    fun shutdown() {
+        synchronized(cleanupLock) {
+            val closing = sessions.toList()
+            try {
+                closing.forEach { it.closeWithResult() }
+            } finally {
+                // A session publishes its aborted outcome before the same fatal error escapes.
+                cleanupOutcome = profilerCleanupOutcome(
+                    closing.map { it.cleanupOutcome },
+                    closing.flatMap { it.retryableOwnership() },
+                )
+            }
+            cleanupOutcome.throwIfIncomplete("Profiler service cleanup failed")
+        }
+    }
+
+    @Volatile
+    var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+        private set
+
+    private companion object {
+        const val WORKER_JOIN_TIMEOUT_MS = 60_000L
+        const val GRACE_PERIOD_MS = 5_000L
+    }
+}

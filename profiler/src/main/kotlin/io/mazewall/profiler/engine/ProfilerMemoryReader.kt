@@ -8,6 +8,23 @@ import io.mazewall.ffi.memory.TraceeMemoryReader
  * Interface for reading memory and resolving paths from a tracee process or thread.
  */
 public interface ProfilerMemoryReader : TraceeMemoryReader {
+    /** Adds typed evidence while honoring existing custom string-reader implementations. */
+    context(arena: NativeArena) public fun readPathString(
+        tid: Tid,
+        remoteAddr: Long,
+        maxLen: Int = 4096,
+    ): PathStringRead =
+        try {
+            readStringFromProcess(tid, remoteAddr, maxLen)?.let(PathStringRead::Text) ?: PathStringRead.Missing
+        } catch (failure: io.mazewall.enforcer.api.ContainmentViolationException) {
+            val cause = failure.cause
+            if (cause is TraceeMemoryReader.TruncatedStringException) {
+                PathStringRead.Truncated(cause.preview, cause.bytesRead)
+            } else {
+                PathStringRead.Denied(PathResolutionCause.from(cause ?: failure))
+            }
+        }
+
     context(arena: NativeArena) public fun readStringFromProcess(
         tid: Tid,
         remoteAddr: Long,
@@ -15,6 +32,8 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
     ): String? =
         try {
         readString(tid, remoteAddr, maxLen)
+    } catch (cancellation: java.util.concurrent.CancellationException) {
+        throw cancellation
     } catch (e: IllegalStateException) {
         throw io.mazewall.enforcer.api
             .ContainmentViolationException(e.message ?: "Unknown containment violation", e)

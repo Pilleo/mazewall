@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.util.stream.Stream
+import kotlin.test.assertIs
 
 class SyscallPathResolverTest {
     private val AT_FDCWD_VAL = -100L
@@ -47,6 +48,179 @@ class SyscallPathResolverTest {
         syscallName = name,
         args = args,
     )
+
+    @Test
+    fun `descriptor inspection retains the existing resolved fd path`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                reader.linkToPath["fd/5"] = "/tmp/open-file"
+                val resolver = makeResolver(reader)
+                for (name in listOf("FSTAT", "FCHMOD", "FCHOWN")) {
+                    assertEquals(listOf("/tmp/open-file"), resolver.resolve(makeRawEvent(name, listOf(5L))).paths)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `directory lookup cancellation remains cancellation`() {
+        val reader = object : ProfilerMemoryReader {
+            context(arena: NativeArena) override fun readStringFromProcess(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): String? = "relative"
+
+            context(arena: NativeArena) override fun resolveLink(
+                tid: Tid,
+                link: String,
+            ): String? = throw java.util.concurrent.CancellationException("cancel directory lookup")
+        }
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                kotlin.test.assertFailsWith<java.util.concurrent.CancellationException> {
+                    makeResolver(reader).resolve(makeRawEvent("OPEN", listOf(100L)))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `resolved and opaque outcomes are explicit`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                reader.addressToString[100L] = "/tmp/file"
+                val resolver = makeResolver(reader)
+                assertEquals(listOf("/tmp/file"), assertIs<PathResolution.Resolved>(resolver.resolve(makeRawEvent("OPEN", listOf(100L))).pathResolution).paths)
+                for (name in listOf("UNKNOWN_SYSCALL", "IOCTL", "CONNECT")) {
+                    assertEquals(PathResolution.NotApplicable, resolver.resolve(makeRawEvent(name, emptyList())).pathResolution)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `missing path operands identify null unreadable and absent registers`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val resolver = makeResolver(RecordingMockReader())
+                for (args in listOf(emptyList(), listOf(0L), listOf(999L))) {
+                    val result = assertIs<PathResolution.Failed>(resolver.resolve(makeRawEvent("OPEN", args)).pathResolution)
+                    assertEquals(listOf(0), result.failures.map { it.operandIndex })
+                    assertEquals(PathResolutionFailure.Reason.Missing, result.failures.single().reason)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `Yama denial keeps its cause and does not prevent reading the next operand`() {
+        val denied = ContainmentViolationException("Yama EPERM reading tracee memory")
+        val reader = object : ProfilerMemoryReader {
+            context(arena: NativeArena) override fun readStringFromProcess(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): String? {
+                if (remoteAddr == 100L) throw denied
+                return "/tmp/new"
+            }
+        }
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val result = assertIs<PathResolution.Partial>(makeResolver(reader).resolve(makeRawEvent("LINK", listOf(100L, 200L))).pathResolution)
+                assertEquals(listOf("/tmp/new"), result.paths)
+                val failure = result.failures.single()
+                assertEquals(0, failure.operandIndex)
+                assertEquals(PathResolutionFailure.Reason.VmReadDenied, failure.reason)
+                assertEquals(denied.javaClass.name, failure.cause?.type)
+                assertEquals(denied.message, failure.cause?.message)
+                assertTrue(failure.detail.contains("123"))
+            }
+        }
+    }
+
+    @Test
+    fun `relative path failures retain dirfd and cwd evidence`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                reader.addressToString[100L] = "relative.txt"
+                for (dirfd in listOf(-100L, 9L, -2L)) {
+                    val result = assertIs<PathResolution.Failed>(makeResolver(reader).resolve(makeRawEvent("OPENAT", listOf(dirfd, 100L))).pathResolution)
+                    val failure = result.failures.single()
+                    assertEquals(PathResolutionFailure.Reason.DirFdUnresolved, failure.reason)
+                    assertTrue(failure.detail.contains("dirfd=$dirfd"))
+                    assertTrue(failure.detail.contains("relative.txt"))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `two failed operands and partial successes keep operand ordering`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                val resolver = makeResolver(reader)
+                val event = makeRawEvent("RENAME", listOf(100L, 200L))
+                val failed = assertIs<PathResolution.Failed>(resolver.resolve(event).pathResolution)
+                assertEquals(listOf(0, 1), failed.failures.map { it.operandIndex })
+                reader.addressToString[100L] = "/tmp/old"
+                val partial = assertIs<PathResolution.Partial>(resolver.resolve(event).pathResolution)
+                assertEquals(listOf("/tmp/old"), partial.paths)
+                assertEquals(listOf(1), partial.failures.map { it.operandIndex })
+                reader.addressToString[200L] = "/tmp/new"
+                assertEquals(listOf("/tmp/old", "/tmp/new"), assertIs<PathResolution.Resolved>(resolver.resolve(event).pathResolution).paths)
+            }
+        }
+    }
+
+    @Test
+    fun `reader truncation is typed before normalization and is not a resolved prefix`() {
+        val reader = object : ProfilerMemoryReader {
+            context(arena: NativeArena) override fun readPathString(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): PathStringRead = PathStringRead.Truncated("/short/../prefix", 17)
+        }
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val result = assertIs<PathResolution.Failed>(makeResolver(reader).resolve(makeRawEvent("OPEN", listOf(100L))).pathResolution)
+                assertTrue(result.paths.isEmpty())
+                assertEquals(PathResolutionFailure.Reason.Truncated, result.failures.single().reason)
+            }
+        }
+    }
+
+    @Test
+    fun `unresolved first dirfd preserves the second rename operand`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                reader.addressToString[100L] = "old.txt"
+                reader.addressToString[200L] = "/tmp/new.txt"
+                val event = makeRawEvent("RENAMEAT", listOf(9L, 100L, -100L, 200L))
+
+                assertEquals(listOf("/tmp/new.txt"), makeResolver(reader).resolve(event).paths)
+            }
+        }
+    }
+
+    @Test
+    fun `missing required register preserves the first link operand`() {
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val reader = RecordingMockReader()
+                reader.addressToString[100L] = "/tmp/old.txt"
+
+                assertEquals(listOf("/tmp/old.txt"), makeResolver(reader).resolve(makeRawEvent("LINK", listOf(100L))).paths)
+            }
+        }
+    }
 
     @Test
     fun `test resolve SYMLINKAT correctly resolves source and target paths`() {

@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -105,9 +106,8 @@ class ProcessBrokerIntegrationTest {
             // Check out the only worker via a long sleep on a separate thread.
             val inFlight = CompletableFuture.runAsync { broker.sleep(60_000) }
             // Wait until the slot is actually checked out (idle queue empty).
-            val deadline = System.currentTimeMillis() + 10_000
-            while (broker.idleSize() != 0 && System.currentTimeMillis() < deadline) {
-                Thread.sleep(50)
+            awaitCondition(description = "portal caller checked out the sole worker") {
+                broker.idleSize() == 0
             }
             assertEquals(0, broker.idleSize(), "worker should be checked out by now")
 
@@ -163,7 +163,7 @@ class ProcessBrokerIntegrationTest {
         )
         broker.use { b ->
             b.start()
-            Thread.sleep(1_500)
+            Thread.sleep(1_500) // Workload delay: keep the worker idle across three real receive-timeout intervals.
             assertEquals("after-idle", b.echo("after-idle"))
             assertEquals(1, b.spawnedWorkers(), "idle ticks must not respawn workers")
         }

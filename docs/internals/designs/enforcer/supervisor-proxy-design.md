@@ -1,8 +1,8 @@
 # Supervisor Proxy Pattern (FD Injection)
 
 > [!IMPORTANT]
-> **Status:** Designed (Not Yet Implemented)
-> This document details the architectural design for a future enhancement. The Supervisor Proxy component does not yet exist in the codebase.
+> **Status:** Experimental implementation; this document also retains design requirements that are not implementation guarantees.
+> The supervisor sidecar and FD-injection routes exist. See [the containment design's session/reply ownership section](containment-design.md#supervisor-session-and-reply-ownership) for the current authority boundary, terminal-effect implementation, and known secure-exec limitations. In particular, the rate limits, remote-close coordination, and blanket confinement guarantees proposed below must not be assumed implemented.
 >
 > This is the **syscall** broker (`USER_NOTIF` + `ADDFD`). Application-level broker/worker JVM split (generated RPC, capability FDs, process pools) is specified in [process-portal-design.md](process-portal-design.md). Do not merge the two.
 
@@ -94,4 +94,4 @@ Relying on thread stack extraction to authorize requests is an expensive operati
 
 ### F. FD Leakage & GC Relocation Race
 When the Supervisor Daemon injects a File Descriptor into the target process, a race condition exists: the untrusted thread might crash or be interrupted *before* the Java wrapper (`java.io.FileDescriptor`) is created and registered with the JVM's Garbage Collector / Cleaner. If GC runs during this window, the raw OS FD will leak.
-*   **Mitigation:** The architecture must track injected FDs via an ephemeral registry. If a thread fails to acknowledge receipt and wrap the FD within a short timeout window, the Supervisor Daemon must force-close the orphaned FD on the target process's behalf using `pidfd_getfd` or remote close coordination.
+*   **Proposed mitigation:** Track injected FDs and coordinate remote close or tracee teardown when acknowledgement fails. `pidfd_getfd` only creates a local duplicate; closing that duplicate cannot close the tracee's entry. Remote-close coordination is not implemented, and failed secure-exec rewrite can leave the injected descriptor in the tracee until teardown; see [the tracked limitation](../../backlog/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md).

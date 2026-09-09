@@ -39,6 +39,14 @@ class ProfilerArchitectureTest {
             .areAssignableTo(TraceEvent::class.java)
             .or()
             .areAssignableTo(SyscallEvent::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.engine.PathResolution::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.engine.PathResolutionFailure::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.engine.PathResolutionCause::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.engine.PathStringRead::class.java)
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("java.lang.foreign..", "io.mazewall.ffi.memory..")
@@ -115,6 +123,24 @@ class ProfilerArchitectureTest {
     @ArchTest
     fun observationAndEbpfOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.profiler.engine.PathResolution" to setOf(
+                "io.mazewall.profiler.engine.PathResolution\$NotApplicable",
+                "io.mazewall.profiler.engine.PathResolution\$Resolved",
+                "io.mazewall.profiler.engine.PathResolution\$Partial",
+                "io.mazewall.profiler.engine.PathResolution\$Failed",
+            ),
+            "io.mazewall.profiler.engine.PathResolutionFailure\$Reason" to setOf(
+                "io.mazewall.profiler.engine.PathResolutionFailure\$Reason\$VmReadDenied",
+                "io.mazewall.profiler.engine.PathResolutionFailure\$Reason\$Missing",
+                "io.mazewall.profiler.engine.PathResolutionFailure\$Reason\$DirFdUnresolved",
+                "io.mazewall.profiler.engine.PathResolutionFailure\$Reason\$Truncated",
+            ),
+            "io.mazewall.profiler.engine.PathStringRead" to setOf(
+                "io.mazewall.profiler.engine.PathStringRead\$Text",
+                "io.mazewall.profiler.engine.PathStringRead\$Missing",
+                "io.mazewall.profiler.engine.PathStringRead\$Denied",
+                "io.mazewall.profiler.engine.PathStringRead\$Truncated",
+            ),
             "io.mazewall.profiler.ProfileObservation" to setOf(
                 "io.mazewall.profiler.ProfileObservation\$Syscall",
                 "io.mazewall.profiler.ProfileObservation\$IoUring",

@@ -212,12 +212,12 @@ internal class ProfilerSessionHandler(
     ): SyscallEvent<SyscallEventState.Resolved> {
         val tid = Tid(pid)
         val syscallName = syscallMap[syscallNr] ?: "SYSCALL_$syscallNr"
-        val paths = resolver.resolvePaths(tid, syscallName, args)
-        return SyscallEvent(
+        val resolution = resolver.resolveEvidence(tid, syscallName, args)
+        return SyscallEvent.fromResolution(
             tid = tid,
             syscallName = syscallName,
             args = args.toCollection(ArrayList(args.size)),
-            paths = paths,
+            pathResolution = resolution,
         )
     }
 

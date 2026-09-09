@@ -1,5 +1,6 @@
 package io.mazewall.enforcer
 
+import io.mazewall.KernelCapability
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Platform
@@ -34,6 +35,8 @@ class FilterInstallationFailureTest {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
+
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -81,6 +84,8 @@ class FilterInstallationFailureTest {
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
@@ -126,6 +131,8 @@ class FilterInstallationFailureTest {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
+
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 

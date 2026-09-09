@@ -18,6 +18,13 @@ import java.util.Locale
  * Shared utility for reading memory and resolving paths from remote processes/threads using process_vm_readv and readlink.
  */
 public interface TraceeMemoryReader {
+    /** Typed diagnostic; the original IllegalStateException entry-point contract is preserved. */
+    public class TruncatedStringException(
+        public val bytesRead: Int,
+        public val preview: String,
+        message: String,
+    ) : IllegalStateException(message)
+
     context(arena: NativeArena) public fun readString(
         tid: Tid,
         remoteAddr: Long,
@@ -54,7 +61,9 @@ public interface TraceeMemoryReader {
             }
             if (!hasNullTerminator) {
                 val preview = bytes.take(64).joinToString("") { String.format(Locale.ROOT, "%02X", it) }
-                throw IllegalStateException(
+                throw TruncatedStringException(
+                    len,
+                    preview,
                     "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview",
                 )
             }
@@ -90,9 +99,9 @@ public interface TraceeMemoryReader {
                 MemorySegment.copy(localBuf.unwrap, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
                 dest
             } else {
-                if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM) {
+                if (res is LinuxNative.SyscallResult.Error && (res.errno == NativeConstants.EPERM || res.errno == NativeConstants.EACCES)) {
                     throw IllegalStateException(
-                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)}",
+                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)} (errno=${res.errno})",
                     )
                 } else {
                     null

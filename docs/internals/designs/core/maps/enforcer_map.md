@@ -1,10 +1,7 @@
 # Enforcer knowledge map
 
-The containment entry points live in `enforcer/src/main/kotlin/io/mazewall`.
-
-- `Platform` provides generation-safe platform capability probes.
-- `enforcer/supervisor/SupervisorSessionMachine` is the authoritative notification lifecycle reducer; `SupervisorSessionHandler` interprets its effects.
-- `enforcer/engine` installs Landlock before Seccomp and owns the native containment boundary.
-- `platform` owns FFM layouts and raw native engine abstractions; it must not be bypassed from policy code.
-
-For the full threat model and ordering constraints see `docs/internals/designs/enforcer/containment-design.md`.
+This historical entry point redirects to the [canonical architectural knowledge map](../architectural-map.md).
+Use the [enforcer architecture and generated diagram](../../enforcer/enforcer-architecture.md)
+and [containment design](../../enforcer/containment-design.md) for current ownership, threat-model,
+and installation-order guidance. The containment entry points live in
+`enforcer/src/main/kotlin/io/mazewall`.

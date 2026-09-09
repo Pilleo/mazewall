@@ -6,6 +6,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeCloseFailure
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import io.mazewall.ffi.IoctlCommand
@@ -24,7 +25,6 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
 import io.mazewall.onSuccess
 import io.mazewall.recover
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Unified reactor handler for active seccomp user notifications and UNIX domain control sockets.
@@ -48,22 +48,50 @@ public class SeccompSessionHandler(
     public var isTerminated: Boolean = false
         private set
 
-    private val closed = AtomicBoolean(false)
+    private var notifReleased = false
+    private var respReleased = false
+    private var arenaClosed = false
 
     override fun close() {
-        if (!closed.compareAndSet(false, true)) {
-            return
+        when (val outcome = closeWithResult()) {
+            SeccompCleanupOutcome.Complete -> Unit
+            is SeccompCleanupOutcome.Incomplete -> {
+                val failure = IllegalStateException("Incomplete seccomp session cleanup")
+                outcome.failures.forEach(failure::addSuppressed)
+                throw failure
+            }
         }
-        try {
-            SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-        } catch (_: Throwable) {
-            }
-        try {
-            SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
-        } catch (_: Throwable) {
-            }
-        sessionArena.close()
     }
+
+    @io.mazewall.MazewallInternal
+    @Synchronized
+    public fun closeWithResult(): SeccompCleanupOutcome = closeWithResult { }
+
+    @Synchronized
+    internal fun closeWithResult(recordOutcome: (SeccompCleanupOutcome) -> Unit): SeccompCleanupOutcome =
+        SeccompCleanupInterpreter.closeResources(
+        listOf(
+        {
+            if (!notifReleased) {
+                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
+                notifReleased = true
+            }
+        },
+        {
+            if (!respReleased) {
+                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                respReleased = true
+            }
+        },
+        {
+            if (!arenaClosed) {
+                sessionArena.close()
+                arenaClosed = true
+            }
+        },
+        ),
+        recordOutcome,
+    )
 
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
         if (isTerminated) {
@@ -182,8 +210,9 @@ public class SeccompSessionHandler(
     private fun closeControlSocket() {
         try {
             socketManager.close(socketFd)
-        } catch (_: Exception) {
-            return
+        } catch (failure: NativeCloseFailure) {
+            onSocketClosed()
+            throw failure
         }
         onSocketClosed()
     }

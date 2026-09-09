@@ -94,4 +94,30 @@ class PlatformProviderTest {
         assertTrue(matrix.landlockSupported)
         assertFalse(matrix.landlockTsyncSupported) // Needs ABI 8
     }
+
+    @Test
+    fun `legacy provider receives typed Landlock capability by default`() {
+        val legacyProvider = MockPlatformProvider().apply { mockLandlockAbiVersion = 7 }
+
+        assertEquals(KernelCapability.Available(7), legacyProvider.getLandlockCapability())
+
+        legacyProvider.mockLandlockAbiVersion = 0
+        assertEquals(KernelCapability.Unsupported, legacyProvider.getLandlockCapability())
+    }
+
+    @Test
+    fun `assessment uses cached typed capability instead of reconstructing it from ABI zero`() {
+        val provider =
+            object : MockPlatformProvider() {
+                override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Rejected(io.mazewall.ffi.NativeConstants.EPERM)
+            }
+        Platform.setProvider(provider)
+
+        assertEquals(0, Platform.featureMatrix.landlockAbiVersion)
+
+        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
+
+        assertContains(assessment.blockingReasons, "landlock capability rejected with errno 1")
+    }
 }

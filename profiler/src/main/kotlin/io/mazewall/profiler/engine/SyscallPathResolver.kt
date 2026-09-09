@@ -12,120 +12,110 @@ internal class SyscallPathResolver(
     private val memoryReader: ProfilerMemoryReader,
     private val ledger: SessionEventLedger,
 ) {
-    /**
-     * Resolves path arguments for a raw syscall event.
-     */
-    context(arena: NativeArena) fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> {
-        val argsArr = LongArray(event.args.size) { i -> event.args[i] }
-        val paths = resolvePaths(event.tid, event.syscallName, argsArr)
-        return event.resolved(paths)
+    context(arena: NativeArena) fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> =
+        event.resolved(resolveEvidence(event.tid, event.syscallName, event.args.toLongArray()))
+
+    context(arena: NativeArena) fun resolveEvidence(
+        tid: Tid,
+        syscallName: String,
+        args: LongArray,
+    ): PathResolution {
+        if (syscallName.uppercase(java.util.Locale.ROOT) in setOf("FSTAT", "FCHMOD", "FCHOWN")) {
+            return resolveDescriptor(tid, args.getOrNull(0))
+        }
+        val operands = pathOperands(syscallName)
+        val results = operands.mapIndexed { index, operand ->
+            val dirfd = operand.dirFdRegister?.let { args.getOrNull(it) } ?: AT_FDCWD_VAL
+            readOperand(tid, index, args.getOrNull(operand.register), dirfd, operand.dirFdRegister != null && args.getOrNull(operand.dirFdRegister) == null)
+        }
+        return combinePathResolution(results.flatMap { it.paths }, results.flatMap { it.failures })
     }
 
+    context(arena: NativeArena) private fun resolveDescriptor(
+        tid: Tid,
+        fd: Long?,
+    ): PathResolution =
+        when {
+        fd == null -> failed(0, PathResolutionFailure.Reason.Missing, "TID ${tid.value}: missing descriptor")
+        fd.toInt() < 0 -> failed(0, PathResolutionFailure.Reason.DirFdUnresolved, "TID ${tid.value}: invalid fd=$fd")
+        else -> resolveRelativePath(tid, 0, "", fd)
+    }
+
+    /** Legacy list entry points project the evidence; production events keep the full result. */
     context(arena: NativeArena) fun resolvePaths(
         tid: Tid,
         syscallName: String,
         args: LongArray,
-    ): List<String> {
-        val paths = when (syscallName) {
-            "OPEN", "EXECVE", "MKDIR", "RMDIR", "CHMOD", "CHOWN", "LCHOWN", "UNLINK", "READLINK", "CHROOT", "UTIME", "UTIMES" ->
-                listOfNotNull(tryRead(tid, args[0]))
-
-            "FCHMOD", "FCHOWN", "FSTAT" ->
-                listOfNotNull(resolveFdPath(tid, args[0].toInt()))
-
-            "SYMLINK", "LINK", "RENAME" ->
-                listOfNotNull(tryRead(tid, args[0]), tryRead(tid, args[1]))
-
-            "OPENAT", "EXECVEAT", "OPENAT2", "MKDIRAT", "UNLINKAT", "FCHMODAT", "FCHOWNAT", "UTIMENSAT", "FSTATAT", "READLINKAT" ->
-                listOfNotNull(tryRead(tid, args[1], args[0]))
-
-            "RENAMEAT", "RENAMEAT2", "LINKAT" ->
-                listOfNotNull(
-                    tryRead(tid, args[1], args[0]),
-                    tryRead(tid, args[3], args[2]),
-                )
-
-            "SYMLINKAT" ->
-                listOfNotNull(
-                    tryRead(tid, args[0]),
-                    tryRead(tid, args[2], args[1]),
-                )
-
-            // IOCTL is highly command-dependent and its arguments are not standard string pointers.
-            // We treat it as a generic opaque operation without attempting deep pointer dereferencing.
-            "IOCTL" -> emptyList()
-
-            else -> emptyList()
-        }
-        return paths
-    }
+    ): List<String> = resolveEvidence(tid, syscallName, args).paths
 
     context(arena: NativeArena) fun resolvePaths(
         tid: Tid,
         syscallName: String,
         args: List<Long>,
-    ): List<String> {
-        val argsArr = LongArray(args.size) { i -> args[i] }
-        return resolvePaths(tid, syscallName, argsArr)
-    }
+    ): List<String> = resolvePaths(tid, syscallName, args.toLongArray())
 
-    context(arena: NativeArena) private fun resolveCwd(tid: Tid): String? = memoryReader.resolveLink(tid, "cwd")
-
-    context(arena: NativeArena) private fun resolveFdPath(
+    context(arena: NativeArena) private fun readOperand(
         tid: Tid,
-        fd: Int,
-    ): String? = memoryReader.resolveLink(tid, "fd/$fd")
-
-    private fun isAtFdcwd(fd: Long): Boolean = fd == AT_FDCWD_VAL || fd == AT_FDCWD_UNSIGNED_VAL || fd.toInt() == AT_FDCWD_INT_VAL
-
-    context(arena: NativeArena) private fun tryRead(
-        tid: Tid,
-        addr: Long,
-        dirfd: Long = AT_FDCWD_VAL,
-    ): String? {
-        if (addr == 0L) return null
-        val path = try {
-            memoryReader.readStringFromProcess(tid, addr)
-        } catch (_: io.mazewall.enforcer.api.ContainmentViolationException) {
-            // Yama can deny grandchild memory reads. Record the failed inspection and
-            // keep the session alive so the syscall can be continued; the event is
-            // published without a resolved path rather than as a successful empty read.
-            ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), false))
-            return null
+        index: Int,
+        address: Long?,
+        dirfd: Long,
+        missingDirfd: Boolean,
+    ): PathResolution {
+        val context = "TID ${tid.value} address=${address?.let { "0x${it.toString(16)}" }} dirfd=$dirfd"
+        if (address == null || address == 0L) {
+            return failed(index, PathResolutionFailure.Reason.Missing, "$context: missing path pointer")
         }
-        ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), path != null))
-        if (path == null) return null
-        return if (path.startsWith("/")) {
-            PathNormalizerHelper.normalizePath(path)
-        } else {
-            resolveRelativePath(tid, path, dirfd)
+        val read = memoryReader.readPathString(tid, address)
+        ledger.record(SessionEvent.VmReadvResolved(System.nanoTime(), tid.value.toLong(), read is PathStringRead.Text))
+        return when (read) {
+            PathStringRead.Missing -> failed(index, PathResolutionFailure.Reason.Missing, "$context: no readable path")
+            is PathStringRead.Denied -> failed(index, PathResolutionFailure.Reason.VmReadDenied, "$context: memory read denied", read.cause)
+            is PathStringRead.Truncated -> failed(index, PathResolutionFailure.Reason.Truncated, "$context: no terminator in ${read.bytesRead} bytes; preview=${read.preview}")
+            is PathStringRead.Text -> {
+                if (read.value.startsWith("/")) {
+                    PathResolution.Resolved(listOf(PathNormalizerHelper.normalizePath(read.value)))
+                } else if (missingDirfd) {
+                    failed(index, PathResolutionFailure.Reason.DirFdUnresolved, "$context: missing dirfd for '${read.value}'")
+                } else {
+                    resolveRelativePath(tid, index, read.value, dirfd)
+                }
+            }
         }
     }
 
     context(arena: NativeArena) private fun resolveRelativePath(
         tid: Tid,
+        index: Int,
         path: String,
         dirfd: Long,
-    ): String {
-        val dirPathStr = if (isAtFdcwd(dirfd)) {
-            resolveCwd(tid)
-        } else if (dirfd >= 0) {
-            resolveFdPath(tid, dirfd.toInt())
-        } else {
-            null
+    ): PathResolution {
+        val context = "TID ${tid.value} relative path '$path' (dirfd=$dirfd)"
+        return try {
+            val directory = when {
+                dirfd.toInt() == AT_FDCWD_INT_VAL -> memoryReader.resolveLink(tid, "cwd")
+                dirfd.toInt() >= 0 -> memoryReader.resolveLink(tid, "fd/${dirfd.toInt()}")
+                else -> null
+            }
+            if (directory == null) {
+                failed(index, PathResolutionFailure.Reason.DirFdUnresolved, context)
+            } else {
+                PathResolution.Resolved(listOf(PathNormalizerHelper.normalizePath("$directory/$path")))
+            }
+        } catch (failure: io.mazewall.enforcer.api.ContainmentViolationException) {
+            failed(index, PathResolutionFailure.Reason.DirFdUnresolved, context, PathResolutionCause.from(failure))
+        } catch (cancellation: java.util.concurrent.CancellationException) {
+            throw cancellation
+        } catch (failure: IllegalStateException) {
+            failed(index, PathResolutionFailure.Reason.DirFdUnresolved, context, PathResolutionCause.from(failure))
         }
-
-        if (dirPathStr == null) {
-            throw IllegalStateException("Failed to resolve absolute path for relative path '$path' (dirfd=$dirfd)")
-        }
-
-        val combined = if (dirPathStr.endsWith("/")) {
-            dirPathStr + path
-        } else {
-            "$dirPathStr/$path"
-        }
-        return PathNormalizerHelper.normalizePath(combined)
     }
+
+    private fun failed(
+        index: Int,
+        reason: PathResolutionFailure.Reason,
+        detail: String,
+        cause: PathResolutionCause? = null,
+    ): PathResolution.Failed = PathResolution.Failed(listOf(PathResolutionFailure(index, reason, detail, cause)))
 }
 
 internal object PathNormalizerHelper {

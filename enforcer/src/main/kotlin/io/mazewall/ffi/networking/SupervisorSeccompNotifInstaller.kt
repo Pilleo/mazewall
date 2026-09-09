@@ -2,6 +2,7 @@ package io.mazewall.ffi.networking
 
 import io.mazewall.BpfNativeCache
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
@@ -10,7 +11,6 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
-import io.mazewall.core.close
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
@@ -32,6 +32,132 @@ import java.util.concurrent.atomic.AtomicReference
  * to prevent deadlocks when supervising critical JVM operations (like open/openat).
  */
 public object SupervisorSeccompNotifInstaller {
+    private fun awaitCoordinator(proceedLatch: CountDownLatch) {
+        var interrupted = false
+        while (true) {
+            try {
+                proceedLatch.await()
+                break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt()
+        }
+    }
+
+    private fun synchronizeProcessFilter(
+        native: NativeEngine,
+        arch: Arch,
+        dummyBpf: List<BpfInstruction>,
+        installationGate: SeccompInstallationGate,
+    ) {
+        val dummyProg = BpfNativeCache.getOrCompute(dummyBpf, native)
+        val tsyncRes = installationGate.commit {
+            native.raw.syscall(
+                arch.seccompSyscallNumber.toLong(),
+                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                NativeArg.MemoryArg(dummyProg),
+            )
+        }
+        when (tsyncRes) {
+            is LinuxNative.SyscallResult.Error ->
+                throw IllegalStateException(
+                    "Process-wide profiling TSYNC failed: ${
+                        io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(tsyncRes.errno, null)
+                    }",
+                )
+
+            is LinuxNative.SyscallResult.Success ->
+                if (tsyncRes.value > 0L) {
+                    throw IllegalStateException(
+                        "Process-wide profiling TSYNC failed: ${
+                            io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(null, tsyncRes.value)
+                        }",
+                    )
+                }
+        }
+    }
+
+    private fun startCoordinator(
+        native: NativeEngine,
+        socketPath: String,
+        listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>>,
+        setupError: AtomicReference<Throwable?>,
+        installLatch: CountDownLatch,
+        proceedLatch: CountDownLatch,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit,
+        onSocketConnected: (Int, CountDownLatch) -> Unit,
+    ): Thread =
+        Thread {
+            try {
+                // Wait for the tracee thread to complete the seccomp installation
+                installLatch.await()
+                val fdRef = listenerFdVal.get()
+                if (fdRef.value < 0) {
+                    val err = setupError.get() ?: IllegalStateException("Failed to install seccomp filter")
+                    throw err
+                }
+
+                // Connect to socket and send the descriptor (runs uncontained)
+                val socketFd = connectWithRetry(socketPath)
+                var socketTransferred = false
+                try {
+                    val sent = sendDescriptor(socketFd, fdRef.value)
+                    if (!sent) {
+                        throw IllegalStateException("Failed to send seccomp listener FD to daemon")
+                    }
+
+                    // The daemon now has a copy of the listener FD via SCM_RIGHTS.
+                    // We must close our local copy. If we don't, the kernel will not abort
+                    // pending notifications when the daemon exits (since our FD would remain open),
+                    // causing tracee threads to deadlock forever in __seccomp_filter.
+                    native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener")
+
+                    val readyLatch = CountDownLatch(1)
+
+                    // Start validation/event listener thread (which will run uncontained)
+                    socketTransferred = true
+                    onSocketConnected(socketFd, readyLatch)
+
+                    // Wait until the listener is fully initialized and ready
+                    readyLatch.await()
+
+                    // Registry bookkeeping can load application classes. Run it on the
+                    // uncontained coordinator after the listener is live, never on the
+                    // tracee after NEW_LISTENER has made openat subject to USER_NOTIF.
+                    onFilterApplied()
+                } catch (expectedCoordinatorFailure: Exception) {
+                    if (!socketTransferred) {
+                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                    }
+                    throw expectedCoordinatorFailure
+                } catch (expectedCoordinatorError: Error) {
+                    if (!socketTransferred) {
+                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                    }
+                    throw expectedCoordinatorError
+                }
+
+                // Handshake is fully configured, wake up tracee thread
+                proceedLatch.countDown()
+            } catch (expectedCoordinatorFailure: Exception) {
+                setupError.set(expectedCoordinatorFailure)
+                proceedLatch.countDown()
+            } catch (expectedCoordinatorError: Error) {
+                setupError.set(expectedCoordinatorError)
+                proceedLatch.countDown()
+            }
+        }.apply {
+            isDaemon = true
+            name = "seccomp-install-coordinator"
+            start()
+        }
+
     public fun install(
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
@@ -41,12 +167,70 @@ public object SupervisorSeccompNotifInstaller {
         onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
     ) {
-        if (!Platform.featureMatrix.seccompUserNotifSupported) {
+        install(
+            LinuxNative.snapshot(),
+            Platform.featureMatrix.seccompUserNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            connectWithRetry,
+            sendDescriptor,
+            onFilterApplied,
+            onSocketConnected,
+        )
+    }
+
+    /**
+     * Installation under one captured native authority, including the uncontained coordinator.
+     * [onSocketConnected] takes ownership of its socket on entry, including callback failure.
+     */
+    @io.mazewall.MazewallInternal
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit = {},
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        install(
+            native,
+            userNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            connectWithRetry,
+            sendDescriptor,
+            onFilterApplied,
+            SeccompInstallationGate.Direct,
+            onSocketConnected,
+        )
+    }
+
+    /** Allocation and coordinator waits stay outside [installationGate]. */
+    @io.mazewall.MazewallInternal
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        validateNotVirtual()
+        if (!userNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
         }
 
         // Mandatory for non-privileged seccomp
-        LinuxNative.process
+        native.process
             .prctl(
                 io.mazewall.core.PrctlCommand
                 .SetNoNewPrivs(true),
@@ -72,75 +256,31 @@ public object SupervisorSeccompNotifInstaller {
 
         // Coordinator thread spawned BEFORE the seccomp filter is active.
         // This ensures the helper is completely uncontained.
-        val coordinator = Thread {
-            try {
-                // Wait for the tracee thread to complete the seccomp installation
-                installLatch.await()
-                val fdRef = listenerFdVal.get()
-                if (fdRef.value < 0) {
-                    val err = setupError.get() ?: IllegalStateException("Failed to install seccomp filter")
-                    throw err
-                }
-
-                // Connect to socket and send the descriptor (runs uncontained)
-                val socketFd = connectWithRetry(socketPath)
-                try {
-                    val sent = sendDescriptor(socketFd, fdRef.value)
-                    if (!sent) {
-                        throw IllegalStateException("Failed to send seccomp listener FD to daemon")
-                    }
-
-                    // The daemon now has a copy of the listener FD via SCM_RIGHTS.
-                    // We must close our local copy. If we don't, the kernel will not abort
-                    // pending notifications when the daemon exits (since our FD would remain open),
-                    // causing tracee threads to deadlock forever in __seccomp_filter.
-                    fdRef.close()
-
-                    val readyLatch = CountDownLatch(1)
-
-                    // Start validation/event listener thread (which will run uncontained)
-                    onSocketConnected(socketFd, readyLatch)
-
-                    // Wait until the listener is fully initialized and ready
-                    readyLatch.await()
-
-                    // Registry bookkeeping can load application classes. Run it on the
-                    // uncontained coordinator after the listener is live, never on the
-                    // tracee after NEW_LISTENER has made openat subject to USER_NOTIF.
-                    onFilterApplied()
-                } catch (expectedCoordinatorFailure: Exception) {
-                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
-                    throw expectedCoordinatorFailure
-                } catch (expectedCoordinatorError: Error) {
-                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket).close()
-                    throw expectedCoordinatorError
-                }
-
-                // Handshake is fully configured, wake up tracee thread
-                proceedLatch.countDown()
-            } catch (expectedCoordinatorFailure: Exception) {
-                setupError.set(expectedCoordinatorFailure)
-                proceedLatch.countDown()
-            } catch (expectedCoordinatorError: Error) {
-                setupError.set(expectedCoordinatorError)
-                proceedLatch.countDown()
-            }
-        }.apply {
-            isDaemon = true
-            name = "seccomp-install-coordinator"
-            start()
-        }
+        startCoordinator(
+            native,
+            socketPath,
+            listenerFdVal,
+            setupError,
+            installLatch,
+            proceedLatch,
+            connectWithRetry,
+            sendDescriptor,
+            onFilterApplied,
+            onSocketConnected,
+        )
 
         try {
-            val prog = BpfNativeCache.getOrCompute(filter.instructions)
+            val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = LinuxNative.raw.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                NativeArg.MemoryArg(prog),
-            )
+            val r = installationGate.commit {
+                native.raw.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
+                    NativeArg.MemoryArg(prog),
+                )
+            }
 
             val rawFd = when (r) {
                 is LinuxNative.SyscallResult.Success -> r.value.toInt()
@@ -158,18 +298,7 @@ public object SupervisorSeccompNotifInstaller {
             // Block tracee thread until the coordinator completes descriptor passing and listener startup
             // We wait uninterruptibly to ensure the handshake completes even if the thread is interrupted
             // during executor shutdown. This prevents state desync between the kernel and JVM.
-            var interrupted = false
-            while (true) {
-                try {
-                    proceedLatch.await()
-                    break
-                } catch (_: InterruptedException) {
-                    interrupted = true
-                }
-            }
-            if (interrupted) {
-                Thread.currentThread().interrupt()
-            }
+            awaitCoordinator(proceedLatch)
 
             setupError.get()?.let { throw it }
 
@@ -178,41 +307,22 @@ public object SupervisorSeccompNotifInstaller {
             // This prevents the coordinator and listener threads from being subject to the seccomp
             // filter during their startup and handshake, avoiding fatal circular deadlocks.
             if (processWide && dummyBpf != null) {
-                val dummyProg = BpfNativeCache.getOrCompute(dummyBpf)
-                val tsyncRes = LinuxNative.raw.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                    NativeArg.MemoryArg(dummyProg),
-                )
-                when (tsyncRes) {
-                    is LinuxNative.SyscallResult.Error ->
-                        throw IllegalStateException(
-                            "Process-wide profiling TSYNC failed: ${
-                                io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(tsyncRes.errno, null)
-                            }",
-                        )
-
-                    is LinuxNative.SyscallResult.Success ->
-                        if (tsyncRes.value > 0L) {
-                            throw IllegalStateException(
-                                "Process-wide profiling TSYNC failed: ${
-                                    io.mazewall.seccomp.PureJavaBpfEngine.tsyncFailureDetail(null, tsyncRes.value)
-                                }",
-                            )
-                        }
-                }
+                synchronizeProcessFilter(native, arch, dummyBpf, installationGate)
             }
         } catch (expectedInstallFailure: Exception) {
+            setupError.compareAndSet(null, expectedInstallFailure)
+            installLatch.countDown()
             val fdRef = listenerFdVal.get()
-            if (fdRef.value >= 0) {
-                fdRef.close()
+            if (fdRef.isValid) {
+                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
             }
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
+            setupError.compareAndSet(null, expectedInstallError)
+            installLatch.countDown()
             val fdRef = listenerFdVal.get()
-            if (fdRef.value >= 0) {
-                fdRef.close()
+            if (fdRef.isValid) {
+                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
             }
             throw expectedInstallError
         }

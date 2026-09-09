@@ -1,15 +1,17 @@
 package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
-import io.mazewall.core.close
-import io.mazewall.profiler.Profiler
+import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+import io.mazewall.profiler.engine.PathResolution
 import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
+import io.mazewall.profiler.throwIfIncomplete
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -35,13 +37,19 @@ internal class ProfilerTraceListener(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
-    private val threadFor: (Tid) -> Thread? = { Profiler.threadRegistry[it] },
+    private val threadFor: (Tid) -> Thread?,
+    private val native: NativeEngine,
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
 
     // Thread-safe idempotent close guard to prevent native double-close.
     private val socketClosed = AtomicBoolean(false)
+    private val socketCloseLock = Any()
+
+    @Volatile
+    var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+        private set
     private var workerThread: Thread? = null
     private var collectorThread: Thread? = null
 
@@ -57,16 +65,41 @@ internal class ProfilerTraceListener(
      * the underlying native close system call) is executed at most once, eliminating native double-close
      * vulnerabilities and preventing file descriptor recycling corruption inside the JVM.
      */
+    @Suppress("TooGenericExceptionCaught") // Persist pre-dispatch native dependency failures for the session owner.
     private fun closeSocketOnce() {
-        if (socketClosed.compareAndSet(false, true)) {
+        synchronized(socketCloseLock) {
+            if (socketClosed.get()) return
             try {
-                logger.fine("Executing idempotent socketFd.close() for fd=${socketFd.value}")
-                socketFd.close()
-            } catch (ignored: Exception) {
-                // Ignore any close exceptions
+                val result = native.fileSystem.close(socketFd)
+                // A returned native error may already have released the integer. Never retry it.
+                socketClosed.set(true)
+                cleanupOutcome = when (result) {
+                    is LinuxNative.SyscallResult.Success -> SeccompCleanupOutcome.Complete
+                    is LinuxNative.SyscallResult.Error -> SeccompCleanupOutcome.Incomplete(
+                        listOf(IllegalStateException("close(fd=${socketFd.value}) failed: errno=${result.errno}")),
+                        emptyList(),
+                    )
+                }
+            } catch (failure: Exception) {
+                recordCloseFailure(failure)
+            } catch (failure: Error) {
+                recordCloseFailure(IllegalStateException("Profiler listener socket cleanup aborted", failure))
+                throw failure
             }
         }
     }
+
+    private fun recordCloseFailure(failure: Exception) {
+        // Native engines retire the generation before dispatch. An exception alone cannot
+        // prove retryability, and a retired token must never be adopted or closed again.
+        if (!socketFd.isLiveForIo()) socketClosed.set(true)
+        cleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), retryableOwnership())
+    }
+
+    fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> =
+        synchronized(socketCloseLock) {
+            if (socketClosed.get() || !socketFd.isLiveForIo()) emptyList() else listOf(socketFd)
+        }
 
     internal val eventQueue = TraceEventQueue()
     val eventChannel = eventQueue.channel
@@ -109,7 +142,7 @@ internal class ProfilerTraceListener(
 
         val arena = io.mazewall.ffi.memory.NativeArena
             .ofShared()
-        val inputStream = NativeSocketInputStream(socketFd, arena)
+        val inputStream = NativeSocketInputStream(socketFd, arena, native.memory)
 
         val thread = Thread {
             try {
@@ -171,36 +204,32 @@ internal class ProfilerTraceListener(
      * still writing the last event (sendTraceEvent → write → EPIPE → event lost).
      */
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
+        closeWithResult().throwIfIncomplete("Profiler trace listener cleanup failed")
+    }
+
+    @Synchronized
+    fun closeWithResult(): SeccompCleanupOutcome {
+        val requestDrain = closed.compareAndSet(false, true)
+        if (!requestDrain && workerThread == null && collectorThread == null) {
+            closeSocketOnce()
+            return cleanupOutcome
+        }
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
-        gracefulDrainRequested.set(true)
+        if (requestDrain) gracefulDrainRequested.set(true)
 
         try {
             // Step 1: Signal the daemon to finish up. The daemon receives this byte,
             // enters pass-through mode for this session, and closes its side of the socket.
             // This triggers EOF on our read side without shutting down the global daemon.
-            logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
+            if (requestDrain) logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
 
             var workerJoined = false
             var collectorJoined = false
 
             // Step 2: Wait for the listener thread to drain remaining events and see EOF.
             // The thread exits via EOFException once the daemon closes its socket end.
-            workerThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
-                        it.interrupt()
-                        it.join(INTERRUPT_JOIN_TIMEOUT_MS)
-                    } else {
-                        workerJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
+            workerThread?.let { workerJoined = joinWorkerForDrain(it) }
 
             collectorThread?.let {
                 try {
@@ -216,13 +245,9 @@ internal class ProfilerTraceListener(
                 }
             }
 
-            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
-                drainComplete = true
-            } else {
-                drainComplete = false
-                if (!collectorJoined) {
-                    droppedEvents += 1
-                }
+            drainComplete = gracefulDrainRequested.get() && workerJoined && collectorJoined && droppedEvents == 0
+            if (!collectorJoined) {
+                droppedEvents += 1
             }
         } finally {
             // Step 3: Close the socket FD only after draining in an idempotent way.
@@ -230,6 +255,7 @@ internal class ProfilerTraceListener(
             workerThread = null
             collectorThread = null
         }
+        return cleanupOutcome
     }
 
     /**
@@ -238,65 +264,27 @@ internal class ProfilerTraceListener(
      * for all notifications until the tracee process fully exits.
      * The daemon will close its end of the socket, which sends EOF to our listener thread.
      */
-    fun passThrough() {
-        if (!closed.compareAndSet(false, true)) return
+    fun passThrough() = close()
 
-        logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
-        gracefulDrainRequested.set(true)
-
+    private fun joinWorkerForDrain(worker: Thread): Boolean =
         try {
-            logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
-
-            var workerJoined = false
-            var collectorJoined = false
-
-            workerThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
-                        it.interrupt()
-                    } else {
-                        workerJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
-
-            collectorThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
-                        it.interrupt()
-                    } else {
-                        collectorJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
-
-            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
-                drainComplete = true
+            worker.join(JOIN_TIMEOUT_MS)
+            if (worker.isAlive) {
+                logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                worker.interrupt()
+                worker.join(INTERRUPT_JOIN_TIMEOUT_MS)
+                false
             } else {
-                drainComplete = false
-                if (!collectorJoined) {
-                    droppedEvents += 1
-                }
+                true
             }
-        } finally {
-            // Gracefully close the socket once using the idempotent close guard.
-            closeSocketOnce()
-            workerThread = null
-            collectorThread = null
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
         }
-    }
 
     private fun sendCommand(commandByte: Byte): TraceCommandWriteResult {
         try {
-            val res = ProfilerNativeCommandWriter.writeByte(LinuxNative.memory, socketFd, commandByte)
+            val res = ProfilerNativeCommandWriter.writeByte(native.memory, socketFd, commandByte)
             return TraceCommandWriteResult.from(res)
         } catch (expectedCommandFailure: Exception) {
             return TraceCommandWriteResult.Threw(expectedCommandFailure)
@@ -333,7 +321,7 @@ internal class ProfilerTraceListener(
             }
 
             System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
-            while (!closed.get()) {
+            while (true) {
                 state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
@@ -369,6 +357,10 @@ internal class ProfilerTraceListener(
         state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
         if (decoded is TraceEventDecodeResult.ProtocolViolation) {
+            // A complete TID header identifies an outstanding notification. Settle it before
+            // rejecting the frame, just as processEvent settles accepted events in its finally.
+            droppedEvents += 1
+            sendAck()
             throw java.io.IOException(decoded.reason)
         }
         decoded as TraceEventDecodeResult.Event
@@ -402,7 +394,8 @@ internal class ProfilerTraceListener(
 
     private fun processAndQueueEvent(event: TraceEvent) {
          System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.paths.isNotEmpty() && isDuplicate(event)) {
+         val resolution = event.pathResolution
+         if (resolution is PathResolution.Resolved && isDuplicate(event.syscallName, resolution)) {
              System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
              return
          }
@@ -415,8 +408,16 @@ internal class ProfilerTraceListener(
         sendCommand(PROTOCOL_ACK_BYTE)
     }
 
-    private fun isDuplicate(event: TraceEvent): Boolean {
-        val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"
+    private fun isDuplicate(
+        syscallName: String,
+        resolution: PathResolution.Resolved,
+    ): Boolean {
+        // Keep the compatibility string cache, but encode typed paths in operand order with
+        // lengths: delimiters inside a path cannot alias another operand tuple.
+        val cacheKey = buildString {
+            append("resolved:").append(syscallName.length).append(':').append(syscallName)
+            for (path in resolution.paths) append(':').append(path.length).append(':').append(path)
+        }
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
         return if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {

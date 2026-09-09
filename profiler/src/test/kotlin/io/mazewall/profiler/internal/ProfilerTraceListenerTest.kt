@@ -10,8 +10,17 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.profiler.EbpfLoad
+import io.mazewall.profiler.PathResolutionQuality
+import io.mazewall.profiler.ProfileEnvironment
+import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.ProfileStrategy
+import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.StackAttribution
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.util.concurrent.CountDownLatch
@@ -19,6 +28,224 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `duplicate paths preserve distinct failed operands and ACK every event`() {
+        val resolutions = listOf(
+            io.mazewall.profiler.engine.PathResolution.Partial(
+                listOf("/tmp/a"),
+                listOf(
+                    io.mazewall.profiler.engine
+                    .PathResolutionFailure(1, io.mazewall.profiler.engine.PathResolutionFailure.Reason.VmReadDenied, "Yama denied"),
+                ),
+            ),
+            io.mazewall.profiler.engine.PathResolution.Partial(
+                listOf("/tmp/a"),
+                listOf(
+                    io.mazewall.profiler.engine
+                    .PathResolutionFailure(0, io.mazewall.profiler.engine.PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes"),
+                ),
+            ),
+        )
+        val collected = collectPathEvidence(resolutions)
+        assertEquals(2, collected.acknowledgements)
+        assertEquals(resolutions, collected.logs.map { it.pathResolution })
+        assertEquals(2, collected.stacks.size, "Distinct failures must survive the listener's stack-profile map")
+        val coverage = listenerCoverage(collected.stacks.keys.map { ProfileObservation.fromTraceEvent(it) })
+        assertEquals(PathResolutionQuality.MIXED, coverage.pathResolution)
+        assertEquals(resolutions.flatMap { it.failures }, coverage.pathFailures)
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `resolved path cache preserves per-operand ordering`() {
+        val paths = listOf(listOf("/tmp/a", "/tmp/b"), listOf("/tmp/b", "/tmp/a"))
+        val collected = collectPathEvidence(
+            paths.map {
+            io.mazewall.profiler.engine.PathResolution
+            .Resolved(it)
+        },
+        )
+        assertEquals(2, collected.acknowledgements)
+        assertEquals(paths, collected.logs.map { it.paths })
+    }
+
+    private data class CollectedPathEvidence(
+        val logs: List<TraceEvent>,
+        val stacks: Map<TraceEvent, MutableList<Array<StackTraceElement>>>,
+        val acknowledgements: Int,
+    )
+
+    private fun collectPathEvidence(resolutions: List<io.mazewall.profiler.engine.PathResolution>): CollectedPathEvidence {
+        val bytes = byteArrayOf(0xAC.toByte()) +
+            resolutions
+                .flatMap { resolution ->
+            TraceEventEncoder
+                .encode(
+                io.mazewall.profiler.engine.SyscallEvent
+                    .fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(io.mazewall.core.Tid(7), "RENAME", listOf(100L, 200L), resolution),
+            ).toList()
+        }.toByteArray()
+        val input = java.io.ByteArrayInputStream(bytes)
+        val eof = CountDownLatch(1)
+        val acknowledgements = AtomicInteger()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val chunk = input.readNBytes(count.toInt())
+                chunk.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                if (chunk.isEmpty()) eof.countDown()
+                return LinuxNative.SyscallResult.Success(chunk.size.toLong())
+            }
+
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (count == 1L && buf.readByte(0L) == 0xAC.toByte()) acknowledgements.incrementAndGet()
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        },
+        )
+        val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        val stacks = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
+        ProfilerTraceListener(
+            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(308),
+            accumulatedLogs = logs,
+            stackTracesMap = stacks,
+            pathCache = mutableMapOf(),
+            threadFor = { null },
+            native = native,
+        ).use { listener ->
+            listener.start(CountDownLatch(1))
+            org.junit.jupiter.api.Assertions
+                .assertTrue(eof.await(3, TimeUnit.SECONDS))
+        }
+        return CollectedPathEvidence(logs, stacks, acknowledgements.get())
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `unsupported event version ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent(version = 99))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid resolution tag ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent(tag = 99))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `malformed diagnostic ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent())
+    }
+
+    private fun malformedEvent(
+        version: Int = 1,
+        tag: Int = 3,
+    ): ByteArray {
+        val bytes = java.io.ByteArrayOutputStream()
+        java.io.DataOutputStream(bytes).use { output ->
+            output.writeInt(7)
+            output.writeInt(version)
+            output.writeInt(4)
+            output.writeBytes("OPEN")
+            output.writeInt(0)
+            output.writeInt(0)
+            output.writeByte(tag)
+            output.writeInt(1)
+            output.writeInt(0)
+            output.writeByte(0)
+            output.writeInt(1)
+            output.writeByte('x'.code)
+            output.writeByte(2) // Neither absent nor present: reject this diagnostic.
+        }
+        return bytes.toByteArray()
+    }
+
+    private fun assertRejectedEventSettled(frame: ByteArray) {
+        val timeline = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val drainRequested = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val input = java.io.ByteArrayInputStream(frame)
+        val native = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    timeline.add("close")
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val chunk = if (reads.getAndIncrement() == 0) {
+                        byteArrayOf(0xAC.toByte())
+                    } else {
+                        check(drainRequested.await(3, TimeUnit.SECONDS))
+                        input.readNBytes(count.toInt())
+                    }
+                    chunk.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(chunk.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val command = buf.readByte(0L).toInt() and 0xff
+                    timeline.add("write:$command")
+                    if (command == 0x54) drainRequested.countDown()
+                    return LinuxNative.SyscallResult.Success(count)
+                }
+            },
+        )
+        val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        val listener = ProfilerTraceListener(
+            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(309),
+            logs,
+            null,
+            mutableMapOf(),
+            { null },
+            native,
+        )
+        val ready = CountDownLatch(1)
+        listener.start(ready)
+        assertTrue(ready.await(2, TimeUnit.SECONDS))
+        listener.close()
+        assertEquals(listOf("write:84", "write:172", "close"), timeline)
+        assertTrue(logs.isEmpty(), "Malformed evidence must not become an observation")
+        assertFalse(listener.drainComplete, "A protocol rejection is not a completed drain")
+        assertEquals(1, listener.droppedEvents)
+        assertFalse(listenerCoverage(emptyList(), listener.droppedEvents, listener.drainComplete).complete)
+    }
+
+    private fun listenerCoverage(
+        observations: List<ProfileObservation>,
+        dropped: Int = 0,
+        drained: Boolean = true,
+    ): ProfilingCoverage =
+        ProfilingCoverage.infer(
+        ProfileStrategy.USER_NOTIF,
+            "listener evidence",
+            false,
+            observations,
+            StackAttribution.CAPTURED,
+        dropped,
+            drained,
+            ProfileEnvironment("test", EbpfLoad.Denied("test")),
+    )
+
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `close should close the socket exactly once on graceful drain`() {
@@ -53,14 +280,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(300)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val readyLatch = CountDownLatch(1)
@@ -71,8 +299,6 @@ class ProfilerTraceListenerTest {
 
             // Verify close was called exactly once
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -99,14 +325,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(301)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val readyLatch = CountDownLatch(1)
@@ -125,8 +352,6 @@ class ProfilerTraceListenerTest {
 
             // Verify total close calls remains 1
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -155,6 +380,9 @@ class ProfilerTraceListenerTest {
                         buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(42))
                         offset += 4
 
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(1))
+                        offset += 4
+
                         buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(4))
                         offset += 4
 
@@ -180,6 +408,11 @@ class ProfilerTraceListenerTest {
                         buf.writeByte(offset + 4, 'o'.code.toByte())
                         offset += 5
 
+                        buf.writeByte(offset, 1)
+                        offset += 1
+                        buf.writeIntUnaligned(offset, 0)
+                        offset += 4
+
                         callCount++
                         return LinuxNative.SyscallResult.Success(offset)
                     } else {
@@ -189,14 +422,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(302)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
                 stackTracesMap = stackTracesMap,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val eventCollectedLatch = CountDownLatch(1)
@@ -218,8 +452,6 @@ class ProfilerTraceListenerTest {
             assertEquals(1, accumulatedLogs.size)
             assertEquals("OPEN", accumulatedLogs[0].syscallName)
             assertEquals(listOf("hello"), accumulatedLogs[0].paths)
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -236,14 +468,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(303)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             // Concurrently invoke close() multiple times to ensure idempotency is strictly enforced
@@ -259,8 +492,6 @@ class ProfilerTraceListenerTest {
             listener.close()
 
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -276,14 +507,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(304)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             // Trigger close across all possible sequences:
@@ -296,8 +528,6 @@ class ProfilerTraceListenerTest {
 
             // Verify the native file system close was called exactly once
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 }

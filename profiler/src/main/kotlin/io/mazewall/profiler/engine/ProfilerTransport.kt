@@ -118,53 +118,21 @@ internal object RealProfilerTransport : ProfilerTransport {
 
     override val raw: io.mazewall.RawSyscallOperations get() = LinuxNative.raw
 
-    private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
-    private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
-
     context(arena: Arena) override fun sendTraceEvent(
         socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
         event: SyscallEvent<SyscallEventState.Resolved>,
     ) {
-        val syscallNameBytes = event.syscallName.toByteArray(StandardCharsets.UTF_8)
-        val pathBytesList = event.paths.map { it.toByteArray(StandardCharsets.UTF_8) }
-
-        var totalSize = 4 + 4 + syscallNameBytes.size + 4 + (event.args.size * 8) + 4
-        for (p in pathBytesList) {
-            totalSize += 4 + p.size
-        }
-
-        val buf = arena.allocate(totalSize.toLong())
-        var offset = 0L
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.tid.value)
-        offset += 4
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, syscallNameBytes.size)
-        offset += 4
-        MemorySegment.copy(syscallNameBytes, 0, buf, ValueLayout.JAVA_BYTE, offset, syscallNameBytes.size)
-        offset += syscallNameBytes.size
-
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, event.args.size)
-        offset += 4
-        for (arg in event.args) {
-            buf.set(JAVA_LONG_BE_UNALIGNED, offset, arg)
-            offset += 8
-        }
-
-        buf.set(JAVA_INT_BE_UNALIGNED, offset, pathBytesList.size)
-        offset += 4
-        for (p in pathBytesList) {
-            buf.set(JAVA_INT_BE_UNALIGNED, offset, p.size)
-            offset += 4
-            MemorySegment.copy(p, 0, buf, ValueLayout.JAVA_BYTE, offset, p.size)
-            offset += p.size
-        }
-
-        val res = SocketIo.writeFully(
+        val bytes = io.mazewall.profiler.internal.TraceEventEncoder
+            .encode(event)
+        val buf = arena.allocate(bytes.size.toLong())
+        MemorySegment.copy(bytes, 0, buf, ValueLayout.JAVA_BYTE, 0, bytes.size)
+        SocketIo
+            .writeFully(
             LinuxNative.memory,
             socketFd,
             ConfinedSegment(buf),
-            totalSize.toLong(),
-        )
-        res.getOrThrow("sendTraceEvent")
+            bytes.size.toLong(),
+        ).getOrThrow("sendTraceEvent")
     }
 
     context(arena: Arena) override fun sendSeccompContinue(
@@ -275,6 +243,7 @@ internal object RealProfilerTransport : ProfilerTransport {
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
-        LinuxNative.fileSystem.close(fd)
+        io.mazewall.core.RealSocketManager
+            .close(fd)
     }
 }

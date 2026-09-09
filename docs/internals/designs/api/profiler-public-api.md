@@ -20,7 +20,7 @@ keywords: ["public-api", "profiling", "coverage", "session-lifecycle"]
 
 ### Session Ownership
 
-The profiler uses global daemon/listener state, exposes `shutdown()` with ambiguous semantics, and exposes mutable recent logs on the executor wrapper. Iterative profiling also uses mutable global registrations. Concurrent or repeated test suites need isolated sessions with deterministic cleanup.
+USER_NOTIF runtime ownership is now internal to `ProfilerService` and `ProfilerSession`; independent services isolate dependencies, listeners, TIDs, buffers and cleanup outcomes. The static `Profiler` API delegates to one default service. Its `shutdown()` drains current sessions into pass-through while preserving the daemon for installed filters and allowing later sessions. The executor wrapper still exposes mutable recent logs, and its shutdown methods control only the delegate executor. A public executor-session ownership API remains a separate proposal. Iterative profiling also retains its separate registration model.
 
 ### Strategy Selection
 

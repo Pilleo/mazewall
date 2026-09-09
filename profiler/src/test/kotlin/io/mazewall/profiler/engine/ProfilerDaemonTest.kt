@@ -129,9 +129,6 @@ class ProfilerDaemonTest {
             nfds: Long,
             timeout: Int,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-            if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
-                Thread.sleep(10)
-            }
             return nextPollResult
         }
 
@@ -157,9 +154,6 @@ class ProfilerDaemonTest {
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 rawPolls++
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
-                if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value == 0L) {
-                    Thread.sleep(10)
-                }
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
                     val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
                     fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
@@ -245,6 +239,54 @@ class ProfilerDaemonTest {
             tid: Tid,
             link: String,
         ): String? = "/proc/1/cwd"
+    }
+
+    @Test
+    fun `production profiler transport reports terminal native close errors`() {
+        val realNative = LinuxNative.snapshot()
+        val socket = io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val number = realNative.fileSystem
+                .open(arena.allocateFrom("/dev/null"), io.mazewall.core.OpenFlags.RDONLY)
+                .getOrThrow("open owned profiler fixture")
+            FileDescriptor.adopt(number.toInt(), FileDescriptorRole.UnixSocket)
+        }
+        var consumed = false
+        var attempts = 0
+        val native = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                assertEquals(socket, fd)
+                attempts++
+                realNative.fileSystem.close(fd).getOrThrow("close owned profiler fixture")
+                consumed = true
+                return LinuxNative.SyscallResult.Error(NativeConstants.EACCES, -1L)
+            }
+        },
+        )
+        LinuxNative.setEngine(native)
+        try {
+            val daemon = ProfilerDaemonEngine("/tmp/production-cleanup-test.sock")
+            daemon.triggerGlobalShutdown("test")
+            daemon.handleConnection(socket)
+            val delegateField = ProfilerDaemonEngine::class.java.getDeclaredField("delegate").apply { isAccessible = true }
+            val delegate = delegateField.get(daemon) as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
+            val outcome = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome.Incomplete::class.java,
+                delegate.cleanupOutcome,
+            )
+            assertTrue(
+                outcome.failures
+                .single()
+                .message!!
+                .contains("EACCES"),
+            )
+            assertTrue(outcome.retryableOwnership.isEmpty())
+            delegate.retryCleanup()
+            assertEquals(1, attempts)
+        } finally {
+            LinuxNative.resetToDefault()
+            if (!consumed) realNative.fileSystem.close(socket).getOrThrow("close unused profiler fixture")
+        }
     }
 
     @Test

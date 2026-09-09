@@ -4,6 +4,13 @@ import io.mazewall.core.Arch
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ManagedSegment
 
+internal data class SyscallArguments(
+    val pathStr: String?,
+    val sockaddrBytes: ByteArray?,
+    val dirfd: TraceeDirFd = TraceeDirFd.CurrentWorkingDirectory,
+    val openHow: OpenHow? = null,
+)
+
 /** Immutable notification fields shared by every supervisor route. */
 internal data class NotifHeader(
     val nr: Int,

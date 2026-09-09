@@ -11,9 +11,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 /**
- * Registry contract for generated dispatchers: builtin ids (1..4) never reach it,
- * generated ids route to their registered handler, unknown ids yield null so the
- * worker can answer PortalKind.ERROR.
+ * Startup bootstrap contract for generated dispatchers: malformed strict entries fail,
+ * tolerant startup skips malformed entries, and valid entries publish into a table.
  */
 class PortalDispatcherRegistryTest {
     /** Mimics the shape KotlinPoet emits for `<Service>PortalDispatcher`. */
@@ -44,37 +43,46 @@ class PortalDispatcherRegistryTest {
     private fun grantedFds(): List<FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>> = emptyList()
 
     @Test
-    fun `generated id routes through registry with bound impl`() {
-        // Reflective bootstrap path, exactly as production configures it.
-        // Explicit dispatcher object via ';' separator.
-        val count = PortalDispatcherRegistry.bootstrapFromProperty(
+    fun `strict bootstrap rejects malformed entries before a valid dispatcher is published`() {
+        val builder = PortalDispatcherTable.Builder()
+        assertFailsWith<IllegalArgumentException> { builder.bootstrapStrict("malformed") }
+
+        val count = builder.bootstrapStrict(
             "${EchoService::class.java.name}=${EchoServiceImpl::class.java.name};" +
                 EchoServicePortalDispatcher::class.java.name,
         )
         assertEquals(1, count)
+        val table = builder.build()
 
-        val out = PortalDispatcherRegistry.dispatchOrNull(
+        val out = table.dispatchOrNull(
             PortalMethod.Generated(1000),
             "hello".toByteArray(),
             grantedFds(),
         )
         assertEquals("impl:hello", out?.decodeToString())
-        assertNull(PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(1001), ByteArray(0), grantedFds()))
+        assertNull(table.dispatchOrNull(PortalMethod.Generated(1001), ByteArray(0), grantedFds()))
     }
 
     @Test
     fun `unknown generated ids are not claimed and builtin ids cannot be generated`() {
-        assertNull(PortalDispatcherRegistry.dispatchOrNull(PortalMethod.Generated(9999), ByteArray(0), grantedFds()))
         assertFailsWith<IllegalArgumentException> { PortalMethod.Generated(1) }
     }
 
     @Test
     fun `malformed bootstrap entries are skipped without poisoning later ones`() {
-        val count = PortalDispatcherRegistry.bootstrapFromProperty(
+        val builder = PortalDispatcherTable.Builder()
+        val count = builder.bootstrapFromProperty(
             "garbage-without-equals,${EchoService::class.java.name}=no.such.Impl," +
                 "${EchoService::class.java.name}=${EchoServiceImpl::class.java.name};" +
                 EchoServicePortalDispatcher::class.java.name,
         )
         assertEquals(1, count)
+        assertEquals(
+            "impl:hello",
+            builder
+                .build()
+                .dispatchOrNull(PortalMethod.Generated(1000), "hello".toByteArray(), grantedFds())
+                ?.decodeToString(),
+        )
     }
 }

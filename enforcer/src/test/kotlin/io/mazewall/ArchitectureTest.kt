@@ -14,6 +14,11 @@ import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ArchitectureTest {
     @ArchTest
+    fun singletonProvidersMustBeImmutable(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        singletonProviderRule().check(allClasses)
+    }
+
+    @ArchTest
     fun enforcerShouldNotDependOnProfiler(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
@@ -525,6 +530,45 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.supervisor.SupervisorReplyEffect" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Continue",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Error",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$AddFdAndReply",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$SecureExecAndReply",
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Recycle",
+            ),
+            "io.mazewall.enforcer.supervisor.ReplyExecutionResult" to setOf(
+                "io.mazewall.enforcer.supervisor.ReplyExecutionResult\$ReplySucceeded",
+                "io.mazewall.enforcer.supervisor.ReplyExecutionResult\$ReplyFailed",
+            ),
+            "io.mazewall.enforcer.supervisor.JvmExchangeResult" to setOf(
+                "io.mazewall.enforcer.supervisor.JvmExchangeResult\$Verdict",
+                "io.mazewall.enforcer.supervisor.JvmExchangeResult\$Timeout",
+                "io.mazewall.enforcer.supervisor.JvmExchangeResult\$Malformed",
+                "io.mazewall.enforcer.supervisor.JvmExchangeResult\$TransportFailed",
+            ),
+            "io.mazewall.enforcer.supervisor.SupervisorDescriptorResult" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisorDescriptorResult\$Opened",
+                "io.mazewall.enforcer.supervisor.SupervisorDescriptorResult\$Denied",
+            ),
+            "io.mazewall.enforcer.supervisor.FdInjectionResult" to setOf(
+                "io.mazewall.enforcer.supervisor.FdInjectionResult\$Injected",
+                "io.mazewall.enforcer.supervisor.FdInjectionResult\$Failed",
+            ),
+            "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome" to setOf(
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Complete",
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Incomplete",
+            ),
+            "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult" to setOf(
+                "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult\$Authorized",
+                "io.mazewall.enforcer.supervisor.SpawnAuthorizationResult\$Rejected",
+            ),
+            "io.mazewall.KernelCapability" to setOf(
+                "io.mazewall.KernelCapability\$Available",
+                "io.mazewall.KernelCapability\$Unsupported",
+                "io.mazewall.KernelCapability\$Rejected",
+                "io.mazewall.KernelCapability\$ProbeFailed",
+            ),
             "io.mazewall.landlock.LandlockApplyResult" to setOf(
                 "io.mazewall.landlock.LandlockApplyResult\$Applied",
                 "io.mazewall.landlock.LandlockApplyResult\$Bypassed",

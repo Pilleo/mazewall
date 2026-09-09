@@ -1,6 +1,7 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeMemory
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -10,12 +11,28 @@ import io.mazewall.ffi.memory.readByte
 import java.io.InputStream
 import java.io.InterruptedIOException
 
-/** EINTR-safe reader over an externally owned descriptor and caller-owned confined arena. */
+/**
+ * EINTR-safe reader over an externally owned descriptor and caller-owned confined arena.
+ * The public primary constructor captures the current native memory dependency once;
+ * the additive constructor captures an explicitly supplied dependency instead.
+ */
 public open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
     private val description: String = "native descriptor",
 ) : InputStream() {
+    // Assigned only during construction: an extra primary parameter would break Kotlin metadata.
+    private var memory: NativeMemory = LinuxNative.snapshot().memory
+
+    public constructor(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
+        arena: NativeArena,
+        description: String,
+        memory: NativeMemory,
+    ) : this(socketFd, arena, description) {
+        this.memory = memory
+    }
+
     private val readBuf = arena.allocate(1)
     private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())
 
@@ -45,7 +62,7 @@ public open class NativeDescriptorInputStream(
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during $description $operation")
             }
-            when (val result = LinuxNative.memory.read(socketFd, buffer, count)) {
+            when (val result = memory.read(socketFd, buffer, count)) {
                 is LinuxNative.SyscallResult.Success -> if (result.value <= 0) return -1 else return onRead(result.value)
                 is LinuxNative.SyscallResult.Error -> {
                     if (result.errno != EINTR) return -1

@@ -511,17 +511,36 @@ Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Pr
 2. **Parent Stack Trace Capture on Spawn Entry:**
    When the parent JVM thread ($T_{parent}$) calls `vfork`, `fork`, or a process-spawning `clone`:
    - The seccomp filter traps the entry.
-   - The JVM validation listener captures the stack trace of $T_{parent}$ and registers $T_{parent}$'s TID in a global `PendingSpawnRegistry` with its authorized stack trace before allowing the syscall to continue.
+   - The JVM validation listener captures the stack trace of $T_{parent}$ and runs the spawn policy callback. Only an approved spawn with a nonempty stack may register authorization before the syscall continues.
+   - Each `SupervisorRuntimeContext` owns a `SpawnAuthorizationStore`. The key is the parent's process ID (TGID) plus `/proc/<pid>/stat` start-time ticks, so reuse of a PID does not reuse authorization. Unavailable TGID or process identity rejects the spawn; there is no TID-only fallback.
 
 3. **State-Based Propagation on Child `execve`:**
    When the child process ($PID_{child}$) calls `execve`/`execveat` to run the target binary:
    - The seccomp filter intercepts `execve`.
    - The supervisor daemon reads `PPID` from `/proc/$PID_{child}/stat` to verify it is a descendant of the JVM.
-   - Because the parent thread is suspended by the kernel in `vfork` or `clone(CLONE_VFORK)` until the child calls `execve` or exits, the spawning parent thread is guaranteed to be in the `PendingSpawnRegistry`.
-   - The JVM validation listener queries the registry to retrieve the parent thread's authorized stack trace and validates the execution context.
-   - Once the child execs, the parent thread returns and is removed from the `PendingSpawnRegistry`.
+   - For an exec with no live JVM stack, the JVM validation listener resolves the parent's current process identity and atomically consumes authorization from its own session. Missing, expired, consumed, closed, or unresolvable authorization denies exec, even when no policy callback is installed.
+   - Authorization lasts at most the existing ten-second monotonic TTL and is valid at its exact boundary. Each registration permits one consume, including when the subsequent exec policy rejects it. Session close, listener termination, and installation failure clear the store permanently.
+   - Stack containers and frames are copied at registration and when constructing or reading a successful result.
 
-This ensures process spawning validation is 100% secure, JVM-independent, and free of thread-creation deadlocks.
+The store holds one outstanding authorization per parent process identity. It does not bind a registration to a particular future child, and concurrent spawns from the same process can replace one another. Multiple exec attempts (including helper-to-target exec or PATH retries) need separately validated authority; they cannot replay one spawn entry. This experimental stack propagation does not replace the process-wide Tier 1 baseline, child ancestry checks, or the secure-exec path's existing fail-closed rewrite requirements. Thread-scoped containment remains an incomplete ACE boundary.
+
+### Supervisor session and reply ownership
+
+`SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
+
+An unusable exchange remains terminal even if closing its connection fails. Its typed outcome retains the cleanup exception alongside the primary failure; the session records both and refuses subsequent notifications. Preparation-only recovery cannot reinterpret an execution or exchange failure as successfully handled work.
+
+Open, socket, asynchronous accept, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply. Async accept uses its own confined arena and transfers only heap request data and descriptors acquired from successful native calls.
+
+Descriptor ownership also covers setup before a reply can be interpreted. The imported listening socket's cleanup scope encloses accept-buffer allocation and initialization. A completed route effect is held by a single-use `SupervisorReplyHandoff` while the handler creates its reply arena and response buffer. If setup fails, the handoff disposes any unconsumed AddFd or opened secure-exec descriptor before terminal failure accounting. Transfer goes directly to the sole reply interpreter and retires the handoff; neither a failed disposal nor a post-transfer failure can close the same descriptor again. The original setup failure stays primary, with cleanup failures retained as suppressed evidence.
+
+A fatal accept-worker failure completes its future exceptionally after resource cleanup, allowing the session owner to process `ReplyFailed` and shut down without a policy-denial reply. The worker then rethrows the original fatal failure; it is not converted to ordinary denial or successful handling. Fatal prerequisite-close failures also release any already acquired successor descriptor before propagation.
+
+Reply interpretation and its post-reply cleanup are also terminal failure boundaries. A failure after confirmed ADDFD-with-SEND cannot enter pre-reply denial recovery. A fatal failure on the calling thread is rethrown with its original identity outside the future callback. For a pending async completion, the callback first terminates the session and finishes cleanup, then explicitly delivers the original fatal failure to the replying worker's uncaught-exception handler before that worker exits. This explicit delivery is necessary because `CompletableFuture` captures callback throws; no exceptional dependent completion is left unobserved. Shutdown or uncaught-handler failures remain attached to the primary failure as suppressed evidence.
+
+The process boundary is also the authorization boundary: `SupervisorInstaller`'s JVM validation listener registers and consumes its session's spawn authorization. The sidecar routes carry the resulting JVM decision alongside their request context; neither argument preparation nor a route executor mirrors, consumes again, or independently grants that authority. Duplicating the store across processes would risk replay or incorrectly deny a legitimately consumed authorization.
+
+Two pre-existing secure-exec limitations remain explicitly tracked: the native `O_PATH` value needs an ABI correction ([backlog](../../backlog/issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md)), and `pidfd_getfd` plus local close does not remove an injected descriptor from the tracee's FD table ([backlog](../../backlog/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md)). Failed rewrite remains denied, but the injected remote descriptor can remain until tracee teardown. This refactor does not introduce a remote-close protocol or change native flag values.
 
 ---
 
@@ -540,6 +559,6 @@ The following table clarifies which effects in mazewall are reversible and which
 | `sanitizeThreadState` | Forbidden | Throws |
 
 **Related issues:**
-- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](docs/internals/backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
-- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](docs/internals/backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
-- [issue-20260821-113003-report-already-active-landlock](docs/internals/backlog/code_health/issue-20260821-113003-report-already-active-landlock.md)
+- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
+- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](../../backlog/resolved/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
+- [issue-20260821-113003-report-already-active-landlock](../../backlog/resolved/issue-20260821-113003-report-already-active-landlock.md)

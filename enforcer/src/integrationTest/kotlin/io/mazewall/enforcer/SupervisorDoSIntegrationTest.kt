@@ -6,6 +6,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertTrue
@@ -21,6 +22,7 @@ class SupervisorDoSIntegrationTest {
         val socketPath = context.socketPath
 
         val baselineThreads = getThreadCount(pid)
+        val baselineDescriptors = getDescriptorCount(pid)
         System.err.println("Baseline threads for supervisor ($pid): $baselineThreads")
 
         val connections = mutableListOf<Int>()
@@ -31,8 +33,9 @@ class SupervisorDoSIntegrationTest {
                 connections.add(fd)
             }
 
-            // Give it a moment to spawn threads
-            Thread.sleep(1000)
+            awaitCondition(description = "supervisor accepted its 200-connection capacity") {
+                getDescriptorCount(pid) >= baselineDescriptors + 200
+            }
 
             val currentThreads = getThreadCount(pid)
             System.err.println("Threads after $numConnections connections: $currentThreads")
@@ -58,4 +61,6 @@ class SupervisorDoSIntegrationTest {
         val line = statusFile.readLines().find { it.startsWith("Threads:") } ?: return -1
         return line.substringAfter("Threads:").trim().toInt()
     }
+
+    private fun getDescriptorCount(pid: Long): Int = File("/proc/$pid/fd").list()?.size ?: -1
 }

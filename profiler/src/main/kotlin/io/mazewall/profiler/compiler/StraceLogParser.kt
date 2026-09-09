@@ -128,7 +128,7 @@ public object StraceLogParser {
             correlation = corr,
             source = ObservationSource.STRACE,
             name = syscallName,
-            paths = paths,
+            paths = java.util.List.copyOf(paths),
             openFlags = flags,
         )
     }

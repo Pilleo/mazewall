@@ -10,6 +10,8 @@ import io.mazewall.core.Syscall
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable
@@ -32,9 +34,8 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         wrapped: Profiler.ProfilerExecutorWrapper,
         expectedCountAtLeast: Int,
     ) {
-        val start = System.currentTimeMillis()
-        while (wrapped.recentLogs.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
-            Thread.sleep(10)
+        awaitCondition(description = "profiler recorded at least $expectedCountAtLeast events") {
+            wrapped.recentLogs.size >= expectedCountAtLeast
         }
     }
 
@@ -42,9 +43,8 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         wrapped: Profiler.ProfilerExecutorWrapper,
         expectedCountAtLeast: Int,
     ) {
-        val start = System.currentTimeMillis()
-        while (wrapped.recentStackProfiles.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
-            Thread.sleep(10)
+        awaitCondition(description = "profiler recorded at least $expectedCountAtLeast stack profiles") {
+            wrapped.recentStackProfiles.size >= expectedCountAtLeast
         }
     }
 
@@ -308,7 +308,9 @@ LinuxNative.raw.syscall(
             tasks.forEach { it.get(5, TimeUnit.SECONDS) }
 
             awaitLogs(wrapped, 1)
-            Thread.sleep(200) // Allow any other concurrent events to be processed asynchronously
+            wrapped.shutdown()
+            assertTrue(wrapped.awaitTermination(5, TimeUnit.SECONDS), "profiled tasks terminated")
+            Profiler.shutdown() // Session close drains the listener before inspecting deduplication.
             val bob = wrapped.compileBillOfBehavior()
             // The number of OPEN/OPENAT events in recentLogs for /etc/hostname should be low
             // due to deduplication, even if triggered from different threads.
@@ -325,6 +327,7 @@ LinuxNative.raw.syscall(
         val pool = Executors.newSingleThreadExecutor()
         val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         val latch = java.util.concurrent.CountDownLatch(1)
+        val releaseWork = java.util.concurrent.CountDownLatch(1)
         val finished =
             java.util.concurrent.atomic
                 .AtomicBoolean(false)
@@ -333,15 +336,19 @@ LinuxNative.raw.syscall(
             wrapped.submit(
                 Callable {
                     latch.countDown()
-                    Thread.sleep(1000) // Simulate long-running syscall or operation
+                    releaseWork.awaitOrFail("pending profiler task released after shutdown")
                     val text = File("/etc/hostname").readText()
                     finished.set(true)
                     text
                 },
             )
 
-        latch.await()
-        wrapped.shutdown() // Should not kill daemon immediately
+        try {
+            latch.awaitOrFail("profiled task started before shutdown")
+            wrapped.shutdown() // Should not kill daemon immediately
+        } finally {
+            releaseWork.countDown()
+        }
 
         val result = future.get(5, TimeUnit.SECONDS)
         assertTrue(result.isNotEmpty())

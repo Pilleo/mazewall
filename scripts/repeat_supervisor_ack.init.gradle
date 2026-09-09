@@ -1,0 +1,25 @@
+// Usage: ./gradlew --no-daemon -I scripts/repeat_supervisor_ack.init.gradle :enforcer:ackFreshWorkers
+// Each Test task owns a fresh JVM. Ordering and forkEvery prevent worker/process reuse.
+gradle.projectsEvaluated {
+    def enforcer = gradle.rootProject.findProject(':enforcer')
+    if (enforcer == null) return
+    def baseline = enforcer.tasks.named('test', Test).get()
+    def runs = (1..100).collect { run ->
+        enforcer.tasks.register("ackFreshWorker${run}", Test) {
+            testClassesDirs = baseline.testClassesDirs
+            classpath = baseline.classpath
+            javaLauncher = baseline.javaLauncher
+            jvmArgs = baseline.jvmArgs
+            systemProperties = baseline.systemProperties
+            useJUnitPlatform()
+            filter.includeTestsMatching('io.mazewall.enforcer.supervisor.SupervisorDaemonEngineTest.processConnectionStep retries on EINTR during ACK write')
+            maxParallelForks = 1
+            forkEvery = 1
+            outputs.upToDateWhen { false }
+            reports.junitXml.outputLocation = enforcer.layout.buildDirectory.dir("test-results/ackFreshWorker${run}")
+            reports.html.required = false
+            if (run > 1) mustRunAfter("ackFreshWorker${run - 1}")
+        }
+    }
+    enforcer.tasks.register('ackFreshWorkers') { dependsOn(runs) }
+}

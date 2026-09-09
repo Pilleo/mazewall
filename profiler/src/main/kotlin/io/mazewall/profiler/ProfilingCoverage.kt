@@ -1,5 +1,8 @@
 package io.mazewall.profiler
 
+import io.mazewall.profiler.engine.PathResolution
+import io.mazewall.profiler.engine.PathResolutionFailure
+
 /**
  * How the profile was collected. [AUTO] records the concrete choice in [ProfilingCoverage.strategyReason].
  */
@@ -77,6 +80,24 @@ public data class ProfilingCoverage(
     val complete: Boolean,
     val warnings: List<String> = emptyList(),
 ) {
+    /**
+     * Operand diagnostics retained independently of the compatibility quality summary.
+     * Generated copies retain them unless callers explicitly replace the warnings projection.
+     */
+    public val pathFailures: List<PathResolutionFailure>
+        get() = (warnings as? PathDiagnostics)?.failures.orEmpty()
+
+    private fun withPathEvidence(observations: List<ProfileObservation>): ProfilingCoverage = withPathFailures(observations.flatMap { it.pathResolution.failures })
+
+    private fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(warnings = PathDiagnostics(warnings, failures))
+
+    /** Internal warning augmentation preserves evidence independently of the new list projection. */
+    internal fun withWarnings(
+        warnings: List<String>,
+        complete: Boolean = this.complete,
+        drainComplete: Boolean = this.drainComplete,
+    ): ProfilingCoverage = copy(complete = complete, drainComplete = drainComplete, warnings = PathDiagnostics(warnings, pathFailures))
+
     public fun evidence(): ProfileEvidence =
         if (complete) {
             ProfileEvidence.Complete
@@ -88,7 +109,8 @@ public data class ProfilingCoverage(
 
     internal fun retainStricterPathResolution(prior: ProfilingCoverage): ProfilingCoverage {
         val kept = worsePath(pathResolution, prior.pathResolution)
-        if (kept == pathResolution) return this
+        val failures = (pathFailures + prior.pathFailures).distinct()
+        if (kept == pathResolution) return withPathFailures(failures)
         val extra =
             if (kept == PathResolutionQuality.FAILED ||
                 kept == PathResolutionQuality.MIXED ||
@@ -105,7 +127,7 @@ public data class ProfilingCoverage(
                 kept != PathResolutionQuality.MIXED &&
                 kept != PathResolutionQuality.TRUNCATED,
             warnings = warnings + extra,
-        )
+        ).withPathFailures(failures)
     }
 
     public companion object {
@@ -261,7 +283,7 @@ public data class ProfilingCoverage(
                 environment = environment,
                 complete = complete,
                 warnings = warnings,
-            )
+            ).withPathEvidence(observations)
         }
 
         internal fun inferIoUring(
@@ -285,85 +307,55 @@ public data class ProfilingCoverage(
                     obs.name.uppercase() in setOf("IO_URING_SETUP", "IO_URING_ENTER", "IO_URING_REGISTER")
             }
 
-        private val pathBearingNames =
-            setOf(
-                "OPEN",
-                "OPENAT",
-                "OPENAT2",
-                "EXECVE",
-                "EXECVEAT",
-                "UNLINK",
-                "UNLINKAT",
-                "RENAME",
-                "RENAMEAT",
-                "RENAMEAT2",
-                "MKDIR",
-                "MKDIRAT",
-                "RMDIR",
-                "LINK",
-                "LINKAT",
-                "SYMLINK",
-                "SYMLINKAT",
-                "CHDIR",
-                "TRUNCATE",
-                "ACCESS",
-                "FACCESSAT",
-                "FACCESSAT2",
-                "STAT",
-                "NEWFSTATAT",
-                "FSTATAT",
-                "CREAT",
-                "CHMOD",
-                "FCHMODAT",
-                "CHOWN",
-                "LCHOWN",
-                "FCHOWNAT",
-                "READLINK",
-                "READLINKAT",
-                "CHROOT",
-                "UTIME",
-                "UTIMES",
-                "UTIMENSAT",
-            )
-
-        private fun expectedPathOperands(name: String): Int =
-            when (name) {
-                "RENAME", "LINK", "SYMLINK", "RENAMEAT", "RENAMEAT2", "LINKAT", "SYMLINKAT" -> 2
-                else -> 1
-            }
-
-        private fun isUringPathBearing(opcode: String): Boolean = UringOp.parse(opcode).isPathBearing()
-
-        private const val TRUNCATION_THRESHOLD = 4096
-
         private fun inferPaths(observations: List<ProfileObservation>): PathResolutionQuality {
-            if (observations.isEmpty()) return PathResolutionQuality.NONE
-            val pathBearing =
-                observations.filter { obs ->
-                    when (obs) {
-                        is ProfileObservation.Syscall -> obs.name.uppercase() in pathBearingNames
-                        is ProfileObservation.IoUring -> isUringPathBearing(obs.opcode)
-                        is ProfileObservation.Connect -> false
+            var resolved = false
+            var failed = false
+            var truncated = false
+            for (observation in observations) {
+                when (observation.pathResolution) {
+                    PathResolution.NotApplicable -> Unit
+                    is PathResolution.Resolved -> resolved = true
+                    is PathResolution.Partial -> resolved = true
+                    is PathResolution.Failed -> Unit
+                }
+                for (failure in observation.pathResolution.failures) {
+                    when (failure.reason) {
+                        PathResolutionFailure.Reason.VmReadDenied,
+                        PathResolutionFailure.Reason.Missing,
+                        PathResolutionFailure.Reason.DirFdUnresolved,
+                        -> failed = true
+                        PathResolutionFailure.Reason.Truncated -> truncated = true
                     }
                 }
-            if (pathBearing.isEmpty()) return PathResolutionQuality.NONE
-            val truncated = pathBearing.any { obs -> obs.paths.any { it.length >= TRUNCATION_THRESHOLD } }
-
-            fun expectedOperands(obs: ProfileObservation): Int =
-                when (obs) {
-                    is ProfileObservation.Syscall -> expectedPathOperands(obs.name.uppercase())
-                    is ProfileObservation.IoUring -> 1
-                    is ProfileObservation.Connect -> 0
-                }
-            val failed = pathBearing.count { obs -> obs.paths.size < expectedOperands(obs) }
+            }
             return when {
-                failed == 0 && !truncated -> PathResolutionQuality.RESOLVED
-                failed > 0 && !truncated -> PathResolutionQuality.FAILED
-                failed == 0 && truncated -> PathResolutionQuality.TRUNCATED
-                else -> PathResolutionQuality.MIXED
+                failed && truncated -> PathResolutionQuality.MIXED
+                failed -> PathResolutionQuality.FAILED
+                truncated -> PathResolutionQuality.TRUNCATED
+                resolved -> PathResolutionQuality.RESOLVED
+                else -> PathResolutionQuality.NONE
             }
         }
     }
+}
+
+/**
+ * Internal owner of typed diagnostics with the existing warnings-list projection.
+ * The generated coverage copy method retains this immutable record unless callers replace warnings.
+ */
+private class PathDiagnostics(
+    warnings: List<String>,
+    failures: List<PathResolutionFailure>,
+) : java.util.AbstractList<String>() {
+    val failures: List<PathResolutionFailure> = java.util.List.copyOf(failures)
+    private val messages: List<String> =
+        java.util.List.copyOf(
+            (warnings + failures.map { "path operand ${it.operandIndex}: ${it.reason}; ${it.detail}" }).distinct(),
+        )
+
+    override val size: Int get() = messages.size
+
+    override fun get(index: Int): String = messages[index]
 }
 
 public class IncompleteProfileException(

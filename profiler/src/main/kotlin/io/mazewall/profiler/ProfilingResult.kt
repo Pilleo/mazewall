@@ -37,7 +37,15 @@ class ProfilingResult<T>(
     private val stackProfileStorage = ImmutableStackProfile.copyOf(stackProfile)
     val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
         get() = stackProfileStorage.snapshot()
-    val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+    val observations: List<ProfileObservation> = java.util.List.copyOf(
+        observations.map { observation ->
+            when (observation) {
+                is ProfileObservation.Syscall -> observation.withPathResolution(observation.pathResolution)
+                is ProfileObservation.IoUring -> observation.withPathResolution(observation.pathResolution)
+                is ProfileObservation.Connect -> observation.withPathResolution(observation.pathResolution)
+            }
+        },
+    )
 
     fun copy(
         value: T = this.value,

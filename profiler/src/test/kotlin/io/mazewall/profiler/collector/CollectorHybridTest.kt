@@ -8,9 +8,15 @@ import io.mazewall.profiler.MazewallProfiler
 import io.mazewall.profiler.NetworkEndpoint
 import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.PathResolutionQuality
+import io.mazewall.profiler.ProfileEnvironment
 import io.mazewall.profiler.ProfileObservation
 import io.mazewall.profiler.ProfileOptions
 import io.mazewall.profiler.ProfileStrategy
+import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.StackAttribution
+import io.mazewall.profiler.engine.PathResolution
+import io.mazewall.profiler.engine.PathResolutionFailure
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -18,6 +24,46 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CollectorHybridTest {
+    @Test
+    fun `collector merge retains distinct typed failures and reports mixed coverage`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "Yama denied")
+        val truncated = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL")
+        val syscall = ProfileObservation.Syscall(correlation, ObservationSource.USER_NOTIF, "OPEN")
+        val first = syscall.withPathResolution(PathResolution.Failed(listOf(denied)))
+        val second = syscall.withPathResolution(PathResolution.Failed(listOf(truncated)))
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(listOf(first)), CollectorDrain(listOf(second, first))))
+        assertEquals(2, merged.observations.size)
+        val coverage = ProfilingCoverage.infer(
+            ProfileStrategy.USER_NOTIF,
+            "merged",
+            false,
+            merged.observations,
+            StackAttribution.SKIPPED,
+            merged.droppedEvents,
+            merged.drainComplete,
+            ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertEquals(PathResolutionQuality.MIXED, coverage.pathResolution)
+        assertEquals(listOf(denied, truncated), coverage.pathFailures)
+    }
+
+    @Test
+    fun `collector keys preserve typed diagnostics on every observation variant`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val reasons = listOf(PathResolutionFailure.Reason.VmReadDenied, PathResolutionFailure.Reason.Truncated)
+        val observations = reasons.flatMap { reason ->
+            val resolution = PathResolution.Failed(listOf(PathResolutionFailure(0, reason, "inspection")))
+            listOf(
+                ProfileObservation.Syscall(correlation, ObservationSource.USER_NOTIF, "OPEN").withPathResolution(resolution),
+                ProfileObservation.IoUring(correlation, ObservationSource.EBPF, "OPENAT").withPathResolution(resolution),
+                ProfileObservation.Connect(correlation, ObservationSource.EBPF, NetworkEndpoint("127.0.0.1", 80)).withPathResolution(resolution),
+            )
+        }
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(observations + observations)))
+        assertEquals(6, merged.observations.size)
+    }
+
     @Test
     fun `parser reads uring syscall and connect lines`() {
         val log = """
