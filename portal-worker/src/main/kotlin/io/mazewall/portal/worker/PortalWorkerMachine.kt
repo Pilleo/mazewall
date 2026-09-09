@@ -42,6 +42,8 @@ internal sealed interface PortalWorkerEvent {
     data class ReplyFailed(
         val reason: String,
     ) : PortalWorkerEvent
+
+    data object FatalDispatchFailed : PortalWorkerEvent
 }
 
 internal sealed interface PortalWorkerTransition {
@@ -109,6 +111,7 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.DispatchFailed,
             PortalWorkerEvent.ReplySucceeded,
             is PortalWorkerEvent.ReplyFailed,
+            PortalWorkerEvent.FatalDispatchFailed,
             -> violation("received a dispatch result without a request")
         }
 
@@ -119,6 +122,7 @@ internal object PortalWorkerMachine {
         when (event) {
             is PortalWorkerEvent.DispatchSucceeded -> reply(state.request, PortalKind.Response, event.payload)
             is PortalWorkerEvent.DispatchFailed -> reply(state.request, PortalKind.Error, event.message)
+            PortalWorkerEvent.FatalDispatchFailed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.FrameReceived -> violation("received a second frame while dispatching")
             PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
@@ -136,6 +140,7 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.DispatchSucceeded,
             is PortalWorkerEvent.DispatchFailed,
             PortalWorkerEvent.IdleTick,
+            PortalWorkerEvent.FatalDispatchFailed,
             -> violation("received an event while sending a reply")
         }
 

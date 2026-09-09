@@ -43,31 +43,32 @@ internal class PortalWorkerDriver(
     var state: PortalWorkerState = PortalWorkerState.AwaitingRequest
         private set
 
-    @Suppress("TooGenericExceptionCaught") // Dispatch exceptions are converted to one error reply.
     fun run() {
-        try {
-            serve@ while (state != PortalWorkerState.Stopped) {
-                when (val received = transport.receive()) {
-                    PortalWorkerReceive.Idle -> {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
-                    }
-                    PortalWorkerReceive.PeerClosed -> {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
-                        break@serve
-                    }
-                    is PortalWorkerReceive.Failure -> {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
-                        throw received.cause
-                    }
-                    is PortalWorkerReceive.Frame -> {
-                        handle(received)
-                    }
+        val primaryFailure = captureFailure(::serve)
+        val cleanupFailure = captureFailure(transport::close)
+        if (primaryFailure != null) cleanupFailure?.let(primaryFailure::addSuppressed)
+        val terminal = primaryFailure ?: cleanupFailure
+        if (terminal != null) throw terminal
+    }
+
+    private fun serve() {
+        serve@ while (state != PortalWorkerState.Stopped) {
+            when (val received = transport.receive()) {
+                PortalWorkerReceive.Idle -> state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
+                PortalWorkerReceive.PeerClosed -> {
+                    state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
+                    break@serve
                 }
+                is PortalWorkerReceive.Failure -> {
+                    state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
+                    throw received.cause
+                }
+                is PortalWorkerReceive.Frame -> handle(received)
             }
-        } finally {
-            transport.close()
         }
     }
+
+    private fun captureFailure(action: () -> Unit): Throwable? = runCatching(action).exceptionOrNull()
 
     @Suppress("TooGenericExceptionCaught") // Dispatch and send are distinct exhaustive exception boundaries.
     private fun handle(received: PortalWorkerReceive.Frame) {
@@ -84,8 +85,12 @@ internal class PortalWorkerDriver(
                 received.capabilities,
             )
             PortalWorkerEvent.DispatchSucceeded(PortalPayload(result))
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             val actual = unwrapInvocation(failure)
+            if (actual !is Exception) {
+                state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
+                throw actual
+            }
             val message = (actual.message ?: actual::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
             PortalWorkerEvent.DispatchFailed(PortalPayload(message))
         } finally {
@@ -102,9 +107,9 @@ internal class PortalWorkerDriver(
         }
     }
 
-    private tailrec fun unwrapInvocation(failure: Exception): Exception =
-        if (failure is java.lang.reflect.InvocationTargetException && failure.targetException is Exception) {
-            unwrapInvocation(failure.targetException as Exception)
+    private tailrec fun unwrapInvocation(failure: Throwable): Throwable =
+        if (failure is java.lang.reflect.InvocationTargetException && failure.targetException != null) {
+            unwrapInvocation(failure.targetException)
         } else {
             failure
         }

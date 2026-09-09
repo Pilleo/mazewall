@@ -28,10 +28,13 @@ note right of Starting
   One absolute 30s deadline spans
   accept and readiness for the batch.
   No provisional worker is published.
+  Shutdown cancels + joins startup;
+  partial owners remain retryable.
 end note
 
 note right of SendingReply
   A failed or partial write is terminal;
   no error frame may be appended.
+  Fatal reflected Throwables keep identity.
 end note
 @enduml

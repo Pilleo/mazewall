@@ -9,12 +9,30 @@ import io.mazewall.portal.PortalPayload
 import io.mazewall.portal.PortalReadTimeoutException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
 
 class PortalWorkerDriverTest {
+    @Test
+    fun `reflective fatal error preserves identity sends nothing and retires transport`() {
+        val fatal = AssertionError("fatal guest failure")
+        val closeFailure = IOException("transport close failed")
+        val transport = FakeTransport(listOf(PortalWorkerReceive.Frame(request())), closeFailure = closeFailure)
+        val driver = PortalWorkerDriver(transport) { _, _, _ ->
+            throw InvocationTargetException(fatal)
+        }
+
+        assertSame(fatal, assertThrows(AssertionError::class.java) { driver.run() })
+        assertEquals(0, transport.sendAttempts)
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+        assertTrue(transport.closed)
+        assertTrue(fatal.suppressed.contains(closeFailure), "terminal cleanup failure must not replace fatal identity")
+    }
+
     @Test
     fun `failed response write is terminal and never appends an error frame`() {
         val transport = FakeTransport(
@@ -68,11 +86,13 @@ class PortalWorkerDriverTest {
     private class FakeTransport(
         receives: List<PortalWorkerReceive>,
         private val sendFailure: IOException? = null,
+        private val closeFailure: IOException? = null,
     ) : PortalWorkerTransport {
         private val remaining = ArrayDeque(receives)
         val sent = mutableListOf<PortalFrame>()
         var sendAttempts = 0
         var receiveAttempts = 0
+        var closed = false
 
         override fun receive(): PortalWorkerReceive {
             receiveAttempts++
@@ -85,6 +105,9 @@ class PortalWorkerDriverTest {
             sent += frame
         }
 
-        override fun close() = Unit
+        override fun close() {
+            closed = true
+            closeFailure?.let { throw it }
+        }
     }
 }

@@ -25,6 +25,8 @@ broad dispatch catch could interpret a response-write failure as permission to s
 2. Added SendingReply plus explicit ReplySucceeded/ReplyFailed transitions.
 3. Partial receive and response-write failures are terminal, reflection failures are unwrapped,
    and READY is published only after all worker startup authorities exist.
+4. Review follow-up unwraps every reflective target `Throwable`: fatal errors preserve identity,
+   attempt no response, and retain terminal cleanup failures as suppressed evidence.
 
 ---
 <!-- id: issue-20260909-214720-333-make-portal-worker-reply-loop-authoritative  file: issue-20260909-214720-333-make-portal-worker-reply-loop-authoritative.md -->

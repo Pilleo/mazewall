@@ -4,6 +4,7 @@ import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -12,12 +13,80 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.Adler32
 
 @Execution(ExecutionMode.SAME_THREAD)
 class ProcessBrokerIntegrationTest {
+    @Test
+    fun `close waits for cancelled startup and reaps every provisional child`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val secondLaunchEntered = CountDownLatch(1)
+        val releaseSecondLaunch = CountDownLatch(1)
+        val children = java.util.concurrent.CopyOnWriteArrayList<Process>()
+        val starts = AtomicInteger()
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                if (starts.incrementAndGet() == 2) {
+                    secondLaunchEntered.countDown()
+                    assertTrue(releaseSecondLaunch.await(5, TimeUnit.SECONDS))
+                }
+                return RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
+            }
+        }
+        val broker = ProcessBroker(poolSize = 2, launcher = launcher)
+        val startup = CompletableFuture.runAsync { broker.start() }
+        assertTrue(secondLaunchEntered.await(10, TimeUnit.SECONDS))
+
+        val closing = CompletableFuture.runAsync { broker.close() }
+        Thread.sleep(100)
+        assertFalse(closing.isDone, "close must join the startup owner before publishing Closed")
+        releaseSecondLaunch.countDown()
+
+        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+        closing.get(10, TimeUnit.SECONDS)
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+        assertTrue(children.none(Process::isAlive), "all provisional children must be reaped")
+    }
+
+    @Test
+    fun `failed provisional rollback is retained for close retry`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val starts = AtomicInteger()
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                if (starts.incrementAndGet() == 2) error("second worker launch failed")
+                return RealProcessLauncher.startProcess(args, redirectErrorStream)
+            }
+        }
+        val closes = AtomicInteger()
+        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
+            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+                if (closes.incrementAndGet() == 1) throw java.io.IOException("pre-native channel close")
+                io.mazewall.core.RealSocketManager
+                    .close(fd)
+            }
+        }
+        val broker = ProcessBroker(poolSize = 2, launcher = launcher, sockets = sockets)
+
+        assertThrows(IllegalStateException::class.java) { broker.start() }
+        assertEquals(1, broker.provisionalWorkers(), "unfinished rollback owner must remain registered")
+
+        broker.close()
+
+        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+        assertEquals(0, broker.provisionalWorkers())
+        assertEquals(4, closes.get(), "retry only the provisional listener whose pre-native close failed")
+    }
+
     @Test
     fun `second worker startup failure rolls back the unpublished first worker`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))

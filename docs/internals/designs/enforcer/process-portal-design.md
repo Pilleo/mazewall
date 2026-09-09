@@ -39,7 +39,11 @@ The broker pool is published transactionally. Its closed lifecycle is `New → S
 remain provisional: the idle queue and live-slot registry receive no entry until every configured
 worker has connected and reported readiness. A single monotonic deadline (30 seconds by default)
 covers every initial accept and readiness observation. Failure of any pool member retires and reaps
-the complete provisional batch.
+the complete provisional batch. A separate provisional-owner registry covers partial acquisition
+and accepted-but-unclaimed sockets. Shutdown cancels startup, joins its completion boundary, and
+publishes `Closed` only after all provisional processes, pumps, sockets, and endpoints retire.
+Pre-native cleanup failures keep their owner registered for a later close retry; completed cleanup
+steps are never dispatched twice.
 
 Worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
@@ -52,6 +56,9 @@ channel. Builtin and generated methods are resolved before one dispatch-failure 
 deliberately unwraps reflective invocation failures. Consequently a partial response write closes
 the channel and cannot be followed by an error frame. The READY sentinel is emitted only after
 containment, dispatcher publication/guest construction, and channel initialization have succeeded.
+An `InvocationTargetException` is unwrapped through any target `Throwable`: ordinary exceptions
+become one error response, while fatal errors retain their identity, send no response, close owned
+capabilities and transport, and receive cleanup failures only as suppressed evidence.
 See [the portal lifecycle diagram](../../../diagrams/portal_lifecycle.puml).
 
 ## Architecture

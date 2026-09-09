@@ -57,3 +57,27 @@ including the overall repair plan. Neither new Task 7 backlog record is reported
 guard traversal passed the portal/platform/codegen/worker portions and then encountered the
 unrelated existing `SupervisorPostReplyFailureTest` failure in `enforcer`; receipt:
 `.adk/verification-receipts/guard-1788991202855.log`.
+
+## Review follow-up
+
+Four P2 review findings were repaired in a separate follow-up commit:
+
+- An `AcceptedSocketHandoff` now owns each accept result until claim or confirmed retirement. It
+  also covers timeout/process-exit dummy-connection races and retains pre-native close failures.
+- Startup publishes partial and ready-but-unpublished ownership in separate registries. Close
+  cancels and joins startup before `Closed`; a cancelled startup cannot launch another worker.
+- Partial startup rollback is generation-safe and retryable per resource. Later close attempts only
+  unfinished channel/peer, process/reap, pump, listener, and endpoint releases.
+- Reflective targets are unwrapped as `Throwable`. Ordinary `Exception` remains an error reply;
+  fatal targets stop the machine, preserve identity, send no frame, and close transport ownership.
+
+Follow-up RED evidence included an unresolved handoff type, a close/start latch assertion, retained
+rollback assertion, and fatal identity being replaced by a cleanup `IOException`. Focused tests then
+passed, followed by the full portal/worker module and integration/static gates recorded in the
+follow-up commit output.
+
+- `./gradlew --no-daemon :portal:test :portal:integrationTest :portal-worker:test` — passed.
+- `./gradlew --no-daemon :portal:check :portal-worker:check` — passed (98 tasks; unit,
+  integration, ktlint, detekt, coverage, and SpotBugs gates).
+- `./scripts/adkw check-backlog` — only the same nine pre-existing plan-frontmatter errors remain;
+  neither Task 7 backlog item is reported.
