@@ -30,6 +30,7 @@ internal class SupervisorSessionHandler(
     engine: NativeEngine = LinuxNative,
     socketManager: SocketManager = RealSocketManager,
     private val preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
+    private val replyArena: () -> NativeArena = NativeArena::ofConfined,
 ) : SeccompNotifHandler {
     private val reader = NotificationReader(engine, logger)
     private val exchange = JvmVerdictExchange(engine, socketFd, socketManager)
@@ -147,9 +148,12 @@ internal class SupervisorSessionHandler(
                 if (failure != null) {
                     completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
                 } else {
-                    NativeArena.ofConfined().use { workerArena ->
-                        with(workerArena) {
-                            finish(effect, SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
+                    SupervisorReplyHandoff(effect).use { handoff ->
+                        replyArena().use { workerArena ->
+                            with(workerArena) {
+                                val replyContext = SupervisorReplyContext(id, workerArena.allocate(Layouts.SECCOMP_NOTIF_RESP))
+                                completeReply(id, handoff.transferTo(replies, replyContext))
+                            }
                         }
                     }
                 }
@@ -165,7 +169,7 @@ internal class SupervisorSessionHandler(
             }
         }
         callerFatal?.let { throw it }
-        // Accepted async work remains ExecutingReply; only finish can produce Replied.
+        // Accepted async work remains ExecutingReply until interpretation confirms its reply.
         return completion.getNow(true)
     }
 

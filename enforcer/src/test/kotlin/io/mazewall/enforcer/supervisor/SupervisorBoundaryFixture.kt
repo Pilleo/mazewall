@@ -109,6 +109,8 @@ internal class SupervisorBoundaryFixture {
 
     fun handler(socketManager: SocketManager = sockets) = SupervisorSessionHandler(socket, listener, engine, socketManager, SupervisorRoutePreparation(memory) { 0 })
 
+    fun handlerWithReplyArena(replyArena: () -> NativeArena) = SupervisorSessionHandler(socket, listener, engine, sockets, SupervisorRoutePreparation(memory) { 0 }, replyArena)
+
     /** Worker exit follows synchronous future callbacks, reply cleanup, and the terminal transition. */
     fun awaitTerminalProcessing() {
         replied.awaitOrFail("terminal kernel operation")

@@ -61,15 +61,20 @@ internal class SocketRouteExecutor(
         when (val socket = descriptors.import(request.tid, request.fd)) {
             is SupervisorDescriptorResult.Denied -> SupervisorReplyEffect.Error(socket.errno)
             is SupervisorDescriptorResult.Opened -> {
-                val address = arena.allocate(MAX_ADDRESS_LENGTH.toLong())
-                val length = arena.allocate(Int.SIZE_BYTES.toLong())
-                length.writeInt(0, MAX_ADDRESS_LENGTH)
+                var buffers: Pair<ManagedSegment, ManagedSegment>? = null
                 val accepted = socket.descriptor.produce {
+                    val address = arena.allocate(MAX_ADDRESS_LENGTH.toLong())
+                    val length = arena.allocate(Int.SIZE_BYTES.toLong())
+                    length.writeInt(0, MAX_ADDRESS_LENGTH)
+                    buffers = address to length
                     SupervisorDescriptorResult.from(engine.networking.accept4(socket.descriptor.handle, address, length, request.flags), engine)
                 }
                 when (val client = accepted) {
                     is SupervisorDescriptorResult.Denied -> SupervisorReplyEffect.Error(client.errno)
-                    is SupervisorDescriptorResult.Opened -> prepareAccepted(client.descriptor, request, address, length.readInt(0))
+                    is SupervisorDescriptorResult.Opened -> {
+                        val (address, length) = checkNotNull(buffers)
+                        prepareAccepted(client.descriptor, request, address, length.readInt(0))
+                    }
                 }
             }
         }

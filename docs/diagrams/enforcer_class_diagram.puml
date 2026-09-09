@@ -1329,6 +1329,10 @@ class "SupervisorReplyContext" as io.mazewall.enforcer.supervisor.SupervisorRepl
 }
 interface "SupervisorReplyEffect" as io.mazewall.enforcer.supervisor.SupervisorReplyEffect {
 }
+class "SupervisorReplyHandoff" as io.mazewall.enforcer.supervisor.SupervisorReplyHandoff {
+  +ReplyExecutionResult transferTo(NativeArena, SupervisorReplyInterpreter, SupervisorReplyContext)
+  +void close()
+}
 class "SupervisorReplyInterpreter" as io.mazewall.enforcer.supervisor.SupervisorReplyInterpreter {
   +ReplyExecutionResult execute(NativeArena, SupervisorReplyEffect, SupervisorReplyContext)
 }
@@ -2485,6 +2489,7 @@ io.mazewall.enforcer.supervisor.SupervisorNotificationMachine --> io.mazewall.en
 io.mazewall.enforcer.supervisor.SupervisorOwnedFd --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorOwnedFd --> io.mazewall.NativeFileSystem
 io.mazewall.enforcer.supervisor.SupervisorReplyContext --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.enforcer.supervisor.SupervisorReplyHandoff --> io.mazewall.enforcer.supervisor.SupervisorReplyEffect
 io.mazewall.enforcer.supervisor.SupervisorReplyInterpreter --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorReplyInterpreter --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorReplyInterpreter --> io.mazewall.enforcer.supervisor.SupervisorExecRewriteExchange
@@ -2504,6 +2509,7 @@ io.mazewall.enforcer.supervisor.SupervisorRuntimeContext --> io.mazewall.enforce
 io.mazewall.enforcer.supervisor.SupervisorRuntimeContext --> io.mazewall.core.Tid
 io.mazewall.enforcer.supervisor.SupervisorSession --> io.mazewall.enforcer.supervisor.SupervisorRuntimeContext
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.ffi.memory.NativeArena
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.JvmVerdictExchange
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.TraceeDescriptorImporter
