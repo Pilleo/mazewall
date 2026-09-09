@@ -70,6 +70,34 @@ public object SupervisorSeccompNotifInstaller {
         onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
     ) {
+        install(
+            native,
+            userNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            connectWithRetry,
+            sendDescriptor,
+            onFilterApplied,
+            SeccompInstallationGate.Direct,
+            onSocketConnected,
+        )
+    }
+
+    /** Allocation and coordinator waits stay outside [installationGate]. */
+    @io.mazewall.MazewallInternal
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
         validateNotVirtual()
         if (!userNotifSupported) {
             throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
@@ -171,12 +199,14 @@ public object SupervisorSeccompNotifInstaller {
             val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = native.raw.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                NativeArg.MemoryArg(prog),
-            )
+            val r = installationGate.commit {
+                native.raw.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
+                    NativeArg.MemoryArg(prog),
+                )
+            }
 
             val rawFd = when (r) {
                 is LinuxNative.SyscallResult.Success -> r.value.toInt()
@@ -215,12 +245,14 @@ public object SupervisorSeccompNotifInstaller {
             // filter during their startup and handshake, avoiding fatal circular deadlocks.
             if (processWide && dummyBpf != null) {
                 val dummyProg = BpfNativeCache.getOrCompute(dummyBpf, native)
-                val tsyncRes = native.raw.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                    NativeArg.MemoryArg(dummyProg),
-                )
+                val tsyncRes = installationGate.commit {
+                    native.raw.syscall(
+                        arch.seccompSyscallNumber.toLong(),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                        NativeArg.MemoryArg(dummyProg),
+                    )
+                }
                 when (tsyncRes) {
                     is LinuxNative.SyscallResult.Error ->
                         throw IllegalStateException(
@@ -240,12 +272,16 @@ public object SupervisorSeccompNotifInstaller {
                 }
             }
         } catch (expectedInstallFailure: Exception) {
+            setupError.compareAndSet(null, expectedInstallFailure)
+            installLatch.countDown()
             val fdRef = listenerFdVal.get()
             if (fdRef.isValid) {
                 native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
             }
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
+            setupError.compareAndSet(null, expectedInstallError)
+            installLatch.countDown()
             val fdRef = listenerFdVal.get()
             if (fdRef.isValid) {
                 native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")

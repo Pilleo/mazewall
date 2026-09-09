@@ -4,6 +4,7 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
+import io.mazewall.ffi.networking.SeccompInstallationGate
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
@@ -34,9 +35,14 @@ internal class ProfilerSession(
     private val cleanupLock = Any()
     private val closed = AtomicBoolean(false)
     private var installations = 0
-    private val installer = runtime.installer.forSession {
-        check(!closed.get()) { "Profiler session closed during installation" }
-    }
+    private val installer = runtime.installer.forSession(
+        SeccompInstallationGate { operation ->
+            synchronized(lifecycleLock) {
+                check(!closed.get()) { "Profiler session closed during installation" }
+                operation()
+            }
+        },
+    )
 
     @Volatile
     var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete

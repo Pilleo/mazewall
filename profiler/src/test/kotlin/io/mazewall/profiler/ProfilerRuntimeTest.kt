@@ -5,11 +5,14 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
 import io.mazewall.MockNativeNetworking
 import io.mazewall.MockPlatformProvider
+import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.NativeArg
+import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
@@ -24,6 +27,8 @@ import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.seccomp.BpfProgram
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -34,13 +39,115 @@ import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ProfilerRuntimeTest {
+    @Test
+    @Timeout(20)
+    fun `close waits only for an already committed native installation`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val closeRequested = CountDownLatch(1)
+        val calls = CopyOnWriteArrayList<String>()
+        val native = installationEngine(calls)
+        native.onSyscall = { _, _, flags, _, _, _, _ ->
+            val tsync = (flags as NativeArg.LongArg).value == 1L // SECCOMP_FILTER_FLAG_TSYNC
+            if (tsync) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            LinuxNative.SyscallResult.Success(if (tsync) 0L else 701L)
+        }
+        val manager = ProfilerDaemonManager(native, ProfilerTest.MockSocketManager(), ProfilerTest.MockProcessLauncher())
+        val service = ProfilerService(ProfilerRuntime({ manager }, RealProfilerInstaller(native, true), { native.process.gettid() }, native))
+        val session = service.openSession(processWide = true)
+        val callers = Executors.newFixedThreadPool(2)
+        val installation = callers.submit { runCatching { session.installOnCurrentThread() } }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val close = callers.submit {
+                closeRequested.countDown()
+                service.shutdown()
+            }
+            assertTrue(closeRequested.await(5, TimeUnit.SECONDS))
+            assertFailsWith<TimeoutException> { close.get(100, TimeUnit.MILLISECONDS) }
+            assertNotNull(session.state.threadFor(Tid(1234)), "Close must not linearize during a committed native operation")
+            assertEquals(0, calls.count { it == "close:702" })
+            release.countDown()
+            installation.get(5, TimeUnit.SECONDS)
+            close.get(5, TimeUnit.SECONDS)
+            assertNull(session.state.threadFor(Tid(1234)))
+            assertEquals(1, calls.count { it == "close:701" })
+            assertEquals(1, calls.count { it == "close:702" })
+        } finally {
+            release.countDown()
+            callers.shutdown()
+            assertTrue(callers.awaitTermination(5, TimeUnit.SECONDS))
+            service.shutdown()
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = [1, 2])
+    @Timeout(20)
+    fun `close during BPF allocation prevents subsequent native installation`(blockedAllocation: Int) {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val calls = CopyOnWriteArrayList<String>()
+        val native = installationEngine(calls, onBpfAllocation = { allocation ->
+            if (allocation == blockedAllocation) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+        })
+        native.onSyscall = { _, _, flags, _, _, _, _ ->
+            when ((flags as NativeArg.LongArg).value) {
+                8L -> { // SECCOMP_FILTER_FLAG_NEW_LISTENER
+                    calls.add("install-listener")
+                    LinuxNative.SyscallResult.Success(701L)
+                }
+                1L -> { // SECCOMP_FILTER_FLAG_TSYNC
+                    calls.add("install-tsync")
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+                else -> error("Unexpected installation flags: $flags")
+            }
+        }
+        val manager = ProfilerDaemonManager(native, ProfilerTest.MockSocketManager(), ProfilerTest.MockProcessLauncher())
+        val service = ProfilerService(ProfilerRuntime({ manager }, RealProfilerInstaller(native, true), { native.process.gettid() }, native))
+        val session = service.openSession(processWide = true)
+        val callers = Executors.newFixedThreadPool(2)
+        val installation = callers.submit { session.installOnCurrentThread() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            callers.submit { service.shutdown() }.get(1, TimeUnit.SECONDS)
+            val closedLogs = session.logs.toList()
+            release.countDown()
+            val failure = assertFailsWith<ExecutionException> { installation.get(5, TimeUnit.SECONDS) }
+            assertIs<IllegalStateException>(failure.cause)
+            assertEquals(0, calls.count { it == "install-tsync" }, "Close must prevent TSYNC after blocked allocation")
+            val committedListeners = if (blockedAllocation == 1) 0 else 1
+            assertEquals(committedListeners, calls.count { it == "install-listener" }, "Close must prevent a late NEW_LISTENER syscall")
+            assertEquals(committedListeners, calls.count { it == "socket" }, "No new listener may be published after close")
+            assertEquals(committedListeners, calls.count { it == "close:701" }, "Every acquired seccomp descriptor closes once")
+            assertEquals(committedListeners, calls.count { it == "close:702" }, "Every acquired socket closes once")
+            assertEquals(closedLogs, session.logs.toList(), "Closed session observations must remain unchanged")
+            assertNull(session.state.threadFor(Tid(1234)))
+        } finally {
+            release.countDown()
+            callers.shutdown()
+            assertTrue(callers.awaitTermination(5, TimeUnit.SECONDS))
+            service.shutdown()
+        }
+    }
+
     @Test
     @Timeout(20)
     fun `close during a published listener handshake prevents later tsync`() {
@@ -127,6 +234,27 @@ class ProfilerRuntimeTest {
                 Function2::class.java,
             ),
         )
+        assertNotNull(
+            SupervisorSeccompNotifInstaller::class.java.getMethod(
+                "install",
+                NativeEngine::class.java,
+                Boolean::class.javaPrimitiveType,
+                String::class.java,
+                BpfProgram::class.java,
+                Boolean::class.javaPrimitiveType,
+                Function1::class.java,
+                Function2::class.java,
+                Function0::class.java,
+                Function2::class.java,
+            ),
+        )
+        assertNotNull(
+            RealProfilerInstaller::class.java.getConstructor(
+                NativeEngine::class.java,
+                Boolean::class.javaPrimitiveType,
+                Function0::class.java,
+            ),
+        )
     }
 
     @Test
@@ -161,6 +289,7 @@ class ProfilerRuntimeTest {
         calls: MutableList<String>,
         beforeRead: () -> Unit = {},
         onPassThrough: () -> Unit = {},
+        onBpfAllocation: (Int) -> Unit = {},
     ): MockNativeEngine {
         val bytes = ByteArrayOutputStream()
         DataOutputStream(bytes).use { output ->
@@ -176,10 +305,13 @@ class ProfilerRuntimeTest {
         }
         val input = ByteArrayInputStream(bytes.toByteArray())
         val drained = CountDownLatch(1)
+        val allocations = AtomicInteger()
         val memory = object : MockNativeMemory() {
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 calls.add("bpf")
-                return super.newSockFProg(filters)
+                val program = super.newSockFProg(filters)
+                onBpfAllocation(allocations.incrementAndGet())
+                return program
             }
 
             override fun read(
