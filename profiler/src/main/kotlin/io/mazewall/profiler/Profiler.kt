@@ -112,6 +112,10 @@ object Profiler {
             }
         }
 
+        override fun shutdownNow(): List<Runnable> {
+            return delegate.shutdownNow()
+        }
+
         /** Compiles a [BillOfBehavior] from the events captured so far. */
         fun compileBillOfBehavior(): BillOfBehavior = session.compileBillOfBehavior()
     }
