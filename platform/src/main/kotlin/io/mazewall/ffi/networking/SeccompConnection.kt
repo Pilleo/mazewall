@@ -53,8 +53,10 @@ public sealed class SeccompConnection(
             try {
                 socketManager.close(socketFd)
                 socketClosedFlag.set(true)
+            } catch (failure: NativeCloseFailure) {
+                socketClosedFlag.set(true)
+                failures += failure
             } catch (failure: Exception) {
-                if (failure is NativeCloseFailure) socketClosedFlag.set(true)
                 failures += failure
             }
         }
@@ -63,8 +65,10 @@ public sealed class SeccompConnection(
             try {
                 socketManager.close(lFd)
                 listenerClosedFlag.set(true)
+            } catch (failure: NativeCloseFailure) {
+                listenerClosedFlag.set(true)
+                failures += failure
             } catch (failure: Exception) {
-                if (failure is NativeCloseFailure) listenerClosedFlag.set(true)
                 failures += failure
             }
         }
