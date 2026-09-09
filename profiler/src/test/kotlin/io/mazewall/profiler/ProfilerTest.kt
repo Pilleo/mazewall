@@ -129,17 +129,6 @@ class ProfilerTest {
         ): Boolean = true
     }
 
-    @AfterEach
-    fun tearDown() {
-        // Reset Profiler providers back to default
-        Profiler.daemonManagerProvider = { ProfilerDaemonManager.getInstance() }
-        Profiler.installerProvider = io.mazewall.profiler.engine.RealProfilerInstaller
-        Profiler.tidProvider = {
-            io.mazewall.LinuxNative.process
-            .gettid()
-        }
-    }
-
     @Test
     fun `test profile with mocked daemon and installer`() {
         val launcher = MockProcessLauncher()
@@ -169,15 +158,15 @@ class ProfilerTest {
             }
         }
 
-        Profiler.daemonManagerProvider = { mockDaemonManager }
-        Profiler.installerProvider = mockInstaller
         var tidRequests = 0
-        Profiler.tidProvider = {
+        val service = ProfilerService(
+            ProfilerRuntime({ mockDaemonManager }, mockInstaller, {
             tidRequests += 1
             Tid(4242)
-        }
+        }),
+        )
 
-        val result = Profiler.profile {
+        val result = service.profile {
             "success"
         }
 
@@ -193,9 +182,7 @@ class ProfilerTest {
         val socket = MockSocketManager()
         val manager = ProfilerDaemonManager(io.mazewall.LinuxNative, socket, launcher)
         val tid = Tid(4343)
-        Profiler.daemonManagerProvider = { manager }
-        Profiler.tidProvider = { tid }
-        Profiler.installerProvider = object : ProfilerInstallerInterface {
+        val installer = object : ProfilerInstallerInterface {
             override fun installProfilingFilterForThread(
                 socketPath: String,
                 policy: PolicyDefinition<*>,
@@ -213,11 +200,12 @@ class ProfilerTest {
             ) = Unit
         }
 
+        val service = ProfilerService(ProfilerRuntime({ manager }, installer, { tid }))
         assertThrows(IllegalStateException::class.java) {
-            Profiler.profile { throw IllegalStateException("workload failed") }
+            service.profile { throw IllegalStateException("workload failed") }
         }
 
-        assertTrue(!Profiler.threadRegistry.containsKey(tid))
+        assertEquals("next session", service.profile { "next session" }.value)
     }
 
     @Test
@@ -248,12 +236,11 @@ class ProfilerTest {
             }
         }
 
-        Profiler.daemonManagerProvider = { mockDaemonManager }
-        Profiler.installerProvider = mockInstaller
+        val service = ProfilerService(ProfilerRuntime({ mockDaemonManager }, mockInstaller, { Tid(73) }))
 
         val delegate = Executors.newSingleThreadExecutor()
         try {
-            val wrapper = Profiler.wrap(delegate, Policy.PURE_COMPUTE_UNSAFE)
+            val wrapper = service.wrap(delegate, true, Policy.PURE_COMPUTE_UNSAFE)
 
             val future1 = wrapper.submit(java.util.concurrent.Callable { "task1" })
             assertEquals("task1", future1.get())

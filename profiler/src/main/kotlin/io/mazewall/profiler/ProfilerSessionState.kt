@@ -19,4 +19,8 @@ internal class ProfilerSessionState {
     }
 
     fun threadFor(tid: Tid): Thread? = threads[tid]
+
+    fun clear() {
+        threads.clear()
+    }
 }

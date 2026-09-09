@@ -53,14 +53,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(300)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val readyLatch = CountDownLatch(1)
@@ -71,8 +72,6 @@ class ProfilerTraceListenerTest {
 
             // Verify close was called exactly once
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -99,14 +98,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(301)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val readyLatch = CountDownLatch(1)
@@ -125,8 +125,6 @@ class ProfilerTraceListenerTest {
 
             // Verify total close calls remains 1
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -189,14 +187,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(302)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
                 stackTracesMap = stackTracesMap,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             val eventCollectedLatch = CountDownLatch(1)
@@ -218,8 +217,6 @@ class ProfilerTraceListenerTest {
             assertEquals(1, accumulatedLogs.size)
             assertEquals("OPEN", accumulatedLogs[0].syscallName)
             assertEquals(listOf("hello"), accumulatedLogs[0].paths)
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -236,14 +233,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(303)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             // Concurrently invoke close() multiple times to ensure idempotency is strictly enforced
@@ -259,8 +257,6 @@ class ProfilerTraceListenerTest {
             listener.close()
 
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -276,14 +272,15 @@ class ProfilerTraceListenerTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(304)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
                 stackTracesMap = null,
                 pathCache = mutableMapOf(),
+                threadFor = { null },
+                native = mock,
             )
 
             // Trigger close across all possible sequences:
@@ -296,8 +293,6 @@ class ProfilerTraceListenerTest {
 
             // Verify the native file system close was called exactly once
             assertEquals(1, closeCount.get())
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 }

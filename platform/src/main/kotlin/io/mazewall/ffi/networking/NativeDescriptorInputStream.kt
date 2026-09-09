@@ -1,6 +1,7 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeMemory
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -14,8 +15,15 @@ import java.io.InterruptedIOException
 public open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
-    private val description: String = "native descriptor",
+    private val description: String,
+    private val memory: NativeMemory,
 ) : InputStream() {
+    public constructor(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
+        arena: NativeArena,
+        description: String = "native descriptor",
+    ) : this(socketFd, arena, description, LinuxNative.snapshot().memory)
+
     private val readBuf = arena.allocate(1)
     private val multiBuf = arena.allocate(BUFFER_SIZE.toLong())
 
@@ -45,7 +53,7 @@ public open class NativeDescriptorInputStream(
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during $description $operation")
             }
-            when (val result = LinuxNative.memory.read(socketFd, buffer, count)) {
+            when (val result = memory.read(socketFd, buffer, count)) {
                 is LinuxNative.SyscallResult.Success -> if (result.value <= 0) return -1 else return onRead(result.value)
                 is LinuxNative.SyscallResult.Error -> {
                     if (result.errno != EINTR) return -1
