@@ -19,6 +19,88 @@ import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
     @Test
+    fun `recorded eBPF augmentation retains path failures in the final result and snapshot`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "Yama denied")
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(
+            Tid(7),
+            "OPEN",
+            emptyList(),
+            PathResolution.Failed(listOf(failure)),
+        )
+        val observations = listOf(ProfileObservation.fromSyscallEvent(event))
+        val raw = ProfilingResult("observed", BobCompiler.compileObservations(observations), emptyMap(), pathCoverage(observations), observations)
+        val log = directory.resolve("recorded.log")
+        java.nio.file.Files
+            .writeString(log, "kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/sidecar\n")
+        MazewallProfiler.open(ProfileOptions(ProfileStrategy.USER_NOTIF, captureStacks = false, ebpfEventLog = log)).use { profiler ->
+            // Exercise the real final-result augmentation without installing a USER_NOTIF filter.
+            val attach = MazewallProfiler::class.java.getDeclaredMethod("attachCoverage", ProfilingResult::class.java)
+            attach.isAccessible = true
+            val result = attach.invoke(profiler, raw) as ProfilingResult<*>
+            assertEquals("observed", result.value)
+            assertTrue(result.behavior.opens.contains("/tmp/sidecar"))
+            assertTrue(result.coverage.warnings.any { it.contains("recorded eBPF") })
+            assertFalse(result.coverage.complete)
+            assertEquals(listOf(failure), result.coverage.pathFailures)
+            assertEquals(listOf(failure), profiler.snapshot().coverage.pathFailures)
+            assertEquals(result.coverage, profiler.snapshot().coverage)
+        }
+    }
+
+    @Test
+    fun `mutation audit augmentation retains path failures in the final public result`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPENAT", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val raw = ProfilingResult("observed", BillOfBehavior(), emptyMap(), pathCoverage(listOf(observation)), listOf(observation))
+        val result = raw.withCoverageAugmentation(recordedLog = false, untrappedMutations = listOf("truncate(76)"))
+        assertEquals("observed", result.value)
+        assertEquals(listOf(observation), result.observations)
+        assertTrue(result.coverage.warnings.any { it.contains("truncate(76)") })
+        assertFalse(result.coverage.complete)
+        assertEquals(listOf(failure), result.coverage.pathFailures)
+    }
+
+    @Test
+    fun `policy rejection warning augmentation preserves the original typed path failures`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val coverage = pathCoverage(listOf(observation))
+        val behaviors = listOf(
+            BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
+            BillOfBehavior(execs = setOf("/bin/tool")),
+            BillOfBehavior(ioUringOps = setOf("IORING_OP_SENDMSG")),
+        )
+        val rejected = behaviors.map { behavior ->
+            assertFailsWith<IncompleteProfileException> { ProfilingResult(Unit, behavior, emptyMap(), coverage).toPolicy() }.coverage
+        }
+        assertEquals(List(3) { listOf(failure) }, rejected.map { it.pathFailures })
+    }
+
+    @Test
+    fun `DSL rejection retains supplied diagnostics even when caller overrides completeness`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.Missing, "missing operand")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val coverage = pathCoverage(listOf(observation)).copy(complete = true)
+        val behaviors = listOf(
+            BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
+            BillOfBehavior(execs = setOf("/bin/tool")),
+            BillOfBehavior(ioUringOps = setOf("IORING_OP_SENDMSG")),
+        )
+        val rejected = behaviors.map { behavior ->
+            assertFailsWith<IncompleteProfileException> { ProfilingResult(Unit, behavior, emptyMap(), coverage).toDsl() }.coverage
+        }
+        assertEquals(List(3) { listOf(failure) }, rejected.map { it.pathFailures })
+    }
+
+    @Test
     fun `coverage retains its data class contract and immutable diagnostics when merging prior evidence`() {
         assertTrue(ProfilingCoverage::class.isData)
         val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")

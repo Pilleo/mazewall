@@ -89,7 +89,7 @@ class BillOfBehavior(
         val evidence = coverage ?: ProfilingCoverage.absent()
         if (connects.isNotEmpty()) {
             val withConnects =
-                evidence.copy(
+                evidence.withWarnings(
                     complete = false,
                     warnings = evidence.warnings +
                         "connect destinations were observed but cannot be enforced; " +
@@ -101,7 +101,7 @@ class BillOfBehavior(
         }
         if (execs.isNotEmpty()) {
             val withExecs =
-                evidence.copy(
+                evidence.withWarnings(
                     complete = false,
                     warnings = evidence.warnings +
                         "exec destinations were observed but cannot be enforced; " +
@@ -116,7 +116,7 @@ class BillOfBehavior(
         }
         if (unenforceableIoUring.isNotEmpty()) {
             val withUring =
-                evidence.copy(
+                evidence.withWarnings(
                     complete = false,
                     warnings = evidence.warnings +
                         "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
@@ -167,7 +167,7 @@ class BillOfBehavior(
         requireComplete(coverage, allowIncomplete)
         if (connects.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
-                ProfilingCoverage.absent().copy(
+                coverage.withWarnings(
                     complete = false,
                     warnings = listOf(
                         "connect destinations were observed but cannot be enforced; " +
@@ -178,7 +178,7 @@ class BillOfBehavior(
         }
         if (execs.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
-                ProfilingCoverage.absent().copy(
+                coverage.withWarnings(
                     complete = false,
                     warnings = listOf(
                         "exec destinations were observed but cannot be enforced; " +
@@ -192,7 +192,7 @@ class BillOfBehavior(
         }
         if (unenforceableIoUring.isNotEmpty() && !allowIncomplete) {
             throw IncompleteProfileException(
-                coverage.copy(
+                coverage.withWarnings(
                     complete = false,
                     warnings = coverage.warnings +
                         "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",

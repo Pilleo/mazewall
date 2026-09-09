@@ -10,8 +10,17 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.profiler.EbpfLoad
+import io.mazewall.profiler.PathResolutionQuality
+import io.mazewall.profiler.ProfileEnvironment
+import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.ProfileStrategy
+import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.StackAttribution
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.util.concurrent.CountDownLatch
@@ -34,10 +43,40 @@ class ProfilerTraceListenerTest {
                 listOf("/tmp/a"),
                 listOf(
                     io.mazewall.profiler.engine
-                    .PathResolutionFailure(0, io.mazewall.profiler.engine.PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9"),
+                    .PathResolutionFailure(0, io.mazewall.profiler.engine.PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes"),
                 ),
             ),
         )
+        val collected = collectPathEvidence(resolutions)
+        assertEquals(2, collected.acknowledgements)
+        assertEquals(resolutions, collected.logs.map { it.pathResolution })
+        assertEquals(2, collected.stacks.size, "Distinct failures must survive the listener's stack-profile map")
+        val coverage = listenerCoverage(collected.stacks.keys.map { ProfileObservation.fromTraceEvent(it) })
+        assertEquals(PathResolutionQuality.MIXED, coverage.pathResolution)
+        assertEquals(resolutions.flatMap { it.failures }, coverage.pathFailures)
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `resolved path cache preserves per-operand ordering`() {
+        val paths = listOf(listOf("/tmp/a", "/tmp/b"), listOf("/tmp/b", "/tmp/a"))
+        val collected = collectPathEvidence(
+            paths.map {
+            io.mazewall.profiler.engine.PathResolution
+            .Resolved(it)
+        },
+        )
+        assertEquals(2, collected.acknowledgements)
+        assertEquals(paths, collected.logs.map { it.paths })
+    }
+
+    private data class CollectedPathEvidence(
+        val logs: List<TraceEvent>,
+        val stacks: Map<TraceEvent, MutableList<Array<StackTraceElement>>>,
+        val acknowledgements: Int,
+    )
+
+    private fun collectPathEvidence(resolutions: List<io.mazewall.profiler.engine.PathResolution>): CollectedPathEvidence {
         val bytes = byteArrayOf(0xAC.toByte()) +
             resolutions
                 .flatMap { resolution ->
@@ -74,10 +113,11 @@ class ProfilerTraceListenerTest {
         },
         )
         val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        val stacks = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
         ProfilerTraceListener(
             socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(308),
             accumulatedLogs = logs,
-            stackTracesMap = null,
+            stackTracesMap = stacks,
             pathCache = mutableMapOf(),
             threadFor = { null },
             native = native,
@@ -86,9 +126,125 @@ class ProfilerTraceListenerTest {
             org.junit.jupiter.api.Assertions
                 .assertTrue(eof.await(3, TimeUnit.SECONDS))
         }
-        assertEquals(2, acknowledgements.get())
-        assertEquals(resolutions, logs.map { it.pathResolution })
+        return CollectedPathEvidence(logs, stacks, acknowledgements.get())
     }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `unsupported event version ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent(version = 99))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid resolution tag ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent(tag = 99))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `malformed diagnostic ACKs before rejection during graceful close`() {
+        assertRejectedEventSettled(malformedEvent())
+    }
+
+    private fun malformedEvent(
+        version: Int = 1,
+        tag: Int = 3,
+    ): ByteArray {
+        val bytes = java.io.ByteArrayOutputStream()
+        java.io.DataOutputStream(bytes).use { output ->
+            output.writeInt(7)
+            output.writeInt(version)
+            output.writeInt(4)
+            output.writeBytes("OPEN")
+            output.writeInt(0)
+            output.writeInt(0)
+            output.writeByte(tag)
+            output.writeInt(1)
+            output.writeInt(0)
+            output.writeByte(0)
+            output.writeInt(1)
+            output.writeByte('x'.code)
+            output.writeByte(2) // Neither absent nor present: reject this diagnostic.
+        }
+        return bytes.toByteArray()
+    }
+
+    private fun assertRejectedEventSettled(frame: ByteArray) {
+        val timeline = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val drainRequested = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val input = java.io.ByteArrayInputStream(frame)
+        val native = MockNativeEngine(
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    timeline.add("close")
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val chunk = if (reads.getAndIncrement() == 0) {
+                        byteArrayOf(0xAC.toByte())
+                    } else {
+                        check(drainRequested.await(3, TimeUnit.SECONDS))
+                        input.readNBytes(count.toInt())
+                    }
+                    chunk.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(chunk.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val command = buf.readByte(0L).toInt() and 0xff
+                    timeline.add("write:$command")
+                    if (command == 0x54) drainRequested.countDown()
+                    return LinuxNative.SyscallResult.Success(count)
+                }
+            },
+        )
+        val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        val listener = ProfilerTraceListener(
+            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(309),
+            logs,
+            null,
+            mutableMapOf(),
+            { null },
+            native,
+        )
+        val ready = CountDownLatch(1)
+        listener.start(ready)
+        assertTrue(ready.await(2, TimeUnit.SECONDS))
+        listener.close()
+        assertEquals(listOf("write:84", "write:172", "close"), timeline)
+        assertTrue(logs.isEmpty(), "Malformed evidence must not become an observation")
+        assertFalse(listener.drainComplete, "A protocol rejection is not a completed drain")
+        assertEquals(1, listener.droppedEvents)
+        assertFalse(listenerCoverage(emptyList(), listener.droppedEvents, listener.drainComplete).complete)
+    }
+
+    private fun listenerCoverage(
+        observations: List<ProfileObservation>,
+        dropped: Int = 0,
+        drained: Boolean = true,
+    ): ProfilingCoverage =
+        ProfilingCoverage.infer(
+        ProfileStrategy.USER_NOTIF,
+            "listener evidence",
+            false,
+            observations,
+            StackAttribution.CAPTURED,
+        dropped,
+            drained,
+            ProfileEnvironment("test", EbpfLoad.Denied("test")),
+    )
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)

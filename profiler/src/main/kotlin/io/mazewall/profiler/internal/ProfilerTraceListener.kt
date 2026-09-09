@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.Tid
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+import io.mazewall.profiler.engine.PathResolution
 import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import io.mazewall.profiler.throwIfIncomplete
@@ -242,13 +243,9 @@ internal class ProfilerTraceListener(
                 }
             }
 
-            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
-                drainComplete = true
-            } else {
-                drainComplete = false
-                if (!collectorJoined) {
-                    droppedEvents += 1
-                }
+            drainComplete = gracefulDrainRequested.get() && workerJoined && collectorJoined && droppedEvents == 0
+            if (!collectorJoined) {
+                droppedEvents += 1
             }
         } finally {
             // Step 3: Close the socket FD only after draining in an idempotent way.
@@ -342,6 +339,10 @@ internal class ProfilerTraceListener(
         state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
         if (decoded is TraceEventDecodeResult.ProtocolViolation) {
+            // A complete TID header identifies an outstanding notification. Settle it before
+            // rejecting the frame, just as processEvent settles accepted events in its finally.
+            droppedEvents += 1
+            sendAck()
             throw java.io.IOException(decoded.reason)
         }
         decoded as TraceEventDecodeResult.Event
@@ -375,7 +376,8 @@ internal class ProfilerTraceListener(
 
     private fun processAndQueueEvent(event: TraceEvent) {
          System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.pathResolution is io.mazewall.profiler.engine.PathResolution.Resolved && isDuplicate(event)) {
+         val resolution = event.pathResolution
+         if (resolution is PathResolution.Resolved && isDuplicate(event.syscallName, resolution)) {
              System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
              return
          }
@@ -388,8 +390,16 @@ internal class ProfilerTraceListener(
         sendCommand(PROTOCOL_ACK_BYTE)
     }
 
-    private fun isDuplicate(event: TraceEvent): Boolean {
-        val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"
+    private fun isDuplicate(
+        syscallName: String,
+        resolution: PathResolution.Resolved,
+    ): Boolean {
+        // Keep the compatibility string cache, but encode typed paths in operand order with
+        // lengths: delimiters inside a path cannot alias another operand tuple.
+        val cacheKey = buildString {
+            append("resolved:").append(syscallName.length).append(':').append(syscallName)
+            for (path in resolution.paths) append(':').append(path.length).append(':').append(path)
+        }
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
         return if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {

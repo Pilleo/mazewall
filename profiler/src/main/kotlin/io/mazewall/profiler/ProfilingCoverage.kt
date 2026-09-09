@@ -91,6 +91,13 @@ public data class ProfilingCoverage(
 
     private fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(warnings = PathDiagnostics(warnings, failures))
 
+    /** Internal warning augmentation preserves evidence independently of the new list projection. */
+    internal fun withWarnings(
+        warnings: List<String>,
+        complete: Boolean = this.complete,
+        drainComplete: Boolean = this.drainComplete,
+    ): ProfilingCoverage = copy(complete = complete, drainComplete = drainComplete, warnings = PathDiagnostics(warnings, pathFailures))
+
     public fun evidence(): ProfileEvidence =
         if (complete) {
             ProfileEvidence.Complete

@@ -1,8 +1,10 @@
 package io.mazewall.profiler.collector
 
 import io.mazewall.profiler.IoUringVisibility
+import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
 import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.engine.PathResolution
 
 /** Drain of one collector. Sessions merge drains before [io.mazewall.profiler.compiler.BobCompiler]. */
 public data class CollectorDrain(
@@ -28,7 +30,7 @@ public interface ProfileCollector : AutoCloseable {
 /** Merge collector drains. Later sources win on identical correlation+payload; dropped counts add. */
 public object ObservationMerger {
     public fun merge(drains: List<CollectorDrain>): CollectorDrain {
-        val seen = LinkedHashSet<String>()
+        val seen = LinkedHashSet<ObservationKey>()
         val observations = mutableListOf<ProfileObservation>()
         var dropped = 0
         var drainComplete = true
@@ -47,16 +49,22 @@ public object ObservationMerger {
         return CollectorDrain(observations, dropped, drainComplete, ioUring)
     }
 
-    private fun keyOf(obs: ProfileObservation): String {
-        val corr = "${obs.correlation.tgid}:${obs.correlation.tid.value}:${obs.correlation.ktimeNs}"
-        return when (obs) {
+    private data class ObservationKey(
+        val correlation: ObservationCorrelation,
+        val payload: List<Any?>,
+        val pathResolution: PathResolution,
+    )
+
+    private fun keyOf(obs: ProfileObservation): ObservationKey {
+        val payload = when (obs) {
             is ProfileObservation.Syscall ->
-                "$corr|syscall|${obs.name}|${obs.paths}|${obs.openFlags}"
+                listOf("syscall", obs.name, obs.paths, obs.openFlags)
             is ProfileObservation.IoUring ->
-                "$corr|uring|${obs.opcode}|${obs.paths}"
+                listOf("uring", obs.opcode, obs.paths)
             is ProfileObservation.Connect ->
-                "$corr|connect|${obs.endpoint}"
+                listOf("connect", obs.endpoint)
         }
+        return ObservationKey(obs.correlation, payload, obs.pathResolution)
     }
 
     private fun rank(

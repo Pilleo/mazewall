@@ -165,7 +165,7 @@ public sealed class TraceEvent {
             if (args != other.args) return false
             if (paths != other.paths) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
@@ -173,6 +173,7 @@ public sealed class TraceEvent {
             result = 31 * result + args.hashCode()
             result = 31 * result + paths.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }
@@ -220,7 +221,7 @@ public sealed class TraceEvent {
             if (flags != other.flags) return false
             if (mode != other.mode) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
@@ -229,6 +230,7 @@ public sealed class TraceEvent {
             result = 31 * result + flags.hashCode()
             result = 31 * result + mode
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }
@@ -266,13 +268,14 @@ public sealed class TraceEvent {
             if (syscallName != other.syscallName) return false
             if (path != other.path) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
             result = 31 * result + path.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }
@@ -333,7 +336,7 @@ public sealed class TraceEvent {
             if (fileDescriptor != other.fileDescriptor) return false
             if (offset != other.offset) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
@@ -344,6 +347,7 @@ public sealed class TraceEvent {
             result = 31 * result + fileDescriptor.hashCode()
             result = 31 * result + offset.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }
@@ -393,7 +397,7 @@ public sealed class TraceEvent {
             if (type != other.type) return false
             if (protocol != other.protocol) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
@@ -401,6 +405,7 @@ public sealed class TraceEvent {
             result = 31 * result + type
             result = 31 * result + protocol
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }
@@ -438,13 +443,14 @@ public sealed class TraceEvent {
             if (syscallName != other.syscallName) return false
             if (paths != other.paths) return false
             if (stackTrace != other.stackTrace) return false
-            return true
+            return pathResolution == other.pathResolution
         }
 
         override fun hashCode(): Int {
             var result = syscallName.hashCode()
             result = 31 * result + paths.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
             return result
         }
     }

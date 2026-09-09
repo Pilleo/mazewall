@@ -125,61 +125,33 @@ public class MazewallProfiler private constructor(
             drainComplete = if (options.ebpfEventLog != null) false else merged.drainComplete,
             environment = environment,
         )
-        val coverage =
-            inferred
-                .retainStricterPathResolution(raw.coverage)
-                .let { kept ->
-                    if (options.ebpfEventLog == null) {
-                        kept
-                    } else {
-                        kept.copy(
-                            complete = false,
-                            drainComplete = false,
-                            warnings = kept.warnings +
-                                "recorded eBPF log is not contemporaneous with this USER_NOTIF run",
-                        )
-                    }
-                }
-                // issue-20260821-113000: mutation syscalls invisible to USER_NOTIF must
-                // decertify coverage rather than silently pass.
-                .let { kept ->
-                    // Audit the installed DEFAULT floor (PURE_COMPUTE_UNSAFE compiled in
-                    // profiling mode). Iterative path additions do not alter the syscall set;
-                    // custom bases with narrower floors are the operator's responsibility and
-                    // will surface as untrapped here only if they also drop preset blocks.
-                    val program = io.mazewall.BpfFilter
-                        .build(
-                        Arch.current(),
-                        io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition,
-                        profilingMode = true,
-                    ).instructions
-                    val untrapped = io.mazewall.profiler.compiler.MutationTrapAudit.untrapped(
-                        program,
-                        Arch.current(),
-                    )
-                    if (untrapped.isEmpty()) {
-                        kept
-                    } else {
-                        kept.copy(
-                            complete = false,
-                            warnings = kept.warnings +
-                                "filesystem mutation syscalls were not traced: ${untrapped.joinToString()}",
-                        )
-                    }
-                }
-        val result = raw.copy(
+        val result = raw
+            .copy(
             behavior = behavior,
-            coverage = coverage,
+            coverage = inferred.retainStricterPathResolution(raw.coverage),
             observations = liveObservations + recordedObservations,
-        )
+        ).withCoverageAugmentation(options.ebpfEventLog != null, untrappedMutations())
         lastSnapshot = ProfilingResult(
             Unit,
             result.behavior,
             result.stackProfile,
-            coverage,
+            result.coverage,
             result.observations,
         )
         return result
+    }
+
+    private fun untrappedMutations(): List<String> {
+        // Audit the installed DEFAULT floor. Iterative path additions do not alter its syscall
+        // set; an untrapped mutation must decertify coverage (issue-20260821-113000).
+        val program = BpfFilter
+            .build(
+            Arch.current(),
+            io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition,
+            profilingMode = true,
+        ).instructions
+        return io.mazewall.profiler.compiler.MutationTrapAudit
+            .untrapped(program, Arch.current())
     }
 
     private fun emptyCoverage(): ProfilingCoverage =

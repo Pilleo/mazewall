@@ -9,6 +9,51 @@ import kotlin.test.assertNull
 
 class TraceEventTest {
     @Test
+    fun `behavioral equality preserves distinct failure reasons while ignoring tid`() {
+        for ((name, paths) in listOf("OPEN" to emptyList(), "RENAME" to listOf("/tmp/a"))) {
+            val denied = evidenceEvent(7, name, paths, PathResolutionFailure.Reason.VmReadDenied)
+            val truncated = evidenceEvent(7, name, paths, PathResolutionFailure.Reason.Truncated)
+            val otherThread = evidenceEvent(8, name, paths, PathResolutionFailure.Reason.VmReadDenied)
+            assertEquals(denied, otherThread)
+            assertEquals(denied.hashCode(), otherThread.hashCode())
+            assertEquals(2, setOf(denied, truncated, otherThread).size, name)
+        }
+    }
+
+    @Test
+    fun `canonical behavioral keys retain typed evidence for every event variant`() {
+        val cases = listOf(
+            "OPEN" to emptyList(),
+            "RENAME" to listOf("/tmp/a"),
+            "OPENAT" to listOf("/tmp/a"),
+            "EXECVE" to listOf("/tmp/a"),
+            "MMAP" to emptyList(),
+            "SOCKET" to emptyList(),
+        )
+        for ((name, paths) in cases) {
+            val denied = evidenceEvent(7, name, paths, PathResolutionFailure.Reason.VmReadDenied)
+            val truncated = evidenceEvent(7, name, paths, PathResolutionFailure.Reason.Truncated)
+            val otherThread = evidenceEvent(8, name, paths, PathResolutionFailure.Reason.VmReadDenied)
+            assertEquals(denied.behavioralKey(), otherThread.behavioralKey())
+            assertNotEquals(denied.behavioralKey(), truncated.behavioralKey(), name)
+            assertNotEquals(denied, truncated, name)
+        }
+    }
+
+    private fun evidenceEvent(
+        tid: Int,
+        name: String,
+        paths: List<String>,
+        reason: PathResolutionFailure.Reason,
+    ): TraceEvent {
+        val failures = listOf(PathResolutionFailure(0, reason, "operand inspection"))
+        val resolution = if (paths.isEmpty()) PathResolution.Failed(failures) else PathResolution.Partial(paths, failures)
+        return TraceEvent.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(tid), name, List(6) { 0L }, resolution),
+        )
+    }
+
+    @Test
     fun `test trace events equality ignores tid`() {
         val event1 = TraceEvent(1001, "OPENAT", longArrayOf(1, 2, 3), listOf("/etc/passwd"))
         val event2 = TraceEvent(1002, "OPENAT", longArrayOf(1, 2, 3), listOf("/etc/passwd"))
