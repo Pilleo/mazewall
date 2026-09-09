@@ -40,10 +40,15 @@ public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     private val installations = ThreadLocal.withInitial { mutableListOf<SupervisorInstallationLifetime>() }
 
+    internal fun requireReusableInstallations() {
+        installations.get().forEach { it.requireReusable() }
+    }
+
     @Suppress("TooGenericExceptionCaught") // rollback releases acquired leases, then preserves the original failure
     internal fun acquireTaskSession(scopingPolicy: StacktraceScopingPolicy): SupervisorSession {
         val tid = LinuxNative.process.gettid()
         val owners = installations.get()
+        owners.forEach { it.requireReusable() }
         check(owners.all { it.scopingPolicy === scopingPolicy }) { "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread" }
         val runtimes = owners.map { it.runtime }
         check(runtimes.isNotEmpty()) { "Supervised filter has no installation runtime on this thread" }
@@ -65,6 +70,7 @@ public object SupervisorInstaller {
         scopingPolicy: StacktraceScopingPolicy,
         onFilterApplied: () -> Unit = {},
     ): SupervisorSession {
+        requireReusableInstallations()
         ValidationListenerPreload.ensureLoaded()
         val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
         val arch = Arch.current()
@@ -107,11 +113,21 @@ public object SupervisorInstaller {
             ownedInstallations.add(lifetime)
             return session
         } catch (expectedInstallFailure: Exception) {
-            if (applied) ownedInstallations.add(lifetime) else lifetime.close()
+            if (applied) {
+                ownedInstallations.add(lifetime)
+                lifetime.fail(expectedInstallFailure)
+            } else {
+                lifetime.close()
+            }
             session.close()
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
-            if (applied) ownedInstallations.add(lifetime) else lifetime.close()
+            if (applied) {
+                ownedInstallations.add(lifetime)
+                lifetime.fail(expectedInstallError)
+            } else {
+                lifetime.close()
+            }
             session.close()
             throw expectedInstallError
         }

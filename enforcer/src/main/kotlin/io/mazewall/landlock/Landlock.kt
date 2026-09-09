@@ -258,8 +258,9 @@ object Landlock {
     internal fun tryApplyRuleset(
         policy: PolicyDefinition<*>,
         processWide: Boolean = false,
+        onRestrictionApplied: () -> Unit = {},
     ): LandlockApplyResult {
-        val session = LandlockSession(policy, processWide)
+        val session = LandlockSession(policy, processWide, onRestrictionApplied)
         return session.tryApplyRuleset()
     }
 
@@ -517,6 +518,7 @@ object Landlock {
     internal fun tryEnforceRuleset(
         ruleset: LandlockRuleset<RulesetState.Building>,
         processWide: Boolean = false,
+        onRestrictionApplied: () -> Unit = {},
     ): LandlockRestrictOutcome {
         val prctlResult = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
         if (prctlResult is LinuxNative.SyscallResult.Error) {
@@ -535,8 +537,11 @@ object Landlock {
                 .IntArg(0),
         )
         return when (restrictResult) {
-            is LinuxNative.SyscallResult.Success ->
+            is LinuxNative.SyscallResult.Success -> {
+                // Publish before outcome allocation or any ruleset/arena cleanup can fail.
+                onRestrictionApplied()
                 LandlockRestrictOutcome.Ok(LandlockRuleset(ruleset.fd))
+            }
             is LinuxNative.SyscallResult.Error -> LandlockRestrictOutcome.Err(restrictResult.errno)
         }
     }

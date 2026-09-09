@@ -568,7 +568,8 @@ The following table clarifies which effects in mazewall are reversible and which
 Process-wide Seccomp planning reads only `processState`; a restriction on the calling
 thread cannot satisfy a policy requested for every peer thread. Thread planning uses
 the combined state. Each successful native stage publishes immediately: Landlock
-before diagnostic emission, Seccomp before verification or supervisor readiness can
+at successful `restrict_self`, before outcome allocation, ruleset/arena cleanup, or
+diagnostic emission; Seccomp before verification or supervisor readiness can
 fail. The supervised coordinator uses a precomputed publication closure targeting
 the installing thread's holder; it never publishes to its own ThreadLocal.
 No wrapper or failure handler restores a previous policy snapshot.
@@ -583,6 +584,11 @@ Repeated and nested supervised tasks acquire idempotent registration leases in t
 same installation runtime. They do not create a compatibility runtime or retire the
 validation listener. A different scoping-policy object is rejected on an already
 supervised platform thread: use a new thread for a different authorization contract.
+If native filter installation succeeds but connection or descriptor transfer fails,
+the installation retains irreversible metadata and a failed owner record. Its runtime
+is closed; every subsequent contained task on that thread is rejected before policy
+planning, even when the next policy does not request supervision. Operator fallback
+cannot convert a permanently failed listener into a usable installation.
 Raw executor ownership stays with the caller; a dedicated daemon lifetime observer
 joins each installing platform thread, without finalizer/cleaner inference. Retirement
 requests stop, and the listener completes socket and arena cleanup in its own reactor.

@@ -31,5 +31,12 @@ Changing the authorization-policy object on the same permanent filter is explici
 rejected and tested. Full enforcer and fresh-JVM SupervisorProxy gates passed.
 Migration guidance, corrected wrapper KDoc, and diagrams accompany Task 3.
 
+**Review follow-up:** Native installation followed by connect/sendmsg failure keeps
+the filter metadata but records a failed installation owner and closes its runtime.
+Further contained tasks on that worker are rejected before policy planning or another
+handshake, even if they request no supervised syscalls. Fresh-JVM tests use real
+NEW_LISTENER installation with injected transport failures; both demonstrated task
+execution on retry before the fix and now reject retry without executing user code.
+
 ---
 <!-- id: issue-20260909-172033-632-bind-supervisor-runtime-to-permanent-installation-  file: issue-20260909-172033-632-bind-supervisor-runtime-to-permanent-installation-.md -->

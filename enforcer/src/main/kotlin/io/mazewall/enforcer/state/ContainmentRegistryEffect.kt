@@ -30,6 +30,18 @@ internal sealed interface ContainmentRegistryEffect {
 }
 
 internal object ContainmentRegistryEffectInterpreter {
+    /** Allocate the new snapshot before restrict_self makes the restriction irreversible. */
+    fun prepare(effect: ContainmentRegistryEffect.LandlockApplied): () -> Unit =
+        if (effect.processWide) {
+            val next = ContainmentStateRegistry.processState.withLandlockPolicy(effect.policy)
+            val publish: () -> Unit = { ContainmentStateRegistry.processState = next }
+            publish
+        } else {
+            ContainmentStateRegistry.captureThreadPublication(
+                ContainmentStateRegistry.threadState.withLandlockPolicy(effect.policy),
+            )
+        }
+
     /** Precompute thread publication before irreversible native installation. */
     fun prepare(effect: ContainmentRegistryEffect.SeccompInstalled): () -> Unit =
         if (effect.processWide) {

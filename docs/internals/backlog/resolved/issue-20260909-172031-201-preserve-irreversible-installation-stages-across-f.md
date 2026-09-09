@@ -31,5 +31,11 @@ installation's progress, wrong-thread publication, and failed NEW_LISTENER propa
 Focused tests passed after behavioral reds; full enforcer gate and design/diagram
 evidence accompany architecture repair Task 3.
 
+**Review follow-up:** Landlock publication now runs at successful `restrict_self`,
+before result allocation and ruleset/arena cleanup. Exact wrapper-worker tests inject
+ordinary and fatal ruleset-close exceptions after restriction and verify the retained
+policy and true Landlock progress; fatal identity remains unchanged. Both tests were
+red before the callback was moved and passed afterward.
+
 ---
 <!-- id: issue-20260909-172031-201-preserve-irreversible-installation-stages-across-f  file: issue-20260909-172031-201-preserve-irreversible-installation-stages-across-f.md -->

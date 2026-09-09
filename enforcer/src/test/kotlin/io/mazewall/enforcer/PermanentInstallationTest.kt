@@ -13,6 +13,51 @@ import java.util.concurrent.Executors
 import kotlin.test.*
 
 class PermanentInstallationTest {
+    @Test fun `wrapper preserves Landlock when ruleset close throws after restriction`() {
+        assertLandlockCleanupFailure(IllegalStateException("ruleset close failed"))
+    }
+
+    @Test fun `wrapper preserves Landlock and fatal identity when ruleset close throws`() {
+        assertLandlockCleanupFailure(AssertionError("fatal ruleset close failed"))
+    }
+
+    private fun assertLandlockCleanupFailure(cleanupFailure: Throwable) {
+        Platform.setProvider(MockPlatformProvider())
+        var restricted = false
+        val native = MockNativeEngine(
+            fileSystem = MockNativeFileSystem().apply {
+            onClose = { fd ->
+                if (fd.value == 42 && restricted) throw cleanupFailure
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        },
+        ).apply {
+            onSyscall = { nr, _, _, _, _, _, _ ->
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) restricted = true
+                LinuxNative.SyscallResult.Success(42L)
+            }
+        }
+        LinuxNative.setEngine(native)
+        Executors.newSingleThreadExecutor().use { worker ->
+            val wrapped = ContainedExecutors.wrap(worker, Policy.builder().allowFsRead("/tmp").build())
+            val failure = assertFailsWith<ExecutionException> { wrapped.submit {}.get() }
+            val partial = if (cleanupFailure is Error) {
+                assertSame(cleanupFailure, failure.cause)
+                assertIs<io.mazewall.enforcer.api.PartialInstallationException>(cleanupFailure.suppressed.single())
+            } else {
+                assertIs<io.mazewall.enforcer.api.PartialInstallationException>(failure.cause).also {
+                    assertSame(cleanupFailure, it.cause)
+                }
+            }
+            assertTrue(restricted)
+            assertTrue(partial.progress.landlockApplied)
+            assertFalse(partial.progress.seccompApplied)
+            val state = worker.submit<ContainerState> { ContainmentStateRegistry.threadState }.get()
+            assertNotNull(state.landlockPolicy)
+            assertEquals(0, state.filterDepth)
+        }
+    }
+
     @Test fun `failed attempt never reports another installation as its own progress`() {
         Platform.setProvider(MockPlatformProvider())
         val engine = MockNativeEngine(

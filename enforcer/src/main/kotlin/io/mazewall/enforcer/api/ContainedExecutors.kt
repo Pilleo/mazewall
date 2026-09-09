@@ -310,6 +310,9 @@ object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy,
     ): io.mazewall.InstallationReceipt {
+        // A failed permanent listener cannot be repaired by policy planning or operator bypass.
+        io.mazewall.enforcer.supervisor.SupervisorInstaller
+            .requireReusableInstallations()
         val attempt = InstallationAttempt(processWide)
         try {
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
@@ -504,12 +507,15 @@ object ContainedExecutors {
                 landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
 
             if (isDifferent) {
-                when (val applied = Landlock.tryApplyRuleset(policy, processWide)) {
+                val publish = ContainmentRegistryEffectInterpreter.prepare(
+                    ContainmentRegistryEffect.LandlockApplied(processWide, policy),
+                )
+                val applied = Landlock.tryApplyRuleset(policy, processWide) {
+                    attempt.landlockApplied = true
+                    publish()
+                }
+                when (applied) {
                     is io.mazewall.landlock.LandlockApplyResult.Applied -> {
-                        attempt.landlockApplied = true
-                        ContainmentRegistryEffectInterpreter.apply(
-                            ContainmentRegistryEffect.LandlockApplied(processWide, policy),
-                        )
                         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
                             io.mazewall.enforcer.diagnostics.MazewallEvents.LandlockApplied(
                                 processWide = processWide,

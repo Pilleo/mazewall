@@ -246,7 +246,10 @@ internal sealed interface LandlockLifecycle {
     ) : LandlockLifecycle {
         override val diagnosticState: LandlockState = LandlockState.Enforcing(ruleset.fd)
 
-        fun tryRestrictSelf(processWide: Boolean = false): LandlockRestrictOutcome = Landlock.tryEnforceRuleset(ruleset, processWide)
+        fun tryRestrictSelf(
+            processWide: Boolean = false,
+            onRestrictionApplied: () -> Unit = {},
+        ): LandlockRestrictOutcome = Landlock.tryEnforceRuleset(ruleset, processWide, onRestrictionApplied)
 
         fun restrictSelf(processWide: Boolean = false): Restricted {
             Landlock.enforceRuleset(ruleset, processWide)
@@ -263,6 +266,7 @@ internal sealed interface LandlockLifecycle {
 internal class LandlockSession(
     private val policy: PolicyDefinition<*>? = null,
     private val processWide: Boolean = false,
+    private val onRestrictionApplied: () -> Unit = {},
 ) {
     var state: LandlockState = LandlockState.Uninitialized
         private set
@@ -339,7 +343,7 @@ internal class LandlockSession(
         val added = LandlockLifecycle.RulesetCreated(addRules.ruleset, addRules.abi, addRules.policy).addRules(arena)
         val restrictSelf = transition(LandlockInstallEvent.RulesAdded(added.ruleset, processWide))
             .single() as LandlockInstallEffect.RestrictSelf
-        return when (val restricted = added.tryRestrictSelf(restrictSelf.processWide)) {
+        return when (val restricted = added.tryRestrictSelf(restrictSelf.processWide, onRestrictionApplied)) {
             is LandlockRestrictOutcome.Err -> failNativeStep("landlock_restrict_self", restricted.errno)
             is LandlockRestrictOutcome.Ok -> {
                 interpretTerminalEffects(transition(LandlockInstallEvent.RestrictionApplied))

@@ -1048,6 +1048,7 @@ interface "ContainmentRegistryEffect" as io.mazewall.enforcer.state.ContainmentR
 class "ContainmentRegistryEffectInterpreter" as io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter {
   + {static}ContainmentRegistryEffectInterpreter INSTANCE
   __
+  +Function0<Unit> prepare(LandlockApplied)
   +Function0<Unit> prepare(SeccompInstalled)
   +void apply(ContainmentRegistryEffect)
 }
@@ -1304,6 +1305,8 @@ class "SupervisorInstallationLifetime" as io.mazewall.enforcer.supervisor.Superv
   __
   +SupervisorRuntimeContext getRuntime()
   +StacktraceScopingPolicy getScopingPolicy()
+  +void requireReusable()
+  +void fail(Throwable)
   +void attach(AutoCloseable)
   +void start()
   +void close()
@@ -1311,6 +1314,7 @@ class "SupervisorInstallationLifetime" as io.mazewall.enforcer.supervisor.Superv
 class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
   + {static}SupervisorInstaller INSTANCE
   __
+  +void requireReusableInstallations()
   +SupervisorSession acquireTaskSession(StacktraceScopingPolicy)
   +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>)
 }
@@ -2060,7 +2064,7 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +boolean isSupported()
   +int getAbiVersion()
   +void applyRuleset(PolicyDefinition<?>, boolean)
-  +LandlockApplyResult tryApplyRuleset(PolicyDefinition<?>, boolean)
+  +LandlockApplyResult tryApplyRuleset(PolicyDefinition<?>, boolean, Function0<Unit>)
   +long getFullAccessMask(int)
   +long getFullNetAccessMask(int)
   +void handleUnsupportedLandlock()
@@ -2068,7 +2072,7 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +LandlockApplyResult handleUnsupportedLandlockOutcome()
   +void addJvmClasspathRules(NativeArena, LandlockRuleset<? extends Building>, long)
   +LandlockRuleset<Sealed> enforceRuleset(LandlockRuleset<? extends Building>, boolean)
-  +LandlockRestrictOutcome tryEnforceRuleset(LandlockRuleset<? extends Building>, boolean)
+  +LandlockRestrictOutcome tryEnforceRuleset(LandlockRuleset<? extends Building>, boolean, Function0<Unit>)
   +void applyUserRules(NativeArena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
   +long getAccessMask(int, PolicyDefinition<?>)
   +long getNetAccessMask(int, PolicyDefinition<?>)
