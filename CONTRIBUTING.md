@@ -54,9 +54,28 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 # Full integration suite
 ./scripts/run_tests.sh
 
+# Full merge gate (all verification, including kernel and fresh-JVM tests)
+./gradlew --no-daemon build
+
 # Lint
 ./scripts/lint.sh
 ```
+
+### Optional architecture report
+
+RefactorFirst is intentionally not part of `build`, `check`, `unitCheck`, or `kernelCheck`.
+Generate its informational report explicitly when planning architectural work:
+
+```bash
+./gradlew refactorFirstReport
+```
+
+The task analyzes committed production sources from `platform`, `enforcer`, `profiler`,
+`portal`, `portal-codegen`, and `portal-worker`. It rejects uncommitted changes in those
+source roots, builds an isolated sparse snapshot so linked worktrees and unrelated modules
+cannot leak into the analysis, and writes
+`build/reports/refactorFirst/refactor-first-report.html`. Use `--rerun-tasks` to regenerate
+the report for an unchanged commit.
 
 ### Option B: Isolated Podman environment (recommended)
 

@@ -701,7 +701,6 @@ tasks.named("check") {
     findProject(":tools:orchestrator")?.let { orchestrator ->
         dependsOn(orchestrator.tasks.named("checkBacklog"))
     }
-    dependsOn(tasks.named("refactorFirstReport"))
 }
 
 /**
@@ -749,28 +748,48 @@ tasks.register("validateBacklogIndex") {
     doLast(io.mazewall.build.ValidateBacklogIndexAction(index))
 }
 
-// RefactorFirst's underlying maven/jgit tooling cannot resolve linked git worktrees (.git
-// file), so the informational report is skipped there; normal checkouts are unaffected.
-// The worktree branch is decided at configuration time (plain file inspection); the 'mvn'
-// availability probe stays inside the execution-time onlyIf because Gradle forbids spawning
-// external processes during configuration.
-val refactorFirstPlainCheckout = rootDir.resolve(".git").isDirectory
+val refactorFirstVersion = "0.10.0"
+val refactorFirstSourceRoots =
+    listOf(
+        "platform/src/main",
+        "enforcer/src/main",
+        "profiler/src/main",
+        "portal/src/main",
+        "portal-codegen/src/main",
+        "portal-worker/src/main",
+    )
+val refactorFirstRunner = layout.projectDirectory.file("scripts/refactor_first.sh")
+val refactorFirstOutput = layout.buildDirectory.file("reports/refactorFirst/refactor-first-report.html")
+val refactorFirstCommit =
+    providers
+        .exec {
+            workingDir(rootDir)
+            commandLine("git", "rev-parse", "HEAD")
+        }.standardOutput.asText
+        .map(String::trim)
+
+val refactorFirstPreflight =
+    tasks.register<Exec>("refactorFirstPreflight") {
+        group = "verification"
+        description = "Checks prerequisites and requires committed production sources for RefactorFirst"
+        outputs.upToDateWhen { false }
+        commandLine(refactorFirstRunner.asFile.absolutePath, "--check")
+    }
 
 tasks.register<Exec>("refactorFirstReport") {
     group = "verification"
-    description = "Generates a RefactorFirst HTML report using Maven"
-    if (!refactorFirstPlainCheckout) {
-        description = "$description (skipped in linked git worktrees: unsupported by jgit)"
-        onlyIf { false }
-        commandLine("refactor-first-skipped")
-    } else {
-        onlyIf {
-            runCatching {
-                ProcessBuilder("mvn", "-v").redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0
-            }.getOrDefault(false)
-        }
-        commandLine("mvn", "org.hjug.refactorfirst.plugin:refactor-first-maven-plugin:0.9.0:htmlReport")
-    }
+    description = "Generates an isolated RefactorFirst HTML report for committed production sources"
+    dependsOn(refactorFirstPreflight)
+    inputs.file(refactorFirstRunner)
+    inputs.property("refactorFirstVersion", refactorFirstVersion)
+    inputs.property("sourceRoots", refactorFirstSourceRoots)
+    inputs.property("commit", refactorFirstCommit)
+    outputs.file(refactorFirstOutput)
+    commandLine(
+        refactorFirstRunner.asFile.absolutePath,
+        "--output",
+        refactorFirstOutput.get().asFile.absolutePath,
+    )
 }
 
 // Wipes every module's JUnit XML/binary result directories (all test variants).

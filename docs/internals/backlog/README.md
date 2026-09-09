@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 111 | *Total Resolved Issues:* 497
+*Total Active Issues:* 110 | *Total Resolved Issues:* 498
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
@@ -57,7 +57,6 @@
 | [issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction](issue-20260727-102502-jules-ci-failure-prompt-rebase-instruction.md) | Add Mandatory Origin Master Rebase Prompt Instructions in Jules Retry and Feedback Prompts | high | orchestrator |
 | [issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write](issue-20260729-131005-atomic-state-persistence-orchestrator-properties-write.md) | Atomic Properties State File Writing in Orchestrator to Prevent Corruption | high | orchestrator |
 | [issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier](issue-20260729-131006-orchestrator-branch-sanitization-merging-barrier.md) | Introduce Branch Sanitization and Checkout Checks in Orchestrator Merging Logic | high | orchestrator |
-| [issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis](issue-20260729-131008-integrate-refactorfirst-architectural-metric-analysis.md) | Integrate RefactorFirst Gradle Plugin to Prioritize Architectural Cleanups | high | ci |
 | [issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization](issue-20260729-215004-orchestrator-clean-merge-self-healing-sanitization.md) | Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser | high | orchestrator |
 | [issue-20260808-032525-reduce-and-version-public-api-surface](issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
 | [issue-20260823-181012-single-start-approval-gate-hybrid](issue-20260823-181012-single-start-approval-gate-hybrid.md) | One start-approval gate for hybrid Paperclip + orchestrator loop | high | orchestrator |
