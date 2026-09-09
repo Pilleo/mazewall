@@ -5,8 +5,6 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.RealSocketManager
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -21,6 +19,7 @@ public class Capability private constructor() {
         private val lock = ReentrantLock()
         private var closed = false
         private var retired = false
+        internal val isRetired: Boolean get() = lock.withLock { retired }
 
         /** The descriptor must not escape this borrow. Close waits until the action returns. */
         public fun <T> borrow(action: (FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>) -> T): T =
@@ -31,9 +30,10 @@ public class Capability private constructor() {
 
         internal fun <T> borrowUntil(
             deadline: Deadline,
+            cancelled: () -> Boolean,
             action: (FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>) -> T,
         ): T {
-            if (!lock.tryLock(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)) throw java.io.IOException("capability borrow timed out")
+            PortalAdmission.acquire(lock, deadline, cancelled)
             try {
                 check(!closed) { "capability is closed" }
                 return action(fd)

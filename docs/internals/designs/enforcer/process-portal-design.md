@@ -80,6 +80,14 @@ never reset it. Portal-owned sockets use `O_NONBLOCK`, readiness polling, and no
 Only a timeout before the first header byte is an idle tick. After any frame progress,
 timeout is a terminal incomplete frame and the channel cannot be reused. A partial received
 descriptor collection remains locally owned until successful delivery and is closed on failure.
+The terminal channel retains received owners whose pre-native cleanup fails, so later `close()`
+calls retry only unfinished retirement. Closing admission is distinct from retiring the socket;
+a native close result (including errno) is terminal, while a failure before native dispatch is
+retryable. Channel-lock admission consumes the same absolute deadline; failure to acquire the
+channel does not terminate another caller's active frame. Both channel and capability admission
+observe cancellation at bounded intervals, independently of the thread holding the lock.
+An expired admission fails before I/O without consuming queued bytes; it is not a worker idle
+read tick. Idle ticks apply only to an admitted receive waiting for its first header byte.
 
 ### Capability ownership migration
 

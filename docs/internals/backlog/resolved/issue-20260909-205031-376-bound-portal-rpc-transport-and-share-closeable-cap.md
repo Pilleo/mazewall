@@ -37,5 +37,12 @@ descriptor order, idle-vs-terminal timeout, expired budgets and ownership races.
 Reflective generated dispatch verifies that guest close and final cleanup share an owner.
 Portal/worker detekt passes. See task-6-report.md in the scoped SDD directory for commands.
 
+**Independent-review follow-up:** Channel socket retirement and failed partial received owners
+remain retryable after pre-native cleanup failure. Completed native releases are never retried.
+Channel lock admission uses the RPC deadline, and capability admission observes channel
+cancellation in bounded waits. Five focused regressions protect all four review findings plus
+terminal native-close behavior; the partial-owner fixture proves fatal-first aggregation,
+continued independent socket cleanup, and eventual release of all three real received FDs.
+
 ---
 <!-- id: issue-20260909-205031-376-bound-portal-rpc-transport-and-share-closeable-cap  file: issue-20260909-205031-376-bound-portal-rpc-transport-and-share-closeable-cap.md -->

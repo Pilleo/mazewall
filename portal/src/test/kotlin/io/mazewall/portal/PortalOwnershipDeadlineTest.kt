@@ -147,7 +147,14 @@ class PortalOwnershipDeadlineTest {
     ) {
         connection(dir) { channel, peer ->
             peer.write(ByteBuffer.wrap(PortalFrame(PortalKind.Request, 1, PortalMethod.Echo, PortalPayload(byteArrayOf(7)), 0).headerBytes() + byteArrayOf(7)))
-            assertThrows(PortalReadTimeoutException::class.java) { channel.receive(Deadline.afterMillis(0)) }
+            assertThrows(java.io.IOException::class.java) { channel.receive(Deadline.afterMillis(0)) }
+            assertArrayEquals(
+                byteArrayOf(7),
+                channel
+                .receive(2_000)
+                .first.payload
+                .copyToByteArray(),
+            )
         }
     }
 

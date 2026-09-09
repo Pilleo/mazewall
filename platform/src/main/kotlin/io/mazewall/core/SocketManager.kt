@@ -38,7 +38,8 @@ public interface SocketManager {
 }
 
 /** A native close result failed; the integer may already be reused and must never be retried. */
-internal class NativeCloseFailure(
+@io.mazewall.MazewallInternal
+public class NativeCloseFailure internal constructor(
     message: String,
 ) : IllegalStateException(message)
 
