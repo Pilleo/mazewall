@@ -21,6 +21,77 @@ import java.util.concurrent.atomic.AtomicInteger
 class ProfilerTraceListenerTest {
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `duplicate paths preserve distinct failed operands and ACK every event`() {
+        val resolutions = listOf(
+            io.mazewall.profiler.engine.PathResolution.Partial(
+                listOf("/tmp/a"),
+                listOf(
+                    io.mazewall.profiler.engine
+                    .PathResolutionFailure(1, io.mazewall.profiler.engine.PathResolutionFailure.Reason.VmReadDenied, "Yama denied"),
+                ),
+            ),
+            io.mazewall.profiler.engine.PathResolution.Partial(
+                listOf("/tmp/a"),
+                listOf(
+                    io.mazewall.profiler.engine
+                    .PathResolutionFailure(0, io.mazewall.profiler.engine.PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9"),
+                ),
+            ),
+        )
+        val bytes = byteArrayOf(0xAC.toByte()) +
+            resolutions
+                .flatMap { resolution ->
+            TraceEventEncoder
+                .encode(
+                io.mazewall.profiler.engine.SyscallEvent
+                    .fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(io.mazewall.core.Tid(7), "RENAME", listOf(100L, 200L), resolution),
+            ).toList()
+        }.toByteArray()
+        val input = java.io.ByteArrayInputStream(bytes)
+        val eof = CountDownLatch(1)
+        val acknowledgements = AtomicInteger()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val chunk = input.readNBytes(count.toInt())
+                chunk.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                if (chunk.isEmpty()) eof.countDown()
+                return LinuxNative.SyscallResult.Success(chunk.size.toLong())
+            }
+
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (count == 1L && buf.readByte(0L) == 0xAC.toByte()) acknowledgements.incrementAndGet()
+                return LinuxNative.SyscallResult.Success(count)
+            }
+        },
+        )
+        val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
+        ProfilerTraceListener(
+            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(308),
+            accumulatedLogs = logs,
+            stackTracesMap = null,
+            pathCache = mutableMapOf(),
+            threadFor = { null },
+            native = native,
+        ).use { listener ->
+            listener.start(CountDownLatch(1))
+            org.junit.jupiter.api.Assertions
+                .assertTrue(eof.await(3, TimeUnit.SECONDS))
+        }
+        assertEquals(2, acknowledgements.get())
+        assertEquals(resolutions, logs.map { it.pathResolution })
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `close should close the socket exactly once on graceful drain`() {
         val closeCount = AtomicInteger(0)
         val readLatch = CountDownLatch(1)
@@ -153,6 +224,9 @@ class ProfilerTraceListenerTest {
                         buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(42))
                         offset += 4
 
+                        buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(1))
+                        offset += 4
+
                         buf.writeIntUnaligned(offset, java.lang.Integer.reverseBytes(4))
                         offset += 4
 
@@ -177,6 +251,11 @@ class ProfilerTraceListenerTest {
                         buf.writeByte(offset + 3, 'l'.code.toByte())
                         buf.writeByte(offset + 4, 'o'.code.toByte())
                         offset += 5
+
+                        buf.writeByte(offset, 1)
+                        offset += 1
+                        buf.writeIntUnaligned(offset, 0)
+                        offset += 4
 
                         callCount++
                         return LinuxNative.SyscallResult.Success(offset)

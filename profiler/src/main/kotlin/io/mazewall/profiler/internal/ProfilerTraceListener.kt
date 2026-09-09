@@ -375,7 +375,7 @@ internal class ProfilerTraceListener(
 
     private fun processAndQueueEvent(event: TraceEvent) {
          System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.paths.isNotEmpty() && isDuplicate(event)) {
+         if (event.pathResolution is io.mazewall.profiler.engine.PathResolution.Resolved && isDuplicate(event)) {
              System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
              return
          }

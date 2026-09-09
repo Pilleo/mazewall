@@ -5,6 +5,10 @@ import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.compiler.StraceLogParser
+import io.mazewall.profiler.engine.PathResolution
+import io.mazewall.profiler.engine.PathResolutionFailure
+import io.mazewall.profiler.engine.SyscallEvent
+import io.mazewall.profiler.engine.SyscallEventState
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -14,6 +18,92 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
+    @Test
+    fun `coverage retains its data class contract and immutable diagnostics when merging prior evidence`() {
+        assertTrue(ProfilingCoverage::class.isData)
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")
+        val missing = PathResolutionFailure(1, PathResolutionFailure.Reason.Missing, "null operand")
+
+        fun coverage(failure: PathResolutionFailure): ProfilingCoverage {
+            val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(
+                Tid(7),
+                "RENAME",
+                emptyList(),
+                PathResolution.Failed(listOf(failure)),
+            )
+            return pathCoverage(listOf(ProfileObservation.fromSyscallEvent(event)))
+        }
+        val merged = coverage(missing).retainStricterPathResolution(coverage(denied))
+        assertEquals(listOf(missing, denied), merged.pathFailures)
+        assertEquals(merged.pathFailures, merged.copy(strategyReason = "copied").pathFailures)
+        assertFailsWith<UnsupportedOperationException> { (merged.pathFailures as MutableList).clear() }
+        assertFailsWith<UnsupportedOperationException> { (merged.warnings as MutableList).clear() }
+    }
+
+    @Test
+    fun `typed path failures survive heap events observations and coverage`() {
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")
+        val missing = PathResolutionFailure(1, PathResolutionFailure.Reason.Missing, "null operand")
+        val truncated = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes")
+        val cases = listOf(
+            PathResolution.NotApplicable to PathResolutionQuality.NONE,
+            PathResolution.Resolved(listOf("/tmp/a")) to PathResolutionQuality.RESOLVED,
+            PathResolution.Partial(listOf("/tmp/a"), listOf(missing)) to PathResolutionQuality.FAILED,
+            PathResolution.Failed(listOf(denied)) to PathResolutionQuality.FAILED,
+            PathResolution.Failed(listOf(truncated)) to PathResolutionQuality.TRUNCATED,
+            PathResolution.Failed(listOf(truncated, missing)) to PathResolutionQuality.MIXED,
+        )
+        for ((resolution, quality) in cases) {
+            val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "RENAME", emptyList(), resolution)
+            val observation = ProfileObservation.fromSyscallEvent(event)
+            assertEquals(resolution, observation.pathResolution)
+            assertEquals(resolution.paths, observation.paths)
+            val coverage = pathCoverage(listOf(observation))
+            assertEquals(quality, coverage.pathResolution)
+            assertEquals(resolution.failures, coverage.pathFailures)
+            assertEquals(resolution.failures.isEmpty(), coverage.complete)
+            assertEquals(resolution.failures, coverage.copy(strategyReason = "copied").pathFailures)
+        }
+    }
+
+    @Test
+    fun `typed resolution is authoritative even for a long complete path`() {
+        val resolution = PathResolution.Resolved(listOf("/" + "a".repeat(4096)))
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), resolution)
+        val coverage = pathCoverage(listOf(ProfileObservation.fromSyscallEvent(event)))
+        assertEquals(PathResolutionQuality.RESOLVED, coverage.pathResolution)
+        assertTrue(coverage.complete)
+    }
+
+    @Test
+    fun `path evidence snapshots caller lists and survives trace projection and observation copies`() {
+        val paths = mutableListOf("/tmp/a")
+        val failures = mutableListOf(PathResolutionFailure(1, PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9"))
+        val resolution = PathResolution.Partial(paths, failures)
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "RENAME", emptyList(), resolution)
+        val trace = TraceEvent.fromSyscallEvent(event)
+        val observation = assertIs<ProfileObservation.Syscall>(ProfileObservation.fromTraceEvent(trace))
+        paths.clear()
+        failures.clear()
+        assertEquals(listOf("/tmp/a"), observation.paths)
+        assertEquals(listOf(1), observation.pathResolution.failures.map { it.operandIndex })
+        assertEquals(resolution, observation.copy(contextId = 99L).pathResolution)
+        assertFailsWith<UnsupportedOperationException> { (resolution.paths as MutableList).clear() }
+        assertFailsWith<UnsupportedOperationException> { (resolution.failures as MutableList).clear() }
+    }
+
+    private fun pathCoverage(observations: List<ProfileObservation>): ProfilingCoverage =
+        ProfilingCoverage.infer(
+        strategy = ProfileStrategy.USER_NOTIF,
+        strategyReason = "typed evidence",
+        processWide = false,
+        observations = observations,
+        stacks = StackAttribution.SKIPPED,
+        droppedEvents = 0,
+        drainComplete = true,
+        environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+    )
+
     @Test
     fun `bob compiler is the only path from strace lines and trace events`() {
         val traceEvents = listOf(

@@ -34,15 +34,23 @@ public sealed interface SyscallEventState {
  * @property paths The list of resolved filesystem paths extracted from the tracee's memory.
  * @property stackTrace The captured JVM stack trace of the triggering thread, if available.
  */
-public class SyscallEvent<out S : SyscallEventState>(
+public class SyscallEvent<out S : SyscallEventState> private constructor(
     val tid: Tid,
     val syscallName: String,
     args: List<Long>,
-    paths: List<String> = emptyList(),
-    stackTrace: List<String>? = null,
+    val pathResolution: PathResolution,
+    stackTrace: List<String>?,
 ) {
+    public constructor(
+        tid: Tid,
+        syscallName: String,
+        args: List<Long>,
+        paths: List<String> = emptyList(),
+        stackTrace: List<String>? = null,
+    ) : this(tid, syscallName, args, legacyPathResolution(syscallName, paths), stackTrace)
+
     val args: List<Long> = java.util.List.copyOf(args)
-    val paths: List<String> = java.util.List.copyOf(paths)
+    val paths: List<String> get() = pathResolution.paths
     val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
 
     override fun equals(other: Any?): Boolean {
@@ -51,7 +59,7 @@ public class SyscallEvent<out S : SyscallEventState>(
         if (tid != other.tid) return false
         if (syscallName != other.syscallName) return false
         if (args != other.args) return false
-        if (paths != other.paths) return false
+        if (pathResolution != other.pathResolution) return false
         if (stackTrace != other.stackTrace) return false
         return true
     }
@@ -60,13 +68,23 @@ public class SyscallEvent<out S : SyscallEventState>(
         var result = tid.hashCode()
         result = 31 * result + syscallName.hashCode()
         result = 31 * result + args.hashCode()
-        result = 31 * result + paths.hashCode()
+        result = 31 * result + pathResolution.hashCode()
         result = 31 * result + (stackTrace?.hashCode() ?: 0)
         return result
     }
 
     override fun toString(): String {
-        return "SyscallEvent(tid=$tid, syscallName=$syscallName, args=$args, paths=$paths, stackTrace=$stackTrace)"
+        return "SyscallEvent(tid=$tid, syscallName=$syscallName, args=$args, paths=$paths, stackTrace=$stackTrace, pathResolution=$pathResolution)"
+    }
+
+    public companion object {
+        public fun <S : SyscallEventState> fromResolution(
+            tid: Tid,
+            syscallName: String,
+            args: List<Long>,
+            pathResolution: PathResolution,
+            stackTrace: List<String>? = null,
+        ): SyscallEvent<S> = SyscallEvent(tid, syscallName, args, pathResolution, stackTrace)
     }
 }
 
@@ -75,3 +93,6 @@ public class SyscallEvent<out S : SyscallEventState>(
  */
 internal fun SyscallEvent<SyscallEventState.Raw>.resolved(paths: List<String>): SyscallEvent<SyscallEventState.Resolved> =
     SyscallEvent(tid, syscallName, args, java.util.List.copyOf(paths), stackTrace)
+
+internal fun SyscallEvent<SyscallEventState.Raw>.resolved(resolution: PathResolution): SyscallEvent<SyscallEventState.Resolved> =
+    SyscallEvent.fromResolution(tid, syscallName, args, resolution, stackTrace)

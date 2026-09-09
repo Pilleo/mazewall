@@ -104,6 +104,17 @@ public sealed class TraceEvent {
      */
     public open val paths: List<String> get() = emptyList()
 
+    private var resolutionEvidence: PathResolution? = null
+
+    /** Typed collector evidence, or the explicitly lossy legacy-constructor projection. */
+    public val pathResolution: PathResolution get() = resolutionEvidence ?: legacyPathResolution(syscallName, paths)
+
+    /** Copies attach immutable evidence before publishing the newly constructed event. */
+    protected fun <E : TraceEvent> copyEvidenceTo(copy: E): E {
+        if (copy.syscallName == syscallName && copy.paths == paths) (copy as TraceEvent).resolutionEvidence = resolutionEvidence
+        return copy
+    }
+
     @Volatile
     private var jvmStackTraceStorage: Array<StackTraceElement>? = null
 
@@ -134,7 +145,7 @@ public sealed class TraceEvent {
             args: List<Long> = this.args,
             paths: List<String> = this.paths,
             stackTrace: List<String>? = this.stackTrace,
-        ): Generic = Generic(tid, syscallName, args, paths, stackTrace)
+        ): Generic = copyEvidenceTo(Generic(tid, syscallName, args, paths, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -187,7 +198,7 @@ public sealed class TraceEvent {
             flags: Long = this.flags,
             mode: Int = this.mode,
             stackTrace: List<String>? = this.stackTrace,
-        ): Open = Open(tid, syscallName, path, flags, mode, stackTrace)
+        ): Open = copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -239,7 +250,7 @@ public sealed class TraceEvent {
             syscallName: String = this.syscallName,
             path: String = this.path,
             stackTrace: List<String>? = this.stackTrace,
-        ): Exec = Exec(tid, syscallName, path, stackTrace)
+        ): Exec = copyEvidenceTo(Exec(tid, syscallName, path, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -291,7 +302,7 @@ public sealed class TraceEvent {
             fileDescriptor: MmapFileDescriptor = this.fileDescriptor,
             offset: Long = this.offset,
             stackTrace: List<String>? = this.stackTrace,
-        ): Mmap = Mmap(tid, addr, len, protection, mappingFlags, fileDescriptor, offset, stackTrace)
+        ): Mmap = copyEvidenceTo(Mmap(tid, addr, len, protection, mappingFlags, fileDescriptor, offset, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -356,7 +367,7 @@ public sealed class TraceEvent {
             type: Int = this.type,
             protocol: Int = this.protocol,
             stackTrace: List<String>? = this.stackTrace,
-        ): Socket = Socket(tid, domain, type, protocol, stackTrace)
+        ): Socket = copyEvidenceTo(Socket(tid, domain, type, protocol, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -411,7 +422,7 @@ public sealed class TraceEvent {
             syscallName: String = this.syscallName,
             paths: List<String> = this.paths,
             stackTrace: List<String>? = this.stackTrace,
-        ): FsMutation = FsMutation(tid, syscallName, paths, stackTrace)
+        ): FsMutation = copyEvidenceTo(FsMutation(tid, syscallName, paths, stackTrace))
 
         public operator fun component1(): Tid = tid
 
@@ -439,6 +450,11 @@ public sealed class TraceEvent {
     }
 
     public companion object {
+        public fun fromSyscallEvent(event: SyscallEvent<SyscallEventState.Resolved>): TraceEvent =
+            invoke(event.tid.value, event.syscallName, event.args.toLongArray(), event.paths, event.stackTrace).also {
+                it.resolutionEvidence = event.pathResolution
+            }
+
         private const val INDEX_ADDR = 0
         private const val INDEX_LEN = 1
         private const val INDEX_PROT = 2

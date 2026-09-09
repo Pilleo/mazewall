@@ -179,6 +179,14 @@ Seccomp-BPF is blind to operations submitted via `io_uring` rings.
 
 ### Profiler Lifecycle & Memory Safety Invariants
 
+Path inspection produces `PathResolution.NotApplicable`, `Resolved(paths)`, `Partial(paths, failures)`, or `Failed(failures)`. Failures identify the zero-based path operand ordinal and distinguish `VmReadDenied`, `Missing`, `DirFdUnresolved`, and `Truncated`. A failed first operand does not prevent inspecting the second operand of rename/link calls. Relative paths retain cwd/dirfd failure evidence; unterminated reads never publish a normalized prefix as a resolved path. The diagnostic contains heap strings describing the tracee, address or directory, and the original exception type/message where available. Exception objects and native segments do not cross the event boundary.
+
+The private profiler daemon/JVM event frame is now version 1: big-endian TID, version, syscall name, raw arguments, resolved path list, then an explicit resolution tag and bounded operand diagnostics. The listener rejects unknown versions, invalid tags, unordered failure operands, inconsistent outcomes, oversized fields, and truncated frames. Daemon and listener are launched from the same distribution; mixed-version profiler pairs are unsupported. Portal wire frames are unchanged. The daemon still waits for the listener's `0xAC` ACK before issuing CONTINUE. Failed inspections remain observable diagnostic events and do not veto the tracee syscall.
+
+`SyscallEvent`, `TraceEvent`, and `ProfileObservation` retain immutable typed evidence, and `ProfilingCoverage.infer` exhaustively folds it into its compatibility quality summary plus `pathFailures`. Failed inspections bypass path deduplication so distinct reasons cannot disappear behind the same successful path. Existing public constructors, accessors, copy methods and destructuring remain available. Constructors that accept only a legacy path list necessarily use a conservative compatibility adapter: they cannot recover missing operand identity or prove string termination. New collectors should provide typed evidence through the additive factories; coverage itself never reconstructs outcomes from path counts or path lengths.
+
+`ProfilingCoverage` retains its original data-class constructor and generated methods. Inferred coverage owns an immutable diagnostic record through its existing warnings-list projection; ordinary `copy` calls retain that record, and merging prior coverage explicitly merges its typed failures. Explicitly replacing the warnings projection also replaces that record. No global side map or native-memory reference is involved.
+
 To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
 
 *   **Session Ownership:** Internal `ProfilerService` instances capture their runtime dependencies and own their active sessions. Each `ProfilerSession` owns its trace listeners, TID mappings, event/stack buffers, deduplication cache, and cleanup result. `Profiler` is a compatibility facade containing only an atomic default-service reference. A trace listener receives its TID resolver and native dependencies explicitly; identical TIDs in different services cannot resolve through shared state. The captured native engine also governs Yama authorization, `PR_SET_NO_NEW_PRIVS`, BPF allocation, NEW_LISTENER/TSYNC installation, socket connection, SCM_RIGHTS transfer, and descriptor cleanup. Replacing the ambient engine cannot redirect an already constructed service's installation.
@@ -341,7 +349,7 @@ val policy = Policy.builder()
 Under Linux Yama LSM (`/proc/sys/kernel/yama/ptrace_scope` >= 1), a process must explicitly grant ptrace permissions to its tracer using `prctl(PR_SET_PTRACER, tracer_pid)`.
 *   **The Hazard:** This permission is **not inherited across `fork()`**.
 *   **The Impact:** If the profiled JVM process forks a child (e.g., via `ProcessBuilder`), the child inherits the seccomp filter (and thus traps to the daemon) but does **not** inherit the ptrace permission.
-*   **The Mitigation:** The `ProfilerDaemon` must gracefully handle `-EPERM` when attempting to read a grandchild's memory via `process_vm_readv`. In such cases, the daemon logs the syscall without absolute path resolution.
+*   **The Mitigation:** The `ProfilerDaemon` records `VmReadDenied` evidence for `EPERM` or `EACCES` when inspecting a grandchild with `process_vm_readv`. The event remains incomplete, preserves any other resolved operands, and follows the normal listener-ACK/CONTINUE handshake.
 
 ### Seccomp Listener `-ENOSYS` JVM Crash
 When a seccomp `USER_NOTIF` listener file descriptor is closed while tracee threads are still blocked in the kernel waiting for a decision:

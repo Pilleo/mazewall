@@ -353,12 +353,15 @@ class ProfilerServiceTest {
 
         fun emit(path: String) {
             output.writeInt(73)
+            output.writeInt(1) // private profiler event version
             output.writeInt(6)
             output.writeBytes("OPENAT")
             output.writeInt(0)
             output.writeInt(1)
             output.writeInt(path.length)
             output.writeBytes(path)
+            output.writeByte(1) // Resolved
+            output.writeInt(0) // failures
             output.flush()
             assertEquals(0xAC, commands.poll(5, TimeUnit.SECONDS), "Every trace event requires its own ACK")
         }

@@ -295,6 +295,7 @@ class ProfilerRuntimeTest {
         DataOutputStream(bytes).use { output ->
             output.writeByte(0xAC)
             output.writeInt(1234)
+            output.writeInt(1) // private profiler event version
             output.writeInt(6)
             output.writeBytes("OPENAT")
             output.writeInt(0)
@@ -302,6 +303,8 @@ class ProfilerRuntimeTest {
             val path = "/tmp/captured-engine"
             output.writeInt(path.length)
             output.writeBytes(path)
+            output.writeByte(1) // Resolved
+            output.writeInt(0) // failures
         }
         val input = ByteArrayInputStream(bytes.toByteArray())
         val drained = CountDownLatch(1)
