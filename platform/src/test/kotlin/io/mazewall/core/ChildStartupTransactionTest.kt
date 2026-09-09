@@ -9,6 +9,66 @@ import java.util.concurrent.TimeUnit
 
 class ChildStartupTransactionTest {
     @Test
+    fun `startup boundary rejects uncommitted success and retires its endpoint`() {
+        val deleted = mutableListOf<Path>()
+        val launcher = object : MockProcessLauncher() {
+            override fun deleteIfExists(path: Path): Boolean = deleted.add(path)
+        }
+        val startup = ChildStartupTransaction(launcher, "test-", "child.sock")
+        assertThrows(IllegalStateException::class.java) { startup.runStartup<String> { "not committed" } }
+        assertEquals(2, deleted.size)
+    }
+
+    @Test
+    fun `startup fatal identity survives ordinary rollback failure`() {
+        val fatal = LinkageError("launch")
+        val ordinary = java.io.IOException("socket cleanup")
+        var deletes = 0
+        val launcher = object : MockProcessLauncher() {
+            override fun deleteIfExists(path: Path): Boolean {
+                if (++deletes == 1) throw ordinary
+                return true
+            }
+        }
+        val startup = ChildStartupTransaction(launcher, "test-", "child.sock")
+        assertSame(fatal, assertThrows(LinkageError::class.java) { startup.runStartup<Nothing> { throw fatal } })
+        assertSame(ordinary, fatal.suppressed.single())
+        assertEquals(2, deletes)
+        startup.close()
+        assertEquals(4, deletes)
+    }
+
+    @Test
+    fun `startup observes caller interrupt and rollback restores consumed interruption`() {
+        val interruption = InterruptedException("startup cancelled")
+        var deletes = 0
+        val launcher = object : MockProcessLauncher() {
+            override fun deleteIfExists(path: Path): Boolean {
+                assertFalse(Thread.currentThread().isInterrupted, "Cleanup needs an un-interrupted bounded reap")
+                deletes++
+                return true
+            }
+        }
+        val startup = ChildStartupTransaction(launcher, "test-", "child.sock")
+        Thread.currentThread().interrupt()
+        try {
+            assertSame(
+                interruption,
+                assertThrows(InterruptedException::class.java) {
+                startup.runStartup<Nothing> {
+                    assertTrue(Thread.interrupted(), "Startup must observe pre-existing cancellation")
+                    throw interruption
+                }
+            },
+            )
+            assertTrue(Thread.currentThread().isInterrupted)
+            assertEquals(2, deletes)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
     fun `endpoint close retains fatal error and attempts directory deletion`() {
         val fatal = LinkageError("socket deletion")
         val later = java.io.IOException("directory deletion")

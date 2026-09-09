@@ -60,6 +60,7 @@ public class SupervisorDaemonManager(
         }
 
     @Volatile private var ownedResources: ChildProcessResources? = null
+    private var pendingStartup: ChildStartupTransaction? = null
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
     internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
@@ -152,6 +153,8 @@ public class SupervisorDaemonManager(
     }
 
     private fun retirePendingResources() {
+        pendingStartup?.close()
+        pendingStartup = null
         ownedResources?.close()
         ownedResources = null
     }
@@ -175,7 +178,11 @@ public class SupervisorDaemonManager(
 
     private fun spawnDaemon(): SupervisorContext {
         refuseSpawnIfParentIsFiltered()
-        return ChildStartupTransaction(processLauncher, "mazewall-supervisor-", "supervisor.sock").use(::startDaemon)
+        val startup = ChildStartupTransaction(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+        pendingStartup = startup
+        val context = startup.runStartup(::startDaemon)
+        pendingStartup = null
+        return context
     }
 
     private fun startDaemon(startup: ChildStartupTransaction): SupervisorContext {

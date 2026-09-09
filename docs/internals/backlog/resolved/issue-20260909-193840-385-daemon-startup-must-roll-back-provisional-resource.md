@@ -24,14 +24,18 @@ Supervisor and profiler startup failures leak endpoints children pumps or hooks;
 **Resolution (2026-09-09):** Both managers acquire through ChildStartupTransaction and retain
 ChildProcessResources only after live readiness. Launch/ptracer/hook/readiness failure rolls
 back all acquired resources. ResourceRetirement attempts independent releases and propagates
-fatal errors first. Failed retirement remains owned/retryable; no replacement skips a dead
+fatal errors first, including a fatal rollback error following an ordinary startup failure.
+Both managers retain provisional owners when rollback fails; stop/retry must finish retirement
+before any replacement launch. Failed retirement remains owned/retryable; no replacement skips a dead
 profiler's pending cleanup. PrivateUnixEndpoint uses its creating launcher and retires invalid
 fallback candidates. The supervisor output owner observes process exit even when EOF comes first.
 
 **Evidence:** RED→GREEN launch/fallback/interrupt/retirement/fatal-precedence/EOF regressions;
-both-manager failure matrix and failed dead-profiler replacement retry. Final :platform:test:
-319 tests, no failures/skips; :enforcer:test: 794 tests, no failures, 2 existing skips;
-:profiler:test: 526 tests, no failures/skips. Fresh-JVM PermanentSupervisorRegistration and
+both-manager failure matrix, provisional rollback retention/no-second-launch, distinct fatal
+launch/readiness cleanup identity, and failed dead-profiler replacement retry. Shared startup
+boundary also checks ownership commit and caller interruption. Final :platform:test:
+322 tests, no failures/skips; :enforcer:test: 794 tests, no failures, 2 existing skips;
+:profiler:test: 530 tests, no failures/skips. Fresh-JVM PermanentSupervisorRegistration and
 SupervisorProxy: 3 tests, no failures/skips; ProfilerIntegrationTest: 12 tests, no failures/skips.
 All three detektMain tasks passed; enforcer/profiler diagrams and startup migration docs updated.
 

@@ -190,7 +190,10 @@ one `ChildProcessResources` owner, retained by the manager until retirement. Dea
 resources are retired before a replacement is launched. `PR_SET_PTRACER` errors are fatal
 to startup, not warnings. Retirement attempts every release, forcibly terminates/reaps the
 child with a bounded wait, and joins the output pump. Failed retirement remains reachable for
-retry; completed process/stream/hook releases are not repeated. The manager's public context remains
+retry, including a provisional owner whose startup rollback failed. `stop()` retries that owner,
+and no replacement starts until its retirement succeeds. Startup and cleanup failures are folded
+together with fatal cleanup errors primary over ordinary startup failures; earlier failures remain
+suppressed evidence. Completed process/stream/hook releases are not repeated. The manager's public context remains
 an observation, not authority to clean up another manager's child.
 
 Profiler and supervisor share `UserNotifReply.send` for the kernel-send mechanism only:

@@ -422,8 +422,11 @@ published as running before readiness; an unexpected exit after publication reta
 supervisor's fail-closed halt policy. Intentional retirement first removes the running state
 so pump EOF cannot be mistaken for an unexpected exit. Output observation does not take the
 manager lock while cleanup joins the pump.
-Failed retirement remains owned and retryable before another daemon can be spawned; completed
-resource releases are not repeated. See the [startup migration guide](../api/daemon-startup-migration.md).
+Failed retirement remains owned and retryable before another daemon can be spawned, including
+provisional startup rollback. `stop()` retries that provisional owner even when no running context
+was published. Fatal cleanup errors outrank ordinary startup failures, retaining earlier failures
+as suppressed evidence; every independent release is attempted. Completed resource releases are
+not repeated. See the [startup migration guide](../api/daemon-startup-migration.md).
 
 Transient off-heap structs use `Arena.ofConfined()` for automatic deallocation.
 The daemon's reusable notification and response buffers use process-lifetime shared

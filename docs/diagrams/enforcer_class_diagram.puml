@@ -559,6 +559,7 @@ class "ChildProcessResources" as io.mazewall.core.ChildProcessResources {
 class "ChildStartupTransaction" as io.mazewall.core.ChildStartupTransaction {
   +PrivateUnixEndpoint getEndpoint()
   +Thread getShutdownHook()
+  +T runStartup(Function1<? super ChildStartupTransaction, ? extends T>)
   +Process start(JvmChildSpec)
   +void startOutputPump(String, Function1<? super String, Unit>, String, Function0<Unit>)
   +void registerShutdownHook()
@@ -811,6 +812,8 @@ class "RealSocketManager" as io.mazewall.core.RealSocketManager {
   +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
 }
 class "ResourceRetirement" as io.mazewall.core.ResourceRetirement {
+  + {static}Companion Companion
+  __
   +void attempt(Function0<Unit>)
   +void finish()
 }
@@ -2654,6 +2657,7 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.Soc
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ChildProcessResources
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ChildStartupTransaction
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
 io.mazewall.enforcer.supervisor.SupervisorExecRewriteExchange --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorExecRewriteExchange --> io.mazewall.core.FileDescriptor

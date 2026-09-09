@@ -15,9 +15,15 @@ EOF wakes readiness waiters but does not report successful startup. Use
 `JvmChildProcess.startStdoutPump` / `awaitReady` instead of manufacturing pump values.
 
 New `ChildStartupTransaction` and `ChildProcessResources` are internal-use platform APIs
-(`@MazewallInternal`), not a generic process framework. Use the transaction in a `use` block,
-acquire endpoint/child/output/hook, verify readiness, then retain the committed resource owner.
-The caller remains responsible for its distinct daemon lifecycle and authority policy.
+(`@MazewallInternal`), not a generic process framework. Retain the provisional transaction in
+the manager before calling `runStartup`; acquire endpoint/child/output/hook, verify readiness,
+then retain the committed resource owner. The startup boundary requires a commit before success
+and aggregates rollback failures explicitly: a fatal cleanup error outranks an ordinary startup
+failure, retaining the earlier failure as suppressed evidence. Kotlin `use` does not provide that
+precedence and is not the startup boundary. If rollback fails, keep the provisional transaction
+reachable and retry `close()` on `stop()` or before any replacement launch. Clear the retained
+owner only after successful retirement. The caller remains responsible for its distinct daemon
+lifecycle and authority policy.
 
 Profiler's native transport and reply-result types remain module-internal. Native syscall
 signatures, layouts, notification encoding, and portal wire formats are unchanged.

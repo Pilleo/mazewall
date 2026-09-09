@@ -15,6 +15,154 @@ import java.nio.file.Path
 
 class DaemonStartupRollbackTest {
     @Test
+    fun `failed provisional rollback blocks replacement and stop retries retirement in both managers`() {
+        for (supervisor in listOf(false, true)) {
+            val launchFailure = IOException("launch failed")
+            var starts = 0
+            var deletes = 0
+            var cleanupFails = true
+            val launcher = object : MockProcessLauncher() {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                ): Process {
+                    starts++
+                    throw launchFailure
+                }
+
+                override fun deleteIfExists(path: Path): Boolean {
+                    deletes++
+                    if (cleanupFails) throw IOException("endpoint still owned")
+                    return true
+                }
+            }
+            val manager = driver(supervisor, MockNativeEngine(), launcher)
+            assertSame(launchFailure, assertThrows(IOException::class.java, manager.start))
+            assertThrows(IOException::class.java, manager.start)
+            assertEquals(1, starts, "Replacement must not launch before provisional retirement succeeds")
+            assertThrows(IOException::class.java, manager.stop)
+            assertEquals(6, deletes, "Start and stop must retry the retained endpoint")
+            cleanupFails = false
+            manager.stop()
+            assertEquals(8, deletes)
+            manager.stop()
+            assertEquals(8, deletes, "Successful retirement is not repeated")
+            assertSame(launchFailure, assertThrows(IOException::class.java, manager.start))
+            assertEquals(2, starts, "Replacement is allowed after retirement")
+            manager.stop()
+        }
+    }
+
+    @Test
+    fun `fatal rollback failure dominates ordinary launch failure in both managers`() {
+        for (supervisor in listOf(false, true)) {
+            val launchFailure = IOException("launch failed")
+            val fatal = LinkageError("fatal socket retirement")
+            val directoryFailure = IOException("directory retirement")
+            var deletes = 0
+            val launcher = object : MockProcessLauncher() {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                ): Process = throw launchFailure
+
+                override fun deleteIfExists(path: Path): Boolean =
+                    when (++deletes) {
+                    1 -> throw fatal
+                    2 -> throw directoryFailure
+                    else -> true
+                }
+            }
+            val manager = driver(supervisor, MockNativeEngine(), launcher)
+            val observed = assertThrows(LinkageError::class.java, manager.start)
+            assertSame(fatal, observed)
+            assertTrue(observed.suppressed.any { it === launchFailure })
+            assertTrue(observed.suppressed.any { it === directoryFailure })
+            assertEquals(2, deletes, "Fatal socket failure must not skip directory retirement")
+            manager.stop()
+            assertEquals(4, deletes, "Fatal rollback retains its provisional owner")
+        }
+    }
+
+    @Test
+    fun `readiness failure retains unreaped child until retry retirement succeeds in both managers`() {
+        for (supervisor in listOf(false, true)) {
+            var cleanupFails = true
+            var destroys = 0
+            var starts = 0
+            var deletes = 0
+            val process = object : MockProcess(123, "not ready\n") {
+                override fun destroyForcibly(): Process {
+                    destroys++
+                    if (cleanupFails) throw IOException("child still owned")
+                    return super.destroyForcibly()
+                }
+
+                override fun waitFor(
+                    timeout: Long,
+                    unit: java.util.concurrent.TimeUnit,
+                ): Boolean = !isAlive
+            }
+            val launcher = object : MockProcessLauncher(process) {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                ): Process {
+                    starts++
+                    return process
+                }
+
+                override fun deleteIfExists(path: Path): Boolean {
+                    deletes++
+                    return true
+                }
+            }
+            val manager = driver(supervisor, MockNativeEngine(), launcher)
+            assertThrows(IllegalStateException::class.java, manager.start)
+            assertTrue(process.isAlive)
+            assertTrue(launcher.shutdownHooks.isEmpty())
+            assertEquals(2, deletes, "Other releases must still be attempted")
+            assertThrows(IOException::class.java, manager.start)
+            assertEquals(1, starts)
+            cleanupFails = false
+            manager.stop()
+            assertFalse(process.isAlive)
+            assertEquals(3, destroys)
+            assertEquals(2, deletes, "Already retired endpoint is not touched again")
+        }
+    }
+
+    @Test
+    fun `fatal cleanup dominates readiness failure after all other resources retire in both managers`() {
+        for (supervisor in listOf(false, true)) {
+            val fatal = LinkageError("fatal process destruction")
+            var destroys = 0
+            var deletes = 0
+            val process = object : MockProcess(123, "not ready\n") {
+                override fun destroyForcibly(): Process {
+                    destroys++
+                    setAlive(false)
+                    throw fatal
+                }
+            }
+            val launcher = object : MockProcessLauncher(process) {
+                override fun deleteIfExists(path: Path): Boolean {
+                    deletes++
+                    return true
+                }
+            }
+            val manager = driver(supervisor, MockNativeEngine(), launcher)
+            assertSame(fatal, assertThrows(LinkageError::class.java, manager.start))
+            assertTrue(fatal.suppressed.any { it is IllegalStateException && it.message!!.contains("readiness") })
+            assertFalse(process.isAlive)
+            assertTrue(launcher.shutdownHooks.isEmpty())
+            assertEquals(2, deletes)
+            manager.stop()
+            assertEquals(1, destroys, "Confirmed reaping is not repeated after fatal destruction failure")
+        }
+    }
+
+    @Test
     fun `failed dead-profiler retirement remains owned until retry succeeds`() {
         val sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL
         val first = MockProcess(123, "$sentinel\n")
@@ -138,20 +286,29 @@ class DaemonStartupRollbackTest {
         supervisor: Boolean,
         engine: MockNativeEngine,
         launcher: MockProcessLauncher,
-    ): () -> Unit =
+    ): () -> Unit = driver(supervisor, engine, launcher).start
+
+    private data class Driver(
+        val start: () -> Unit,
+        val stop: () -> Unit,
+    )
+
+    private fun driver(
+        supervisor: Boolean,
+        engine: MockNativeEngine,
+        launcher: MockProcessLauncher,
+    ): Driver =
         if (supervisor) {
             val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
             val start: () -> Unit = {
                 manager.getOrSpawnSharedDaemon()
-                Unit
             }
-            start
+            Driver(start, manager::stop)
         } else {
             val manager = ProfilerDaemonManager(engine, MockSocketManager(), launcher)
             val start: () -> Unit = {
                 manager.getOrSpawnSharedDaemon()
-                Unit
             }
-            start
+            Driver(start, manager::stop)
         }
 }

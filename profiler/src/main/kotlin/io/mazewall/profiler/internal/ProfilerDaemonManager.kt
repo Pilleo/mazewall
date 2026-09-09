@@ -38,6 +38,7 @@ public class ProfilerDaemonManager(
     private val daemonLock = Any()
     private var sharedDaemonContext: DaemonContext? = null
     private var ownedResources: ChildProcessResources? = null
+    private var pendingStartup: ChildStartupTransaction? = null
 
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
@@ -55,6 +56,7 @@ public class ProfilerDaemonManager(
      */
     public fun getOrSpawnSharedDaemon(): DaemonContext {
         synchronized(daemonLock) {
+            retirePendingStartup()
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive && ownedResources?.isClosed != true) {
                 engine.process
@@ -77,6 +79,7 @@ public class ProfilerDaemonManager(
      */
     public fun stop() {
         synchronized(daemonLock) {
+            retirePendingStartup()
             sharedDaemonContext?.let {
                 cleanupDaemon(it)
                 sharedDaemonContext = null
@@ -96,7 +99,18 @@ public class ProfilerDaemonManager(
         }
     }
 
-    private fun spawnDaemon(): DaemonContext = ChildStartupTransaction(processLauncher, "mazewall-profiler-", "profiler.sock").use(::startDaemon)
+    private fun retirePendingStartup() {
+        pendingStartup?.close()
+        pendingStartup = null
+    }
+
+    private fun spawnDaemon(): DaemonContext {
+        val startup = ChildStartupTransaction(processLauncher, "mazewall-profiler-", "profiler.sock")
+        pendingStartup = startup
+        val context = startup.runStartup(::startDaemon)
+        pendingStartup = null
+        return context
+    }
 
     private fun startDaemon(startup: ChildStartupTransaction): DaemonContext {
         val endpoint = startup.endpoint

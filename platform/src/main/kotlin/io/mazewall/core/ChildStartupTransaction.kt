@@ -17,6 +17,17 @@ public class ChildStartupTransaction(
     public val endpoint: PrivateUnixEndpoint get() = resources.endpoint
     public val shutdownHook: Thread get() = resources.shutdownHook
 
+    /**
+     * Runs startup with fatal-first rollback aggregation. Retain this transaction before calling:
+     * if rollback fails, its owner must retry [close] before starting another child.
+     * The action must [commit] before publishing a successful result.
+     */
+    public fun <T> runStartup(action: (ChildStartupTransaction) -> T): T =
+        ResourceRetirement.runWithRollback(
+            { action(this).also { check(committed) { "Startup returned without committing its resource owner" } } },
+            ::close,
+        )
+
     public fun start(spec: JvmChildSpec): Process {
         check(!committed && !resources.isClosed && resources.child == null) { "Startup closed or child already acquired" }
         return JvmChildProcess.start(resources.launcher, spec).also { resources.child = it }

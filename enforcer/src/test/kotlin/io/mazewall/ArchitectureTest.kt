@@ -232,10 +232,14 @@ class ArchitectureTest {
             .areDeclaredInClassesThat()
             .haveSimpleNameNotStartingWith("IsolatedTestRunner")
             // This resource fold attempts every release and rethrows failures, fatal first.
-            // ChildStartupTransactionTest verifies aggregation rather than silent suppression.
+            // ChildStartupTransactionTest and DaemonStartupRollbackTest verify startup and
+            // retirement aggregation rather than silent suppression, including exact fatal identity.
             .and()
             .areDeclaredInClassesThat()
-            .haveSimpleNameNotStartingWith("ResourceRetirement")
+            .doNotHaveFullyQualifiedName("io.mazewall.core.ResourceRetirement")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.core.ResourceRetirement\$Companion")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
