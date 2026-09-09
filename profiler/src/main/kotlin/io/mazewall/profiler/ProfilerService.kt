@@ -17,6 +17,7 @@ internal class ProfilerService(
     private val runtime: ProfilerRuntime,
 ) {
     private val sessions = ConcurrentHashMap.newKeySet<ProfilerSession>()
+    private val cleanupLock = Any()
 
     fun openSession(
         policy: PolicyDefinition<*> = PolicyPresets.PURE_COMPUTE_UNSAFE,
@@ -79,16 +80,19 @@ internal class ProfilerService(
 
     /** Closing sessions leaves the daemon serving permanent kernel filters in pass-through mode. */
     fun shutdown() {
-        val incomplete = sessions.toList().map { it.closeWithResult() }.filterIsInstance<SeccompCleanupOutcome.Incomplete>()
-        cleanupOutcome = if (incomplete.isEmpty()) {
-            SeccompCleanupOutcome.Complete
-        } else {
-            SeccompCleanupOutcome.Incomplete(
-            incomplete.flatMap { it.failures },
-            incomplete.flatMap { it.retryableOwnership },
-        )
+        synchronized(cleanupLock) {
+            val closing = sessions.toList()
+            try {
+                closing.forEach { it.closeWithResult() }
+            } finally {
+                // A session publishes its aborted outcome before the same fatal error escapes.
+                cleanupOutcome = profilerCleanupOutcome(
+                    closing.map { it.cleanupOutcome },
+                    closing.flatMap { it.retryableOwnership() },
+                )
+            }
+            cleanupOutcome.throwIfIncomplete("Profiler service cleanup failed")
         }
-        cleanupOutcome.throwIfIncomplete("Profiler service cleanup failed")
     }
 
     @Volatile

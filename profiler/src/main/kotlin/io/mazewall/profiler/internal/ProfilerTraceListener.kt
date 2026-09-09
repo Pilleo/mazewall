@@ -81,10 +81,25 @@ internal class ProfilerTraceListener(
                     )
                 }
             } catch (failure: Exception) {
-                cleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), listOf(socketFd))
+                recordCloseFailure(failure)
+            } catch (failure: Error) {
+                recordCloseFailure(IllegalStateException("Profiler listener socket cleanup aborted", failure))
+                throw failure
             }
         }
     }
+
+    private fun recordCloseFailure(failure: Exception) {
+        // Native engines retire the generation before dispatch. An exception alone cannot
+        // prove retryability, and a retired token must never be adopted or closed again.
+        if (!socketFd.isLiveForIo()) socketClosed.set(true)
+        cleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), retryableOwnership())
+    }
+
+    fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> =
+        synchronized(socketCloseLock) {
+            if (socketClosed.get() || !socketFd.isLiveForIo()) emptyList() else listOf(socketFd)
+        }
 
     internal val eventQueue = TraceEventQueue()
     val eventChannel = eventQueue.channel

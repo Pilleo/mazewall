@@ -203,11 +203,13 @@ class "ProfilerSession" as io.mazewall.profiler.ProfilerSession {
   +SeccompCleanupOutcome getCleanupOutcome()
   +void installOnCurrentThread()
   +SeccompCleanupOutcome closeWithResult()
+  +List<FileDescriptor<?, Open, Owned>> retryableOwnership()
   +void close()
   +BillOfBehavior compileBillOfBehavior()
   +ProfilingResult<T> result(T)
 }
 class "ProfilerSessionKt" as io.mazewall.profiler.ProfilerSessionKt {
+  + {static}SeccompCleanupOutcome profilerCleanupOutcome(List<? extends SeccompCleanupOutcome>, List<? extends FileDescriptor<?, ? extends Open, Owned>>, Throwable)
   + {static}void throwIfIncomplete(SeccompCleanupOutcome, String)
 }
 class "ProfilerSessionState" as io.mazewall.profiler.ProfilerSessionState {
@@ -894,6 +896,7 @@ class "ProfilerTraceListener" as io.mazewall.profiler.internal.ProfilerTraceList
   + {static}Companion Companion
   __
   +SeccompCleanupOutcome getCleanupOutcome()
+  +List<FileDescriptor<?, Open, Owned>> retryableOwnership()
   +TraceEventQueue getEventQueue()
   +Channel<TraceEvent> getEventChannel()
   +Flow<TraceEvent> getEventFlow()

@@ -1,6 +1,8 @@
 package io.mazewall.profiler
 
 import io.mazewall.PolicyDefinition
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
@@ -34,6 +36,7 @@ internal class ProfilerSession(
     private val lifecycleLock = Any()
     private val cleanupLock = Any()
     private val closed = AtomicBoolean(false)
+    private var closureNotified = false
     private var installations = 0
     private val installer = runtime.installer.forSession(
         SeccompInstallationGate { operation ->
@@ -112,32 +115,36 @@ internal class ProfilerSession(
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // Record aborted cleanup before propagating the original fatal error.
     fun closeWithResult(): SeccompCleanupOutcome {
         synchronized(lifecycleLock) { closed.set(true) }
         return synchronized(cleanupLock) {
             try {
-                val outcomes = listeners.map { it.closeWithResult() }
-                val incomplete = outcomes.filterIsInstance<SeccompCleanupOutcome.Incomplete>()
-                cleanupOutcome = if (incomplete.isEmpty()) {
-                    SeccompCleanupOutcome.Complete
-                } else {
-                    SeccompCleanupOutcome.Incomplete(
-                        incomplete.flatMap { it.failures },
-                        incomplete.flatMap { it.retryableOwnership },
-                    )
-                }
-                cleanupOutcome
-            } finally {
+                listeners.forEach { it.closeWithResult() }
+                cleanupOutcome = currentCleanupOutcome()
                 val settled = synchronized(lifecycleLock) {
                     state.clear()
                     appliedThreads.clear()
                     installations == 0
                 }
-                // Keep ownership reachable from the service until any late installation is disposed.
-                if (settled) onClosed(this)
+                // Aborted folds and late installations retain their service owner and TID resolver.
+                if (settled && cleanupOutcome == SeccompCleanupOutcome.Complete && !closureNotified) {
+                    onClosed(this)
+                    closureNotified = true
+                }
+            } catch (failure: Exception) {
+                cleanupOutcome = currentCleanupOutcome(failure)
+            } catch (failure: Error) {
+                cleanupOutcome = currentCleanupOutcome(failure)
+                throw failure
             }
+            cleanupOutcome
         }
     }
+
+    fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> = listeners.flatMap { it.retryableOwnership() }
+
+    private fun currentCleanupOutcome(failure: Throwable? = null): SeccompCleanupOutcome = profilerCleanupOutcome(listeners.map { it.cleanupOutcome }, retryableOwnership(), failure)
 
     override fun close() {
         closeWithResult().throwIfIncomplete("Profiler session cleanup failed")
@@ -158,6 +165,23 @@ internal class ProfilerSession(
             environment = runtime.environment(),
         )
         return ProfilingResult(value, compileBillOfBehavior().copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)
+    }
+}
+
+/** Include unattempted owners when an earlier close aborted the fold. Fatal errors remain causes. */
+internal fun profilerCleanupOutcome(
+    outcomes: List<SeccompCleanupOutcome>,
+    retryableOwnership: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>,
+    failure: Throwable? = null,
+): SeccompCleanupOutcome {
+    val failures = outcomes.filterIsInstance<SeccompCleanupOutcome.Incomplete>().flatMap { it.failures }.toMutableList()
+    if (failure != null && failures.none { it === failure || it.cause === failure }) {
+        failures += if (failure is Exception) failure else IllegalStateException("Profiler cleanup aborted", failure)
+    }
+    return if (failures.isEmpty() && retryableOwnership.isEmpty()) {
+        SeccompCleanupOutcome.Complete
+    } else {
+        SeccompCleanupOutcome.Incomplete(failures.toList(), retryableOwnership)
     }
 }
 
