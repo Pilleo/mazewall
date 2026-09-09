@@ -223,6 +223,18 @@ public object SupervisorSocketUtils {
         descriptors.forEach { received ->
             try {
                 fileSystem.close(FileDescriptor.adopt(received, role)).getOrThrow("close rejected SCM_RIGHTS descriptor")
+            } catch (fatal: Error) {
+                val previous = cleanupFailure
+                if (previous == null) {
+                    cleanupFailure = fatal
+                } else if (previous !is Error) {
+                    // Preserve fatal identity for callers that distinguish JVM
+                    // failures from ordinary transport/session cleanup exceptions.
+                    fatal.addSuppressed(previous)
+                    cleanupFailure = fatal
+                } else if (previous !== fatal) {
+                    previous.addSuppressed(fatal)
+                }
             } catch (failure: Throwable) {
                 val previous = cleanupFailure
                 if (previous == null) {

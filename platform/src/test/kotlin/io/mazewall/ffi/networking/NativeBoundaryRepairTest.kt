@@ -3,6 +3,7 @@ package io.mazewall.ffi.networking
 import io.mazewall.IsolatedProcessTester
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.NativeFileSystem
 import io.mazewall.NativeNetworking
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -72,6 +73,32 @@ class NativeBoundaryRepairTest {
 
     @Test
     fun `two descriptors are rejected and both received copies closed`() = rejectRights(2)
+
+    @Test
+    fun `later fatal close failure is primary after all received descriptors are closed`() =
+        withPair { arena, sender, receiver ->
+            sendRights(arena, sender, intArrayOf(sender.value, sender.value))
+            val ordinary = IllegalStateException("first close failed")
+            val fatal = LinkageError("second close failed fatally")
+            val closed = mutableListOf<Int>()
+            val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    real.fileSystem.close(fd).getOrThrow("close received fixture")
+                    closed.add(fd.value)
+                    if (closed.size == 1) throw ordinary
+                    throw fatal
+                }
+            }
+            LinuxNative.setEngine(object : NativeEngine by real {
+                override val fileSystem: NativeFileSystem = fileSystem
+            })
+            val thrown = assertThrows<Throwable> { SupervisorSocketUtils.recvDescriptor(receiver) }
+            assertEquals(2, closed.size, "both independent closes must be attempted")
+            assertEquals(2, closed.toSet().size, "each received descriptor must close once")
+            closed.forEach { assertFalse(LinuxNative.isDescriptorLive(it)) }
+            assertSame(fatal, thrown, "fatal JVM failure must not be hidden under an ordinary failure")
+            assertEquals(listOf(ordinary), thrown.suppressed.toList())
+        }
 
     @Test
     fun `truncated descriptor message closes all delivered copies`() = rejectRights(3)
