@@ -19,6 +19,7 @@ class PortalWorkerMachineTest {
 
         assertTrue(dispatch is PortalWorkerTransition.Dispatch)
         val sent = reply as PortalWorkerTransition.Send
+        assertInstanceOf(PortalWorkerState.SendingReply::class.java, sent.state)
         assertEquals(PortalKind.Response, sent.frame.kind)
         assertEquals(5, sent.frame.requestId)
         assertEquals(PortalMethod.Echo, sent.frame.method)
@@ -27,6 +28,20 @@ class PortalWorkerMachineTest {
             .copyToByteArray()
             .contentEquals(byteArrayOf(2)),
         )
+    }
+
+    @Test
+    fun `a request is not complete until reply transmission succeeds`() {
+        val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, ByteArray(0), 0)
+        val dispatch = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(request))
+        val sending = PortalWorkerMachine.evaluate(dispatch.state, PortalWorkerEvent.DispatchSucceeded(PortalPayload(ByteArray(0))))
+
+        val succeeded = PortalWorkerMachine.evaluate(sending.state, PortalWorkerEvent.ReplySucceeded)
+        val failed = PortalWorkerMachine.evaluate(sending.state, PortalWorkerEvent.ReplyFailed("partial write"))
+
+        assertEquals(PortalWorkerState.AwaitingRequest, succeeded.state)
+        assertEquals(PortalWorkerState.Stopped, failed.state)
+        assertInstanceOf(PortalWorkerTransition.Close::class.java, failed)
     }
 
     @Test

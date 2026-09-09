@@ -32,6 +32,28 @@ Presentation context: [article0a-history.md](../../../presentation/article0a-his
 | Codegen | KotlinPoet, Gradle plugin module only (not runtime). |
 | Host fallback | Never instantiate guest `Impl` in the broker. Fail closed if the stub/worker is missing. |
 
+## Authoritative lifecycles
+
+The broker pool is published transactionally. Its closed lifecycle is `New → Starting → Running
+→ Closing → Closed`, with `Failed` retaining startup/cleanup failure until cleanup is retried. `Starting` workers
+remain provisional: the idle queue and live-slot registry receive no entry until every configured
+worker has connected and reported readiness. A single monotonic deadline (30 seconds by default)
+covers every initial accept and readiness observation. Failure of any pool member retires and reaps
+the complete provisional batch.
+
+Worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
+is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
+replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
+so a slot cannot be returned after closing admission begins.
+
+The worker request loop has the closed states `AwaitingRequest → Dispatching → SendingReply`.
+`ReplySucceeded` is the only transition back to `AwaitingRequest`; `ReplyFailed` terminates the
+channel. Builtin and generated methods are resolved before one dispatch-failure boundary, which
+deliberately unwraps reflective invocation failures. Consequently a partial response write closes
+the channel and cannot be followed by an error frame. The READY sentinel is emitted only after
+containment, dispatcher publication/guest construction, and channel initialization have succeeded.
+See [the portal lifecycle diagram](../../../diagrams/portal_lifecycle.puml).
+
 ## Architecture
 
 ```

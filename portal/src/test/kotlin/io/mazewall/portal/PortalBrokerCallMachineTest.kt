@@ -36,6 +36,19 @@ class PortalBrokerCallMachineTest {
     }
 
     @Test
+    fun `rejects a response for a different method`() {
+        val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, ByteArray(0), 0)
+        val waiting = PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
+
+        val mismatch = PortalBrokerCallMachine.evaluate(
+            waiting.state,
+            PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Response, 7, PortalMethod.Checksum, ByteArray(0), 0)),
+        )
+
+        assertEquals(PortalBrokerCallEffect.ProtocolViolation("method mismatch"), mismatch.effect)
+    }
+
+    @Test
     fun `reply without a request is a protocol violation`() {
         val reply = PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, ByteArray(0), 0)
 

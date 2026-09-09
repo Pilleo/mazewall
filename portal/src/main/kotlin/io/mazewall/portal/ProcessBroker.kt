@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.core.ChildStdoutPump
 import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -15,7 +16,10 @@ import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -30,11 +34,14 @@ public class ProcessBroker(
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = "",
+    private val startupTimeoutMs: Long = 30_000L,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
 ) : AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
+        require(callTimeoutMs > 0) { "callTimeoutMs must be positive" }
+        require(startupTimeoutMs > 0) { "startupTimeoutMs must be positive" }
     }
 
     public companion object {
@@ -45,8 +52,10 @@ public class ProcessBroker(
 
     private val nextId = AtomicInteger(1)
     private val idle = ArrayBlockingQueue<WorkerSlot>(poolSize)
-    private val started = AtomicInteger(0)
     private val spawned = AtomicInteger(0)
+    private val maintenance = Executors.newSingleThreadExecutor(
+        Thread.ofVirtual().name("portal-broker-maintenance", 0).factory(),
+    )
 
     /**
      * Every live slot (idle AND checked-out), so [close] can destroy workers that are
@@ -55,13 +64,39 @@ public class ProcessBroker(
     private val trackedSlots: MutableSet<WorkerSlot> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
-    private val closed = java.util.concurrent.atomic
-        .AtomicBoolean(false)
+    private val lifecycleGate = Any()
 
+    @Volatile private var lifecycle: ProcessBrokerLifecycle = ProcessBrokerLifecycle.New
+
+    @Suppress("TooGenericExceptionCaught") // Transaction rollback must run for every acquisition failure.
     public fun start() {
-        check(started.compareAndSet(0, 1)) { "broker already started" }
-        repeat(poolSize) {
-            register(spawnWorker())?.let { idle.put(it) }
+        synchronized(lifecycleGate) {
+            val transition = ProcessBrokerLifecycleMachine.evaluate(lifecycle, ProcessBrokerLifecycleEvent.StartRequested)
+            check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
+            lifecycle = transition.state
+        }
+        val deadline = Deadline.afterMillis(startupTimeoutMs)
+        val acquired = ArrayList<WorkerSlot>(poolSize)
+        try {
+            repeat(poolSize) { acquired += spawnWorker(deadline) }
+            synchronized(lifecycleGate) {
+                check(lifecycle == ProcessBrokerLifecycle.Starting) { "broker closed during startup" }
+                acquired.forEach { trackedSlots.add(it) }
+                acquired.forEach { idle.add(it) }
+                lifecycle = ProcessBrokerLifecycleMachine
+                    .evaluate(lifecycle, ProcessBrokerLifecycleEvent.StartupSucceeded)
+                    .state
+            }
+        } catch (failure: Throwable) {
+            acquired.forEach { destroySlot(it) }
+            synchronized(lifecycleGate) {
+                if (lifecycle == ProcessBrokerLifecycle.Starting) {
+                    lifecycle = ProcessBrokerLifecycleMachine
+                        .evaluate(lifecycle, ProcessBrokerLifecycleEvent.StartupFailed(failure.message ?: "worker startup failed"))
+                        .state
+                }
+            }
+            throw failure
         }
     }
 
@@ -69,6 +104,8 @@ public class ProcessBroker(
     internal fun trackedWorkers(): Int = trackedSlots.size
 
     internal fun idleSize(): Int = idle.size
+
+    internal fun lifecycleState(): ProcessBrokerLifecycle = lifecycle
 
     public fun echo(text: String): String {
         val payload = call(PortalMethod.Echo, text.toByteArray(StandardCharsets.UTF_8), emptyList())
@@ -123,16 +160,17 @@ public class ProcessBroker(
         payload: ByteArray,
         fds: List<Capability.ReadFd>,
     ): ByteArray {
-        check(started.get() == 1) { "broker not started" }
+        check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
         val deadline = Deadline.afterMillis(callTimeoutMs)
         val slot =
             idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("timed out waiting for an idle portal worker")
         var returnedToPool = false
+        var callState: PortalBrokerCallState = PortalBrokerCallState.Idle
         return try {
             val id = nextId.getAndIncrement()
             val request = PortalFrame(PortalKind.Request, id, method, PortalPayload(payload), fds.size)
-            var callState = PortalBrokerCallMachine
+            callState = PortalBrokerCallMachine
                 .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
                 .state
             slot.channel.sendCapabilities(request, fds, deadline)
@@ -157,43 +195,57 @@ public class ProcessBroker(
             }
         } catch (e: PortalCallException) {
             if (!returnedToPool) {
-                recycleDeadWorker(slot)
+                scheduleRecycle(slot)
             }
             throw e
         } catch (expectedRpcFailure: Exception) {
+            val transportFailure = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.TransportFailed)
+            check(transportFailure.state == PortalBrokerCallState.Failed)
             if (!returnedToPool) {
-                recycleDeadWorker(slot)
+                scheduleRecycle(slot)
             }
             throw PortalCallException("portal RPC failed", expectedRpcFailure)
         }
     }
 
     override fun close() {
-        closed.set(true)
-        started.set(0)
+        synchronized(lifecycleGate) {
+            if (lifecycle == ProcessBrokerLifecycle.Closed || lifecycle == ProcessBrokerLifecycle.Closing) return
+            val transition = ProcessBrokerLifecycleMachine.evaluate(lifecycle, ProcessBrokerLifecycleEvent.CloseRequested)
+            check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
+            lifecycle = transition.state
+        }
+        maintenance.shutdownNow()
+        try {
+            if (!maintenance.awaitTermination(3, TimeUnit.SECONDS)) {
+                logger.warning("portal maintenance did not terminate before broker cleanup")
+            }
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            logger.log(Level.WARNING, "interrupted while stopping portal maintenance", interrupted)
+        }
         val leftover = mutableListOf<WorkerSlot>()
         idle.drainTo(leftover)
         // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
         synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
-        leftover.forEach { destroySlot(it) }
+        val cleanupComplete = leftover.distinct().map { destroySlot(it) }.all { it }
+        synchronized(lifecycleGate) {
+            lifecycle = ProcessBrokerLifecycleMachine
+                .evaluate(
+                    lifecycle,
+                    if (cleanupComplete) ProcessBrokerLifecycleEvent.CleanupSucceeded else ProcessBrokerLifecycleEvent.CleanupFailed("broker cleanup failed"),
+                ).state
+        }
     }
 
     /** Pool the slot unless the broker closed meanwhile; destroy orphans either way. */
     private fun returnToPoolOrDestroy(slot: WorkerSlot) {
-        if (closed.get()) {
-            destroySlot(slot)
-        } else {
-            idle.put(slot)
-        }
-    }
-
-    private fun register(slot: WorkerSlot): WorkerSlot? {
-        trackedSlots.add(slot)
-        return if (closed.get()) {
-            destroySlot(slot)
-            null
-        } else {
-            slot
+        synchronized(lifecycleGate) {
+            if (lifecycle != ProcessBrokerLifecycle.Running) {
+                destroySlot(slot)
+            } else {
+                idle.put(slot)
+            }
         }
     }
 
@@ -205,10 +257,17 @@ public class ProcessBroker(
         return cp
     }
 
-    private fun spawnWorker(): WorkerSlot {
+    @Suppress("TooGenericExceptionCaught") // Provisional ownership must roll back on every startup failure.
+    private fun spawnWorker(deadline: Deadline = Deadline.afterMillis(startupTimeoutMs)): WorkerSlot {
         val ep = PrivateUnixEndpoint.create(launcher, "mazewall-portal-", "portal.sock")
-        val listen = sockets.createUnixServer(ep.path)
-        val spec =
+        var listen: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+        var proc: Process? = null
+        var peer: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+        var channel: PortalChannel? = null
+        var pump: ChildStdoutPump? = null
+        try {
+            listen = sockets.createUnixServer(ep.path)
+            val spec =
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
                 mainArgs = listOf(ep.path),
@@ -217,35 +276,8 @@ public class ProcessBroker(
                 classpath = resolveWorkerClasspath(),
                 extraJvmArgs = workerExtraJvmArgs,
             )
-        val proc = JvmChildProcess.start(launcher, spec)
-        // CI diagnosability + hang prevention: a worker that dies before connecting
-        // must (a) surface its exit code and command line, and (b) break the
-        // blocking accept() below by closing the listener, so the cleanup path runs
-        // instead of hanging until an external timeout.
-        proc
-            .onExit()
-            .thenAccept {
-            if (it.exitValue() != 0) {
-                System.err.println(
-                    "[PORTAL-WORKER-EXIT] code=${it.exitValue()} cmd=${JvmChildProcess.commandLine(spec).joinToString(" ")}",
-                )
-            }
-            // Wake order matters: close() alone does not interrupt a thread blocked
-            // in accept4 on the same fd. A dummy connect forces the accept to return
-            // (its peer is discarded by the !proc.isAlive guard below); closing the
-            // listener afterwards prevents any further accepts.
-            runCatching {
-                java.nio.channels.SocketChannel
-                    .open(
-                    java.net.UnixDomainSocketAddress.of(ep.path),
-                ).use { ch -> ch.write(java.nio.ByteBuffer.wrap(ByteArray(1))) }
-            }
-            runCatching { sockets.close(listen) }
-        }.exceptionally {
-            System.err.println("[PORTAL-WORKER-EXIT] onExit failed: ${it.message}")
-            null
-        }
-        val pump =
+            proc = JvmChildProcess.start(launcher, spec)
+            pump =
             JvmChildProcess.startStdoutPump(
                 proc,
                 "MAZEWALL_PORTAL_WORKER_READY",
@@ -256,63 +288,155 @@ public class ProcessBroker(
                     }
                 },
                 "portal-worker-stdout",
+                { runCatching { System.err.println("[PORTAL-WORKER-EXIT] code=${proc.exitValue()}") } },
             )
-        val peer = try {
-            sockets.accept(listen)
-        } catch (expectedWorkerTeardown: Exception) {
-            // Listener closed by the death watcher (or teardown racing accept).
-            runCatching { proc.destroyForcibly() }
-            ep.close()
-            throw IllegalStateException(
-                "portal worker died before connecting: ${expectedWorkerTeardown.message}",
-                expectedWorkerTeardown,
-            )
-        }
-        if (!proc.isAlive) {
-            sockets.close(peer)
-            sockets.close(listen)
-            ep.close()
-            proc.destroyForcibly()
-            error("portal worker exited during handshake")
-        }
-        val channel = PortalChannel(peer, sockets)
-        if (!JvmChildProcess.awaitReady(pump, 30)) {
-            sockets.close(peer)
-            sockets.close(listen)
-            proc.destroyForcibly()
-            ep.close()
-            error("portal worker failed to become ready")
-        }
-        spawned.incrementAndGet()
-        return register(WorkerSlot(proc, channel, ep, listen)) ?: run {
-            // Closed between accept and registration: tear down this worker immediately.
-            proc.destroyForcibly()
-            ep.close()
-            sockets.close(listen)
-            error("broker closed during worker spawn")
+            peer = acceptWithin(listen, proc, ep.path, deadline)
+            check(proc.isAlive) { "portal worker exited during handshake" }
+            channel = PortalChannel(peer, sockets)
+            peer = null
+            val remaining = deadline.remainingMillis()
+            check(remaining > 0 && pump.ready.await(remaining.toLong(), TimeUnit.MILLISECONDS) && JvmChildProcess.awaitReady(pump, 0)) {
+                "portal worker failed to become ready before startup deadline"
+            }
+            check(proc.isAlive) { "portal worker exited during readiness handshake" }
+            spawned.incrementAndGet()
+            val readyChannel = checkNotNull(channel)
+            channel = null
+            return WorkerSlot(proc, readyChannel, ep, listen)
+        } catch (failure: Throwable) {
+            channel?.let { runCatching { it.close() }.exceptionOrNull()?.let(failure::addSuppressed) }
+            peer?.let { runCatching { sockets.close(it) }.exceptionOrNull()?.let(failure::addSuppressed) }
+            proc?.let {
+                runCatching { it.destroyForcibly() }.exceptionOrNull()?.let(failure::addSuppressed)
+                runCatching { it.waitFor(2, TimeUnit.SECONDS) }.exceptionOrNull()?.let(failure::addSuppressed)
+            }
+            pump?.thread?.let { thread ->
+                runCatching {
+                    thread.interrupt()
+                    thread.join(1_000)
+                }.exceptionOrNull()?.let(failure::addSuppressed)
+            }
+            listen?.let { runCatching { sockets.close(it) }.exceptionOrNull()?.let(failure::addSuppressed) }
+            runCatching { ep.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
         }
     }
 
-    private fun recycleDeadWorker(dead: WorkerSlot) {
-        // Pre-spawn BEFORE teardown: replacement boot overlaps destruction of the corpse,
-        // bounding recycle latency instead of serializing a full JVM start (issue-011652).
-        val fresh = try {
-            spawnWorker()
-        } finally {
-            destroySlot(dead)
+    private fun acceptWithin(
+        listener: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        process: Process,
+        socketPath: String,
+        deadline: Deadline,
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+        Executors.newVirtualThreadPerTaskExecutor().use { executor ->
+            val accepted = executor.submit<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>> { sockets.accept(listener) }
+            var peer: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+            try {
+                while (peer == null) {
+                    check(process.isAlive) { "portal worker exited before connecting" }
+                    val remaining = deadline.remainingMillis()
+                    check(remaining > 0) { "portal worker connection timed out" }
+                    try {
+                        peer = accepted.get(minOf(remaining, 50).toLong(), TimeUnit.MILLISECONDS)
+                    } catch (_: TimeoutException) {
+                        continue
+                    } catch (failed: ExecutionException) {
+                        throw (failed.cause as? Exception ?: failed)
+                    }
+                }
+            } finally {
+                if (!accepted.isDone) {
+                    process.destroyForcibly()
+                    runCatching {
+                        java.nio.channels.SocketChannel
+                            .open(java.net.UnixDomainSocketAddress.of(socketPath))
+                            .close()
+                    }
+                    accepted.cancel(true)
+                }
+            }
+            checkNotNull(peer)
         }
-        idle.put(fresh)
+
+    private fun scheduleRecycle(dead: WorkerSlot) {
+        try {
+            maintenance.execute {
+                runCatching {
+                    check(destroySlot(dead)) { "failed to retire dead portal worker" }
+                    if (lifecycle != ProcessBrokerLifecycle.Running) return@runCatching
+                    val fresh = spawnWorker()
+                    val published = synchronized(lifecycleGate) {
+                        if (lifecycle == ProcessBrokerLifecycle.Running) {
+                            trackedSlots.add(fresh)
+                            idle.add(fresh)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    if (!published) destroySlot(fresh)
+                }.exceptionOrNull()?.let { failure ->
+                    logger.log(Level.WARNING, "failed to replenish portal worker", failure)
+                }
+            }
+        } catch (closed: java.util.concurrent.RejectedExecutionException) {
+            logger.log(Level.WARNING, "portal worker retirement rejected during shutdown", closed)
+            runCatching { destroySlot(dead) }.exceptionOrNull()?.let { failure ->
+                logger.log(Level.WARNING, "failed to retire portal worker after maintenance shutdown", failure)
+            }
+        }
     }
 
-    private fun destroySlot(slot: WorkerSlot) {
-        trackedSlots.remove(slot)
-        val cleanup = CleanupCollector()
-        cleanup.attempt("worker RPC channel") { slot.channel.close() }
-        cleanup.attempt("worker listener socket") { sockets.close(slot.server) }
-        cleanup.attempt("worker process") { slot.process.destroyForcibly() }
-        cleanup.attempt("worker endpoint") { slot.endpoint.close() }
-        cleanup.outcome().failures.forEach { failure ->
-            logger.log(Level.WARNING, "failed to release ${failure.resource}", failure.cause)
+    private fun destroySlot(slot: WorkerSlot): Boolean {
+        synchronized(slot) {
+            if (slot.fullyRetired) return true
+            val cleanup = CleanupCollector()
+            if (!slot.channelRetired) {
+                cleanup.attempt("worker RPC channel") {
+                    try {
+                        slot.channel.close()
+                        slot.channelRetired = true
+                    } catch (terminal: io.mazewall.core.NativeCloseFailure) {
+                        slot.channelRetired = true
+                        throw terminal
+                    }
+                }
+            }
+            if (!slot.serverRetired) {
+                cleanup.attempt("worker listener socket") {
+                    try {
+                        sockets.close(slot.server)
+                        slot.serverRetired = true
+                    } catch (terminal: io.mazewall.core.NativeCloseFailure) {
+                        slot.serverRetired = true
+                        throw terminal
+                    }
+                }
+            }
+            if (!slot.processDestroyed) {
+                cleanup.attempt("worker process") {
+                    slot.process.destroyForcibly()
+                    slot.processDestroyed = true
+                }
+            }
+            if (!slot.processReaped) {
+                cleanup.attempt("worker process reap") {
+                    check(slot.process.waitFor(2, TimeUnit.SECONDS)) { "portal worker did not exit after forced termination" }
+                    slot.processReaped = true
+                }
+            }
+            if (!slot.endpointRetired) {
+                cleanup.attempt("worker endpoint") {
+                    slot.endpoint.close()
+                    slot.endpointRetired = true
+                }
+            }
+            val outcome = cleanup.outcome()
+            outcome.failures.forEach { failure ->
+                logger.log(Level.WARNING, "failed to release ${failure.resource}", failure.cause)
+            }
+            if (outcome.complete) trackedSlots.remove(slot)
+            return outcome.complete
         }
     }
 
@@ -321,5 +445,13 @@ public class ProcessBroker(
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
         val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-    )
+    ) {
+        var channelRetired: Boolean = false
+        var serverRetired: Boolean = false
+        var processDestroyed: Boolean = false
+        var processReaped: Boolean = false
+        var endpointRetired: Boolean = false
+        val fullyRetired: Boolean
+            get() = channelRetired && serverRetired && processDestroyed && processReaped && endpointRetired
+    }
 }

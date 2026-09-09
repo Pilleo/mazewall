@@ -1,17 +1,70 @@
 package io.mazewall.portal
 
+import io.mazewall.core.ProcessLauncher
+import io.mazewall.core.RealProcessLauncher
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.Adler32
 
+@Execution(ExecutionMode.SAME_THREAD)
 class ProcessBrokerIntegrationTest {
+    @Test
+    fun `second worker startup failure rolls back the unpublished first worker`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val starts = AtomicInteger()
+        var first: Process? = null
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                if (starts.incrementAndGet() == 2) error("second worker launch failed")
+                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { first = it }
+            }
+        }
+        val broker = ProcessBroker(poolSize = 2, launcher = launcher)
+
+        assertThrows(IllegalStateException::class.java) { broker.start() }
+
+        assertEquals(ProcessBrokerLifecycle.Failed("second worker launch failed"), broker.lifecycleState())
+        assertEquals(0, broker.trackedWorkers())
+        assertEquals(0, broker.idleSize())
+        assertTrue(first?.isAlive == false, "provisional first worker must be destroyed and reaped")
+        broker.close()
+    }
+
+    @Test
+    fun `worker connection and readiness share one bounded startup deadline`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        var child: Process? = null
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process = ProcessBuilder("sh", "-c", "sleep 60").start().also { child = it }
+        }
+        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 150)
+        val startedAt = System.nanoTime()
+
+        assertThrows(IllegalStateException::class.java) { broker.start() }
+
+        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+        assertTrue(elapsedMs < 3_000, "startup deadline escaped: ${elapsedMs}ms")
+        assertTrue(child?.isAlive == false, "timed-out worker must be destroyed and reaped")
+        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+        broker.close()
+    }
+
     @Test
     fun `worker checkout consumes the same budget as the subsequent RPC`() {
         ProcessBroker(callTimeoutMs = 2_000).use { broker ->
@@ -95,6 +148,7 @@ class ProcessBrokerIntegrationTest {
         ProcessBroker(poolSize = 1, callTimeoutMs = 800).use { broker ->
             broker.start()
             assertThrows(PortalCallException::class.java) { broker.sleep(10_000) }
+            awaitCondition(java.time.Duration.ofSeconds(10), "timed-out worker replacement") { broker.idleSize() == 1 }
             assertEquals("after-timeout", broker.echo("after-timeout"))
         }
     }
@@ -106,6 +160,7 @@ class ProcessBrokerIntegrationTest {
             broker.start()
             broker.crashIdleWorkerProcess()
             assertThrows(PortalCallException::class.java) { broker.echo("fail-inflight") }
+            awaitCondition(java.time.Duration.ofSeconds(10), "crashed worker replacement") { broker.idleSize() == 1 }
             assertEquals("after-crash", broker.echo("after-crash"))
         }
     }
@@ -152,17 +207,19 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
-    fun `recycled worker is replaced without serializing boot and teardown`() {
+    fun `recycled worker is retired before asynchronous replacement`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(poolSize = 2).use { broker ->
             broker.start()
             assertEquals(2, broker.trackedWorkers())
             broker.crashIdleWorkerProcess()
 
-            // Pre-spawn overlap: replacement must already exist right after the crash hook.
-            assertEquals(2, broker.trackedWorkers(), "replacement should be spawned before corpse teardown")
-
             assertEquals("still-alive", broker.echo("still-alive"))
+            assertThrows(PortalCallException::class.java) { broker.echo("dead-worker") }
+            awaitCondition(java.time.Duration.ofSeconds(10), "replacement after corpse retirement") {
+                broker.trackedWorkers() == 2 && broker.idleSize() == 2
+            }
+            assertEquals(3, broker.spawnedWorkers(), "one worker should replace the reaped corpse")
         }
     }
 
@@ -170,13 +227,14 @@ class ProcessBrokerIntegrationTest {
     fun `worker survives multiple idle ticks and still serves calls`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         // Regression for the pooled-worker self-exit bug (011654): a 500ms receive deadline
-        // fires ~3 times during this sleep; the old break-on-timeout loop killed the worker.
+        // fires twice during this sleep. Keep the request away from the exact deadline edge:
+        // once a header byte arrives, expiry is correctly a terminal partial-frame timeout.
         val broker = ProcessBroker(
             workerExtraJvmArgs = listOf("-Dio.mazewall.portal.worker.idleTimeoutMs=500"),
         )
         broker.use { b ->
             b.start()
-            Thread.sleep(1_500) // Workload delay: keep the worker idle across three real receive-timeout intervals.
+            Thread.sleep(1_250) // Workload delay: keep the worker idle across multiple real receive-timeout intervals.
             assertEquals("after-idle", b.echo("after-idle"))
             assertEquals(1, b.spawnedWorkers(), "idle ticks must not respawn workers")
         }

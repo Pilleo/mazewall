@@ -4,12 +4,10 @@ import io.mazewall.ProcessPolicies
 import io.mazewall.RuntimeProfile
 import io.mazewall.core.RealSocketManager
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalChannel
-import io.mazewall.portal.PortalFrame
-import io.mazewall.portal.PortalKind
-import io.mazewall.portal.PortalPayload
-import java.nio.charset.StandardCharsets
+import io.mazewall.portal.PortalIncompleteFrameException
+import io.mazewall.portal.PortalMethod
+import io.mazewall.portal.PortalReadTimeoutException
 import kotlin.system.exitProcess
 
 /**
@@ -39,8 +37,6 @@ public object PortalWorkerMain {
         ContainedExecutors.installOnCurrentThread(
             ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
         )
-        println(READY)
-        System.out.flush()
         // Generated service dispatchers must be registered before the first request
         // can arrive; entries come from -Dio.mazewall.portal.worker.dispatchers.
         val dispatchers = publishDispatcherTable(
@@ -59,68 +55,50 @@ public object PortalWorkerMain {
         val idleTimeoutMs = System
             .getProperty("io.mazewall.portal.worker.idleTimeoutMs")
             ?.toLongOrNull() ?: 30_000L
-        println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
-        var state: PortalWorkerState = PortalWorkerState.AwaitingRequest
-        try {
-            serve@ while (true) {
-                val (frame, fds) =
-                    try {
-                        channel.receive(idleTimeoutMs)
-                    } catch (_: io.mazewall.portal.PortalReadTimeoutException) {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
-                        continue
-                    } catch (expectedPeerClose: Exception) {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
-                        break
-                    }
-                val received = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FrameReceived(frame))
-                state = received.state
-                val dispatch = when (val action = PortalWorkerTransitionInterpreter.interpret(received)) {
-                    is PortalWorkerLoopAction.Dispatch -> action
-                    PortalWorkerLoopAction.Continue -> {
-                        Capability.closeAll(fds)
-                        continue
-                    }
-                    is PortalWorkerLoopAction.Terminate -> {
-                        Capability.closeAll(fds)
-                        break@serve
-                    }
-                }
-                try {
-                    val result = PortalBuiltinDispatch.handle(dispatch.request.method, dispatch.request.payload.copyToByteArray(), fds)
-                    val replied = PortalWorkerMachine.dispatchSucceeded(dispatch.state, PortalPayload(result))
-                    state = replied.state
-                    channel.send(replied.frame)
-                } catch (e: UnknownPortalMethod) {
-                    val generated = dispatcherTable.dispatchOrNull(
-                        e.method,
-                        dispatch.request.payload.copyToByteArray(),
-                        fds,
-                    )
-                    if (generated != null) {
-                        val replied = PortalWorkerMachine.dispatchSucceeded(dispatch.state, PortalPayload(generated))
-                        state = replied.state
-                        channel.send(replied.frame)
-                    } else {
-                        val msg = (e.message ?: e::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
-                        val replied = PortalWorkerMachine.dispatchFailed(dispatch.state, PortalPayload(msg))
-                        state = replied.state
-                        channel.send(replied.frame)
-                    }
-                } catch (expectedDispatchFailure: Exception) {
-                    val msg = (expectedDispatchFailure.message ?: expectedDispatchFailure::class.java.simpleName)
-                        .toByteArray(StandardCharsets.UTF_8)
-                    val replied = PortalWorkerMachine.dispatchFailed(dispatch.state, PortalPayload(msg))
-                    state = replied.state
-                    channel.send(replied.frame)
-                } finally {
-                    Capability.closeAll(fds)
-                }
+        val transport = ChannelWorkerTransport(channel, idleTimeoutMs)
+        val dispatcher = PortalWorkerDispatcher { method, payload, fds ->
+            when (method) {
+                is PortalMethod.Generated -> dispatcherTable.dispatchOrNull(method, payload, fds) ?: throw UnknownPortalMethod(method)
+                PortalMethod.Echo,
+                PortalMethod.Checksum,
+                PortalMethod.Sleep,
+                PortalMethod.TryOpenHostPasswd,
+                -> PortalBuiltinDispatch.handle(method, payload, fds)
             }
-        } finally {
-            channel.close()
         }
+        val driver = PortalWorkerDriver(transport, dispatcher)
+        // Readiness is the publication boundary: containment, dispatcher validation,
+        // guest construction, and channel initialization all succeeded above.
+        println(READY)
+        System.out.flush()
+        println("[DBG-W] idleTimeoutMs=$idleTimeoutMs")
+        driver.run()
     }
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)
+}
+
+private class ChannelWorkerTransport(
+    private val channel: PortalChannel,
+    private val idleTimeoutMs: Long,
+) : PortalWorkerTransport {
+    override fun receive(): PortalWorkerReceive =
+        try {
+        val (frame, fds) = channel.receive(idleTimeoutMs)
+        PortalWorkerReceive.Frame(frame, fds)
+    } catch (_: PortalReadTimeoutException) {
+        PortalWorkerReceive.Idle
+    } catch (partial: PortalIncompleteFrameException) {
+        PortalWorkerReceive.Failure(partial)
+    } catch (_: java.io.IOException) {
+        PortalWorkerReceive.PeerClosed
+    }
+
+    override fun send(frame: io.mazewall.portal.PortalFrame) {
+        channel.send(frame)
+    }
+
+    override fun close() {
+        channel.close()
+    }
 }

@@ -1,0 +1,37 @@
+@startuml portal_lifecycle
+hide empty description
+
+state "Broker" as broker {
+  [*] --> New
+  New --> Starting : StartRequested
+  Starting --> Running : all workers ready\npublish complete pool
+  Starting --> Failed : startup failure\nrollback + reap batch
+  Running --> Closing : CloseRequested
+  Starting --> Closing : concurrent CloseRequested
+  New --> Closing : CloseRequested
+  Failed --> Closing : cleanup retry
+  Closing --> Closed : cleanup complete
+  Closing --> Failed : cleanup failure
+}
+
+state "Worker RPC" as worker {
+  [*] --> AwaitingRequest
+  AwaitingRequest --> Dispatching : request frame
+  Dispatching --> SendingReply : dispatch result
+  SendingReply --> AwaitingRequest : ReplySucceeded
+  SendingReply --> Stopped : ReplyFailed
+  AwaitingRequest --> Stopped : peer close / partial frame
+  Dispatching --> Stopped : protocol violation
+}
+
+note right of Starting
+  One absolute 30s deadline spans
+  accept and readiness for the batch.
+  No provisional worker is published.
+end note
+
+note right of SendingReply
+  A failed or partial write is terminal;
+  no error frame may be appended.
+end note
+@enduml

@@ -12,6 +12,11 @@ internal sealed interface PortalWorkerState {
         val request: PortalFrame,
     ) : PortalWorkerState
 
+    data class SendingReply(
+        val request: PortalFrame,
+        val reply: PortalFrame,
+    ) : PortalWorkerState
+
     data object Stopped : PortalWorkerState
 }
 
@@ -31,6 +36,12 @@ internal sealed interface PortalWorkerEvent {
     data object IdleTick : PortalWorkerEvent
 
     data object PeerClosed : PortalWorkerEvent
+
+    data object ReplySucceeded : PortalWorkerEvent
+
+    data class ReplyFailed(
+        val reason: String,
+    ) : PortalWorkerEvent
 }
 
 internal sealed interface PortalWorkerTransition {
@@ -79,27 +90,54 @@ internal object PortalWorkerMachine {
         event: PortalWorkerEvent,
     ): PortalWorkerTransition =
         when (state) {
-        PortalWorkerState.AwaitingRequest -> when (event) {
+        PortalWorkerState.AwaitingRequest -> awaiting(event)
+        is PortalWorkerState.Dispatching -> dispatching(state, event)
+        is PortalWorkerState.SendingReply -> sending(event)
+        PortalWorkerState.Stopped -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+    }
+
+    private fun awaiting(event: PortalWorkerEvent): PortalWorkerTransition =
+        when (event) {
             is PortalWorkerEvent.FrameReceived -> if (event.frame.kind == PortalKind.Request) {
                 PortalWorkerTransition.Dispatch(PortalWorkerState.Dispatching(event.frame), event.frame)
             } else {
                 violation("expected a request frame")
             }
-            PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
+            PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(PortalWorkerState.AwaitingRequest)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.DispatchSucceeded,
             is PortalWorkerEvent.DispatchFailed,
+            PortalWorkerEvent.ReplySucceeded,
+            is PortalWorkerEvent.ReplyFailed,
             -> violation("received a dispatch result without a request")
         }
-        is PortalWorkerState.Dispatching -> when (event) {
+
+    private fun dispatching(
+        state: PortalWorkerState.Dispatching,
+        event: PortalWorkerEvent,
+    ): PortalWorkerTransition =
+        when (event) {
             is PortalWorkerEvent.DispatchSucceeded -> reply(state.request, PortalKind.Response, event.payload)
             is PortalWorkerEvent.DispatchFailed -> reply(state.request, PortalKind.Error, event.message)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.FrameReceived -> violation("received a second frame while dispatching")
             PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
+            PortalWorkerEvent.ReplySucceeded,
+            is PortalWorkerEvent.ReplyFailed,
+            -> violation("received a reply result before sending a reply")
         }
-        PortalWorkerState.Stopped -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
-    }
+
+    private fun sending(event: PortalWorkerEvent): PortalWorkerTransition =
+        when (event) {
+            PortalWorkerEvent.ReplySucceeded -> PortalWorkerTransition.Await(PortalWorkerState.AwaitingRequest)
+            is PortalWorkerEvent.ReplyFailed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+            PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+            is PortalWorkerEvent.FrameReceived,
+            is PortalWorkerEvent.DispatchSucceeded,
+            is PortalWorkerEvent.DispatchFailed,
+            PortalWorkerEvent.IdleTick,
+            -> violation("received an event while sending a reply")
+        }
 
     private fun reply(
         request: PortalFrame,
@@ -107,7 +145,7 @@ internal object PortalWorkerMachine {
         payload: PortalPayload,
     ): PortalWorkerTransition.Send {
         val frame = PortalFrame(kind, request.requestId, request.method, payload, 0)
-        return PortalWorkerTransition.Send(PortalWorkerState.AwaitingRequest, frame)
+        return PortalWorkerTransition.Send(PortalWorkerState.SendingReply(request, frame), frame)
     }
 
     private fun violation(reason: String): PortalWorkerTransition.ProtocolViolation = PortalWorkerTransition.ProtocolViolation(PortalWorkerState.Stopped, reason)

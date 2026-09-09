@@ -79,6 +79,7 @@ internal object PortalBrokerCallMachine {
         reply: PortalFrame,
     ): PortalBrokerCallTransition {
         if (reply.requestId != request.requestId) return protocolViolation("request id mismatch")
+        if (reply.method != request.method) return protocolViolation("method mismatch")
         return when (reply.kind) {
             PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReturnPayload(reply.payload))
             PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload.copyToByteArray().toString(StandardCharsets.UTF_8)))
