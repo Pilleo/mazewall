@@ -22,11 +22,6 @@ internal sealed interface ContainmentRegistryEffect {
         val defaultAction: SeccompAction,
     ) : ContainmentRegistryEffect
 
-    /** Rollback is valid only for thread-local bookkeeping before Landlock succeeds. */
-    data class RestoreThreadState(
-        val state: ContainerState,
-    ) : ContainmentRegistryEffect
-
     /** Records successful or failed seccomp-engine progress after the corresponding native step. */
     data class EngineStateUpdated(
         val processWide: Boolean,
@@ -35,6 +30,18 @@ internal sealed interface ContainmentRegistryEffect {
 }
 
 internal object ContainmentRegistryEffectInterpreter {
+    /** Precompute thread publication before irreversible native installation. */
+    fun prepare(effect: ContainmentRegistryEffect.SeccompInstalled): () -> Unit =
+        if (effect.processWide) {
+            val next = ContainmentStateRegistry.processState.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction)
+            val publish: () -> Unit = { ContainmentStateRegistry.processState = next }
+            publish
+        } else {
+            ContainmentStateRegistry.captureThreadPublication(
+                ContainmentStateRegistry.threadState.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction),
+            )
+        }
+
     fun apply(effect: ContainmentRegistryEffect) {
         when (effect) {
             is ContainmentRegistryEffect.LandlockApplied ->
@@ -58,10 +65,6 @@ internal object ContainmentRegistryEffectInterpreter {
                             effect.defaultAction,
                         )
                 }
-
-            is ContainmentRegistryEffect.RestoreThreadState -> {
-                ContainmentStateRegistry.threadState = effect.state
-            }
 
             is ContainmentRegistryEffect.EngineStateUpdated ->
                 if (effect.processWide) {

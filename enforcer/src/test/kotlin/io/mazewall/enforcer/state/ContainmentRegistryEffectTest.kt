@@ -58,18 +58,27 @@ class ContainmentRegistryEffectTest {
     }
 
     @Test
-    fun `rollback restores the supplied thread state without weakening process state`() {
+    fun `coordinator publication updates the installing thread rather than the coordinator`() {
         val processState = ContainerState(filterDepth = 5)
-        val expectedThreadState = ContainerState(filterDepth = 2)
         ContainmentStateRegistry.processState = processState
-        ContainmentStateRegistry.threadState = ContainerState(filterDepth = 3)
-
-        ContainmentRegistryEffectInterpreter.apply(
-            ContainmentRegistryEffect.RestoreThreadState(expectedThreadState),
+        ContainmentStateRegistry.threadState = ContainerState()
+        val policy = Policy
+            .builder()
+            .block(Syscall.EXECVE)
+            .build()
+            .definition
+        val publish = ContainmentRegistryEffectInterpreter.prepare(
+            ContainmentRegistryEffect.SeccompInstalled(false, policy, mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()), SeccompAction.ACT_ALLOW),
         )
-
+        java.util.concurrent.Executors.newSingleThreadExecutor().use { coordinator ->
+            coordinator
+                .submit {
+                publish()
+                assertEquals(0, ContainmentStateRegistry.threadState.filterDepth)
+            }.get()
+        }
         assertEquals(processState, ContainmentStateRegistry.processState)
-        assertEquals(expectedThreadState, ContainmentStateRegistry.threadState)
+        assertEquals(1, ContainmentStateRegistry.threadState.filterDepth)
     }
 
     @Test

@@ -38,16 +38,26 @@ import java.util.logging.Logger
 
 public object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
-    private val compatibilityRuntime = SupervisorRuntimeContext()
+    private val installations = ThreadLocal.withInitial { mutableListOf<SupervisorInstallationLifetime>() }
 
-    internal fun compatibilityRuntime(): SupervisorRuntimeContext = compatibilityRuntime
-
-    public fun registerThread(tid: Tid) {
-        compatibilityRuntime.register(tid)
-    }
-
-    public fun unregisterThread(tid: Tid) {
-        compatibilityRuntime.unregister(tid)
+    @Suppress("TooGenericExceptionCaught") // rollback releases acquired leases, then preserves the original failure
+    internal fun acquireTaskSession(scopingPolicy: StacktraceScopingPolicy): SupervisorSession {
+        val tid = LinuxNative.process.gettid()
+        val owners = installations.get()
+        check(owners.all { it.scopingPolicy === scopingPolicy }) { "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread" }
+        val runtimes = owners.map { it.runtime }
+        check(runtimes.isNotEmpty()) { "Supervised filter has no installation runtime on this thread" }
+        val acquired = mutableListOf<SupervisorRuntimeContext>()
+        try {
+            runtimes.forEach {
+                it.register(tid)
+                acquired.add(it)
+            }
+        } catch (failure: Throwable) {
+            acquired.forEach { it.unregister(tid) }
+            throw failure
+        }
+        return SupervisorSession { acquired.forEach { it.unregister(tid) } }
     }
 
     public fun installSupervisedFilterForThread(
@@ -64,28 +74,45 @@ public object SupervisorInstaller {
 
         val filter = BpfFilter.build(arch, policy)
         val tid = LinuxNative.process.gettid()
+        val ownedInstallations = installations.get()
         val runtime = SupervisorRuntimeContext()
-        runtime.register(tid)
+        val lifetime = SupervisorInstallationLifetime(Thread.currentThread(), runtime, scopingPolicy)
+        var previousLease: SupervisorSession? = null
+        val session = SupervisorSession {
+            runtime.unregister(tid)
+            previousLease?.close()
+        }
+        var applied = false
         try {
+            previousLease = if (ownedInstallations.isEmpty()) null else acquireTaskSession(scopingPolicy)
+            lifetime.start()
+            runtime.register(tid)
             SupervisorSeccompNotifInstaller.install(
                 socketPath = context.socketPath,
                 filter = filter,
                 processWide = false,
-                onFilterApplied = onFilterApplied,
+                onFilterApplied = {
+                    applied = true
+                    onFilterApplied()
+                },
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
                     FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket),
                     scopingPolicy,
                     runtime,
                 )
+                lifetime.attach(AutoCloseable { listener.requestStop() })
                 listener.start(readyLatch)
             }
-            return SupervisorSession(tid, runtime)
+            ownedInstallations.add(lifetime)
+            return session
         } catch (expectedInstallFailure: Exception) {
-            runtime.close()
+            if (applied) ownedInstallations.add(lifetime) else lifetime.close()
+            session.close()
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
-            runtime.close()
+            if (applied) ownedInstallations.add(lifetime) else lifetime.close()
+            session.close()
             throw expectedInstallError
         }
     }
@@ -97,6 +124,7 @@ internal class JVMValidationListener(
     private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
 ) {
     private val closed = AtomicBoolean(false)
+    private val activeChannel = AtomicReference<SupervisorValidationChannel?>()
     private val logger = Logger.getLogger(JVMValidationListener::class.java.name)
 
     companion object {
@@ -109,6 +137,8 @@ internal class JVMValidationListener(
 
     fun start(readyLatch: CountDownLatch) {
         val channel = SupervisorValidationChannel(socketFd)
+        activeChannel.set(channel)
+        if (closed.get()) channel.requestStop()
 
         Thread {
             runValidationReactor(channel, readyLatch)
@@ -117,6 +147,11 @@ internal class JVMValidationListener(
             name = "supervisor-validation-listener-${socketFd.value}"
             start()
         }
+    }
+
+    fun requestStop() {
+        closed.set(true)
+        activeChannel.get()?.requestStop()
     }
 
     private fun runValidationReactor(

@@ -8,21 +8,18 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 
 /**
- * Resource token representing an active, contained supervisor session.
- *
- * Implements [AutoCloseable] to ensure that when a contained task completes or exits,
- * its installation-scoped thread registration is cleaned up correctly
- * to prevent classloader leaks and inconsistent thread state.
+ * Idempotent task-registration lease. Closing it never retires the permanent
+ * filter's runtime or listener; those belong to the installing thread's lifetime.
  */
 public class SupervisorSession internal constructor(
-    private val tid: Tid,
-    private val runtime: SupervisorRuntimeContext? = null,
+    private val release: () -> Unit,
 ) : AutoCloseable {
+    internal constructor(tid: Tid, runtime: SupervisorRuntimeContext) : this({ runtime.unregister(tid) })
+
+    private val closed = java.util.concurrent.atomic
+        .AtomicBoolean(false)
+
     override fun close() {
-        if (runtime != null) {
-            runtime.close()
-        } else {
-            SupervisorInstaller.unregisterThread(tid)
-        }
+        if (closed.compareAndSet(false, true)) release()
     }
 }

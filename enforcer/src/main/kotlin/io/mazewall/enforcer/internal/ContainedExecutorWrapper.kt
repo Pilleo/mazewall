@@ -4,8 +4,6 @@ import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import io.mazewall.enforcer.state.ContainmentRegistryEffect
-import io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
@@ -34,25 +32,13 @@ import java.util.concurrent.TimeUnit
  * task at construction only covers the one thread that happens to run it; other pool
  * threads remain unfiltered.
  *
- * ### Classloader bypass and per-task install
+ * ### Permanent installation and task registration
  *
- * The supervisor's [io.mazewall.enforcer.supervisor.JvmStackInspector] unconditionally allows
- * any intercepted syscall while the JVM ClassLoader lock is held by the sandboxed thread. This
- * prevents the well-known deadlock where the supervisor thread cannot load classes (the lock
- * is held) while the sandboxed thread is blocked waiting for the supervisor response.
- *
- * As a consequence, the *first* execution of user code on a given thread may trigger lazy
- * class loading, during which any `openat` (including one to a user file) that coincides with
- * an active classloader frame is allowed without consulting the scoping policy. This is the
- * correct and intended behavior: the bypass breaks the deadlock, and the file access is
- * allowed. The scoping policy is correctly consulted for **all subsequent calls** on that
- * thread once the relevant classes are loaded.
- *
- * **Security implication**: the library guarantees that unauthorized syscalls are DENIED.
- * It does not guarantee that every authorized syscall is routed through the scoping policy —
- * those that coincide with class loading are bypassed. Tests must reflect this contract:
- * verify that evil access is denied (reliable, class-load-independent), not that an internal
- * tracking structure is populated for allowed access (unreliable on first execution).
+ * Installation state survives both task completion and partial installation failures.
+ * Each task borrows registration in the installed filter's runtime; nested tasks release
+ * only their own lease. The installing platform thread owns listener retirement.
+ * Classloading frames do not grant arbitrary path authority: the supervisor's bounded
+ * JVM-path rules and explicit scoping decisions remain authoritative on every task.
  */
 internal class ContainedExecutorWrapper(
     private val delegate: ExecutorService,
@@ -64,25 +50,10 @@ internal class ContainedExecutorWrapper(
     private fun wrapRunnable(task: Runnable): Runnable = Runnable { runContained(task::run) }
 
     private fun <T> runContained(task: () -> T): T {
-        val initialState = ContainmentStateRegistry.threadState
         var receipt: io.mazewall.InstallationReceipt? = null
         try {
             receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
             return runTask(task)
-        } catch (expectedInstallFailure: Exception) {
-            if (receipt == null) {
-                ContainmentRegistryEffectInterpreter.apply(
-                    ContainmentRegistryEffect.RestoreThreadState(initialState),
-                )
-            }
-            throw expectedInstallFailure
-        } catch (expectedInstallError: Error) {
-            if (receipt == null) {
-                ContainmentRegistryEffectInterpreter.apply(
-                    ContainmentRegistryEffect.RestoreThreadState(initialState),
-                )
-            }
-            throw expectedInstallError
         } finally {
             receipt?.supervisorSession?.close()
         }

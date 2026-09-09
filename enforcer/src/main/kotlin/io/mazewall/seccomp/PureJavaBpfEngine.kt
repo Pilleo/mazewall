@@ -70,6 +70,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     private fun installInternal(
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
+        onApplied: () -> Unit = {},
     ) {
         // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
         EngineState.UnprivilegedImpl.toString()
@@ -95,6 +96,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             val locked = built.lockPrivileges()
             updateState(locked, useTsync)
             val applied = locked.applyFilter(arch, useTsync)
+            onApplied()
             updateState(applied, useTsync)
             val verified = applied.verify(policy.definition)
             updateState(verified, useTsync)
@@ -114,6 +116,14 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             updateState(SeccompInstallationState.Failed(stepName, errno, expectedFatalFailure), useTsync)
             throw expectedFatalFailure
         }
+    }
+
+    /** Publication occurs immediately after native success, before verification can fail. */
+    internal fun installWithPublication(policy: CompiledSandbox<*>, processWide: Boolean, onApplied: () -> Unit) {
+        if (processWide && !Platform.featureMatrix.seccompTsyncSupported) {
+            throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
+        }
+        installInternal(policy, processWide, onApplied)
     }
 
     private fun getStepName(): String {

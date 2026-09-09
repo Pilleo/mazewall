@@ -62,16 +62,29 @@ class SpawnAuthorizationStoreTest {
     }
 
     @Test
-    fun `session close clears authorization and prevents new registrations`() {
+    fun `installation close clears authorization and prevents new registrations`() {
         val first = SupervisorRuntimeContext(processIdentityResolver = { identity })
         val second = SupervisorRuntimeContext(processIdentityResolver = { identity })
         first.registerSpawn(identity.pid, listOf(frame), 100L)
         second.registerSpawn(identity.pid, listOf(frame), 100L)
-        SupervisorSession(Tid(identity.pid.value), first).close()
+        first.close()
         assertEquals(SpawnAuthorizationResult.Rejected(SpawnRejection.CLOSED), first.consumeSpawn(identity.pid, 101L))
         assertEquals(SpawnRegistrationResult.CLOSED, first.registerSpawn(identity.pid, listOf(frame), 101L))
         assertIs<SpawnAuthorizationResult.Authorized>(second.consumeSpawn(identity.pid, 101L))
         second.close()
+    }
+
+    @Test
+    fun `last task lease discards unconsumed spawn authority without closing runtime`() {
+        val runtime = SupervisorRuntimeContext(processIdentityResolver = { identity })
+        val tid = Tid(identity.pid.value)
+        runtime.register(tid)
+        runtime.registerSpawn(identity.pid, listOf(frame), 100L)
+        SupervisorSession(tid, runtime).close()
+        runtime.register(tid)
+        assertEquals(SpawnAuthorizationResult.Rejected(SpawnRejection.MISSING), runtime.consumeSpawn(identity.pid, 101L))
+        assertEquals(SpawnRegistrationResult.REGISTERED, runtime.registerSpawn(identity.pid, listOf(frame), 102L))
+        runtime.close()
     }
 
     @Test

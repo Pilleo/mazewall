@@ -103,6 +103,10 @@ public object SupervisorSeccompNotifInstaller {
                     throw err
                 }
 
+                // Publish the successful irreversible kernel stage even if connect or
+                // readiness subsequently fails. The callback captures the tracee's holder.
+                onFilterApplied()
+
                 // Connect to socket and send the descriptor (runs uncontained)
                 val socketFd = connectWithRetry(socketPath)
                 var socketTransferred = false
@@ -126,11 +130,6 @@ public object SupervisorSeccompNotifInstaller {
 
                     // Wait until the listener is fully initialized and ready
                     readyLatch.await()
-
-                    // Registry bookkeeping can load application classes. Run it on the
-                    // uncontained coordinator after the listener is live, never on the
-                    // tracee after NEW_LISTENER has made openat subject to USER_NOTIF.
-                    onFilterApplied()
                 } catch (expectedCoordinatorFailure: Exception) {
                     if (!socketTransferred) {
                         native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
@@ -288,7 +287,7 @@ public object SupervisorSeccompNotifInstaller {
                     setupError.set(IllegalStateException("seccomp syscall failed with errno ${r.errno}"))
                     installLatch.countDown()
                     proceedLatch.countDown()
-                    return
+                    throw checkNotNull(setupError.get())
                 }
             }
 

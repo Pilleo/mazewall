@@ -100,6 +100,11 @@ internal class SpawnAuthorizationStore : AutoCloseable {
     }
 
     @Synchronized
+    fun clear() {
+        entries.clear()
+    }
+
+    @Synchronized
     override fun close() {
         closed = true
         entries.clear()

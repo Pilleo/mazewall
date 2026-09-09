@@ -7,6 +7,33 @@ import kotlin.test.assertSame
 
 class SupervisorRuntimeContextTest {
     @Test
+    fun `closing task session permits sequential registration on permanent runtime`() {
+        val runtime = SupervisorRuntimeContext()
+        val tid = Tid(44)
+        runtime.register(tid)
+        SupervisorSession(tid, runtime).close()
+        runtime.register(tid)
+        assertSame(Thread.currentThread(), runtime.resolve(tid))
+        runtime.close()
+    }
+
+    @Test
+    fun `closing nested task lease preserves outer registration`() {
+        val runtime = SupervisorRuntimeContext()
+        val tid = Tid(45)
+        runtime.register(tid)
+        val outer = SupervisorSession(tid, runtime)
+        runtime.register(tid)
+        val inner = SupervisorSession(tid, runtime)
+        inner.close()
+        inner.close()
+        assertSame(Thread.currentThread(), runtime.resolve(tid))
+        outer.close()
+        assertNull(runtime.resolve(tid))
+        runtime.close()
+    }
+
+    @Test
     fun `registrations are isolated and session close removes only its own thread`() {
         val first = SupervisorRuntimeContext()
         val second = SupervisorRuntimeContext()

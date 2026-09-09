@@ -8,7 +8,12 @@ import java.util.concurrent.ConcurrentHashMap
 internal class SupervisorRuntimeContext(
     private val processIdentityResolver: ProcessIdentityResolver = ProcProcessIdentityResolver(),
 ) : AutoCloseable {
-    private val threads = ConcurrentHashMap<Tid, Thread>()
+    private data class Registration(
+        val thread: Thread,
+        val leases: Int,
+    )
+
+    private val threads = ConcurrentHashMap<Tid, Registration>()
     private val spawnAuthorizations = SpawnAuthorizationStore()
     private var closed = false
 
@@ -18,14 +23,23 @@ internal class SupervisorRuntimeContext(
         thread: Thread = Thread.currentThread(),
     ) {
         check(!closed) { "Supervisor runtime context is closed" }
-        threads[tid] = thread
+        val previous = threads[tid]
+        check(previous == null || previous.thread === thread) { "TID is already owned by another thread" }
+        threads[tid] = Registration(thread, (previous?.leases ?: 0) + 1)
     }
 
+    @Synchronized
     fun unregister(tid: Tid) {
-        threads.remove(tid)
+        val previous = threads[tid] ?: return
+        if (previous.leases == 1) {
+            threads.remove(tid)
+            if (threads.isEmpty()) spawnAuthorizations.clear()
+        } else {
+            threads[tid] = previous.copy(leases = previous.leases - 1)
+        }
     }
 
-    fun resolve(tid: Tid): Thread? = threads[tid]
+    fun resolve(tid: Tid): Thread? = threads[tid]?.thread
 
     @Synchronized
     fun registerSpawn(

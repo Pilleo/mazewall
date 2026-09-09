@@ -525,7 +525,7 @@ Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Pr
    - The seccomp filter intercepts `execve`.
    - The supervisor daemon reads `PPID` from `/proc/$PID_{child}/stat` to verify it is a descendant of the JVM.
    - For an exec with no live JVM stack, the JVM validation listener resolves the parent's current process identity and atomically consumes authorization from its own session. Missing, expired, consumed, closed, or unresolvable authorization denies exec, even when no policy callback is installed.
-   - Authorization lasts at most the existing ten-second monotonic TTL and is valid at its exact boundary. Each registration permits one consume, including when the subsequent exec policy rejects it. Session close, listener termination, and installation failure clear the store permanently.
+   - Authorization lasts at most the existing ten-second monotonic TTL and is valid at its exact boundary. Each registration permits one consume, including when the subsequent exec policy rejects it. The last task lease clears pending authority without closing the reusable store. Listener termination and installation-owner retirement close it permanently.
    - Stack containers and frames are copied at registration and when constructing or reading a successful result.
 
 The store holds one outstanding authorization per parent process identity. It does not bind a registration to a particular future child, and concurrent spawns from the same process can replace one another. Multiple exec attempts (including helper-to-target exec or PATH retries) need separately validated authority; they cannot replay one spawn entry. This experimental stack propagation does not replace the process-wide Tier 1 baseline, child ancestry checks, or the secure-exec path's existing fail-closed rewrite requirements. Thread-scoped containment remains an incomplete ACE boundary.
@@ -560,9 +560,37 @@ The following table clarifies which effects in mazewall are reversible and which
 |---|---|---|
 | Seccomp filter | No (thread/process lifetime) | `ContainerState.filterDepth` / actions — never clear after apply |
 | Landlock domain | No (nest inward only) | `landlockPolicy` — never rewind after apply |
-| Supervisor session / USER_NOTIF listener | Session closeable; filter stays | Closing session does **not** uninstall; later NOTIFY may get ENOSYS |
+| Supervisor task session | Reference-counted registration lease | Closing a lease preserves outer leases and the installed runtime |
+| Supervisor installation / USER_NOTIF listener | Platform-thread lifetime | An explicit owner joins the installing thread, then requests reactor-owned socket/arena cleanup |
 | `InstallationReceipt` | Diagnostic only | `installed` is independent of `landlockApplied` |
 | `sanitizeThreadState` | Forbidden | Throws |
+
+Process-wide Seccomp planning reads only `processState`; a restriction on the calling
+thread cannot satisfy a policy requested for every peer thread. Thread planning uses
+the combined state. Each successful native stage publishes immediately: Landlock
+before diagnostic emission, Seccomp before verification or supervisor readiness can
+fail. The supervised coordinator uses a precomputed publication closure targeting
+the installing thread's holder; it never publishes to its own ThreadLocal.
+No wrapper or failure handler restores a previous policy snapshot.
+
+`PartialInstallationException.progress` records this attempt's successful irreversible
+stages, not a difference against shared process state that another installation may
+change. Fatal errors retain their identity and carry
+the same typed progress as suppressed diagnostic evidence. Partial failure does not
+authorize execution; normal fail-closed propagation remains the default.
+
+Repeated and nested supervised tasks acquire idempotent registration leases in the
+same installation runtime. They do not create a compatibility runtime or retire the
+validation listener. A different scoping-policy object is rejected on an already
+supervised platform thread: use a new thread for a different authorization contract.
+Raw executor ownership stays with the caller; a dedicated daemon lifetime observer
+joins each installing platform thread, without finalizer/cleaner inference. Retirement
+requests stop, and the listener completes socket and arena cleanup in its own reactor.
+
+Migration: callers that manually invoked `SupervisorInstaller.registerThread` or
+`unregisterThread` must acquire/release the `InstallationReceipt.supervisorSession`
+lease instead; the unrelated compatibility registry has been removed. Do not close
+an installation listener at task exit. Wrapped executors manage these task leases.
 
 **Related issues:**
 - WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)

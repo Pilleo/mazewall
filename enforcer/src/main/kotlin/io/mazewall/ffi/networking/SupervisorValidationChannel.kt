@@ -27,8 +27,48 @@ public class SupervisorValidationChannel(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
 ) : AutoCloseable {
     private val arena = NativeArena.ofShared()
-    public val inputStream: InputStream = SupervisorSocketInputStream(socketFd, arena)
+    private val stopping = java.util.concurrent.atomic
+        .AtomicBoolean(false)
+    private val native = LinuxNative.snapshot()
+    private val input = SupervisorSocketInputStream(socketFd, arena)
+    private val pollFd = io.mazewall.ffi.memory.PollFdSegment.of(arena.allocate(Layouts.POLLFD)).apply {
+        setFd(socketFd.value)
+        setEvents(io.mazewall.ffi.NativeConstants.POLLIN)
+    }
+    public val inputStream: InputStream = object : InputStream() {
+        override fun read(): Int {
+            awaitReadable()
+            return input.read()
+        }
+
+        override fun read(
+            bytes: ByteArray,
+            offset: Int,
+            length: Int,
+        ): Int {
+            if (length == 0) return 0
+            awaitReadable()
+            return input.read(bytes, offset, length)
+        }
+    }
     private val responseSegment = with(arena) { SupervisorResponseSegment.allocate() }
+
+    /** Requests reactor-owned cleanup without closing an arena under an active native read. */
+    internal fun requestStop() {
+        stopping.set(true)
+    }
+
+    private fun awaitReadable() {
+        while (!stopping.get()) {
+            when (val result = native.raw.poll(pollFd.managed, 1, 100)) {
+                is LinuxNative.SyscallResult.Success -> if (result.value > 0) return
+                is LinuxNative.SyscallResult.Error -> if (result.errno != io.mazewall.ffi.NativeConstants.EINTR) {
+                    throw java.io.IOException("validation poll errno=${result.errno}")
+                }
+            }
+        }
+        throw java.io.IOException("supervisor installation owner terminated")
+    }
 
     public fun sendResponse(
         id: Long,
@@ -78,7 +118,7 @@ public class SupervisorValidationChannel(
 
     override fun close() {
         try {
-            inputStream.close()
+            native.fileSystem.close(socketFd).getOrThrow("close validation socket")
         } finally {
             arena.close()
         }

@@ -623,7 +623,6 @@ class ArchitectureTest {
             "io.mazewall.enforcer.state.ContainmentRegistryEffect" to setOf(
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$LandlockApplied",
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$SeccompInstalled",
-                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$RestoreThreadState",
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$EngineStateUpdated",
             ),
             "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(

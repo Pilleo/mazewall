@@ -30,7 +30,7 @@ class FilterInstallationFailureTest {
     }
 
     @Test
-    fun `test state IS reverted on failure when Landlock is not applied`() {
+    fun `failed installation records engine progress without inventing policy installation`() {
         val mockPlatform = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
@@ -44,7 +44,17 @@ class FilterInstallationFailureTest {
         }
         Platform.setProvider(mockPlatform)
 
-        val mockEngine = MockNativeEngine()
+        val mockEngine = MockNativeEngine(
+            process = io.mazewall.MockNativeProcess().apply {
+            onPrctl = { command ->
+                if (command is io.mazewall.core.PrctlCommand.SetSeccomp) {
+                    LinuxNative.SyscallResult.Error(22, -1L)
+                } else {
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        },
+        )
 
         // Policy WITHOUT filesystem paths — Landlock will NOT be applied
         val policy = Policy.builder().block(Syscall.EXECVE).build()
@@ -72,8 +82,9 @@ class FilterInstallationFailureTest {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
-        // VERIFY: state WAS reverted because Landlock was not applied
-        assertEquals(initialState, ContainmentStateRegistry.threadState)
+        assertEquals(initialState.filterDepth, ContainmentStateRegistry.threadState.filterDepth)
+        assertEquals(initialState.syscallActions, ContainmentStateRegistry.threadState.syscallActions)
+        kotlin.test.assertIs<io.mazewall.seccomp.SeccompInstallationState.Failed>(ContainmentStateRegistry.threadState.engineState)
         assertNull(ContainmentStateRegistry.threadState.landlockPolicy)
     }
 

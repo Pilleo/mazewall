@@ -61,6 +61,16 @@ internal object ContainmentStateRegistry {
             h.cachedProcessState = null
         }
 
+    /** Captures the installing thread's holder before a coordinator is started. */
+    fun captureThreadPublication(next: ContainerState): () -> Unit {
+        val holder = threadHolder
+        return {
+            holder.state = next
+            holder.cachedMergedState = null
+            holder.cachedProcessState = null
+        }
+    }
+
     // -------------------------------------------------------------------------
     // State Resolution
     // -------------------------------------------------------------------------
