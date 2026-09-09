@@ -30,7 +30,7 @@ public object Platform {
     private var provider: PlatformProvider = RealPlatformProvider
 
     @Volatile
-    private var cachedMatrix: KernelFeatureMatrix? = null
+    private var cachedSnapshot: KernelFeatureSnapshot? = null
 
     /** Bumps whenever the test/runtime provider changes; probe results never cross generations. */
     @Volatile
@@ -41,19 +41,22 @@ public object Platform {
      */
     @JvmStatic
     public val featureMatrix: KernelFeatureMatrix
+        get() = featureSnapshot.matrix
+
+    internal val featureSnapshot: KernelFeatureSnapshot
         get() {
-            val current = cachedMatrix
+            val current = cachedSnapshot
             if (current != null) return current
             synchronized(this) {
-                val secondCheck = cachedMatrix
+                val secondCheck = cachedSnapshot
                 if (secondCheck != null) return secondCheck
                 val capturedProvider = provider
                 val capturedGeneration = providerGeneration
-                val resolved = KernelFeatureMatrix.resolve(capturedProvider)
+                val resolved = KernelFeatureSnapshot.resolve(capturedProvider)
                 if (providerGeneration != capturedGeneration || provider !== capturedProvider) {
-                    return featureMatrix
+                    return featureSnapshot
                 }
-                cachedMatrix = resolved
+                cachedSnapshot = resolved
                 return resolved
             }
         }
@@ -66,7 +69,7 @@ public object Platform {
         synchronized(this) {
             provider = newProvider
             providerGeneration++
-            cachedMatrix = null
+            cachedSnapshot = null
             isCpuCetSupportedCached = null
         }
     }
@@ -79,7 +82,7 @@ public object Platform {
         synchronized(this) {
             provider = RealPlatformProvider
             providerGeneration++
-            cachedMatrix = null
+            cachedSnapshot = null
             isCpuCetSupportedOverride = null
             isCpuCetSupportedCached = null
         }

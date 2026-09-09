@@ -525,6 +525,12 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.KernelCapability" to setOf(
+                "io.mazewall.KernelCapability\$Available",
+                "io.mazewall.KernelCapability\$Unsupported",
+                "io.mazewall.KernelCapability\$Rejected",
+                "io.mazewall.KernelCapability\$ProbeFailed",
+            ),
             "io.mazewall.landlock.LandlockApplyResult" to setOf(
                 "io.mazewall.landlock.LandlockApplyResult\$Applied",
                 "io.mazewall.landlock.LandlockApplyResult\$Bypassed",

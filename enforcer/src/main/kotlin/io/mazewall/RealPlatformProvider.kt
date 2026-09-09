@@ -7,6 +7,7 @@ import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.landlock.LandlockCapabilityProbe
 import java.io.File
 
 internal object RealPlatformProvider : PlatformProvider {
@@ -92,19 +93,14 @@ internal object RealPlatformProvider : PlatformProvider {
         }
     }
 
-    override fun getLandlockAbiVersion(): Int =
-        try {
+    override fun getLandlockCapability(): KernelCapability<Int> =
         if (!getOsName().equals("Linux", ignoreCase = true)) {
-            0
+            KernelCapability.Unsupported
         } else {
-            io.mazewall.landlock.Landlock
-                .getAbiVersion()
+            LandlockCapabilityProbe.probeCapability()
         }
-    } catch (_: UnsupportedOperationException) {
-        0
-    } catch (_: IllegalStateException) {
-        0
-    }
+
+    override fun getLandlockAbiVersion(): Int = getLandlockCapability().availableValueOrZero()
 
     override fun probeSeccompTsync(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong())
 

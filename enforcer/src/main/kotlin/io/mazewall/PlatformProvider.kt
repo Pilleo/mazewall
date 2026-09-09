@@ -44,6 +44,17 @@ public interface PlatformProvider {
     fun getLandlockAbiVersion(): Int
 
     /**
+     * Returns the typed Landlock capability probe result.
+     *
+     * The default preserves compatibility with providers that implement only [getLandlockAbiVersion].
+     */
+    fun getLandlockCapability(): KernelCapability<Int> =
+        getLandlockAbiVersion()
+            .takeIf { it >= 1 }
+            ?.let { KernelCapability.Available(it) }
+            ?: KernelCapability.Unsupported
+
+    /**
      * Probes for Seccomp TSYNC support (process-wide synchronization).
      * Should return true if the kernel recognizes SECCOMP_FILTER_FLAG_TSYNC.
      */

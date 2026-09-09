@@ -62,11 +62,12 @@ public object InstallationAssessor {
         val scope = if (processWide) InstallationScope.PROCESS else InstallationScope.THREAD
         val virtual = Thread.currentThread().isVirtual
         val fallback = Platform.configuredFallback()
-        val matrix = featureMatrix()
+        val snapshot = featureSnapshot()
+        val matrix = snapshot.matrix
         val tsyncRequired = processWide
         val userNotifRequired = policy.hasSupervisedSyscalls
         val landlockRequired = policy.enforceLandlock
-        val blockers = blockers(policy, processWide, virtual, matrix, userNotifRequired, landlockRequired)
+        val blockers = blockers(policy, processWide, virtual, snapshot, userNotifRequired, landlockRequired)
         val warnings = warnings(fallback, policy, processWide)
 
         return InstallationAssessment(
@@ -91,21 +92,39 @@ public object InstallationAssessor {
         policy: PolicyDefinition<*>,
         processWide: Boolean,
         virtualThread: Boolean,
-        matrix: KernelFeatureMatrix,
+        snapshot: KernelFeatureSnapshot,
         userNotifRequired: Boolean,
         landlockRequired: Boolean,
-    ): List<InstallationBlocker> =
-        listOf(
+    ): List<InstallationBlocker> {
+        val matrix = snapshot.matrix
+        return listOfNotNull(
             InstallationBlocker(InstallationStage.PLATFORM, !Platform.isLinux, "not Linux"),
             InstallationBlocker(InstallationStage.SECCOMP, !Platform.isSupported(), "seccomp is not available or sanity check failed"),
             InstallationBlocker(InstallationStage.VIRTUAL_THREAD, virtualThread, "current thread is virtual; seccomp would poison the carrier"),
             InstallationBlocker(InstallationStage.TSYNC, processWide && !matrix.seccompTsyncSupported, "process-wide install needs SECCOMP_FILTER_FLAG_TSYNC"),
             InstallationBlocker(InstallationStage.USER_NOTIF, userNotifRequired && !matrix.seccompUserNotifSupported, "policy uses USER_NOTIF but the kernel probe failed"),
             InstallationBlocker(InstallationStage.USER_NOTIF, processWide && userNotifRequired, "process-wide USER_NOTIF is unsupported (NEW_LISTENER cannot combine with TSYNC)"),
-            InstallationBlocker(InstallationStage.LANDLOCK, landlockRequired && !matrix.landlockSupported, "policy has Landlock paths but landlock ABI is 0"),
+            landlockCapabilityBlocker(landlockRequired, snapshot.landlockCapability),
             InstallationBlocker(InstallationStage.LANDLOCK, processWide && landlockRequired && !matrix.landlockTsyncSupported, "process-wide Landlock needs TSYNC (Landlock ABI 8+)"),
             InstallationBlocker(InstallationStage.INTEL_CET, policy.lockIntelCet && !matrix.cetSupported, "lockIntelCet is true but Intel CET is not supported on this platform"),
         ).filter(InstallationBlocker::applies)
+    }
+
+    private fun landlockCapabilityBlocker(
+        required: Boolean,
+        capability: KernelCapability<Int>,
+    ): InstallationBlocker? {
+        if (!required) return null
+        val reason =
+            when (capability) {
+                is KernelCapability.Available -> return null
+                KernelCapability.Unsupported -> "landlock capability is unsupported"
+                is KernelCapability.Rejected -> "landlock capability rejected with errno ${capability.errno}"
+                is KernelCapability.ProbeFailed ->
+                    "landlock capability probe failed: ${capability.cause.message ?: capability.cause::class.java.name}"
+            }
+        return InstallationBlocker(InstallationStage.LANDLOCK, true, reason)
+    }
 
     private fun warnings(
         fallback: Platform.FallbackBehavior,
@@ -117,16 +136,20 @@ public object InstallationAssessor {
             "allowMmapExec=false on process-wide policy can fatal a JIT JVM".takeIf { processWide && !policy.allowMmapExec },
         )
 
-    private fun featureMatrix(): KernelFeatureMatrix =
+    private fun featureSnapshot(): KernelFeatureSnapshot =
         if (Platform.isLinux) {
-            Platform.featureMatrix
+            Platform.featureSnapshot
         } else {
-            KernelFeatureMatrix(
-                seccompSupported = false,
-                seccompTsyncSupported = false,
-                seccompUserNotifSupported = false,
-                landlockAbiVersion = 0,
-                cetSupported = false,
+            KernelFeatureSnapshot(
+                matrix =
+                    KernelFeatureMatrix(
+                        seccompSupported = false,
+                        seccompTsyncSupported = false,
+                        seccompUserNotifSupported = false,
+                        landlockAbiVersion = 0,
+                        cetSupported = false,
+                    ),
+                landlockCapability = KernelCapability.Unsupported,
             )
         }
 

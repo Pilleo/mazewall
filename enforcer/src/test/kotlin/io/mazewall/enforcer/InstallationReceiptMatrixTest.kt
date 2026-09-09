@@ -101,6 +101,8 @@ class InstallationReceiptMatrixTest {
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): io.mazewall.KernelCapability<Int> = io.mazewall.KernelCapability.Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1L)
