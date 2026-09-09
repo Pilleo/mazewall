@@ -39,6 +39,8 @@ public data class JvmChildSpec(
 public data class ChildStdoutPump(
     val ready: CountDownLatch,
     val thread: Thread,
+    internal val readinessObserved: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
+        .AtomicBoolean(true),
 )
 
 /**
@@ -87,20 +89,25 @@ public object JvmChildProcess {
         onStreamClosed: () -> Unit = {},
     ): ChildStdoutPump {
         val ready = CountDownLatch(1)
+        val observed = java.util.concurrent.atomic
+            .AtomicBoolean(false)
         val thread =
             Thread {
                 try {
-                    val reader = process.inputStream.bufferedReader()
+                    process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
                         if (readySentinel != null && line.contains(readySentinel)) {
+                            observed.set(true)
                             ready.countDown()
                         }
                         onLine(line)
                     }
+                    }
                 } catch (_: IOException) {
                     // Child closed stdout.
                 } finally {
+                    ready.countDown()
                     onStreamClosed()
                 }
             }.apply {
@@ -108,13 +115,13 @@ public object JvmChildProcess {
                 name = threadName
             }
         thread.start()
-        return ChildStdoutPump(ready, thread)
+        return ChildStdoutPump(ready, thread, observed)
     }
 
     public fun awaitReady(
         pump: ChildStdoutPump,
         timeoutSeconds: Long,
-    ): Boolean = pump.ready.await(timeoutSeconds, TimeUnit.SECONDS)
+    ): Boolean = pump.ready.await(timeoutSeconds, TimeUnit.SECONDS) && pump.readinessObserved.get()
 
     public fun stripInheritedJvmOptions(env: MutableMap<String, String>) {
         INHERITED_JVM_OPTION_KEYS.forEach { env.remove(it) }

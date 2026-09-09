@@ -16,12 +16,15 @@ public class PrivateUnixEndpoint private constructor(
     public val dir: Path,
     public val socketFileName: String,
     public val path: String,
+    private val launcher: ProcessLauncher,
 ) : AutoCloseable {
     public fun socketFile(): Path = dir.resolve(socketFileName)
 
     override fun close() {
-        RealProcessLauncher.deleteIfExists(socketFile())
-        RealProcessLauncher.deleteIfExists(dir)
+        val cleanup = ResourceRetirement()
+        cleanup.attempt { launcher.deleteIfExists(socketFile()) }
+        cleanup.attempt { launcher.deleteIfExists(dir) }
+        cleanup.finish()
     }
 
     public companion object {
@@ -38,15 +41,17 @@ public class PrivateUnixEndpoint private constructor(
             var dir = launcher.createTempDirectory(dirPrefix, attr)
             var path = dir.resolve(socketFileName).toAbsolutePath().toString()
             if (utf8Length(path) > MAX_SUN_PATH_BYTES) {
-                launcher.deleteIfExists(dir.resolve(socketFileName))
-                launcher.deleteIfExists(dir)
+                PrivateUnixEndpoint(dir, socketFileName, path, launcher).close()
                 dir = launcher.createTempDirectory(Path.of("/tmp"), dirPrefix, attr)
                 path = dir.resolve(socketFileName).toAbsolutePath().toString()
+                if (utf8Length(path) > MAX_SUN_PATH_BYTES) {
+                    PrivateUnixEndpoint(dir, socketFileName, path, launcher).close()
+                }
                 require(utf8Length(path) <= MAX_SUN_PATH_BYTES) {
                     "Failed to generate a safe UNIX socket path (exceeds $MAX_SUN_PATH_BYTES bytes): $path"
                 }
             }
-            return PrivateUnixEndpoint(dir, socketFileName, path)
+            return PrivateUnixEndpoint(dir, socketFileName, path, launcher)
         }
 
         internal fun utf8Length(path: String): Int = path.toByteArray(StandardCharsets.UTF_8).size

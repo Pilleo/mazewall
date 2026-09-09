@@ -539,10 +539,37 @@ enum "AttributionKind" as io.mazewall.core.AttributionKind {
   AGENT_CONTEXT
   USER_NOTIF_ORACLE
 }
-class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
+class "ChildProcessResources" as io.mazewall.core.ChildProcessResources {
+  ..
+  + {static}long PUMP_JOIN_TIMEOUT_MS
   __
+  +ProcessLauncher getLauncher()
+  +PrivateUnixEndpoint getEndpoint()
+  +Process getChild()
+  +void setChild(Process)
+  +ChildStdoutPump getPump()
+  +void setPump(ChildStdoutPump)
+  +Thread getHook()
+  +void setHook(Thread)
+  +boolean isClosed()
+  +Process getProcess()
+  +Thread getShutdownHook()
+  +void close()
+}
+class "ChildStartupTransaction" as io.mazewall.core.ChildStartupTransaction {
+  +PrivateUnixEndpoint getEndpoint()
+  +Thread getShutdownHook()
+  +Process start(JvmChildSpec)
+  +void startOutputPump(String, Function1<? super String, Unit>, String, Function0<Unit>)
+  +void registerShutdownHook()
+  +void awaitReady(long)
+  +ChildProcessResources commit()
+  +void close()
+}
+class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
   +CountDownLatch getReady()
   +Thread getThread()
+  +AtomicBoolean getReadinessObserved()
 }
 class "CloneFlags" as io.mazewall.core.CloneFlags {
   +long getValue()
@@ -553,7 +580,6 @@ class "CloneFlags" as io.mazewall.core.CloneFlags {
   + {static}boolean equals-impl0(long, long)
 }
 class "ContextId" as io.mazewall.core.ContextId {
-  ..
   + {static}Companion Companion
   + {static}int WIRE_SIZE_BYTES
   __
@@ -783,6 +809,10 @@ class "RealSocketManager" as io.mazewall.core.RealSocketManager {
   +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
   +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
   +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
+}
+class "ResourceRetirement" as io.mazewall.core.ResourceRetirement {
+  +void attempt(Function0<Unit>)
+  +void finish()
 }
 class "SandboxedPath" as io.mazewall.core.SandboxedPath {
   + {static}Companion Companion
@@ -2527,6 +2557,10 @@ io.mazewall.RuntimeSnapshot .u.|> io.mazewall.NativeEngine
 io.mazewall.RuntimeSnapshot --> io.mazewall.NativeEngine
 io.mazewall.SbobParser --> io.mazewall.SbobParser
 io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
+io.mazewall.core.ChildProcessResources --> io.mazewall.core.ProcessLauncher
+io.mazewall.core.ChildProcessResources --> io.mazewall.core.ChildStdoutPump
+io.mazewall.core.ChildProcessResources --> io.mazewall.core.PrivateUnixEndpoint
+io.mazewall.core.ChildStartupTransaction --> io.mazewall.core.ChildProcessResources
 io.mazewall.core.ErrnoMapping --> io.mazewall.core.ErrnoMapping
 io.mazewall.core.FdEpoch --> io.mazewall.core.FdEpoch
 io.mazewall.core.FdLifecycle --> io.mazewall.core.FdOwnership
@@ -2538,6 +2572,7 @@ io.mazewall.core.JvmChildProcess --> io.mazewall.core.JvmChildProcess
 io.mazewall.core.JvmChildSpec --> io.mazewall.core.JavaAgentSelection
 io.mazewall.core.MazewallContext --> io.mazewall.core.ContextId
 io.mazewall.core.MazewallContext --> io.mazewall.core.MazewallContext
+io.mazewall.core.PrivateUnixEndpoint --> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
 io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
 io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
@@ -2615,10 +2650,11 @@ io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.File
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.SocketManager
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.supervisor.SocketHelperPool
 io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.SocketManager
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ChildProcessResources
 io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
+io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
 io.mazewall.enforcer.supervisor.SupervisorExecRewriteExchange --> io.mazewall.NativeEngine
 io.mazewall.enforcer.supervisor.SupervisorExecRewriteExchange --> io.mazewall.core.FileDescriptor
 io.mazewall.enforcer.supervisor.SupervisorFastPath --> io.mazewall.enforcer.supervisor.SupervisorFastPath

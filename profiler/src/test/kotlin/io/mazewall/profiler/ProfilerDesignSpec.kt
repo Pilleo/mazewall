@@ -140,16 +140,18 @@ class ProfilerDesignSpec :
             context(arena: Arena) override fun sendSeccompContinue(
                 session: HandshakeSession.Success,
                 resp: MemorySegment,
-            ) {
+            ): io.mazewall.profiler.ffi.SeccompReplyResult {
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
+                return io.mazewall.profiler.ffi.SeccompReplyResult.SENT
             }
 
             context(arena: Arena) override fun sendSeccompError(
                 session: HandshakeSession.Failed,
                 resp: MemorySegment,
                 errorNr: Int,
-            ) {
+            ): io.mazewall.profiler.ffi.SeccompReplyResult {
                 ioctlCalls.add(0xc0182101L) // SECCOMP_IOCTL_NOTIF_SEND
+                return io.mazewall.profiler.ffi.SeccompReplyResult.SENT
             }
 
             override fun recvDescriptor(

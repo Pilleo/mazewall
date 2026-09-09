@@ -25,6 +25,7 @@ import io.mazewall.platform.seccomp.daemon.NotifResult
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.SeccompReplyResult
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.TraceEventPublisher
 import io.mazewall.recover
@@ -93,7 +94,7 @@ internal class ProfilerSessionHandler(
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
 
-        var continueSent = false
+        var replyAttempted = false
 
         try {
             ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
@@ -102,7 +103,10 @@ internal class ProfilerSessionHandler(
 
             // Optimisation: skip event delivery for JVM-internal paths that generate noise
             // (JDK home, classpath, /proc, /sys).
-            if (checkAndBypassNoisePath(arena, nr, resolvedEvent, handshake, resp)) {
+            if (isNoisePath(nr, resolvedEvent)) {
+                replyAttempted = true
+                val reply = with(arena.unwrap) { responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap) }
+                if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
                 return NotifResult.HANDLED
             }
 
@@ -118,10 +122,11 @@ internal class ProfilerSessionHandler(
                         waitingState,
                         ProfilerSessionEvent.AckSucceeded,
                     ).state
-                    with(arena.unwrap) {
+                    replyAttempted = true
+                    val reply = with(arena.unwrap) {
                         responder.sendSeccompContinue(result, resp.unwrap)
                     }
-                    continueSent = true
+                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     result.deferredShutdownReason?.let(onShutdown)
                     NotifResult.HANDLED
@@ -133,9 +138,11 @@ internal class ProfilerSessionHandler(
                         waitingState,
                         ProfilerSessionEvent.HandshakeFailed,
                     ).state
-                    with(arena.unwrap) {
+                    replyAttempted = true
+                    val reply = with(arena.unwrap) {
                         responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
                     }
+                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
                     ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
                     NotifResult.TERMINATE
                 }
@@ -146,10 +153,11 @@ internal class ProfilerSessionHandler(
                         waitingState,
                         ProfilerSessionEvent.PassedThrough,
                     ).state
-                    with(arena.unwrap) {
+                    replyAttempted = true
+                    val reply = with(arena.unwrap) {
                         responder.sendSeccompContinue(result.acknowledged(), resp.unwrap)
                     }
-                    continueSent = true
+                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
                     ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
                     NotifResult.PASS_THROUGH
                 }
@@ -163,37 +171,54 @@ internal class ProfilerSessionHandler(
                 }
             }
         } catch (e: InterruptedException) {
+            terminateSession()
             Thread.currentThread().interrupt()
             throw e
         } catch (e: java.nio.channels.ClosedByInterruptException) {
+            terminateSession()
             Thread.currentThread().interrupt()
             throw e
         } catch (e: IOException) {
             logSessionFailure("IOException", e)
-            if (continueSent) {
-                state = ProfilerSessionMachine
-                    .evaluate(state, ProfilerSessionEvent.AckSucceeded)
-                    .state
-                return NotifResult.HANDLED
-            }
-            state = ProfilerSessionMachine
-                .evaluate(state, ProfilerSessionEvent.TransportFailed)
-                .state
-            try {
-                with(arena.unwrap) {
-                    responder.sendSeccompError(handshake.failed(), resp.unwrap, ECONNRESET)
-                }
-            } catch (ignored: Throwable) {
-                }
-            ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-            return NotifResult.TERMINATE
+            return failTransport(handshake, resp, pidVal, replyAttempted)
         } catch (expectedStructuralFailure: Exception) {
+            terminateSession()
             logSessionFailure("Structural or unrecoverable error", expectedStructuralFailure)
+            if (replyAttempted) return NotifResult.TERMINATE
             throw expectedStructuralFailure
         } catch (expectedStructuralError: Error) {
+            terminateSession()
             logSessionFailure("Structural or unrecoverable error", expectedStructuralError)
             throw expectedStructuralError
         }
+    }
+
+    context(arena: NativeArena) private fun failTransport(
+        handshake: HandshakeSession.Active,
+        response: ManagedSegment,
+        pid: Int,
+        replyAttempted: Boolean,
+    ): NotifResult {
+        terminateSession()
+        if (replyAttempted) return NotifResult.TERMINATE
+        try {
+            val reply = with(arena.unwrap) { responder.sendSeccompError(handshake.failed(), response.unwrap, ECONNRESET) }
+            if (reply == SeccompReplyResult.SENT) ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pid.toLong(), ECONNRESET))
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw interrupted
+        } catch (interrupted: java.nio.channels.ClosedByInterruptException) {
+            Thread.currentThread().interrupt()
+            throw interrupted
+        } catch (expectedReplyFailure: Exception) {
+            logSessionFailure("Error reply failed", expectedReplyFailure)
+        }
+        return NotifResult.TERMINATE
+    }
+
+    private fun terminateSession(): NotifResult {
+        state = ProfilerSessionMachine.evaluate(state, ProfilerSessionEvent.TransportFailed).state
+        return NotifResult.TERMINATE
     }
 
     private fun logSessionFailure(
@@ -253,12 +278,9 @@ internal class ProfilerSessionHandler(
     /**
      * Noise filter bypass logic helper.
      */
-    private fun checkAndBypassNoisePath(
-        arena: NativeArena,
+    private fun isNoisePath(
         nr: Int,
         resolvedEvent: SyscallEvent<SyscallEventState.Resolved>,
-        handshake: HandshakeSession.Active,
-        resp: ManagedSegment,
     ): Boolean {
         if (io.mazewall.platform.seccomp.SupervisedKind
             .classify(
@@ -272,31 +294,23 @@ internal class ProfilerSessionHandler(
             val pathStr = resolvedEvent.paths.first()
             try {
                 val normalizedPathStr = PathNormalizerHelper.normalizePath(pathStr)
-                val matched = io.mazewall.enforcer.supervisor.BypassPaths
-                    .isBypassPath(
-                        java.nio.file.Paths
-                        .get(normalizedPathStr),
-                    )
-                System.err.println("[DAEMON-DEBUG] Noise-filter check: path=$pathStr, skip=$matched")
-                if (matched) {
-                    // No JVM event was published, so there is no 0xAC ACK to wait for.
-                    // CONTINUE the tracee immediately; waiting for handshake deadlocks the session.
-                    val transition = ProfilerSessionMachine.evaluate(state, ProfilerSessionEvent.NoisePathBypassed)
-                    check(transition.passThrough) { "Noise bypass requires an explicit CONTINUE effect" }
-                    state = transition.state
-                    with(arena.unwrap) {
-                        responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap)
-                    }
-                    return true
-                }
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-                throw e
-            } catch (e: java.nio.channels.ClosedByInterruptException) {
-                Thread.currentThread().interrupt()
-                throw e
-            } catch (ignored: Exception) {
-                }
+                val path = java.nio.file.Paths
+                    .get(normalizedPathStr)
+                return ProfilerNoiseClassifier.isNoise(
+                    io.mazewall.platform.seccomp.SupervisedKind
+                        .classify(
+                            io.mazewall.core.SyscallNumber(nr),
+                            io.mazewall.core.Arch
+                            .current(),
+                        ),
+                    path,
+                    io.mazewall.enforcer.supervisor.BypassPaths
+                        .resolveForPolicy(path),
+                    io.mazewall.enforcer.supervisor.BypassPaths.safeBypassPaths,
+                )
+            } catch (_: java.nio.file.InvalidPathException) {
+                return false
+            }
         }
         return false
     }

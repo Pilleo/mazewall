@@ -133,7 +133,7 @@ class ProfilerTest {
     fun `test profile with mocked daemon and installer`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.LinuxNative, socket, launcher)
+        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
 
         val mockInstaller = object : ProfilerInstallerInterface {
             var installCalled = false
@@ -180,7 +180,7 @@ class ProfilerTest {
     fun `profile removes worker registration when workload fails`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val manager = ProfilerDaemonManager(io.mazewall.LinuxNative, socket, launcher)
+        val manager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
         val tid = Tid(4343)
         val installer = object : ProfilerInstallerInterface {
             override fun installProfilingFilterForThread(
@@ -212,7 +212,7 @@ class ProfilerTest {
     fun `test wrap executor submissions with mocked providers`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.LinuxNative, socket, launcher)
+        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
 
         val mockInstaller = object : ProfilerInstallerInterface {
             var installCount = 0

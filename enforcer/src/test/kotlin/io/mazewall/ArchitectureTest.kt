@@ -231,6 +231,11 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .haveSimpleNameNotStartingWith("IsolatedTestRunner")
+            // This resource fold attempts every release and rethrows failures, fatal first.
+            // ChildStartupTransactionTest verifies aggregation rather than silent suppression.
+            .and()
+            .areDeclaredInClassesThat()
+            .haveSimpleNameNotStartingWith("ResourceRetirement")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(

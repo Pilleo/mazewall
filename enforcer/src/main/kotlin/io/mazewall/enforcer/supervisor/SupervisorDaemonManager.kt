@@ -2,24 +2,19 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.ChildProcessResources
+import io.mazewall.core.ChildStartupTransaction
 import io.mazewall.core.JavaAgentSelection
 import io.mazewall.core.JvmChildProcess
 import io.mazewall.core.JvmChildSpec
-import io.mazewall.core.PrivateUnixEndpoint
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.RealProcessLauncher
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
-import io.mazewall.enforcer.*
-import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.state.*
-import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.getFdOrThrow
 import io.mazewall.seccomp.SeccompInstallationState
-import java.io.IOException
 import java.nio.file.Path
 import java.util.logging.Logger
 
@@ -56,7 +51,15 @@ public class SupervisorDaemonManager(
         ) : DaemonHandle
     }
 
-    private var daemonHandle: DaemonHandle = DaemonHandle.NotStarted
+    private val handleRef = java.util.concurrent.atomic
+        .AtomicReference<DaemonHandle>(DaemonHandle.NotStarted)
+    private var daemonHandle: DaemonHandle
+        get() = handleRef.get()
+        set(value) {
+            handleRef.set(value)
+        }
+
+    @Volatile private var ownedResources: ChildProcessResources? = null
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
     internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
@@ -94,9 +97,10 @@ public class SupervisorDaemonManager(
                 is DaemonHandle.Running -> {
                     if (handle.context.daemonProcess.isAlive) return handle.context
                     markDefunct(handle.context, handle.context.daemonProcess.exitValue())
+                    cleanupDaemon(handle.context)
                 }
                 is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
-                DaemonHandle.NotStarted -> Unit
+                DaemonHandle.NotStarted -> retirePendingResources()
             }
             return spawnDaemon()
         }
@@ -110,7 +114,7 @@ public class SupervisorDaemonManager(
             when (val handle = daemonHandle) {
                 is DaemonHandle.Running -> cleanupDaemon(handle.context)
                 is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
-                DaemonHandle.NotStarted -> Unit
+                DaemonHandle.NotStarted -> retirePendingResources()
             }
             daemonHandle = DaemonHandle.NotStarted
         }
@@ -123,7 +127,7 @@ public class SupervisorDaemonManager(
     ) {
         val current = daemonHandle
         if (current !is DaemonHandle.Running || current.context.daemonProcess != context.daemonProcess) return
-        daemonHandle = DaemonHandle.Defunct(context)
+        if (!handleRef.compareAndSet(current, DaemonHandle.Defunct(context))) return
         logger.severe("SupervisorDaemon (PID=${context.daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
         logger.severe("Last daemon log lines:")
         daemonLogLines.forEach { line -> logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line") }
@@ -138,25 +142,18 @@ public class SupervisorDaemonManager(
     }
 
     private fun cleanupDaemon(context: SupervisorContext) {
-        try {
-            processLauncher.removeShutdownHook(context.shutdownHook)
-        } catch (ignored: IllegalStateException) {
-            // Shutdown already in progress - ignore
-        } catch (e: SecurityException) {
-            logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
+        val resources = ownedResources ?: return
+        check(resources.process === context.daemonProcess) { "Daemon resource ownership mismatch" }
+        daemonHandle = DaemonHandle.NotStarted
+        resources.use {
+            if (context.daemonProcess.isAlive) triggerDaemonShutdown(context.socketPath, context.daemonProcess)
         }
-        triggerDaemonShutdown(context.socketPath, context.daemonProcess)
-        context.daemonProcess.destroyForcibly()
-        try {
-            processLauncher.deleteIfExists(context.socketDir.resolve("supervisor.sock"))
-            processLauncher.deleteIfExists(context.socketDir)
-        } catch (e: IOException) {
-            logger.log(
-                java.util.logging.Level.WARNING,
-                "Failed to delete secure socket directory at ${context.socketDir}",
-                e,
-            )
-        }
+        ownedResources = null
+    }
+
+    private fun retirePendingResources() {
+        ownedResources?.close()
+        ownedResources = null
     }
 
     private fun refuseSpawnIfParentIsFiltered() {
@@ -178,8 +175,11 @@ public class SupervisorDaemonManager(
 
     private fun spawnDaemon(): SupervisorContext {
         refuseSpawnIfParentIsFiltered()
-        val endpoint =
-            PrivateUnixEndpoint.create(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+        return ChildStartupTransaction(processLauncher, "mazewall-supervisor-", "supervisor.sock").use(::startDaemon)
+    }
+
+    private fun startDaemon(startup: ChildStartupTransaction): SupervisorContext {
+        val endpoint = startup.endpoint
         val socketDir = endpoint.dir
         val socketPath = endpoint.path
 
@@ -193,76 +193,53 @@ public class SupervisorDaemonManager(
         val pbArgs = JvmChildProcess.commandLine(spec)
         logger.info("Spawning SupervisorDaemon: ${pbArgs.joinToString(" ")}")
 
-        val daemonProcess = JvmChildProcess.start(processLauncher, spec)
+        val daemonProcess = startup.start(spec)
         val daemonPid = daemonProcess.pid()
 
-        val prctlRes = engine.process.prctl(
+        engine.process
+            .prctl(
             io.mazewall.core.PrctlCommand
                 .SetPtracer(daemonPid),
-        )
-        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
-            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
-        }
+        ).getOrThrow("prctl(PR_SET_PTRACER)")
 
-        val shutdownHook = Thread {
-            synchronized(daemonLock) {
-                when (val handle = daemonHandle) {
-                    is DaemonHandle.Running -> if (handle.context.daemonProcess == daemonProcess) {
-                        daemonHandle = DaemonHandle.NotStarted
-                    }
-                    is DaemonHandle.Defunct -> if (handle.context.daemonProcess == daemonProcess) {
-                        daemonHandle = DaemonHandle.NotStarted
-                    }
-                    DaemonHandle.NotStarted -> Unit
-                }
-            }
-            daemonProcess.destroyForcibly()
-        }
-        processLauncher.addShutdownHook(shutdownHook)
-
-        val context = SupervisorContext(socketPath, socketDir, daemonProcess, shutdownHook)
-        daemonHandle = DaemonHandle.Running(context)
-
-        val pump =
-            JvmChildProcess.startStdoutPump(
-                process = daemonProcess,
-                readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
+        startup.startOutputPump(
+                sentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
                 onLine = { line ->
                     daemonLogLines.add(line)
                     System.err.println("[SUPERVISOR-DAEMON] $line")
                     System.err.flush()
                 },
                 threadName = "supervisor-daemon-output",
-                onStreamClosed = {
-                    synchronized(daemonLock) {
-                        val currentHandle = daemonHandle
-                        if (currentHandle is DaemonHandle.Running && currentHandle.context.daemonProcess == daemonProcess) {
-                            if (!daemonProcess.isAlive) {
-                                val exitCode = try {
-                                    daemonProcess.exitValue()
-                                } catch (_: Exception) {
-                                    -1
-                                }
-                                markDefunct(currentHandle.context, exitCode)
-                            }
-                        }
-                    }
-                },
+                onStreamClosed = { observeDaemonExit(daemonProcess) },
             )
 
-        val ready = JvmChildProcess.awaitReady(pump, LATCH_TIMEOUT_SECONDS)
-
-        if (!ready) {
-            val alive = daemonProcess.isAlive
-            val exitCode = if (!alive) daemonProcess.exitValue() else -1
-            if (alive) daemonProcess.destroyForcibly()
-
-            throw IllegalStateException(
-                "SupervisorDaemon failed to signal readiness within 30s (exitCode=$exitCode).",
-            )
-        }
-
+        startup.registerShutdownHook()
+        startup.awaitReady(LATCH_TIMEOUT_SECONDS)
+        val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook)
+        val running = DaemonHandle.Running(context)
+        val resources = startup.commit()
+        ownedResources = resources
+        daemonHandle = running
+        if (!daemonProcess.isAlive) markDefunct(context, daemonProcess.exitValue())
         return context
+    }
+
+    /** EOF can precede process exit; the owned output thread remains the lifetime observer. */
+    private fun observeDaemonExit(process: Process) {
+        val exitCode = try {
+            process.waitFor()
+        } catch (expectedInterruption: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return
+        }
+        val current = daemonHandle
+        if (current is DaemonHandle.Running &&
+            current.context.daemonProcess === process &&
+            ownedResources?.isClosed != true &&
+            !process.isAlive
+        ) {
+            markDefunct(current.context, exitCode)
+        }
     }
 
     /**

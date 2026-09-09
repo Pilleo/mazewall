@@ -182,6 +182,27 @@ Seccomp-BPF is blind to operations submitted via `io_uring` rings.
 
 ### Profiler Lifecycle & Memory Safety Invariants
 
+Daemon startup is provisional until readiness. `ChildStartupTransaction` owns the private
+endpoint, child JVM, output pump, and shutdown hook as each is acquired; unsuccessful
+launch, ptracer authorization, hook registration, readiness, or cancellation rolls them
+back. EOF without the readiness sentinel fails immediately. A successful startup commits
+one `ChildProcessResources` owner, retained by the manager until retirement. Dead profiler
+resources are retired before a replacement is launched. `PR_SET_PTRACER` errors are fatal
+to startup, not warnings. Retirement attempts every release, forcibly terminates/reaps the
+child with a bounded wait, and joins the output pump. Failed retirement remains reachable for
+retry; completed process/stream/hook releases are not repeated. The manager's public context remains
+an observation, not authority to clean up another manager's child.
+
+Profiler and supervisor share `UserNotifReply.send` for the kernel-send mechanism only:
+`EINTR` retries the same response, while profiler `SeccompReplyResult` distinguishes `SENT`
+from `NOTIFICATION_GONE` (`ENOENT`). An expired notification or responder failure terminates
+the profiler session without another reply or a false success ledger event. A failed noise
+bypass never falls through into event publication or ACK waiting. `ProfilerNoiseClassifier`
+is a pure decision over resolved path evidence; resolution and reply I/O remain outside it.
+`NativeProfilerTransport` takes a `NativeEngine` and `SocketManager`; the composite adapter
+does not merge the profiler and supervisor reducers or alter their different authority. See the
+[daemon startup migration guide](../api/daemon-startup-migration.md) for internal helper changes.
+
 Path inspection produces `PathResolution.NotApplicable`, `Resolved(paths)`, `Partial(paths, failures)`, or `Failed(failures)`. Failures identify the zero-based path operand ordinal and distinguish `VmReadDenied`, `Missing`, `DirFdUnresolved`, and `Truncated`. A failed first operand does not prevent inspecting the second operand of rename/link calls. Relative paths retain cwd/dirfd failure evidence; unterminated reads never publish a normalized prefix as a resolved path. The diagnostic contains heap strings describing the tracee, address or directory, and the original exception type/message where available. Exception objects and native segments do not cross the event boundary.
 
 The private profiler daemon/JVM event frame is now version 1: big-endian TID, version, syscall name, raw arguments, resolved path list, then an explicit resolution tag and bounded operand diagnostics. The listener rejects unknown versions, invalid tags, unordered failure operands, inconsistent outcomes, oversized fields, and truncated frames. A rejected body after a complete TID header still receives exactly one `0xAC` ACK before the listener terminates: this settles the outstanding notification without publishing malformed evidence. Rejection counts as a dropped event and prevents a complete drain, including when rejection races with graceful close. Daemon and listener are launched from the same distribution; mixed-version profiler pairs are unsupported. Portal wire frames are unchanged. The daemon still waits for the listener's ACK before issuing CONTINUE. Failed inspections remain observable diagnostic events and do not veto the tracee syscall.

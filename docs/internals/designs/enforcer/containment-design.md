@@ -412,6 +412,19 @@ For reference: the exact steps performed by `PureJavaBpfEngine.installInternal()
 
 ## 7. FFM Struct Layouts
 
+Supervisor and profiler daemon startup share the platform `ChildStartupTransaction` resource
+mechanism, not a lifecycle reducer. Endpoint, process, output pump, and shutdown hook remain
+provisional until readiness commits a `ChildProcessResources` owner. Failed authorization
+(`PR_SET_PTRACER`, including `EPERM`/`EACCES`), launch, hook registration, readiness, or
+interruption triggers rollback. Cleanup attempts all owned releases, bounds child reaping
+and pump joining, and uses the same launcher that created the endpoint. A supervisor is not
+published as running before readiness; an unexpected exit after publication retains the
+supervisor's fail-closed halt policy. Intentional retirement first removes the running state
+so pump EOF cannot be mistaken for an unexpected exit. Output observation does not take the
+manager lock while cleanup joins the pump.
+Failed retirement remains owned and retryable before another daemon can be spawned; completed
+resource releases are not repeated. See the [startup migration guide](../api/daemon-startup-migration.md).
+
 Transient off-heap structs use `Arena.ofConfined()` for automatic deallocation.
 The daemon's reusable notification and response buffers use process-lifetime shared
 `SegmentPool.owned(...)` pools. Each session holds generation-specific `SegmentLease`

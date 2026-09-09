@@ -17,41 +17,7 @@ import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.RealProfilerTransport
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.TraceEventPublisher
-
-/**
- * Wrapper classes that route all native I/O through the injected [ProfilerTransport]
- * to ensure the profiler daemon uses the test-provided transport for seccomp
- * notification recv/send and memory operations.
- */
-internal class TransportNativeMemory(
-    private val transport: ProfilerTransport,
-    private val delegate: io.mazewall.NativeMemory,
-) : io.mazewall.NativeMemory by delegate {
-    override fun read(
-        fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership>,
-        buf: io.mazewall.ffi.memory.ManagedSegment,
-        count: Long,
-    ): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-        transport.read(fd, buf.native, count) as io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled>
-
-    override fun write(
-        fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership>,
-        buf: io.mazewall.ffi.memory.ManagedSegment,
-        count: Long,
-    ): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-        transport.write(fd, buf.native, count) as io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled>
-}
-
-internal class TransportNativeEngine(
-    private val transport: ProfilerTransport,
-    private val delegate: io.mazewall.NativeEngine,
-) : io.mazewall.NativeEngine by delegate {
-    override val raw: io.mazewall.RawSyscallOperations = delegate.raw
-    override val fileSystem: io.mazewall.NativeFileSystem = delegate.fileSystem
-    override val process: io.mazewall.NativeProcess = delegate.process
-    override val networking: io.mazewall.NativeNetworking = delegate.networking
-    override val memory: io.mazewall.NativeMemory = TransportNativeMemory(transport, delegate.memory)
-}
+import io.mazewall.profiler.ffi.TransportNativeEngine
 
 /**
  * Standalone Profiler Daemon Engine.

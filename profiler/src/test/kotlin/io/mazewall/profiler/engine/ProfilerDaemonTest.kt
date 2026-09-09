@@ -25,12 +25,15 @@ import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.RealProfilerTransport
+import io.mazewall.profiler.ffi.SeccompReplyResult
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.profiler.ffi.TransportNativeEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -52,6 +55,13 @@ class ProfilerDaemonTest {
 
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+    }
+
+    @Test
+    fun `transport engine bridge uses the injected raw native operations`() {
+        val transport = MockTransport()
+        val bridge = TransportNativeEngine(transport, MockNativeEngine())
+        assertSame(transport.raw, bridge.raw)
     }
 
     private open class MockTransport :
@@ -83,16 +93,18 @@ class ProfilerDaemonTest {
         context(arena: Arena) override fun sendSeccompContinue(
             session: HandshakeSession.Success,
             resp: MemorySegment,
-        ) {
+        ): SeccompReplyResult {
             continueSent = true
+            return SeccompReplyResult.SENT
         }
 
         context(arena: Arena) override fun sendSeccompError(
             session: HandshakeSession.Failed,
             resp: MemorySegment,
             errorNr: Int,
-        ) {
+        ): SeccompReplyResult {
             errorSent = true
+            return SeccompReplyResult.SENT
         }
 
         override fun read(
@@ -650,7 +662,7 @@ class ProfilerDaemonTest {
     }
 
     @Test
-    fun `test RealProfilerTransport sendSeccompContinue and sendSeccompError ignore ENOENT`() {
+    fun `test RealProfilerTransport reports expired notifications explicitly`() {
         val mockEngine = MockNativeEngine()
         mockEngine.ioctlResult = LinuxNative.SyscallResult.Error(NativeConstants.ENOENT, -1L)
 
@@ -678,16 +690,18 @@ class ProfilerDaemonTest {
                 val successSession = HandshakeSession.Success(123L, listenerFd)
                 val failedSession = HandshakeSession.Failed(123L, listenerFd)
 
-                org.junit.jupiter.api.assertDoesNotThrow {
+                assertEquals(
+                    SeccompReplyResult.NOTIFICATION_GONE,
                     with(arena) {
                         RealProfilerTransport.sendSeccompContinue(successSession, resp)
-                    }
-                }
-                org.junit.jupiter.api.assertDoesNotThrow {
+                    },
+                )
+                assertEquals(
+                    SeccompReplyResult.NOTIFICATION_GONE,
                     with(arena) {
                         RealProfilerTransport.sendSeccompError(failedSession, resp, 5) // EIO = 5
-                    }
-                }
+                    },
+                )
 
                 assertEquals(2, logs.size, "Should have logged 2 warning messages")
                 assertTrue(logs.all { it.level == java.util.logging.Level.WARNING }, "All logs must be WARNING level")
@@ -696,6 +710,82 @@ class ProfilerDaemonTest {
             }
         } finally {
             logger.removeHandler(handler)
+        }
+    }
+
+    @Test
+    fun `kernel replies retry repeated EINTR before succeeding`() {
+        val engine = MockNativeEngine()
+        var attempts = 0
+        engine.onIoctl = { _, _, _ ->
+            attempts++
+            if (attempts < 4) {
+                LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+            } else {
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        LinuxNative.setEngine(engine)
+        Arena.ofConfined().use { arena ->
+            with(arena) {
+                RealProfilerTransport.sendSeccompContinue(
+                    HandshakeSession.Success(123L, FileDescriptor.adopt(20, FileDescriptorRole.SeccompNotif)),
+                    arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
+                )
+            }
+        }
+        assertEquals(4, attempts)
+    }
+
+    @Test
+    fun `throwing noise responder terminates without publication ACK or another reply`() {
+        for (failure in listOf(IOException("failed kernel reply"), IllegalStateException("EPERM"), OutOfMemoryError("fatal reply"), null)) {
+        var attempts = 0
+        val transport = object : MockTransport() {
+            context(arena: Arena) override fun sendSeccompContinue(
+                session: HandshakeSession.Success,
+                resp: MemorySegment,
+            ): SeccompReplyResult {
+                attempts++
+                if (failure != null) throw failure
+                return SeccompReplyResult.NOTIFICATION_GONE
+            }
+        }
+        val reader = object : ProfilerMemoryReader {
+            context(arena: io.mazewall.ffi.memory.NativeArena) override fun readStringFromProcess(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): String = System.getProperty("java.home") + "/lib/modules"
+
+            context(arena: io.mazewall.ffi.memory.NativeArena) override fun resolveLink(
+                tid: Tid,
+                link: String,
+            ): String? = null
+        }
+        val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN")) {}.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+                val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000L)
+                if (failure is Error) {
+                    assertSame(failure, assertThrows(Error::class.java) { with(arena) { handler.processNotification(notif, resp, listener, socket) } })
+                } else {
+                    assertEquals(NotifResult.TERMINATE, with(arena) { handler.processNotification(notif, resp, listener, socket) })
+                }
+                assertEquals(NotifResult.TERMINATE, with(arena) { handler.processNotification(notif, resp, listener, socket) })
+                assertEquals(1, attempts)
+                assertTrue(transport.sentEvents.isEmpty())
+                assertEquals(0, transport.rawPolls)
+                assertFalse(transport.errorSent)
+                assertTrue(handler.ledger.dump().none { it is SessionEvent.ContinueReplied || it is SessionEvent.ErrorReplied })
+            }
+        }
         }
     }
 

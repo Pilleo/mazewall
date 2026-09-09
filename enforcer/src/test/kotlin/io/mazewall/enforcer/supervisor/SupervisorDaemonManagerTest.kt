@@ -123,7 +123,20 @@ class SupervisorDaemonManagerTest {
     fun `detects unexpected daemon exit and invokes handler`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
-        val mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n", exitVal = 42, alive = false)
+        val output = java.io.PipedInputStream()
+        val writer = java.io.PipedOutputStream(output)
+        writer.write((SupervisorDaemon.DAEMON_READY_SENTINEL + "\n").toByteArray())
+        val exitWaitEntered = CountDownLatch(1)
+        val exited = CountDownLatch(1)
+        val mockProcess = object : MockProcess(9999L, exitVal = 42) {
+            override fun getInputStream(): java.io.InputStream = output
+
+            override fun waitFor(): Int {
+                exitWaitEntered.countDown()
+                exited.await()
+                return 42
+            }
+        }
         mockLauncher.mockProcess = mockProcess
         val mockSocket = MockSocketManager()
 
@@ -139,10 +152,18 @@ class SupervisorDaemonManagerTest {
 
         val context = manager.getOrSpawnSharedDaemon()
         assertNotNull(context)
+        writer.close()
+        try {
+            assertTrue(exitWaitEntered.await(2, TimeUnit.SECONDS), "Output EOF must still observe later process death")
+        } finally {
+            mockProcess.setAlive(false)
+            exited.countDown()
+        }
 
         val completed = exitLatch.await(5, TimeUnit.SECONDS)
         assertTrue(completed, "Expected unexpected exit handler to be invoked")
         assertEquals(42, exitCodeReceived.get())
+        manager.stop()
     }
 
     @Test

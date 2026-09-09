@@ -96,13 +96,13 @@ class ProfilerDaemonBenchmarkTest {
         context(arena: Arena) override fun sendSeccompContinue(
             session: HandshakeSession.Success,
             resp: MemorySegment,
-        ) {}
+        ): io.mazewall.profiler.ffi.SeccompReplyResult = io.mazewall.profiler.ffi.SeccompReplyResult.SENT
 
         context(arena: Arena) override fun sendSeccompError(
             session: HandshakeSession.Failed,
             resp: MemorySegment,
             errorNr: Int,
-        ) {}
+        ): io.mazewall.profiler.ffi.SeccompReplyResult = io.mazewall.profiler.ffi.SeccompReplyResult.SENT
 
         override fun read(
             fd: FileDescriptor<*, FdState.Open, FdOwnership>,
