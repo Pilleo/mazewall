@@ -65,4 +65,20 @@ class PortalBrokerCallMachineTest {
         assertTrue(failed.state is PortalBrokerCallState.Failed)
         assertEquals(PortalBrokerCallEffect.RecycleWorker("portal RPC failed"), failed.effect)
     }
+
+    @Test
+    fun `post terminal events are explicit observations`() {
+        val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, ByteArray(0), 0)
+        val completed = PortalBrokerCallMachine.evaluate(
+            PortalBrokerCallState.AwaitingReply(request),
+            PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, ByteArray(0), 0)),
+        )
+
+        val observed = PortalBrokerCallMachine.evaluate(completed.state, PortalBrokerCallEvent.TransportFailed)
+
+        assertEquals(
+            PortalBrokerCallEffect.PostTerminalObservation(PortalBrokerCallState.Completed, PortalBrokerCallEvent.TransportFailed),
+            observed.effect,
+        )
+    }
 }

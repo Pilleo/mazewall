@@ -229,6 +229,8 @@ public class ProcessBroker(
                 }
                 is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
                 is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
+                is PortalBrokerCallEffect.PostTerminalObservation ->
+                    throw PortalCallException("portal RPC observed ${effect.event} after ${effect.state}")
                 PortalBrokerCallEffect.None -> throw PortalCallException("portal RPC produced no terminal result")
             }
         } catch (e: PortalCallException) {
