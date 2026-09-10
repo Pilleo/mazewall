@@ -104,8 +104,7 @@ spotbugs {
 
 tasks.configureEach {
     if (name.contains("detekt", ignoreCase = true) ||
-        name.contains("spotbugs", ignoreCase = true) ||
-        name.contains("ktlint", ignoreCase = true)
+        name.contains("spotbugs", ignoreCase = true)
     ) {
         enabled = true
     }
