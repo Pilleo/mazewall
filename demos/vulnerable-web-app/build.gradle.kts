@@ -18,11 +18,6 @@ kotlin {
     jvmToolchain(25)
 }
 
-
-
-
-
-
 configurations.all {
     exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
     resolutionStrategy {
@@ -111,7 +106,9 @@ tasks.configureEach {
     if (name.contains("detekt", ignoreCase = true) ||
         name.contains("spotbugs", ignoreCase = true) ||
         name.contains("ktlint", ignoreCase = true)
-    ) enabled = true
+    ) {
+        enabled = true
+    }
 }
 
 tasks.matching { it.name.startsWith("spotbugsTest") }.configureEach { enabled = false }
@@ -124,10 +121,11 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
 val extractJacocoAgent by tasks.registering(Copy::class) {
     // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
     // Extract it once so bootRun can reference it as a -javaagent.
-    val agentWrapperJar = configurations["jacocoAgent"]
-        .resolvedConfiguration.resolvedArtifacts
-        .first { it.name == "org.jacoco.agent" }
-        .file
+    val agentWrapperJar =
+        configurations["jacocoAgent"]
+            .resolvedConfiguration.resolvedArtifacts
+            .first { it.name == "org.jacoco.agent" }
+            .file
     from(zipTree(agentWrapperJar)) {
         include("jacocoagent.jar")
     }
@@ -152,12 +150,10 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
             "-javaagent:${agentFile.absolutePath}" +
                 "=destfile=${execFile.absolutePath}" +
                 ",includes=demo.vulnapp.*" +
-                ",output=file"
+                ",output=file",
         )
     }
 }
-
-
 
 jacoco {
     toolVersion = "0.8.14"
