@@ -5,6 +5,17 @@ import io.mazewall.ffi.memory.native
 
 /** Checks bounded local memory before its address or a size_t crosses the FFM boundary. */
 internal object NativeTransfer {
+    fun ioctl(
+        request: Long,
+        segment: ManagedSegment,
+    ) {
+        val encodedSize = (request ushr 16) and 0x3fffL
+        // Legacy FIONREAD/TIOCINQ predates _IOC and writes a C int.
+        val size = if (request == 0x541bL) 4L else encodedSize
+        require(size > 0) { "Managed ioctl request has no known payload size: $request" }
+        bytes(segment, size, writable = true)
+    }
+
     fun bytes(
         segment: ManagedSegment,
         count: Long = segment.byteSize(),

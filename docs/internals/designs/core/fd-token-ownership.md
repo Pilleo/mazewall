@@ -94,6 +94,14 @@ requested range is rejected before copying. Raw integer addresses, pointers
 embedded inside native structures, and remote iovec target addresses still
 require trusted callers: an address by itself does not prove an allocation's
 size or ownership, and segment checks cannot recover that information.
+Raw syscall dispatch accepts managed buffers only at explicitly supported pointer
+positions, with syscall-specific byte counts, element counts, or fixed layouts.
+Unknown or misplaced managed buffers and mixed nonzero raw pointers are rejected.
+The wholly raw integer-address path remains a trusted-caller escape hatch; a
+zero-address, zero-size managed NULL is also accepted as scalar zero for legacy
+callers. Managed ioctl buffers require a known payload size: FIONREAD/TIOCINQ
+uses a four-byte C int, while unsupported zero-size request encodings fail before
+native dispatch rather than inferring a kernel payload from the allocation size.
 
 ## Seccomp daemon cleanup outcomes
 

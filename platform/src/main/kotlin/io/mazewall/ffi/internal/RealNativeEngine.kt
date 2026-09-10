@@ -112,14 +112,9 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         a6: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         ebadfUnlessLive(a1, a2, a3, a4, a5, a6)?.let { return it }
-        for (arg in arrayOf(a1, a2, a3, a4, a5, a6)) {
-            if (arg is io.mazewall.core.NativeArg.MemoryArg) NativeTransfer.bytes(arg.value)
-        }
+        RawNativeTransfer.validate(nr, arrayOf(a1, a2, a3, a4, a5, a6))
         val arch = io.mazewall.core.Arch
             .current()
-        if ((nr == arch.read.toLong() || nr == arch.write.toLong()) && a2 is io.mazewall.core.NativeArg.MemoryArg) {
-            NativeTransfer.bytes(a2.value, a3.asLong, writable = nr == arch.read.toLong())
-        }
         val result = SyscallInvoker.syscall(
             SYSCALL,
             nr,
@@ -171,8 +166,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessLive()?.let { return it }
-        val encodedSize = (request ushr 16) and 0x3fffL
-        NativeTransfer.bytes(arg, if (encodedSize == 0L) arg.byteSize() else encodedSize, writable = true)
+        NativeTransfer.ioctl(request, arg)
         return SyscallInvoker.ioctlAddr(IOCTL_ADDR, fd.value, request, arg.native)
     }
 
