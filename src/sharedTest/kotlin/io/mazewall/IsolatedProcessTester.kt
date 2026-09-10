@@ -25,6 +25,9 @@ object IsolatedProcessTester {
         testClassName: String,
         vararg args: String,
     ) {
+        // Validate configuration before acquiring a child-process resource. A bad
+        // test setting must never launch an unowned process.
+        val timeout = configuredTimeout()
         val javaHome = System.getProperty("java.home")
         val javaBin = javaHome + File.separator + "bin" + File.separator + "java"
         val classpath = System.getProperty("java.class.path")
@@ -53,7 +56,6 @@ object IsolatedProcessTester {
             .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
-        val timeout = configuredTimeout()
         val completed =
             try {
                 process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)

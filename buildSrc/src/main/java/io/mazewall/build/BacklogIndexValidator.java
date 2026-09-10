@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 
 /** Pure filesystem validator for backlog totals, identity, links, status and index membership. */
 final class BacklogIndexValidator {
+    private static final Set<String> ACTIVE_STATUSES = Set.of("open", "deferred");
     private static final Pattern SUMMARY = Pattern.compile(
         "^\\*Total Active Issues:\\* (\\d+) \\| \\*Total Resolved Issues:\\* (\\d+)$", Pattern.MULTILINE);
     private static final Pattern ROW = Pattern.compile("^\\| \\[[^]]+]\\(([^)]+\\.md)\\) \\|", Pattern.MULTILINE);
@@ -72,8 +73,12 @@ final class BacklogIndexValidator {
             String text = Files.readString(path, StandardCharsets.UTF_8);
             Matcher status = STATUS.matcher(text);
             if (!status.find()) throw new IllegalArgumentException("Backlog issue has no status: " + backlog.relativize(path));
+            String statusName = status.group(1).toLowerCase(java.util.Locale.ROOT);
+            if (!"resolved".equals(statusName) && !ACTIVE_STATUSES.contains(statusName)) {
+                throw new IllegalArgumentException("Unknown backlog status " + status.group(1) + ": " + backlog.relativize(path));
+            }
             boolean resolvedLocation = path.startsWith(backlog.resolve("resolved"));
-            boolean resolvedStatus = "resolved".equalsIgnoreCase(status.group(1));
+            boolean resolvedStatus = "resolved".equals(statusName);
             if (resolvedLocation != resolvedStatus) {
                 throw new IllegalArgumentException("Backlog status/location mismatch: " + backlog.relativize(path));
             }

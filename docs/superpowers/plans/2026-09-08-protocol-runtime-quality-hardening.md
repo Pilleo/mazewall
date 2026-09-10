@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Protocol, Runtime, and Quality Hardening Implementation Plan"
+base_revision: 24ba3a0a
+---
+
 # Protocol, Runtime, and Quality Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

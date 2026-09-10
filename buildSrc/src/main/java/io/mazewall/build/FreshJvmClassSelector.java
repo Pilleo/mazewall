@@ -43,10 +43,21 @@ final class FreshJvmClassSelector {
     }
 
     private static boolean annotated(ClassMetadata metadata, Map<String, ClassMetadata> classes, Set<String> visiting) {
-        if (metadata.directlyAnnotated()) return true;
+        if (metadata.classAnnotated() || metadata.methodAnnotated()) return true;
         if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
         ClassMetadata parent = classes.get(metadata.superName());
-        return parent != null && annotated(parent, classes, visiting);
+        return parent != null && inheritedClassAnnotation(parent, classes, visiting);
+    }
+
+    private static boolean inheritedClassAnnotation(
+        ClassMetadata metadata,
+        Map<String, ClassMetadata> classes,
+        Set<String> visiting
+    ) {
+        if (metadata.classAnnotated()) return true;
+        if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
+        ClassMetadata parent = classes.get(metadata.superName());
+        return parent != null && inheritedClassAnnotation(parent, classes, visiting);
     }
 
     private static ClassMetadata read(File file) throws IOException {
@@ -61,7 +72,7 @@ final class FreshJvmClassSelector {
             input.skipNBytes(input.readUnsignedShort() * 2L);
             skipMembers(input, pool, false);
             boolean methodAnnotated = skipMembers(input, pool, true);
-            return new ClassMetadata(name, parent, methodAnnotated || attributesAnnotated(input, pool));
+            return new ClassMetadata(name, parent, attributesAnnotated(input, pool), methodAnnotated);
         }
     }
 
@@ -154,5 +165,5 @@ final class FreshJvmClassSelector {
         }
     }
 
-    private record ClassMetadata(String className, String superName, boolean directlyAnnotated) {}
+    private record ClassMetadata(String className, String superName, boolean classAnnotated, boolean methodAnnotated) {}
 }

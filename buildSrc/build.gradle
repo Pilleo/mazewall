@@ -2,6 +2,15 @@ plugins {
     id 'java-gradle-plugin'
 }
 
+gradlePlugin {
+    plugins {
+        testHealth {
+            id = 'io.mazewall.test-health'
+            implementationClass = 'io.mazewall.build.TestHealthPlugin'
+        }
+    }
+}
+
 repositories {
     mavenCentral()
 }

@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Tier E Unique Stack x Syscall Coverage Implementation Plan"
+base_revision: ead1e006
+---
+
 # Tier E Unique Stack x Syscall Coverage Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task.

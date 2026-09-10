@@ -28,6 +28,7 @@ public final class VerificationActionsTest {
         verifiesFreshJvmClassMetadata();
         verifiesBacklogContracts();
         verifiesTestHealthAggregation();
+        TestHealthPluginFunctionalTest.verify();
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
     }
 
@@ -48,6 +49,8 @@ public final class VerificationActionsTest {
                 class MentionOnly { Class<?> marker = NeedsFreshJvm.class; }
                 @NeedsFreshJvm class ClassTagged {}
                 class MethodTagged { @NeedsFreshJvm void test() {} }
+                class MethodOnlyBase { @NeedsFreshJvm void test() {} }
+                class MethodOnlyChild extends MethodOnlyBase {}
                 class InheritedTagged extends ClassTagged {}
                 class Outer { @NeedsFreshJvm static class NestedTagged {} }
                 """);
@@ -59,6 +62,7 @@ public final class VerificationActionsTest {
             equal(List.of(
                 "sample.ClassTagged",
                 "sample.InheritedTagged",
+                "sample.MethodOnlyBase",
                 "sample.MethodTagged",
                 "sample.Outer$NestedTagged"
             ), FreshJvmClassSelector.select(List.of(classes.toFile())));
@@ -90,6 +94,26 @@ public final class VerificationActionsTest {
 
             Files.writeString(index, Files.readString(index).replace("issue-open.md", "missing.md"));
             rejects(() -> BacklogIndexValidator.validate(index), "Broken backlog link");
+            Files.writeString(index, """
+                # Index
+                *Total Active Issues:* 1 | *Total Resolved Issues:* 1
+                | Issue | Title | Priority | Component |
+                |---|---|---|---|
+                | [open](../outside.md) | Open | high | testing |
+                """);
+            rejects(() -> BacklogIndexValidator.validate(index), "escapes index directory");
+            Files.writeString(index, """
+                # Index
+                *Total Active Issues:* 1 | *Total Resolved Issues:* 1
+                | Issue | Title | Priority | Component |
+                |---|---|---|---|
+                | [open](issue-open.md) | Open | high | testing |
+                | [open again](issue-open.md) | Open | high | testing |
+                """);
+            rejects(() -> BacklogIndexValidator.validate(index), "Duplicate backlog index entry");
+            Files.writeString(index, Files.readString(index).replace("*Total Active Issues:* 1", "*Total Active Issues:* 2")
+                .replace("| [open again](issue-open.md) | Open | high | testing |\n", ""));
+            rejects(() -> BacklogIndexValidator.validate(index), "Backlog totals are stale");
             Files.writeString(index, "*Total Active Issues:* 0 | *Total Resolved Issues:* 1\n");
             rejects(() -> BacklogIndexValidator.validate(index), "membership mismatch");
 
@@ -100,6 +124,8 @@ public final class VerificationActionsTest {
             Files.delete(duplicate);
             Files.writeString(backlog.resolve("issue-open.md"), issue("resolved", "open-id"));
             rejects(() -> BacklogIndexValidator.validate(index), "status/location mismatch");
+            Files.writeString(backlog.resolve("issue-open.md"), issue("mystery", "open-id"));
+            rejects(() -> BacklogIndexValidator.validate(index), "Unknown backlog status");
         } catch (Exception failure) {
             throw new AssertionError("Backlog validator contract failed", failure);
         }

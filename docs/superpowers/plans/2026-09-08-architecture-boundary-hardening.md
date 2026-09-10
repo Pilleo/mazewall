@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Architecture Boundary Hardening Implementation Plan"
+base_revision: 35a93262
+---
+
 # Architecture Boundary Hardening Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

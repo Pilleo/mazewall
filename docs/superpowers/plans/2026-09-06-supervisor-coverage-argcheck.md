@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Supervisor, Coverage, and ArgCheck Implementation Plan"
+base_revision: bc4f57e8
+---
+
 # Supervisor, Coverage, and ArgCheck Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. Steps use checkbox syntax for tracking.
