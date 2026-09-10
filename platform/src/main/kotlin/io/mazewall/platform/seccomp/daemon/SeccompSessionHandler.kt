@@ -27,6 +27,10 @@ import io.mazewall.platform.seccomp.UserNotifReplyResult
 
 /**
  * Unified reactor handler for active seccomp user notifications and UNIX domain control sockets.
+ * Owns its buffer leases and pending notification work. The enclosing connection retains
+ * listener/socket ownership; this handler only closes the control socket through the supplied
+ * ownership callback on terminal failure. Close drains work and releases buffers idempotently;
+ * a reported pre-retirement failure requires retaining this handler for cleanup retry.
  */
 public class SeccompSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,

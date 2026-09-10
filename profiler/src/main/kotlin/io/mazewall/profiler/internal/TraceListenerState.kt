@@ -37,4 +37,9 @@ internal sealed interface TraceListenerState {
 
     /** The daemon did not prove it accepted the listener FD; no event stream is trusted. */
     data object HandshakeRejected : TraceListenerState
+
+    /** Invalid parser progress or frame identity; close preserves this terminal diagnostic. */
+    data class ProtocolViolation(
+        val reason: String,
+    ) : TraceListenerState
 }

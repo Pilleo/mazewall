@@ -1,6 +1,7 @@
 package io.mazewall.portal
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.CleanupFailures
 import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -28,6 +29,11 @@ public class PortalIncompleteFrameException : java.io.IOException("portal frame 
 /** Clean peer shutdown before receiving the first byte of a new frame. */
 public class PortalPeerClosedException : java.io.EOFException("portal peer closed between frames")
 
+/**
+ * Owns the supplied socket and descriptors received but not yet delivered to a caller.
+ * Successful receive transfers capabilities to its caller; sending borrows capabilities only.
+ * Close rejects new I/O, retires all retained owners, and permits retry after pre-native failure.
+ */
 public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
@@ -152,12 +158,7 @@ public class PortalChannel(
         first: Throwable,
         next: Throwable,
     ): Throwable {
-        if (next is Error && first !is Error) {
-            next.addSuppressed(first)
-            return next
-        }
-        if (first !== next) first.addSuppressed(next)
-        return first
+        return CleanupFailures.merge(first, next)
     }
 }
 

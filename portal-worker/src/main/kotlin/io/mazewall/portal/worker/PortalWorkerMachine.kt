@@ -75,21 +75,16 @@ internal sealed interface PortalWorkerTransition {
     data class Close(
         override val state: PortalWorkerState.Stopped,
     ) : PortalWorkerTransition
+
+    /** Late events cannot dispatch, transmit, or schedule another close after termination. */
+    data class PostTerminalObservation(
+        val event: PortalWorkerEvent,
+    ) : PortalWorkerTransition {
+        override val state: PortalWorkerState.Stopped = PortalWorkerState.Stopped
+    }
 }
 
 internal object PortalWorkerMachine {
-    /** The dispatch phase can only complete by producing a reply frame. */
-    fun dispatchSucceeded(
-        state: PortalWorkerState.Dispatching,
-        payload: PortalPayload,
-    ): PortalWorkerTransition.Send = reply(state.request, PortalKind.Response, payload)
-
-    /** The dispatch phase can only fail by producing an error reply frame. */
-    fun dispatchFailed(
-        state: PortalWorkerState.Dispatching,
-        message: PortalPayload,
-    ): PortalWorkerTransition.Send = reply(state.request, PortalKind.Error, message)
-
     fun evaluate(
         state: PortalWorkerState,
         event: PortalWorkerEvent,
@@ -98,7 +93,7 @@ internal object PortalWorkerMachine {
         PortalWorkerState.AwaitingRequest -> awaiting(event)
         is PortalWorkerState.Dispatching -> dispatching(state, event)
         is PortalWorkerState.SendingReply -> sending(event)
-        PortalWorkerState.Stopped -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+        PortalWorkerState.Stopped -> PortalWorkerTransition.PostTerminalObservation(event)
     }
 
     private fun awaiting(event: PortalWorkerEvent): PortalWorkerTransition =

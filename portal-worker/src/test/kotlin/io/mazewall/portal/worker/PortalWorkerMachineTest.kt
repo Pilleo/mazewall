@@ -34,7 +34,7 @@ class PortalWorkerMachineTest {
             listOf(PortalWorkerTransition.Dispatch::class, violation, violation, await, close, violation, violation, violation, close),
             listOf(violation, send, send, await, close, violation, violation, close, close),
             listOf(violation, violation, violation, violation, close, await, close, violation, close),
-            List(events.size) { close },
+            List(events.size) { PortalWorkerTransition.PostTerminalObservation::class },
         )
         states.forEachIndexed { row, state ->
             events.forEachIndexed { column, event ->
@@ -60,7 +60,7 @@ class PortalWorkerMachineTest {
         val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, byteArrayOf(1), 0)
         val dispatch = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(request))
         val dispatchState = assertInstanceOf(PortalWorkerState.Dispatching::class.java, dispatch.state)
-        val reply = PortalWorkerMachine.dispatchSucceeded(dispatchState, PortalPayload(byteArrayOf(2)))
+        val reply = PortalWorkerMachine.evaluate(dispatchState, PortalWorkerEvent.DispatchSucceeded(PortalPayload(byteArrayOf(2))))
 
         assertTrue(dispatch is PortalWorkerTransition.Dispatch)
         val sent = reply as PortalWorkerTransition.Send
@@ -73,6 +73,14 @@ class PortalWorkerMachineTest {
             .copyToByteArray()
             .contentEquals(byteArrayOf(2)),
         )
+    }
+
+    @Test
+    fun `late completion is an observation without another reply or close effect`() {
+        val event = PortalWorkerEvent.DispatchSucceeded(PortalPayload(byteArrayOf(2)))
+        val transition = assertInstanceOf(PortalWorkerTransition.PostTerminalObservation::class.java, PortalWorkerMachine.evaluate(PortalWorkerState.Stopped, event))
+        assertEquals(event, transition.event)
+        assertEquals(PortalWorkerState.Stopped, transition.state)
     }
 
     @Test

@@ -150,6 +150,16 @@ not change them.
 
 ## 6. Failure Modes & Recovery
 
+Cleanup owners in platform, supervisor helpers, and portal use `CleanupFailures.merge` for
+fatal-first failure ordering and identity-based suppression. Re-observing the same cleanup
+outcome does not append duplicate evidence. The helper performs no resource operations and
+does not change the interrupt flag: interruption remains with the owner that knows whether it
+must drain before propagation. Protocol violations are distinct from operational I/O failures
+and programmer invariant checks. Reducers name idle/await progress and post-terminal
+observations explicitly; only active transitions schedule work. The seccomp daemon uses the
+shared UNIX listen machine directly, with the public `SeccompDaemonState` alias retained for
+source compatibility.
+
 | Symptom | Probable Cause | Investigation Path |
 |---------|----------------|--------------------|
 | **JVM Hangs on Startup** | Blocked critical syscall (futex, clone). | Check `BpfFilter.jvmCriticalNrs`. |

@@ -1,5 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.core.CleanupFailures
+
 /** Cleanup attempts independent owners after failure; fatal errors retain primary identity. */
 internal class SocketCleanup(
     initial: Throwable? = null,
@@ -19,15 +21,7 @@ internal class SocketCleanup(
     }
 
     private fun record(next: Throwable) {
-        val prior = failure
-        if (prior == null) {
-            failure = next
-        } else if (next is Error && prior !is Error) {
-            next.addSuppressed(prior)
-            failure = next
-        } else if (next !== prior) {
-            prior.addSuppressed(next)
-        }
+        failure = CleanupFailures.merge(failure, next)
         if (next is InterruptedException) Thread.currentThread().interrupt()
     }
 

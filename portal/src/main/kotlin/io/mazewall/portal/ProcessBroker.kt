@@ -30,6 +30,8 @@ import java.util.logging.Logger
  *
  * This public facade is also the ownership aggregate for startup attempts, checked-out workers,
  * and maintenance retirement; its helpers intentionally keep those resources private.
+ * Closing stops admission and drains those owners. Failed cleanup is reported and remains
+ * retryable; a caller must retain the broker until close succeeds.
  */
 public class ProcessBroker(
     private val poolSize: Int = 1,
@@ -232,7 +234,7 @@ public class ProcessBroker(
                 is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
                 is PortalBrokerCallEffect.PostTerminalObservation ->
                     throw PortalCallException("portal RPC observed ${effect.event} after ${effect.state}")
-                PortalBrokerCallEffect.None -> throw PortalCallException("portal RPC produced no terminal result")
+                PortalBrokerCallEffect.AwaitReply -> throw PortalCallException("portal RPC produced no terminal result")
             }
         } catch (e: PortalCallException) {
             if (!returnedToPool) {

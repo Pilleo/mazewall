@@ -30,6 +30,52 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
     @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid wire tid closes without publishing or acknowledging an event`() {
+        val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte(), 0, 0, 0, 0))
+        val writes = AtomicInteger()
+        val closes = AtomicInteger()
+        val logs = mutableListOf<TraceEvent>()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val bytes = input.readNBytes(count.toInt())
+                    bytes.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(bytes.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    writes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(count)
+                }
+            },
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+        )
+        ProfilerTraceListener(TestFileDescriptors.replace(309), logs, null, mutableMapOf(), { null }, native).use { listener ->
+            listener.start(CountDownLatch(1))
+            assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+            assertEquals(0, writes.get())
+            assertEquals(1, closes.get())
+            assertTrue(logs.isEmpty())
+            assertFalse(listener.drainComplete)
+        }
+        assertEquals(1, closes.get())
+    }
+
+    @Test
     fun `processing failure remains primary when ACK and close also fail`() {
         for (original in listOf(IllegalStateException("capture failed"), LinkageError("fatal capture"))) {
             val closes = AtomicInteger()

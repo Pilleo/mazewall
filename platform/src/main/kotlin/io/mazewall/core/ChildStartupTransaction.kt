@@ -78,7 +78,11 @@ public class ChildStartupTransaction(
     }
 }
 
-/** Sole cleanup owner after startup commits; managers retain their independent lifecycle policies. */
+/**
+ * Sole cleanup owner after startup commits: endpoint, process, output pump, and shutdown hook.
+ * Close attempts each independent release, retains failed owners for retry, and is idempotent
+ * after successful retirement. Managers retain their independent lifecycle policies.
+ */
 @MazewallInternal
 public class ChildProcessResources internal constructor(
     internal val launcher: ProcessLauncher,

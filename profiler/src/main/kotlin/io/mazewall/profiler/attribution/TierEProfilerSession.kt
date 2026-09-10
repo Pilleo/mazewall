@@ -66,7 +66,11 @@ internal sealed interface TierESessionState {
     data object Closed : TierESessionState
 }
 
-/** Reusable Kubescape-facing composition of the eBPF engine and JVMTI dictionary. */
+/**
+ * Owns the supplied eBPF engine/event source and the collected immutable evidence.
+ * [finish] freezes one cached result; [close] retires the source without reopening collection.
+ * Callers must close this session even after finishing and must not separately close its source.
+ */
 public class TierEProfilerSession internal constructor(
     private val source: TierEEventSource,
     private val processEpoch: Long,

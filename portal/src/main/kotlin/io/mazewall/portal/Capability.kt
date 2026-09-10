@@ -13,6 +13,12 @@ import kotlin.concurrent.withLock
  * `SCM_RIGHTS` descriptors on the wire.
  */
 public class Capability private constructor() {
+    /**
+     * Sole owner of a granted descriptor, shared by every in-process wrapper alias.
+     * Borrow keeps the descriptor alive through an operation. Close waits for borrows, rejects
+     * later borrows, and is idempotent after native retirement; failed pre-native close is retryable.
+     * A descriptor borrowed by a callback must never escape that callback.
+     */
     public class ReadFd internal constructor(
         private val fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>,
     ) : AutoCloseable {
@@ -65,15 +71,8 @@ public class Capability private constructor() {
                 try {
                     capability.close()
                 } catch (next: Throwable) {
-                    val previous = failure
-                    if (previous == null) {
-                        failure = next
-                    } else if (next is Error && previous !is Error) {
-                        next.addSuppressed(previous)
-                        failure = next
-                    } else if (previous !== next) {
-                            previous.addSuppressed(next)
-                        }
+                    failure = io.mazewall.core.CleanupFailures
+                        .merge(failure, next)
                 }
             }
             failure?.let { throw it }

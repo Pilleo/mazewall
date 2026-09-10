@@ -50,34 +50,52 @@ internal object TraceListenerMachine {
     fun evaluate(
         state: TraceListenerState,
         event: TraceListenerEvent,
-    ): TraceListenerState =
-        when (event) {
+    ): TraceListenerState {
+        if (state is TraceListenerState.ProtocolViolation || state is TraceListenerState.HandshakeRejected) return state
+        return when (event) {
             TraceListenerEvent.HandshakeReceived ->
-                if (state is TraceListenerState.Disconnected) TraceListenerState.AwaitingEvent else state
-            TraceListenerEvent.HandshakeRejected -> TraceListenerState.HandshakeRejected
-            TraceListenerEvent.AwaitEvent,
-            -> TraceListenerState.AwaitingEvent
-            is TraceListenerEvent.HeaderRead ->
-                if (state is TraceListenerState.AwaitingEvent) TraceListenerState.ReadingHeader(event.pid) else state
-            is TraceListenerEvent.SyscallRead ->
-                if (state is TraceListenerState.ReadingHeader && state.pid == event.pid) {
-                    TraceListenerState.ReadingSyscall(event.pid, event.nameLength)
-                } else {
-                    state
-                }
-            is TraceListenerEvent.ArgumentsRead ->
-                if (state is TraceListenerState.ReadingSyscall && state.pid == event.pid) {
-                    TraceListenerState.ReadingArguments(event.pid, event.name, event.count)
-                } else {
-                    state
-                }
-            is TraceListenerEvent.EventRead ->
-                if (state is TraceListenerState.ReadingArguments) {
-                    TraceListenerState.ProcessingEvent(event.event)
-                } else {
-                    state
-                }
+                if (state is TraceListenerState.Disconnected) TraceListenerState.AwaitingEvent else violation(state, event)
+            TraceListenerEvent.HandshakeRejected ->
+                if (state is TraceListenerState.Disconnected) TraceListenerState.HandshakeRejected else violation(state, event)
+            TraceListenerEvent.AwaitEvent ->
+                if (state is TraceListenerState.AwaitingEvent || state is TraceListenerState.ProcessingEvent) TraceListenerState.AwaitingEvent else violation(state, event)
+            is TraceListenerEvent.HeaderRead -> readHeader(state, event)
+            is TraceListenerEvent.SyscallRead -> readSyscall(state, event)
+            is TraceListenerEvent.ArgumentsRead -> readArguments(state, event)
+            is TraceListenerEvent.EventRead -> readEvent(state, event)
             TraceListenerEvent.SocketClosed ->
-                if (state is TraceListenerState.HandshakeRejected) state else TraceListenerState.Disconnected
+                TraceListenerState.Disconnected
         }
+    }
+
+    private fun readHeader(
+        state: TraceListenerState,
+        event: TraceListenerEvent.HeaderRead,
+    ): TraceListenerState = if (state is TraceListenerState.AwaitingEvent && event.pid > 0) TraceListenerState.ReadingHeader(event.pid) else violation(state, event)
+
+    private fun readSyscall(
+        state: TraceListenerState,
+        event: TraceListenerEvent.SyscallRead,
+    ): TraceListenerState = if (state is TraceListenerState.ReadingHeader && state.pid == event.pid) TraceListenerState.ReadingSyscall(event.pid, event.nameLength) else violation(state, event)
+
+    private fun readArguments(
+        state: TraceListenerState,
+        event: TraceListenerEvent.ArgumentsRead,
+    ): TraceListenerState =
+        if (state is TraceListenerState.ReadingSyscall && state.pid == event.pid) TraceListenerState.ReadingArguments(event.pid, event.name, event.count) else violation(state, event)
+
+    private fun readEvent(
+        state: TraceListenerState,
+        event: TraceListenerEvent.EventRead,
+    ): TraceListenerState = if (state is TraceListenerState.ReadingArguments && state.pid == event.event.tid.value) TraceListenerState.ProcessingEvent(event.event) else violation(state, event)
+
+    private fun violation(
+        state: TraceListenerState,
+        event: TraceListenerEvent,
+    ): TraceListenerState.ProtocolViolation = TraceListenerState.ProtocolViolation("Invalid listener transition: ${state.javaClass.simpleName} / ${event.javaClass.simpleName}")
 }
+
+/** Peer/parser protocol failure, distinct from native transport failure or a programmer check. */
+internal class TraceListenerProtocolException(
+    reason: String,
+) : java.io.IOException(reason)

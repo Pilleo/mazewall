@@ -314,11 +314,11 @@ internal class ProfilerTraceListener(
                 // Read handshake ACK from the daemon confirming the listener FD was received.
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
-                    state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeRejected)
+                    advanceListener(TraceListenerEvent.HandshakeRejected)
                     logger.warning("Invalid handshake ACK from daemon: $handshakeAck; rejecting trace stream")
                     return
                 }
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
+                advanceListener(TraceListenerEvent.HandshakeReceived)
                 // No config bytes are sent. The daemon uses fire-and-forget delivery;
                 // no bypassedTids or captureStackTraces negotiation is required.
             } finally {
@@ -326,7 +326,7 @@ internal class ProfilerTraceListener(
             }
 
             while (true) {
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
+                advanceListener(TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
                 } catch (_: java.io.EOFException) {
@@ -343,7 +343,7 @@ internal class ProfilerTraceListener(
                     throw expectedCloseIoFailure
                 }
 
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.EventRead(event))
+                advanceListener(TraceListenerEvent.EventRead(event))
                 processEvent(event)
             }
         } catch (e: java.io.IOException) {
@@ -356,7 +356,7 @@ internal class ProfilerTraceListener(
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
         val tidValue = dis.readInt()
-        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
+        advanceListener(TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
         if (decoded is TraceEventDecodeResult.ProtocolViolation) {
             // A complete TID header identifies an outstanding notification. Settle it before
@@ -366,20 +366,20 @@ internal class ProfilerTraceListener(
             throw java.io.IOException(decoded.reason)
         }
         decoded as TraceEventDecodeResult.Event
-        state = TraceListenerMachine.evaluate(
-            state,
-            TraceListenerEvent.SyscallRead(tidValue, decoded.syscallNameLength),
-        )
-        state = TraceListenerMachine.evaluate(
-            state,
-            TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount),
-        )
+        advanceListener(TraceListenerEvent.SyscallRead(tidValue, decoded.syscallNameLength))
+        advanceListener(TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount))
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
         // in kernel space using seccomp and awaits an ACK from this listener thread. While the
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
         // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
         return decoded.event
+    }
+
+    private fun advanceListener(event: TraceListenerEvent) {
+        val next = TraceListenerMachine.evaluate(state, event)
+        state = next
+        if (next is TraceListenerState.ProtocolViolation) throw TraceListenerProtocolException(next.reason)
     }
 
     @Suppress("TooGenericExceptionCaught") // Preserve fatal identity while settling the independent ACK obligation.

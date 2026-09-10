@@ -75,6 +75,11 @@ See [the portal lifecycle diagram](../../../diagrams/portal_lifecycle.puml).
 
 ## Architecture
 
+Broker request transmission produces `AwaitReply`; worker events after `Stopped` produce a
+`PostTerminalObservation` without another send or close effect. The single worker evaluator
+owns dispatch-result transitions. Resource cleanup shares platform's fatal-first,
+identity-deduplicating failure fold while each owner retains its own cleanup deadlines.
+
 ```
 Broker JVM                         Worker JVM (pool member)
 ─────────                          ───────────────────────
