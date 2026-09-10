@@ -58,12 +58,14 @@ class SupervisorPostReplyFailureTest {
         val fatal = LinkageError("fatal accepted-source cleanup")
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
+        val uncaught = CountDownLatch(1)
         val uncaughtCount = AtomicInteger()
         val observed = AtomicReference<Throwable>()
         fixture.engine.networking.onAccept4 = { _, _, _, _ ->
             Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, failure ->
                 observed.set(failure)
                 uncaughtCount.incrementAndGet()
+                uncaught.countDown()
             }
             entered.countDown()
             release.awaitOrFail("release successful accept after completion registration")
@@ -83,6 +85,7 @@ class SupervisorPostReplyFailureTest {
                 release.countDown()
             }
             fixture.awaitTerminalProcessing()
+            uncaught.awaitOrFail("fatal cleanup delivered to the worker uncaught handler")
             val finalAction = with(arena) {
                 handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
             }

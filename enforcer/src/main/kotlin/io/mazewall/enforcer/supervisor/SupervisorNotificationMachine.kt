@@ -90,8 +90,8 @@ internal object SupervisorNotificationMachine {
             is SupervisedKind.Accept,
             is SupervisedKind.Exec,
             is SupervisedKind.Spawn,
-            is SupervisedKind.Unknown,
             -> SupervisorRoute.AskJvm
+            is SupervisedKind.Unknown -> unsupportedRoute()
         }
     }
 
@@ -102,16 +102,27 @@ internal object SupervisorNotificationMachine {
         return when (verdict) {
             is JvmVerdict.Deny ->
                 SupervisorRoute.Abort(verdict.errorNr, "jvm deny")
-            is JvmVerdict.InjectFd -> SupervisorRoute.InjectFd
+            is JvmVerdict.InjectFd -> when (kind) {
+                is SupervisedKind.Open,
+                is SupervisedKind.Connect,
+                is SupervisedKind.Accept,
+                -> SupervisorRoute.InjectFd
+                is SupervisedKind.Exec,
+                is SupervisedKind.Spawn,
+                is SupervisedKind.Unknown,
+                -> unsupportedRoute()
+            }
             is JvmVerdict.Allow -> when (kind) {
                 is SupervisedKind.Open,
                 is SupervisedKind.Connect,
                 is SupervisedKind.Accept,
                 -> SupervisorRoute.InjectFd
                 is SupervisedKind.Exec -> SupervisorRoute.SecureExec
-                is SupervisedKind.Spawn,
-                is SupervisedKind.Unknown,
-                -> SupervisorRoute.Continue
+                // The spawn authorization depends on register flags and parent identity,
+                // never on clone's child stack/TID pointer contents. CLONE_THREAD remains
+                // unconditionally allowed by the BPF argument inspector.
+                is SupervisedKind.Spawn -> SupervisorRoute.Continue
+                is SupervisedKind.Unknown -> unsupportedRoute()
             }
         }
     }
@@ -120,16 +131,18 @@ internal object SupervisorNotificationMachine {
         resolvedPath: java.nio.file.Path?,
         rawPath: String?,
     ): SupervisorRoute {
-        if (resolvedPath != null && BypassPaths.isBypassPath(resolvedPath)) {
-            return SupervisorRoute.Continue
+        if (resolvedPath == null || rawPath == null) {
+            return SupervisorRoute.Abort(NativeConstants.EPERM, "unresolved open path")
         }
-        if (resolvedPath == null && rawPath != null && looksLikeClassloading(rawPath)) {
-            return SupervisorRoute.Continue
+        if (BypassPaths.isBypassPath(resolvedPath)) {
+            // Even a trusted path must execute the copied request: CONTINUE would
+            // let a sibling mutate the tracee pathname after authorization.
+            return SupervisorRoute.InjectFd
         }
         return SupervisorRoute.AskJvm
     }
 
-    internal fun looksLikeClassloading(path: String): Boolean = path.endsWith(".class") || path.contains("META-INF/") || path.endsWith(".jar")
+    private fun unsupportedRoute(): SupervisorRoute.Abort = SupervisorRoute.Abort(NativeConstants.EPERM, "unsupported supervised operation")
 }
 
 internal sealed interface InjectTarget {
