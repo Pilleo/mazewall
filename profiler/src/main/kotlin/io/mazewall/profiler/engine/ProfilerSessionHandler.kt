@@ -132,6 +132,7 @@ internal class ProfilerSessionHandler(
         ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong()))
         val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
         if (isNoisePath(notification.nr, event)) {
+            state = ProfilerSessionMachine.evaluate(currentState, ProfilerSessionEvent.NoisePathBypassed).state
             reply.attempted = true
             val sent = with(arena.unwrap) { responder.sendSeccompContinue(handshake.acknowledged(), response.unwrap) }
             return if (sent == SeccompReplyResult.NOTIFICATION_GONE) terminateSession() else NotifResult.HANDLED

@@ -19,12 +19,16 @@ internal sealed interface ProfilerSessionEvent {
 
     /** Socket or notification I/O failed before this session could complete its protocol step. */
     data object TransportFailed : ProfilerSessionEvent
+
+    /** A terminal session was observed again; modeled as a benign no-op for the reactor. */
+    data object PostTerminalObserved : ProfilerSessionEvent
 }
 
 internal data class ProfilerSessionTransition(
     val state: ProfilerState,
     val terminate: Boolean = false,
     val passThrough: Boolean = false,
+    val protocolViolation: Boolean = false,
 )
 
 internal object ProfilerSessionMachine {
@@ -49,7 +53,8 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.HandshakeFailed,
                 is ProfilerSessionEvent.PassedThrough,
                 is ProfilerSessionEvent.TransportFailed,
-                -> stay(state)
+                is ProfilerSessionEvent.PostTerminalObserved,
+                -> violation(state)
             }
             is ProfilerState.Notified -> when (event) {
                 is ProfilerSessionEvent.EventDelivered ->
@@ -61,7 +66,8 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.PassedThrough,
                 is ProfilerSessionEvent.NoisePathBypassed,
                 is ProfilerSessionEvent.TransportFailed,
-                -> stay(state)
+                is ProfilerSessionEvent.PostTerminalObserved,
+                -> violation(state)
             }
             is ProfilerState.WaitingForAck -> when (event) {
                 is ProfilerSessionEvent.AckSucceeded ->
@@ -74,15 +80,21 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.EventDelivered,
                 is ProfilerSessionEvent.NoisePathBypassed,
                 is ProfilerSessionEvent.TransportFailed,
-                -> stay(state)
+                is ProfilerSessionEvent.PostTerminalObserved,
+                -> violation(state)
             }
-            is ProfilerState.Terminated,
+            is ProfilerState.Terminated -> ProfilerSessionTransition(state)
             is ProfilerState.PassThrough,
             is ProfilerState.Connected,
             is ProfilerState.HandshakeAck,
-            -> stay(state)
+            -> violation(state)
         }
     }
 
-    private fun stay(state: ProfilerState) = ProfilerSessionTransition(state)
+    private fun violation(state: ProfilerState) =
+        ProfilerSessionTransition(
+            ProfilerState.Terminated(state.socketFd, state.listenerFd),
+            terminate = true,
+            protocolViolation = true,
+        )
 }
