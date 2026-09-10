@@ -64,3 +64,12 @@ interface UnreadablePojoService {
 interface WrongReaderPojoService {
     fun echo(value: WrongReaderPojo): WrongReaderPojo
 }
+
+data class KotlinDataDto(
+    val name: String,
+    val count: Int,
+)
+
+interface KotlinDataDtoService {
+    fun echoKotlin(value: KotlinDataDto): KotlinDataDto
+}

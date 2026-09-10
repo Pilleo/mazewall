@@ -2,6 +2,8 @@ package io.mazewall.portal.codegen
 
 import io.mazewall.portal.codegen.testapi.BadStream
 import io.mazewall.portal.codegen.testapi.InheritedService
+import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
+import io.mazewall.portal.codegen.testapi.MethodIdShadowService
 import io.mazewall.portal.codegen.testapi.Overloads
 import io.mazewall.portal.codegen.testapi.SampleFd
 import io.mazewall.portal.codegen.testapi.SampleGeom
@@ -149,6 +151,37 @@ class PortalStubGeneratorTest {
                 .toString()
         assertTrue(stub.contains(".getName()"), stub)
         assertTrue(stub.contains(".count()"), stub)
+    }
+
+    @Test
+    fun `Kotlin data class readers are modeled and emitted as property access`() {
+        val method = PortalServiceSchema.compile(KotlinDataDtoService::class.java).methods.single()
+        val kind = method.parameters.single().kind as BoundaryTypes.Kind.RecordT
+        assertTrue(kind.components.all { it.reader is BoundaryTypes.Kind.Reader.KotlinProperty }, kind.toString())
+
+        val stub =
+            PortalStubGenerator
+                .generate(KotlinDataDtoService::class.java)
+                .single { it.name == "KotlinDataDtoServicePortalStub" }
+                .toString()
+        assertTrue(stub.contains(".name)"), stub)
+        assertTrue(stub.contains(".count)"), stub)
+        assertFalse(stub.contains(".getName()"), stub)
+        assertFalse(stub.contains(".getCount()"), stub)
+    }
+
+    @Test
+    fun `method id constant cannot be shadowed by its identically named parameter`() {
+        val method = MethodIdShadowService::class.java.getDeclaredMethod("pinned", String::class.java)
+        assertTrue(PortalStubGenerator.methodId(MethodIdShadowService::class.java, method) == 654_749_016)
+
+        val stub =
+            PortalStubGenerator
+                .generate(MethodIdShadowService::class.java)
+                .single { it.name == "MethodIdShadowServicePortalStub" }
+                .toString()
+        assertTrue(stub.contains("pinned(PINNED_METHOD_ID: String)"), stub)
+        assertTrue(stub.contains("PortalMethod.Generated(Companion.PINNED_METHOD_ID)"), stub)
     }
 
     @Test

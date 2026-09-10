@@ -127,7 +127,7 @@ public object PortalStubGenerator {
         val invocation =
             CodeBlock
                 .builder()
-                .add("this.%N.invoke(%T.Generated(%N), %N", brokerName, portalMethod, constantName, payloadName)
+                .add("this.%N.invoke(%T.Generated(Companion.%N), %N", brokerName, portalMethod, constantName, payloadName)
                 .apply { granted.forEach { add(", %L", it) } }
                 .add(")")
                 .build()
@@ -273,6 +273,7 @@ public object PortalStubGenerator {
         component: BoundaryTypes.Kind.Component,
     ): CodeBlock =
         when (component.reader) {
+            is BoundaryTypes.Kind.Reader.KotlinProperty -> CodeBlock.of("%L.%N", receiver, component.reader.name)
             is BoundaryTypes.Kind.Reader.Field -> CodeBlock.of("%L.%N", receiver, component.reader.name)
             is BoundaryTypes.Kind.Reader.Method -> CodeBlock.of("%L.%N()", receiver, component.reader.name)
         }

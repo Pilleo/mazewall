@@ -75,6 +75,10 @@ internal object BoundaryTypes {
         sealed interface Reader {
             val name: String
 
+            data class KotlinProperty(
+                override val name: String,
+            ) : Reader
+
             data class Field(
                 override val name: String,
             ) : Reader
@@ -171,7 +175,13 @@ internal object BoundaryTypes {
         val compatible = candidateNames.firstNotNullOfOrNull { name ->
             methods.firstOrNull { it.name == name && sameBoundaryType(it.returnType, expectedType) }
         }
-        if (compatible != null) return Kind.Reader.Method(compatible.name)
+        if (compatible != null) {
+            return if (isKotlinPropertyAccessor(type, component, expectedType, compatible)) {
+                Kind.Reader.KotlinProperty(component)
+            } else {
+                Kind.Reader.Method(compatible.name)
+            }
+        }
 
         val fields = type.fields.filter { it.name == component && Modifier.isPublic(it.modifiers) && !Modifier.isStatic(it.modifiers) }
         val field = fields.firstOrNull { sameBoundaryType(it.type, expectedType) }
@@ -183,6 +193,26 @@ internal object BoundaryTypes {
         throw IllegalArgumentException(
             "portal POJO ${type.name} component $component needs a public readable accessor ($component(), get$suffix(), or public field)",
         )
+    }
+
+    private fun isKotlinPropertyAccessor(
+        type: Class<*>,
+        component: String,
+        expectedType: Class<*>,
+        accessor: java.lang.reflect.Method,
+    ): Boolean {
+        if (type.getAnnotation(Metadata::class.java) == null) return false
+        val hasCompatibleBackingField =
+            type.declaredFields.any {
+                it.name == component && !Modifier.isStatic(it.modifiers) && sameBoundaryType(it.type, expectedType)
+            }
+        if (!hasCompatibleBackingField) return false
+        val suffix = component.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val booleanIsProperty =
+            sameBoundaryType(expectedType, Boolean::class.java) &&
+                component.startsWith("is") &&
+                accessor.name == component
+        return accessor.name == "get$suffix" || booleanIsProperty
     }
 
     private fun sameBoundaryType(

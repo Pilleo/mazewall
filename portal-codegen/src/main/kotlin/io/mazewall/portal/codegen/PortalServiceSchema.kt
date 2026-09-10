@@ -1,8 +1,5 @@
 package io.mazewall.portal.codegen
 
-import java.lang.reflect.Method
-import java.lang.reflect.Modifier
-
 internal data class PortalServiceSchema(
     val service: Class<*>,
     val methods: List<PortalMethodSchema>,
@@ -18,8 +15,12 @@ internal data class PortalServiceSchema(
             val effective =
                 service.methods
                     .asSequence()
-                    .filterNot { it.isSynthetic || it.isBridge || Modifier.isStatic(it.modifiers) }
-                    .filterNot { it.declaringClass == Any::class.java }
+                    .filterNot {
+                        it.isSynthetic ||
+                            it.isBridge ||
+                            java.lang.reflect.Modifier
+                        .isStatic(it.modifiers)
+                    }.filterNot { it.declaringClass == Any::class.java }
                     .groupBy(::signature)
                     .map { (signature, candidates) -> resolveOverride(service, signature, candidates) }
                     .sortedBy(::signature)
@@ -31,7 +32,7 @@ internal data class PortalServiceSchema(
                 }
             }
 
-            val seenIds = linkedMapOf<Int, Method>()
+            val seenIds = linkedMapOf<Int, java.lang.reflect.Method>()
             val methods =
                 effective.map { method ->
                     val id = PortalStubGenerator.methodId(service, method)
@@ -58,24 +59,40 @@ internal data class PortalServiceSchema(
         private fun resolveOverride(
             service: Class<*>,
             signature: String,
-            candidates: List<Method>,
-        ): Method {
-            if (candidates.size == 1) return candidates.single()
-            candidates.firstOrNull { it.declaringClass == service }?.let { return it }
+            candidates: List<java.lang.reflect.Method>,
+        ): java.lang.reflect.Method {
             val mostSpecific =
                 candidates.filter { candidate ->
                     candidates.all { other ->
                         candidate == other || other.declaringClass.isAssignableFrom(candidate.declaringClass)
                     }
                 }
-            if (mostSpecific.size == 1) return mostSpecific.single()
-            if (candidates.map(Method::getReturnType).distinct().size == 1) {
-                return candidates.minWith(
-                    compareBy<Method>({ it.declaringClass.name }, Method::toGenericString),
-                )
+            val direct = candidates.firstOrNull { it.declaringClass == service }
+            val identicalReturn = candidates.map(java.lang.reflect.Method::getReturnType).distinct().size == 1
+            return when {
+                candidates.size == 1 -> candidates.single()
+                direct != null -> direct
+                mostSpecific.size == 1 -> mostSpecific.single()
+                identicalReturn ->
+                    candidates.minWith(
+                        compareBy<java.lang.reflect.Method>(
+                            { it.declaringClass.name },
+                            java.lang.reflect.Method::toGenericString,
+                        ),
+                    )
+                else -> resolveCovariantOverride(service, signature, candidates)
             }
+        }
+
+        private fun resolveCovariantOverride(
+            service: Class<*>,
+            signature: String,
+            candidates: List<java.lang.reflect.Method>,
+        ): java.lang.reflect.Method {
             val covariant =
-                candidates.filter { candidate -> candidates.all { other -> other.returnType.isAssignableFrom(candidate.returnType) } }
+                candidates.filter { candidate ->
+                    candidates.all { other -> other.returnType.isAssignableFrom(candidate.returnType) }
+                }
             require(covariant.size == 1) {
                 "portal service ${service.name} inherits conflicting methods for $signature: " +
                     candidates.map(::displaySignature).sorted().joinToString()
@@ -83,14 +100,14 @@ internal data class PortalServiceSchema(
             return covariant.single()
         }
 
-        private fun signature(method: Method): String = method.name + "(" + method.parameterTypes.joinToString(",") { it.name } + ")"
+        private fun signature(method: java.lang.reflect.Method): String = method.name + "(" + method.parameterTypes.joinToString(",") { it.name } + ")"
 
-        private fun displaySignature(method: Method): String = signature(method)
+        private fun displaySignature(method: java.lang.reflect.Method): String = signature(method)
     }
 }
 
 internal data class PortalMethodSchema(
-    val method: Method,
+    val method: java.lang.reflect.Method,
     val id: Int,
     val parameters: List<PortalParameterSchema>,
     val returnKind: BoundaryTypes.Kind,

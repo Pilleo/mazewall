@@ -1,5 +1,7 @@
 package io.mazewall.portal.codegen
 
+import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
+import io.mazewall.portal.codegen.testapi.MethodIdShadowService
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -23,9 +25,17 @@ class PortalCodegenFunctionalTest {
     lateinit var projectDir: Path
 
     @Test
-    fun `generated sources compile and round trip diamond and nested DTOs`() {
+    fun `generated sources compile and round trip Java and Kotlin DTOs`() {
         val apiJar = compileApiJar(projectDir)
-        writeFixture(apiJar, listOf("fixture.A"), compileGenerated = true)
+        writeFixture(
+            apiJar,
+            listOf(
+                "fixture.A",
+                KotlinDataDtoService::class.java.name,
+                MethodIdShadowService::class.java.name,
+            ),
+            compileGenerated = true,
+        )
 
         val result = runner("roundTrip").build()
 
@@ -71,6 +81,18 @@ class PortalCodegenFunctionalTest {
         val portalJar = Path.of(System.getProperty("portal.codegen.portalJar")).toAbsolutePath()
         val platformJar = Path.of(System.getProperty("portal.codegen.platformJar")).toAbsolutePath()
         val enforcerJar = Path.of(System.getProperty("portal.codegen.enforcerJar")).toAbsolutePath()
+        val testApiClasses =
+            Path
+                .of(
+                    KotlinDataDtoService::class.java.protectionDomain.codeSource.location
+                    .toURI(),
+                ).toAbsolutePath()
+        val javaTestApiClasses =
+            Path
+                .of(
+                    MethodIdShadowService::class.java.protectionDomain.codeSource.location
+                    .toURI(),
+                ).toAbsolutePath()
         val quotedServices = services.joinToString(", ") { "\"$it\"" }
         val extra =
             if (compileGenerated) {
@@ -93,7 +115,10 @@ class PortalCodegenFunctionalTest {
             }
             repositories { mavenCentral() }
             dependencies {
-                implementation(files("${apiJar.toAbsolutePath()}", "$portalJar", "$platformJar", "$enforcerJar"))
+                implementation(files(
+                    "${apiJar.toAbsolutePath()}", "$portalJar", "$platformJar", "$enforcerJar",
+                    "$testApiClasses", "$javaTestApiClasses",
+                ))
             }
             portalCodegen { interfaces.set(listOf($quotedServices)) }
             $extra
@@ -103,6 +128,9 @@ class PortalCodegenFunctionalTest {
         sourceDir.resolve("Main.kt").writeText(
             """
             package fixture
+            import io.mazewall.portal.codegen.testapi.KotlinDataDto
+            import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
+            import io.mazewall.portal.codegen.testapi.KotlinDataDtoServicePortalDispatcher
             import io.mazewall.portal.PortalCodec
             import io.mazewall.portal.PortalMethod
             private fun methodId(name: String, parameterTypes: String): Int =
@@ -164,6 +192,22 @@ class PortalCodegenFunctionalTest {
                 val nestedPojoReader = PortalCodec.Reader(nestedPojo)
                 check(nestedPojoReader.string() == "safe!")
                 check(nestedPojoReader.int() == 5)
+                val kotlinImplementation = object : KotlinDataDtoService {
+                    override fun echoKotlin(value: KotlinDataDto): KotlinDataDto =
+                        KotlinDataDto(value.name + "!", value.count + 1)
+                }
+                val kotlinDto = KotlinDataDtoServicePortalDispatcher.handle(
+                    kotlinImplementation,
+                    PortalMethod.Generated(
+                        (("io.mazewall.portal.codegen.testapi.KotlinDataDtoService#echoKotlin#" +
+                            "io.mazewall.portal.codegen.testapi.KotlinDataDto").hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000,
+                    ),
+                    pojoPayload,
+                    emptyList(),
+                )
+                val kotlinReader = PortalCodec.Reader(kotlinDto)
+                check(kotlinReader.string() == "safe!")
+                check(kotlinReader.int() == 5)
                 println("ROUND_TRIP_OK")
             }
             """.trimIndent(),
