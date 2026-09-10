@@ -32,6 +32,9 @@ services:
             - MAZEWALL_ENABLED=true
             - SERVER_ADDRESS=0.0.0.0
             - SERVER_PORT=8081
+            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/profiles/sbob.json
+        volumes:
+            - profile-artifacts:/app/profiles:ro
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/admin/log"]
             interval: 10s
@@ -54,13 +57,16 @@ services:
             - MAZEWALL_PROFILE=true
             - SERVER_ADDRESS=0.0.0.0
             - SERVER_PORT=8083
-            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/output/sbob.json
+            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/profiles/sbob.json
         healthcheck:
             test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8083/admin/log"]
             interval: 10s
             timeout: 3s
             retries: 5
         volumes:
-            - ../output:/app/output:rw
+            - profile-artifacts:/app/profiles:rw
         annotations:
             io.podman.annotations.seccomp: ${PWD}/../../infra/dev/podman-seccomp.json
+
+volumes:
+    profile-artifacts:

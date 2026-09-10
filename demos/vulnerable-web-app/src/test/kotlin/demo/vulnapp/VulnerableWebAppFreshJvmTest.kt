@@ -1,5 +1,6 @@
 package demo.vulnapp
 
+import demo.vulnapp.config.ExecutorDrain
 import demo.vulnapp.config.MazewallProtectionBootstrap
 import demo.vulnapp.config.ProfileArtifactPublisher
 import demo.vulnapp.service.DefaultFileService
@@ -50,6 +51,16 @@ class VulnerableWebAppFreshJvmTest {
                 assertTrue(application.getBean(FileService::class.java) is DefaultFileService)
                 assertEquals("false", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
                 assertEquals(404, missingCommandRoute(application).statusCode())
+                for (path in listOf("/import/java", "/import/jackson", "/import/yaml", "/import/xstream")) {
+                    val request = HttpRequest
+                        .newBuilder(uri(application, path))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                        .build()
+                    assertEquals(404, HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
+                }
+                val payload = HttpRequest.newBuilder(uri(application, "/exploit/payload?command=true")).GET().build()
+                assertEquals(404, HttpClient.newHttpClient().send(payload, HttpResponse.BodyHandlers.ofString()).statusCode())
                 application.getBean(FileService::class.java).runCommand("printf exploited > '$created'")
                 assertEquals("exploited", Files.readString(created))
                 assertEquals("preserve", Files.readString(marker))
@@ -66,6 +77,9 @@ class VulnerableWebAppFreshJvmTest {
     fun protectedBody() {
         val root = Files.createTempDirectory("mazewall-web-protected-")
         val marker = root.resolve("marker")
+        val target = root.resolve("sbob.json")
+        ProfileArtifactPublisher.publish(target, io.mazewall.profiler.BillOfBehavior(), ExecutorDrain.Complete)
+        System.setProperty("mazewall.sbob.path", target.toString())
         try {
             startApplication(enabled = true).use { application ->
                 assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
@@ -81,8 +95,8 @@ class VulnerableWebAppFreshJvmTest {
                 assertFalse(Files.exists(marker), "protected service command must not create its marker")
             }
         } finally {
-            Files.deleteIfExists(marker)
-            Files.deleteIfExists(root)
+            System.clearProperty("mazewall.sbob.path")
+            root.toFile().deleteRecursively()
         }
     }
 

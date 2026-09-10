@@ -9,6 +9,28 @@ import kotlin.test.assertTrue
 
 class DeploymentContractTest {
     @Test
+    fun `default artifact excludes executable deserialization fixtures`() {
+        java.util.jar.JarFile(projectFile("build/libs/vulnerable-app.jar").toFile()).use { jar ->
+            assertEquals(null, jar.getEntry("BOOT-INF/classes/demo/vulnapp/service/CustomGadget.class"))
+            assertEquals(null, jar.getEntry("BOOT-INF/classes/demo/vulnapp/controller/ImportController.class"))
+        }
+    }
+
+    @Test
+    fun `profiling and enforcement share one named artifact volume with distinct access`() {
+        val compose = Yaml().load<Map<String, Any>>(Files.readString(projectFile("compose.yml")))
+        val services = compose.getValue("services") as Map<*, *>
+        val profile = services["profile"] as Map<*, *>
+        val protected = services["protected"] as Map<*, *>
+        assertEquals(listOf("profile-artifacts:/app/profiles:rw"), profile["volumes"])
+        assertEquals(listOf("profile-artifacts:/app/profiles:ro"), protected["volumes"])
+        assertTrue((compose["volumes"] as? Map<*, *>)?.containsKey("profile-artifacts") == true)
+        for (service in listOf(profile, protected)) {
+            assertTrue((service["environment"] as List<*>).contains("JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/profiles/sbob.json"))
+        }
+    }
+
+    @Test
     fun `compose keeps host ports private while binding container servers for networking`() {
         val compose = Yaml().load<Map<String, Any>>(Files.readString(projectFile("compose.yml")))
         val services = compose.getValue("services") as Map<*, *>

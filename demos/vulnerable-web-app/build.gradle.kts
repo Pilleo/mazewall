@@ -104,7 +104,8 @@ spotbugs {
 
 tasks.configureEach {
     if (name.contains("detekt", ignoreCase = true) ||
-        name.contains("spotbugs", ignoreCase = true)
+        name.contains("spotbugs", ignoreCase = true) ||
+        name.contains("ktlint", ignoreCase = true)
     ) {
         enabled = true
     }
@@ -115,6 +116,28 @@ tasks.matching { it.name.startsWith("spotbugsTest") }.configureEach { enabled = 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     mainClass.set("demo.vulnapp.VulnAppApplicationKt")
     archiveFileName.set("vulnerable-app.jar")
+}
+
+// Executable deserialization fixtures never enter the ordinary application artifact.
+val vulnerableFixture =
+    sourceSets.create("vulnerableFixture") {
+        compileClasspath += sourceSets.main.get().output
+        runtimeClasspath += sourceSets.main.get().output
+    }
+configurations[vulnerableFixture.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[vulnerableFixture.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
+dependencies {
+    // Verify profile gating in tests without placing fixture classes in the main artifact.
+    testImplementation(vulnerableFixture.output)
+}
+
+tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("isolatedVulnerableFixtureJar") {
+    group = "build"
+    description = "Builds an executable attack fixture for isolated disposable environments only."
+    mainClass.set("demo.vulnapp.VulnAppApplicationKt")
+    targetJavaVersion.set(JavaVersion.VERSION_25)
+    archiveFileName.set("isolated-vulnerable-fixture.jar")
+    classpath(vulnerableFixture.runtimeClasspath)
 }
 
 val extractJacocoAgent by tasks.registering(Copy::class) {

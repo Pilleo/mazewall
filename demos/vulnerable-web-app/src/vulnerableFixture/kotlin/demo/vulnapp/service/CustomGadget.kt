@@ -2,6 +2,7 @@ package demo.vulnapp.service
 
 import java.io.Serializable
 
+/** Executable attack fixture: packaged only by isolatedVulnerableFixtureJar. */
 class CustomGadget : Serializable {
     companion object {
         private const val serialVersionUID = 1L

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
+@org.springframework.context.annotation.Profile("isolated-vulnerable-fixture")
 class ImportController(
     private val yamlImportService: YamlImportService,
     private val xmlImportService: XmlImportService,
