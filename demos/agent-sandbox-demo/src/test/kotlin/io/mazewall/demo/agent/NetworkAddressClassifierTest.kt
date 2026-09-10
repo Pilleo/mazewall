@@ -24,12 +24,31 @@ class NetworkAddressClassifierTest {
     }
 
     @Test
-    fun `blocks IPv6 local and IPv4 mapped private addresses`() {
-        listOf("::1", "fc00::1", "fdff::1", "fe80::1", "::ffff:169.254.169.254", "::ffff:192.168.1.1")
+    fun `blocks IPv6 local addresses`() {
+        listOf("::1", "fc00::1", "fdff::1", "fe80::1")
             .forEach { address ->
                 assertEquals(AddressDecision.DENY, NetworkAddressClassifier.classify(sockaddr(address)), address)
             }
         assertEquals(AddressDecision.ALLOW, NetworkAddressClassifier.classify(sockaddr("2001:4860:4860::8888")))
+    }
+
+    @Test
+    fun `classifies explicit IPv4 mapped IPv6 address bytes`() {
+        assertEquals(
+            AddressDecision.DENY,
+            NetworkAddressClassifier.classify(mappedIpv6Sockaddr(169, 254, 169, 254)),
+            "mapped metadata address",
+        )
+        assertEquals(
+            AddressDecision.DENY,
+            NetworkAddressClassifier.classify(mappedIpv6Sockaddr(192, 168, 1, 1)),
+            "mapped RFC1918 address",
+        )
+        assertEquals(
+            AddressDecision.ALLOW,
+            NetworkAddressClassifier.classify(mappedIpv6Sockaddr(8, 8, 8, 8)),
+            "mapped public address",
+        )
     }
 
     @Test
@@ -47,5 +66,15 @@ class NetworkAddressClassifierTest {
         bytes[1] = 0
         address.copyInto(bytes, if (family == 2) 4 else 8)
         return bytes
+    }
+
+    private fun mappedIpv6Sockaddr(vararg ipv4: Int): ByteArray {
+        require(ipv4.size == 4)
+        return ByteArray(28).also { bytes ->
+            bytes[0] = 10 // AF_INET6, native little-endian family
+            bytes[18] = 0xff.toByte()
+            bytes[19] = 0xff.toByte()
+            ipv4.forEachIndexed { index, octet -> bytes[20 + index] = octet.toByte() }
+        }
     }
 }
