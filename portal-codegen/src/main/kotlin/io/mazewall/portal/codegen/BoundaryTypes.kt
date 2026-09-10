@@ -133,7 +133,12 @@ internal object BoundaryTypes {
                     require(Modifier.isPublic(component.accessor.modifiers)) {
                         "record ${type.name} component $name has no public readable accessor"
                     }
-                    Kind.Component(name, kindOf(component.type, stack), Kind.Reader.Method(component.accessor.name))
+                    val reader = if (type.getAnnotation(Metadata::class.java) != null) {
+                        Kind.Reader.KotlinProperty(name)
+                    } else {
+                        Kind.Reader.Method(component.accessor.name)
+                    }
+                    Kind.Component(name, kindOf(component.type, stack), reader)
                 }
             require(components.isNotEmpty()) { "record ${type.name} has no components" }
             return Kind.RecordT(type.asClassName(), java.util.List.copyOf(components))
@@ -150,6 +155,15 @@ internal object BoundaryTypes {
                 val name = parameter.name
                 require(!name.matches(Regex("arg\\d+"))) {
                     "portal POJO ${type.name} lost constructor parameter names; compile with -parameters or use a record"
+                }
+                if (type.getAnnotation(Metadata::class.java) != null) {
+                    require(
+                        type.declaredFields.any {
+                        it.name == name && !Modifier.isStatic(it.modifiers) && sameBoundaryType(it.type, parameter.type)
+                    },
+                    ) {
+                        "portal Kotlin component ${type.name}.$name must be a constructor-backed property; computed and delegated readers cannot reconstruct evidence"
+                    }
                 }
                 Kind.Component(name, kindOf(parameter.type, stack), readableAccessor(type, name, parameter.type))
             }

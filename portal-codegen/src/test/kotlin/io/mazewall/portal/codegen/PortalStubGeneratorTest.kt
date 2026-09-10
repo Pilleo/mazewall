@@ -20,6 +20,29 @@ import org.junit.jupiter.api.Test
 
 class PortalStubGeneratorTest {
     @Test
+    fun `capability placement reports service method and nested property`() {
+        listOf(
+            io.mazewall.portal.codegen.testapi.ReturnedFdService::class.java to "acquire.return",
+            io.mazewall.portal.codegen.testapi.NestedFdService::class.java to "consume.value.fd",
+        ).forEach { (service, path) ->
+            val failure = assertThrows(IllegalArgumentException::class.java) { PortalStubGenerator.generate(service) }
+            assertTrue(failure.message!!.contains(service.name), failure.message)
+            assertTrue(failure.message!!.contains(path), failure.message)
+        }
+    }
+
+    @Test
+    fun `computed and delegated constructor components are rejected`() {
+        listOf(
+            io.mazewall.portal.codegen.testapi.ComputedDtoService::class.java,
+            io.mazewall.portal.codegen.testapi.DelegatedDtoService::class.java,
+        ).forEach { service ->
+            val failure = assertThrows(IllegalArgumentException::class.java) { PortalStubGenerator.generate(service) }
+            assertTrue(failure.message!!.contains("constructor-backed"), failure.message)
+        }
+    }
+
+    @Test
     fun `host stub serializes strings and never mentions Impl`() {
         val files = PortalStubGenerator.generate(SampleGreeter::class.java)
         val stub = files.single { it.name == "SampleGreeterPortalStub" }.toString()
@@ -175,15 +198,15 @@ class PortalStubGeneratorTest {
     fun `Kotlin JVM records use record component accessors`() {
         val method = PortalServiceSchema.compile(KotlinJvmRecordDtoService::class.java).methods.single()
         val kind = method.parameters.single().kind as BoundaryTypes.Kind.RecordT
-        assertTrue(kind.components.all { it.reader is BoundaryTypes.Kind.Reader.Method }, kind.toString())
+        assertTrue(kind.components.all { it.reader is BoundaryTypes.Kind.Reader.KotlinProperty }, kind.toString())
 
         val stub =
             PortalStubGenerator
                 .generate(KotlinJvmRecordDtoService::class.java)
                 .single { it.name == "KotlinJvmRecordDtoServicePortalStub" }
                 .toString()
-        assertTrue(stub.contains(".name()"), stub)
-        assertTrue(stub.contains(".count()"), stub)
+        assertTrue(stub.contains(".name)"), stub)
+        assertTrue(stub.contains(".count)"), stub)
     }
 
     @Test

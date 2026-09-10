@@ -189,10 +189,27 @@ signatures. Generated identifiers use independent KotlinPoet allocators for memb
 parameters, receivers, and locals, so keywords, hostile parameter names, and case-distinct method
 names cannot collide.
 
-The Gradle task emits stubs and dispatchers into task-owned staging trees. It publishes both trees
+Host builds emit stubs only by default. Applications opt into a dedicated guest source set with
+`portalCodegen { workerSourceSet.set("portalWorker") }` and place guest implementations under
+`src/portalWorker/kotlin`. The plugin compiles dispatchers in that source set and exposes
+`portalWorkerJar`, containing guest classes and `META-INF/mazewall/portal/<service>` descriptors.
+Only this artifact belongs on the worker classpath; ordinary `jar` contains neither dispatchers
+nor descriptors. `main` and `test` are rejected as worker output source sets. The worker resolves
+one descriptor per configured service through its own defining classloader before constructing
+the guest. Missing, duplicate, malformed, or conflicting descriptors abort readiness. Existing
+registry bootstrap APIs remain available for migration; production startup requires generated metadata.
+See [the code-generation diagram](../../../diagrams/portal_codegen.puml).
+
+Boundary validation allows `Capability.ReadFd` only as a direct inbound parameter. Returns and
+structured components report their service/method/property path and fail generation. Java records
+use record methods; Kotlin records and constructor-backed properties use Kotlin property access.
+Computed and delegated constructor component readers are rejected because reconstruction cannot
+preserve their value reliably. Inherited overrides and service-based wire IDs remain unchanged.
+
+The Gradle task emits stubs, dispatchers, and worker resources into task-owned staging trees. It publishes all trees
 only after every configured interface validates and every file is generated, replacing prior trees
 with atomic same-filesystem moves. A removed interface therefore removes its old generated files;
-a validation or generation failure leaves both previously published trees intact. Generated wire
+a validation or generation failure leaves all previously published trees intact. Generated wire
 IDs and frame bytes are unaffected.
 
 Hand-written stub must work before KotlinPoet so protocol bugs are not hidden in generated code.

@@ -1,6 +1,7 @@
 package io.mazewall.portal.codegen
 
 import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
+import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
 import io.mazewall.portal.codegen.testapi.MethodIdShadowService
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
@@ -25,6 +26,23 @@ class PortalCodegenFunctionalTest {
     lateinit var projectDir: Path
 
     @Test
+    fun `host only configuration publishes no worker code or descriptor`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A"), workerSourceSet = null)
+        runner("jar").build()
+        assertTrue(generatedContents().keys.all { it.name.endsWith("PortalStub.kt") })
+        assertFalse(generatedContents().isEmpty())
+    }
+
+    @Test
+    fun `main source set cannot be selected as worker output`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A"), workerSourceSet = "main")
+        val result = runner("generatePortalStubs").buildAndFail()
+        assertTrue(result.output.contains("dedicated worker source set"), result.output)
+    }
+
+    @Test
     fun `generated sources compile and round trip Java and Kotlin DTOs`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(
@@ -32,15 +50,26 @@ class PortalCodegenFunctionalTest {
             listOf(
                 "fixture.A",
                 KotlinDataDtoService::class.java.name,
+                KotlinJvmRecordDtoService::class.java.name,
                 MethodIdShadowService::class.java.name,
             ),
             compileGenerated = true,
         )
 
-        val result = runner("roundTrip").build()
+        val result = runner("roundTrip", "jar", "portalWorkerJar").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":compileKotlin")?.outcome)
         assertTrue(result.output.contains("ROUND_TRIP_OK"), result.output)
+        val jars = Files.list(projectDir.resolve("build/libs")).use { it.toList() }
+        val host = jars.single { !it.fileName.toString().contains("portal-worker") }
+        java.util.jar.JarFile(host.toFile()).use { jar ->
+            assertFalse(jar.entries().asSequence().any { it.name.contains("PortalDispatcher") || it.name.contains("META-INF/mazewall/portal") })
+        }
+        val worker = jars.single { it.fileName.toString().contains("portal-worker") }
+        java.util.jar.JarFile(worker.toFile()).use { jar ->
+            assertTrue(jar.entries().asSequence().any { it.name == "fixture/APortalDispatcher.class" })
+            assertTrue(jar.getEntry("META-INF/mazewall/portal/fixture.A") != null)
+        }
     }
 
     @Test
@@ -76,6 +105,7 @@ class PortalCodegenFunctionalTest {
         apiJar: Path,
         services: List<String>,
         compileGenerated: Boolean = false,
+        workerSourceSet: String? = "portalWorker",
     ) {
         projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"portal-codegen-fixture\"\n")
         val portalJar = Path.of(System.getProperty("portal.codegen.portalJar")).toAbsolutePath()
@@ -97,10 +127,9 @@ class PortalCodegenFunctionalTest {
         val extra =
             if (compileGenerated) {
                 """
-                kotlin.sourceSets.getByName("main").kotlin.srcDir(layout.buildDirectory.dir("generated/portal-dispatchers"))
                 tasks.register<JavaExec>("roundTrip") {
-                    dependsOn("classes")
-                    classpath = sourceSets["main"].runtimeClasspath
+                    dependsOn("portalWorkerClasses")
+                    classpath = sourceSets["portalWorker"].runtimeClasspath
                     mainClass.set("fixture.MainKt")
                 }
                 """.trimIndent()
@@ -120,17 +149,23 @@ class PortalCodegenFunctionalTest {
                     "$testApiClasses", "$javaTestApiClasses",
                 ))
             }
-            portalCodegen { interfaces.set(listOf($quotedServices)) }
+            portalCodegen {
+                interfaces.set(listOf($quotedServices))
+                ${workerSourceSet?.let { "workerSourceSet.set(\"$it\")" }.orEmpty()}
+            }
             $extra
             """.trimIndent(),
         )
-        val sourceDir = projectDir.resolve("src/main/kotlin/fixture").createDirectories()
+        val sourceDir = projectDir.resolve("src/portalWorker/kotlin/fixture").createDirectories()
         sourceDir.resolve("Main.kt").writeText(
             """
             package fixture
             import io.mazewall.portal.codegen.testapi.KotlinDataDto
             import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
             import io.mazewall.portal.codegen.testapi.KotlinDataDtoServicePortalDispatcher
+            import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDto
+            import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
+            import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoServicePortalDispatcher
             import io.mazewall.portal.PortalCodec
             import io.mazewall.portal.PortalMethod
             private fun methodId(name: String, parameterTypes: String): Int =
@@ -208,6 +243,21 @@ class PortalCodegenFunctionalTest {
                 val kotlinReader = PortalCodec.Reader(kotlinDto)
                 check(kotlinReader.string() == "safe!")
                 check(kotlinReader.int() == 5)
+                val recordImplementation = object : KotlinJvmRecordDtoService {
+                    override fun echoKotlinJvmRecord(value: KotlinJvmRecordDto) = KotlinJvmRecordDto(value.name + "!", value.count + 1)
+                }
+                val recordResult = KotlinJvmRecordDtoServicePortalDispatcher.handle(
+                    recordImplementation,
+                    PortalMethod.Generated(
+                        (("io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService#echoKotlinJvmRecord#" +
+                            "io.mazewall.portal.codegen.testapi.KotlinJvmRecordDto").hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000,
+                    ),
+                    pojoPayload,
+                    emptyList(),
+                )
+                val recordReader = PortalCodec.Reader(recordResult)
+                check(recordReader.string() == "safe!")
+                check(recordReader.int() == 5)
                 println("ROUND_TRIP_OK")
             }
             """.trimIndent(),
@@ -305,7 +355,7 @@ class PortalCodegenFunctionalTest {
 
     private fun assertGeneratedServices(expected: Set<String>) {
         val files = generatedContents().keys.map { it.name }.toSet()
-        val expectedFiles = expected.flatMap { listOf("${it}PortalStub.kt", "${it}PortalDispatcher.kt") }.toSet()
+        val expectedFiles = expected.flatMap { listOf("${it}PortalStub.kt", "${it}PortalDispatcher.kt", "fixture.$it") }.toSet()
         assertEquals(expectedFiles, files)
         assertFalse(files.any { it.contains("Missing") })
     }

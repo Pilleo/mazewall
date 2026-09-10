@@ -54,7 +54,9 @@ public object PortalWorkerMain {
                 )
             },
             createDispatcher = {
-                val dispatcherTable = publishDispatcherTable(System.getProperty("io.mazewall.portal.worker.dispatchers")).table
+                val builder = PortalDispatcherTable.Builder()
+                builder.bootstrapGenerated(System.getProperty("io.mazewall.portal.worker.dispatchers"), PortalWorkerMain::class.java.classLoader)
+                val dispatcherTable = builder.build()
                 PortalWorkerDispatcher { method, payload, fds ->
             when (method) {
                 is PortalMethod.Generated -> dispatcherTable.dispatchOrNull(method, payload, fds) ?: throw UnknownPortalMethod(method)

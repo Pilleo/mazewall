@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 555
+*Total Active Issues:* 75 | *Total Resolved Issues:* 556
+
+Review-hardening Task 7 resolved: [explicit compiled worker artifacts and validated boundary metadata](resolved/issue-20260910-192121-101-compile-portal-dispatchers-in-an-explicit-worker-a.md).
 
 Review-hardening Task 6 worker transport resolved: [terminal transport and startup failures](resolved/issue-20260910-185837-079-make-portal-worker-transport-and-startup-failure-t.md).
 
