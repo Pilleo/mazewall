@@ -145,7 +145,13 @@ internal object SeccompConnectionMachine {
     ): SeccompConnectionTransition {
         val effects = when (event) {
             is SeccompConnectionEvent.ListenerReceived -> listOf(SeccompConnectionEffect.CloseRejectedListener(event.listenerFd))
-            else -> emptyList()
+            is SeccompConnectionEvent.RecvFailed,
+            is SeccompConnectionEvent.PollIdle,
+            is SeccompConnectionEvent.PollFailed,
+            is SeccompConnectionEvent.AckSucceeded,
+            is SeccompConnectionEvent.AckFailed,
+            is SeccompConnectionEvent.SessionFinished,
+            -> emptyList()
         }
         return SeccompConnectionTransition(null, effects, SeccompConnectionOutcome.ProtocolViolation(state, event))
     }

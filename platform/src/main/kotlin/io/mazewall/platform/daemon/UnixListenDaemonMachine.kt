@@ -235,7 +235,10 @@ internal object UnixListenDaemonMachine {
         val active = when (state) {
             is UnixListenDaemonState.Listening -> state.serverFd
             is UnixListenDaemonState.Active -> state.serverFd
-            else -> null
+            is UnixListenDaemonState.Uninitialized,
+            is UnixListenDaemonState.ShuttingDown,
+            is UnixListenDaemonState.Terminated,
+            -> null
         }
         val transition = terminate(active)
         val effects = buildList {
