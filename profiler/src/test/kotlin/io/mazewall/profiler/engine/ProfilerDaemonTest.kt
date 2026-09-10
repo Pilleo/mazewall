@@ -49,6 +49,67 @@ import java.nio.channels.ClosedByInterruptException
 @Isolated
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class ProfilerDaemonTest {
+    @Test
+    fun `stalled preparation expires in reactor and late evidence cannot publish or reply`() {
+        val future = java.util.concurrent.CompletableFuture<SyscallEvent<SyscallEventState.Resolved>>()
+        var cancellations = 0
+        val preparation = ProfilerPreparation { _, _ ->
+            object : ProfilerPreparationJob {
+                override val result = future
+
+                override fun close() {
+                    cancellations++
+                }
+            }
+        }
+        val transport = MockTransport()
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        var now = 0L
+        var replies = 0
+        val native = MockNativeEngine().apply {
+            onIoctl = { _, command, buffer ->
+                when (command) {
+                    SECCOMP_IOCTL_NOTIF_RECV -> {
+                        buffer.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    }
+                    SECCOMP_IOCTL_NOTIF_SEND -> replies++
+                    else -> error("Unexpected ioctl")
+                }
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN"), preparation = preparation) {}.use { handler ->
+            io.mazewall.platform.seccomp.daemon.SeccompSessionHandler(socket, listener, handler, engine = native, socketManager = transport, nanoTime = { now }).use { reactor ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                    with(arena) {
+                        val poll = allocate(Layouts.POLLFD, 2)
+                        val listenerPoll = io.mazewall.ffi.memory.PollFdSegment
+                            .of(poll.asSlice(0, Layouts.POLLFD_SIZE))
+                        listenerPoll.setRevents(NativeConstants.POLLIN)
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        listenerPoll.setRevents(0)
+                        now = 29_999_999_999L
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        assertEquals(0, transport.handshakeWrites)
+                        now = 30_000_000_000L
+                        assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                        assertEquals(1, replies)
+                        assertEquals(1, cancellations)
+                        future.complete(SyscallEvent(Tid(456), "OPEN", List(6) { 0L }, listOf("/late")))
+                        assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                        assertEquals(1, replies)
+                        assertEquals(0, transport.handshakeWrites)
+                        assertTrue(transport.ioctlCalls.isEmpty())
+                        assertTrue(handler.state is ProfilerState.Terminated)
+                    }
+                }
+            }
+        }
+    }
+
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -106,7 +167,7 @@ class ProfilerDaemonTest {
     ) {
         val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
         val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
-        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), parser) {}.use { handler ->
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), parser, directProfilerPreparation(reader)) {}.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 with(arena) {
                     val notif = allocate(Layouts.SECCOMP_NOTIF)
@@ -156,7 +217,7 @@ class ProfilerDaemonTest {
                 maxLen: Int,
             ): PathStringRead = throw IllegalArgumentException("private path must not appear in diagnostics")
         }
-        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN")) {}.use { handler ->
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), preparation = directProfilerPreparation(reader)) {}.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 with(arena) {
                     val notif = allocate(Layouts.SECCOMP_NOTIF)
@@ -198,7 +259,7 @@ class ProfilerDaemonTest {
         }
         val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
         val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
-        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN")) { }.use { handler ->
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN"), preparation = directProfilerPreparation(MockReader())) { }.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 with(arena) {
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)

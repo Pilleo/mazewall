@@ -29,6 +29,51 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
+    @Test
+    fun `processing failure remains primary when ACK and close also fail`() {
+        for (original in listOf(IllegalStateException("capture failed"), LinkageError("fatal capture"))) {
+            val closes = AtomicInteger()
+            val native = MockNativeEngine(
+                memory = object : MockNativeMemory() {
+                    override fun write(
+                        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        buf: ManagedSegment,
+                        count: Long,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(32, -1L)
+                },
+                fileSystem = object : MockNativeFileSystem() {
+                    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        closes.incrementAndGet()
+                        return LinuxNative.SyscallResult.Error(5, -1L)
+                    }
+                },
+            )
+            val listener = ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), mutableMapOf(), mutableMapOf(), { throw original }, native)
+            val event = TraceEvent.fromSyscallEvent(
+                io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
+                io.mazewall.core.Tid(7),
+                    "GETPID",
+                    emptyList(),
+                    io.mazewall.profiler.engine.PathResolution.NotApplicable,
+            ),
+            )
+            val process = ProfilerTraceListener::class.java.getDeclaredMethod("processEvent", TraceEvent::class.java).apply { isAccessible = true }
+            val thrown = org.junit.jupiter.api.Assertions
+                .assertThrows(java.lang.reflect.InvocationTargetException::class.java) { process.invoke(listener, event) }
+            org.junit.jupiter.api.Assertions
+                .assertSame(original, thrown.cause)
+            assertEquals(1, original.suppressed.size)
+            assertEquals(
+                1,
+                original.suppressed
+                .single()
+                .suppressed.size,
+            )
+            listener.closeWithResult()
+            assertEquals(1, closes.get())
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(longs = [-1, 0, 2])
     @Timeout(value = 5, unit = TimeUnit.SECONDS)

@@ -51,6 +51,7 @@ internal class ProfilerSessionHandler(
     private val memoryReader: ProfilerMemoryReader,
     private val syscallMap: Map<Int, String>,
     private val parser: SeccompNotificationParser = RealSeccompNotificationParser,
+    private val preparation: ProfilerPreparation? = null,
     private val onShutdown: (String) -> Unit,
 ) : AutoCloseable,
     SeccompNotifHandler {
@@ -97,6 +98,7 @@ internal class ProfilerSessionHandler(
             private var control: ControlSocketExchange? = null
             private var waiting: ProfilerState? = null
             private var sentRecorded = false
+            private var preparing: ProfilerPreparationJob? = null
 
             private var completed = false
 
@@ -114,14 +116,21 @@ internal class ProfilerSessionHandler(
             override fun close() {
                 if (!completed) terminateSession()
                 completed = true
+                preparing?.close()
             }
 
             context(arena: NativeArena) private fun advance(): NotificationProgress {
                 val exchange = control
                 if (exchange == null) {
                     val current = state as? ProfilerState.ActiveSession ?: return reply(ECONNRESET, NotifResult.TERMINATE)
-                    ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
-                    val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
+                    val job = preparing ?: run {
+                        ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
+                        checkNotNull(preparation) { "Profiler preparation worker is unavailable" }
+                            .submit(notification, syscallMap[notification.nr] ?: "SYSCALL_${notification.nr}")
+                            .also { preparing = it }
+                    }
+                    if (!job.result.isDone) return NotificationProgress.Await
+                    val event = job.result.join()
                     if (isNoisePath(notification.nr, event)) {
                         state = ProfilerSessionMachine.evaluate(current, ProfilerSessionEvent.NoisePathBypassed).state
                         return reply(0, NotifResult.HANDLED)

@@ -723,6 +723,33 @@ class "ProfilerNoiseClassifier" as io.mazewall.profiler.engine.ProfilerNoiseClas
   __
   +boolean isNoise(SupervisedKind, Path, List<? extends Path>)
 }
+interface "ProfilerPreparation" as io.mazewall.profiler.engine.ProfilerPreparation {
+  + {abstract}ProfilerPreparationJob submit(SeccompNotification, String)
+}
+interface "ProfilerPreparationJob" as io.mazewall.profiler.engine.ProfilerPreparationJob {
+  + {abstract}CompletableFuture<SyscallEvent<Resolved>> getResult()
+}
+class "ProfilerPreparationMain" as io.mazewall.profiler.engine.ProfilerPreparationMain {
+  + {static}ProfilerPreparationMain INSTANCE
+  __
+  + {static}void main(String[])
+}
+class "ProfilerPreparationPool" as io.mazewall.profiler.engine.ProfilerPreparationPool {
+  + {static}Companion Companion
+  __
+  +ProfilerPreparationJob submit(SeccompNotification, String)
+  +void close()
+}
+class "ProfilerPreparationPoolKt" as io.mazewall.profiler.engine.ProfilerPreparationPoolKt {
+}
+class "ProfilerPreparationProtocol" as io.mazewall.profiler.engine.ProfilerPreparationProtocol {
+  + {static}ProfilerPreparationProtocol INSTANCE
+  __
+  +void writeRequest(DataOutputStream, Request)
+  +Request readRequest(DataInputStream)
+  +void writeResponse(DataOutputStream, Request, SyscallEvent<? extends Resolved>)
+  +SyscallEvent<Resolved> readResponse(DataInputStream, Request)
+}
 interface "ProfilerSessionEvent" as io.mazewall.profiler.engine.ProfilerSessionEvent {
 }
 class "ProfilerSessionHandler" as io.mazewall.profiler.engine.ProfilerSessionHandler {
@@ -1359,6 +1386,7 @@ io.mazewall.profiler.engine.PathResolutionFailure --> io.mazewall.profiler.engin
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.DaemonRunner
 io.mazewall.profiler.engine.ProfilerDaemon --> io.mazewall.profiler.engine.ProfilerDaemon
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.TraceEventPublisher
+io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.engine.ProfilerPreparationPool
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.NativeIoOperations
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.SeccompResponder
 io.mazewall.profiler.engine.ProfilerDaemonEngine --> io.mazewall.profiler.ffi.ProfilerTransport
@@ -1367,8 +1395,12 @@ io.mazewall.profiler.engine.ProfilerInstaller --> io.mazewall.profiler.engine.Pr
 io.mazewall.profiler.engine.ProfilerInstallerSession --> io.mazewall.profiler.engine.ProfilerInstallationContext
 io.mazewall.profiler.engine.ProfilerInstallerSession --> io.mazewall.profiler.engine.TraceEvent
 io.mazewall.profiler.engine.ProfilerNoiseClassifier --> io.mazewall.profiler.engine.ProfilerNoiseClassifier
+io.mazewall.profiler.engine.ProfilerPreparationMain --> io.mazewall.profiler.engine.ProfilerPreparationMain
+io.mazewall.profiler.engine.ProfilerPreparationPool .u.|> io.mazewall.profiler.engine.ProfilerPreparation
+io.mazewall.profiler.engine.ProfilerPreparationProtocol --> io.mazewall.profiler.engine.ProfilerPreparationProtocol
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SeccompNotificationParser
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.ffi.TraceEventPublisher
+io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.ProfilerPreparation
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.SyscallPathResolver
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.ffi.NativeIoOperations
 io.mazewall.profiler.engine.ProfilerSessionHandler --> io.mazewall.profiler.engine.ProfilerState

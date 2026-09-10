@@ -382,12 +382,22 @@ internal class ProfilerTraceListener(
         return decoded.event
     }
 
+    @Suppress("TooGenericExceptionCaught") // Preserve fatal identity while settling the independent ACK obligation.
     private fun processEvent(event: TraceEvent) {
+         var primary: Throwable? = null
          try {
              processAndQueueEvent(event)
-         } finally {
-             sendAck()
-         }
+        } catch (failure: Throwable) {
+            primary = failure
+        }
+        try {
+            sendAck()
+        } catch (ackFailure: Throwable) {
+            val processingFailure = primary
+            if (processingFailure == null) throw ackFailure
+            if (processingFailure !== ackFailure) processingFailure.addSuppressed(ackFailure)
+        }
+        primary?.let { throw it }
     }
 
     private fun processAndQueueEvent(event: TraceEvent) {

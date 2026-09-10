@@ -202,6 +202,20 @@ from `NOTIFICATION_GONE` (`ENOENT`). An expired notification or responder failur
 the profiler session without another reply or a false success ledger event. A failed noise
 bypass never falls through into event publication or ACK waiting. `ProfilerNoiseClassifier`
 is a pure decision over resolved path evidence; resolution and reply I/O remain outside it.
+Remote-memory and `/proc` path preparation runs in a profiler-owned pool of four persistent
+child processes with 64 queued requests, never on the reactor. Private bounded pipe frames
+retain notification identity and architecture. The authorized profiler daemon's descendants
+inherit Yama ptracer eligibility. A notification awaiting preparation remains subject to the
+reactor's absolute 30-second deadline: expiry claims one terminal denial and signals the
+active helper through `ProcessHandle`, without closing a concurrently read pipe on the reactor.
+The I/O worker reaps cancelled helpers before replacement; late evidence cannot publish or
+reply. Pool shutdown is bounded and reports incomplete cleanup. These helpers resolve evidence
+only and never issue kernel replies or make supervisor authorization decisions.
+
+Listener ACK failure closes its endpoint once. If event capture or queueing already failed,
+that original throwable (including a fatal JVM error) remains primary; ACK and socket-cleanup
+failures are retained as suppressed evidence rather than replacing it.
+
 `NativeProfilerTransport` takes a `NativeEngine` and `SocketManager`; the composite adapter
 does not merge the profiler and supervisor reducers or alter their different authority. See the
 [daemon startup migration guide](../api/daemon-startup-migration.md) for internal helper changes.
