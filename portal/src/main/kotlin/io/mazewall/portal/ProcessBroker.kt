@@ -76,6 +76,7 @@ public class ProcessBroker(
     private val acceptedHandoffs: MutableSet<AcceptedSocketHandoff> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val startupRetirement = StartupRetirement(sockets)
+    private val closeRetirement = CloseRetirement()
 
     private val lifecycleGate = Any()
 
@@ -258,40 +259,9 @@ public class ProcessBroker(
         val startupToJoin = preparation.startupToJoin
         val completionToSignal = preparation.completionToSignal
         val cleanup = CleanupCollector()
-        var maintenanceStopped = false
-        var startupStopped = false
         var allRetired = false
         try {
-            cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
-            maintenanceStopped = awaitMaintenance()
-            acceptedHandoffs.toList().forEach { handoff ->
-                cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
-            }
-            provisionalSlots.toList().forEach { slot ->
-                cleanup.attempt("provisional worker") { destroySlot(slot) }
-            }
-            startupStopped = awaitStartup(startupToJoin)
-            val leftover = mutableListOf<WorkerSlot>()
-            idle.drainTo(leftover)
-            // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
-            synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
-            leftover.addAll(provisionalSlots)
-            leftover.distinct().forEach { slot ->
-                cleanup.attempt("worker") { destroySlot(slot) }
-            }
-            provisionalAttempts.toList().forEach { attempt ->
-                cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
-            }
-            acceptedHandoffs.toList().forEach { handoff ->
-                cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
-            }
-            allRetired =
-                maintenanceStopped &&
-                    startupStopped &&
-                    provisionalSlots.isEmpty() &&
-                    provisionalAttempts.isEmpty() &&
-                    acceptedHandoffs.isEmpty() &&
-                    cleanup.outcome().complete
+            allRetired = retireOwnedResources(cleanup, startupToJoin)
         } finally {
             synchronized(lifecycleGate) {
                 try {
@@ -317,6 +287,50 @@ public class ProcessBroker(
                 outcome.failures.map { BrokerCleanupFailure(it.resource, it.cause) },
             )
         }
+    }
+
+    /** Retires every ownership registry after admission has been closed. */
+    private fun retireOwnedResources(
+        cleanup: CleanupCollector,
+        startupToJoin: CountDownLatch?,
+    ): Boolean {
+        cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
+        val maintenanceStopped = awaitMaintenance()
+        closeRetirement.retireHandoffs(cleanup)
+        provisionalSlots.toList().forEach { slot ->
+            cleanup.attempt("provisional worker") { destroySlot(slot) }
+        }
+        val startupStopped = awaitStartup(startupToJoin)
+        closeRetirement.retireAllSlots(cleanup)
+        provisionalAttempts.toList().forEach { attempt ->
+            cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
+        }
+        closeRetirement.retireHandoffs(cleanup)
+        return maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
+    }
+
+    /** Keeps close-only ownership retirement separate from public broker operations. */
+    private inner class CloseRetirement {
+        fun retireHandoffs(cleanup: CleanupCollector) {
+            acceptedHandoffs.toList().forEach { handoff ->
+                cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
+            }
+        }
+
+        fun retireAllSlots(cleanup: CleanupCollector) {
+            val leftover = mutableListOf<WorkerSlot>()
+            idle.drainTo(leftover)
+            // Destroy checked-out slots too: a worker mid-call belongs to a broker that is gone.
+            synchronized(trackedSlots) { leftover.addAll(trackedSlots) }
+            leftover.addAll(provisionalSlots)
+            leftover.distinct().forEach { slot -> cleanup.attempt("worker") { destroySlot(slot) } }
+        }
+
+        fun allOwnedResourcesRetired(cleanup: CleanupCollector): Boolean =
+            provisionalSlots.isEmpty() &&
+                provisionalAttempts.isEmpty() &&
+                acceptedHandoffs.isEmpty() &&
+                cleanup.outcome().complete
     }
 
     private fun prepareClose(): ClosePreparation =

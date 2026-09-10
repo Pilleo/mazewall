@@ -183,48 +183,8 @@ internal class JVMValidationListener(
             if (!acceptHandshake(dis, readyLatch)) return
 
             while (!closed.get()) {
-                val id = try {
-                    dis.readLong()
-                } catch (ignored: java.io.EOFException) {
-                    break
-                }
-                val pidVal = dis.readInt()
-                val archVal = dis.readInt()
-                val ppidVal = dis.readInt()
-                val nr = dis.readInt()
-                val argCount = dis.readInt()
-
-                val argsList = when (val decoded = SupervisorValidationDecoder.arguments(dis, argCount)) {
-                    is SupervisorValidationDecodeResult.Arguments -> decoded.values
-                    is SupervisorValidationDecodeResult.ProtocolViolation -> {
-                        logger.warning(decoded.reason)
-                        break
-                    }
-                    SupervisorValidationDecodeResult.HandshakeAccepted -> error("argument decoder accepted a handshake")
-                }
-                System.err.println("[JVM-VALIDATION] Received request: id=$id, pid=$pidVal, arch=$archVal, ppid=$ppidVal, nr=$nr, args=$argsList")
-
-                val traceeArch = Arch.fromAudit(archVal)
-                val syscallResolution = SupervisorSyscallResolver.resolve(nr, traceeArch)
-
-                val startMs = System.currentTimeMillis()
-                val targetThread = runtime.resolve(Tid(pidVal))
-                val inspection = inspectWithSpawnAuthorization(nr, argsList, targetThread, ppidVal, traceeArch)
-
-                val inspectMs = System.currentTimeMillis() - startMs
-                if (inspectMs > SLOW_INSPECT_THRESHOLD_MS) {
-                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JvmStackInspector.inspect took ${inspectMs}ms for syscall nr=$nr, args=$argsList")
-                }
-
-                val isAllowed = inspection.spawnContextAccepted &&
-                    authorizeValidation(inspection.state, syscallResolution, pidVal, nr, traceeArch, targetThread)
-
-                val totalMs = System.currentTimeMillis() - startMs
-                if (totalMs > SLOW_TOTAL_THRESHOLD_MS) {
-                    logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${totalMs}ms for syscall nr=$nr")
-                }
-
-                sendValidationResponse(dis, channel, id, nr, argsList, pidVal, traceeArch, syscallResolution, isAllowed)
+                val request = readValidationRequest(dis) ?: break
+                processValidationRequest(dis, channel, request)
             }
         } catch (expectedStop: java.io.IOException) {
             if (!closed.get()) failure = expectedStop
@@ -236,6 +196,74 @@ internal class JVMValidationListener(
             if (!closed.get()) {
                 onUnexpectedTermination(failure ?: IllegalStateException("validation reactor exited unexpectedly"))
             }
+        }
+    }
+
+    private data class ValidationRequest(
+        val id: Long,
+        val pid: Int,
+        val arch: Int,
+        val parentPid: Int,
+        val syscall: Int,
+        val arguments: List<Any>,
+    )
+
+    private fun readValidationRequest(dis: DataInputStream): ValidationRequest? {
+        val id = try {
+            dis.readLong()
+        } catch (_: java.io.EOFException) {
+            return null
+        }
+        val pid = dis.readInt()
+        val arch = dis.readInt()
+        val parentPid = dis.readInt()
+        val syscall = dis.readInt()
+        val arguments = when (val decoded = SupervisorValidationDecoder.arguments(dis, dis.readInt())) {
+            is SupervisorValidationDecodeResult.Arguments -> decoded.values
+            is SupervisorValidationDecodeResult.ProtocolViolation -> {
+                logger.warning(decoded.reason)
+                return null
+            }
+            SupervisorValidationDecodeResult.HandshakeAccepted -> error("argument decoder accepted a handshake")
+        }
+        return ValidationRequest(id, pid, arch, parentPid, syscall, arguments)
+    }
+
+    private fun processValidationRequest(
+        dis: DataInputStream,
+        channel: SupervisorValidationChannel,
+        request: ValidationRequest,
+    ) {
+        System.err.println("[JVM-VALIDATION] Received request: id=${request.id}, pid=${request.pid}, arch=${request.arch}, ppid=${request.parentPid}, nr=${request.syscall}, args=${request.arguments}")
+        val traceeArch = Arch.fromAudit(request.arch)
+        val syscallResolution = SupervisorSyscallResolver.resolve(request.syscall, traceeArch)
+        val startMs = System.currentTimeMillis()
+        val targetThread = runtime.resolve(Tid(request.pid))
+        val inspection = inspectWithSpawnAuthorization(request.syscall, request.arguments, targetThread, request.parentPid, traceeArch)
+        logSlowInspection(startMs, request)
+        val isAllowed = inspection.spawnContextAccepted &&
+            authorizeValidation(inspection.state, syscallResolution, request.pid, request.syscall, traceeArch, targetThread)
+        logSlowValidation(startMs, request.syscall)
+        sendValidationResponse(dis, channel, request.id, request.syscall, request.arguments, request.pid, traceeArch, syscallResolution, isAllowed)
+    }
+
+    private fun logSlowInspection(
+        startMs: Long,
+        request: ValidationRequest,
+    ) {
+        val elapsed = System.currentTimeMillis() - startMs
+        if (elapsed > SLOW_INSPECT_THRESHOLD_MS) {
+            logger.warning("[SUPERVISOR-DIAGNOSTIC] JvmStackInspector.inspect took ${elapsed}ms for syscall nr=${request.syscall}, args=${request.arguments}")
+        }
+    }
+
+    private fun logSlowValidation(
+        startMs: Long,
+        syscall: Int,
+    ) {
+        val elapsed = System.currentTimeMillis() - startMs
+        if (elapsed > SLOW_TOTAL_THRESHOLD_MS) {
+            logger.warning("[SUPERVISOR-DIAGNOSTIC] JVM Validation total processing took ${elapsed}ms for syscall nr=$syscall")
         }
     }
 

@@ -36,14 +36,24 @@ internal object ProfilerSessionMachine {
         state: ProfilerState,
         event: ProfilerSessionEvent,
     ): ProfilerSessionTransition {
-        if (event is ProfilerSessionEvent.TransportFailed) {
-            return ProfilerSessionTransition(
-                ProfilerState.Terminated(state.socketFd, state.listenerFd),
-                terminate = true,
-            )
-        }
+        if (event is ProfilerSessionEvent.TransportFailed) return transportFailure(state)
         return when (state) {
-            is ProfilerState.ActiveSession -> when (event) {
+            is ProfilerState.ActiveSession -> active(state, event)
+            is ProfilerState.Notified -> notified(state, event)
+            is ProfilerState.WaitingForAck -> waitingForAck(state, event)
+            is ProfilerState.Terminated -> ProfilerSessionTransition(state)
+            is ProfilerState.PassThrough,
+            is ProfilerState.Connected,
+            is ProfilerState.HandshakeAck,
+            -> violation(state)
+        }
+    }
+
+    private fun active(
+        state: ProfilerState.ActiveSession,
+        event: ProfilerSessionEvent,
+    ): ProfilerSessionTransition =
+        when (event) {
                 is ProfilerSessionEvent.NotificationReceived ->
                     ProfilerSessionTransition(state.notified(event.id, event.event))
                 is ProfilerSessionEvent.NoisePathBypassed ->
@@ -56,7 +66,12 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.PostTerminalObserved,
                 -> violation(state)
             }
-            is ProfilerState.Notified -> when (event) {
+
+    private fun notified(
+        state: ProfilerState.Notified,
+        event: ProfilerSessionEvent,
+    ): ProfilerSessionTransition =
+        when (event) {
                 is ProfilerSessionEvent.EventDelivered ->
                     ProfilerSessionTransition(state.waitingForAck())
                 is ProfilerSessionEvent.HandshakeFailed ->
@@ -69,7 +84,12 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.PostTerminalObserved,
                 -> violation(state)
             }
-            is ProfilerState.WaitingForAck -> when (event) {
+
+    private fun waitingForAck(
+        state: ProfilerState.WaitingForAck,
+        event: ProfilerSessionEvent,
+    ): ProfilerSessionTransition =
+        when (event) {
                 is ProfilerSessionEvent.AckSucceeded ->
                     ProfilerSessionTransition(state.acknowledged())
                 is ProfilerSessionEvent.PassedThrough ->
@@ -83,13 +103,12 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.PostTerminalObserved,
                 -> violation(state)
             }
-            is ProfilerState.Terminated -> ProfilerSessionTransition(state)
-            is ProfilerState.PassThrough,
-            is ProfilerState.Connected,
-            is ProfilerState.HandshakeAck,
-            -> violation(state)
-        }
-    }
+
+    private fun transportFailure(state: ProfilerState) =
+        ProfilerSessionTransition(
+            ProfilerState.Terminated(state.socketFd, state.listenerFd),
+            terminate = true,
+        )
 
     private fun violation(state: ProfilerState) =
         ProfilerSessionTransition(
