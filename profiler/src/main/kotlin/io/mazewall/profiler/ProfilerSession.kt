@@ -7,6 +7,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.ffi.networking.SeccompInstallationGate
+import io.mazewall.getFdOrThrow
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
@@ -79,7 +80,7 @@ internal class ProfilerSession(
                     // A late socket still needs the ACK/pass-through protocol, but cannot publish
                     // observations or resolve TIDs through an already closed session.
                     val listener = ProfilerTraceListener(
-                        FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
+                        fd,
                         if (late) CopyOnWriteArrayList() else logs,
                         if (!late && captureStackTraces) stackProfiles else null,
                         if (late) ConcurrentHashMap() else pathCache,

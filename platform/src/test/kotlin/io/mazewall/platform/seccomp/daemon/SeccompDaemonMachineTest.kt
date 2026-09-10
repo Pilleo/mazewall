@@ -2,6 +2,7 @@ package io.mazewall.platform.seccomp.daemon
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
 import io.mazewall.platform.daemon.UnixListenDaemonState
@@ -11,7 +12,8 @@ import org.junit.jupiter.api.Test
 class SeccompDaemonMachineTest {
     @Test
     fun `seccomp machine is the shared listen-loop machine`() {
-        val server = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(20)
+        val server = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(20)
         val event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock")
         val viaAlias = SeccompDaemonMachine.evaluate(UnixListenDaemonState.Uninitialized, event)
         val viaShared = UnixListenDaemonMachine.evaluate(UnixListenDaemonState.Uninitialized, event)

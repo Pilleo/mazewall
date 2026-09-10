@@ -199,7 +199,7 @@ internal fun openGrantedRead(
                 }
 
                 is LinuxNative.SyscallResult.Success -> {
-                    val granted = FileDescriptor.adopt(opened.value.toInt(), FileDescriptorRole.Granted)
+                    val granted = opened.getFdOrThrow("open grant", FileDescriptorRole.Granted)
                     return Capability.ReadFd(granted)
                 }
             }

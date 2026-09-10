@@ -12,6 +12,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
@@ -398,7 +399,12 @@ class ProfilerRuntimeTest {
                 }
             }
             NativeArena.ofConfined().use { arena ->
-                NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(603), arena, memory).read()
+                NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(603),
+                        arena,
+                    memory,
+                ).read()
             }
         },
         )

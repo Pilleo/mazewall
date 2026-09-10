@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.NewFdFlags
 import io.mazewall.core.Tid
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeByte
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -129,7 +130,7 @@ class SupervisorReplyInterpreterMatrixTest {
         }
 
     private fun opened(fixture: SupervisorBoundaryFixture): SupervisorOwnedFd =
-        (SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002), fixture.engine) as SupervisorDescriptorResult.Opened).descriptor
+        (SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002).testAcquisition(), fixture.engine) as SupervisorDescriptorResult.Opened).descriptor
 
     private fun interpreter(fixture: SupervisorBoundaryFixture) =
         SupervisorReplyInterpreter(fixture.engine, fixture.listener, SupervisorExecRewriteExchange(fixture.engine, fixture.socket), TraceeDescriptorImporter(fixture.engine) { it }, { 12288 })

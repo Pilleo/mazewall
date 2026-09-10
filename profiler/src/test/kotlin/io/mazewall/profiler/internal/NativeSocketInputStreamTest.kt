@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -42,7 +43,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val result = stream.read()
                 assertEquals(0x42, result)
                 assertEquals(3, attempts)
@@ -74,7 +80,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 val result = stream.read(buffer)
                 assertEquals(1, result)
@@ -101,7 +112,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 Thread.currentThread().interrupt()
                 try {
                     stream.read()
@@ -133,7 +149,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 Thread.currentThread().interrupt()
                 try {
@@ -171,7 +192,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 try {
                     stream.read()
                     fail("Expected InterruptedIOException from sleep interruption")
@@ -200,7 +226,12 @@ class NativeSocketInputStreamTest {
         )
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 assertEquals(-1, stream.read())
             }
         }
@@ -222,7 +253,12 @@ class NativeSocketInputStreamTest {
         )
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 assertEquals(-1, stream.read())
             }
         }
@@ -232,7 +268,11 @@ class NativeSocketInputStreamTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `bulk read with length 0 should return 0`() {
         NativeArena.ofConfined().use { arena ->
-            val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+            val stream = NativeSocketInputStream(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(1),
+                    arena,
+            )
             val buffer = ByteArray(5)
             assertEquals(0, stream.read(buffer, 0, 0))
         }
@@ -254,7 +294,12 @@ class NativeSocketInputStreamTest {
         )
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(5)
                 assertEquals(-1, stream.read(buffer))
             }
@@ -277,7 +322,12 @@ class NativeSocketInputStreamTest {
         )
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(5)
                 assertEquals(-1, stream.read(buffer))
             }
@@ -308,7 +358,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 assertEquals(0x42, stream.read())
                 assertEquals(6, callCount)
             }
@@ -339,7 +394,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 assertEquals(1, stream.read(buffer))
                 assertEquals(0x42.toByte(), buffer[0])
@@ -370,7 +430,12 @@ class NativeSocketInputStreamTest {
 
         run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena, mock.memory)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 try {
                     stream.read(buffer)

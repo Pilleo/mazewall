@@ -1,6 +1,6 @@
 # File-Descriptor Token Ownership — Invariants & Incident Notes
 
-> Status (2026-09-07): The ownership split and audit ledger are implemented. Read this before
+> Status (2026-09-10): Native acquisition receipts and active descriptor identities are implemented. Read this before
 > minting [FileDescriptor] tokens in tests or production.
 
 ## The incident (2026-08-24)
@@ -43,16 +43,57 @@ Every such call is a real `close(int)` syscall in the shared test JVM:
 ## Implemented controls
 
 1. **Type-level ownership split**: `generic()`/`unsafe()` and role-specific raw
-   factories return `Unowned` tokens that cannot call `close()`. Kernel-result
-   adoption (`adopt`, `replace`, and dup-result handling) yields `Owned` tokens.
-2. **Audit ledger mode**: with `mazewall.fd.audit=true`, `FdEpoch` verifies
-   `fcntl(fd, F_GETFD)` before close, logs untracked close attempts, and suppresses
-   a close when the kernel has already invalidated the descriptor.
-3. **Literal-factory sweep**: the remaining raw literal tokens are mock/equality
-   uses and cannot close. JUnit tests that mint owned replacement fixtures use
-   `ForeignFdGuard`, which fails a test that closes a descriptor present at start.
+   factories return `Unowned` tokens that cannot call `close()`. Successful native
+   descriptor acquisitions attach a single-use receipt to their result.
+   `getFdOrThrow(context, role)` consumes it. A fabricated numeric `Success`, or
+   a copied/mapped numeric result, has no acquisition authority.
+2. **Active identities**: a monotonic process-wide identity distinguishes every
+   acquisition, including reuse of the same integer. Close atomically removes
+   the active identity before calling the kernel, including on native error.
+   Closed identities and historical ownership ledgers are not retained. Typed
+   owned views share their lifecycle, and repeated/concurrent closes cannot
+   dispatch another native close. Borrowed raw views remain the external owner's
+   responsibility; this tracking cannot detect unreported external close/reuse.
+3. **Test fixtures**: `TestFileDescriptors` and `testAcquisition()` live only in
+   shared test sources. Invented numbers are permitted only against injected
+   test engines. Tests using the real engine must acquire their own kernel
+   resources and use `ForeignFdGuard`; never close an invented number.
 4. **PID discipline**: signal-bearing paths create PID tokens only from pidfds
    returned by `pidfd_open`; never mint one around an invented process identifier.
+
+### Migration
+
+`FileDescriptor.adopt(Int, ...)` and `replace(Int, ...)` retain their JVM symbols,
+but are deprecated and throw with an instruction to consume native acquisition
+evidence. Keep the native result until `getFdOrThrow` consumes it; extracting an
+integer first loses that authority. Use `FileDescriptor.withRole(owned, role)`
+when changing the typed view of an already owned descriptor.
+For `socketpair`, consume the result twice with `getFdOrThrow`: the receipts
+follow the output array order. A third consumption fails, as does a second
+consumption of a scalar acquisition result.
+
+`SupervisorSocketUtils.connectDescriptorWithRetry` returns an owned socket.
+`SupervisorSeccompNotifInstaller.installOwned` accepts a typed connector and
+transfers that owned socket to its callback. Their legacy integer-returning and
+integer-callback entrypoints are deprecated fail-fast shims. The receiver owns
+callback cleanup even if the callback fails. No integer-to-ownership registry or
+thread-local ownership recovery is provided.
+
+### Native transfer checks
+
+The real native boundary centrally checks managed segment/count pairs before
+passing them to FFM: nonnegative counts within segment capacity, live and
+accessible native memory, and writable output buffers. Array counts for poll
+and iovec headers use division before multiplication to avoid overflow. Paths
+must contain a NUL terminator within their segment. The native C layouts and
+calling conventions are unchanged.
+
+`NativeDescriptorInputStream.read(byte[], off, len)` checks the Java array range
+before any native I/O, including zero-length reads. A success count outside the
+requested range is rejected before copying. Raw integer addresses, pointers
+embedded inside native structures, and remote iovec target addresses still
+require trusted callers: an address by itself does not prove an allocation's
+size or ownership, and segment checks cannot recover that information.
 
 ## Seccomp daemon cleanup outcomes
 

@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -49,8 +50,10 @@ class SeccompSessionHandlerTest {
             ): NotifResult = NotifResult.HANDLED
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = notifHandler,
             engine = engine,
         )

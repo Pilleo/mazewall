@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
@@ -32,7 +33,11 @@ class SocketHelperPoolTest {
         }
         try {
             val session = pool.session()
-            val fd = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52500), fixture.engine.fileSystem)
+            val fd = SupervisorOwnedFd(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(52500),
+                    fixture.engine.fileSystem,
+            )
             session.submit(SocketOperation.Accept(0), fd)
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             Thread.currentThread().interrupt()
@@ -54,8 +59,16 @@ class SocketHelperPoolTest {
             fixture.closed += fd.value
             if (fd.value == 52400) SupervisorBoundaryFixture.failure(5) else SupervisorBoundaryFixture.success(0)
         }
-        val source = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52400), fixture.engine.fileSystem)
-        val accepted = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52401), fixture.engine.fileSystem)
+        val source = SupervisorOwnedFd(
+            TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(52400),
+                fixture.engine.fileSystem,
+        )
+        val accepted = SupervisorOwnedFd(
+            TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(52401),
+                fixture.engine.fileSystem,
+        )
         SocketHelperPool(1, 1) {
             object : SocketHelper {
                 override fun execute(
@@ -95,7 +108,11 @@ class SocketHelperPoolTest {
             }
         }.use { pool ->
             pool.session().use { session ->
-                val fd = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52300), fixture.engine.fileSystem)
+                val fd = SupervisorOwnedFd(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(52300),
+                        fixture.engine.fileSystem,
+                )
                 val result = session.submit(SocketOperation.Accept(0), fd)
                 val failure = assertThrows(java.util.concurrent.ExecutionException::class.java) { result.get(5, TimeUnit.SECONDS) }
                 assertSame(fatal, failure.cause)
@@ -130,7 +147,12 @@ class SocketHelperPoolTest {
         }.use { pool ->
             val session = pool.session()
 
-            fun fd(n: Int) = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(n), fixture.engine.fileSystem)
+            fun fd(n: Int) =
+                SupervisorOwnedFd(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(n),
+                    fixture.engine.fileSystem,
+            )
             val first = session.submit(SocketOperation.Connect(byteArrayOf(2, 0)), fd(52000))
             assertTrue(started.await(5, TimeUnit.SECONDS))
             val queued = session.submit(SocketOperation.Connect(byteArrayOf(2, 0)), fd(52001))
@@ -166,7 +188,11 @@ class SocketHelperPoolTest {
         }.use { pool ->
             pool.session().use { session ->
                 repeat(3) { index ->
-                    val fd = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52100 + index), fixture.engine.fileSystem)
+                    val fd = SupervisorOwnedFd(
+                        TestFileDescriptors
+                        .replace<FileDescriptorRole.Generic>(52100 + index),
+                            fixture.engine.fileSystem,
+                    )
                     val result = session.submit(SocketOperation.Connect(byteArrayOf(2, 0)), fd).get(5, TimeUnit.SECONDS)
                     assertEquals(if (index == 1) SocketHelperResult.Failed(5) else SocketHelperResult.Connected, result)
                 }

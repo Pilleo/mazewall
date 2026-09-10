@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
 import org.junit.jupiter.api.AfterEach
@@ -25,7 +26,10 @@ class SeccompConnectionTest {
         NativeArena.ofConfined().use { arena ->
             with(arena) {
                 when (val result = openPath("/dev/null", OpenFlags.RDONLY)) {
-                    is LinuxNative.SyscallResult.Success -> FileDescriptor.adopt(result.value.toInt(), role).also { ownedDescriptors += it }
+                    is LinuxNative.SyscallResult.Success ->
+                        TestFileDescriptors
+                        .adopt(result.value.toInt(), role)
+                        .also { ownedDescriptors += it }
                     is LinuxNative.SyscallResult.Error -> error("Cannot open owned test descriptor: $result")
                 }
             }

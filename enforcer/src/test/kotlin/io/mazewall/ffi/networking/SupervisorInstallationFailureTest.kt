@@ -13,7 +13,7 @@ class SupervisorInstallationFailureTest {
         }
         var applied = false
         val failure = assertFailsWith<IllegalStateException> {
-            SupervisorSeccompNotifInstaller.install(
+            SupervisorSeccompNotifInstaller.installOwned(
                 native = native,
                 userNotifSupported = true,
                 socketPath = "/unused",

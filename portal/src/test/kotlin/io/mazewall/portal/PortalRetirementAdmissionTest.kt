@@ -5,6 +5,7 @@ import io.mazewall.NativeEngine
 import io.mazewall.NativeFileSystem
 import io.mazewall.RawSyscallOperations
 import io.mazewall.core.*
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
@@ -205,8 +206,10 @@ class PortalRetirementAdmissionTest {
         NativeArena.ofConfined().use { arena ->
             val pair = arena.allocate(8)
             LinuxNative.networking.socketpair(1, 1 or NativeConstants.SOCK_CLOEXEC, 0, pair).getOrThrow("socketpair")
-            val socket = FileDescriptor.adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
-            val peer = FileDescriptor.adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
+            val socket = TestFileDescriptors
+                .adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
+            val peer = TestFileDescriptors
+                .adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
             val channel = PortalChannel(socket, sockets)
             try {
                 action(channel, socket, peer)

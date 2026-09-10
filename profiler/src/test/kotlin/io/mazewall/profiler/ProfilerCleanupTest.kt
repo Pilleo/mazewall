@@ -10,6 +10,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.ffi.networking.SupervisorSocketUtils
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
@@ -245,7 +246,8 @@ class ProfilerCleanupTest {
         @Suppress("UNCHECKED_CAST")
         fun listener(session: ProfilerSession): OwnedDescriptor {
             val value = actual.networking.socket(SupervisorSocketUtils.AF_UNIX, SupervisorSocketUtils.SOCK_STREAM, 0).getOrThrow("acquire cleanup fixture socket")
-            val fd = FileDescriptor.adopt(value.toInt(), FileDescriptorRole.UnixSocket)
+            val fd = TestFileDescriptors
+                .adopt(value.toInt(), FileDescriptorRole.UnixSocket)
             acquired += fd
             val field = ProfilerSession::class.java.getDeclaredField("listeners").apply { isAccessible = true }
             val listeners = field.get(session) as MutableList<ProfilerTraceListener>

@@ -14,6 +14,8 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SandboxedPath
+import io.mazewall.core.TestFileDescriptors
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -51,7 +53,7 @@ class LandlockFailureModeTest {
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
             }
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition()
             }
             return super.syscall(nr, a1, a2, a3, a4, a5, a6)
         }
@@ -71,7 +73,13 @@ class LandlockFailureModeTest {
 
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
-                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(42)), 0L)
+                Landlock.addJvmClasspathRules(
+                    LandlockRuleset<RulesetState.Building>(
+                        TestFileDescriptors
+                    .replace<FileDescriptorRole.Ruleset>(42),
+                    ),
+                        0L,
+                )
             }
         }
     }
@@ -94,12 +102,18 @@ class LandlockFailureModeTest {
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
-                Landlock.addJvmClasspathRules(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(42)), 0L)
+                Landlock.addJvmClasspathRules(
+                    LandlockRuleset<RulesetState.Building>(
+                        TestFileDescriptors
+                    .replace<FileDescriptorRole.Ruleset>(42),
+                    ),
+                        0L,
+                )
             }
         }
     }
@@ -181,9 +195,27 @@ class LandlockFailureModeTest {
         }
         LinuxNative.setEngine(mock)
 
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf()
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf(false)
-        LandlockLifecycle.RulesAdded(LandlockRuleset<RulesetState.Building>(FileDescriptor.replace<FileDescriptorRole.Ruleset>(10))).restrictSelf(true)
+        LandlockLifecycle
+            .RulesAdded(
+            LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+            .replace<FileDescriptorRole.Ruleset>(10),
+            ),
+        ).restrictSelf()
+        LandlockLifecycle
+            .RulesAdded(
+            LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+            .replace<FileDescriptorRole.Ruleset>(10),
+            ),
+        ).restrictSelf(false)
+        LandlockLifecycle
+            .RulesAdded(
+            LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+            .replace<FileDescriptorRole.Ruleset>(10),
+            ),
+        ).restrictSelf(true)
 
         assertEquals(
             listOf(0L, 0L, 1L shl 3),
@@ -194,7 +226,7 @@ class LandlockFailureModeTest {
     @Test
     fun `test calculateFinalAccess branches`() {
         val mock = SupportedLandlockMock()
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
         // Branch: isFallback = true
@@ -211,7 +243,7 @@ class LandlockFailureModeTest {
                     return if (current == 1) {
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
                     } else {
-                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
                     }
                 }
             },
@@ -258,7 +290,7 @@ class LandlockFailureModeTest {
                         deletedPathAttempts.incrementAndGet()
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1) // ENOENT
                     }
-                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
                 }
             },
         )
@@ -444,7 +476,10 @@ class LandlockFailureModeTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -470,11 +505,14 @@ class LandlockFailureModeTest {
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+                .replace(42),
+            )
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -539,7 +577,10 @@ class LandlockFailureModeTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -567,7 +608,10 @@ class LandlockFailureModeTest {
         }
         LinuxNative.setEngine(mock)
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val ex = assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.enforceRuleset(ruleset, false)
         }
@@ -593,11 +637,14 @@ class LandlockFailureModeTest {
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+                .replace(42),
+            )
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -626,11 +673,14 @@ class LandlockFailureModeTest {
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
         }
-        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+        mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
         NativeArena.ofConfined().use { arena ->
-            val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+            val ruleset = LandlockRuleset<RulesetState.Building>(
+                TestFileDescriptors
+                .replace(42),
+            )
             val ex = assertFailsWith<UnsupportedKernelFeatureException> {
                 with(arena) {
                     Landlock.addJvmClasspathRules(ruleset, 0L)
@@ -657,9 +707,9 @@ class LandlockFailureModeTest {
                     }
                     if (pathStr == "/nonexistent") {
                         observedFlags.add(pathStr to flags.value)
-                        return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                        return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
                     }
-                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
                 }
             },
         )
@@ -709,7 +759,7 @@ class LandlockFailureModeTest {
                     if (pathStr == "/nonexistent/file") {
                         return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
                     }
-                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
                 }
             },
         )
@@ -781,7 +831,7 @@ class LandlockFailureModeTest {
                     observedSizes.add(a2.value)
                     val rulesetAttr = LandlockRulesetAttrSegment(a1.value.unwrap)
                     observedNetMasks.add(rulesetAttr.getHandledAccessNet())
-                    return LinuxNative.SyscallResult.Success(100L)
+                    return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100L).testAcquisition()
                 }
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }

@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -12,7 +13,11 @@ class PoolSocketRouteExecutorTest {
     @Test
     fun `invalid accepted helper result closes descriptor when effect construction fails`() {
         val fixture = SupervisorBoundaryFixture()
-        val accepted = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52600), fixture.engine.fileSystem)
+        val accepted = SupervisorOwnedFd(
+            TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(52600),
+                fixture.engine.fileSystem,
+        )
         SocketHelperPool(1, 1) {
             object : SocketHelper {
                 override fun execute(
@@ -35,7 +40,11 @@ class PoolSocketRouteExecutorTest {
     @Test
     fun `accept completion defers tracee memory writes until terminal reply authority`() {
         val fixture = SupervisorBoundaryFixture()
-        val accepted = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52600), fixture.engine.fileSystem)
+        val accepted = SupervisorOwnedFd(
+            TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(52600),
+                fixture.engine.fileSystem,
+        )
         SocketHelperPool(1, 1) {
             object : SocketHelper {
                 override fun execute(

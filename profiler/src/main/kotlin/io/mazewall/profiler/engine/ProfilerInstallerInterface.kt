@@ -3,7 +3,12 @@ package io.mazewall.profiler.engine
 import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
+import io.mazewall.core.FileDescriptor
+import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.networking.SeccompInstallationGate
+import io.mazewall.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
 import java.util.concurrent.CountDownLatch
 
@@ -22,7 +27,7 @@ internal interface ProfilerInstallerInterface {
         pathCache: MutableMap<String, Long>,
         processWide: Boolean = false,
         startTraceListener: (
-            Int,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
@@ -55,7 +60,7 @@ internal class RealProfilerInstaller private constructor(
         pathCache: MutableMap<String, Long>,
         processWide: Boolean,
         startTraceListener: (
-            Int,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
@@ -70,7 +75,7 @@ internal class RealProfilerInstaller private constructor(
             stackTracesMap = stackTracesMap,
             pathCache = pathCache,
             processWide = processWide,
-            connectWithRetry = { ProfilerSocket.connectWithRetry(it, native) },
+            connectWithRetry = { ProfilerSocket.connectDescriptorWithRetry(it, native) },
             installationGate = installationGate,
             startTraceListener = startTraceListener,
         )

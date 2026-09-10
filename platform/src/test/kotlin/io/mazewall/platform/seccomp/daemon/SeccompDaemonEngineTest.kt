@@ -6,6 +6,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
@@ -38,8 +39,10 @@ class SeccompDaemonEngineTest {
             },
             engine = nativeEngine,
         )
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(11)
         val connection = SeccompConnection.Active(socketFd, listenerFd)
 
         NativeArena.ofConfined().use { arena ->

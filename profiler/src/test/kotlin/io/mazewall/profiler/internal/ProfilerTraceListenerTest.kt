@@ -8,6 +8,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.*
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.profiler.EbpfLoad
@@ -115,7 +116,8 @@ class ProfilerTraceListenerTest {
         val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
         val stacks = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
         ProfilerTraceListener(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(308),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(308),
             accumulatedLogs = logs,
             stackTracesMap = stacks,
             pathCache = mutableMapOf(),
@@ -212,7 +214,8 @@ class ProfilerTraceListenerTest {
         )
         val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
         val listener = ProfilerTraceListener(
-            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(309),
+            TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(309),
             logs,
             null,
             mutableMapOf(),
@@ -281,7 +284,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(300)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(300)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -326,7 +330,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(301)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(301)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -423,7 +428,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(302)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(302)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
@@ -469,7 +475,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(303)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(303)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -508,7 +515,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(304)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(304)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),

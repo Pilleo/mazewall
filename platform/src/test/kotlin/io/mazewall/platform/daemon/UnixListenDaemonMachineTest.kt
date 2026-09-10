@@ -2,6 +2,7 @@ package io.mazewall.platform.daemon
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -14,7 +15,8 @@ import kotlin.reflect.KClass
 
 internal class UnixListenDaemonMachineTest {
     companion object {
-        private val server = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(20)
+        private val server = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(20)
         private val listening = UnixListenDaemonState.Listening(server, "/tmp/mw.sock")
         private val active = UnixListenDaemonState.Active(server, "/tmp/mw.sock")
 

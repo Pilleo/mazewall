@@ -6,6 +6,7 @@ import io.mazewall.NativeFileSystem
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.portal.Capability
@@ -156,7 +157,7 @@ class PortalWorkerDriverTest {
                     arena.allocateFrom(path.toAbsolutePath().toString()),
                     OpenFlags(NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC),
                 ).getOrThrow("open worker test capability")
-            Capability.readFd(FileDescriptor.adopt(raw.toInt(), FileDescriptorRole.Granted))
+            Capability.readFd(TestFileDescriptors.adopt(raw.toInt(), FileDescriptorRole.Granted))
         }
 
     private class FakeTransport(

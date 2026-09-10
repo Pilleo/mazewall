@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
@@ -33,7 +34,8 @@ class UserNotifSharedTest {
 
             val outcome = UserNotifReply.send(
                 engine.raw,
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(17),
+                TestFileDescriptors
+                    .replace<FileDescriptorRole.SeccompNotif>(17),
                 arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
             )
 
@@ -51,7 +53,8 @@ class UserNotifSharedTest {
 
             val outcome = UserNotifReply.send(
                 engine.raw,
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(17),
+                TestFileDescriptors
+                    .replace<FileDescriptorRole.SeccompNotif>(17),
                 arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
             )
 
@@ -68,7 +71,8 @@ class UserNotifSharedTest {
 
             val outcome = UserNotifReply.send(
                 engine.raw,
-                FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(17),
+                TestFileDescriptors
+                    .replace<FileDescriptorRole.SeccompNotif>(17),
                 arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
             )
 

@@ -1,5 +1,6 @@
 package demo
 
+import io.mazewall.getFdOrThrow
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.FileDescriptor
@@ -258,7 +259,7 @@ fs.open(
                         throw java.io.IOException("Permission denied (synchronous native open blocked)")
                     }
                 }.onSuccess { value ->
-                    LinuxNative.fileSystem.close(FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic))
+                    LinuxNative.fileSystem.close(openResult.getFdOrThrow("open demo descriptor"))
                 }
             }
             "native open succeeded"

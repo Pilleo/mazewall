@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.readByte
@@ -50,7 +51,8 @@ class SupervisorValidationChannelTest {
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {}
         LinuxNative.setEngine(mockEngine)
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(42)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(42)
         val channel = SupervisorValidationChannel(socketFd)
 
         channel.sendResponse(1001L, 2.toByte(), 13, "/usr/bin/true")
@@ -86,7 +88,10 @@ class SupervisorValidationChannelTest {
             }
         }
         LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
-        val channel = SupervisorValidationChannel(FileDescriptor.replace(7))
+        val channel = SupervisorValidationChannel(
+            TestFileDescriptors
+            .replace(7),
+        )
         channel.sendExecRewriteAck(true)
         assertEquals(1L, writtenCount)
         assertEquals(1.toByte(), ack)
@@ -109,7 +114,10 @@ class SupervisorValidationChannelTest {
             }
         }
         LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
-        val channel = SupervisorValidationChannel(FileDescriptor.replace(7))
+        val channel = SupervisorValidationChannel(
+            TestFileDescriptors
+            .replace(7),
+        )
         channel.sendExecRewriteAck(false)
         assertEquals(1L, writtenCount)
         assertEquals(0.toByte(), ack)

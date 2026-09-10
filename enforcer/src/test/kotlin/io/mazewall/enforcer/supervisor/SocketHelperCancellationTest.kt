@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.*
@@ -56,12 +57,12 @@ class SocketHelperCancellationTest {
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
         val source = SupervisorOwnedFd(
-            io.mazewall.core.FileDescriptor
+            TestFileDescriptors
             .replace<io.mazewall.core.FileDescriptorRole.Generic>(52200),
                 fixture.engine.fileSystem,
         )
         val accepted = SupervisorOwnedFd(
-            io.mazewall.core.FileDescriptor
+            TestFileDescriptors
             .replace<io.mazewall.core.FileDescriptorRole.Generic>(52201),
                 fixture.engine.fileSystem,
         )

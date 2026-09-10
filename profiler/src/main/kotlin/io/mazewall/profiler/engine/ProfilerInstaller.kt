@@ -1,5 +1,6 @@
 package io.mazewall.profiler.engine
 
+import io.mazewall.core.FdOwnership
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
@@ -32,9 +33,9 @@ internal object ProfilerInstaller {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean = false,
-        connectWithRetry: (String) -> Int = { path -> ProfilerSocket.connectWithRetry(path) },
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { path -> ProfilerSocket.connectDescriptorWithRetry(path) },
         startTraceListener: (
-            Int,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
@@ -56,10 +57,10 @@ internal object ProfilerInstaller {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean = false,
-        connectWithRetry: (String) -> Int = { ProfilerSocket.connectWithRetry(it, context.native) },
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { ProfilerSocket.connectDescriptorWithRetry(it, context.native) },
         installationGate: SeccompInstallationGate = SeccompInstallationGate.Direct,
         startTraceListener: (
-            Int,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
@@ -87,9 +88,9 @@ internal class ProfilerInstallerSession(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
-    private val connectWithRetry: (String) -> Int,
+    private val connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val startTraceListener: (
-        Int,
+        FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         MutableList<TraceEvent>,
         MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         MutableMap<String, Long>,
@@ -104,9 +105,9 @@ internal class ProfilerInstallerSession(
         accumulatedLogs: MutableList<TraceEvent>,
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
-        connectWithRetry: (String) -> Int,
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         startTraceListener: (
-            Int,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
@@ -124,7 +125,7 @@ internal class ProfilerInstallerSession(
         val arch = Arch.current()
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
-        SupervisorSeccompNotifInstaller.install(
+        SupervisorSeccompNotifInstaller.installOwned(
             native = context.native,
             userNotifSupported = context.userNotifSupported,
             socketPath = socketPath,

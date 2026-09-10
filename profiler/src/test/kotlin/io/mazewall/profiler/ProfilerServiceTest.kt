@@ -316,7 +316,7 @@ class ProfilerServiceTest {
             pathCache: MutableMap<String, Long>,
             processWide: Boolean,
             startTraceListener: (
-                Int,
+                io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
                 MutableList<TraceEvent>,
                 MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                 MutableMap<String, Long>,
@@ -324,8 +324,8 @@ class ProfilerServiceTest {
             ) -> Unit,
         ) {
             beforeInstall()
-            val fd = ProfilerSocket.connectWithRetry(path.toString())
-            listenerFd = fd
+            val fd = ProfilerSocket.connectDescriptorWithRetry(path.toString())
+            listenerFd = fd.value
             peer = server.accept()
             output = DataOutputStream(Channels.newOutputStream(peer))
             output.writeByte(0xAC)

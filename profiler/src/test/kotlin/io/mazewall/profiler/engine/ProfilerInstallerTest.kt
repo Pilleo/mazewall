@@ -3,6 +3,7 @@ package io.mazewall.profiler.engine
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
@@ -119,7 +120,8 @@ class ProfilerInstallerTest {
                     pathCache = pathCache,
                     connectWithRetry = { _ ->
                         // Return a dummy FD that will fail sendDescriptor
-                        999
+                        TestFileDescriptors
+                            .replace<io.mazewall.core.FileDescriptorRole.UnixSocket>(999)
                     },
                     startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )

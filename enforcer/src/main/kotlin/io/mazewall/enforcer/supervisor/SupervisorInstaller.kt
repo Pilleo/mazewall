@@ -93,7 +93,7 @@ public object SupervisorInstaller {
             previousLease = if (ownedInstallations.isEmpty()) null else acquireTaskSession(scopingPolicy)
             lifetime.start()
             runtime.register(tid)
-            SupervisorSeccompNotifInstaller.install(
+            SupervisorSeccompNotifInstaller.installOwned(
                 socketPath = context.socketPath,
                 filter = filter,
                 processWide = false,
@@ -103,7 +103,7 @@ public object SupervisorInstaller {
                 },
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
-                    FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket),
+                    socketFd,
                     scopingPolicy,
                     runtime,
                     onUnexpectedTermination = { cause -> lifetime.fail(cause) },

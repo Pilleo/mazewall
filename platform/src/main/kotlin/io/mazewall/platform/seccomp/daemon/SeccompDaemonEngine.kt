@@ -21,6 +21,7 @@ import io.mazewall.ffi.networking.SeccompConnectionEffect
 import io.mazewall.ffi.networking.SeccompConnectionEvent
 import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.ffi.networking.SeccompConnectionOutcome
+import io.mazewall.getFdOrThrow
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
@@ -219,7 +220,7 @@ public class SeccompDaemonEngine(
                     }
 
                     if (clientFdVal < 0L) return
-                    clientFd = FileDescriptor.adopt(clientFdVal.toInt(), FileDescriptorRole.UnixSocket)
+                    clientFd = res.getFdOrThrow("accept client", FileDescriptorRole.UnixSocket)
                 }
 
                 if (clientSockets.size >= maxConnections) {

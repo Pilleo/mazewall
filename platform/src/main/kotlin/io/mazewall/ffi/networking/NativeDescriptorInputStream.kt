@@ -43,6 +43,7 @@ public open class NativeDescriptorInputStream(
         off: Int,
         len: Int,
     ): Int {
+        java.util.Objects.checkFromIndexSize(off, len, b.size)
         if (len == 0) return 0
         return readWithRetry(multiBuf, minOf(len, BUFFER_SIZE).toLong(), "bulk read") { read ->
             ManagedSegment.copy(multiBuf, 0, b, off, read.toInt())
@@ -63,7 +64,11 @@ public open class NativeDescriptorInputStream(
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during $description $operation")
             }
             when (val result = memory.read(socketFd, buffer, count)) {
-                is LinuxNative.SyscallResult.Success -> if (result.value <= 0) return -1 else return onRead(result.value)
+                is LinuxNative.SyscallResult.Success -> {
+                    if (result.value < 0 || result.value > count) throw java.io.IOException("Invalid native read result ${result.value} for count $count")
+                    if (result.value == 0L) return -1
+                    return onRead(result.value)
+                }
                 is LinuxNative.SyscallResult.Error -> {
                     if (result.errno != EINTR) return -1
                     eintrCount++

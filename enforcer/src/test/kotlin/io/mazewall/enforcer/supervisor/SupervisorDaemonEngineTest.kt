@@ -10,6 +10,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.NativeArena
@@ -51,8 +52,10 @@ class SupervisorDaemonEngineTest {
                 val path = arena.allocateFrom("/dev/null")
                 val socket = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
                 val listener = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
-                FileDescriptor.adopt(socket, FileDescriptorRole.UnixSocket) to
-                    FileDescriptor.adopt(listener, FileDescriptorRole.SeccompNotif)
+                TestFileDescriptors
+                    .adopt(socket, FileDescriptorRole.UnixSocket) to
+                    TestFileDescriptors
+                        .adopt(listener, FileDescriptorRole.SeccompNotif)
             }
         }
         try {
@@ -102,7 +105,8 @@ class SupervisorDaemonEngineTest {
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = socketManager)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -128,7 +132,8 @@ class SupervisorDaemonEngineTest {
         }
 
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = TestSocketManager())
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -150,11 +155,13 @@ class SupervisorDaemonEngineTest {
                 serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
                 fallbackAcceptCalls++
-                return FileDescriptor.replace(11)
+                return TestFileDescriptors
+                    .replace(11)
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -176,7 +183,8 @@ class SupervisorDaemonEngineTest {
 
         val mockSocket = object : TestSocketManager(5) {}
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         // Reflection to inject throwing ExecutorService
         val delegateField = SupervisorDaemonEngine::class.java.getDeclaredField("delegate")
@@ -256,12 +264,17 @@ class SupervisorDaemonEngineTest {
     ) : SocketManager {
         val closedFds = CopyOnWriteArrayList<Int>()
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(serverFdVal)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(serverFdVal)
 
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            FileDescriptor.replace(11)
+            TestFileDescriptors
+                .replace(11)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(12)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(12)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
             closedFds.add(fd.value)
@@ -269,7 +282,9 @@ class SupervisorDaemonEngineTest {
 
         override fun recvDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
+            TestFileDescriptors
+            .replace(20)
 
         override fun sendDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
@@ -343,9 +358,11 @@ class SupervisorDaemonEngineTest {
                 socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
             ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
                 return if (socketFd.value == 12) {
-                    FileDescriptor.replace(20)
+                    TestFileDescriptors
+                        .replace(20)
                 } else if (socketFd.value == 13) {
-                    FileDescriptor.replace(21)
+                    TestFileDescriptors
+                        .replace(21)
                 } else {
                     null
                 }

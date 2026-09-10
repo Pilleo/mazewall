@@ -7,6 +7,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -43,8 +44,10 @@ class SeccompSessionHandlerTest {
             }
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = object : SeccompNotifHandler {
                 context(arena: NativeArena) override fun processNotification(
                     notif: ManagedSegment,

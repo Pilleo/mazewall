@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.readInt
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -30,7 +31,11 @@ class SupervisorSocketInputStreamTest {
         )
         try {
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-                SupervisorSocketInputStream(FileDescriptor.replace<FileDescriptorRole.UnixSocket>(99), arena).close()
+                SupervisorSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.UnixSocket>(99),
+                        arena,
+                ).close()
             }
             assertEquals(0, closeCount.get())
         } finally {
@@ -49,8 +54,10 @@ class SupervisorSocketInputStreamTest {
             throw AssertionError("socketpair failed: \${res.errno}")
         }
 
-        val readFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(sv.readInt(0L))
-        val writeFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(sv.readInt(4L))
+        val readFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(sv.readInt(0L))
+        val writeFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(sv.readInt(4L))
 
         val inputStream = SupervisorSocketInputStream(readFd, arena)
 
@@ -91,8 +98,10 @@ class SupervisorSocketInputStreamTest {
             throw AssertionError("socketpair failed: \${res.errno}")
         }
 
-        val readFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(sv.readInt(0L))
-        val writeFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(sv.readInt(4L))
+        val readFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(sv.readInt(0L))
+        val writeFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(sv.readInt(4L))
 
         val inputStream = SupervisorSocketInputStream(readFd, arena)
 
