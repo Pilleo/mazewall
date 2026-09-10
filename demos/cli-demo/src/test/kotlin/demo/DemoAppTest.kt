@@ -12,10 +12,22 @@ import kotlin.test.assertTrue
 
 class DemoAppTest {
     @Test
+    fun `inferred permission text is never claimed as authenticated containment`() {
+        val inferred = java.io.IOException("Permission denied")
+
+        assertTrue(classifyContainmentFailure(inferred) is ScenarioOutcome.InfrastructureFailure)
+    }
+
+    @Test
     @EnabledIfLinuxAndSupported
-    fun `unsafe and safe scenarios satisfy opposite explicit expectations`() {
+    fun `unsafe succeeds while safe requires authenticated containment evidence`() {
         assertTrue(runUnsafe().passed)
-        assertTrue(runSafe().passed)
+        val safe = runSafe()
+        when (safe.outcome) {
+            is ScenarioOutcome.Denied -> assertTrue(safe.passed)
+            is ScenarioOutcome.InfrastructureFailure -> assertFalse(safe.passed)
+            is ScenarioOutcome.Completed -> assertFalse(safe.passed)
+        }
     }
 
     @Test

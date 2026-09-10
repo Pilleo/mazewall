@@ -373,10 +373,5 @@ fs.open(
 }
 
 private fun classifyFailure(failure: Throwable): ScenarioOutcome {
-    val diagnostic = ContainmentViolationDetector.diagnose(failure)
-    return if (diagnostic != null) {
-        ScenarioOutcome.Denied(diagnostic.evidence.name)
-    } else {
-        ScenarioOutcome.InfrastructureFailure(failure)
-    }
+    return classifyContainmentFailure(failure)
 }
