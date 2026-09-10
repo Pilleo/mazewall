@@ -17,6 +17,18 @@ import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
 
+/** The terminal outcome of one SECCOMP_IOCTL_NOTIF_SEND attempt. */
+@MazewallInternal
+public sealed interface UserNotifReplyResult {
+    public data object Sent : UserNotifReplyResult
+
+    public data object NotificationGone : UserNotifReplyResult
+
+    public data class Failed(
+        public val errno: Int,
+    ) : UserNotifReplyResult
+}
+
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
 @MazewallInternal
 public object UserNotifReply {
@@ -62,7 +74,7 @@ public object UserNotifReply {
         raw: RawSyscallOperations,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership>,
         resp: ManagedSegment,
-    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    ): UserNotifReplyResult {
         while (true) {
             val res = raw.ioctl(
                 listenerFd,
@@ -72,7 +84,11 @@ public object UserNotifReply {
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
                 continue
             }
-            return res
+            return when (res) {
+                is LinuxNative.SyscallResult.Success -> UserNotifReplyResult.Sent
+                is LinuxNative.SyscallResult.Error ->
+                    if (res.errno == NativeConstants.ENOENT) UserNotifReplyResult.NotificationGone else UserNotifReplyResult.Failed(res.errno)
+            }
         }
     }
 }

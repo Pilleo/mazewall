@@ -24,6 +24,8 @@ import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
 import io.mazewall.onSuccess
+import io.mazewall.platform.seccomp.UserNotifReply
+import io.mazewall.platform.seccomp.UserNotifReplyResult
 import io.mazewall.recover
 
 /**
@@ -221,10 +223,13 @@ public class SeccompSessionHandler(
         id: Long,
         resp: ManagedSegment,
     ) {
-        io.mazewall.platform.seccomp.UserNotifReply
-            .encodeContinue(resp, id)
-        io.mazewall.platform.seccomp.UserNotifReply
-            .send(engine.raw, listenerFd, resp)
+        UserNotifReply.encodeContinue(resp, id)
+        when (UserNotifReply.send(engine.raw, listenerFd, resp)) {
+            UserNotifReplyResult.Sent -> Unit
+            UserNotifReplyResult.NotificationGone,
+            is UserNotifReplyResult.Failed,
+            -> isTerminated = true
+        }
     }
 
     public companion object {

@@ -17,6 +17,7 @@ import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
 import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.typed
 import io.mazewall.platform.seccomp.UserNotifReply
+import io.mazewall.platform.seccomp.UserNotifReplyResult
 
 internal sealed interface FdInjectionResult {
     data class Injected(
@@ -96,11 +97,11 @@ internal class SupervisorReplyInterpreter(
         return confirmed(UserNotifReply.send(engine.raw, listener, context.response))
     }
 
-    private fun confirmed(result: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>): ReplyExecutionResult =
+    private fun confirmed(result: UserNotifReplyResult): ReplyExecutionResult =
         when (result) {
-            is LinuxNative.SyscallResult.Success -> ReplyExecutionResult.ReplySucceeded
-            is LinuxNative.SyscallResult.Error ->
-                ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor kernel reply failed with errno=${result.errno}"))
+            UserNotifReplyResult.Sent -> ReplyExecutionResult.ReplySucceeded
+            UserNotifReplyResult.NotificationGone -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor notification expired before kernel reply"))
+            is UserNotifReplyResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor kernel reply failed with errno=${result.errno}"))
         }
 
     context(arena: NativeArena) private fun inject(
