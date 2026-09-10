@@ -20,6 +20,7 @@ import io.mazewall.ffi.networking.SeccompConnection
 import io.mazewall.ffi.networking.SeccompConnectionEffect
 import io.mazewall.ffi.networking.SeccompConnectionEvent
 import io.mazewall.ffi.networking.SeccompConnectionMachine
+import io.mazewall.ffi.networking.SeccompConnectionOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
@@ -392,6 +393,14 @@ public class SeccompDaemonEngine(
         event: SeccompConnectionEvent,
     ): SeccompConnection? {
         val transition = SeccompConnectionMachine.evaluate(connection, event)
+        when (val outcome = transition.outcome) {
+            SeccompConnectionOutcome.Advanced,
+            SeccompConnectionOutcome.IdlePoll,
+            SeccompConnectionOutcome.Terminated,
+            -> Unit
+            is SeccompConnectionOutcome.ProtocolViolation ->
+                System.err.println("[SECCOMP-DAEMON] Terminating malformed connection protocol: ${outcome.state} + ${outcome.event}")
+        }
         for (effect in transition.effects) {
             when (effect) {
                 is SeccompConnectionEffect.RegisterListener -> {
@@ -406,6 +415,11 @@ public class SeccompDaemonEngine(
                     handleSession(active)
                     System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
                 }
+                is SeccompConnectionEffect.CloseRejectedListener ->
+                    SeccompCleanupInterpreter.closeResources(
+                        listOf({ socketManager.close(effect.listenerFd) }),
+                        ::recordCleanup,
+                    )
             }
         }
         return transition.connection?.also { it.socketManager = socketManager }
