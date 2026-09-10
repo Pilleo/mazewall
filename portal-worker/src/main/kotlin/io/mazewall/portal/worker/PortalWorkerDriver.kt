@@ -67,9 +67,10 @@ internal class PortalWorkerDriver(
                     is PortalWorkerReceive.Frame -> handle(received)
                 }
             }
-        } catch (failure: Throwable) {
-            state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalFailure).state
-            throw failure
+        } finally {
+            if (state != PortalWorkerState.Stopped) {
+                state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalFailure).state
+            }
         }
     }
 
