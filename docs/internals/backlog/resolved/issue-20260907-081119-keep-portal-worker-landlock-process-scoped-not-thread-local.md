@@ -1,17 +1,18 @@
 ---
 title: "Keep portal-worker Landlock process-scoped not thread-local"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
-component: "docs"
+component: "portal-worker"
 target_modules:
   - ":portal-worker"
+  - ":enforcer"
 target_files:
   - "portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
 target_symbols:
   - "PortalWorkerMain"
-needs_kernel: false
+needs_kernel: true
 core_lock: false
 effort: "small"
 autonomy: "supervised"
@@ -37,7 +38,9 @@ Portal worker startup still applies thread-scoped Landlock via `installOnCurrent
 
 ---
 
-**Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+**Resolution (2026-09-10):** Worker startup now installs the combined filesystem, NO_EXEC, and NO_NETWORK baseline with `ContainedExecutors.installOnDedicatedProcess`. This internal entry requires Landlock TSYNC (ABI 8+), rejects fallback and virtual-thread installation, and invokes the existing process installation transaction so Landlock precedes Seccomp and partial irreversible stages retain their published state. The channel is owned before installation; guest construction and READY occur only afterwards. Unsupported older kernels fail startup.
+
+**Verification:** `DedicatedProcessInstallationTest` covers unsupported TSYNC, fallback rejection, and virtual-thread rejection. `DedicatedProcessBaselineTest` launches a fresh child JVM, creates a sibling before installation, confirms that sibling cannot read `/etc/passwd`, and confirms a permitted JDK-file read succeeds. The isolated kernel test and all 18 `ProcessBrokerIntegrationTest` scenarios passed with the process-wide worker baseline. Worker startup tests cover ordering and failure cleanup. Backlog validated with `./scripts/adkw check-backlog`; no tools changes.
 
 <!-- id: issue-20260907-081119  file: issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

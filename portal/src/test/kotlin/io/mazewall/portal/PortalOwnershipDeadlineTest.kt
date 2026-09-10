@@ -19,6 +19,23 @@ import java.util.concurrent.TimeUnit
 
 class PortalOwnershipDeadlineTest {
     @Test
+    fun `clean peer EOF has a distinct outcome but partial header EOF is failure`(
+        @TempDir dir: Path,
+    ) {
+        connection(dir) { channel, peer ->
+            peer.close()
+            assertThrows(PortalPeerClosedException::class.java) { channel.receive(1_000) }
+        }
+        connection(Files.createDirectory(dir.resolve("partial"))) { channel, peer ->
+            peer.write(ByteBuffer.wrap(byteArrayOf(1)))
+            peer.close()
+            val failure = assertThrows(java.io.IOException::class.java) { channel.receive(1_000) }
+            assertFalse(failure is PortalPeerClosedException)
+            assertThrows(IllegalStateException::class.java) { channel.receive(1_000) }
+        }
+    }
+
+    @Test
     fun `complete transfer preserves descriptor order and independent received ownership`(
         @TempDir dir: Path,
     ) {

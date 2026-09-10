@@ -1,6 +1,10 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 553
+*Total Active Issues:* 75 | *Total Resolved Issues:* 555
+
+Review-hardening Task 6 worker transport resolved: [terminal transport and startup failures](resolved/issue-20260910-185837-079-make-portal-worker-transport-and-startup-failure-t.md).
+
+Review-hardening Task 6 worker baseline resolved: [process-wide worker Landlock](resolved/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md).
 
 Review-hardening Task 6 broker resolved: [bounded child output and fatal checkout retirement](resolved/issue-20260910-184603-286-contain-portal-child-output-and-retire-fatal-check.md).
 
@@ -80,7 +84,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
 | [issue-20260808-032520-owned-contained-executor-lifecycle](security/issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
-| [issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local](security/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md) | Keep portal-worker Landlock process-scoped not thread-local | high | docs |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](testing/issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
 | [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
 | [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |

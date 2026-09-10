@@ -88,9 +88,16 @@ app → generated stub
 
 Spawn workers **before** the broker calls `installOnProcess`. Children inherit seccomp; `SupervisorDaemonManager.refuseSpawnIfParentIsFiltered()` already encodes this.
 
-Worker first lines after IPC connect:
-1. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
-2. `ContainedExecutors.installOnCurrentThread(ProcessPolicies.workerFilesystem)` — Landlock allowlist of `java.home` and classpath entries only. `allowJvmClasspath()` is `ThreadLocalOnly` (no ABI v8 TSYNC on existing helper threads). Fail closed if Landlock is unsupported. Extra readable paths are deferred.
+After IPC connection and channel initialization, the worker installs one permanent baseline
+through `ContainedExecutors.installOnDedicatedProcess`: the classpath/`java.home` filesystem
+allowlist plus `denyProcessCreation` and `denyNetwork`. This internal entry requires Landlock
+TSYNC (ABI 8+) and rejects fallback configuration. The ordinary installer applies Landlock
+before Seccomp, records each irreversible stage, and synchronizes both across existing JVM
+threads. Older kernels fail worker startup; there is no thread-only worker baseline.
+Dispatcher validation and guest construction follow containment. Any initialization or readiness
+publication failure closes the owned channel, preserving the original failure and suppressing
+cleanup failures. Only after READY succeeds does ownership pass to the execution driver.
+Extra readable paths are deferred.
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
@@ -119,7 +126,9 @@ budget covers request bytes, every descriptor transfer, and response bytes; fram
 never reset it. Portal-owned sockets use `O_NONBLOCK`, readiness polling, and nonblocking
 `SCM_RIGHTS` attempts. Readiness is advisory: `EAGAIN`/`EINTR` retries recheck the deadline.
 Only a timeout before the first header byte is an idle tick. After any frame progress,
-timeout is a terminal incomplete frame and the channel cannot be reused. A partial received
+timeout is a terminal incomplete frame and the channel cannot be reused. Only zero-byte EOF
+before a new header is `PortalPeerClosedException`; EOF after progress and native I/O errors
+remain terminal failures with their cause. A partial received
 descriptor collection remains locally owned until successful delivery and is closed on failure.
 The terminal channel retains received owners whose pre-native cleanup fails, so later `close()`
 calls retry only unfinished retirement. Closing admission is distinct from retiring the socket;

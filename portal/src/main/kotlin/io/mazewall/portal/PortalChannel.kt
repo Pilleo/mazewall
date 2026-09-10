@@ -25,6 +25,9 @@ public class PortalReadTimeoutException : java.io.IOException("portal read timed
 
 public class PortalIncompleteFrameException : java.io.IOException("portal frame incomplete at deadline")
 
+/** Clean peer shutdown before receiving the first byte of a new frame. */
+public class PortalPeerClosedException : java.io.EOFException("portal peer closed between frames")
+
 public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,

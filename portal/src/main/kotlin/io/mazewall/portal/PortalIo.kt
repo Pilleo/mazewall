@@ -49,13 +49,13 @@ internal class PortalIo(
             if (writing) bytes.forEachIndexed { index, byte -> buffer.writeByte(index.toLong(), byte) }
             var position = 0
             while (position < bytes.size) {
-                await(deadline, if (writing) POLLOUT else NativeConstants.POLLIN, idleAllowed && position == 0)
+                val beforeFrame = idleAllowed && position == 0
+                await(deadline, if (writing) POLLOUT else NativeConstants.POLLIN, beforeFrame)
                 val slice = buffer.asSlice(position.toLong(), (bytes.size - position).toLong())
                 val result = if (writing) LinuxNative.memory.write(socket, slice, slice.byteSize()) else LinuxNative.memory.read(socket, slice, slice.byteSize())
                 when (result) {
                     is LinuxNative.SyscallResult.Success -> {
-                        if (result.value <= 0) throw IOException("portal peer closed during transfer")
-                        position += result.value.toInt()
+                        position += transferProgress(result.value, beforeFrame)
                     }
                     is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR &&
                         result.errno != NativeConstants.EAGAIN
@@ -66,6 +66,15 @@ internal class PortalIo(
             }
             if (!writing) bytes.indices.forEach { bytes[it] = buffer.readByte(it.toLong()) }
         }
+    }
+
+    private fun transferProgress(
+        count: Long,
+        beforeFrame: Boolean,
+    ): Int {
+        if (count == 0L && beforeFrame) throw PortalPeerClosedException()
+        if (count <= 0) throw IOException("portal peer closed during transfer")
+        return count.toInt()
     }
 
     fun sendDescriptor(

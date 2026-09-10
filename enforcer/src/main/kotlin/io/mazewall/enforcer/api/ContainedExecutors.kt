@@ -207,6 +207,25 @@ object ContainedExecutors {
     }
 
     /**
+     * Installs a permanent baseline in a dedicated child process, including existing JVM threads.
+     * Unlike the general process API, this internal entry accepts filesystem policies only when
+     * Landlock TSYNC is available (ABI 8+). The child must not publish readiness on failure;
+     * successful stages remain irreversible and are recorded by the ordinary installer.
+     */
+    @io.mazewall.MazewallInternal
+    fun installOnDedicatedProcess(vararg policies: Policy<*, Uncompiled>): io.mazewall.InstallationReceipt {
+        validateLinuxAndNotVirtual()
+        check(Platform.configuredFallback() == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
+        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        check(!combined.enforceLandlock || Platform.featureMatrix.landlockTsyncSupported) {
+            "Dedicated process filesystem containment requires Landlock TSYNC (ABI 8+)"
+        }
+        val receipt = installInternal(true, combined).requireInstalled()
+        check(!combined.enforceLandlock || receipt.landlockApplied) { "Dedicated process Landlock was not applied" }
+        return receipt
+    }
+
+    /**
      * Wraps an [java.util.concurrent.ExecutorService] so that any task submitted to it will have the given
      * [policies] applied before execution.
      *

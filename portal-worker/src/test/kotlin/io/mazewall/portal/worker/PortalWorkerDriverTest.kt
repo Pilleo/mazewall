@@ -30,6 +30,20 @@ import java.nio.file.Path
 
 class PortalWorkerDriverTest {
     @Test
+    fun `same fatal failure from transport and close keeps original identity`() {
+        val fatal = AssertionError("shared transport failure")
+        val driver = PortalWorkerDriver(object : PortalWorkerTransport {
+            override fun receive(): PortalWorkerReceive = throw fatal
+
+            override fun send(frame: PortalFrame) = Unit
+
+            override fun close(): Unit = throw fatal
+        }) { _, _, _ -> ByteArray(0) }
+        assertSame(fatal, assertThrows(AssertionError::class.java) { driver.run() })
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+    }
+
+    @Test
     fun `fatal receive failure transitions worker to stopped before propagation`() {
         val fatal = AssertionError("transport invariant failed")
         val driver = PortalWorkerDriver(

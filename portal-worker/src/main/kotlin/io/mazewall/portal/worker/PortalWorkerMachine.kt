@@ -110,12 +110,12 @@ internal object PortalWorkerMachine {
             }
             PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(PortalWorkerState.AwaitingRequest)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+            PortalWorkerEvent.FatalFailure -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.DispatchSucceeded,
             is PortalWorkerEvent.DispatchFailed,
             PortalWorkerEvent.ReplySucceeded,
             is PortalWorkerEvent.ReplyFailed,
             PortalWorkerEvent.FatalDispatchFailed,
-            PortalWorkerEvent.FatalFailure,
             -> violation("received a dispatch result without a request")
         }
 
@@ -146,8 +146,8 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.DispatchFailed,
             PortalWorkerEvent.IdleTick,
             PortalWorkerEvent.FatalDispatchFailed,
-            PortalWorkerEvent.FatalFailure,
             -> violation("received an event while sending a reply")
+            PortalWorkerEvent.FatalFailure -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
         }
 
     private fun reply(

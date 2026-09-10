@@ -11,6 +11,51 @@ import org.junit.jupiter.api.Test
 
 class PortalWorkerMachineTest {
     @Test
+    fun `every state event combination has an explicit transition`() {
+        val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, ByteArray(0), 0)
+        val reply = PortalFrame(PortalKind.Response, 5, PortalMethod.Echo, ByteArray(0), 0)
+        val states = listOf(PortalWorkerState.AwaitingRequest, PortalWorkerState.Dispatching(request), PortalWorkerState.SendingReply(request, reply), PortalWorkerState.Stopped)
+        val events = listOf(
+            PortalWorkerEvent.FrameReceived(request),
+            PortalWorkerEvent.DispatchSucceeded(PortalPayload(ByteArray(0))),
+            PortalWorkerEvent.DispatchFailed(PortalPayload(ByteArray(0))),
+            PortalWorkerEvent.IdleTick,
+            PortalWorkerEvent.PeerClosed,
+            PortalWorkerEvent.ReplySucceeded,
+            PortalWorkerEvent.ReplyFailed("write"),
+            PortalWorkerEvent.FatalDispatchFailed,
+            PortalWorkerEvent.FatalFailure,
+        )
+        val violation = PortalWorkerTransition.ProtocolViolation::class
+        val close = PortalWorkerTransition.Close::class
+        val await = PortalWorkerTransition.Await::class
+        val send = PortalWorkerTransition.Send::class
+        val expected = listOf(
+            listOf(PortalWorkerTransition.Dispatch::class, violation, violation, await, close, violation, violation, violation, close),
+            listOf(violation, send, send, await, close, violation, violation, close, close),
+            listOf(violation, violation, violation, violation, close, await, close, violation, close),
+            List(events.size) { close },
+        )
+        states.forEachIndexed { row, state ->
+            events.forEachIndexed { column, event ->
+                val transition = PortalWorkerMachine.evaluate(state, event)
+                assertTrue(expected[row][column].java.isInstance(transition), "$state / $event: $transition")
+            }
+        }
+    }
+
+    @Test
+    fun `fatal transport failures close every active state without protocol violation`() {
+        val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, ByteArray(0), 0)
+        val reply = PortalFrame(PortalKind.Response, 5, PortalMethod.Echo, ByteArray(0), 0)
+        for (state in listOf(PortalWorkerState.AwaitingRequest, PortalWorkerState.Dispatching(request), PortalWorkerState.SendingReply(request, reply))) {
+            val transition = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalFailure)
+            assertInstanceOf(PortalWorkerTransition.Close::class.java, transition)
+            assertEquals(PortalWorkerState.Stopped, transition.state)
+        }
+    }
+
+    @Test
     fun `request dispatches then replies with the matching response`() {
         val request = PortalFrame(PortalKind.Request, 5, PortalMethod.Echo, byteArrayOf(1), 0)
         val dispatch = PortalWorkerMachine.evaluate(PortalWorkerState.AwaitingRequest, PortalWorkerEvent.FrameReceived(request))

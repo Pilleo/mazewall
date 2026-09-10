@@ -333,6 +333,12 @@ syscalls fail before Landlock can activate.
 
 Wrapper wrap methods only call `installOnCurrentThread`, which reaches `installInternal`.
 
+Dedicated child processes use the internal `installOnDedicatedProcess` entry. It accepts
+filesystem policies only with Landlock TSYNC support, rejects fallback, and delegates to
+the same process-wide installation transaction. It therefore records successful irreversible
+stages before returning or throwing and preserves the ordering above. Portal workers require
+this permanent baseline before dispatcher construction or readiness publication.
+
 Do not change this order.
 
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)

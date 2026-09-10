@@ -21,6 +21,9 @@ state "Worker RPC" as worker {
   SendingReply --> AwaitingRequest : ReplySucceeded
   SendingReply --> Stopped : ReplyFailed
   AwaitingRequest --> Stopped : peer close / partial frame
+  AwaitingRequest --> Stopped : transport failure / fatal Error
+  Dispatching --> Stopped : fatal Error
+  SendingReply --> Stopped : fatal Error
   Dispatching --> Stopped : protocol violation
 }
 
@@ -32,6 +35,17 @@ note right of Starting
   late acquisitions stay registered.
   Failed cleanup signals all waiters;
   partial owners remain retryable.
+  Output retained as 64 bounded lines;
+  exact READY sentinel publishes readiness.
+end note
+
+note left of AwaitingRequest
+  Channel initialized before containment.
+  Landlock TSYNC (ABI 8+) before Seccomp TSYNC.
+  All existing JVM threads receive the baseline.
+  Guest validation/construction before READY.
+  Startup failure closes the channel;
+  cleanup failures remain suppressed.
 end note
 
 note right of SendingReply

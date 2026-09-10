@@ -46,7 +46,7 @@ internal class PortalWorkerDriver(
     fun run() {
         val primaryFailure = captureFailure(::serve)
         val cleanupFailure = captureFailure(transport::close)
-        if (primaryFailure != null) cleanupFailure?.let(primaryFailure::addSuppressed)
+        if (primaryFailure != null) cleanupFailure?.takeIf { it !== primaryFailure }?.let(primaryFailure::addSuppressed)
         val terminal = primaryFailure ?: cleanupFailure
         if (terminal != null) throw terminal
     }
@@ -61,7 +61,7 @@ internal class PortalWorkerDriver(
                         break@serve
                     }
                     is PortalWorkerReceive.Failure -> {
-                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
+                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalFailure).state
                         throw received.cause
                     }
                     is PortalWorkerReceive.Frame -> handle(received)
@@ -101,12 +101,12 @@ internal class PortalWorkerDriver(
         val actualFailure = dispatchFailure
         if (actualFailure != null && actualFailure !is Exception) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
-            capabilityFailure?.let(actualFailure::addSuppressed)
+            capabilityFailure?.takeIf { it !== actualFailure }?.let(actualFailure::addSuppressed)
             raiseWorkerFailure(actualFailure)
         }
         if (capabilityFailure != null) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
-            actualFailure?.let(capabilityFailure::addSuppressed)
+            actualFailure?.takeIf { it !== capabilityFailure }?.let(capabilityFailure::addSuppressed)
             raiseWorkerFailure(capabilityFailure)
         }
         val dispatchEvent = if (actualFailure == null) {
