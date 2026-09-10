@@ -1,67 +1,33 @@
-# mazewall-demo
+# mazewall CLI demonstration
 
-**The interactive showcase demonstrating mazewall's runtime protection and architectural complementary sandboxing.**
+This application runs executable positive and negative controls and exits non-zero whenever the observed result differs from the declared expectation. A kernel containment denial, successful operation, and infrastructure failure are distinct outcomes; an unavailable daemon or unrelated I/O error never counts as a successful block.
 
-This subproject contains real-world scenarios demonstrating how `mazewall` blocks Arbitrary Code Execution (ACE) exploits at the kernel level without performance-degrading agents or complex wrappers, and how Seccomp and Landlock form complementary protection layers to prevent modern asynchronous seccomp bypasses.
+## Modes
 
----
+- `unsafe` expects the simulated JNDI exploit to create a marker inside an owned private temporary directory.
+- `safe` applies the combined `Policy.NO_EXEC` and `Policy.NO_NETWORK` contract and expects the exploit to be denied without creating the marker.
+- `profile` profiles synchronous file/socket work, compiles the observation, verifies the legitimate workload, and executes negative controls.
+- `both` runs only `unsafe` and `safe`; `all` also runs `profile`.
 
-## What the Demo Showcases
+The profile demonstration’s native file probe is a direct synchronous `open(2)` call. It does not initialize an io_uring queue, submit an SQE, or demonstrate asynchronous io_uring containment. The broader Seccomp/Landlock io_uring threat model is documented elsewhere in the project, but it must not be inferred from this executable.
 
-The demo application contains three executable execution modes:
+All attack markers and configuration fixtures are created beneath fresh owner-only temporary roots and removed afterward. The demo does not replace pre-existing files or follow caller-selected symlink targets.
 
-1. **`unsafe` (Active Exploitation):** Simulates a vulnerable framework receiving a Log4Shell-style JNDI injection payload. With no behavioral protection active, the exploit successfully spawns an external process and compromises the host container filesystem.
-2. **`safe` (Active Blockage):** Runs the exact same malicious JNDI payload, but wraps the thread executor in `Policy.NO_EXEC` + `Policy.NO_NETWORK`. The Linux kernel intercepts the subprocess creation (`execve`) and returns `EPERM`, throwing a typed `ContainmentViolationException` in Java.
-3. **`profile` (Profile & Enforce & Complementary Sandboxing):**
-   - **Step 1:** Automatically profiles a complex workload that performs file operations, opens sockets, and invokes async kernel primitives (`io_uring_setup`) using the Tier S `USER_NOTIF` profiler.
-   - **Step 2:** Outputs a compiled Bill of Behavior (BoB) DSL.
-   - **Step 3:** Enforces the compiled policy under `ContainedExecutors`, demonstrating that the legitimate workload executes with zero friction.
-   - **Step 4:** Simulates a path breach where the attacker attempts to read `/etc/hosts` outside of the whitelisted scope, which is immediately blocked by Landlock.
-   - **Step 5:** Simulates an advanced **Seccomp Bypass** where the attacker uses an allowed `io_uring` queue to submit an asynchronous read of `/etc/hosts`. The demo showcases how **Landlock LSM** intercepts the async task inside the kernel's worker thread (`io-wq`), successfully caging the attack where Seccomp alone would fail.
+## Running
 
----
-
-## The Complementary Seccomp-Landlock Threat Model
-
-Modern kernel subsystems like `io_uring` allow processes to submit asynchronous read/write requests through shared ring buffers, bypassing standard thread-scoped Seccomp-BPF filters (which can only evaluate system calls initiated *directly* by the calling thread). 
-
-`mazewall` solves this vector by enforcing a **Complementary Sandboxing Model** of Seccomp-BPF and Landlock LSM:
-- **Seccomp** acts as the gatekeeper, restricting execution rights (`execve`) and socket creation (`connect`).
-- **Landlock LSM** operates at the Virtual File System (VFS) hook layer. When `io_uring` executes an asynchronous file task in the kernel's helper threadpools (`io-wq`), the kernel **automatically propagates the calling thread's Landlock credentials** to the async workers. 
-- Therefore, even if the thread-scoped Seccomp filter cannot inspect the async payload submitted to the ring buffer, the kernel's VFS layer intercepts the operation, caging file operations perfectly!
-
----
-
-## Running the Demo
-
-The demo must be run inside the nested seccomp OCI container:
+Run inside the nested-seccomp development environment when exercising kernel containment:
 
 ```bash
-# Start the Podman test environment
 podman compose -f infra/dev/compose.yml up -d
-
-# Execute the complete demonstration suite
 podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:run
 ```
 
-You can run individual modes by passing arguments to the Gradle task:
+Individual examples:
 
 ```bash
-# Run only the JNDI exploit showcase
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:run --args="unsafe"
-
-# Run only the JNDI protection showcase
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:run --args="safe"
-
-# Run the complete Profile & Enforce (io_uring) showcase
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:run --args="profile"
+./gradlew :demos:cli-demo:run --args="unsafe"
+./gradlew :demos:cli-demo:run --args="safe"
+./gradlew :demos:cli-demo:run --args="profile"
 ```
 
----
-
-## Class Directory
-
-- **`demo.DemoApp`:** Main orchestration entrypoint routing arguments to the respective runners.
-- **`demo.UnsafeRunner` & `demo.SafeRunner`:** Wrappers representing unprotected and protected executors.
-- **`demo.VulnerableLogger`:** Simulates a framework vulnerable to string parsing exploits.
-- **`demo.ProfileAndEnforceDemo`:** Implements the dynamic `USER_NOTIF` profiling trace, auto-compiles the DSL, mounts the `ContainedExecutors` sandboxing pool, and attempts both path and `io_uring` breaches.
+Exit code `0` means every scenario matched its expectation. Exit code `2` means an attack unexpectedly succeeded, legitimate work failed, or infrastructure prevented a trustworthy conclusion.

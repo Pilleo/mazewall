@@ -7,12 +7,18 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 
 object SafeRunner {
+    internal val policy =
+        Policy.builder()
+            .base(Policy.NO_EXEC)
+            .base(Policy.NO_NETWORK)
+            .build()
+
     fun run(payload: String) {
         val executor = Executors.newSingleThreadExecutor()
         try {
             // Wrap inside try so the raw executor is always shut down in finally,
             // even if ContainedExecutors.wrap() itself throws (e.g. seccomp install failure).
-            val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+            val safeExecutor = ContainedExecutors.wrap(executor, policy)
             val future = safeExecutor.submit<String> {
                 VulnerableLogger.log(payload)
             }

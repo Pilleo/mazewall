@@ -1,0 +1,43 @@
+package demo
+
+internal enum class ExpectedResult {
+    ALLOWED,
+    DENIED,
+}
+
+internal sealed interface ScenarioOutcome {
+    data class Completed(val detail: String) : ScenarioOutcome
+
+    data class Denied(val detail: String) : ScenarioOutcome
+
+    data class InfrastructureFailure(val cause: Throwable) : ScenarioOutcome
+}
+
+internal data class ScenarioResult(
+    val name: String,
+    val expected: ExpectedResult,
+    val outcome: ScenarioOutcome,
+) {
+    val passed: Boolean
+        get() = when (expected) {
+            ExpectedResult.ALLOWED -> outcome is ScenarioOutcome.Completed
+            ExpectedResult.DENIED -> outcome is ScenarioOutcome.Denied
+        }
+
+    fun render(): String {
+        val status = if (passed) "PASS" else "FAIL"
+        val observation = when (outcome) {
+            is ScenarioOutcome.Completed -> "ALLOWED: ${outcome.detail}"
+            is ScenarioOutcome.Denied -> "DENIED: ${outcome.detail}"
+            is ScenarioOutcome.InfrastructureFailure ->
+                "INFRASTRUCTURE FAILURE: ${outcome.cause.message ?: outcome.cause.javaClass.simpleName}"
+        }
+        return "[$status] $name (expected ${expected.name}): $observation"
+    }
+}
+
+internal data class DemoReport(val results: List<ScenarioResult>) {
+    val passed: Boolean get() = results.isNotEmpty() && results.all(ScenarioResult::passed)
+
+    fun summary(): String = results.joinToString(separator = "\n", transform = ScenarioResult::render)
+}

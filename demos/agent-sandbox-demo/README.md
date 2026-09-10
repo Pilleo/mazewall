@@ -10,9 +10,11 @@ Unlike traditional out-of-process sandboxes (e.g., Docker or L7 proxies like NVI
 
 This PoC runs a LangChain4j agent with three tools, demonstrating three common security exploits triggered via prompt injection:
 
+Each run declares whether the selected operation must be allowed or denied and exits non-zero when reality differs. Infrastructure failures are reported separately and never presented as containment success. Fixtures live under one fresh owner-only temporary root and are deleted after the scenario.
+
 1.  **SSRF / Network Egress Bypass (`--scenario ssrf`)**
     *   **Goal:** The agent has a `fetchWebpage` tool to scrape docs. Prompt injection forces it to hit the internal AWS metadata service (`http://169.254.169.254`).
-    *   **Mitigation:** `mazewall` applies a Seccomp-BPF filter to the web fetcher thread, using a user-space supervisor to check and instantly drop TCP connections targeting private/local IP subnets.
+    *   **Mitigation:** `mazewall` applies a Seccomp-BPF filter to the web fetcher thread. Before installing the process baseline, the demo starts the external supervisor. One pure fail-closed classifier handles the metadata endpoint, complete RFC1918 ranges, IPv4/IPv6 loopback and link-local ranges, IPv6 unique-local addresses, IPv4-mapped IPv6 addresses, and malformed/unsupported socket addresses.
 2.  **Path Traversal (`--scenario path_traversal`)**
     *   **Goal:** The agent has an `analyzeUserFile` tool to read files in the `agent-workspace` directory. Prompt injection forces it to attempt a path traversal to a file outside the workspace (e.g. `../passwd`).
     *   **Mitigation:** `mazewall` applies Landlock LSM rules to the file-handling thread, physically restricting its filesystem view to *only* the designated workspace directory. The kernel blocks the path traversal with `EACCES`.
@@ -29,7 +31,7 @@ This PoC runs a LangChain4j agent with three tools, demonstrating three common s
     ```bash
     ./gradlew :demos:agent-sandbox-demo:run --args="--scenario ssrf"
     ```
-    *(Result: The agent attempts to connect and fetch the private metadata endpoint, failing only with a network timeout/connection error rather than a security denial).*
+    *(Result: This unprotected run depends on host networking. A timeout is reported as infrastructure failure, not as protection.)*
 
 *   **Protected by Mazewall:**
     ```bash
@@ -74,4 +76,3 @@ The stacktrace scoping mechanism utilized in this demo is **highly experimental*
 2. **The JVM launchMechanism Workaround:** To bypass this, we configure the JVM to launch processes using `vfork` or `fork` instead of `clone` (`-Djdk.lang.Process.launchMechanism=vfork`). We then allow thread-creation `CLONE` calls un-supervised.
 3. **Parent Thread Context Capture:** When `vfork`/`fork` is called, the parent JVM thread is suspended before the child process is fully detached. The supervisor intercepts this call on the parent thread, queries `Thread.getStackTrace()`, and determines if the call originated from the authorized tool (`executeDataAnalysis`).
 4. **Execution Restriction:** Since the child process detaches afterward, the actual `execve` occurs inside the child. Because child PIDs have no JVM stacktrace, we enforce validation on the parent thread's `vfork`/`fork` rather than on `execve` directly.
-

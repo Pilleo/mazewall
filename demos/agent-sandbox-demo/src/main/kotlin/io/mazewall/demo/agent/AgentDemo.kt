@@ -9,7 +9,7 @@ import io.mazewall.Policy
 import io.mazewall.PolicyScope
 import io.mazewall.core.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
-import java.io.File
+import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 import java.lang.reflect.Method
 import kotlin.system.exitProcess
 
@@ -37,6 +37,15 @@ fun main(args: Array<String>) {
         exitProcess(1)
     }
 
+    val result = runAgentScenario(scenario, useMazewall)
+    println(result.render())
+    if (!result.passed) exitProcess(2)
+}
+
+internal fun runAgentScenario(
+    scenario: String,
+    useMazewall: Boolean,
+): AgentScenarioResult {
     println("======================================================================")
     println("Starting AI Agent Sandbox Demo")
     println("Scenario: $scenario")
@@ -44,6 +53,12 @@ fun main(args: Array<String>) {
     println("======================================================================")
 
     if (useMazewall) {
+        // The demo supervises the parent-side vfork. Set this before ProcessImpl is initialized;
+        // applicationDefaultJvmArgs provides the same value for normal Gradle runs.
+        System.setProperty("jdk.lang.Process.launchMechanism", "vfork")
+        // USER_NOTIF's external supervisor must exist before any permanent process filter.
+        SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
+
         // Tier 1: Process-Wide Baseline Constraint
         // We block highly sensitive system administration syscalls for the entire process,
         // ensuring that even if an attacker achieves Arbitrary Code Execution (ACE) on any thread, 
@@ -56,52 +71,28 @@ fun main(args: Array<String>) {
         println("[MAZEWALL] Tier 1 Process-wide containment applied (blocked PTRACE, MOUNT, UNSHARE, CHROOT).")
     }
 
-    // Setup workspace directory
-    val workspaceDir = File("agent-workspace").canonicalFile
-    workspaceDir.mkdirs()
-    val secretFile = File(workspaceDir, "secret.txt")
-    secretFile.writeText("SUPER_SECRET_WORKSPACE_TOKEN_12345")
-    
-    // Also prepare a dummy target for path traversal demo
-    val dummyEtcPasswd = File("passwd")
-    dummyEtcPasswd.writeText("root:x:0:0:root:/root:/bin/bash\nbin:x:1:1:bin:/bin:/sbin/nologin\n")
-
-    val tools = AgentTools(useMazewall, workspaceDir)
-    val model: ChatLanguageModel = MockAttackLlm(scenario)
-
-    try {
+    val expected = if (useMazewall && scenario != "rce_legit") ExpectedAgentResult.DENIED else ExpectedAgentResult.ALLOWED
+    AgentDemoFixture.create().use { fixture ->
+        val tools = AgentTools(useMazewall, fixture.workspace)
+        val model: ChatLanguageModel = MockAttackLlm(scenario)
+        val outcome = try {
         println("[AGENT] Prompting LLM...")
         val response = model.generate(emptyList())
         val aiMessage = response.content()
 
         if (aiMessage.hasToolExecutionRequests()) {
-            for (toolRequest in aiMessage.toolExecutionRequests()) {
-                println("[AGENT] LLM requested tool execution: ${toolRequest.name()} with args ${toolRequest.arguments()}")
-                try {
-                    val result = invokeTool(tools, toolRequest)
-                    println("[AGENT] Tool execution SUCCESS. Result:\n$result")
-                } catch (e: Exception) {
-                    println("[AGENT] Tool execution FAILED: ${e.cause?.message ?: e.message}")
-                    if (useMazewall) {
-                        println("[MAZEWALL] Security violation successfully intercepted at kernel level!")
-                    }
-                }
-            }
+            val toolRequest = aiMessage.toolExecutionRequests().single()
+            println("[AGENT] LLM requested tool execution: ${toolRequest.name()} with args ${toolRequest.arguments()}")
+            classifyToolOutcome(runCatching { invokeTool(tools, toolRequest) })
         } else {
-            println("[AGENT] LLM response: ${aiMessage.text()}")
+            AgentOutcome.InfrastructureFailure(IllegalStateException("scenario produced no tool request"))
         }
-    } finally {
-        tools.shutdown()
-        // Clean up dummy passwd file if created
-        if (dummyEtcPasswd.exists()) {
-            dummyEtcPasswd.delete()
+        } catch (failure: Throwable) {
+            AgentOutcome.InfrastructureFailure(failure)
+        } finally {
+            tools.shutdown()
         }
-        if (secretFile.exists()) {
-            secretFile.delete()
-        }
-        if (workspaceDir.exists()) {
-            workspaceDir.delete()
-        }
+        return AgentScenarioResult(scenario, expected, outcome)
     }
 }
 

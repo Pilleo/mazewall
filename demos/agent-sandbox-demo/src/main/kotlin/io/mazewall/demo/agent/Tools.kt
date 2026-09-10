@@ -34,15 +34,16 @@ class AgentTools(
     private val webScopingPolicy = object : StacktraceScopingPolicy {
         override val handlers = mapOf<Syscall, ScopingHandler>(
             Syscall.CONNECT to { tid, args, stack ->
-                val ip = args.firstOrNull() as? String ?: ""
-                val isPrivate = ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("127.") || ip.startsWith("172.16.")
-                
-                if (isPrivate) {
-                    println("[MAZEWALL] [BLOCKED] Network connection to private IP $ip intercepted and dropped!")
-                    false
-                } else {
-                    println("[MAZEWALL] [ALLOWED] Network connection to public IP $ip authorized.")
-                    true
+                val address = args.firstOrNull() as? ByteArray
+                when (address?.let(NetworkAddressClassifier::classify) ?: AddressDecision.DENY) {
+                    AddressDecision.DENY -> {
+                        println("[MAZEWALL] [BLOCKED] Local, private, metadata, malformed, or unsupported destination denied.")
+                        false
+                    }
+                    AddressDecision.ALLOW -> {
+                        println("[MAZEWALL] [ALLOWED] Public IP destination authorized.")
+                        true
+                    }
                 }
             },
             Syscall.VFORK to { tid, args, stack -> authorizeExec(stack) },
@@ -142,51 +143,6 @@ class AgentTools(
             process.waitFor()
             result
         }.get()
-    }
-
-    private fun isPrivateIp(sockaddrBytes: ByteArray): Boolean {
-        if (sockaddrBytes.size < 8) return false
-        val family = (sockaddrBytes[0].toInt() and 0xFF) or ((sockaddrBytes[1].toInt() and 0xFF) shl 8)
-
-        if (family == 2) { // AF_INET
-            val ip0 = sockaddrBytes[4].toInt() and 0xFF
-            val ip1 = sockaddrBytes[5].toInt() and 0xFF
-            val ip2 = sockaddrBytes[6].toInt() and 0xFF
-            val ip3 = sockaddrBytes[7].toInt() and 0xFF
-            return isPrivateIpv4(ip0, ip1, ip2, ip3)
-        } else if (family == 10) { // AF_INET6
-            if (sockaddrBytes.size < 24) return false
-            // Check if it is an IPv4-mapped IPv6 address (::ffff:x.x.x.x)
-            // Bytes 8-17 should be 0, bytes 18-19 should be 0xFF
-            val isMapped = (8..17).all { sockaddrBytes[it].toInt() == 0 } &&
-                    (sockaddrBytes[18].toInt() and 0xFF) == 0xFF &&
-                    (sockaddrBytes[19].toInt() and 0xFF) == 0xFF
-
-            if (isMapped && sockaddrBytes.size >= 24) {
-                val ip0 = sockaddrBytes[20].toInt() and 0xFF
-                val ip1 = sockaddrBytes[21].toInt() and 0xFF
-                val ip2 = sockaddrBytes[22].toInt() and 0xFF
-                val ip3 = sockaddrBytes[23].toInt() and 0xFF
-                return isPrivateIpv4(ip0, ip1, ip2, ip3)
-            }
-
-            // Native IPv6 private checks
-            val firstByte = sockaddrBytes[8].toInt() and 0xFF
-            // ULA (fc00::/7) - first byte is 0xfc or 0xfd
-            if (firstByte == 0xFC || firstByte == 0xFD) return true
-            // Link-local (fe80::/10) - first byte is 0xfe and second byte has top 2 bits set (0x80 to 0xbf)
-            val secondByte = sockaddrBytes[9].toInt() and 0xFF
-            if (firstByte == 0xFE && (secondByte and 0xC0) == 0x80) return true
-            // Loopback (::1)
-            val isLoopback = (8..22).all { sockaddrBytes[it].toInt() == 0 } && sockaddrBytes[23].toInt() == 1
-            if (isLoopback) return true
-        }
-
-        return false
-    }
-
-    private fun isPrivateIpv4(ip0: Int, ip1: Int, ip2: Int, ip3: Int): Boolean {
-        return ip0 == 127 || ip0 == 10 || (ip0 == 192 && ip1 == 168) || (ip0 == 172 && ip1 in 16..31) || (ip0 == 169 && ip1 == 254)
     }
 
     fun shutdown() {

