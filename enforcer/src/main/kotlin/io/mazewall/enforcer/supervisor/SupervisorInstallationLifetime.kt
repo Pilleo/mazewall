@@ -21,15 +21,17 @@ internal class SupervisorInstallationLifetime(
     /** A permanent kernel filter remains recorded, but failed setup never grants another lease. */
     @Synchronized
     fun fail(cause: Throwable) {
-        installationFailure = cause
+        if (installationFailure == null) installationFailure = cause
         runtime.close()
-        listener?.close()
+        val owned = listener
+        listener = null
+        owned?.close()
     }
 
     @Synchronized
     fun attach(resource: AutoCloseable) {
         check(listener == null) { "validation listener already attached" }
-        if (retired) resource.close() else listener = resource
+        if (retired || installationFailure != null) resource.close() else listener = resource
     }
 
     @Synchronized

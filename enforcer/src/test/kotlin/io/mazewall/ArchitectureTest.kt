@@ -539,6 +539,14 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.ffi.networking.SeccompInstallState" to setOf(
+                "io.mazewall.ffi.networking.SeccompInstallState\$Pending",
+                "io.mazewall.ffi.networking.SeccompInstallState\$Failed",
+            ),
+            "io.mazewall.ffi.networking.SeccompInstallEvent" to setOf(
+                "io.mazewall.ffi.networking.SeccompInstallEvent\$Advanced",
+                "io.mazewall.ffi.networking.SeccompInstallEvent\$Failed",
+            ),
             "io.mazewall.platform.seccomp.daemon.NotificationProgress" to setOf(
                 "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Await",
                 "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Ready",

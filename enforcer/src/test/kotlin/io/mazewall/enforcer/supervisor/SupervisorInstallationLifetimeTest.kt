@@ -7,6 +7,30 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 class SupervisorInstallationLifetimeTest {
+    @Test fun `failure closes a listener once even when owner later retires`() {
+        val closes = AtomicInteger()
+        val lifetime = SupervisorInstallationLifetime(Thread.currentThread(), SupervisorRuntimeContext())
+        lifetime.attach(AutoCloseable { closes.incrementAndGet() })
+        lifetime.fail(IllegalStateException("listener failed"))
+        lifetime.fail(IllegalStateException("second failure"))
+        lifetime.close()
+        assertEquals(1, closes.get())
+    }
+
+    @Test fun `listener attached after installation failure is immediately stopped`() {
+        val closes = AtomicInteger()
+        val lifetime = SupervisorInstallationLifetime(Thread.currentThread(), SupervisorRuntimeContext())
+        lifetime.fail(IllegalStateException("startup expired"))
+        try {
+            lifetime.attach(AutoCloseable { closes.incrementAndGet() })
+            assertEquals(1, closes.get())
+            assertFailsWith<IllegalStateException> { lifetime.requireReusable() }
+        } finally {
+            lifetime.close()
+        }
+        assertEquals(1, closes.get())
+    }
+
     @Test fun `reactor failure retires runtime and rejects another task lease`() {
         val release = CountDownLatch(1)
         val owner = Thread { release.await() }.apply { start() }

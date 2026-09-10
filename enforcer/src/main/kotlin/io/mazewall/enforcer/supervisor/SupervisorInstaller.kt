@@ -111,6 +111,7 @@ public object SupervisorInstaller {
                 lifetime.attach(AutoCloseable { listener.requestStop() })
                 listener.start(readyLatch)
             }
+            lifetime.requireReusable()
             ownedInstallations.add(lifetime)
             return session
         } catch (expectedInstallFailure: Exception) {
@@ -140,6 +141,7 @@ internal class JVMValidationListener(
     private val scopingPolicy: StacktraceScopingPolicy,
     private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
     private val onUnexpectedTermination: (Throwable) -> Unit = {},
+    private val launch: (Thread) -> Unit = Thread::start,
 ) {
     private val closed = AtomicBoolean(false)
     private val activeChannel = AtomicReference<SupervisorValidationChannel?>()
@@ -153,17 +155,30 @@ internal class JVMValidationListener(
         private const val SLOW_TOTAL_THRESHOLD_MS = 1000L
     }
 
+    @Suppress("TooGenericExceptionCaught") // The listener owns the socket on entry, including failed startup.
     fun start(readyLatch: CountDownLatch) {
-        val channel = SupervisorValidationChannel(socketFd)
-        activeChannel.set(channel)
-        if (closed.get()) channel.requestStop()
+        var ownedChannel: SupervisorValidationChannel? = null
+        try {
+            val channel = SupervisorValidationChannel(socketFd)
+            ownedChannel = channel
+            activeChannel.set(channel)
+            if (closed.get()) channel.requestStop()
 
-        Thread {
-            runValidationReactor(channel, readyLatch)
-        }.apply {
-            isDaemon = true
-            name = "supervisor-validation-listener-${socketFd.value}"
-            start()
+            launch(
+                Thread {
+                    runValidationReactor(channel, readyLatch)
+                }.apply {
+                    isDaemon = true
+                    name = "supervisor-validation-listener-${socketFd.value}"
+                },
+            )
+        } catch (failure: Throwable) {
+            try {
+                if (ownedChannel == null) LinuxNative.fileSystem.close(socketFd).getOrThrow("close failed validation startup") else ownedChannel.close()
+            } catch (cleanup: Throwable) {
+                if (cleanup !== failure) failure.addSuppressed(cleanup)
+            }
+            throw failure
         }
     }
 
@@ -191,10 +206,22 @@ internal class JVMValidationListener(
         } catch (expectedStop: IllegalStateException) {
             if (!closed.get()) failure = expectedStop
         } finally {
-            runtime.close()
-            channel.close()
-            if (!closed.get()) {
-                onUnexpectedTermination(failure ?: IllegalStateException("validation reactor exited unexpectedly"))
+            try {
+                try {
+                    runtime.close()
+                } finally {
+                    channel.close()
+                }
+            } finally {
+                try {
+                    if (!closed.get()) {
+                        onUnexpectedTermination(failure ?: IllegalStateException("validation reactor exited unexpectedly"))
+                    }
+                } finally {
+                    // An invalid ACK or startup failure releases the installer only after
+                    // the installation lifetime has observed the listener's failed health.
+                    readyLatch.countDown()
+                }
             }
         }
     }
@@ -271,7 +298,6 @@ internal class JVMValidationListener(
         dis: DataInputStream,
         readyLatch: CountDownLatch,
     ): Boolean {
-        try {
             // Read handshake ACK
             System.err.println("[JVM-VALIDATION] reading handshake ACK...")
             val ack = dis.readUnsignedByte()
@@ -284,9 +310,7 @@ internal class JVMValidationListener(
                 }
                 is SupervisorValidationDecodeResult.Arguments -> error("handshake decoder returned arguments")
             }
-        } finally {
-            readyLatch.countDown()
-        }
+        readyLatch.countDown()
         return true
     }
 

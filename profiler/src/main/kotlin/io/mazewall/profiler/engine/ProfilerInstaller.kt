@@ -33,7 +33,7 @@ internal object ProfilerInstaller {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean = false,
-        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { path -> ProfilerSocket.connectDescriptorWithRetry(path) },
+        connectWithRetry: ((String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>)? = null,
         startTraceListener: (
             FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             MutableList<TraceEvent>,
@@ -57,7 +57,7 @@ internal object ProfilerInstaller {
         stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         pathCache: MutableMap<String, Long>,
         processWide: Boolean = false,
-        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { ProfilerSocket.connectDescriptorWithRetry(it, context.native) },
+        connectWithRetry: ((String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>)? = null,
         installationGate: SeccompInstallationGate = SeccompInstallationGate.Direct,
         startTraceListener: (
             FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
@@ -88,7 +88,7 @@ internal class ProfilerInstallerSession(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
-    private val connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val connectWithRetry: ((String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>)?,
     private val startTraceListener: (
         FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         MutableList<TraceEvent>,
@@ -125,19 +125,33 @@ internal class ProfilerInstallerSession(
         val arch = Arch.current()
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
-        SupervisorSeccompNotifInstaller.installOwned(
-            native = context.native,
-            userNotifSupported = context.userNotifSupported,
-            socketPath = socketPath,
-            filter = filter,
-            processWide = processWide,
-            connectWithRetry = connectWithRetry,
-            sendDescriptor = { sockFd, fd -> ProfilerSocket.sendDescriptor(sockFd, fd, context.native) },
-            onFilterApplied = context.onFilterApplied,
-            installationGate = installationGate,
-        ) { socketFd, readyLatch ->
-            // Start background thread to listen for events from the daemon (uncontained)
+        val connected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit = { socketFd, readyLatch ->
             startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, readyLatch)
+        }
+        val connector = connectWithRetry
+        if (connector == null) {
+            SupervisorSeccompNotifInstaller.installOwned(
+                native = context.native,
+                userNotifSupported = context.userNotifSupported,
+                socketPath = socketPath,
+                filter = filter,
+                processWide = processWide,
+                onFilterApplied = context.onFilterApplied,
+                installationGate = installationGate,
+                onSocketConnected = connected,
+            )
+        } else {
+            SupervisorSeccompNotifInstaller.installOwned(
+                native = context.native,
+                userNotifSupported = context.userNotifSupported,
+                socketPath = socketPath,
+                filter = filter,
+                processWide = processWide,
+                connectWithRetry = connector,
+                onFilterApplied = context.onFilterApplied,
+                installationGate = installationGate,
+                onSocketConnected = connected,
+            )
         }
     }
 }

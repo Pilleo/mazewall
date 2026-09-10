@@ -86,7 +86,7 @@ class ProfilerInstallerTest {
         try {
             coordinatorEntered.awaitOrFail("coordinator entered connection attempt")
             awaitCondition(description = "installer waits for coordinator completion") {
-                thread.state == Thread.State.WAITING
+                thread.state == Thread.State.TIMED_WAITING
             }
             assertTrue(errorRef.get() == null, "installer cannot complete while the coordinator is blocked")
         } finally {

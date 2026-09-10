@@ -548,6 +548,32 @@ The store holds one outstanding authorization per parent process identity. It do
 
 ### Supervisor session and reply ownership
 
+Supervisor/profiler installation uses one 30-second monotonic handshake budget,
+covering the install notification, listener readiness and caller proceed waits.
+`mazewall.supervisor.installTimeoutMillis` may lower this budget to 1–30000 ms;
+invalid values fail before installation. Interruptions do not renew the deadline
+and the caller's interrupt status is restored. A reducer retains the last completed
+stage (prepared, filter applied, descriptor transferred, ready) when setup fails;
+a late successful kernel installation cannot erase a previous failure or its
+irreversible application. The permanent supervisor lifetime rejects later task
+registrations after listener failure, including failure observed during startup.
+
+Default installation IPC creates a private CLOEXEC socket with nonblocking connect,
+then restores its stream flags for the existing listener. SCM_RIGHTS sends use
+MSG_DONTWAIT and deadline-bounded writable polling, with at most eight send attempts.
+Permission failures are terminal. Supervisor and profiler production installers use
+this shared transport; injected connect/send callbacks are fault-injection seams
+and cannot provide the production deadline guarantee when they block arbitrarily.
+The local seccomp listener has one atomic owner: the failing caller may reclaim it
+until the coordinator claims it for send, after which only the coordinator closes
+it. A late connection is closed before callback transfer. Socket ownership passes
+to the listener callback on entry, including startup failure. Invalid supervisor
+acknowledgments publish failed listener health before releasing readiness, and
+cleanup failure cannot suppress that health notification. Neither a setup timeout
+nor listener closure removes an installed kernel filter. This installation change
+does not implement notification admission limits or isolate filesystem/proc work;
+the notification-processing limitations below still apply.
+
 The shared `SeccompSessionHandler` accepts one notification at a time and owns its
 30-second monotonic deadline. `SeccompNotifHandler.beginNotification` returns
 reactor-confined `NotificationWork`; every poll yields `Await` or a terminal reply

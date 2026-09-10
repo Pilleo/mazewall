@@ -75,7 +75,6 @@ internal class RealProfilerInstaller private constructor(
             stackTracesMap = stackTracesMap,
             pathCache = pathCache,
             processWide = processWide,
-            connectWithRetry = { ProfilerSocket.connectDescriptorWithRetry(it, native) },
             installationGate = installationGate,
             startTraceListener = startTraceListener,
         )
