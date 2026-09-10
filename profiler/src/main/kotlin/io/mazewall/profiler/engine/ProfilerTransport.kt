@@ -193,16 +193,20 @@ internal class NativeProfilerTransport(
         listener: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership>,
         resp: MemorySegment,
     ): SeccompReplyResult {
-        val res = io.mazewall.platform.seccomp.UserNotifReply
+        return when (
+            val outcome = io.mazewall.platform.seccomp.UserNotifReply
             .send(raw, listener, ConfinedSegment(resp))
-        if (res is LinuxNative.SyscallResult.Error) {
-            logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${res.errno}")
-            if (res.errno == NativeConstants.ENOENT) {
-                return SeccompReplyResult.NOTIFICATION_GONE
+        ) {
+            io.mazewall.platform.seccomp.UserNotifReplyResult.Sent -> SeccompReplyResult.SENT
+            io.mazewall.platform.seccomp.UserNotifReplyResult.NotificationGone -> {
+                logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${NativeConstants.ENOENT}")
+                SeccompReplyResult.NOTIFICATION_GONE
+            }
+            is io.mazewall.platform.seccomp.UserNotifReplyResult.Failed -> {
+                logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${outcome.errno}")
+                error("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${outcome.errno}")
             }
         }
-        res.getOrThrow("SECCOMP_IOCTL_NOTIF_SEND")
-        return SeccompReplyResult.SENT
     }
 
     override fun poll(

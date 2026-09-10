@@ -44,6 +44,9 @@ internal sealed interface PortalWorkerEvent {
     ) : PortalWorkerEvent
 
     data object FatalDispatchFailed : PortalWorkerEvent
+
+    /** Any fatal driver or transport failure ends this worker before it is propagated. */
+    data object FatalFailure : PortalWorkerEvent
 }
 
 internal sealed interface PortalWorkerTransition {
@@ -112,6 +115,7 @@ internal object PortalWorkerMachine {
             PortalWorkerEvent.ReplySucceeded,
             is PortalWorkerEvent.ReplyFailed,
             PortalWorkerEvent.FatalDispatchFailed,
+            PortalWorkerEvent.FatalFailure,
             -> violation("received a dispatch result without a request")
         }
 
@@ -123,6 +127,7 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.DispatchSucceeded -> reply(state.request, PortalKind.Response, event.payload)
             is PortalWorkerEvent.DispatchFailed -> reply(state.request, PortalKind.Error, event.message)
             PortalWorkerEvent.FatalDispatchFailed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
+            PortalWorkerEvent.FatalFailure -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             PortalWorkerEvent.PeerClosed -> PortalWorkerTransition.Close(PortalWorkerState.Stopped)
             is PortalWorkerEvent.FrameReceived -> violation("received a second frame while dispatching")
             PortalWorkerEvent.IdleTick -> PortalWorkerTransition.Await(state)
@@ -141,6 +146,7 @@ internal object PortalWorkerMachine {
             is PortalWorkerEvent.DispatchFailed,
             PortalWorkerEvent.IdleTick,
             PortalWorkerEvent.FatalDispatchFailed,
+            PortalWorkerEvent.FatalFailure,
             -> violation("received an event while sending a reply")
         }
 

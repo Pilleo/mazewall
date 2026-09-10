@@ -84,7 +84,28 @@ internal sealed interface UnixListenDaemonEffect {
 internal data class UnixListenDaemonTransition(
     val state: UnixListenDaemonState,
     val effects: List<UnixListenDaemonEffect> = emptyList(),
+    val outcome: UnixListenDaemonOutcome,
 )
+
+/** Makes retained and rejected daemon lifecycle events explicit to the engine. */
+internal sealed interface UnixListenDaemonOutcome {
+    data object Advanced : UnixListenDaemonOutcome
+
+    data class BenignObservation(
+        val name: String,
+    ) : UnixListenDaemonOutcome
+
+    data class ProtocolViolation(
+        val state: UnixListenDaemonState,
+        val event: UnixListenDaemonEvent,
+    ) : UnixListenDaemonOutcome
+
+    data class PostTerminalObservation(
+        val event: UnixListenDaemonEvent,
+    ) : UnixListenDaemonOutcome
+
+    data object Terminated : UnixListenDaemonOutcome
+}
 
 internal object UnixListenDaemonMachine {
     internal fun evaluate(
@@ -96,7 +117,7 @@ internal object UnixListenDaemonMachine {
             is UnixListenDaemonState.Listening -> listening(state, event)
             is UnixListenDaemonState.Active -> active(state, event)
             is UnixListenDaemonState.ShuttingDown -> shuttingDown(state, event)
-            is UnixListenDaemonState.Terminated -> stay(state)
+            is UnixListenDaemonState.Terminated -> postTerminal(event)
         }
     }
 
@@ -128,13 +149,15 @@ internal object UnixListenDaemonMachine {
             is UnixListenDaemonEvent.Bound -> UnixListenDaemonTransition(
                 UnixListenDaemonState.Listening(event.serverFd, event.socketPath),
                 listOf(UnixListenDaemonEffect.LogListening(event.socketPath, event.serverFd)),
+                UnixListenDaemonOutcome.Advanced,
             )
             is UnixListenDaemonEvent.ShutdownRequested -> UnixListenDaemonTransition(
                 UnixListenDaemonState.ShuttingDown,
                 listOf(UnixListenDaemonEffect.LogShutdown(event.source)),
+                UnixListenDaemonOutcome.Advanced,
             )
             is UnixListenDaemonEvent.AcceptLoopFinished -> terminate(event.serverFd)
-            is UnixListenDaemonEvent.ReadyAnnounced -> stay(UnixListenDaemonState.Uninitialized)
+            is UnixListenDaemonEvent.ReadyAnnounced -> violation(UnixListenDaemonState.Uninitialized, event)
         }
     }
 
@@ -146,13 +169,15 @@ internal object UnixListenDaemonMachine {
             is UnixListenDaemonEvent.ReadyAnnounced -> UnixListenDaemonTransition(
                 state.active(),
                 listOf(UnixListenDaemonEffect.PublishReady),
+                UnixListenDaemonOutcome.Advanced,
             )
             is UnixListenDaemonEvent.ShutdownRequested -> UnixListenDaemonTransition(
                 UnixListenDaemonState.ShuttingDown,
                 listOf(UnixListenDaemonEffect.LogShutdown(event.source)),
+                UnixListenDaemonOutcome.Advanced,
             )
             is UnixListenDaemonEvent.AcceptLoopFinished -> terminate(event.serverFd ?: state.serverFd)
-            is UnixListenDaemonEvent.Bound -> stay(state)
+            is UnixListenDaemonEvent.Bound -> violation(state, event)
         }
     }
 
@@ -164,9 +189,11 @@ internal object UnixListenDaemonMachine {
             is UnixListenDaemonEvent.ShutdownRequested -> UnixListenDaemonTransition(
                 UnixListenDaemonState.ShuttingDown,
                 listOf(UnixListenDaemonEffect.LogShutdown(event.source)),
+                UnixListenDaemonOutcome.Advanced,
             )
             is UnixListenDaemonEvent.AcceptLoopFinished -> terminate(event.serverFd ?: state.serverFd)
-            is UnixListenDaemonEvent.ReadyAnnounced, is UnixListenDaemonEvent.Bound -> stay(state)
+            is UnixListenDaemonEvent.ReadyAnnounced -> observe(state, "duplicate readiness announcement")
+            is UnixListenDaemonEvent.Bound -> violation(state, event)
         }
     }
 
@@ -176,10 +203,9 @@ internal object UnixListenDaemonMachine {
     ): UnixListenDaemonTransition {
         return when (event) {
             is UnixListenDaemonEvent.AcceptLoopFinished -> terminate(event.serverFd)
-            is UnixListenDaemonEvent.ShutdownRequested,
-            is UnixListenDaemonEvent.ReadyAnnounced,
-            is UnixListenDaemonEvent.Bound,
-            -> stay(state)
+            is UnixListenDaemonEvent.ShutdownRequested -> observe(state, "duplicate shutdown request")
+            is UnixListenDaemonEvent.ReadyAnnounced -> observe(state, "readiness announced during shutdown")
+            is UnixListenDaemonEvent.Bound -> violation(state, event)
         }
     }
 
@@ -193,8 +219,43 @@ internal object UnixListenDaemonMachine {
             add(UnixListenDaemonEffect.CloseTrackedConnections)
             add(UnixListenDaemonEffect.ClearConnectionTables)
         }
-        return UnixListenDaemonTransition(UnixListenDaemonState.Terminated, effects)
+        return UnixListenDaemonTransition(UnixListenDaemonState.Terminated, effects, UnixListenDaemonOutcome.Terminated)
     }
 
-    private fun stay(state: UnixListenDaemonState): UnixListenDaemonTransition = UnixListenDaemonTransition(state, emptyList())
+    private fun observe(
+        state: UnixListenDaemonState,
+        name: String,
+    ): UnixListenDaemonTransition = UnixListenDaemonTransition(state, emptyList(), UnixListenDaemonOutcome.BenignObservation(name))
+
+    private fun violation(
+        state: UnixListenDaemonState,
+        event: UnixListenDaemonEvent,
+    ): UnixListenDaemonTransition {
+        val rejected = (event as? UnixListenDaemonEvent.Bound)?.serverFd
+        val active = when (state) {
+            is UnixListenDaemonState.Listening -> state.serverFd
+            is UnixListenDaemonState.Active -> state.serverFd
+            is UnixListenDaemonState.Uninitialized,
+            is UnixListenDaemonState.ShuttingDown,
+            is UnixListenDaemonState.Terminated,
+            -> null
+        }
+        val transition = terminate(active)
+        val effects = buildList {
+            if (rejected != null && rejected != active) add(UnixListenDaemonEffect.CloseServer(rejected))
+            addAll(transition.effects)
+        }
+        return UnixListenDaemonTransition(transition.state, effects, UnixListenDaemonOutcome.ProtocolViolation(state, event))
+    }
+
+    private fun postTerminal(event: UnixListenDaemonEvent): UnixListenDaemonTransition {
+        val effects = when (event) {
+            is UnixListenDaemonEvent.Bound -> listOf(UnixListenDaemonEffect.CloseServer(event.serverFd))
+            is UnixListenDaemonEvent.ReadyAnnounced,
+            is UnixListenDaemonEvent.ShutdownRequested,
+            is UnixListenDaemonEvent.AcceptLoopFinished,
+            -> emptyList()
+        }
+        return UnixListenDaemonTransition(UnixListenDaemonState.Terminated, effects, UnixListenDaemonOutcome.PostTerminalObservation(event))
+    }
 }

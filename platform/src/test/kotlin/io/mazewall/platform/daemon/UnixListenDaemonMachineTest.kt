@@ -107,11 +107,11 @@ internal class UnixListenDaemonMachineTest {
                 },
             ),
             TransitionTestCase(
-                name = "terminated ignores bind",
+                name = "terminated closes a late bind descriptor",
                 initialState = UnixListenDaemonState.Terminated,
                 event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
                 expectedState = UnixListenDaemonState.Terminated,
-                expectedEffectTypes = emptyList(),
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
             ),
             TransitionTestCase(
                 name = "terminated ignores ready",
@@ -121,11 +121,16 @@ internal class UnixListenDaemonMachineTest {
                 expectedEffectTypes = emptyList(),
             ),
             TransitionTestCase(
-                name = "uninitialized cannot skip to active via ready",
+                name = "uninitialized readiness is a protocol violation that terminates",
                 initialState = UnixListenDaemonState.Uninitialized,
                 event = UnixListenDaemonEvent.ReadyAnnounced,
-                expectedState = UnixListenDaemonState.Uninitialized,
-                expectedEffectTypes = emptyList(),
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(
+                    UnixListenDaemonEffect.StopConnectionWorkers::class,
+                    UnixListenDaemonEffect.AwaitConnectionWorkers::class,
+                    UnixListenDaemonEffect.CloseTrackedConnections::class,
+                    UnixListenDaemonEffect.ClearConnectionTables::class,
+                ),
             ),
             TransitionTestCase(
                 name = "uninitialized shutdown still reaches shutting down",
@@ -154,10 +159,11 @@ internal class UnixListenDaemonMachineTest {
                 expectedEffectTypes = listOf(UnixListenDaemonEffect.LogShutdown::class),
             ),
             TransitionTestCase(
-                name = "listening ignores a duplicate bind",
+                name = "listening duplicate bind terminates and closes the server",
                 initialState = listening,
                 event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
-                expectedState = listening,
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
             ),
             TransitionTestCase(
                 name = "active ignores a duplicate ready announcement",
@@ -166,10 +172,11 @@ internal class UnixListenDaemonMachineTest {
                 expectedState = active,
             ),
             TransitionTestCase(
-                name = "active ignores a duplicate bind",
+                name = "active duplicate bind terminates and closes the server",
                 initialState = active,
                 event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
-                expectedState = active,
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
             ),
             TransitionTestCase(
                 name = "shutting down ignores a ready announcement",
@@ -178,10 +185,11 @@ internal class UnixListenDaemonMachineTest {
                 expectedState = UnixListenDaemonState.ShuttingDown,
             ),
             TransitionTestCase(
-                name = "shutting down ignores a duplicate bind",
+                name = "shutting down duplicate bind terminates and closes the delivered server",
                 initialState = UnixListenDaemonState.ShuttingDown,
                 event = UnixListenDaemonEvent.Bound(server, "/tmp/mw.sock"),
-                expectedState = UnixListenDaemonState.ShuttingDown,
+                expectedState = UnixListenDaemonState.Terminated,
+                expectedEffectTypes = listOf(UnixListenDaemonEffect.CloseServer::class),
             ),
             TransitionTestCase(
                 name = "terminated ignores shutdown requests",
@@ -234,5 +242,16 @@ internal class UnixListenDaemonMachineTest {
         val ref = AtomicReference<UnixListenDaemonState>(shutting)
         UnixListenDaemonMachine.apply(ref, UnixListenDaemonEvent.ShutdownRequested("again")) { }
         assertSame(shutting, ref.get())
+    }
+
+    @Test
+    fun `retained, invalid, and terminal observations have distinct outcomes`() {
+        val duplicateReady = UnixListenDaemonMachine.evaluate(active, UnixListenDaemonEvent.ReadyAnnounced)
+        val invalidReady = UnixListenDaemonMachine.evaluate(UnixListenDaemonState.Uninitialized, UnixListenDaemonEvent.ReadyAnnounced)
+        val lateReady = UnixListenDaemonMachine.evaluate(UnixListenDaemonState.Terminated, UnixListenDaemonEvent.ReadyAnnounced)
+
+        assertTrue(duplicateReady.outcome is UnixListenDaemonOutcome.BenignObservation)
+        assertTrue(invalidReady.outcome is UnixListenDaemonOutcome.ProtocolViolation)
+        assertTrue(lateReady.outcome is UnixListenDaemonOutcome.PostTerminalObservation)
     }
 }

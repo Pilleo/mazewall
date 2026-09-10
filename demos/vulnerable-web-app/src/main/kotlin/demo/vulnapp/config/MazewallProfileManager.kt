@@ -30,27 +30,28 @@ internal class MazewallProfileManager private constructor(
         return executorOwner.own(wrapper)
     }
 
-    fun generateSbob(): BillOfBehavior = wrappers.fold(BillOfBehavior()) { merged, wrapper ->
+    fun generateSbob(): BillOfBehavior =
+        wrappers.fold(BillOfBehavior()) { merged, wrapper ->
         merged + wrapper.compileBillOfBehavior()
     }
 
     fun resolveSbobPath(configuredPath: String?): Path {
-        if (!configuredPath.isNullOrBlank() && configuredPath != "/app/sbob.json") return Paths.get(configuredPath)
+        if (!configuredPath.isNullOrBlank()) return Paths.get(configuredPath)
         var current = java.io.File(".").absoluteFile
         while (current.parentFile != null) {
             if (java.io.File(current, "settings.gradle.kts").exists()) {
-                return java.io.File(current, "demos/output/sbob.json").toPath().toAbsolutePath()
+                return java.io
+                    .File(current, "demos/output/sbob.json")
+                    .toPath()
+                    .toAbsolutePath()
             }
             current = current.parentFile
         }
-        val containerOutput = java.io.File("/app/output")
-        if (containerOutput.exists() && containerOutput.canWrite()) return containerOutput.toPath().resolve("sbob.json")
-        val containerApp = java.io.File("/app")
-        if (containerApp.exists() && containerApp.canWrite()) return containerApp.toPath().resolve("sbob.json")
         return Paths.get("sbob.json").toAbsolutePath()
     }
 
     @Synchronized
+    @Suppress("TooGenericExceptionCaught") // Every recoverable profiler shutdown failure must enter integrity evidence.
     internal fun publish(path: Path): ExecutorDrain {
         check(!published.get()) { "profile evidence was already published" }
         var drain = executorOwner.stopAdmissionAndDrain()
@@ -69,6 +70,7 @@ internal class MazewallProfileManager private constructor(
     }
 
     @PreDestroy
+    @Suppress("TooGenericExceptionCaught") // Publication failures are logged with their target and propagated unchanged.
     fun onShutdown() {
         if (wrappers.isEmpty() || published.get()) return
         val path = resolveSbobPath(System.getProperty("mazewall.sbob.path"))

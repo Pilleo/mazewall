@@ -41,7 +41,7 @@ class ProcessBrokerIntegrationTest {
         val startup = CompletableFuture.runAsync { broker.start() }
         assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
 
-        broker.close()
+        assertThrows(IncompleteBrokerCleanupException::class.java) { broker.close() }
 
         assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
         assertEquals(1, broker.provisionalWorkers(), "active acquisition must remain registered after join timeout")
@@ -73,15 +73,23 @@ class ProcessBrokerIntegrationTest {
         val startup = CompletableFuture.runAsync { broker.start() }
         assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
         val closeReturned = CountDownLatch(1)
+        val closeFailure = java.util.concurrent.atomic
+            .AtomicReference<Throwable?>()
         val closer = Thread.ofPlatform().start {
-            broker.close()
-            closeReturned.countDown()
+            try {
+                broker.close()
+            } catch (failure: Throwable) {
+                closeFailure.set(failure)
+            } finally {
+                closeReturned.countDown()
+            }
         }
         awaitCondition(java.time.Duration.ofSeconds(2), "close waiting for startup owner") {
             closer.state in setOf(Thread.State.WAITING, Thread.State.TIMED_WAITING, Thread.State.BLOCKED)
         }
         closer.interrupt()
         assertTrue(closeReturned.await(2, TimeUnit.SECONDS))
+        assertTrue(closeFailure.get() is IncompleteBrokerCleanupException)
 
         assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
         assertEquals(1, broker.provisionalWorkers())

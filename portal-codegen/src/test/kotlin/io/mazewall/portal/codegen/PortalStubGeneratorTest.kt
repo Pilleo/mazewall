@@ -3,6 +3,7 @@ package io.mazewall.portal.codegen
 import io.mazewall.portal.codegen.testapi.BadStream
 import io.mazewall.portal.codegen.testapi.InheritedService
 import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
+import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
 import io.mazewall.portal.codegen.testapi.MethodIdShadowService
 import io.mazewall.portal.codegen.testapi.Overloads
 import io.mazewall.portal.codegen.testapi.SampleFd
@@ -168,6 +169,21 @@ class PortalStubGeneratorTest {
         assertTrue(stub.contains(".count)"), stub)
         assertFalse(stub.contains(".getName()"), stub)
         assertFalse(stub.contains(".getCount()"), stub)
+    }
+
+    @Test
+    fun `Kotlin JVM records use record component accessors`() {
+        val method = PortalServiceSchema.compile(KotlinJvmRecordDtoService::class.java).methods.single()
+        val kind = method.parameters.single().kind as BoundaryTypes.Kind.RecordT
+        assertTrue(kind.components.all { it.reader is BoundaryTypes.Kind.Reader.Method }, kind.toString())
+
+        val stub =
+            PortalStubGenerator
+                .generate(KotlinJvmRecordDtoService::class.java)
+                .single { it.name == "KotlinJvmRecordDtoServicePortalStub" }
+                .toString()
+        assertTrue(stub.contains(".name()"), stub)
+        assertTrue(stub.contains(".count()"), stub)
     }
 
     @Test

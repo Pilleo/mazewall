@@ -31,16 +31,38 @@ internal sealed interface SeccompConnectionEffect {
     public data object LogAck : SeccompConnectionEffect
 
     public data object RunSession : SeccompConnectionEffect
+
+    /** A descriptor delivered outside the handshake is still owned and must be closed. */
+    public data class CloseRejectedListener(
+        val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+    ) : SeccompConnectionEffect
+}
+
+/** Records why a connection did not advance; callers must not silently ignore protocol violations. */
+internal sealed interface SeccompConnectionOutcome {
+    public data object Advanced : SeccompConnectionOutcome
+
+    /** A timeout before the handshake starts; retain the accepted socket and poll again. */
+    public data object IdlePoll : SeccompConnectionOutcome
+
+    public data class ProtocolViolation(
+        val state: SeccompConnection,
+        val event: SeccompConnectionEvent,
+    ) : SeccompConnectionOutcome
+
+    public data object Terminated : SeccompConnectionOutcome
 }
 
 internal data class SeccompConnectionTransition(
     val connection: SeccompConnection?,
     val effects: List<SeccompConnectionEffect> = emptyList(),
+    val outcome: SeccompConnectionOutcome,
 )
 
 /**
  * Pure handshake matrix: [SeccompConnection.Accepted] → [SeccompConnection.FdAttached] →
- * [SeccompConnection.Active] → end. Illegal events stay put with no effects.
+ * [SeccompConnection.Active] → end. Only an idle pre-handshake poll is benign; every other
+ * out-of-order event terminates the connection as a protocol violation.
  */
 internal object SeccompConnectionMachine {
     internal fun evaluate(
@@ -62,15 +84,16 @@ internal object SeccompConnectionMachine {
             is SeccompConnectionEvent.ListenerReceived -> SeccompConnectionTransition(
                 state.attachFd(event.listenerFd),
                 listOf(SeccompConnectionEffect.RegisterListener(event.listenerFd)),
+                SeccompConnectionOutcome.Advanced,
             )
-            is SeccompConnectionEvent.PollIdle -> stay(state)
+            is SeccompConnectionEvent.PollIdle -> idle(state)
             is SeccompConnectionEvent.RecvFailed,
             is SeccompConnectionEvent.PollFailed,
             -> end()
             is SeccompConnectionEvent.AckSucceeded,
             is SeccompConnectionEvent.AckFailed,
             is SeccompConnectionEvent.SessionFinished,
-            -> stay(state)
+            -> violation(state, event)
         }
     }
 
@@ -82,6 +105,7 @@ internal object SeccompConnectionMachine {
             is SeccompConnectionEvent.AckSucceeded -> SeccompConnectionTransition(
                 state.handshakeComplete(),
                 listOf(SeccompConnectionEffect.LogAck),
+                SeccompConnectionOutcome.Advanced,
             )
             is SeccompConnectionEvent.AckFailed -> end()
             is SeccompConnectionEvent.ListenerReceived,
@@ -89,7 +113,7 @@ internal object SeccompConnectionMachine {
             is SeccompConnectionEvent.PollIdle,
             is SeccompConnectionEvent.PollFailed,
             is SeccompConnectionEvent.SessionFinished,
-            -> stay(state)
+            -> violation(state, event)
         }
     }
 
@@ -101,6 +125,7 @@ internal object SeccompConnectionMachine {
             is SeccompConnectionEvent.SessionFinished -> SeccompConnectionTransition(
                 null,
                 listOf(SeccompConnectionEffect.RunSession),
+                SeccompConnectionOutcome.Terminated,
             )
             is SeccompConnectionEvent.ListenerReceived,
             is SeccompConnectionEvent.RecvFailed,
@@ -108,11 +133,28 @@ internal object SeccompConnectionMachine {
             is SeccompConnectionEvent.PollFailed,
             is SeccompConnectionEvent.AckSucceeded,
             is SeccompConnectionEvent.AckFailed,
-            -> stay(state)
+            -> violation(state, event)
         }
     }
 
-    private fun stay(state: SeccompConnection) = SeccompConnectionTransition(state)
+    private fun idle(state: SeccompConnection) = SeccompConnectionTransition(state, outcome = SeccompConnectionOutcome.IdlePoll)
 
-    private fun end() = SeccompConnectionTransition(null)
+    private fun violation(
+        state: SeccompConnection,
+        event: SeccompConnectionEvent,
+    ): SeccompConnectionTransition {
+        val effects = when (event) {
+            is SeccompConnectionEvent.ListenerReceived -> listOf(SeccompConnectionEffect.CloseRejectedListener(event.listenerFd))
+            is SeccompConnectionEvent.RecvFailed,
+            is SeccompConnectionEvent.PollIdle,
+            is SeccompConnectionEvent.PollFailed,
+            is SeccompConnectionEvent.AckSucceeded,
+            is SeccompConnectionEvent.AckFailed,
+            is SeccompConnectionEvent.SessionFinished,
+            -> emptyList()
+        }
+        return SeccompConnectionTransition(null, effects, SeccompConnectionOutcome.ProtocolViolation(state, event))
+    }
+
+    private fun end() = SeccompConnectionTransition(null, outcome = SeccompConnectionOutcome.Terminated)
 }

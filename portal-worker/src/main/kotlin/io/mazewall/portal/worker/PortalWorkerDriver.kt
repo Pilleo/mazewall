@@ -52,18 +52,24 @@ internal class PortalWorkerDriver(
     }
 
     private fun serve() {
-        serve@ while (state != PortalWorkerState.Stopped) {
-            when (val received = transport.receive()) {
-                PortalWorkerReceive.Idle -> state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
-                PortalWorkerReceive.PeerClosed -> {
-                    state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
-                    break@serve
+        try {
+            serve@ while (state != PortalWorkerState.Stopped) {
+                when (val received = transport.receive()) {
+                    PortalWorkerReceive.Idle -> state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.IdleTick).state
+                    PortalWorkerReceive.PeerClosed -> {
+                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
+                        break@serve
+                    }
+                    is PortalWorkerReceive.Failure -> {
+                        state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
+                        throw received.cause
+                    }
+                    is PortalWorkerReceive.Frame -> handle(received)
                 }
-                is PortalWorkerReceive.Failure -> {
-                    state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.PeerClosed).state
-                    throw received.cause
-                }
-                is PortalWorkerReceive.Frame -> handle(received)
+            }
+        } finally {
+            if (state != PortalWorkerState.Stopped) {
+                state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalFailure).state
             }
         }
     }

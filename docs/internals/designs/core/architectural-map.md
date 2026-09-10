@@ -2,6 +2,8 @@
 
 This document provides a high-level "Knowledge Graph" of the `mazewall` system. It is designed to help AI agents and developers understand the distributed nature of the profiler, the immutable boundaries of the enforcer, and the critical IPC loops that connect them.
 
+The completed post-review hardening work has a compact [finding-to-test-to-commit evidence index](post-review-hardening-evidence.md) for reviewers.
+
 ## 1. System Component Overview
 
 | Component | Responsibility | Process/Thread | Lifecycle |

@@ -68,14 +68,26 @@ public sealed interface ProfileObservation {
         val name: String,
         args: List<Long> = emptyList(),
         paths: List<String> = emptyList(),
-        val openFlags: Long? = null,
+        openFlags: Long? = null,
         /** Tier E semantic context; null for unattributed observations. */
         val contextId: Long? = null,
         public val openFlagsEvidence: OpenFlagsEvidence? = openFlags?.let(OpenFlagsEvidence::Complete),
     ) : ProfileObservation {
         public val args: List<Long> = java.util.List.copyOf(args)
+
+        /**
+         * Legacy numeric projection. It is available only when [openFlagsEvidence] is complete;
+         * callers that need to reason about unresolved flags must use the typed evidence.
+         */
+        public val openFlags: Long? = (openFlagsEvidence as? OpenFlagsEvidence.Complete)?.value ?: openFlags?.takeIf { openFlagsEvidence == null }
         override val pathResolution: PathResolution = paths.resolutionFor("syscall:$name") ?: legacyPathResolution(name, paths)
         override val paths: List<String> = java.util.List.copyOf(pathResolution.paths)
+
+        init {
+            require(openFlags == null || openFlagsEvidence == null || openFlags == openFlagsEvidence.value) {
+                "Legacy openFlags must agree with typed openFlagsEvidence"
+            }
+        }
 
         internal fun withPathResolution(resolution: PathResolution): Syscall =
             Syscall(correlation, source, name, args, ObservationPaths("syscall:$name", resolution), openFlags, contextId, openFlagsEvidence)

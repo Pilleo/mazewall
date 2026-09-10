@@ -83,8 +83,10 @@ untrusted network.
 curl -fsS -H 'X-Api-Version: 1.0' http://127.0.0.1:8081/admin/log
 ```
 
-The application itself defaults `server.address` to `127.0.0.1`, and all compose host bindings
-also use `127.0.0.1`; the deliberately vulnerable services are not exposed on every host interface.
+Direct local runs default `server.address` to `127.0.0.1`. Compose overrides the address inside
+each container to `0.0.0.0` so Docker/Podman port forwarding can reach Tomcat, while every
+published host port remains bound to `127.0.0.1`; the deliberately vulnerable services are not
+exposed on every host interface. Each compose service also has a loopback health check.
 
 ### Profiling lifecycle
 
@@ -99,11 +101,20 @@ then snapshots profiler evidence. Each publication writes the SBoB, stack dictio
 digest-backed integrity record into one immutable generation directory. Only after all three
 components exist does one atomic replacement make `sbob.json` point to that generation. Readers
 resolve and validate that pointer, so an interrupted publication cannot combine components from
-different generations or advertise an incomplete generation as current. The integrity record
+different generations. Incomplete generations remain readable for diagnostics but enforcement
+rejects them by default. The integrity record
 contains `complete`, every drain/cleanup failure reason, and SHA-256 digests for both evidence
 components; timeout and interruption are never overwritten by a later cleanup failure. Legacy
 direct SBoB files remain readable by enforcement. Configure the drain deadline with
 `-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
+
+The unsafe override `-Dmazewall.allow-incomplete-profile-enforcement=true` permits enforcement
+from incomplete evidence only when an operator explicitly accepts the missing-observation risk.
+Profiling and enforcement are mutually exclusive startup modes: setting both
+`mazewall.profile=true` and `mazewall.enabled=true` aborts startup.
+
+The container image creates `/app/data` and `/app/uploads` before startup. This keeps Landlock
+rules anchored to those exact directories instead of falling back to the broader `/app` parent.
 
 ## How It Works
 

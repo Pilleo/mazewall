@@ -2,6 +2,9 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.spring") version "2.4.0"
     id("org.springframework.boot") version "3.4.0"
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.spotbugs)
     id("jacoco")
 }
 
@@ -14,11 +17,6 @@ java {
 kotlin {
     jvmToolchain(25)
 }
-
-
-
-
-
 
 configurations.all {
     exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
@@ -68,16 +66,51 @@ tasks.withType<Test> {
     dependsOn(tasks.named("bootJar"))
 }
 
-// Disable static analysis for this deliberately vulnerable demo app
+// Analyze the application lifecycle and containment configuration while excluding only
+// the controllers and services that intentionally retain vulnerable demo behavior.
+detekt {
+    source.setFrom(
+        files(
+            "src/main/kotlin/demo/vulnapp/config",
+            "src/main/kotlin/demo/vulnapp/VulnAppApplication.kt",
+        ),
+    )
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Error
+}
+
+ktlint {
+    version.set("1.7.0")
+    filter {
+        exclude("**/demo/vulnapp/controller/**")
+        exclude("**/demo/vulnapp/service/**")
+    }
+}
+
+tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+    setSource(
+        files(
+            "src/main/kotlin/demo/vulnapp/config",
+            "src/main/kotlin/demo/vulnapp/VulnAppApplication.kt",
+        ),
+    )
+}
+
+spotbugs {
+    ignoreFailures.set(false)
+    onlyAnalyze.set(listOf("demo.vulnapp.config.*", "demo.vulnapp.VulnAppApplication*"))
+    excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
+}
 
 tasks.configureEach {
     if (name.contains("detekt", ignoreCase = true) ||
-        name.contains("spotbugs", ignoreCase = true) ||
-        name.contains("ktlint", ignoreCase = true)
+        name.contains("spotbugs", ignoreCase = true)
     ) {
-        enabled = false
+        enabled = true
     }
 }
+
+tasks.matching { it.name.startsWith("spotbugsTest") }.configureEach { enabled = false }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     mainClass.set("demo.vulnapp.VulnAppApplicationKt")
@@ -87,10 +120,11 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
 val extractJacocoAgent by tasks.registering(Copy::class) {
     // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
     // Extract it once so bootRun can reference it as a -javaagent.
-    val agentWrapperJar = configurations["jacocoAgent"]
-        .resolvedConfiguration.resolvedArtifacts
-        .first { it.name == "org.jacoco.agent" }
-        .file
+    val agentWrapperJar =
+        configurations["jacocoAgent"]
+            .resolvedConfiguration.resolvedArtifacts
+            .first { it.name == "org.jacoco.agent" }
+            .file
     from(zipTree(agentWrapperJar)) {
         include("jacocoagent.jar")
     }
@@ -115,12 +149,10 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
             "-javaagent:${agentFile.absolutePath}" +
                 "=destfile=${execFile.absolutePath}" +
                 ",includes=demo.vulnapp.*" +
-                ",output=file"
+                ",output=file",
         )
     }
 }
-
-
 
 jacoco {
     toolVersion = "0.8.14"

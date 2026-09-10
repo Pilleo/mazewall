@@ -6,8 +6,32 @@ import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.TimeUnit
+import kotlin.test.assertFailsWith
 
 class PoolSocketRouteExecutorTest {
+    @Test
+    fun `invalid accepted helper result closes descriptor when effect construction fails`() {
+        val fixture = SupervisorBoundaryFixture()
+        val accepted = SupervisorOwnedFd(FileDescriptor.replace<FileDescriptorRole.Generic>(52600), fixture.engine.fileSystem)
+        SocketHelperPool(1, 1) {
+            object : SocketHelper {
+                override fun execute(
+                    operation: SocketOperation,
+                    socket: SupervisorOwnedFd,
+                ): SocketHelperResult = SocketHelperResult.Accepted(accepted, byteArrayOf(2, 0), 3)
+
+                override fun close() = Unit
+            }
+        }.use { pool ->
+            PoolSocketRouteExecutor(TraceeDescriptorImporter(fixture.engine) { it }, pool.session()).use { routes ->
+                assertFailsWith<java.util.concurrent.ExecutionException> {
+                    routes.accept(AcceptRequest(Tid(Int.MAX_VALUE), 55, 1, 1, 0)).get(5, TimeUnit.SECONDS)
+                }
+            }
+        }
+        assertEquals(listOf(51005, 51006, 52600), fixture.closed)
+    }
+
     @Test
     fun `accept completion defers tracee memory writes until terminal reply authority`() {
         val fixture = SupervisorBoundaryFixture()

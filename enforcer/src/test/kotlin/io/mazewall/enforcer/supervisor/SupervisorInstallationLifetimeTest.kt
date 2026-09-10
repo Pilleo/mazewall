@@ -7,6 +7,23 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 class SupervisorInstallationLifetimeTest {
+    @Test fun `reactor failure retires runtime and rejects another task lease`() {
+        val release = CountDownLatch(1)
+        val owner = Thread { release.await() }.apply { start() }
+        val runtime = SupervisorRuntimeContext()
+        val lifetime = SupervisorInstallationLifetime(owner, runtime)
+        try {
+            lifetime.fail(IllegalStateException("validation reactor exited"))
+
+            assertFailsWith<IllegalStateException> { lifetime.requireReusable() }
+            assertFailsWith<IllegalStateException> { runtime.register(Tid(51), owner) }
+        } finally {
+            release.countDown()
+            lifetime.close()
+            owner.join(5_000)
+        }
+    }
+
     @Test fun `owner termination retires runtime and listener exactly once`() {
         val release = CountDownLatch(1)
         val stopped = CountDownLatch(1)

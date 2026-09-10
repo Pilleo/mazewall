@@ -45,6 +45,12 @@ internal sealed interface PortalBrokerCallEffect {
         val reason: String,
     ) : PortalBrokerCallEffect
 
+    /** A late event after the call was already resolved; it is never an ordinary empty result. */
+    data class PostTerminalObservation(
+        val state: PortalBrokerCallState,
+        val event: PortalBrokerCallEvent,
+    ) : PortalBrokerCallEffect
+
     data object None : PortalBrokerCallEffect
 }
 
@@ -71,7 +77,7 @@ internal object PortalBrokerCallMachine {
         }
         PortalBrokerCallState.Completed,
         PortalBrokerCallState.Failed,
-        -> PortalBrokerCallTransition(state, PortalBrokerCallEffect.None)
+        -> PortalBrokerCallTransition(state, PortalBrokerCallEffect.PostTerminalObservation(state, event))
     }
 
     private fun evaluateReply(

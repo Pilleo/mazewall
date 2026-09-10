@@ -21,7 +21,6 @@ import java.lang.foreign.Arena
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.file.Files
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.Callable
@@ -46,13 +45,8 @@ internal fun runProfileAndEnforce(): DemoReport {
 
     // 1. Setup paths and mock server
     // (Mazewall now automatically canonicalizes symlinks, but we use canonicalFile for demo hygiene)
-    val fixtureRoot = Files.createTempDirectory("mazewall-profile-demo-").toFile().canonicalFile
-    fixtureRoot.setReadable(false, false)
-    fixtureRoot.setWritable(false, false)
-    fixtureRoot.setExecutable(false, false)
-    fixtureRoot.setReadable(true, true)
-    fixtureRoot.setWritable(true, true)
-    fixtureRoot.setExecutable(true, true)
+    val fixture = DemoFixture.create("profile-enforce")
+    val fixtureRoot = fixture.root.toFile().canonicalFile
     val configFile = File(fixtureRoot, "app_config.json").canonicalFile
 
     var baseExecutor: java.util.concurrent.ExecutorService? = null
@@ -352,7 +346,7 @@ fs.open(
         containedExecutor?.shutdown()
         baseExecutor?.shutdown()
         serverSocket?.close()
-        fixtureRoot.deleteRecursively()
+        fixture.close()
     }
 
     val report = DemoReport(outcomes.toList())
@@ -373,10 +367,5 @@ fs.open(
 }
 
 private fun classifyFailure(failure: Throwable): ScenarioOutcome {
-    val diagnostic = ContainmentViolationDetector.diagnose(failure)
-    return if (diagnostic != null) {
-        ScenarioOutcome.Denied(diagnostic.evidence.name)
-    } else {
-        ScenarioOutcome.InfrastructureFailure(failure)
-    }
+    return classifyContainmentFailure(failure)
 }

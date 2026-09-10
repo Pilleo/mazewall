@@ -35,11 +35,11 @@ internal class ProfilerSessionMachineTest {
             override fun toString(): String = name
         }
 
-        data class IgnoredEventCase(
+        data class ProtocolViolationCase(
             val initialState: ProfilerState,
             val event: ProfilerSessionEvent,
         ) {
-            override fun toString(): String = "${initialState::class.simpleName} ignores ${event::class.simpleName}"
+            override fun toString(): String = "${initialState::class.simpleName} rejects ${event::class.simpleName}"
         }
 
         @JvmStatic
@@ -101,7 +101,7 @@ internal class ProfilerSessionMachineTest {
         )
 
         @JvmStatic
-        fun ignoredSessionEvents(): Stream<IgnoredEventCase> {
+        fun illegalSessionEvents(): Stream<ProtocolViolationCase> {
             val states = listOf(
                 ProfilerState.Connected(socket),
                 ProfilerState.HandshakeAck(socket, listener),
@@ -109,7 +109,6 @@ internal class ProfilerSessionMachineTest {
                 notified,
                 waiting,
                 ProfilerState.PassThrough(socket, listener),
-                ProfilerState.Terminated(socket, listener),
             )
             val events = listOf(
                 ProfilerSessionEvent.NotificationReceived(9L, event),
@@ -118,6 +117,7 @@ internal class ProfilerSessionMachineTest {
                 ProfilerSessionEvent.HandshakeFailed,
                 ProfilerSessionEvent.PassedThrough,
                 ProfilerSessionEvent.NoisePathBypassed,
+                ProfilerSessionEvent.PostTerminalObserved,
             )
             val handled = setOf(
                 ProfilerState.ActiveSession::class to ProfilerSessionEvent.NotificationReceived::class,
@@ -132,9 +132,12 @@ internal class ProfilerSessionMachineTest {
                 .flatMap { state ->
                 events
                     .filter { event -> (state::class to event::class) !in handled }
-                    .map { event -> IgnoredEventCase(state, event) }
+                    .map { event -> ProtocolViolationCase(state, event) }
             }.stream()
         }
+
+        @JvmStatic
+        fun terminalStates(): Stream<ProfilerState.Terminated> = Stream.of(ProfilerState.Terminated(socket, listener))
     }
 
     @ParameterizedTest(name = "{0}")
@@ -150,11 +153,19 @@ internal class ProfilerSessionMachineTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("ignoredSessionEvents")
-    fun `verify non-applicable profiler events have no effect`(testCase: IgnoredEventCase) {
+    @MethodSource("illegalSessionEvents")
+    fun `verify non-applicable profiler events terminate as protocol violations`(testCase: ProtocolViolationCase) {
         val transition = ProfilerSessionMachine.evaluate(testCase.initialState, testCase.event)
-        assertEquals(testCase.initialState, transition.state)
-        assertEquals(false, transition.terminate)
-        assertEquals(false, transition.passThrough)
+        assertTrue(transition.state is ProfilerState.Terminated)
+        assertTrue(transition.terminate)
+        assertTrue(transition.protocolViolation)
+    }
+
+    @ParameterizedTest
+    @MethodSource("terminalStates")
+    fun `post terminal observation is explicitly benign`(state: ProfilerState.Terminated) {
+        val transition = ProfilerSessionMachine.evaluate(state, ProfilerSessionEvent.PostTerminalObserved)
+        assertEquals(state, transition.state)
+        assertEquals(false, transition.protocolViolation)
     }
 }

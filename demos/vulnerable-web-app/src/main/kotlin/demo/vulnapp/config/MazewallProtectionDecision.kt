@@ -9,10 +9,19 @@ import org.springframework.core.env.MapPropertySource
 import org.springframework.core.env.PropertyResolver
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal data class MazewallProtectionDecision(val enabled: Boolean) {
+internal data class MazewallProtectionDecision(
+    val enabled: Boolean,
+    val profiling: Boolean,
+) {
     companion object {
-        fun resolve(properties: PropertyResolver): MazewallProtectionDecision =
-            MazewallProtectionDecision(properties.getProperty("mazewall.enabled", Boolean::class.java, false))
+        fun resolve(properties: PropertyResolver): MazewallProtectionDecision {
+            val enabled = properties.getProperty("mazewall.enabled", Boolean::class.java, false)
+            val profiling = properties.getProperty("mazewall.profile", Boolean::class.java, false)
+            require(!(enabled && profiling)) {
+                "mazewall.enabled and mazewall.profile cannot both be enabled"
+            }
+            return MazewallProtectionDecision(enabled, profiling)
+        }
     }
 }
 
@@ -20,7 +29,11 @@ internal data class MazewallProtectionDecision(val enabled: Boolean) {
 internal class MazewallProtectionBootstrap(
     private val installBaseline: () -> Unit = {
         ContainedExecutors.installOnProcess(
-            Policy.builder().base(Policy.NO_EXEC).allowMmapExec().build(),
+            Policy
+                .builder()
+                .base(Policy.NO_EXEC)
+                .allowMmapExec()
+                .build(),
         )
     },
 ) : ApplicationListener<ApplicationEnvironmentPreparedEvent> {

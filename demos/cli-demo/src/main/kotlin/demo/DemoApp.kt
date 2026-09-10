@@ -70,12 +70,21 @@ internal fun runSafe(): ScenarioResult = DemoFixture.create("safe").use { fixtur
                 ExpectedResult.DENIED,
                 ScenarioOutcome.InfrastructureFailure(failure),
             )
-        ScenarioOutcome.Denied(diagnostic.evidence.name)
+        classifyContainmentFailure(failure)
     } catch (failure: Throwable) {
         ScenarioOutcome.InfrastructureFailure(failure)
     }
     val outcome = if (fixture.marker.exists()) ScenarioOutcome.Completed("attack created its marker") else observed
     ScenarioResult("protected exploit", ExpectedResult.DENIED, outcome)
+}
+
+internal fun classifyContainmentFailure(failure: Throwable): ScenarioOutcome {
+    val diagnostic = ContainmentViolationDetector.diagnose(failure)
+    return if (diagnostic?.evidence == io.mazewall.enforcer.api.ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL) {
+        ScenarioOutcome.Denied(diagnostic.evidence.name)
+    } else {
+        ScenarioOutcome.InfrastructureFailure(failure)
+    }
 }
 
 private fun printHelp() {

@@ -27,6 +27,10 @@ internal sealed interface SupervisorReplyEffect {
         address: ByteArray,
         val length: Int,
     ) : SupervisorReplyEffect {
+        init {
+            require(length in 0..address.size) { "Accepted peer address length must fit its snapshot" }
+        }
+
         private val snapshot = address.copyOf()
         val address: ByteArray get() = snapshot.copyOf()
     }

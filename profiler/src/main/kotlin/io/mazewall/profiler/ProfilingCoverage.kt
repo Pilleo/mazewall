@@ -279,7 +279,11 @@ public class ProfilingCoverage(
             val syscalls = observations.filterIsInstance<ProfileObservation.Syscall>()
             val uring = observations.filterIsInstance<ProfileObservation.IoUring>()
             return InferenceFacts(
-                openat2Uninspected = syscalls.any { it.name.uppercase() == "OPENAT2" && it.paths.isNotEmpty() && it.openFlags == null },
+                openat2Uninspected = syscalls.any {
+                    it.name.uppercase() in setOf("OPEN", "OPENAT", "OPENAT2") &&
+                        it.paths.isNotEmpty() &&
+                        it.openFlagsEvidence !is OpenFlagsEvidence.Complete
+                },
                 unknownOpenFlags = syscalls.mapNotNull { it.openFlagsEvidence as? OpenFlagsEvidence.Incomplete }.flatMap { it.unknownSymbols }.distinct(),
                 uringOpenUninspected = uring.any { UringOp.parse(it.opcode) is UringOp.Open },
                 hybridUnproven = strategy == ProfileStrategy.HYBRID_NO_URING && environment.ioUringDisabled != true,
@@ -310,7 +314,7 @@ public class ProfilingCoverage(
                 if (ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) add("eBPF did not observe io_uring; destinations are unproven")
                 if (pathQuality in incompletePathQualities) add("one or more path-bearing events did not fully resolve a path")
                 if (facts.unknownOpenFlags.isNotEmpty()) add("unrecognized open flags: ${facts.unknownOpenFlags.joinToString(",")}")
-                if (facts.openat2Uninspected) add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
+                if (facts.openat2Uninspected) add("open flags were not observed completely; do not treat paths as a complete write profile")
                 if (facts.uringOpenUninspected) add("io_uring open access mode was not observed")
                 if (facts.hybridUnproven) add("HYBRID_NO_URING without evidence that io_uring was disabled")
                 if (facts.unparsedConnectCount > 0) {

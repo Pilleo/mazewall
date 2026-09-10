@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 550
+*Total Active Issues:* 75 | *Total Resolved Issues:* 551
 
 Task 12 resolved: [authoritative vulnerable-web lifecycle and profiling evidence](resolved/issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md).
 

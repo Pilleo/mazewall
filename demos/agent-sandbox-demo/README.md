@@ -10,11 +10,11 @@ Unlike traditional out-of-process sandboxes (e.g., Docker or L7 proxies like NVI
 
 This PoC runs a LangChain4j agent with three tools, demonstrating three common security exploits triggered via prompt injection:
 
-Each run declares whether the selected operation must be allowed or denied and exits non-zero when reality differs. Infrastructure failures are reported separately and never presented as containment success. Fixtures live under one fresh owner-only temporary root and are deleted after the scenario.
+Each run declares whether the selected operation must be allowed or denied and exits non-zero when reality differs. Only kernel-facing `OBSERVED_POLICY_DENIAL` evidence is reported as containment; permission-shaped exceptions without authenticated provenance are inconclusive infrastructure outcomes. Fixtures live under one fresh owner-only temporary root and are deleted without following symlinks after the scenario.
 
 1.  **SSRF / Network Egress Bypass (`--scenario ssrf`)**
     *   **Goal:** The agent has a `fetchWebpage` tool to scrape docs. Prompt injection forces it to hit the internal AWS metadata service (`http://169.254.169.254`).
-    *   **Mitigation:** `mazewall` applies a Seccomp-BPF filter to the web fetcher thread. Before installing the process baseline, the demo starts the external supervisor. One pure fail-closed classifier handles the metadata endpoint, complete RFC1918 ranges, IPv4/IPv6 loopback and link-local ranges, IPv6 unique-local addresses, IPv4-mapped IPv6 addresses, and malformed/unsupported socket addresses.
+    *   **Mitigation:** `mazewall` applies a Seccomp-BPF filter to the web fetcher thread. Before installing the process baseline, the demo starts the external supervisor. One pure fail-closed classifier permits global unicast destinations and rejects metadata, RFC1918, shared, loopback, link-local, multicast, documentation, benchmarking, reserved, IPv4-mapped private, malformed, and unsupported socket addresses.
 2.  **Path Traversal (`--scenario path_traversal`)**
     *   **Goal:** The agent has an `analyzeUserFile` tool to read files in the `agent-workspace` directory. Prompt injection forces it to attempt a path traversal to a file outside the workspace (e.g. `../passwd`).
     *   **Mitigation:** `mazewall` applies Landlock LSM rules to the file-handling thread, physically restricting its filesystem view to *only* the designated workspace directory. The kernel blocks the path traversal with `EACCES`.
@@ -64,6 +64,14 @@ Each run declares whether the selected operation must be allowed or denied and e
     ./gradlew :demos:agent-sandbox-demo:run --args="--scenario rce_malicious --mazewall"
     ```
     *(Result: The command execution is blocked because the stack trace did not originate from `executeDataAnalysis`).*
+
+### 4. Benign Filesystem Workload (Allowed)
+
+```bash
+./gradlew :demos:agent-sandbox-demo:run --args="--scenario file_legit --mazewall"
+```
+
+*(Result: The agent reads the file inside its owned workspace, demonstrating that legitimate file work remains available.)*
 
 ---
 

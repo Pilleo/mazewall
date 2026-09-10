@@ -20,6 +20,30 @@ import kotlin.test.assertTrue
 @EnabledIfLinuxAndSupported
 class ProfileObservationCompatibilityTest {
     @Test
+    fun `typed flag evidence is canonical and rejects contradictory legacy values`() {
+        val evidence = OpenFlagsEvidence.Incomplete(1, setOf("O_FUTURE"))
+        val observation = ProfileObservation.Syscall(
+            correlation,
+            ObservationSource.STRACE,
+            "OPEN",
+            openFlags = 1,
+            openFlagsEvidence = evidence,
+        )
+
+        assertEquals(null, observation.openFlags)
+        assertEquals(evidence, observation.openFlagsEvidence)
+        assertFailsWith<IllegalArgumentException> {
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPEN",
+                openFlags = 2,
+                openFlagsEvidence = evidence,
+            )
+        }
+    }
+
+    @Test
     fun `syscall identity distinguishes missing and incomplete flag evidence`() {
         val correlation = ObservationCorrelation(7, Tid(8))
         val missing = ProfileObservation.Syscall(correlation, ObservationSource.STRACE, "OPEN")
