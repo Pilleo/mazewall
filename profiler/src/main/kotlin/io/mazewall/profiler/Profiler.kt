@@ -118,5 +118,12 @@ object Profiler {
 
         /** Compiles a [BillOfBehavior] from the events captured so far. */
         fun compileBillOfBehavior(): BillOfBehavior = session.compileBillOfBehavior()
+
+        /**
+         * Immutable behavior and collector-coverage snapshot. Drain this executor and call
+         * [Profiler.shutdown] before using the snapshot for enforcement; active collection
+         * remains incomplete. Shutting down an unused wrapper yields an empty, drained result.
+         */
+        fun snapshot(): ProfilingResult<Unit> = session.result(Unit)
     }
 }

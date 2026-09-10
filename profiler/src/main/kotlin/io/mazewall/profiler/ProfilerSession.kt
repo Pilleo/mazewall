@@ -39,6 +39,7 @@ internal class ProfilerSession(
     private val closed = AtomicBoolean(false)
     private var closureNotified = false
     private var installations = 0
+    private var collectorRequested = false
     private val installer = runtime.installer.forSession(
         SeccompInstallationGate { operation ->
             synchronized(lifecycleLock) {
@@ -57,6 +58,7 @@ internal class ProfilerSession(
         synchronized(lifecycleLock) {
             // Existing wrapped workers retain their kernel filters in pass-through after session close.
             if (closed.get() || thread in appliedThreads) return
+            collectorRequested = true
         }
         validateNotVirtual()
         val tid = runtime.tid()
@@ -162,7 +164,13 @@ internal class ProfilerSession(
             observations = observations,
             stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = listeners.sumOf { it.eventQueue.droppedCount.toInt() + it.droppedEvents },
-            drainComplete = listeners.isNotEmpty() && listeners.all { it.drainComplete },
+            drainComplete = synchronized(lifecycleLock) {
+                closed.get() &&
+                    installations == 0 &&
+                    cleanupOutcome == SeccompCleanupOutcome.Complete &&
+                    (listeners.isNotEmpty() || !collectorRequested) &&
+                    listeners.all { it.drainComplete }
+            },
             environment = runtime.environment(),
         )
         return ProfilingResult(value, compileBillOfBehavior().copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)

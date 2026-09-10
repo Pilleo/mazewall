@@ -3,6 +3,7 @@ package demo.vulnapp
 import demo.vulnapp.config.ExecutorDrain
 import demo.vulnapp.config.MazewallProtectionBootstrap
 import demo.vulnapp.config.ProfileArtifactPublisher
+import demo.vulnapp.config.collectorCoverage
 import demo.vulnapp.service.DefaultFileService
 import demo.vulnapp.service.FileService
 import io.mazewall.EnabledIfLinuxAndSupported
@@ -78,7 +79,7 @@ class VulnerableWebAppFreshJvmTest {
         val root = Files.createTempDirectory("mazewall-web-protected-")
         val marker = root.resolve("marker")
         val target = root.resolve("sbob.json")
-        ProfileArtifactPublisher.publish(target, io.mazewall.profiler.BillOfBehavior(), ExecutorDrain.Complete)
+        ProfileArtifactPublisher.publish(target, io.mazewall.profiler.BillOfBehavior(), ExecutorDrain.Complete, listOf(collectorCoverage()))
         System.setProperty("mazewall.sbob.path", target.toString())
         try {
             startApplication(enabled = true).use { application ->

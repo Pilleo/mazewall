@@ -2,6 +2,8 @@ package demo.vulnapp.config
 
 import io.mazewall.profiler.BillOfBehavior
 import io.mazewall.profiler.Profiler
+import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.ProfilingResult
 import jakarta.annotation.PreDestroy
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
@@ -22,17 +24,17 @@ internal class MazewallProfileManager private constructor(
     constructor(executorOwner: ServiceExecutorOwner) : this(executorOwner, Profiler::shutdown)
 
     private val logger = Logger.getLogger(MazewallProfileManager::class.java.name)
-    private val wrappers = CopyOnWriteArrayList<Profiler.ProfilerExecutorWrapper>()
+    private val collectors = CopyOnWriteArrayList<() -> ProfilingResult<Unit>>()
     private val published = AtomicBoolean()
 
     fun register(wrapper: Profiler.ProfilerExecutorWrapper): OwnedServiceExecutor {
-        wrappers += wrapper
+        collectors += wrapper::snapshot
         return executorOwner.own(wrapper)
     }
 
     fun generateSbob(): BillOfBehavior =
-        wrappers.fold(BillOfBehavior()) { merged, wrapper ->
-        merged + wrapper.compileBillOfBehavior()
+        collectors.fold(BillOfBehavior()) { merged, snapshot ->
+        merged + snapshot().behavior
     }
 
     fun resolveSbobPath(configuredPath: String?): Path {
@@ -63,16 +65,21 @@ internal class MazewallProfileManager private constructor(
                 ExecutorDrain.Incomplete.ProfilerCleanup(failure.message ?: failure.javaClass.name),
             )
         }
-        val evidence = generateSbob()
-        ProfileArtifactPublisher.publish(path, evidence, drain)
+        val snapshots = ArrayList<ProfilingResult<Unit>>()
+        collectors.forEach { snapshots.add(it()) }
+        val evidence = snapshots.fold(BillOfBehavior()) { merged, snapshot -> merged + snapshot.behavior }
+        val coverages = ArrayList<ProfilingCoverage>()
+        snapshots.forEach { coverages.add(it.coverage) }
+        ProfileArtifactPublisher.publish(path, evidence, drain, coverages)
         published.set(true)
-        return drain
+        val coverageFailures = incompleteCollectorReasons(coverages)
+        return if (coverageFailures.isEmpty()) drain else ExecutorDrain.combine(drain, ExecutorDrain.Incomplete.CollectorCoverage(coverageFailures.joinToString("; ")))
     }
 
     @PreDestroy
     @Suppress("TooGenericExceptionCaught") // Publication failures are logged with their target and propagated unchanged.
     fun onShutdown() {
-        if (wrappers.isEmpty() || published.get()) return
+        if (collectors.isEmpty() || published.get()) return
         val path = resolveSbobPath(System.getProperty("mazewall.sbob.path"))
         try {
             val drain = publish(path)
@@ -90,7 +97,11 @@ internal class MazewallProfileManager private constructor(
     companion object {
         internal fun forTesting(
             executorOwner: ServiceExecutorOwner,
+            snapshots: List<ProfilingResult<Unit>> = emptyList(),
             shutdownProfiler: () -> Unit,
-        ): MazewallProfileManager = MazewallProfileManager(executorOwner, shutdownProfiler)
+        ): MazewallProfileManager =
+            MazewallProfileManager(executorOwner, shutdownProfiler).apply {
+            snapshots.forEach { snapshot -> collectors.add { snapshot } }
+        }
     }
 }

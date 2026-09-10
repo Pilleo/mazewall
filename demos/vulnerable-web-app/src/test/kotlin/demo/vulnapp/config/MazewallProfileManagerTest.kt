@@ -1,5 +1,8 @@
 package demo.vulnapp.config
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.ProfilingResult
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -7,12 +10,50 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class MazewallProfileManagerTest {
     @TempDir
     lateinit var directory: Path
+
+    @Test
+    fun `orderly executor shutdown without collector coverage cannot authorize enforcement`() {
+        val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
+        val manager = MazewallProfileManager.forTesting(owner) {}
+        val target = directory.resolve("sbob.json")
+        manager.publish(target)
+        assertFailsWith<IncompleteProfileEvidenceException> { ProfileArtifactPublisher.resolveEvidencePath(target) }
+    }
+
+    @Test
+    fun `orderly shutdown retains lossy collector beside a complete collector and rejects enforcement`() {
+        val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
+        val profiles = listOf(collectorCoverage(), collectorCoverage(droppedEvents = 3)).map { coverage ->
+            ProfilingResult(Unit, BillOfBehavior(), emptyMap(), coverage)
+        }
+        val manager = MazewallProfileManager.forTesting(owner, profiles) {}
+        val target = directory.resolve("sbob.json")
+        assertIs<ExecutorDrain.Incomplete.CollectorCoverage>(manager.publish(target))
+        val integrity = ObjectMapper().readTree(Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity))
+        assertFalse(integrity.path("complete").booleanValue())
+        assertTrue(integrity.path("reason").asText().contains("dropped 3 events"))
+        assertEquals(2, integrity.path("collectors").size())
+        assertEquals(3, integrity.path("collectors")[1].path("droppedEvents").intValue())
+        assertFailsWith<IncompleteProfileEvidenceException> { ProfileArtifactPublisher.resolveEvidencePath(target) }
+    }
+
+    @Test
+    fun `orderly shutdown with complete collectors permits enforcement`() {
+        val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
+        val manager = MazewallProfileManager.forTesting(owner, listOf(ProfilingResult(Unit, BillOfBehavior(), emptyMap(), collectorCoverage()))) {}
+        val target = directory.resolve("sbob.json")
+        assertIs<ExecutorDrain.Complete>(manager.publish(target))
+        assertEquals(ProfileArtifactPublisher.readCurrent(target).evidence, ProfileArtifactPublisher.resolveEvidencePath(target))
+    }
 
     @Test
     fun `timeout and profiler cleanup failure are both retained in published integrity`() {

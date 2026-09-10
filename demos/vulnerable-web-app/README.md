@@ -123,6 +123,13 @@ components; timeout and interruption are never overwritten by a later cleanup fa
 direct SBoB files remain readable by enforcement. Configure the drain deadline with
 `-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
 
+Generation completeness also requires every registered profiler collector to report complete
+coverage. The manager retains each wrapper's immutable behavior/coverage snapshot after profiler
+shutdown; dropped events, unresolved paths, collector-drain failures and collector warnings are
+retained in the integrity record. Clean executor shutdown cannot erase collection loss. Older
+generations containing only a drain-based `complete` marker must be regenerated because they do
+not supply collector evidence.
+
 The unsafe override `-Dmazewall.allow-incomplete-profile-enforcement=true` permits enforcement
 from incomplete evidence only when an operator explicitly accepts the missing-observation risk.
 Profiling and enforcement are mutually exclusive startup modes: setting both
