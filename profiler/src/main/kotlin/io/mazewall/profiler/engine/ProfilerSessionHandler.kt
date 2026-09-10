@@ -77,6 +77,9 @@ internal class ProfilerSessionHandler(
      * This ensures that all transient native allocations (e.g., string reading, socket polling structures)
      * are deterministically freed when the iteration completes, completely eliminating the overhead of
      * creating a new confined arena per notification or operation.
+     *
+     * Each early result below is a terminal exactly-one-reply classification. Keeping that classification
+     * explicit prevents ACK, notification-gone, interruption, and transport paths from replying twice.
      */
     context(arena: NativeArena) override fun processNotification(
         notif: ManagedSegment,
@@ -93,83 +96,10 @@ internal class ProfilerSessionHandler(
 
         System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
+        val reply = ReplyAttempt()
 
-        var replyAttempted = false
-
-        try {
-            ledger.record(SessionEvent.Notified(System.nanoTime(), pidVal.toLong(), nr.toLong()))
-
-            val resolvedEvent = resolveNotificationEvent(pidVal, nr, parsedNotif.args)
-
-            // Optimisation: skip event delivery for JVM-internal paths that generate noise
-            // (JDK home, classpath, /proc, /sys).
-            if (isNoisePath(nr, resolvedEvent)) {
-                replyAttempted = true
-                val reply = with(arena.unwrap) { responder.sendSeccompContinue(handshake.acknowledged(), resp.unwrap) }
-                if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
-                return NotifResult.HANDLED
-            }
-
-            val waitingState = transitionToAckWait(currentState, id, resolvedEvent)
-            state = waitingState
-
-            val result = deliverAndAwaitAck(pidVal, resolvedEvent, handshake)
-            return when (result) {
-                is HandshakeSession.Success -> {
-                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), pidVal.toLong()))
-                    state = ProfilerSessionMachine
-                        .evaluate(
-                        waitingState,
-                        ProfilerSessionEvent.AckSucceeded,
-                    ).state
-                    replyAttempted = true
-                    val reply = with(arena.unwrap) {
-                        responder.sendSeccompContinue(result, resp.unwrap)
-                    }
-                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
-                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-                    result.deferredShutdownReason?.let(onShutdown)
-                    NotifResult.HANDLED
-                }
-                is HandshakeSession.Failed -> {
-                    System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
-                    state = ProfilerSessionMachine
-                        .evaluate(
-                        waitingState,
-                        ProfilerSessionEvent.HandshakeFailed,
-                    ).state
-                    replyAttempted = true
-                    val reply = with(arena.unwrap) {
-                        responder.sendSeccompError(result, resp.unwrap, ECONNRESET)
-                    }
-                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
-                    ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pidVal.toLong(), ECONNRESET))
-                    NotifResult.TERMINATE
-                }
-                is HandshakeSession.PassedThrough -> {
-                    System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
-                    state = ProfilerSessionMachine
-                        .evaluate(
-                        waitingState,
-                        ProfilerSessionEvent.PassedThrough,
-                    ).state
-                    replyAttempted = true
-                    val reply = with(arena.unwrap) {
-                        responder.sendSeccompContinue(result.acknowledged(), resp.unwrap)
-                    }
-                    if (reply == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
-                    ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pidVal.toLong(), 0L))
-                    NotifResult.PASS_THROUGH
-                }
-                is HandshakeSession.Active -> {
-                    state = ProfilerSessionMachine
-                        .evaluate(
-                        waitingState,
-                        ProfilerSessionEvent.HandshakeFailed,
-                    ).state
-                    NotifResult.TERMINATE
-                }
-            }
+        return try {
+            handleActiveNotification(currentState, parsedNotif, handshake, resp, reply)
         } catch (e: InterruptedException) {
             terminateSession()
             Thread.currentThread().interrupt()
@@ -180,17 +110,102 @@ internal class ProfilerSessionHandler(
             throw e
         } catch (e: IOException) {
             logSessionFailure("IOException", e)
-            return failTransport(handshake, resp, pidVal, replyAttempted)
+            failTransport(handshake, resp, pidVal, reply.attempted)
         } catch (expectedStructuralFailure: Exception) {
             terminateSession()
             logSessionFailure("Structural or unrecoverable error", expectedStructuralFailure)
-            if (replyAttempted) return NotifResult.TERMINATE
-            throw expectedStructuralFailure
+            if (reply.attempted) NotifResult.TERMINATE else throw expectedStructuralFailure
         } catch (expectedStructuralError: Error) {
             terminateSession()
             logSessionFailure("Structural or unrecoverable error", expectedStructuralError)
             throw expectedStructuralError
         }
+    }
+
+    context(arena: NativeArena) private fun handleActiveNotification(
+        currentState: ProfilerState.ActiveSession,
+        notification: SeccompNotification,
+        handshake: HandshakeSession.Active,
+        response: ManagedSegment,
+        reply: ReplyAttempt,
+    ): NotifResult {
+        ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong()))
+        val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
+        if (isNoisePath(notification.nr, event)) {
+            reply.attempted = true
+            val sent = with(arena.unwrap) { responder.sendSeccompContinue(handshake.acknowledged(), response.unwrap) }
+            return if (sent == SeccompReplyResult.NOTIFICATION_GONE) terminateSession() else NotifResult.HANDLED
+        }
+        val waitingState = transitionToAckWait(currentState, notification.id, event)
+        state = waitingState
+        val result = deliverAndAwaitAck(notification.pid, event, handshake)
+        return handleHandshakeResult(result, waitingState, response, notification.pid, reply)
+    }
+
+    context(arena: NativeArena) private fun handleHandshakeResult(
+        result: HandshakeSession,
+        waitingState: ProfilerState,
+        response: ManagedSegment,
+        pid: Int,
+        reply: ReplyAttempt,
+    ): NotifResult =
+        when (result) {
+            is HandshakeSession.Success -> handleSuccessfulHandshake(result, waitingState, response, pid, reply)
+            is HandshakeSession.Failed -> handleFailedHandshake(result, waitingState, response, pid, reply)
+            is HandshakeSession.PassedThrough -> handlePassedThrough(result, waitingState, response, pid, reply)
+            is HandshakeSession.Active -> {
+                state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.HandshakeFailed).state
+                NotifResult.TERMINATE
+            }
+        }
+
+    context(arena: NativeArena) private fun handleSuccessfulHandshake(
+        result: HandshakeSession.Success,
+        waitingState: ProfilerState,
+        response: ManagedSegment,
+        pid: Int,
+        reply: ReplyAttempt,
+    ): NotifResult {
+        ledger.record(SessionEvent.AckReceived(System.nanoTime(), pid.toLong()))
+        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.AckSucceeded).state
+        reply.attempted = true
+        val sent = with(arena.unwrap) { responder.sendSeccompContinue(result, response.unwrap) }
+        if (sent == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
+        ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pid.toLong(), 0L))
+        result.deferredShutdownReason?.let(onShutdown)
+        return NotifResult.HANDLED
+    }
+
+    context(arena: NativeArena) private fun handleFailedHandshake(
+        result: HandshakeSession.Failed,
+        waitingState: ProfilerState,
+        response: ManagedSegment,
+        pid: Int,
+        reply: ReplyAttempt,
+    ): NotifResult {
+        System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
+        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.HandshakeFailed).state
+        reply.attempted = true
+        val sent = with(arena.unwrap) { responder.sendSeccompError(result, response.unwrap, ECONNRESET) }
+        if (sent == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
+        ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), pid.toLong(), ECONNRESET))
+        return NotifResult.TERMINATE
+    }
+
+    context(arena: NativeArena) private fun handlePassedThrough(
+        result: HandshakeSession.PassedThrough,
+        waitingState: ProfilerState,
+        response: ManagedSegment,
+        pid: Int,
+        reply: ReplyAttempt,
+    ): NotifResult {
+        System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
+        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.PassedThrough).state
+        reply.attempted = true
+        val sent = with(arena.unwrap) { responder.sendSeccompContinue(result.acknowledged(), response.unwrap) }
+        if (sent == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
+        ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), pid.toLong(), 0L))
+        return NotifResult.PASS_THROUGH
     }
 
     context(arena: NativeArena) private fun failTransport(
@@ -320,4 +335,8 @@ internal class ProfilerSessionHandler(
         private val logger = java.util.logging.Logger
             .getLogger(ProfilerSessionHandler::class.java.name)
     }
+
+    private class ReplyAttempt(
+        var attempted: Boolean = false,
+    )
 }

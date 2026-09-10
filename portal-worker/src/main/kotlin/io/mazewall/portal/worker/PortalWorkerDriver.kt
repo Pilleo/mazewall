@@ -70,7 +70,9 @@ internal class PortalWorkerDriver(
 
     private fun captureFailure(action: () -> Unit): Throwable? = runCatching(action).exceptionOrNull()
 
-    @Suppress("TooGenericExceptionCaught") // Dispatch and send are distinct exhaustive exception boundaries.
+    // Dispatch, capability retirement, and reply transmission are distinct terminal boundaries;
+    // fatal failures must retain their identity and a failed send must never append another frame.
+    @Suppress("TooGenericExceptionCaught")
     private fun handle(received: PortalWorkerReceive.Frame) {
         val transition = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FrameReceived(received.frame))
         state = transition.state
@@ -94,12 +96,12 @@ internal class PortalWorkerDriver(
         if (actualFailure != null && actualFailure !is Exception) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
             capabilityFailure?.let(actualFailure::addSuppressed)
-            throw actualFailure
+            raiseWorkerFailure(actualFailure)
         }
         if (capabilityFailure != null) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
             actualFailure?.let(capabilityFailure::addSuppressed)
-            throw capabilityFailure
+            raiseWorkerFailure(capabilityFailure)
         }
         val dispatchEvent = if (actualFailure == null) {
             PortalWorkerEvent.DispatchSucceeded(PortalPayload(checkNotNull(result)))
@@ -114,7 +116,7 @@ internal class PortalWorkerDriver(
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.ReplySucceeded).state
         } catch (failure: Exception) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.ReplyFailed(failure.message ?: "reply failed")).state
-            throw failure
+            raiseWorkerFailure(failure)
         }
     }
 
@@ -125,3 +127,5 @@ internal class PortalWorkerDriver(
             failure
         }
 }
+
+private fun raiseWorkerFailure(failure: Throwable): Nothing = throw failure

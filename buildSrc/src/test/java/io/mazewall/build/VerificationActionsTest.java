@@ -61,6 +61,9 @@ public final class VerificationActionsTest {
                 abstract class InheritedMethodBase { @Test @NeedsFreshJvm void inheritedTest() {} }
                 class InheritedMethodChild extends InheritedMethodBase {}
                 class OverriddenMethodChild extends InheritedMethodBase { @Override void inheritedTest() {} }
+                interface InheritedMethodInterface { @Test @NeedsFreshJvm default void inheritedInterfaceTest() {} }
+                class InheritedInterfaceChild implements InheritedMethodInterface {}
+                class OverriddenInterfaceChild implements InheritedMethodInterface { @Override public void inheritedInterfaceTest() {} }
                 class InheritedTagged extends ClassTagged {}
                 class Outer { @NeedsFreshJvm static class NestedTagged {} }
                 """);
@@ -72,8 +75,10 @@ public final class VerificationActionsTest {
             equal(0, result);
             equal(List.of(
                 "sample.ClassTagged",
+                "sample.InheritedInterfaceChild",
                 "sample.InheritedMethodBase",
                 "sample.InheritedMethodChild",
+                "sample.InheritedMethodInterface",
                 "sample.InheritedTagged",
                 "sample.MethodOnlyBase",
                 "sample.MethodTagged",

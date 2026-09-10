@@ -91,6 +91,8 @@ internal class PortalIo(
         }
     }
 
+    // Poll readiness, cancellation, deadline classification, and EINTR retry form one transport
+    // transition; extracting any branch would obscure whether an idle or partial frame timed out.
     private fun await(
         deadline: Deadline,
         events: Short,
@@ -101,20 +103,38 @@ internal class PortalIo(
             pfd.setFd(socket.value)
             pfd.setEvents(events)
             while (true) {
-                if (closing()) throw IOException("portal channel is closing")
-                val remaining = deadline.remainingMillis()
-                if (remaining <= 0) timeout(idleAllowed)
-                when (val result = LinuxNative.raw.poll(pfd.managed, 1, minOf(remaining, 50))) {
-                    is LinuxNative.SyscallResult.Success -> if (result.value > 0) {
-                        if (closing()) throw IOException("portal channel is closing")
-                        if (deadline.isExpired()) timeout(idleAllowed)
-                        return
-                    }
-                    is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR) throw IOException("portal poll errno=${result.errno}")
-                }
+                if (pollReady(pfd, deadline, idleAllowed)) return
             }
         }
     }
+
+    private fun pollReady(
+        pfd: PollFdSegment,
+        deadline: Deadline,
+        idleAllowed: Boolean,
+    ): Boolean {
+        if (closing()) failIo("portal channel is closing")
+        val remaining = deadline.remainingMillis()
+        if (remaining <= 0) timeout(idleAllowed)
+        return when (val result = LinuxNative.raw.poll(pfd.managed, 1, minOf(remaining, POLL_SLICE_MS))) {
+            is LinuxNative.SyscallResult.Success -> result.value > 0 && validateReady(deadline, idleAllowed)
+            is LinuxNative.SyscallResult.Error -> {
+                if (result.errno != NativeConstants.EINTR) failIo("portal poll errno=${result.errno}")
+                false
+            }
+        }
+    }
+
+    private fun validateReady(
+        deadline: Deadline,
+        idleAllowed: Boolean,
+    ): Boolean {
+        if (closing()) failIo("portal channel is closing")
+        if (deadline.isExpired()) timeout(idleAllowed)
+        return true
+    }
+
+    private fun failIo(message: String): Nothing = throw IOException(message)
 
     private fun timeout(idleAllowed: Boolean): Nothing = if (idleAllowed) throw PortalReadTimeoutException() else throw PortalIncompleteFrameException()
 
@@ -123,5 +143,6 @@ internal class PortalIo(
         const val F_SETFL = 4
         const val O_NONBLOCK = 0x800L
         const val POLLOUT: Short = 4
+        const val POLL_SLICE_MS = 50
     }
 }

@@ -5,6 +5,12 @@ constructor inputs being returned by identity. `ProfileObservation`, `CollectorD
 `StackDefinition`, `SyscallAttribution`, `ProfilingCoverage`, and `TierEProfile` retain structural
 equality and copy-style APIs, but their list/set projections are immutable snapshots.
 
+`ProfilingCoverage` now groups its completeness decision and warning snapshot in the immutable
+`ProfileIntegrity` value. Replace constructor arguments `complete = value, warnings = messages`
+with `integrity = ProfileIntegrity(value, messages)`. Replace `coverage.copy(complete = value)` with
+`coverage.copy(integrity = coverage.integrity.copy(complete = value))`. The `complete` and `warnings`
+read-only projections remain available on `ProfilingCoverage`.
+
 Open-family strace observations expose `openFlagsEvidence`. `Complete(value)` means the exact flags
 operand was decoded. `Incomplete(value, unknownSymbols)` preserves recognized/numeric bits while
 making every unknown token explicit; the compatibility `openFlags` projection is `null` for an

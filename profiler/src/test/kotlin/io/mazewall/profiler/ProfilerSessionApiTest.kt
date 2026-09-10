@@ -88,7 +88,8 @@ class ProfilerSessionApiTest {
         val observation = ProfileObservation.fromSyscallEvent(
             SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
         )
-        val coverage = pathCoverage(listOf(observation)).copy(complete = true)
+        val original = pathCoverage(listOf(observation))
+        val coverage = original.copy(integrity = original.integrity.copy(complete = true))
         val behaviors = listOf(
             BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
             BillOfBehavior(execs = setOf("/bin/tool")),

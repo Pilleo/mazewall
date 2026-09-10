@@ -18,6 +18,27 @@ import java.nio.charset.CodingErrorAction
 
 /** Converts completed `strace -f` records into immutable observations. */
 public object StraceLogParser {
+    private const val HEX_RADIX = 16
+    private const val OCTAL_RADIX = 8
+    private const val ASCII_BELL = 0x07
+    private const val ASCII_BACKSPACE = 0x08
+    private const val ASCII_TAB = 0x09
+    private const val ASCII_NEWLINE = 0x0a
+    private const val ASCII_VERTICAL_TAB = 0x0b
+    private const val ASCII_FORM_FEED = 0x0c
+    private const val ASCII_CARRIAGE_RETURN = 0x0d
+    private val escapedByteValues = mapOf(
+        '\\' to '\\'.code,
+        '"' to '"'.code,
+        'a' to ASCII_BELL,
+        'b' to ASCII_BACKSPACE,
+        't' to ASCII_TAB,
+        'n' to ASCII_NEWLINE,
+        'v' to ASCII_VERTICAL_TAB,
+        'f' to ASCII_FORM_FEED,
+        'r' to ASCII_CARRIAGE_RETURN,
+    )
+
     private val fileSystemCharset: Charset = System
         .getProperty("sun.jnu.encoding")
         ?.takeIf(String::isNotBlank)
@@ -122,24 +143,47 @@ public object StraceLogParser {
     public fun parse(log: String): List<ProfileObservation> = parseWithStats(log).observations
 
     public fun parseLine(line: String): ProfileObservation? {
-        val cleaned = line.trim()
-        if (cleaned.isEmpty() || cleaned.startsWith("+++") || cleaned.startsWith("---")) return null
-        if (cleaned.contains("<unfinished") || cleaned.contains("resumed>")) return null
-        val openParen = cleaned.indexOf('(')
-        if (openParen <= 0) return null
-        val beforeParen = cleaned.substring(0, openParen).trim()
-        val prefix = beforeParen.split(Regex("\\s+"))
-        val syscallName = prefix.lastOrNull()?.uppercase().orEmpty()
-        if (syscallName.isEmpty()) return null
-        val pid = prefix.firstOrNull()?.toIntOrNull() ?: 0
-        val arguments = completedArguments(cleaned, openParen) ?: return null
-        val operands = tokenizeArguments(arguments)
-        val correlation = ObservationCorrelation(tgid = pid, tid = Tid(pid))
-
-        if (syscallName == "CONNECT") {
-            parseConnect(arguments)?.let { return ProfileObservation.Connect(correlation, ObservationSource.STRACE, it) }
+        val call = parseCall(line) ?: return null
+        if (call.name == "CONNECT") {
+            parseConnect(call.arguments)?.let { return ProfileObservation.Connect(call.correlation, ObservationSource.STRACE, it) }
         }
+        val pathEvidence = parsePaths(call.name, call.operands)
+        val flagsEvidence = parseFlags(call.name, call.operands)
+        val observation = ProfileObservation.Syscall(
+            correlation = call.correlation,
+            source = ObservationSource.STRACE,
+            name = call.name,
+            paths = pathEvidence.paths,
+            openFlags = (flagsEvidence as? OpenFlagsEvidence.Complete)?.value,
+            openFlagsEvidence = flagsEvidence,
+        )
+        return observation.withPathResolution(combinePathResolution(pathEvidence.paths, pathEvidence.failures))
+    }
 
+    // Guards reject incomplete open-ended strace records before operands can become evidence.
+    private fun parseCall(line: String): ParsedCall? {
+        val cleaned = line.trim().takeUnless {
+            it.isEmpty() || it.startsWith("+++") || it.startsWith("---") || it.contains("<unfinished") || it.contains("resumed>")
+        } ?: return null
+        val header = parseCallHeader(cleaned) ?: return null
+        val arguments = completedArguments(cleaned, header.openParen)
+        return arguments?.let {
+            ParsedCall(header.name, it, tokenizeArguments(it), ObservationCorrelation(tgid = header.pid, tid = Tid(header.pid)))
+        }
+    }
+
+    private fun parseCallHeader(cleaned: String): ParsedCallHeader? {
+        val openParen = cleaned.indexOf('(')
+        val beforeParen = cleaned.takeIf { openParen > 0 }?.substring(0, openParen)?.trim() ?: return null
+        val prefix = beforeParen.split(Regex("\\s+"))
+        val name = prefix.lastOrNull()?.uppercase()?.takeIf(String::isNotEmpty) ?: return null
+        return ParsedCallHeader(name, prefix.firstOrNull()?.toIntOrNull() ?: 0, openParen)
+    }
+
+    private fun parsePaths(
+        syscallName: String,
+        operands: List<String>,
+    ): ParsedPaths {
         val pathFailures = mutableListOf<PathResolutionFailure>()
         val paths = buildList {
             (pathOperands[syscallName] ?: intArrayOf()).forEachIndexed { pathIndex, operandIndex ->
@@ -164,22 +208,19 @@ public object StraceLogParser {
                 }
             }
         }
-        val flagsEvidence = when (syscallName) {
+        return ParsedPaths(paths, pathFailures)
+    }
+
+    private fun parseFlags(
+        syscallName: String,
+        operands: List<String>,
+    ): OpenFlagsEvidence? =
+        when (syscallName) {
             "OPEN" -> operands.getOrNull(1)?.let(::parseOpenFlags)
             "OPENAT" -> operands.getOrNull(2)?.let(::parseOpenFlags)
             "OPENAT2" -> operands.getOrNull(2)?.let(::parseOpenHowFlags)
             else -> null
         }
-        val observation = ProfileObservation.Syscall(
-            correlation = correlation,
-            source = ObservationSource.STRACE,
-            name = syscallName,
-            paths = paths,
-            openFlags = (flagsEvidence as? OpenFlagsEvidence.Complete)?.value,
-            openFlagsEvidence = flagsEvidence,
-        )
-        return observation.withPathResolution(combinePathResolution(paths, pathFailures))
-    }
 
     private fun completedArguments(
         line: String,
@@ -257,7 +298,7 @@ public object StraceLogParser {
 
     private fun String.parseInteger(): Long? =
         when {
-            startsWith("0x", ignoreCase = true) -> drop(2).toLongOrNull(16)
+            startsWith("0x", ignoreCase = true) -> drop(2).toLongOrNull(HEX_RADIX)
             matches(Regex("[0-9]+")) -> toLongOrNull()
             else -> null
         }
@@ -268,60 +309,72 @@ public object StraceLogParser {
         val bytes = ByteArrayOutputStream()
         val literal = StringBuilder()
         var index = 1
-        while (index < text.length) {
+        var outcome: DecodedPath? = null
+        while (index < text.length && outcome == null) {
             val char = text[index++]
             if (char == '"') {
-                val suffix = text.substring(index).trim()
-                if (suffix.isNotEmpty()) {
-                    return DecodedPath.Incomplete(
-                        if (suffix.startsWith("...")) "strace truncated the quoted pathname" else "unexpected text after quoted pathname: $suffix",
-                    )
-                }
-                if (!flushLiteral(literal, bytes)) return DecodedPath.Incomplete("pathname is not encodable as ${fileSystemCharset.name()}")
-                return try {
-                    val decoded = fileSystemCharset
-                        .newDecoder()
-                        .onMalformedInput(CodingErrorAction.REPORT)
-                        .onUnmappableCharacter(CodingErrorAction.REPORT)
-                        .decode(ByteBuffer.wrap(bytes.toByteArray()))
-                    DecodedPath.Complete(decoded.toString())
-                } catch (_: CharacterCodingException) {
-                    DecodedPath.Incomplete("pathname contains undecodable ${fileSystemCharset.name()} bytes")
-                }
-            }
-            if (char != '\\' || index >= text.length) {
+                outcome = finishQuoted(text, index, literal, bytes)
+            } else if (char != '\\' || index >= text.length) {
                 literal.append(char)
-                continue
-            }
-            if (!flushLiteral(literal, bytes)) return DecodedPath.Incomplete("pathname is not encodable as ${fileSystemCharset.name()}")
-            val escape = text[index++]
-            when (escape) {
-                '\\', '"' -> bytes.write(escape.code)
-                'a' -> bytes.write(0x07)
-                'b' -> bytes.write(0x08)
-                't' -> bytes.write(0x09)
-                'n' -> bytes.write(0x0a)
-                'v' -> bytes.write(0x0b)
-                'f' -> bytes.write(0x0c)
-                'r' -> bytes.write(0x0d)
-                'x' -> {
-                    val digits = text.substring(index, (index + 2).coerceAtMost(text.length)).takeWhile { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
-                    if (digits.isEmpty()) {
-                        bytes.write('x'.code)
-                    } else {
-                        bytes.write(digits.toInt(16))
-                        index += digits.length
-                    }
-                }
-                in '0'..'7' -> {
-                    val tail = text.substring(index, (index + 2).coerceAtMost(text.length)).takeWhile { it in '0'..'7' }
-                    bytes.write((escape + tail).toInt(8))
-                    index += tail.length
-                }
-                else -> bytes.write(escape.code)
+            } else if (!flushLiteral(literal, bytes)) {
+                outcome = DecodedPath.Incomplete("pathname is not encodable as ${fileSystemCharset.name()}")
+            } else {
+                index = decodeEscape(text, index, bytes)
             }
         }
-        return DecodedPath.Incomplete("strace did not terminate the quoted pathname")
+        return outcome ?: DecodedPath.Incomplete("strace did not terminate the quoted pathname")
+    }
+
+    private fun finishQuoted(
+        text: String,
+        index: Int,
+        literal: StringBuilder,
+        bytes: ByteArrayOutputStream,
+    ): DecodedPath {
+        val suffix = text.substring(index).trim()
+        if (suffix.isNotEmpty()) {
+            return DecodedPath.Incomplete(
+                if (suffix.startsWith("...")) "strace truncated the quoted pathname" else "unexpected text after quoted pathname: $suffix",
+            )
+        }
+        if (!flushLiteral(literal, bytes)) return DecodedPath.Incomplete("pathname is not encodable as ${fileSystemCharset.name()}")
+        return try {
+            val decoded = fileSystemCharset
+                .newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes.toByteArray()))
+            DecodedPath.Complete(decoded.toString())
+        } catch (_: CharacterCodingException) {
+            DecodedPath.Incomplete("pathname contains undecodable ${fileSystemCharset.name()} bytes")
+        }
+    }
+
+    private fun decodeEscape(
+        text: String,
+        escapeIndex: Int,
+        bytes: ByteArrayOutputStream,
+    ): Int {
+        val escape = text[escapeIndex]
+        escapedByteValues[escape]?.let {
+            bytes.write(it)
+            return escapeIndex + 1
+        }
+        var next = escapeIndex + 1
+        when {
+            escape == 'x' -> {
+                val digits = text.substring(next, (next + 2).coerceAtMost(text.length)).takeWhile { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+                bytes.write(if (digits.isEmpty()) 'x'.code else digits.toInt(HEX_RADIX))
+                next += digits.length
+            }
+            escape in '0'..'7' -> {
+                val tail = text.substring(next, (next + 2).coerceAtMost(text.length)).takeWhile { it in '0'..'7' }
+                bytes.write((escape + tail).toInt(OCTAL_RADIX))
+                next += tail.length
+            }
+            else -> bytes.write(escape.code)
+        }
+        return next
     }
 
     private fun flushLiteral(
@@ -354,6 +407,24 @@ public object StraceLogParser {
             val detail: String,
         ) : DecodedPath
     }
+
+    private data class ParsedCall(
+        val name: String,
+        val arguments: String,
+        val operands: List<String>,
+        val correlation: ObservationCorrelation,
+    )
+
+    private data class ParsedCallHeader(
+        val name: String,
+        val pid: Int,
+        val openParen: Int,
+    )
+
+    private data class ParsedPaths(
+        val paths: List<String>,
+        val failures: List<PathResolutionFailure>,
+    )
 
     private fun parseConnect(args: String): NetworkEndpoint? {
         inet.find(args)?.let { return NetworkEndpoint(it.groupValues[2], it.groupValues[1].toInt()) }

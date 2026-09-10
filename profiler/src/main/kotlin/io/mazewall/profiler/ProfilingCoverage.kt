@@ -53,7 +53,7 @@ public data class ProfileEnvironment(
 
 /**
  * Completeness as a type, not a free Boolean. [toPolicy]/[BillOfBehavior.toDsl]
- * must switch on this; do not `copy(complete = true)` to skip evidence.
+ * must switch on this; do not replace [ProfilingCoverage.integrity] with a fabricated complete value.
  */
 public sealed interface ProfileEvidence {
     public data object Complete : ProfileEvidence
@@ -63,9 +63,30 @@ public sealed interface ProfileEvidence {
     ) : ProfileEvidence
 }
 
+/** Immutable completeness decision and its operator-facing diagnostics. */
+public class ProfileIntegrity(
+    public val complete: Boolean,
+    warnings: List<String> = emptyList(),
+) {
+    public val warnings: List<String> = if (warnings is PathDiagnostics) warnings else java.util.List.copyOf(warnings)
+
+    public fun copy(
+        complete: Boolean = this.complete,
+        warnings: List<String> = this.warnings,
+    ): ProfileIntegrity = ProfileIntegrity(complete, warnings)
+
+    override fun equals(other: Any?): Boolean = other is ProfileIntegrity && complete == other.complete && warnings == other.warnings
+
+    override fun hashCode(): Int = 31 * complete.hashCode() + warnings.hashCode()
+}
+
 /**
  * Evidence about what a profile can honestly claim. Incomplete results must not
  * become enforcement policies unless the operator overrides.
+ *
+ * This compatibility type is an intentionally flat public record. Grouping its fields would
+ * make the immutable evidence less cohesive, so completeness and diagnostics are grouped in
+ * [ProfileIntegrity] while the remaining observation dimensions stay directly addressable.
  */
 public class ProfilingCoverage(
     public val strategy: ProfileStrategy,
@@ -77,10 +98,10 @@ public class ProfilingCoverage(
     public val droppedEvents: Int,
     public val drainComplete: Boolean,
     public val environment: ProfileEnvironment,
-    public val complete: Boolean,
-    warnings: List<String> = emptyList(),
+    public val integrity: ProfileIntegrity,
 ) {
-    public val warnings: List<String> = if (warnings is PathDiagnostics) warnings else java.util.List.copyOf(warnings)
+    public val complete: Boolean get() = integrity.complete
+    public val warnings: List<String> get() = integrity.warnings
 
     public fun copy(
         strategy: ProfileStrategy = this.strategy,
@@ -92,22 +113,20 @@ public class ProfilingCoverage(
         droppedEvents: Int = this.droppedEvents,
         drainComplete: Boolean = this.drainComplete,
         environment: ProfileEnvironment = this.environment,
-        complete: Boolean = this.complete,
-        warnings: List<String> = this.warnings,
+        integrity: ProfileIntegrity = this.integrity,
     ): ProfilingCoverage =
         ProfilingCoverage(
-        strategy,
+            strategy,
             strategyReason,
             processWide,
             ioUring,
             pathResolution,
             stacks,
-        droppedEvents,
+            droppedEvents,
             drainComplete,
             environment,
-            complete,
-            warnings,
-    )
+            integrity,
+        )
 
     override fun equals(other: Any?): Boolean =
         other is ProfilingCoverage &&
@@ -120,25 +139,23 @@ public class ProfilingCoverage(
             droppedEvents == other.droppedEvents &&
             drainComplete == other.drainComplete &&
             environment == other.environment &&
-            complete == other.complete &&
-            warnings == other.warnings &&
-        pathFailures == other.pathFailures
+            integrity == other.integrity &&
+            pathFailures == other.pathFailures
 
     override fun hashCode(): Int =
         listOf(
-        strategy,
+            strategy,
             strategyReason,
             processWide,
             ioUring,
             pathResolution,
             stacks,
             droppedEvents,
-        drainComplete,
+            drainComplete,
             environment,
-            complete,
-            warnings,
+            integrity,
             pathFailures,
-    ).hashCode()
+        ).hashCode()
 
     /**
      * Operand diagnostics retained independently of the compatibility quality summary.
@@ -149,14 +166,18 @@ public class ProfilingCoverage(
 
     private fun withPathEvidence(observations: List<ProfileObservation>): ProfilingCoverage = withPathFailures(observations.flatMap { it.pathResolution.failures })
 
-    private fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(warnings = PathDiagnostics(warnings, failures))
+    private fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(integrity = integrity.copy(warnings = PathDiagnostics(warnings, failures)))
 
     /** Internal warning augmentation preserves evidence independently of the new list projection. */
     internal fun withWarnings(
         warnings: List<String>,
         complete: Boolean = this.complete,
         drainComplete: Boolean = this.drainComplete,
-    ): ProfilingCoverage = copy(complete = complete, drainComplete = drainComplete, warnings = PathDiagnostics(warnings, pathFailures))
+    ): ProfilingCoverage =
+        copy(
+        drainComplete = drainComplete,
+        integrity = integrity.copy(complete = complete, warnings = PathDiagnostics(warnings, pathFailures)),
+    )
 
     public fun evidence(): ProfileEvidence =
         if (complete) {
@@ -182,11 +203,10 @@ public class ProfilingCoverage(
             }
         return copy(
             pathResolution = kept,
-            complete = complete &&
-                kept != PathResolutionQuality.FAILED &&
-                kept != PathResolutionQuality.MIXED &&
-                kept != PathResolutionQuality.TRUNCATED,
-            warnings = warnings + extra,
+            integrity = integrity.copy(
+                complete = complete && kept !in incompletePathQualities,
+                warnings = warnings + extra,
+            ),
         ).withPathFailures(failures)
     }
 
@@ -219,8 +239,7 @@ public class ProfilingCoverage(
                 droppedEvents = 0,
                 drainComplete = false,
                 environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
-                complete = false,
-                warnings = listOf("coverage was not supplied"),
+                integrity = ProfileIntegrity(false, listOf("coverage was not supplied")),
             )
 
         public fun infer(
@@ -235,111 +254,9 @@ public class ProfilingCoverage(
         ): ProfilingCoverage {
             val ioUring = inferIoUring(observations, environment)
             val pathQuality = inferPaths(observations)
-            val warnings = mutableListOf<String>()
-            if (ioUring == IoUringVisibility.BLIND) {
-                warnings.add("io_uring destinations were not observed; do not treat this BoB as an async path profile")
-            }
-
-            if (!drainComplete) {
-                warnings.add("event drain did not complete")
-            }
-            if (droppedEvents > 0) {
-                warnings.add("dropped $droppedEvents events")
-            }
-            if (ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) {
-                warnings.add("eBPF did not observe io_uring; destinations are unproven")
-            }
-            if (pathQuality == PathResolutionQuality.FAILED ||
-                pathQuality == PathResolutionQuality.MIXED ||
-                pathQuality == PathResolutionQuality.TRUNCATED
-            ) {
-                warnings.add("one or more path-bearing events did not fully resolve a path")
-            }
-            val openat2Uninspected =
-                observations.any { obs ->
-                    obs is ProfileObservation.Syscall &&
-                        obs.name.uppercase() == "OPENAT2" &&
-                        obs.paths.isNotEmpty() &&
-                        obs.openFlags == null
-                }
-            val unknownOpenFlags = observations
-                .filterIsInstance<ProfileObservation.Syscall>()
-                .mapNotNull { it.openFlagsEvidence as? OpenFlagsEvidence.Incomplete }
-                .flatMap { it.unknownSymbols }
-                .distinct()
-            if (unknownOpenFlags.isNotEmpty()) {
-                warnings.add("unrecognized open flags: ${unknownOpenFlags.joinToString(",")}")
-            }
-            if (openat2Uninspected) {
-                warnings.add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
-            }
-            val uringOpenUninspected =
-                observations.any { obs ->
-                    obs is ProfileObservation.IoUring &&
-                        UringOp.parse(obs.opcode) is UringOp.Open
-                }
-            if (uringOpenUninspected) {
-                warnings.add("io_uring open access mode was not observed")
-            }
-            val hybridUnproven =
-                strategy == ProfileStrategy.HYBRID_NO_URING && environment.ioUringDisabled != true
-            if (hybridUnproven) {
-                warnings.add("HYBRID_NO_URING without evidence that io_uring was disabled")
-            }
-            val unparsedConnectCount =
-                observations.count { obs ->
-                    obs is ProfileObservation.Syscall && obs.name.uppercase() == "CONNECT"
-                }
-            val hasParsedConnect = observations.any { it is ProfileObservation.Connect }
-            if (unparsedConnectCount > 0) {
-                if (!hasParsedConnect) {
-                    warnings.add("CONNECT was observed without a parsed destination")
-                } else {
-                    warnings.add("$unparsedConnectCount CONNECT syscall(s) were observed without a parsed destination")
-                }
-            }
-            val unparsedConnect = unparsedConnectCount > 0
-            val unmappedSyscalls =
-                observations.filter { obs ->
-                    obs is ProfileObservation.Syscall &&
-                        io.mazewall.core.Syscall
-                            .tryParse(obs.name) == null
-                }
-            if (unmappedSyscalls.isNotEmpty()) {
-                val names =
-                    unmappedSyscalls
-                        .filterIsInstance<ProfileObservation.Syscall>()
-                        .map { it.name.uppercase() }
-                        .distinct()
-                warnings.add("unmapped syscall observations cannot be compiled: ${names.joinToString(",")}")
-            }
-            val unenforceableUringOps =
-                observations.filter { obs ->
-                    obs is ProfileObservation.IoUring &&
-                        FsEffect.ofUring(UringOp.parse(obs.opcode), obs.paths) is FsEffect.Unenforceable
-                }
-            if (unenforceableUringOps.isNotEmpty()) {
-                val opcodes =
-                    unenforceableUringOps
-                        .filterIsInstance<ProfileObservation.IoUring>()
-                        .map { it.opcode }
-                        .distinct()
-                warnings.add("unenforceable io_uring opcodes were observed: ${opcodes.joinToString(",")}")
-            }
-            val complete = drainComplete &&
-                droppedEvents == 0 &&
-                ioUring != IoUringVisibility.BLIND &&
-                !(ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) &&
-                pathQuality != PathResolutionQuality.FAILED &&
-                pathQuality != PathResolutionQuality.MIXED &&
-                pathQuality != PathResolutionQuality.TRUNCATED &&
-                !openat2Uninspected &&
-                unknownOpenFlags.isEmpty() &&
-                !uringOpenUninspected &&
-                !hybridUnproven &&
-                !unparsedConnect &&
-                unenforceableUringOps.isEmpty() &&
-                unmappedSyscalls.isEmpty()
+            val facts = analyzeObservations(strategy, observations, environment)
+            val warnings = inferWarnings(strategy, ioUring, pathQuality, droppedEvents, drainComplete, facts)
+            val complete = isComplete(strategy, ioUring, pathQuality, droppedEvents, drainComplete, facts)
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -350,10 +267,108 @@ public class ProfilingCoverage(
                 droppedEvents = droppedEvents,
                 drainComplete = drainComplete,
                 environment = environment,
-                complete = complete,
-                warnings = warnings,
+                integrity = ProfileIntegrity(complete, warnings),
             ).withPathEvidence(observations)
         }
+
+        private fun analyzeObservations(
+            strategy: ProfileStrategy,
+            observations: List<ProfileObservation>,
+            environment: ProfileEnvironment,
+        ): InferenceFacts {
+            val syscalls = observations.filterIsInstance<ProfileObservation.Syscall>()
+            val uring = observations.filterIsInstance<ProfileObservation.IoUring>()
+            return InferenceFacts(
+                openat2Uninspected = syscalls.any { it.name.uppercase() == "OPENAT2" && it.paths.isNotEmpty() && it.openFlags == null },
+                unknownOpenFlags = syscalls.mapNotNull { it.openFlagsEvidence as? OpenFlagsEvidence.Incomplete }.flatMap { it.unknownSymbols }.distinct(),
+                uringOpenUninspected = uring.any { UringOp.parse(it.opcode) is UringOp.Open },
+                hybridUnproven = strategy == ProfileStrategy.HYBRID_NO_URING && environment.ioUringDisabled != true,
+                unparsedConnectCount = syscalls.count { it.name.uppercase() == "CONNECT" },
+                hasParsedConnect = observations.any { it is ProfileObservation.Connect },
+                unmappedSyscalls = syscalls
+                    .map { it.name.uppercase() }
+                    .filter {
+                        io.mazewall.core.Syscall
+                        .tryParse(it) == null
+                    }.distinct(),
+                unenforceableUringOps = uring.filter { FsEffect.ofUring(UringOp.parse(it.opcode), it.paths) is FsEffect.Unenforceable }.map { it.opcode }.distinct(),
+            )
+        }
+
+        private fun inferWarnings(
+            strategy: ProfileStrategy,
+            ioUring: IoUringVisibility,
+            pathQuality: PathResolutionQuality,
+            droppedEvents: Int,
+            drainComplete: Boolean,
+            facts: InferenceFacts,
+        ): List<String> =
+            buildList {
+                if (ioUring == IoUringVisibility.BLIND) add("io_uring destinations were not observed; do not treat this BoB as an async path profile")
+                if (!drainComplete) add("event drain did not complete")
+                if (droppedEvents > 0) add("dropped $droppedEvents events")
+                if (ioUring == IoUringVisibility.UNSEEN && strategy == ProfileStrategy.EBPF) add("eBPF did not observe io_uring; destinations are unproven")
+                if (pathQuality in incompletePathQualities) add("one or more path-bearing events did not fully resolve a path")
+                if (facts.unknownOpenFlags.isNotEmpty()) add("unrecognized open flags: ${facts.unknownOpenFlags.joinToString(",")}")
+                if (facts.openat2Uninspected) add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
+                if (facts.uringOpenUninspected) add("io_uring open access mode was not observed")
+                if (facts.hybridUnproven) add("HYBRID_NO_URING without evidence that io_uring was disabled")
+                if (facts.unparsedConnectCount > 0) {
+                    add(
+                        if (facts.hasParsedConnect) {
+                            "${facts.unparsedConnectCount} CONNECT syscall(s) were observed without a parsed destination"
+                        } else {
+                            "CONNECT was observed without a parsed destination"
+                        },
+                    )
+                }
+                if (facts.unmappedSyscalls.isNotEmpty()) {
+                    add("unmapped syscall observations cannot be compiled: ${facts.unmappedSyscalls.joinToString(",")}")
+                }
+                if (facts.unenforceableUringOps.isNotEmpty()) {
+                    add("unenforceable io_uring opcodes were observed: ${facts.unenforceableUringOps.joinToString(",")}")
+                }
+            }
+
+        private fun isComplete(
+            strategy: ProfileStrategy,
+            ioUring: IoUringVisibility,
+            pathQuality: PathResolutionQuality,
+            droppedEvents: Int,
+            drainComplete: Boolean,
+            facts: InferenceFacts,
+        ): Boolean =
+            listOf(
+                drainComplete,
+                droppedEvents == 0,
+                ioUring != IoUringVisibility.BLIND,
+                ioUring != IoUringVisibility.UNSEEN || strategy != ProfileStrategy.EBPF,
+                pathQuality !in incompletePathQualities,
+                !facts.openat2Uninspected,
+                facts.unknownOpenFlags.isEmpty(),
+                !facts.uringOpenUninspected,
+                !facts.hybridUnproven,
+                facts.unparsedConnectCount == 0,
+                facts.unenforceableUringOps.isEmpty(),
+                facts.unmappedSyscalls.isEmpty(),
+            ).all { it }
+
+        private data class InferenceFacts(
+            val openat2Uninspected: Boolean,
+            val unknownOpenFlags: List<String>,
+            val uringOpenUninspected: Boolean,
+            val hybridUnproven: Boolean,
+            val unparsedConnectCount: Int,
+            val hasParsedConnect: Boolean,
+            val unmappedSyscalls: List<String>,
+            val unenforceableUringOps: List<String>,
+        )
+
+        private val incompletePathQualities = setOf(
+            PathResolutionQuality.FAILED,
+            PathResolutionQuality.MIXED,
+            PathResolutionQuality.TRUNCATED,
+        )
 
         internal fun inferIoUring(
             observations: List<ProfileObservation>,
@@ -410,7 +425,7 @@ public class ProfilingCoverage(
 
 /**
  * Internal owner of typed diagnostics with the existing warnings-list projection.
- * The generated coverage copy method retains this immutable record unless callers replace warnings.
+ * Coverage copies retain this immutable record unless callers replace warnings.
  */
 private class PathDiagnostics(
     warnings: List<String>,

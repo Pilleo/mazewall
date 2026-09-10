@@ -15,20 +15,22 @@ internal object PortalAdmission {
         cancelled: () -> Boolean,
     ) {
         while (true) {
-            if (cancelled()) throw IOException("portal admission cancelled")
+            if (cancelled()) fail("cancelled")
             val remaining = deadline.remainingMillis().toLong()
-            if (remaining <= 0) throw IOException("portal admission timed out")
+            if (remaining <= 0) fail("timed out")
             if (lock.tryLock(minOf(remaining, CANCELLATION_SLICE_MS), TimeUnit.MILLISECONDS)) {
                 if (cancelled()) {
                     lock.unlock()
-                    throw IOException("portal admission cancelled")
+                    fail("cancelled")
                 }
                 if (deadline.isExpired()) {
                     lock.unlock()
-                    throw IOException("portal admission timed out")
+                    fail("timed out")
                 }
                 return
             }
         }
     }
+
+    private fun fail(reason: String): Nothing = throw IOException("portal admission $reason")
 }

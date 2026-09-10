@@ -29,6 +29,10 @@ public class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
 ) : AutoCloseable {
+    private companion object {
+        const val DEFAULT_TIMEOUT_MS = 30_000L
+    }
+
     private val closed = java.util.concurrent.atomic
         .AtomicBoolean()
     private val ioGate = ReentrantLock()
@@ -39,7 +43,7 @@ public class PortalChannel(
     fun send(
         frame: PortalFrame,
         fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> = emptyList(),
-        deadline: Deadline = Deadline.afterMillis(30_000),
+        deadline: Deadline = Deadline.afterMillis(DEFAULT_TIMEOUT_MS),
     ) {
         require(fds.size == frame.fdCount) { "fd list ${fds.size} != header ${frame.fdCount}" }
         terminalOnFailure(deadline) {
@@ -60,7 +64,7 @@ public class PortalChannel(
         }
     }
 
-    fun receive(timeoutMs: Long = 30_000L): Pair<PortalFrame, List<Capability.ReadFd>> = receive(Deadline.afterMillis(timeoutMs))
+    fun receive(timeoutMs: Long = DEFAULT_TIMEOUT_MS): Pair<PortalFrame, List<Capability.ReadFd>> = receive(Deadline.afterMillis(timeoutMs))
 
     fun receive(deadline: Deadline): Pair<PortalFrame, List<Capability.ReadFd>> {
         return terminalOnFailure(deadline) {
@@ -115,22 +119,27 @@ public class PortalChannel(
         io.write(frame.payload.copyToByteArray(), deadline)
     }
 
-    @Suppress("TooGenericExceptionCaught") // All partial transfers invalidate framing; cleanup must preserve fatal precedence.
-    private fun <T> terminalOnFailure(deadline: Deadline, action: () -> T): T {
+    // All partial transfers invalidate framing. The distinct idle, primary, and cleanup throws
+    // preserve protocol classification and fatal-failure precedence at this terminal boundary.
+    @Suppress("TooGenericExceptionCaught")
+    private fun <T> terminalOnFailure(
+        deadline: Deadline,
+        action: () -> T,
+    ): T {
         check(!closed.get()) { "portal channel is closed" }
         PortalAdmission.acquire(ioGate, deadline, closed::get)
         try {
             check(!closed.get()) { "portal channel is closed" }
             return action()
         } catch (idle: PortalReadTimeoutException) {
-            throw idle
+            raisePortalFailure(idle)
         } catch (failure: Throwable) {
             try {
                 close()
             } catch (cleanup: Throwable) {
-                throw preferFatal(failure, cleanup)
+                raisePortalFailure(preferFatal(failure, cleanup))
             }
-            throw failure
+            raisePortalFailure(failure)
         } finally {
             ioGate.unlock()
         }
@@ -148,6 +157,8 @@ public class PortalChannel(
         return first
     }
 }
+
+private fun raisePortalFailure(failure: Throwable): Nothing = throw failure
 
 internal fun openGrantedRead(
     rootDir: Path,

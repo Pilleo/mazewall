@@ -47,14 +47,14 @@ final class FreshJvmClassSelector {
 
     private static boolean annotated(ClassMetadata metadata, Map<String, ClassMetadata> classes, Set<String> visiting) {
         if (metadata.classAnnotated() || metadata.methods().stream().anyMatch(MethodMetadata::freshJvmAnnotated)) return true;
-        if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
+        if (!visiting.add(metadata.className())) return false;
         ClassMetadata parent = classes.get(metadata.superName());
-        if (parent == null) return false;
         Set<String> overridden = metadata.methods().stream()
             .filter(MethodMetadata::canOverride)
             .map(MethodMetadata::signature)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        return inheritedAnnotation(parent, classes, visiting, overridden);
+        return (parent != null && inheritedAnnotation(parent, classes, visiting, overridden))
+            || inheritedInterfaceAnnotation(metadata.interfaces(), classes, visiting, overridden);
     }
 
     private static boolean inheritedAnnotation(
@@ -67,10 +67,22 @@ final class FreshJvmClassSelector {
         if (metadata.methods().stream().anyMatch(method -> method.inheritedFreshJvmTest() && !overridden.contains(method.signature()))) {
             return true;
         }
-        if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
+        if (!visiting.add(metadata.className())) return false;
         metadata.methods().stream().filter(MethodMetadata::canOverride).map(MethodMetadata::signature).forEach(overridden::add);
         ClassMetadata parent = classes.get(metadata.superName());
-        return parent != null && inheritedAnnotation(parent, classes, visiting, overridden);
+        return (parent != null && inheritedAnnotation(parent, classes, visiting, overridden))
+            || inheritedInterfaceAnnotation(metadata.interfaces(), classes, visiting, overridden);
+    }
+
+    private static boolean inheritedInterfaceAnnotation(
+        List<String> interfaces,
+        Map<String, ClassMetadata> classes,
+        Set<String> visiting,
+        Set<String> overridden
+    ) {
+        return interfaces.stream()
+            .map(classes::get)
+            .anyMatch(parent -> parent != null && inheritedAnnotation(parent, classes, visiting, overridden));
     }
 
     private static ClassMetadata read(File file) throws IOException {
@@ -82,10 +94,12 @@ final class FreshJvmClassSelector {
             String name = className(pool, input.readUnsignedShort());
             int superIndex = input.readUnsignedShort();
             String parent = superIndex == 0 ? null : className(pool, superIndex);
-            input.skipNBytes(input.readUnsignedShort() * 2L);
+            int interfaceCount = input.readUnsignedShort();
+            List<String> interfaces = new java.util.ArrayList<>(interfaceCount);
+            for (int index = 0; index < interfaceCount; index++) interfaces.add(className(pool, input.readUnsignedShort()));
             skipMembers(input, pool);
             List<MethodMetadata> methods = readMethods(input, pool);
-            return new ClassMetadata(name, parent, attributesAnnotated(input, pool), List.copyOf(methods));
+            return new ClassMetadata(name, parent, List.copyOf(interfaces), attributesAnnotated(input, pool), List.copyOf(methods));
         }
     }
 
@@ -201,7 +215,13 @@ final class FreshJvmClassSelector {
         }
     }
 
-    private record ClassMetadata(String className, String superName, boolean classAnnotated, List<MethodMetadata> methods) {}
+    private record ClassMetadata(
+        String className,
+        String superName,
+        List<String> interfaces,
+        boolean classAnnotated,
+        List<MethodMetadata> methods
+    ) {}
 
     private record MethodMetadata(String signature, boolean freshJvmAnnotated, boolean junitTestAnnotated, boolean canOverride) {
         boolean inheritedFreshJvmTest() {

@@ -472,8 +472,7 @@ class BillOfBehaviorTest {
             droppedEvents = 1,
             drainComplete = true,
             environment = ProfileEnvironment("6.1.0", EbpfLoad.Denied("test")),
-            complete = false,
-            warnings = listOf("dropped 1 events"),
+            integrity = ProfileIntegrity(false, listOf("dropped 1 events")),
         )
         val result = ProfilingResult(
             value = 42,

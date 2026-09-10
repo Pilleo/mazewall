@@ -180,33 +180,13 @@ public object SupervisorSocketUtils {
                 msg.setMsgFlags(0)
                 val res = runtime.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC or if (beforeAttempt == null) 0 else 0x40)
                 if (res is LinuxNative.SyscallResult.Success) {
-                    val cmsg = CmsghdrSegment(controlBuf)
-                    val controlLength = msg.getMsgControllen()
-                    val rights = controlLength >= Layouts.CMSGHDR_DATA_OFFSET &&
-                        cmsg.getCmsgLevel() == SOL_SOCKET &&
-                        cmsg.getCmsgType() == SCM_RIGHTS
-                    // This fixed buffer can contain one header and up to two ints. Only
-                    // complete SCM_RIGHTS data are descriptors; never adopt padding.
-                    val dataEnd = minOf(controlLength, cmsg.getCmsgLen(), MSG_CONTROL_BUF_SIZE)
-                    val descriptors = if (rights && dataEnd >= CMSG_RIGHTS_LEN) {
-                        List(((dataEnd - Layouts.CMSGHDR_DATA_OFFSET) / Int.SIZE_BYTES).toInt()) { index ->
-                            controlBuf.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET + index * Int.SIZE_BYTES)
-                        }
-                    } else {
-                        emptyList()
-                    }
-                    val truncated = msg.getMsgFlags() and (NativeConstants.MSG_CTRUNC or NativeConstants.MSG_TRUNC) != 0
-                    if (res.value == 1L &&
-                        !truncated &&
-                        controlLength in CMSG_RIGHTS_LEN..MSG_CONTROL_BUF_SIZE &&
-                        cmsg.getCmsgLen() == CMSG_RIGHTS_LEN &&
-                        descriptors.size == 1
-                    ) {
-                        return FileDescriptor.adopt(descriptors.single(), role)
-                    }
-
-                    closeRejectedDescriptors(descriptors, role, runtime.fileSystem)
-                    return null
+                    return validateReceivedDescriptor(
+                        bytesReceived = res.value,
+                        message = msg,
+                        control = controlBuf,
+                        role = role,
+                        fileSystem = runtime.fileSystem,
+                    )
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
                     if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue // EINTR
@@ -214,6 +194,43 @@ public object SupervisorSocketUtils {
                     return null
                 }
             }
+        }
+    }
+
+    // Receipt validation owns every integer decoded from SCM_RIGHTS before any rejection path.
+    private fun <R : FileDescriptorRole> validateReceivedDescriptor(
+        bytesReceived: Long,
+        message: MsghdrSegment,
+        control: MemorySegment,
+        role: R,
+        fileSystem: io.mazewall.NativeFileSystem,
+    ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
+        val cmsg = CmsghdrSegment(control)
+        val controlLength = message.getMsgControllen()
+        val descriptors = decodeDescriptors(control, controlLength, cmsg)
+        val truncated = message.getMsgFlags() and (NativeConstants.MSG_CTRUNC or NativeConstants.MSG_TRUNC) != 0
+        val valid = bytesReceived == 1L &&
+            !truncated &&
+            controlLength in CMSG_RIGHTS_LEN..MSG_CONTROL_BUF_SIZE &&
+            cmsg.getCmsgLen() == CMSG_RIGHTS_LEN &&
+            descriptors.size == 1
+        if (valid) return FileDescriptor.adopt(descriptors.single(), role)
+        closeRejectedDescriptors(descriptors, role, fileSystem)
+        return null
+    }
+
+    private fun decodeDescriptors(
+        control: MemorySegment,
+        controlLength: Long,
+        cmsg: CmsghdrSegment,
+    ): List<Int> {
+        val carriesRights = controlLength >= Layouts.CMSGHDR_DATA_OFFSET &&
+            cmsg.getCmsgLevel() == SOL_SOCKET &&
+            cmsg.getCmsgType() == SCM_RIGHTS
+        val dataEnd = minOf(controlLength, cmsg.getCmsgLen(), MSG_CONTROL_BUF_SIZE)
+        if (!carriesRights || dataEnd < CMSG_RIGHTS_LEN) return emptyList()
+        return List(((dataEnd - Layouts.CMSGHDR_DATA_OFFSET) / Int.SIZE_BYTES).toInt()) { index ->
+            control.get(ValueLayout.JAVA_INT, Layouts.CMSGHDR_DATA_OFFSET + index * Int.SIZE_BYTES)
         }
     }
 

@@ -30,7 +30,7 @@ class ProfilingResult<T>(
         droppedEvents = 0,
         drainComplete = false,
         environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
-        complete = false,
+        integrity = ProfileIntegrity(false),
     ),
     observations: List<ProfileObservation> = emptyList(),
 ) {

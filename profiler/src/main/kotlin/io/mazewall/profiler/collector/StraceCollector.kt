@@ -22,6 +22,11 @@ internal class StraceCollector(
     private val workloadClass: Class<out TraceableWorkload>? = null,
     private val recordedLog: Path? = null,
 ) : ProfileCollector {
+    private companion object {
+        const val WORKLOAD_TIMEOUT_SECONDS = 60L
+        val workloadTimeout: Duration = Duration.ofSeconds(WORKLOAD_TIMEOUT_SECONDS)
+    }
+
     override val source: ObservationSource = ObservationSource.STRACE
     private var logText: String? = null
 
@@ -81,7 +86,7 @@ internal class StraceCollector(
                 .redirectOutput(tempOut.toFile())
                 .redirectError(tempErr.toFile())
                 .start()
-            StraceProcessTree.await(process, Duration.ofSeconds(60), "child strace process")
+            StraceProcessTree.await(process, workloadTimeout, "child strace process")
             val exitCode = process.exitValue()
             if (exitCode != 0) {
                 throw IllegalStateException(
