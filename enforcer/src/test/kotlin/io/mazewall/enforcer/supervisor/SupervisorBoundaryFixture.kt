@@ -124,8 +124,11 @@ internal class SupervisorBoundaryFixture {
         }
     }
 
-    fun handler(socketManager: SocketManager = sockets) =
-        SupervisorSessionHandler(
+    fun handler(
+        socketManager: SocketManager = sockets,
+        admission: SupervisorAdmission = SupervisorAdmission(),
+        socketHelpers: SocketHelperPool = helperPool,
+    ) = SupervisorSessionHandler(
         socket,
             listener,
             engine,
@@ -135,7 +138,8 @@ internal class SupervisorBoundaryFixture {
             io.mazewall.ffi.memory.FaultingNativeArena
             .observingClose { completion.countDown() }
         },
-            helperPool,
+            socketHelpers,
+            admission,
     )
 
     fun handlerWithReplyArena(replyArena: () -> NativeArena) =

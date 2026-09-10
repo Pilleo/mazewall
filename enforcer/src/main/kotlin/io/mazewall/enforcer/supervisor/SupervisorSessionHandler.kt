@@ -34,6 +34,7 @@ internal class SupervisorSessionHandler(
     private val preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
     private val replyArena: () -> NativeArena = NativeArena::ofConfined,
     socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
+    admission: SupervisorAdmission = SupervisorSocketHelpers.admission,
 ) : SeccompNotifHandler,
     AutoCloseable {
     private val reader = NotificationReader(engine, logger)
@@ -42,6 +43,7 @@ internal class SupervisorSessionHandler(
     private val routeExecutor = SupervisorRouteExecutor(engine, descriptors, socketHelpers)
     private val routes = SupervisorRouteDispatcher(routeExecutor)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)
+    private val notifications = SupervisorNotificationSession(admission, engine, descriptors, socketHelpers, preparation, exchange, replies, ::reportUncaught)
     private val terminated = AtomicBoolean(false)
     private val replyGate = Any()
 
@@ -51,8 +53,9 @@ internal class SupervisorSessionHandler(
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         deadline: Deadline,
-    ): NotificationWork = SupervisorNotificationWork(SeccompNotifications.read(notif), resp, deadline, preparation, exchange, routes, replies, ::reportUncaught)
+    ): NotificationWork = notifications.begin(SeccompNotifications.read(notif), resp, deadline)
 
+    /** Compatibility fixture seam; production dispatches exclusively through beginNotification. */
     fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
@@ -237,7 +240,11 @@ internal class SupervisorSessionHandler(
             if (!terminated.compareAndSet(false, true)) return
         }
         try {
-            routeExecutor.close()
+            try {
+                notifications.close()
+            } finally {
+                routeExecutor.cancel()
+            }
         } finally {
             try {
                 exchange.close()

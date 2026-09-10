@@ -57,9 +57,12 @@ internal class PoolSocketRouteExecutor(
         }
 
     override fun close() = session.close()
+
+    fun cancel() = session.cancel()
 }
 
 /** One capacity owner per supervisor JVM, shared across all listener sessions. */
 internal object SupervisorSocketHelpers {
+    val admission = SupervisorAdmission()
     val pool: SocketHelperPool by lazy { SocketHelperPool(factory = SocketHelperProcess::start) }
 }

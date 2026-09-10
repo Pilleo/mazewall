@@ -16,11 +16,12 @@ internal class SupervisorDaemonEngine(
     private val socketManager: SocketManager = io.mazewall.core.RealSocketManager,
     private val socketHelpers: SocketHelperPool = SocketHelperPool(factory = SocketHelperProcess::start),
 ) {
+    private val admission = SupervisorAdmission()
     private val delegate = SeccompDaemonEngine(
         socketPath = socketPath,
         readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
         notifHandlerFactory = { socketFd, listenerFd ->
-            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers)
+            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers, admission = admission)
         },
         handshakeAckByte = 0xAC.toByte(),
         maxConnections = MAX_CONNECTIONS,

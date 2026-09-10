@@ -86,8 +86,9 @@ internal class SupervisorNotificationWork(
     override fun close() {
         if (closed) return
         closed = true
-        handoff?.close()
-        execWork?.close()
+        val cleanup = SocketCleanup()
+        cleanup.attempt { handoff?.close() }
+        cleanup.attempt { execWork?.close() }
         // Helpers own native execution. A late result has disposal authority only.
         future?.whenComplete { effect, _ ->
             try {
@@ -97,5 +98,6 @@ internal class SupervisorNotificationWork(
                 reportUncaught(expectedDisposalFailure)
             }
         }
+        cleanup.rethrow()
     }
 }

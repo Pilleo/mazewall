@@ -33,6 +33,8 @@ internal class SupervisorRouteExecutor(
 
     override fun close() = sockets.close()
 
+    fun cancel() = sockets.cancel()
+
     private companion object {
         const val ACCEPT_FLAGS_ARGUMENT = 3
     }

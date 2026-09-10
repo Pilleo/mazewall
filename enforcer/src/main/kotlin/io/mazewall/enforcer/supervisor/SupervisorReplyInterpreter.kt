@@ -125,6 +125,12 @@ internal class SupervisorReplyInterpreter(
             is FdInjectionResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor injection failed with errno=${result.errno}"))
         }
 
+    /** Admission overload consumes the reactor's terminal lease even on EINTR. */
+    fun rejectOverload(context: SupervisorReplyContext): UserNotifReplyResult {
+        UserNotifReply.encodeError(context.response, context.id, NativeConstants.EAGAIN)
+        return UserNotifReply.send(engine.raw, listener, context.response, maxAttempts = 1)
+    }
+
     private fun sendContinue(context: SupervisorReplyContext): ReplyExecutionResult {
         UserNotifReply.encodeContinue(context.response, context.id)
         return confirmed(UserNotifReply.send(engine.raw, listener, context.response))
@@ -135,7 +141,7 @@ internal class SupervisorReplyInterpreter(
         errno: Int,
     ): ReplyExecutionResult {
         UserNotifReply.encodeError(context.response, context.id, errno)
-        return confirmed(UserNotifReply.send(engine.raw, listener, context.response))
+        return confirmed(UserNotifReply.send(engine.raw, listener, context.response, maxAttempts = if (errno == NativeConstants.EAGAIN) 1 else 8))
     }
 
     private fun confirmed(result: UserNotifReplyResult): ReplyExecutionResult =

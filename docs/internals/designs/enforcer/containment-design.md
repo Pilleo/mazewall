@@ -590,6 +590,15 @@ Normal SEND/RECV interruption retries have an eight-attempt ceiling; timeout den
 does not retry. Native notification/reply layouts and private control frames are
 unchanged.
 
+Before preparation, a daemon-owned admission ledger permits at most 128 admitted
+notifications total and eight per TID, shared across all listener sessions. Each
+notification owns an idempotent counted lease, released on completion, failure,
+timeout, or listener teardown. Admission rejection bypasses argument inspection
+and JVM validation and makes one EAGAIN terminal send attempt, including under
+EINTR. Helper-queue EAGAIN replies also use one attempt. These limits count work
+received by the reactor; they do not limit notifications still queued in the
+kernel or impose a traps-per-second rate limit.
+
 `ControlSocketExchange` moves a frame through partial nonblocking writes and reads,
 using the same notification deadline throughout. It changes status flags only on
 the daemon-owned private control endpoint, never on an imported tracee socket.
@@ -619,7 +628,22 @@ Supervised `connect` imports the original socket with `pidfd_getfd`, transfers a
 
 The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Slots start lazily, execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation closes the imported local descriptor and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors; bounded private pipe frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots. No tracee pointer or confined arena crosses the process boundary.
 
-Each supervisor session owns its queued/active request leases. Teardown stops admission, removes queued work, kills/reaps active child processes, and disposes late accepted descriptors. A reply gate prevents a completed operation from sending after session closure; accepted peer-address writes also occur inside that gate, through an owned immutable reply effect rather than the worker callback. The existing kernel response format is unchanged. Helper termination interrupts blocking native calls without changing the original open-file description's flags. Child startup and reap are bounded to five seconds; the owning pool refuses to recycle an unreaped slot. Cleanup tracks successful reap, channel closure and endpoint deletion independently, so failed steps remain retryable without repeating completed releases. Cancellation does not undo a connect already completed by the kernel.
+Each reactor notification owns a helper request session under its listener owner.
+Notification timeout or listener teardown removes queued work, retires active
+helpers, and disposes late accepted descriptors. Cancellation returns without
+waiting for helper startup or process reaping; bounded cleanup workers terminate
+children independently of the reactor. It does not interrupt JVM operation
+threads. Helper slots remain unavailable until the old child has been reaped,
+including cancellation during factory startup. Explicit session/pool joins use
+one aggregate ten-second cleanup deadline rather than a fresh wait for each job;
+failed helper release remains retryable and cleanup failure is reported.
+The reactor retains all reply authority and a closed notification can only dispose
+a late result. The compatibility fixture entrypoint retains its reply gate.
+The existing kernel response format is unchanged. Child startup and reap each
+have a five-second bound. Cleanup tracks successful reap, channel closure and
+endpoint deletion independently, without repeating completed releases.
+Cancellation does not undo a connect already completed by the kernel or change
+the original open-file description's flags.
 
 Before opening IPC, a helper verifies its expected direct parent and registers an independent JDK ProcessHandle exit monitor. Owner death (including SIGKILL) halts the helper on the monitor thread, releasing imported descriptors even while the operation thread is blocked in native accept/connect. A parent that died before registration fails the direct-parent check; death during registration completes the exit notification. This private helper mechanism adds no FFM layouts or downcalls.
 

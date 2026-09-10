@@ -12,6 +12,14 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 
 class SupervisorReplyInterpreterMatrixTest {
+    @Test
+    fun `helper overload error has only one interrupted terminal attempt`() {
+        val fixture = SupervisorBoundaryFixture()
+        fixture.replyResult = SupervisorBoundaryFixture.failure(4)
+        assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, execute(fixture, SupervisorReplyEffect.Error(11)))
+        assertEquals(listOf(KernelReply(42, -11, 0, false)), fixture.replies)
+    }
+
     @ParameterizedTest
     @ValueSource(ints = [0, 1, 13])
     fun `secure exec continues only after nonterminal injection and affirmative rewrite ACK`(replyErrno: Int) {

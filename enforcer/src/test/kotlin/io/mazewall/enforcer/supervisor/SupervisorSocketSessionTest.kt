@@ -46,6 +46,7 @@ class SupervisorSocketSessionTest {
             }
             assertTrue(started.await(5, TimeUnit.SECONDS))
             handler.close()
+            pool.close() // Cancellation schedules reap; explicit shutdown joins owned cleanup.
             assertEquals(0, fixture.replies.size)
             assertEquals(setOf(51005, 51006), fixture.closed.toSet())
         }
