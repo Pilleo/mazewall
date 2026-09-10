@@ -18,6 +18,28 @@ import org.junit.jupiter.api.Test
 
 class UserNotifSharedTest {
     @Test
+    fun `persistent EINTR exhausts the reply budget`() {
+        NativeArena.ofConfined().use { arena ->
+            var attempts = 0
+            val engine = MockNativeEngine().apply {
+                onIoctl = { _, _, _ ->
+                    attempts++
+                    if (attempts < 100) {
+                        LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+                    } else {
+                        LinuxNative.SyscallResult.Success(0L)
+                    }
+                }
+            }
+            assertEquals(
+                UserNotifReplyResult.Failed(NativeConstants.EINTR),
+                UserNotifReply.send(engine.raw, TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(17), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)),
+            )
+            assertEquals(8, attempts)
+        }
+    }
+
+    @Test
     fun `send retries EINTR before reporting a sent reply`() {
         NativeArena.ofConfined().use { arena ->
             var attempts = 0

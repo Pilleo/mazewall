@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -17,6 +18,7 @@ import io.mazewall.ffi.memory.fill
 import io.mazewall.platform.seccomp.SeccompNotifications
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.NotificationWork
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,12 +45,13 @@ internal class SupervisorSessionHandler(
     private val terminated = AtomicBoolean(false)
     private val replyGate = Any()
 
-    context(arena: NativeArena) override fun processNotification(
+    context(arena: NativeArena) override fun beginNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-    ): NotifResult = if (processNotification(notif, resp)) NotifResult.HANDLED else NotifResult.TERMINATE
+        deadline: Deadline,
+    ): NotificationWork = SupervisorNotificationWork(SeccompNotifications.read(notif), resp, deadline, preparation, exchange, routes, replies, ::reportUncaught)
 
     fun processNotification(
         notif: ManagedSegment,

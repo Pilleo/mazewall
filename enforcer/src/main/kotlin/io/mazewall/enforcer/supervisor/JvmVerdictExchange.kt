@@ -49,6 +49,27 @@ internal class JvmVerdictExchange(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager,
 ) {
+    context(arena: NativeArena) fun begin(
+        request: JvmVerdictRequest,
+        deadline: Deadline,
+    ): io.mazewall.platform.seccomp.daemon.ControlSocketExchange {
+        val header = request.header
+        val encoded = JvmVerdictRequestEncoder.encode(request.id, header.tid.value, header.audit, header.ppid, header.nr, header.args, request.path, request.sockaddrBytes)
+        val bytes = ByteArray(encoded.size.toInt())
+        ManagedSegment.copy(encoded.buffer, 0, bytes, 0, bytes.size)
+        return io.mazewall.platform.seccomp.daemon
+            .ControlSocketExchange(engine.raw, engine.memory, socket, bytes, Layouts.SUPERVISOR_RESPONSE_SIZE.toInt(), deadline)
+    }
+
+    context(arena: NativeArena) fun decode(
+        request: JvmVerdictRequest,
+        bytes: ByteArray,
+    ): JvmExchangeResult {
+        val buffer = arena.allocate(bytes.size.toLong())
+        ManagedSegment.copy(bytes, 0, buffer, 0, bytes.size)
+        return decode(request, buffer)
+    }
+
     context(arena: NativeArena) fun send(request: JvmVerdictRequest): Boolean {
         val header = request.header
         val encoded = JvmVerdictRequestEncoder.encode(

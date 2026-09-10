@@ -21,6 +21,27 @@ internal class SupervisorExecRewriteExchange(
     private val engine: NativeEngine,
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
 ) {
+    context(arena: NativeArena) fun begin(
+        exec: SecureExecRequest,
+        descriptor: Int,
+        emptyPath: Long,
+        deadline: Deadline,
+    ): io.mazewall.platform.seccomp.daemon.ControlSocketExchange {
+        val buffer = arena.allocate(REWRITE_SIZE)
+        val network = NetworkOrderBuffer(buffer.native)
+        network.writeLong(0, descriptor.toLong())
+        network.writeLong(EMPTY_PATH_OFFSET, emptyPath)
+        network.writeLong(ARGV_OFFSET, if (descriptor < 0) 0 else exec.argv)
+        network.writeLong(ENVP_OFFSET, if (descriptor < 0) 0 else exec.envp)
+        network.writeLong(EXECVEAT_OFFSET, if (descriptor < 0) 0 else exec.execveat)
+        network.writeLong(TID_OFFSET, exec.tid.value.toLong())
+        val bytes = ByteArray(REWRITE_SIZE.toInt())
+        io.mazewall.ffi.memory.ManagedSegment
+            .copy(buffer, 0, bytes, 0, bytes.size)
+        return io.mazewall.platform.seccomp.daemon
+            .ControlSocketExchange(engine.raw, engine.memory, socket, bytes, 1, deadline)
+    }
+
     context(arena: NativeArena) fun request(
         exec: SecureExecRequest,
         descriptor: Int,

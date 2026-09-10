@@ -49,14 +49,21 @@ class SeccompSessionHandlerTest {
             listenerFd = TestFileDescriptors
                 .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = object : SeccompNotifHandler {
-                context(arena: NativeArena) override fun processNotification(
+                context(arena: NativeArena) override fun beginNotification(
                     notif: ManagedSegment,
                     resp: ManagedSegment,
                     listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                     socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-                ): NotifResult {
+                    deadline: io.mazewall.core.Deadline,
+                ): NotificationWork {
                     notificationHandlerCalls += 1
-                    return NotifResult.PASS_THROUGH
+                    return object : NotificationWork {
+                        context(arena: NativeArena) override fun poll(): NotificationProgress =
+                            NotificationProgress.Ready(
+                            { io.mazewall.platform.seccomp.UserNotifReplyResult.Sent },
+                            NotifResult.PASS_THROUGH,
+                        )
+                    }
                 }
             },
             engine = engine,

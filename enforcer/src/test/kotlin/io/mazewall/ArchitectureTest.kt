@@ -539,6 +539,10 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.platform.seccomp.daemon.NotificationProgress" to setOf(
+                "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Await",
+                "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Ready",
+            ),
             "io.mazewall.enforcer.supervisor.SupervisorReplyEffect" to setOf(
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Continue",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Value",

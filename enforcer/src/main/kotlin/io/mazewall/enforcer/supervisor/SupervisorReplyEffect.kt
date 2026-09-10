@@ -56,5 +56,7 @@ internal sealed interface ReplyExecutionResult {
 
     data class ReplyFailed(
         val cause: Throwable,
+        val outcome: io.mazewall.platform.seccomp.UserNotifReplyResult = io.mazewall.platform.seccomp.UserNotifReplyResult
+            .Failed(NativeConstants.EIO),
     ) : ReplyExecutionResult
 }

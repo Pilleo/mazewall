@@ -42,12 +42,13 @@ class SeccompSessionHandlerTest {
         }
         val engine = MockNativeEngine(memory = memory)
         val notifHandler = object : SeccompNotifHandler {
-            context(arena: NativeArena) override fun processNotification(
+            context(arena: NativeArena) override fun beginNotification(
                 notif: ManagedSegment,
                 resp: ManagedSegment,
                 listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                 socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-            ): NotifResult = NotifResult.HANDLED
+                deadline: io.mazewall.core.Deadline,
+            ): io.mazewall.platform.seccomp.daemon.NotificationWork = error("unused")
         }
         val handler = SeccompSessionHandler(
             socketFd = TestFileDescriptors

@@ -59,6 +59,45 @@ class ProfilerDaemonTest {
     }
 
     @Test
+    fun `reactor adapter completes the event and ACK before offering a reply`() {
+        val transport = object : MockTransport() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: MemorySegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+        }
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN")) { }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                handler
+                    .beginNotification(
+                    notif,
+                    arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
+                    listener,
+                    socket,
+                    io.mazewall.core.Deadline
+                    .afterMillis(30_000),
+                ).use { work ->
+                    repeat(2) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
+                    val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    assertTrue(transport.ioctlCalls.isEmpty())
+                    assertEquals(io.mazewall.platform.seccomp.UserNotifReplyResult.Sent, ready.reply())
+                    assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                }
+            }
+            }
+        }
+    }
+
+    @Test
     fun `transport engine bridge uses the injected raw native operations`() {
         val transport = MockTransport()
         val bridge = TransportNativeEngine(transport, MockNativeEngine())

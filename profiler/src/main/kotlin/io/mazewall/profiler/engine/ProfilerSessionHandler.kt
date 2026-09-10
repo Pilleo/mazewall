@@ -1,6 +1,7 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -20,14 +21,21 @@ import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeShort
 import io.mazewall.map
 import io.mazewall.onSuccess
+import io.mazewall.platform.seccomp.UserNotifReply
+import io.mazewall.platform.seccomp.UserNotifReplyResult
+import io.mazewall.platform.seccomp.daemon.ControlSocketExchange
+import io.mazewall.platform.seccomp.daemon.ControlSocketFailure
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.NotificationProgress
+import io.mazewall.platform.seccomp.daemon.NotificationWork
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.SeccompReplyResult
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.profiler.ffi.controlMemory
 import io.mazewall.recover
 import java.io.IOException
 
@@ -61,6 +69,93 @@ internal class ProfilerSessionHandler(
         sessionArena.close()
     }
 
+    context(arena: NativeArena) override fun beginNotification(
+        notif: ManagedSegment,
+        resp: ManagedSegment,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        deadline: Deadline,
+    ): NotificationWork {
+        val notification = parser.readNotif(notif)
+        return object : NotificationWork {
+            private var control: ControlSocketExchange? = null
+            private var waiting: ProfilerState? = null
+            private var sentRecorded = false
+
+            context(arena: NativeArena) override fun poll(): NotificationProgress {
+                val exchange = control
+                if (exchange == null) {
+                    val current = state as? ProfilerState.ActiveSession ?: return reply(ECONNRESET, NotifResult.TERMINATE)
+                    ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong()))
+                    val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
+                    if (isNoisePath(notification.nr, event)) {
+                        state = ProfilerSessionMachine.evaluate(current, ProfilerSessionEvent.NoisePathBypassed).state
+                        return reply(0, NotifResult.HANDLED)
+                    }
+                    val frame = io.mazewall.profiler.internal.TraceEventEncoder
+                        .encode(event)
+                    control = ControlSocketExchange(ioOps.raw, ioOps.controlMemory(), socketFd, frame, ACK_BUF_SIZE.toInt(), deadline, minimumResponseSize = 1)
+                    waiting = transitionToAckWait(current, notification.id, event)
+                    state = checkNotNull(waiting)
+                    return NotificationProgress.Await
+                }
+                val bytes = try {
+                    val received = exchange.poll()
+                    if (exchange.requestSent && !sentRecorded) {
+                        sentRecorded = true
+                        ledger.record(SessionEvent.EventSent(System.nanoTime(), notification.pid.toLong()))
+                    }
+                    received ?: return NotificationProgress.Await
+                } catch (failure: ControlSocketFailure) {
+                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
+                    return reply(ECONNRESET, NotifResult.TERMINATE)
+                }
+                // Preserve the four-byte private ACK protocol, including ACK-before-shutdown reply ordering.
+                if (PASS_THROUGH_COMMAND_BYTE in bytes) {
+                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.PassedThrough).state
+                    return reply(0, NotifResult.PASS_THROUGH)
+                }
+                if (PROTOCOL_ACK_BYTE in bytes) {
+                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), notification.pid.toLong()))
+                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.AckSucceeded).state
+                    return reply(0, NotifResult.HANDLED, SHUTDOWN_COMMAND_BYTE in bytes)
+                }
+                if (SHUTDOWN_COMMAND_BYTE in bytes) onShutdown("Parent Command during notification")
+                state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
+                return reply(ECONNRESET, NotifResult.TERMINATE)
+            }
+
+            private fun reply(
+                errno: Int,
+                result: NotifResult,
+                shutdown: Boolean = false,
+            ): NotificationProgress =
+                NotificationProgress.Ready(
+                reply = {
+                    if (errno == 0) {
+                        UserNotifReply.encodeContinue(resp, notification.id)
+                    } else {
+                        UserNotifReply.encodeError(resp, notification.id, errno)
+                    }
+                    UserNotifReply.send(ioOps.raw, listenerFd, resp)
+                },
+                result = result,
+                onReply = { outcome ->
+                    if (outcome == UserNotifReplyResult.Sent) {
+                        if (errno == 0) {
+                            ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), notification.pid.toLong(), 0))
+                        } else {
+                            ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), notification.pid.toLong(), errno))
+                        }
+                        if (shutdown) onShutdown("Parent Command (deferred, ACK took priority)")
+                    } else {
+                        terminateSession()
+                    }
+                },
+            )
+        }
+    }
+
     /**
      * Processes a single incoming seccomp notification.
      *
@@ -81,7 +176,7 @@ internal class ProfilerSessionHandler(
      * Each early result below is a terminal exactly-one-reply classification. Keeping that classification
      * explicit prevents ACK, notification-gone, interruption, and transport paths from replying twice.
      */
-    context(arena: NativeArena) override fun processNotification(
+    context(arena: NativeArena) fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,

@@ -17,6 +17,34 @@ import org.junit.jupiter.api.Test
 
 class SupervisorSessionHandlerTest {
     @Test
+    fun `reactor adapter yields across control IO and leaves reply to the terminal lease`() {
+        val fixture = SupervisorBoundaryFixture()
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+            fixture.handler().use { handler ->
+                handler
+                    .beginNotification(
+                    arena.allocate(Layouts.SECCOMP_NOTIF).also(::notification),
+                    arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
+                    fixture.listener,
+                    fixture.socket,
+                    io.mazewall.core.Deadline
+                        .afterMillis(30_000),
+                ).use { work ->
+                    repeat(3) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
+                    val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    assertEquals(emptyList<KernelReply>(), fixture.replies)
+                    assertEquals(1, fixture.writeCount)
+                    assertEquals(1, fixture.readCount)
+                    assertEquals(io.mazewall.platform.seccomp.UserNotifReplyResult.Sent, ready.reply())
+                    assertEquals(listOf(KernelReply(42, 0, 1, false)), fixture.replies)
+                }
+            }
+        }
+        }
+    }
+
+    @Test
     fun `notification receive retries EINTR and sends exactly one confirmed reply`() {
         val fixture = SupervisorBoundaryFixture()
         var receives = 0

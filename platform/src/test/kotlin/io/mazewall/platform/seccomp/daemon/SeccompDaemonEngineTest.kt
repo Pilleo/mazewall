@@ -25,12 +25,13 @@ class SeccompDaemonEngineTest {
             socketPath = "/tmp/test.sock",
             notifHandlerFactory = { _, _ ->
                 object : SeccompNotifHandler, AutoCloseable {
-                    context(arena: NativeArena) override fun processNotification(
+                    context(arena: NativeArena) override fun beginNotification(
                         notif: ManagedSegment,
                         resp: ManagedSegment,
                         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-                    ): NotifResult = NotifResult.HANDLED
+                        deadline: io.mazewall.core.Deadline,
+                    ): NotificationWork = error("unused")
 
                     override fun close() {
                         notificationHandlerClosed = true

@@ -548,6 +548,33 @@ The store holds one outstanding authorization per parent process identity. It do
 
 ### Supervisor session and reply ownership
 
+The shared `SeccompSessionHandler` accepts one notification at a time and owns its
+30-second monotonic deadline. `SeccompNotifHandler.beginNotification` returns
+reactor-confined `NotificationWork`; every poll yields `Await` or a terminal reply
+effect. Idle and interrupted reactor polls also advance pending work. Supervisor
+helper completions are observed by the reactor; their completion callbacks have
+resource-disposal authority only. A single CAS lease admits either the completed
+reply or the deadline's one EPERM send attempt. ENOENT, hard native failure, and a
+throwing terminal effect consume that lease permanently and terminate the session.
+Normal SEND/RECV interruption retries have an eight-attempt ceiling; timeout denial
+does not retry. Native notification/reply layouts and private control frames are
+unchanged.
+
+`ControlSocketExchange` moves a frame through partial nonblocking writes and reads,
+using the same notification deadline throughout. It changes status flags only on
+the daemon-owned private control endpoint, never on an imported tracee socket.
+EAGAIN yields; EINTR has a finite per-exchange budget. Secure-exec rewrite exchange
+is advanced before the terminal reply is admitted. No timer thread, watchdog, or
+blocking JVM worker is introduced by this protocol.
+
+This is a deadline for cooperative reactor work, not yet a wall-clock bound on
+every existing filesystem operation. Argument/path preparation, `/proc` inspection,
+open routes, and read-only-NUL discovery retain their existing bounded-size but
+potentially blocking native/filesystem calls. Deadline checks before and after a
+work poll reject late completion, but cannot preempt a stalled synchronous call.
+Moving those operations into independently terminable helper processes is a
+prerequisite for an end-to-end liveness guarantee; open semantics are unchanged.
+
 `SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
 
 An unusable exchange remains terminal even if closing its connection fails. Its typed outcome retains the cleanup exception alongside the primary failure; the session records both and refuses subsequent notifications. Preparation-only recovery cannot reinterpret an execution or exchange failure as successfully handled work.
