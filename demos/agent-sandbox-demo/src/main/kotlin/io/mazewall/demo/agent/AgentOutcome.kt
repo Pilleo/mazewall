@@ -3,6 +3,10 @@ package io.mazewall.demo.agent
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.FileVisitResult
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 
 internal enum class ExpectedAgentResult {
     ALLOWED,
@@ -13,6 +17,8 @@ internal sealed interface AgentOutcome {
     data class Completed(val detail: String) : AgentOutcome
 
     data class Denied(val detail: String) : AgentOutcome
+
+    data class Inconclusive(val detail: String) : AgentOutcome
 
     data class InfrastructureFailure(val cause: Throwable) : AgentOutcome
 }
@@ -31,10 +37,17 @@ internal data class AgentScenarioResult(
     fun render(): String {
         val status = if (passed) "PASS" else "FAIL"
         val detail = when (outcome) {
-            is AgentOutcome.Completed -> "ALLOWED: ${outcome.detail}"
-            is AgentOutcome.Denied -> "DENIED: ${outcome.detail}"
+            is AgentOutcome.Inconclusive -> "INFRASTRUCTURE FAILURE (INCONCLUSIVE): ${outcome.detail}"
             is AgentOutcome.InfrastructureFailure ->
                 "INFRASTRUCTURE FAILURE: ${outcome.cause.message ?: outcome.cause.javaClass.simpleName}"
+            is AgentOutcome.Completed -> when (expected) {
+                ExpectedAgentResult.ALLOWED -> "LEGITIMATE WORKLOAD SUCCEEDED: ${outcome.detail}"
+                ExpectedAgentResult.DENIED -> "UNEXPECTED SUCCESS: ${outcome.detail}"
+            }
+            is AgentOutcome.Denied -> when (expected) {
+                ExpectedAgentResult.ALLOWED -> "LEGITIMATE WORKLOAD FAILURE: unexpected denial (${outcome.detail})"
+                ExpectedAgentResult.DENIED -> "EXPECTED DENIAL: ${outcome.detail}"
+            }
         }
         return "[$status] $scenario (expected ${expected.name}): $detail"
     }
@@ -45,13 +58,35 @@ internal fun classifyToolOutcome(result: Result<String>): AgentOutcome =
         onSuccess = { AgentOutcome.Completed(it) },
         onFailure = { failure ->
             val diagnostic = ContainmentViolationDetector.diagnose(failure)
-            if (diagnostic != null) {
-                AgentOutcome.Denied(diagnostic.evidence.name)
-            } else {
-                AgentOutcome.InfrastructureFailure(failure)
+            when (diagnostic?.evidence) {
+                io.mazewall.enforcer.api.ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL ->
+                    AgentOutcome.Denied(diagnostic.evidence.name)
+                io.mazewall.enforcer.api.ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+                io.mazewall.enforcer.api.ContainmentViolationEvidence.UNKNOWN,
+                -> AgentOutcome.Inconclusive(diagnostic.evidence.name)
+                null -> AgentOutcome.InfrastructureFailure(failure)
             }
         },
     )
+
+internal inline fun <T> captureRecoverable(action: () -> T): Result<T> =
+    try {
+        Result.success(action())
+    } catch (failure: Exception) {
+        Result.failure(failure)
+    }
+
+internal fun runScenarioBoundary(
+    action: () -> AgentOutcome,
+    cleanup: () -> Unit,
+): AgentOutcome =
+    try {
+        action()
+    } catch (failure: Exception) {
+        AgentOutcome.InfrastructureFailure(failure)
+    } finally {
+        cleanup()
+    }
 
 internal class AgentDemoFixture private constructor(
     val root: File,
@@ -59,7 +94,21 @@ internal class AgentDemoFixture private constructor(
     val traversalTarget: File,
 ) : AutoCloseable {
     override fun close() {
-        root.deleteRecursively()
+        Files.walkFileTree(
+            root.toPath(),
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.delete(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, failure: java.io.IOException?): FileVisitResult {
+                    if (failure != null) throw failure
+                    Files.delete(dir)
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
     }
 
     companion object {

@@ -6,30 +6,63 @@ import kotlin.test.assertEquals
 
 class NetworkAddressClassifierTest {
     @Test
-    fun `blocks metadata RFC1918 loopback and link local IPv4 boundaries`() {
-        listOf(
-            "169.254.169.254",
-            "10.0.0.0",
-            "10.255.255.255",
-            "172.16.0.0",
-            "172.31.255.255",
-            "192.168.0.0",
-            "192.168.255.255",
-            "127.0.0.1",
-        ).forEach { address ->
-            assertEquals(AddressDecision.DENY, NetworkAddressClassifier.classify(sockaddr(address)), address)
+    fun `IPv4 classification allows only global unicast destinations`() {
+        mapOf(
+            "0.0.0.0" to AddressDecision.DENY,
+            "9.255.255.255" to AddressDecision.ALLOW,
+            "10.0.0.0" to AddressDecision.DENY,
+            "10.255.255.255" to AddressDecision.DENY,
+            "11.0.0.0" to AddressDecision.ALLOW,
+            "100.63.255.255" to AddressDecision.ALLOW,
+            "100.64.0.0" to AddressDecision.DENY,
+            "100.127.255.255" to AddressDecision.DENY,
+            "100.128.0.0" to AddressDecision.ALLOW,
+            "127.0.0.0" to AddressDecision.DENY,
+            "127.255.255.255" to AddressDecision.DENY,
+            "169.254.0.0" to AddressDecision.DENY,
+            "169.254.169.254" to AddressDecision.DENY,
+            "169.254.255.255" to AddressDecision.DENY,
+            "172.15.255.255" to AddressDecision.ALLOW,
+            "172.16.0.0" to AddressDecision.DENY,
+            "172.31.255.255" to AddressDecision.DENY,
+            "172.32.0.0" to AddressDecision.ALLOW,
+            "192.0.2.1" to AddressDecision.DENY,
+            "192.168.0.0" to AddressDecision.DENY,
+            "192.168.255.255" to AddressDecision.DENY,
+            "198.18.0.0" to AddressDecision.DENY,
+            "198.19.255.255" to AddressDecision.DENY,
+            "198.51.100.1" to AddressDecision.DENY,
+            "203.0.113.1" to AddressDecision.DENY,
+            "223.255.255.255" to AddressDecision.ALLOW,
+            "224.0.0.0" to AddressDecision.DENY,
+            "239.255.255.255" to AddressDecision.DENY,
+            "240.0.0.0" to AddressDecision.DENY,
+            "255.255.255.255" to AddressDecision.DENY,
+        ).forEach { (address, expected) ->
+            assertEquals(expected, NetworkAddressClassifier.classify(sockaddr(address)), address)
         }
-        assertEquals(AddressDecision.ALLOW, NetworkAddressClassifier.classify(sockaddr("172.15.255.255")))
-        assertEquals(AddressDecision.ALLOW, NetworkAddressClassifier.classify(sockaddr("172.32.0.0")))
     }
 
     @Test
-    fun `blocks IPv6 local addresses`() {
-        listOf("::1", "fc00::1", "fdff::1", "fe80::1")
-            .forEach { address ->
-                assertEquals(AddressDecision.DENY, NetworkAddressClassifier.classify(sockaddr(address)), address)
-            }
-        assertEquals(AddressDecision.ALLOW, NetworkAddressClassifier.classify(sockaddr("2001:4860:4860::8888")))
+    fun `IPv6 classification allows only global unicast destinations`() {
+        mapOf(
+            "::" to AddressDecision.DENY,
+            "::1" to AddressDecision.DENY,
+            "100::1" to AddressDecision.DENY,
+            "2001:2::1" to AddressDecision.DENY,
+            "2001:db8::1" to AddressDecision.DENY,
+            "2001:4860:4860::8888" to AddressDecision.ALLOW,
+            "3fff::1" to AddressDecision.DENY,
+            "fc00::1" to AddressDecision.DENY,
+            "fdff::1" to AddressDecision.DENY,
+            "fe80::1" to AddressDecision.DENY,
+            "febf:ffff::1" to AddressDecision.DENY,
+            "fec0::1" to AddressDecision.DENY,
+            "ff00::1" to AddressDecision.DENY,
+            "ffff::1" to AddressDecision.DENY,
+        ).forEach { (address, expected) ->
+            assertEquals(expected, NetworkAddressClassifier.classify(sockaddr(address)), address)
+        }
     }
 
     @Test
