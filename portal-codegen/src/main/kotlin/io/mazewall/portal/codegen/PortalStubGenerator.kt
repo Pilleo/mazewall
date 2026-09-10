@@ -295,10 +295,9 @@ public object PortalStubGenerator {
             BoundaryTypes.Kind.ReadFd -> error("ReadFd is taken from granted FDs")
             BoundaryTypes.Kind.UnitT -> CodeBlock.of("Unit")
             is BoundaryTypes.Kind.RecordT -> {
-                val type = ClassName.bestGuess(kind.fqcn)
                 CodeBlock
                     .builder()
-                    .add("%T(", type)
+                    .add("%T(", kind.typeName)
                     .add("%L", kind.components.map { component -> decode(component.kind, reader) }.joinToCode())
                     .add(")")
                     .build()

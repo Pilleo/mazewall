@@ -23,7 +23,7 @@ class PortalCodegenFunctionalTest {
     lateinit var projectDir: Path
 
     @Test
-    fun `generated sources compile and dispatcher round trips inherited hostile service`() {
+    fun `generated sources compile and round trip diamond and nested DTOs`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(apiJar, listOf("fixture.A"), compileGenerated = true)
 
@@ -111,11 +111,16 @@ class PortalCodegenFunctionalTest {
                 val implementation = object : A {
                     override fun inherited(value: String): String = "inherited:" + value
                     override fun overridden(value: Int): Int = value + 1
+                    override fun diamond(value: String): String = "diamond:" + value
                     override fun payload(payload: String, reader: String, result: String, impl: String, method: String, granted: String, broker: String) =
                         payload + reader + result + impl + method + granted + broker
                     override fun ping(value: Int): Int = value
                     override fun PING(value: String): String = value
                     override fun echoPojo(value: SamplePojo): SamplePojo = SamplePojo(value.getName() + "!", value.count() + 1)
+                    override fun echoNestedRecord(value: NestedDtos.NestedRecord): NestedDtos.NestedRecord =
+                        NestedDtos.NestedRecord(value.name() + "!", value.count() + 1)
+                    override fun echoNestedPojo(value: NestedDtos.NestedPojo): NestedDtos.NestedPojo =
+                        NestedDtos.NestedPojo(value.getName() + "!", value.count() + 1)
                 }
                 val inherited = APortalDispatcher.handle(
                     implementation,
@@ -124,6 +129,13 @@ class PortalCodegenFunctionalTest {
                     emptyList(),
                 )
                 check(PortalCodec.Reader(inherited).string() == "inherited:safe")
+                val diamond = APortalDispatcher.handle(
+                    implementation,
+                    PortalMethod.Generated(methodId("diamond", "java.lang.String")),
+                    PortalCodec.encodeString("safe"),
+                    emptyList(),
+                )
+                check(PortalCodec.Reader(diamond).string() == "diamond:safe")
                 val pojoPayload = PortalCodec.concat(listOf(PortalCodec.encodeString("safe"), PortalCodec.encodeInt(4)))
                 val pojo = APortalDispatcher.handle(
                     implementation,
@@ -134,6 +146,24 @@ class PortalCodegenFunctionalTest {
                 val reader = PortalCodec.Reader(pojo)
                 check(reader.string() == "safe!")
                 check(reader.int() == 5)
+                val nestedRecord = APortalDispatcher.handle(
+                    implementation,
+                    PortalMethod.Generated(methodId("echoNestedRecord", "fixture.NestedDtos\${'$'}NestedRecord")),
+                    pojoPayload,
+                    emptyList(),
+                )
+                val nestedRecordReader = PortalCodec.Reader(nestedRecord)
+                check(nestedRecordReader.string() == "safe!")
+                check(nestedRecordReader.int() == 5)
+                val nestedPojo = APortalDispatcher.handle(
+                    implementation,
+                    PortalMethod.Generated(methodId("echoNestedPojo", "fixture.NestedDtos\${'$'}NestedPojo")),
+                    pojoPayload,
+                    emptyList(),
+                )
+                val nestedPojoReader = PortalCodec.Reader(nestedPojo)
+                check(nestedPojoReader.string() == "safe!")
+                check(nestedPojoReader.int() == 5)
                 println("ROUND_TRIP_OK")
             }
             """.trimIndent(),
@@ -145,14 +175,22 @@ class PortalCodegenFunctionalTest {
         sources.resolve("A.java").writeText(
             """
             package fixture;
-            public interface A extends Base {
+            public interface A extends Base, DiamondLeft, DiamondRight {
                 @Override int overridden(int value);
                 String payload(String payload, String reader, String result, String impl, String method, String granted, String broker);
                 int ping(int value);
                 String PING(String value);
                 SamplePojo echoPojo(SamplePojo value);
+                NestedDtos.NestedRecord echoNestedRecord(NestedDtos.NestedRecord value);
+                NestedDtos.NestedPojo echoNestedPojo(NestedDtos.NestedPojo value);
             }
             """.trimIndent(),
+        )
+        sources.resolve("DiamondLeft.java").writeText(
+            "package fixture; public interface DiamondLeft { String diamond(String value); }",
+        )
+        sources.resolve("DiamondRight.java").writeText(
+            "package fixture; public interface DiamondRight { String diamond(String value); }",
         )
         sources.resolve("B.java").writeText(
             "package fixture; public interface B extends A {}",
@@ -172,6 +210,22 @@ class PortalCodegenFunctionalTest {
             }
             """.trimIndent(),
         )
+        sources.resolve("NestedDtos.java").writeText(
+            """
+            package fixture;
+            public final class NestedDtos {
+                private NestedDtos() {}
+                public record NestedRecord(String name, int count) {}
+                public static final class NestedPojo {
+                    private final String name;
+                    private final int count;
+                    public NestedPojo(String name, int count) { this.name = name; this.count = count; }
+                    public String getName() { return name; }
+                    public int count() { return count; }
+                }
+            }
+            """.trimIndent(),
+        )
         val classes = root.resolve("api-classes").createDirectories()
         val compiler = checkNotNull(ToolProvider.getSystemJavaCompiler())
         val exit =
@@ -185,7 +239,10 @@ class PortalCodegenFunctionalTest {
                 sources.resolve("A.java").toString(),
                 sources.resolve("B.java").toString(),
                 sources.resolve("Base.java").toString(),
+                sources.resolve("DiamondLeft.java").toString(),
+                sources.resolve("DiamondRight.java").toString(),
                 sources.resolve("SamplePojo.java").toString(),
+                sources.resolve("NestedDtos.java").toString(),
             )
         assertEquals(0, exit)
         val jar = root.resolve("api.jar")

@@ -69,6 +69,11 @@ internal data class PortalServiceSchema(
                     }
                 }
             if (mostSpecific.size == 1) return mostSpecific.single()
+            if (candidates.map(Method::getReturnType).distinct().size == 1) {
+                return candidates.minWith(
+                    compareBy<Method>({ it.declaringClass.name }, Method::toGenericString),
+                )
+            }
             val covariant =
                 candidates.filter { candidate -> candidates.all { other -> other.returnType.isAssignableFrom(candidate.returnType) } }
             require(covariant.size == 1) {

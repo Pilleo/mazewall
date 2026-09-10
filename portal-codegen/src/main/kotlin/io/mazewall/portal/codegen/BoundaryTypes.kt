@@ -1,5 +1,7 @@
 package io.mazewall.portal.codegen
 
+import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.asClassName
 import java.lang.reflect.Modifier
 import java.lang.reflect.RecordComponent
 
@@ -56,7 +58,7 @@ internal object BoundaryTypes {
         data object UnitT : Kind
 
         data class RecordT(
-            val fqcn: String,
+            val typeName: ClassName,
             val components: List<Component>,
         ) : Kind {
             init {
@@ -130,7 +132,7 @@ internal object BoundaryTypes {
                     Kind.Component(name, kindOf(component.type, stack), Kind.Reader.Method(component.accessor.name))
                 }
             require(components.isNotEmpty()) { "record ${type.name} has no components" }
-            return Kind.RecordT(type.name, java.util.List.copyOf(components))
+            return Kind.RecordT(type.asClassName(), java.util.List.copyOf(components))
         }
 
         val constructors = type.constructors.filter { Modifier.isPublic(it.modifiers) && it.parameterCount > 0 }
@@ -147,7 +149,7 @@ internal object BoundaryTypes {
                 }
                 Kind.Component(name, kindOf(parameter.type, stack), readableAccessor(type, name, parameter.type))
             }
-        return Kind.RecordT(type.name, java.util.List.copyOf(components))
+        return Kind.RecordT(type.asClassName(), java.util.List.copyOf(components))
     }
 
     private fun readableAccessor(
