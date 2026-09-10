@@ -58,6 +58,37 @@ capabilities, and container profile.
 Fresh-JVM selection is annotation-driven before Gradle forks. This prevents a
 tag filter from launching a separate empty JVM for every ordinary integration
 class, while retaining a process boundary for every test that needs one.
+Selection includes inherited ordinary, parameterized, repeated, template and
+factory methods, and nested test containers through each concrete discovery root.
+Declared fresh markers without an executable selection fail with a diagnostic;
+an unmatched explicit filter is not treated as successful execution.
+
+The shared isolated-process harness cleans up after successful parent exits as
+well as timeout, interruption and failure. It retains observed descendant handles,
+terminates descendants before the parent and reaps with bounded waits, preserving
+interruption and suppressed cleanup errors. Its process-tree observations cannot
+prove discovery of a child that forks and reparents entirely between observations;
+this is a cooperative test harness, not an arbitrary-process containment boundary.
+
+## Build and evidence gates
+
+`unitCheck` is the fast host-safe development gate. `build` is the full merge gate;
+kernel changes additionally require `integrationTest`, `integrationTestFreshJvm`
+and `./scripts/run_tests.sh` on a suitable host/container environment. The last
+command requires Podman. A missing runner or failed kernel test is recorded as a
+failed/unavailable gate, never as passing coverage.
+
+`refactorFirstReport` remains optional manual architectural analysis at version
+0.10.0. It analyzes committed production sources in an isolated history-preserving
+snapshot and writes `build/reports/refactorFirst/refactor-first-report.html`.
+Neither it nor Maven/snapshot preparation is attached to ordinary `build`, `check`,
+`unitCheck` or `kernelCheck`. Verify this from `build --dry-run` when build wiring changes.
+
+Test-health records identify module, task and fork. Cached or up-to-date task
+outputs are reuse evidence, not fresh execution. Record exact task execution counts
+alongside XML test counts; XML left by an earlier focused invocation cannot prove
+that an aggregate command reran that suite. The latest hardening gate record is
+[review-hardening-verification.md](review-hardening-verification.md).
 
 ## Combined coverage and testability debt
 

@@ -3,6 +3,8 @@
 This document provides a high-level "Knowledge Graph" of the `mazewall` system. It is designed to help AI agents and developers understand the distributed nature of the profiler, the immutable boundaries of the enforcer, and the critical IPC loops that connect them.
 
 The completed post-review hardening work has a compact [finding-to-test-to-commit evidence index](post-review-hardening-evidence.md) for reviewers.
+The [notification liveness contract](notification-liveness-contract.md) is the cross-module
+entry point for deadlines, admission, helper cancellation, listener health and ownership.
 
 ## 1. System Component Overview
 
@@ -21,7 +23,10 @@ The completed post-review hardening work has a compact [finding-to-test-to-commi
 
 ## 2. The Profiler-Enforcer ACK Loop (The "Deadlock Zone")
 
-This is the most critical interaction in the project. If any step in this loop is missed or fails silently, the **Target JVM Worker Thread will deadlock permanently.**
+The target JVM thread remains blocked until a kernel reply resolves its notification.
+The reactor enforces one absolute 30-second deadline across preparation, publication and
+ACK. Expiry claims the sole terminal reply lease, attempts EPERM once and closes the session.
+The loop below is the successful observation path; it does not renew that deadline.
 
 ```mermaid
 sequenceDiagram
@@ -33,7 +38,7 @@ sequenceDiagram
     W->>K: Invokes trapped Syscall (e.g. openat)
     K->>K: Suspends W (Waiting for NOTIF ACK)
     K->>D: Sends SECCOMP_USER_NOTIF via FD
-    D->>D: Resolve Paths via process_vm_readv
+    D->>D: Poll bounded helper path/evidence preparation
     D-->>L: Sends TraceEvent via UNIX Socket
     L->>L: Capture JVM Stack Trace (session TID resolver)
     L-->>D: Sends ACK byte (Mandatory 0xAC)
@@ -44,6 +49,7 @@ sequenceDiagram
 
 ### ⚠️ Agent Safety Rules for the ACK Loop:
 - **No Blocking in Daemon:** The Daemon must never block on a resource that requires the JVM Worker Thread to be active (e.g., a JVM-held lock).
+- **Deadline ownership:** Only the reactor claims and executes a terminal reply. Helper completion can transfer evidence/resources or dispose late results; it cannot send a reply. `NotificationGone` is terminal, never successful delivery.
 - **Socket Interruption:** The Trace Listener must handle `EINTR` on its socket reads to prevent missing an event.
 - **FD Management:** The daemon owns its received listener FD. Cleanup outcomes must remain visible to the session owner; closing a local duplicate does not close another process's descriptor. Profiler shutdown first moves permanent filters into pass-through mode.
 - **Rejected Frames:** After a complete TID header, a rejected profiler event body still receives one ACK before listener termination. It counts as dropped evidence, not as a valid observation.
@@ -172,7 +178,8 @@ source compatibility.
 To maintain security and stability at the kernel-JVM boundary, `mazewall` adheres to a **Functional-Core, Imperative-Shell** architecture using the following patterns:
 
 ### A. Type-State Machine Pattern (Safety-by-Construction)
-Interfacing with kernel APIs and IPC protocols is sequentially fragile. We use Type-States to make invalid operation sequences *unrepresentable* in the type system.
+Interfacing with kernel APIs and IPC protocols is sequentially fragile. Type-states restrict
+legal construction sequences; exhaustive runtime reducers separately reject protocol violations.
 - **Application:** `BpfBuilder<State>` (enforces Arch Check -> Load NR -> Filtering) and `HandshakeSession<State>` (prevents deadlocks by enforcing the 0xAC protocol).
 
 ### B. Functional Programming at the Native Boundary
@@ -185,7 +192,7 @@ The Linux kernel cannot be mocked. We use OOP traits to decouple high-level secu
 
 ### D. Domain-Driven Design (DDD) & Value Objects
 To avoid "Primitive Obsession" in a codebase full of pointers and integers, we use DDD principles to define a "Ubiquitous Language" for security.
-- **Application:** `value class` for `FileDescriptor`, `Pid`, and `SyscallNumber` ensures that type-safety persists even when dealing with raw kernel identifiers.
+- **Application:** Ownership/state/role types on `FileDescriptor` and value types such as `Pid` and `SyscallNumber` distinguish native identifiers. Descriptor acquisition receipts, shared lifecycle state and unique active identities additionally prevent raw integers from fabricating close authority.
 
 ### E. Architectural Fitness Functions (ArchUnit)
 Security is a structural property. We use ArchUnit to ensure that memory-unsafe operations are strictly localized.

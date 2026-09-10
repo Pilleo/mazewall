@@ -1059,6 +1059,8 @@ class "TraceListenerMachine" as io.mazewall.profiler.internal.TraceListenerMachi
   +void preload()
   +TraceListenerState evaluate(TraceListenerState, TraceListenerEvent)
 }
+class "TraceListenerProtocolException" as io.mazewall.profiler.internal.TraceListenerProtocolException {
+}
 interface "TraceListenerState" as io.mazewall.profiler.internal.TraceListenerState {
 }
 class "IterativeProfiler" as io.mazewall.profiler.iterative.IterativeProfiler {
@@ -1278,6 +1280,9 @@ class "UserNotifOracleSmoke" as io.mazewall.profiler.tierE.stress.UserNotifOracl
   + {static}UserNotifOracleSmoke INSTANCE
   __
   + {static}void main(String[])
+}
+class "DiagnosticReportKt" as io.mazewall.profiler.triage.DiagnosticReportKt {
+  + {static}String diagnosticReportJson(long, Map<String, String>)
 }
 class "DiagnosticTriageRunner" as io.mazewall.profiler.triage.DiagnosticTriageRunner {
   + {static}DiagnosticTriageRunner INSTANCE

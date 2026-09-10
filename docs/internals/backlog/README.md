@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 558
+*Total Active Issues:* 76 | *Total Resolved Issues:* 564
+
+Review-hardening scoped evidence resolved: [native boundaries](resolved/issue-20260910-225751-359-validate-native-transfers-and-descriptor-acquisiti.md), [reactor deadline](resolved/issue-20260910-225751-953-bound-user-notif-reactor-work-and-terminal-reply-o.md), [supervisor authority](resolved/issue-20260910-225752-609-record-fail-closed-supervisor-routing-and-installa.md), [isolated tests](resolved/issue-20260910-225753-174-record-isolated-test-process-and-selector-hardenin.md), [web evidence](resolved/issue-20260910-225753-764-record-web-artifact-and-complete-profile-deploymen.md), and [failure taxonomy](resolved/issue-20260910-225754-299-record-explicit-lifecycle-and-cleanup-failure-evid.md). See the [30-finding manifest](../designs/core/post-review-hardening-evidence.md#liveness-and-boundary-review-rh) and its separate final-gate record.
 
 Review-hardening Task 9 resolved: [verifiable CLI and agent controls](resolved/issue-20260910-212626-611-make-cli-and-agent-containment-claims-verifiable.md) and [cached supervisor ptrace authority](resolved/issue-20260910-210337-751-restore-ptrace-authority-when-reusing-a-cached-sup.md).
 
@@ -26,6 +28,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid](issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md) | Record review hardening liveness and boundary evidence | high | core |
 | [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |

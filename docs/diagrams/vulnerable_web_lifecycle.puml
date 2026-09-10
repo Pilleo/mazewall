@@ -1,5 +1,5 @@
 @startuml
-skinparam backgroundColor transparent
+skinparam backgroundColor white
 skinparam shadowing false
 title Vulnerable web demo — startup and evidence lifecycle
 
@@ -7,7 +7,9 @@ start
 :Spring prepares Environment;
 :Resolve mazewall.enabled once;
 :Publish resolved-enabled decision;
+:Reject simultaneous enforcement + profiling;
 if (Protection enabled?) then (yes)
+  :Require mounted profile + complete collector evidence;
   :Install process-wide NO_EXEC baseline;
   :Create contained service executors;
 else (no)
@@ -23,11 +25,19 @@ endif
 :Drain all accepted work to one deadline;
 if (Profile mode?) then (yes)
   :Close profiler sessions;
-  :Freeze Bill of Behavior;
+  :Freeze behavior + per-collector coverage;
+  :Complete only if drain AND every collector complete;
   :Write immutable SBoB generation;
   :Write immutable stack dictionary generation;
   :Write digest-backed integrity record;
   :Atomically replace current-generation pointer;
 endif
 stop
+note right
+Default artifact excludes executable gadget fixtures.
+Explicit isolated fixture artifact/profile opts in.
+Shared profile-artifacts volume:
+profiling RW / enforcement RO.
+Container bind 0.0.0.0; published host ports 127.0.0.1.
+end note
 @enduml

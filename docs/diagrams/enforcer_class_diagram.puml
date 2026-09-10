@@ -573,6 +573,11 @@ class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
   +Thread getThread()
   +AtomicBoolean getReadinessObserved()
 }
+class "CleanupFailures" as io.mazewall.core.CleanupFailures {
+  + {static}CleanupFailures INSTANCE
+  __
+  +Throwable merge(Throwable, Throwable)
+}
 class "CloneFlags" as io.mazewall.core.CloneFlags {
   +long getValue()
   + {static}String toString-impl(long)
@@ -594,6 +599,12 @@ class "ContextId" as io.mazewall.core.ContextId {
   + {static}boolean equals-impl(int, Object)
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
+}
+class "DaemonPtracer" as io.mazewall.core.DaemonPtracer {
+  + {static}DaemonPtracer INSTANCE
+  __
+  +void authorize(NativeEngine, Process)
+  +void retire(NativeEngine, Process)
 }
 class "Deadline" as io.mazewall.core.Deadline {
   + {static}Companion Companion
@@ -2521,11 +2532,6 @@ class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemon
   +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
 }
-class "SeccompDaemonMachine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine {
-  + {static}SeccompDaemonMachine INSTANCE
-  __
-  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
-}
 class "SeccompDaemonMachineKt" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachineKt {
 }
 interface "SeccompNotifHandler" as io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
@@ -2781,6 +2787,9 @@ io.mazewall.core.ChildProcessResources --> io.mazewall.core.ProcessLauncher
 io.mazewall.core.ChildProcessResources --> io.mazewall.core.ChildStdoutPump
 io.mazewall.core.ChildProcessResources --> io.mazewall.core.PrivateUnixEndpoint
 io.mazewall.core.ChildStartupTransaction --> io.mazewall.core.ChildProcessResources
+io.mazewall.core.CleanupFailures --> io.mazewall.core.CleanupFailures
+io.mazewall.core.DaemonPtracer --> io.mazewall.NativeProcess
+io.mazewall.core.DaemonPtracer --> io.mazewall.core.DaemonPtracer
 io.mazewall.core.ErrnoMapping --> io.mazewall.core.ErrnoMapping
 io.mazewall.core.FdEpoch --> io.mazewall.core.FdEpoch
 io.mazewall.core.FdLifecycle --> io.mazewall.core.FdOwnership
@@ -3075,7 +3084,6 @@ io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.NativeEngine
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.networking.SeccompConnection
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.SocketManager
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.FileDescriptor
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.SeccompSessionBuffers

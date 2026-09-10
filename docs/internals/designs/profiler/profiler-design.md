@@ -3,6 +3,12 @@
 
 This document provides the definitive, production-grade technical design for the **Bill of Behavior (BoB) Profiler** and the **Containment Exception Handling Subsystem** inside `mazewall`. It incorporates deep systems-level findings, physics-level kernel constraints, and JVM-specific runtime behaviors.
 
+The [cross-module notification contract](../core/notification-liveness-contract.md)
+defines reactor deadlines and owned helper cancellation. The current
+[profiler evidence sequence](../../../diagrams/profiler_evidence_flow.svg) and
+[shared daemon startup diagram](../../../diagrams/daemon_startup.svg) show the
+separate observation authority and shared resource lifecycle.
+
 The JVM trace-listener parser rejects out-of-order stages and nonpositive wire TIDs as a
 `TraceListenerState.ProtocolViolation`. The interpreter stops through a distinct protocol
 exception and closes the endpoint; it does not read another event or fabricate an ACK for an

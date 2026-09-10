@@ -580,9 +580,9 @@ it. A late connection is closed before callback transfer. Socket ownership passe
 to the listener callback on entry, including startup failure. Invalid supervisor
 acknowledgments publish failed listener health before releasing readiness, and
 cleanup failure cannot suppress that health notification. Neither a setup timeout
-nor listener closure removes an installed kernel filter. This installation change
-does not implement notification admission limits or isolate filesystem/proc work;
-the notification-processing limitations below still apply.
+nor listener closure removes an installed kernel filter. Notification admission
+and helper isolation are separate processing stages described below and in the
+[cross-module liveness contract](../core/notification-liveness-contract.md).
 
 The shared `SeccompSessionHandler` accepts one notification at a time and owns its
 30-second monotonic deadline. `SeccompNotifHandler.beginNotification` returns

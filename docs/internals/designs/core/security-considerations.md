@@ -12,6 +12,16 @@
 
 Using seccomp-bpf within the JVM introduces specific architectural risks. This document outlines high-level security properties and implementation trade-offs.
 
+The [notification liveness contract](notification-liveness-contract.md) bounds admitted
+USER_NOTIF work with a reactor-owned 30-second deadline and one terminal reply claim.
+It does not make thread containment an ACE boundary or guarantee immediate reclamation
+of a helper stuck in uninterruptible kernel sleep. Unknown routes and unsupported
+authority fail closed; listener failure invalidates the permanent runtime rather than
+pretending to undo its filter. Profile completeness and authenticated denial evidence
+are separate from observing a permission-looking exception message. The default web
+artifact excludes executable deserialization gadgets; only the explicit isolated
+fixture artifact/profile supplies that attack surface.
+
 ---
 
 ## 1. Thread-Level vs. Process-Level Isolation
