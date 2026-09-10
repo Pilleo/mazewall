@@ -106,6 +106,7 @@ public object SupervisorInstaller {
                     FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket),
                     scopingPolicy,
                     runtime,
+                    onUnexpectedTermination = { cause -> lifetime.fail(cause) },
                 )
                 lifetime.attach(AutoCloseable { listener.requestStop() })
                 listener.start(readyLatch)
@@ -138,6 +139,7 @@ internal class JVMValidationListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val scopingPolicy: StacktraceScopingPolicy,
     private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
+    private val onUnexpectedTermination: (Throwable) -> Unit = {},
 ) {
     private val closed = AtomicBoolean(false)
     private val activeChannel = AtomicReference<SupervisorValidationChannel?>()
@@ -175,6 +177,7 @@ internal class JVMValidationListener(
         readyLatch: CountDownLatch,
     ) {
         System.err.println("[JVM-VALIDATION] validation reactor thread started")
+        var failure: Throwable? = null
         try {
             val dis = DataInputStream(BufferedInputStream(channel.inputStream))
             if (!acceptHandshake(dis, readyLatch)) return
@@ -223,13 +226,16 @@ internal class JVMValidationListener(
 
                 sendValidationResponse(dis, channel, id, nr, argsList, pidVal, traceeArch, syscallResolution, isAllowed)
             }
-        } catch (ignored: java.io.IOException) {
-            // Done
-        } catch (ignored: IllegalStateException) {
-            // Done
+        } catch (expectedStop: java.io.IOException) {
+            if (!closed.get()) failure = expectedStop
+        } catch (expectedStop: IllegalStateException) {
+            if (!closed.get()) failure = expectedStop
         } finally {
             runtime.close()
             channel.close()
+            if (!closed.get()) {
+                onUnexpectedTermination(failure ?: IllegalStateException("validation reactor exited unexpectedly"))
+            }
         }
     }
 
