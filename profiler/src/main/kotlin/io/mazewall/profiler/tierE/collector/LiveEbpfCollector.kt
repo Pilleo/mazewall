@@ -1,54 +1,51 @@
 package io.mazewall.profiler.tierE.collector
 
-/**
- * Tier E attributed syscall event collector.
- *
- * Self-contained: no dependency on :profiler module. Events are recorded
- * as [AttributedEvent] instances and drained by the caller (WP-09 will
- * translate these into ProfileObservation objects for :profiler).
- *
- * Drop accounting: [droppedCount] tracks ring-buffer losses.
- */
-public class LiveEbpfCollector {
+/** Raw Tier E ring-buffer retention; it does not create profile observations. */
+public class TierERingBufferCollector {
     private val events = mutableListOf<AttributedEvent>()
 
     public var droppedCount: Int = 0
-    private set
+        private set
 
     public var drainComplete: Boolean = true
-    private set
+        private set
 
-    /** Records an event from the BPF ring buffer. Called by the consumer thread. */
-    @Synchronized public fun record(
+    @Synchronized
+    public fun record(
         tid: Long,
         syscallNr: Int,
         contextId: UInt,
         ktimeNs: Long,
     ) {
-        events.add(AttributedEvent(tid, syscallNr, contextId, ktimeNs))
+        events += AttributedEvent(tid, syscallNr, contextId, ktimeNs)
     }
 
-    @Synchronized public fun recordDrop() {
+    @Synchronized
+    public fun recordDrop() {
         droppedCount++
         drainComplete = false
     }
 
-    /** Returns a snapshot of all collected events. */
-    @Synchronized public fun drain(): List<AttributedEvent> = events.toList()
+    @Synchronized
+    public fun drain(): List<AttributedEvent> = java.util.List.copyOf(events)
 
-    /** Atomically captures events and the loss marker from one collection epoch. */
-    @Synchronized public fun snapshot(): Snapshot = Snapshot(events.toList(), droppedCount, drainComplete)
+    @Synchronized
+    public fun snapshot(): Snapshot = Snapshot(events, droppedCount, drainComplete)
 
-    /** Clears accumulated events after drain. */
-    @Synchronized public fun clear() {
-        events.clear()
-    }
+    @Synchronized
+    public fun clear() = events.clear()
 
-    public data class Snapshot(
-        public val events: List<AttributedEvent>,
+    public class Snapshot(
+        events: List<AttributedEvent>,
         public val droppedCount: Int,
         public val drainComplete: Boolean,
-    )
+    ) {
+        public val events: List<AttributedEvent> = java.util.List.copyOf(events)
+
+        override fun equals(other: Any?): Boolean = other is Snapshot && events == other.events && droppedCount == other.droppedCount && drainComplete == other.drainComplete
+
+        override fun hashCode(): Int = listOf(events, droppedCount, drainComplete).hashCode()
+    }
 
     public data class AttributedEvent(
         public val tid: Long,
@@ -56,4 +53,27 @@ public class LiveEbpfCollector {
         public val contextId: UInt,
         public val ktimeNs: Long,
     )
+}
+
+/** Compatibility shim; use [TierERingBufferCollector] for raw records. */
+@Deprecated("Use TierERingBufferCollector")
+public class LiveEbpfCollector {
+    private val delegate = TierERingBufferCollector()
+    public val droppedCount: Int get() = delegate.droppedCount
+    public val drainComplete: Boolean get() = delegate.drainComplete
+
+    public fun record(
+        tid: Long,
+        syscallNr: Int,
+        contextId: UInt,
+        ktimeNs: Long,
+    ): Unit = delegate.record(tid, syscallNr, contextId, ktimeNs)
+
+    public fun recordDrop(): Unit = delegate.recordDrop()
+
+    public fun drain(): List<TierERingBufferCollector.AttributedEvent> = delegate.drain()
+
+    public fun snapshot(): TierERingBufferCollector.Snapshot = delegate.snapshot()
+
+    public fun clear(): Unit = delegate.clear()
 }

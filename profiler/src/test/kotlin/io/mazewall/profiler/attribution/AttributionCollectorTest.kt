@@ -5,6 +5,20 @@ import kotlin.test.assertEquals
 
 class AttributionCollectorTest {
     @Test
+    fun `pending overflow drops new observations and makes integrity incomplete`() {
+        val collector = AttributionCollector(maxPendingRecords = 1)
+        val first = pendingObservation(InvocationId(101))
+        val dropped = pendingObservation(InvocationId(102))
+
+        collector.accept(first)
+        assertEquals(emptyList(), collector.accept(dropped))
+
+        assertEquals(1, collector.integrity.observedLosses)
+        assertEquals(CaptureGuarantee.INCOMPLETE, collector.integrity.guarantee)
+        assertEquals(listOf(first), collector.finish().map { it.observation })
+    }
+
+    @Test
     fun `unique edge mode retains only the first resolved stack syscall pair`() {
         val collector = AttributionCollector(TierEEmissionMode.UNIQUE_STACK_SYSCALL)
         val invocationId = InvocationId(101)

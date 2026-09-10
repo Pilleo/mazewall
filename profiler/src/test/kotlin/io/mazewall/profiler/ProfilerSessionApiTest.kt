@@ -101,8 +101,7 @@ class ProfilerSessionApiTest {
     }
 
     @Test
-    fun `coverage retains its data class contract and immutable diagnostics when merging prior evidence`() {
-        assertTrue(ProfilingCoverage::class.isData)
+    fun `coverage retains immutable diagnostics when merging prior evidence`() {
         val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")
         val missing = PathResolutionFailure(1, PathResolutionFailure.Reason.Missing, "null operand")
 

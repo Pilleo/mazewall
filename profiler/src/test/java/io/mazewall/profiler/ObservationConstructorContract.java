@@ -12,7 +12,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exercises the existing kotlin-reflect test runtime without adding a compile dependency. */
 final class ObservationConstructorContract {
@@ -24,6 +23,7 @@ final class ObservationConstructorContract {
         "paths", "kotlin.collections.List<kotlin.String>",
         "openFlags", "kotlin.Long?",
         "contextId", "kotlin.Long?",
+        "openFlagsEvidence", "io.mazewall.profiler.OpenFlagsEvidence?",
         "opcode", "kotlin.String",
         "endpoint", "io.mazewall.profiler.NetworkEndpoint"
     );
@@ -33,7 +33,6 @@ final class ObservationConstructorContract {
     static <T> T construct(Class<T> javaType, List<String> names, List<String> optional, Map<String, ?> values)
             throws ReflectiveOperationException {
         KClass<T> type = JvmClassMappingKt.getKotlinClass(javaType);
-        assertTrue(type.isData(), javaType.getSimpleName() + " must retain Kotlin data-class identity");
         KFunction<?> constructor = (KFunction<?>) Class.forName("kotlin.reflect.full.KClasses")
             .getMethod("getPrimaryConstructor", KClass.class).invoke(null, type);
         assertNotNull(constructor);

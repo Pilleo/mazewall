@@ -100,6 +100,7 @@ public data class SessionIntegrity(
  */
 public class AttributionCollector(
     private val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
+    private val maxPendingRecords: Int = TierEOptions.DEFAULT_RECORD_LIMIT,
 ) {
     private val stacks = mutableMapOf<StackTraceId, StackDefinition>()
     private val invocations = mutableMapOf<InvocationId, InvocationDefinition>()
@@ -109,6 +110,11 @@ public class AttributionCollector(
     private var failures: Long = 0
     private var virtualPinnedScopes: Long = 0
     private var virtualPinnedNanos: Long = 0
+    private var pendingCount: Int = 0
+
+    init {
+        require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
+    }
 
     public val integrity: SessionIntegrity
         get() = SessionIntegrity(
@@ -122,17 +128,19 @@ public class AttributionCollector(
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
         val existing = stacks.putIfAbsent(definition.stackTraceId, definition)
         require(existing == null || existing == definition) { "conflicting stack definition ${definition.stackTraceId.value}" }
-        return invocations.values
+        return java.util.List.copyOf(
+            invocations.values
             .asSequence()
             .filter { it.stackTraceId == definition.stackTraceId }
             .flatMap { resolveReady(it.invocationId).asSequence() }
-            .toList()
+            .toList(),
+        )
     }
 
     public fun accept(definition: InvocationDefinition): List<ResolvedSyscall> {
         val existing = invocations.putIfAbsent(definition.invocationId, definition)
         require(existing == null || existing == definition) { "conflicting invocation definition ${definition.invocationId.value}" }
-        return resolveReady(definition.invocationId)
+        return java.util.List.copyOf(resolveReady(definition.invocationId))
     }
 
     public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
@@ -154,7 +162,12 @@ public class AttributionCollector(
             )
         }
         val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
+        if (pendingCount == maxPendingRecords) {
+            recordLoss()
+            return emptyList()
+        }
         pendingByInvocation.getOrPut(invocationId, ::mutableListOf).add(observation)
+        pendingCount++
         return resolveReady(invocationId)
     }
 
@@ -175,25 +188,32 @@ public class AttributionCollector(
 
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> =
-        pendingByInvocation.entries
+        java.util.List.copyOf(
+            pendingByInvocation.entries
             .flatMap { (invocationId, observations) ->
             val invocation = invocations[invocationId]
             val status = if (invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
             failures = Math.addExact(failures, observations.size.toLong())
             observations.map { ResolvedSyscall(it, null, status) }
-        }.also { pendingByInvocation.clear() }
+        }.also {
+            pendingByInvocation.clear()
+            pendingCount = 0
+        },
+        )
 
     private fun resolveReady(invocationId: InvocationId): List<ResolvedSyscall> {
         val invocation = invocations[invocationId] ?: return emptyList()
         val pending = pendingByInvocation[invocationId] ?: return emptyList()
         if (invocation.captureFailure != null) {
             pendingByInvocation.remove(invocationId)
+            pendingCount -= pending.size
             failures = Math.addExact(failures, pending.size.toLong())
             return pending.map { ResolvedSyscall(it, null, ResolutionStatus.CAPTURE_FAILED) }
         }
         val stack = invocation.stackTraceId?.let(stacks::get)
         if (stack == null) return emptyList()
         pendingByInvocation.remove(invocationId)
+        pendingCount -= pending.size
         var status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
             failures = Math.addExact(failures, pending.size.toLong())
             ResolutionStatus.TRUNCATED_STACK

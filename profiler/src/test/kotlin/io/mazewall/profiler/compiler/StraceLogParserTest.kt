@@ -2,11 +2,45 @@ package io.mazewall.profiler.compiler
 
 import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.OpenFlagsEvidence
 import io.mazewall.profiler.ProfileObservation
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
 class StraceLogParserTest {
+    @Test
+    fun `quoted commas escapes and flag-looking path text cannot change the flags operand`() {
+        val observation = StraceLogParser.parseLine(
+            "123 openat(AT_FDCWD, \"/tmp/a, b\\\"O_WRONLY\\\\tail\", O_RDONLY|O_CLOEXEC) = 4",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(listOf("/tmp/a, b\"O_WRONLY\\tail"), observation.paths)
+        assertEquals(OpenFlagsEvidence.Complete(0x80000), observation.openFlagsEvidence)
+        assertEquals(0x80000L, observation.openFlags)
+    }
+
+    @Test
+    fun `openat parses numeric flags without inspecting pathname or result`() {
+        val observation = StraceLogParser.parseLine(
+            "123 openat(AT_FDCWD, \"/tmp/O_TRUNC 0x41\", 0x80041) = 4",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(OpenFlagsEvidence.Complete(0x80041), observation.openFlagsEvidence)
+    }
+
+    @Test
+    fun `openat2 parses only flags field and reports unknown symbolic flags`() {
+        val observation = StraceLogParser.parseLine(
+            "123 openat2(AT_FDCWD, \"/tmp/O_CREAT\", {flags=O_RDONLY|O_FUTURE, mode=O_TRUNC, resolve=0}, 24) = 4",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(
+            OpenFlagsEvidence.Incomplete(0, setOf("O_FUTURE")),
+            observation.openFlagsEvidence,
+        )
+        assertEquals(null, observation.openFlags)
+    }
+
     @Test
     fun `flag names inside pathnames do not suppress observed reads`() {
         val observation = StraceLogParser.parseLine("123 open(\"/data/O_PATH\", O_RDONLY) = 4") as ProfileObservation.Syscall
@@ -22,7 +56,7 @@ class StraceLogParserTest {
             "123 openat2(AT_FDCWD, \"/secret\", {flags=O_PATH, resolve=0}, 24) = 4",
         )) {
             val observation = StraceLogParser.parseLine(line) as ProfileObservation.Syscall
-            assertEquals(0x00200000L, observation.openFlags)
+            assertEquals(0x00200000L, requireNotNull(observation.openFlags) and 0x00200000L)
             val bob = BobCompiler.compileObservations(listOf(observation))
             assertEquals(emptySet(), bob.opens)
             assertEquals(emptySet(), bob.fsWritePaths)

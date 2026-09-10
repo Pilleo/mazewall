@@ -1,6 +1,12 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 109 | *Total Resolved Issues:* 507
+*Total Active Issues:* 109 | *Total Resolved Issues:* 512
+
+Task 8 resolved: [immutable profiler evidence](resolved/issue-20260910-000101-freeze-profiler-evidence-boundaries.md),
+[exact strace flag parsing](resolved/issue-20260910-000102-parse-exact-strace-open-flags.md),
+[architecture-aware syscall mapping](resolved/issue-20260910-000103-use-platform-syscall-metadata-in-ebpf-collector.md),
+[owned strace process trees](resolved/issue-20260910-000104-own-strace-process-tree-lifecycle.md), and
+[bounded Tier E lifecycle](resolved/issue-20260910-000105-bound-tier-e-retention-and-lifecycle.md).
 
 Task 6 resolved: [Bound portal RPC transport and share closeable capability ownership](resolved/issue-20260909-205031-376-bound-portal-rpc-transport-and-share-closeable-cap.md).
 

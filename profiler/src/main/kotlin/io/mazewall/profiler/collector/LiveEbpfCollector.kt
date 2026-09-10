@@ -1,34 +1,23 @@
 package io.mazewall.profiler.collector
 
+import io.mazewall.core.Arch
+import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
 import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
 import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.engine.ObservedSyscall
 
-/**
- * Live eBPF collector backed by the Tier E uprobe → task-storage pipeline.
- *
- * Consumes attributed syscall events from the Tier E daemon's ring buffer
- * and translates them into [ProfileObservation.Syscall] objects with
- * context enrichment. Implements strategy-neutral [ProfileCollector];
- * never compiles policies (invariant 8). Drop accounting flows into
- * [CollectorDrain.droppedEvents]; any drop marks drain incomplete.
- *
- * Events are fed via [onEvent] from the Tier E daemon's consumer thread.
- */
-public class LiveEbpfCollector : ProfileCollector {
+/** Converts live Tier E records into strategy-neutral profile observations. */
+public class ProfileObservationEbpfCollector(
+    private val arch: Arch = Arch.current(),
+) : ProfileCollector {
     override val source: ObservationSource = ObservationSource.EBPF
-
     private val observations = mutableListOf<ProfileObservation.Syscall>()
-    private var _droppedEvents: Int = 0
-    private var started = false
+    private var droppedEvents: Int = 0
     private var drainComplete = true
     private val lock = Any()
 
-    /**
-     * Records an attributed event from the Tier E ring buffer.
-     * Called by the daemon's consumer thread for each committed record.
-     */
     public fun onEvent(
         tgid: Int,
         tid: Int,
@@ -37,64 +26,88 @@ public class LiveEbpfCollector : ProfileCollector {
         ktimeNs: Long,
     ) {
         synchronized(lock) {
-            val corr = ObservationCorrelation(
-                tgid = tgid,
-                tid = Tid(tid),
-                ktimeNs = ktimeNs,
-            )
-            observations.add(
-                ProfileObservation.Syscall(
-                    correlation = corr,
-                    source = ObservationSource.EBPF,
-                    name = syscallName(syscallNr),
-                    contextId = contextId,
-                ),
+            val syscall = syscallFor(arch, syscallNr)
+            observations += ProfileObservation.Syscall(
+                correlation = ObservationCorrelation(tgid, Tid(tid), ktimeNs),
+                source = ObservationSource.EBPF,
+                name = when (syscall) {
+                    is ObservedSyscall.Known -> syscall.syscall.name
+                    is ObservedSyscall.Unknown -> "SYSCALL_$syscallNr"
+                },
+                contextId = contextId,
             )
         }
     }
 
-    /** Records a ring-buffer drop (producer-side reservation failure). */
     public fun onDrop() {
         synchronized(lock) {
-            _droppedEvents++
+            droppedEvents++
             drainComplete = false
         }
     }
 
-    override fun start() {
-        started = true
-    }
+    override fun start() = Unit
 
     override fun drain(): CollectorDrain =
         synchronized(lock) {
-        return CollectorDrain(
-            observations = observations.toList(),
-            droppedEvents = _droppedEvents,
-            drainComplete = drainComplete,
-        )
+        CollectorDrain(java.util.List.copyOf(observations), droppedEvents, drainComplete)
     }
 
     override fun close() {
         synchronized(lock) {
             observations.clear()
-            _droppedEvents = 0
+            droppedEvents = 0
             drainComplete = true
         }
     }
 
     public companion object {
+        public fun syscallFor(
+            arch: Arch,
+            nr: Int,
+        ): ObservedSyscall =
+            Syscall.entries
+                .firstOrNull { syscall -> syscall.numberFor(arch).let { mapped -> mapped >= 0 && mapped == nr } }
+                ?.let(ObservedSyscall::Known)
+                ?: ObservedSyscall.Unknown("syscall:$nr")
+
         public fun syscallName(nr: Int): String =
-            when (nr) {
-            0 -> "READ"
-            1 -> "WRITE"
-            3 -> "CLOSE"
-            39 -> "GETPID"
-            56 -> "CLONE"
-            202 -> "FUTEX"
-            230 -> "CLOCK_NANOSLEEP"
-            232 -> "EPOLL_WAIT"
-            257 -> "OPENAT"
-            else -> "SYSCALL_$nr"
-        }
+            when (val syscall = syscallFor(Arch.current(), nr)) {
+                is ObservedSyscall.Known -> syscall.syscall.name
+                is ObservedSyscall.Unknown -> "SYSCALL_$nr"
+            }
+    }
+}
+
+/**
+ * Compatibility name for the observation-producing Tier E adapter.
+ * @deprecated Use [ProfileObservationEbpfCollector]; the raw ring collector is
+ * [io.mazewall.profiler.tierE.collector.TierERingBufferCollector].
+ */
+@Deprecated("Use ProfileObservationEbpfCollector")
+public class LiveEbpfCollector(
+    arch: Arch = Arch.current(),
+) : ProfileCollector {
+    private val delegate = ProfileObservationEbpfCollector(arch)
+    override val source: ObservationSource get() = delegate.source
+
+    public fun onEvent(
+        tgid: Int,
+        tid: Int,
+        syscallNr: Int,
+        contextId: Long,
+        ktimeNs: Long,
+    ): Unit = delegate.onEvent(tgid, tid, syscallNr, contextId, ktimeNs)
+
+    public fun onDrop(): Unit = delegate.onDrop()
+
+    override fun start(): Unit = delegate.start()
+
+    override fun drain(): CollectorDrain = delegate.drain()
+
+    override fun close(): Unit = delegate.close()
+
+    public companion object {
+        public fun syscallName(nr: Int): String = ProfileObservationEbpfCollector.syscallName(nr)
     }
 }

@@ -7,6 +7,8 @@ import io.mazewall.profiler.TraceableWorkload
 import io.mazewall.profiler.compiler.StraceLogParser
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * Descendant `strace -f` collector. Emits [ProfileObservation]s only.
@@ -56,6 +58,9 @@ internal class StraceCollector(
 
     private fun spawnAndRead(workloadClass: Class<out TraceableWorkload>): String {
         val tempLog = Files.createTempFile("strace_prof_", ".log")
+        val tempOut = Files.createTempFile("strace_prof_", ".out")
+        val tempErr = Files.createTempFile("strace_prof_", ".err")
+        var process: Process? = null
         try {
             val cmd = listOf(
                 "strace",
@@ -70,29 +75,70 @@ internal class StraceCollector(
                 "io.mazewall.profiler.strace.StraceWorkloadRunner",
                 workloadClass.name,
             )
-            val process = ProcessBuilder(cmd).start()
-            val outFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-                process.inputStream.bufferedReader().readText()
-            }
-            val errFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-                process.errorStream.bufferedReader().readText()
-            }
-            val finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                throw IllegalStateException("Child strace process timed out after 60s")
-            }
+            process = ProcessBuilder(cmd)
+                .redirectOutput(tempOut.toFile())
+                .redirectError(tempErr.toFile())
+                .start()
+            StraceProcessTree.await(process, Duration.ofSeconds(60), "child strace process")
             val exitCode = process.exitValue()
-            val outText = outFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)
-            val errText = errFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)
             if (exitCode != 0) {
                 throw IllegalStateException(
-                    "Child JVM failed with exit code $exitCode. Stdout: $outText, Stderr: $errText",
+                    "Child JVM failed with exit code $exitCode. Stdout: ${Files.readString(tempOut)}, Stderr: ${Files.readString(tempErr)}",
                 )
             }
             return if (Files.exists(tempLog)) Files.readString(tempLog) else ""
         } finally {
+            process?.takeIf(Process::isAlive)?.let(StraceProcessTree::terminate)
             Files.deleteIfExists(tempLog)
+            Files.deleteIfExists(tempOut)
+            Files.deleteIfExists(tempErr)
+        }
+    }
+}
+
+/** Owns cancellation and bounded reaping for a spawned strace process tree. */
+internal object StraceProcessTree {
+    private val reapTimeout = Duration.ofSeconds(2)
+
+    @Throws(InterruptedException::class)
+    fun await(
+        process: Process,
+        timeout: Duration,
+        description: String,
+    ) {
+        try {
+            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                terminate(process)
+                throw IllegalStateException("$description timed out after ${timeout.toSeconds()}s")
+            }
+        } catch (interrupted: InterruptedException) {
+            terminate(process)
+            Thread.currentThread().interrupt()
+            throw interrupted
+        }
+    }
+
+    fun terminate(process: Process) {
+        var interrupted = Thread.interrupted()
+        val descendants = process
+            .toHandle()
+            .descendants()
+            .toList()
+            .asReversed()
+        descendants.forEach(ProcessHandle::destroy)
+        process.destroy()
+        try {
+            if (!process.waitFor(reapTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
+                process.destroyForcibly()
+                process.waitFor(reapTimeout.toMillis(), TimeUnit.MILLISECONDS)
+            }
+        } catch (_: InterruptedException) {
+            interrupted = true
+            descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
+            process.destroyForcibly()
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 }

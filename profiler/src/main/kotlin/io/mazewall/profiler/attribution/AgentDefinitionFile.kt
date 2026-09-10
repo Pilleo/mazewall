@@ -8,16 +8,20 @@ import java.nio.file.Path
 
 /** Reader for the native agent's immutable, post-run stack dictionary. */
 public object AgentDefinitionFile {
-    public data class Contents(
-        val stacks: List<StackDefinition>,
-        val invocations: List<InvocationDefinition>,
-        val agentLosses: Long,
-        val executions: List<ExecutionContext> = emptyList(),
+    public class Contents(
+        stacks: List<StackDefinition>,
+        invocations: List<InvocationDefinition>,
+        public val agentLosses: Long,
+        executions: List<ExecutionContext> = emptyList(),
         /** Number of virtual-thread native proxy intervals; every one pins its carrier. */
-        val virtualPinnedScopes: Long = 0,
+        public val virtualPinnedScopes: Long = 0,
         /** Sum of native proxy interval durations, measured by the in-process agent. */
-        val virtualPinnedNanos: Long = 0,
-    )
+        public val virtualPinnedNanos: Long = 0,
+    ) {
+        public val stacks: List<StackDefinition> = java.util.List.copyOf(stacks)
+        public val invocations: List<InvocationDefinition> = java.util.List.copyOf(invocations)
+        public val executions: List<ExecutionContext> = java.util.List.copyOf(executions)
+    }
 
     public fun read(path: Path): Contents = decode(Files.readAllBytes(path))
 

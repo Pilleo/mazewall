@@ -36,11 +36,23 @@ public enum class StackCaptureQuality {
 }
 
 /** Immutable dictionary record that may be delivered after syscall observations. */
-public data class StackDefinition(
-    val stackTraceId: StackTraceId,
-    val frames: List<ManagedFrame>,
-    val captureQuality: StackCaptureQuality,
-)
+public class StackDefinition(
+    public val stackTraceId: StackTraceId,
+    frames: List<ManagedFrame>,
+    public val captureQuality: StackCaptureQuality,
+) {
+    public val frames: List<ManagedFrame> = java.util.List.copyOf(frames)
+
+    override fun equals(other: Any?): Boolean =
+        other is StackDefinition &&
+            stackTraceId == other.stackTraceId &&
+            frames == other.frames &&
+            captureQuality == other.captureQuality
+
+    override fun hashCode(): Int = listOf(stackTraceId, frames, captureQuality).hashCode()
+
+    override fun toString(): String = "StackDefinition(stackTraceId=$stackTraceId, frames=$frames, captureQuality=$captureQuality)"
+}
 
 /**
  * A process-local canonical stack dictionary.
@@ -57,7 +69,7 @@ public class StackTraceDictionary {
         frames: List<ManagedFrame>,
         captureQuality: StackCaptureQuality,
     ): StackDefinition {
-        val key = DefinitionKey(frames.toList(), captureQuality)
+        val key = DefinitionKey(java.util.List.copyOf(frames), captureQuality)
         return definitionsByKey[key] ?: allocate(key)
     }
 

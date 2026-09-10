@@ -67,19 +67,79 @@ public sealed interface ProfileEvidence {
  * Evidence about what a profile can honestly claim. Incomplete results must not
  * become enforcement policies unless the operator overrides.
  */
-public data class ProfilingCoverage(
-    val strategy: ProfileStrategy,
-    val strategyReason: String,
-    val processWide: Boolean,
-    val ioUring: IoUringVisibility,
-    val pathResolution: PathResolutionQuality,
-    val stacks: StackAttribution,
-    val droppedEvents: Int,
-    val drainComplete: Boolean,
-    val environment: ProfileEnvironment,
-    val complete: Boolean,
-    val warnings: List<String> = emptyList(),
+public class ProfilingCoverage(
+    public val strategy: ProfileStrategy,
+    public val strategyReason: String,
+    public val processWide: Boolean,
+    public val ioUring: IoUringVisibility,
+    public val pathResolution: PathResolutionQuality,
+    public val stacks: StackAttribution,
+    public val droppedEvents: Int,
+    public val drainComplete: Boolean,
+    public val environment: ProfileEnvironment,
+    public val complete: Boolean,
+    warnings: List<String> = emptyList(),
 ) {
+    public val warnings: List<String> = if (warnings is PathDiagnostics) warnings else java.util.List.copyOf(warnings)
+
+    public fun copy(
+        strategy: ProfileStrategy = this.strategy,
+        strategyReason: String = this.strategyReason,
+        processWide: Boolean = this.processWide,
+        ioUring: IoUringVisibility = this.ioUring,
+        pathResolution: PathResolutionQuality = this.pathResolution,
+        stacks: StackAttribution = this.stacks,
+        droppedEvents: Int = this.droppedEvents,
+        drainComplete: Boolean = this.drainComplete,
+        environment: ProfileEnvironment = this.environment,
+        complete: Boolean = this.complete,
+        warnings: List<String> = this.warnings,
+    ): ProfilingCoverage =
+        ProfilingCoverage(
+        strategy,
+            strategyReason,
+            processWide,
+            ioUring,
+            pathResolution,
+            stacks,
+        droppedEvents,
+            drainComplete,
+            environment,
+            complete,
+            warnings,
+    )
+
+    override fun equals(other: Any?): Boolean =
+        other is ProfilingCoverage &&
+            strategy == other.strategy &&
+            strategyReason == other.strategyReason &&
+            processWide == other.processWide &&
+            ioUring == other.ioUring &&
+            pathResolution == other.pathResolution &&
+            stacks == other.stacks &&
+            droppedEvents == other.droppedEvents &&
+            drainComplete == other.drainComplete &&
+            environment == other.environment &&
+            complete == other.complete &&
+            warnings == other.warnings &&
+        pathFailures == other.pathFailures
+
+    override fun hashCode(): Int =
+        listOf(
+        strategy,
+            strategyReason,
+            processWide,
+            ioUring,
+            pathResolution,
+            stacks,
+            droppedEvents,
+        drainComplete,
+            environment,
+            complete,
+            warnings,
+            pathFailures,
+    ).hashCode()
+
     /**
      * Operand diagnostics retained independently of the compatibility quality summary.
      * Generated copies retain them unless callers explicitly replace the warnings projection.
@@ -202,6 +262,14 @@ public data class ProfilingCoverage(
                         obs.paths.isNotEmpty() &&
                         obs.openFlags == null
                 }
+            val unknownOpenFlags = observations
+                .filterIsInstance<ProfileObservation.Syscall>()
+                .mapNotNull { it.openFlagsEvidence as? OpenFlagsEvidence.Incomplete }
+                .flatMap { it.unknownSymbols }
+                .distinct()
+            if (unknownOpenFlags.isNotEmpty()) {
+                warnings.add("unrecognized open flags: ${unknownOpenFlags.joinToString(",")}")
+            }
             if (openat2Uninspected) {
                 warnings.add("OPENAT2 flags were not observed; do not treat paths as a complete write profile")
             }
@@ -266,6 +334,7 @@ public data class ProfilingCoverage(
                 pathQuality != PathResolutionQuality.MIXED &&
                 pathQuality != PathResolutionQuality.TRUNCATED &&
                 !openat2Uninspected &&
+                unknownOpenFlags.isEmpty() &&
                 !uringOpenUninspected &&
                 !hybridUnproven &&
                 !unparsedConnect &&

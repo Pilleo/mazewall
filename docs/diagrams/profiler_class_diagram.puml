@@ -109,8 +109,11 @@ enum "ObservationSource" as io.mazewall.profiler.ObservationSource {
   STRACE
   EBPF
 }
-class "PathDiagnostics" as io.mazewall.profiler.PathDiagnostics {
+interface "OpenFlagsEvidence" as io.mazewall.profiler.OpenFlagsEvidence {
   __
+  + {abstract}long getValue()
+}
+class "PathDiagnostics" as io.mazewall.profiler.PathDiagnostics {
   +List<PathResolutionFailure> getFailures()
   +int getSize()
   +String get(int)
@@ -354,8 +357,18 @@ enum "ManagedFrameKind" as io.mazewall.profiler.attribution.ManagedFrameKind {
   JAVA
   NATIVE_METHOD
 }
-interface "ReplayResult" as io.mazewall.profiler.attribution.ReplayResult {
+class "NativeTierEEventSource" as io.mazewall.profiler.attribution.NativeTierEEventSource {
   __
+  +void install(int, int, TierEOptions)
+  +void attachMarker(int, Path, long)
+  +List<SyscallInvocationEvent> drainEvents()
+  +long readLossCount()
+  +long readMarkerFailureCount()
+  +long readMarkerTransitionCount()
+  +long readLastMarkerPidTgid()
+  +void close()
+}
+interface "ReplayResult" as io.mazewall.profiler.attribution.ReplayResult {
   + {abstract}StateInvalidated getInvalidated()
 }
 enum "ResolutionStatus" as io.mazewall.profiler.attribution.ResolutionStatus {
@@ -391,9 +404,8 @@ enum "StackCaptureQuality" as io.mazewall.profiler.attribution.StackCaptureQuali
 class "StackDefinition" as io.mazewall.profiler.attribution.StackDefinition {
   __
   +long getStackTraceId()
-  +List<ManagedFrame> getFrames()
   +StackCaptureQuality getCaptureQuality()
-  +StackDefinition copy(long, List<ManagedFrame>, StackCaptureQuality)
+  +List<ManagedFrame> getFrames()
 }
 class "StackTraceDictionary" as io.mazewall.profiler.attribution.StackTraceDictionary {
   +StackDefinition intern(List<ManagedFrame>, StackCaptureQuality)
@@ -429,10 +441,10 @@ class "SyscallAttribution" as io.mazewall.profiler.attribution.SyscallAttributio
   +TaskIdentity getTask()
   +long getTaskSequence()
   +int getSyscallNumber()
-  +List<Long> getArgs()
   +InvocationId getInvocationId()
   +AttributionStatus getAttributionStatus()
   +int getCaptureFlags()
+  +List<Long> getArgs()
   +SyscallAttribution copy(TaskIdentity, long, int, List<Long>, InvocationId, AttributionStatus, int)
 }
 class "TaskIdentity" as io.mazewall.profiler.attribution.TaskIdentity {
@@ -444,13 +456,28 @@ enum "TierEEmissionMode" as io.mazewall.profiler.attribution.TierEEmissionMode {
   FULL_STREAM
   UNIQUE_STACK_SYSCALL
 }
+interface "TierEEventSource" as io.mazewall.profiler.attribution.TierEEventSource {
+  __
+  + {abstract}void install(int, int, TierEOptions)
+  + {abstract}void attachMarker(int, Path, long)
+  + {abstract}List<SyscallInvocationEvent> drainEvents()
+  + {abstract}long readLossCount()
+  + {abstract}long readMarkerFailureCount()
+  + {abstract}long readMarkerTransitionCount()
+  + {abstract}long readLastMarkerPidTgid()
+}
 class "TierEOptions" as io.mazewall.profiler.attribution.TierEOptions {
+  ..
+  + {static}Companion Companion
+  + {static}int DEFAULT_RECORD_LIMIT
   __
   +TierEEmissionMode getEmissionMode()
+  +int getMaxPendingRecords()
+  +int getMaxRetainedRecords()
 }
 class "TierEProfile" as io.mazewall.profiler.attribution.TierEProfile {
-  +List<ResolvedSyscall> getSyscalls()
   +SessionIntegrity getIntegrity()
+  +List<ResolvedSyscall> getSyscalls()
 }
 class "TierEProfilerSession" as io.mazewall.profiler.attribution.TierEProfilerSession {
   +void installAndAttach(int, int, Path, long)
@@ -460,11 +487,13 @@ class "TierEProfilerSession" as io.mazewall.profiler.attribution.TierEProfilerSe
   +long lastMarkerPidTgid()
   +void close()
 }
+interface "TierESessionState" as io.mazewall.profiler.attribution.TierESessionState {
+}
 class "CollectorDrain" as io.mazewall.profiler.collector.CollectorDrain {
-  +List<ProfileObservation> getObservations()
   +int getDroppedEvents()
   +boolean getDrainComplete()
   +IoUringVisibility getIoUring()
+  +List<ProfileObservation> getObservations()
 }
 class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
   +ObservationSource getSource()
@@ -473,7 +502,6 @@ class "EbpfCollector" as io.mazewall.profiler.collector.EbpfCollector {
   +void close()
 }
 class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
-  ..
   + {static}EbpfEventParser INSTANCE
   __
   +EbpfParseResult parse(String)
@@ -481,8 +509,8 @@ class "EbpfEventParser" as io.mazewall.profiler.collector.EbpfEventParser {
   +Map<String, String> parseFields(String)
 }
 class "EbpfParseResult" as io.mazewall.profiler.collector.EbpfParseResult {
-  +List<ProfileObservation> getObservations()
   +int getDroppedLines()
+  +List<ProfileObservation> getObservations()
 }
 class "LiveEbpfCollector" as io.mazewall.profiler.collector.LiveEbpfCollector {
   + {static}Companion Companion
@@ -505,11 +533,27 @@ interface "ProfileCollector" as io.mazewall.profiler.collector.ProfileCollector 
   + {abstract}CollectorDrain drain()
   + {abstract}void close()
 }
+class "ProfileObservationEbpfCollector" as io.mazewall.profiler.collector.ProfileObservationEbpfCollector {
+  + {static}Companion Companion
+  __
+  +ObservationSource getSource()
+  +void onEvent(int, int, int, long, long)
+  +void onDrop()
+  +void start()
+  +CollectorDrain drain()
+  +void close()
+}
 class "StraceCollector" as io.mazewall.profiler.collector.StraceCollector {
   +ObservationSource getSource()
   +void start()
   +CollectorDrain drain()
   +void close()
+}
+class "StraceProcessTree" as io.mazewall.profiler.collector.StraceProcessTree {
+  + {static}StraceProcessTree INSTANCE
+  __
+  +void await(Process, Duration, String)
+  +void terminate(Process)
 }
 class "BobCompiler" as io.mazewall.profiler.compiler.BobCompiler {
   + {static}BobCompiler INSTANCE
@@ -528,6 +572,7 @@ class "StraceLogParser" as io.mazewall.profiler.compiler.StraceLogParser {
   +StraceParseResult parseWithStats(String)
   +List<ProfileObservation> parse(String)
   +ProfileObservation parseLine(String)
+  +List<String> tokenizeArguments(String)
 }
 interface "AddressFamily" as io.mazewall.profiler.engine.AddressFamily {
   + {static}Companion Companion
@@ -1011,6 +1056,15 @@ class "LiveEbpfCollector" as io.mazewall.profiler.tierE.collector.LiveEbpfCollec
   +Snapshot snapshot()
   +void clear()
 }
+class "TierERingBufferCollector" as io.mazewall.profiler.tierE.collector.TierERingBufferCollector {
+  +int getDroppedCount()
+  +boolean getDrainComplete()
+  +void record(long, int, int, long)
+  +void recordDrop()
+  +List<AttributedEvent> drain()
+  +Snapshot snapshot()
+  +void clear()
+}
 class "ContainerDetector" as io.mazewall.profiler.tierE.container.ContainerDetector {
   + {static}ContainerDetector INSTANCE
   __
@@ -1161,7 +1215,6 @@ class "SyscallInvocationEvent" as io.mazewall.profiler.tierE.ringbuf.SyscallInvo
   +long getInvocationId()
   +long getSequence()
   +List<ULong> getArgs()
-  +SyscallInvocationEvent copy(long, int, int, int, int, long, long, List<ULong>)
 }
 class "StressDriverMainKt" as io.mazewall.profiler.tierE.stress.StressDriverMainKt {
   + {static}void main(String[])
@@ -1239,6 +1292,8 @@ io.mazewall.profiler.attribution.InvocationDefinition --> io.mazewall.profiler.a
 io.mazewall.profiler.attribution.InvocationProtocol --> io.mazewall.profiler.attribution.InvocationProtocol
 io.mazewall.profiler.attribution.InvocationReplayMachine --> io.mazewall.profiler.attribution.TaskIdentity
 io.mazewall.profiler.attribution.ManagedFrame --> io.mazewall.profiler.attribution.ManagedFrameKind
+io.mazewall.profiler.attribution.NativeTierEEventSource .u.|> io.mazewall.profiler.attribution.TierEEventSource
+io.mazewall.profiler.attribution.NativeTierEEventSource --> io.mazewall.profiler.tierE.engine.TierEbpfEngine
 io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.SyscallAttribution
 io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.StackDefinition
 io.mazewall.profiler.attribution.ResolvedSyscall --> io.mazewall.profiler.attribution.ExecutionContext
@@ -1256,10 +1311,11 @@ io.mazewall.profiler.attribution.SyscallAttribution --> io.mazewall.profiler.att
 io.mazewall.profiler.attribution.TierEOptions --> io.mazewall.profiler.attribution.TierEEmissionMode
 io.mazewall.profiler.attribution.TierEProfile --> io.mazewall.profiler.attribution.ResolvedSyscall
 io.mazewall.profiler.attribution.TierEProfile --> io.mazewall.profiler.attribution.SessionIntegrity
-io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.tierE.engine.TierEbpfEngine
 io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.ResolvedSyscall
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.TierEEventSource
 io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.AttributionCollector
 io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.TierEOptions
+io.mazewall.profiler.attribution.TierEProfilerSession --> io.mazewall.profiler.attribution.TierESessionState
 io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.IoUringVisibility
 io.mazewall.profiler.collector.CollectorDrain --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.collector.EbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
@@ -1268,11 +1324,14 @@ io.mazewall.profiler.collector.EbpfCollector --> io.mazewall.profiler.EbpfLoad
 io.mazewall.profiler.collector.EbpfEventParser --> io.mazewall.profiler.collector.EbpfEventParser
 io.mazewall.profiler.collector.EbpfParseResult --> io.mazewall.profiler.ProfileObservation
 io.mazewall.profiler.collector.LiveEbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
-io.mazewall.profiler.collector.LiveEbpfCollector --> io.mazewall.profiler.ObservationSource
+io.mazewall.profiler.collector.LiveEbpfCollector --> io.mazewall.profiler.collector.ProfileObservationEbpfCollector
 io.mazewall.profiler.collector.ObservationMerger --> io.mazewall.profiler.collector.ObservationMerger
+io.mazewall.profiler.collector.ProfileObservationEbpfCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
+io.mazewall.profiler.collector.ProfileObservationEbpfCollector --> io.mazewall.profiler.ObservationSource
 io.mazewall.profiler.collector.StraceCollector .u.|> io.mazewall.profiler.collector.ProfileCollector
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.TraceableWorkload
 io.mazewall.profiler.collector.StraceCollector --> io.mazewall.profiler.ObservationSource
+io.mazewall.profiler.collector.StraceProcessTree --> io.mazewall.profiler.collector.StraceProcessTree
 io.mazewall.profiler.compiler.BobCompiler --> io.mazewall.profiler.compiler.BobCompiler
 io.mazewall.profiler.compiler.MutationTrapAudit --> io.mazewall.profiler.compiler.MutationTrapAudit
 io.mazewall.profiler.compiler.StraceLogParser --> io.mazewall.profiler.compiler.StraceLogParser
@@ -1342,6 +1401,7 @@ io.mazewall.profiler.iterative.IterativeProfiler --> io.mazewall.profiler.iterat
 io.mazewall.profiler.iterative.RealIterativeTaskExecutor .u.|> io.mazewall.profiler.iterative.IterativeTaskExecutor
 io.mazewall.profiler.strace.StraceProfiler --> io.mazewall.profiler.strace.StraceProfiler
 io.mazewall.profiler.strace.StraceWorkloadRunner --> io.mazewall.profiler.strace.StraceWorkloadRunner
+io.mazewall.profiler.tierE.collector.LiveEbpfCollector --> io.mazewall.profiler.tierE.collector.TierERingBufferCollector
 io.mazewall.profiler.tierE.container.ContainerDetector --> io.mazewall.profiler.tierE.container.ContainerDetector
 io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor --> io.mazewall.profiler.tierE.daemon.ElfBuildIdExtractor
 io.mazewall.profiler.tierE.daemon.ElfSymbolOffset --> io.mazewall.profiler.tierE.daemon.ElfSymbolOffset

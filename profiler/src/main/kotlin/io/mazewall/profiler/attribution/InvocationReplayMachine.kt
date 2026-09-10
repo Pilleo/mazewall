@@ -27,19 +27,46 @@ public enum class AttributionStatus {
 }
 
 /** A raw syscall plus the invocation identity that was valid at its ordered capture point. */
-public data class SyscallAttribution(
-    val task: TaskIdentity,
-    val taskSequence: Long,
-    val syscallNumber: Int,
-    val args: List<Long>,
-    val invocationId: InvocationId?,
-    val attributionStatus: AttributionStatus,
-    val captureFlags: Int = 0,
+public class SyscallAttribution(
+    public val task: TaskIdentity,
+    public val taskSequence: Long,
+    public val syscallNumber: Int,
+    args: List<Long>,
+    public val invocationId: InvocationId?,
+    public val attributionStatus: AttributionStatus,
+    public val captureFlags: Int = 0,
 ) {
+    public val args: List<Long> = java.util.List.copyOf(args)
+
     init {
         require(taskSequence > 0) { "task sequence must be positive" }
         require(args.size == ARGUMENT_COUNT) { "syscall observations need exactly $ARGUMENT_COUNT arguments" }
     }
+
+    public fun copy(
+        task: TaskIdentity = this.task,
+        taskSequence: Long = this.taskSequence,
+        syscallNumber: Int = this.syscallNumber,
+        args: List<Long> = this.args,
+        invocationId: InvocationId? = this.invocationId,
+        attributionStatus: AttributionStatus = this.attributionStatus,
+        captureFlags: Int = this.captureFlags,
+    ): SyscallAttribution = SyscallAttribution(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags)
+
+    override fun equals(other: Any?): Boolean =
+        other is SyscallAttribution &&
+            task == other.task &&
+            taskSequence == other.taskSequence &&
+            syscallNumber == other.syscallNumber &&
+            args == other.args &&
+            invocationId == other.invocationId &&
+            attributionStatus == other.attributionStatus &&
+            captureFlags == other.captureFlags
+
+    override fun hashCode(): Int = listOf(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags).hashCode()
+
+    override fun toString(): String =
+        "SyscallAttribution(task=$task, taskSequence=$taskSequence, syscallNumber=$syscallNumber, args=$args, invocationId=$invocationId, attributionStatus=$attributionStatus, captureFlags=$captureFlags)"
 
     public companion object {
         public const val ARGUMENT_COUNT: Int = 6
@@ -64,12 +91,18 @@ public sealed interface InvocationEvent {
         val restoredInvocationId: InvocationId?,
     ) : InvocationEvent
 
-    public data class Syscall(
+    public class Syscall(
         override val task: TaskIdentity,
         override val sequence: Long,
-        val syscallNumber: Int,
-        val args: List<Long>,
-    ) : InvocationEvent
+        public val syscallNumber: Int,
+        args: List<Long>,
+    ) : InvocationEvent {
+        public val args: List<Long> = java.util.List.copyOf(args)
+
+        override fun equals(other: Any?): Boolean = other is Syscall && task == other.task && sequence == other.sequence && syscallNumber == other.syscallNumber && args == other.args
+
+        override fun hashCode(): Int = listOf(task, sequence, syscallNumber, args).hashCode()
+    }
 }
 
 /** An ordering failure invalidates the active task state; it never triggers inference. */

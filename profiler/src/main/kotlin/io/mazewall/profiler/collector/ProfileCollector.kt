@@ -7,12 +7,30 @@ import io.mazewall.profiler.ProfileObservation
 import io.mazewall.profiler.engine.PathResolution
 
 /** Drain of one collector. Sessions merge drains before [io.mazewall.profiler.compiler.BobCompiler]. */
-public data class CollectorDrain(
-    val observations: List<ProfileObservation>,
-    val droppedEvents: Int = 0,
-    val drainComplete: Boolean = true,
-    val ioUring: IoUringVisibility = IoUringVisibility.UNSEEN,
-)
+public class CollectorDrain(
+    observations: List<ProfileObservation>,
+    public val droppedEvents: Int = 0,
+    public val drainComplete: Boolean = true,
+    public val ioUring: IoUringVisibility = IoUringVisibility.UNSEEN,
+) {
+    public val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+
+    public fun copy(
+        observations: List<ProfileObservation> = this.observations,
+        droppedEvents: Int = this.droppedEvents,
+        drainComplete: Boolean = this.drainComplete,
+        ioUring: IoUringVisibility = this.ioUring,
+    ): CollectorDrain = CollectorDrain(observations, droppedEvents, drainComplete, ioUring)
+
+    override fun equals(other: Any?): Boolean =
+        other is CollectorDrain &&
+            observations == other.observations &&
+            droppedEvents == other.droppedEvents &&
+            drainComplete == other.drainComplete &&
+        ioUring == other.ioUring
+
+    override fun hashCode(): Int = listOf(observations, droppedEvents, drainComplete, ioUring).hashCode()
+}
 
 /**
  * Strategy-neutral collector. Implementations must not compile policies themselves.

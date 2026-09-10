@@ -13,6 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -25,8 +26,8 @@ class ProfileObservationCompatibilityTest {
     fun `reflective syscall construction retains the original primary schema and defaults`() {
         val observation = construct(
             ProfileObservation.Syscall::class,
-            listOf("correlation", "source", "name", "args", "paths", "openFlags", "contextId"),
-            listOf("args", "paths", "openFlags", "contextId"),
+            listOf("correlation", "source", "name", "args", "paths", "openFlags", "contextId", "openFlagsEvidence"),
+            listOf("args", "paths", "openFlags", "contextId", "openFlagsEvidence"),
             mapOf("correlation" to correlation, "source" to ObservationSource.STRACE, "name" to "GETPID"),
         )
         assertEquals(ProfileObservation.Syscall(correlation, ObservationSource.STRACE, "GETPID"), observation)
@@ -169,20 +170,20 @@ class ProfileObservationCompatibilityTest {
     }
 
     @Test
-    fun `ordinary list construction and explicit copies keep the baseline caller list contract`() {
+    fun `ordinary construction and copies own caller lists`() {
         val args = mutableListOf(9L)
         val paths = mutableListOf("/tmp/a")
         val syscall = ProfileObservation.Syscall(correlation, ObservationSource.STRACE, "OPEN", args, paths)
         val uring = ProfileObservation.IoUring(correlation, ObservationSource.EBPF, "OPENAT", paths)
         val connect = ProfileObservation.Connect(correlation, ObservationSource.EBPF, endpoint, paths)
-        assertSame(args, syscall.args)
-        assertSame(paths, syscall.copy().paths)
-        assertSame(paths, uring.copy().paths)
-        assertSame(paths, connect.copy().paths)
+        assertNotSame(args, syscall.args)
+        assertNotSame(paths, syscall.copy().paths)
+        assertNotSame(paths, uring.copy().paths)
+        assertNotSame(paths, connect.copy().paths)
         val replacement = listOf("/tmp/replacement")
-        assertSame(replacement, syscall.copy(paths = replacement).paths)
-        assertSame(replacement, uring.copy(paths = replacement).paths)
-        assertSame(replacement, connect.copy(paths = replacement).paths)
+        assertNotSame(replacement, syscall.copy(paths = replacement).paths)
+        assertNotSame(replacement, uring.copy(paths = replacement).paths)
+        assertNotSame(replacement, connect.copy(paths = replacement).paths)
     }
 
     @Test

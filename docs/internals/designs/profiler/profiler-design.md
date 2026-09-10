@@ -214,9 +214,25 @@ The private profiler daemon/JVM event frame is now version 1: big-endian TID, ve
 
 `SyscallEvent` also retains its original public primary constructor (`tid`, `syscallName`, `args`, `paths = emptyList()`, `stackTrace = null`). Its immutable paths projection preserves typed evidence when passed back through that constructor with the same syscall name; an ordinary replacement list selects the legacy adapter. `NativeDescriptorInputStream` retains its original public primary constructor and default description. Its additive native-memory constructor captures the supplied dependency during construction, and every later read uses that captured instance rather than looking up the ambient engine. Executor-wrapper `shutdownNow()` retains the explicit non-null `List<Runnable>` Kotlin return contract and returns the delegate's list without copying it.
 
-`ProfileObservation.Syscall`, `IoUring`, and `Connect` retain their original Kotlin data-class identity and public primary constructors, including parameter names, types, order, and defaults. Typed factories carry an immutable resolution record through the existing `paths` component. Generated copies and destructuring preserve that record when callers keep the paths projection and its syscall name or io_uring opcode; replacing paths with an ordinary list selects the legacy adapter even if the strings are equal. The paths projection obeys ordinary list equality, while observation equality and merge keys also compare the typed evidence. Direct construction and explicit list replacements retain the original caller-supplied list semantics. Factory outputs and published `ProfilingResult` observations defensively snapshot lists, including syscall arguments, so subsequent caller mutation cannot change published evidence. No primary component, mutable diagnostic state, or global side map is added.
+`ProfileObservation.Syscall`, `IoUring`, and `Connect` retain their public constructor parameter names,
+copy-style methods, destructuring components, structural equality, and Java getters, but are no longer
+Kotlin data classes. That deliberate source migration lets constructors own immutable argument and
+path snapshots instead of returning caller collections by identity. Typed factories preserve path
+resolution evidence across ordinary copies. `ProfilingCoverage` follows the same owned-value pattern:
+warnings and typed failures are immutable, and `copy` retains both unless explicitly replaced. See
+the [profiler hardening migration](../api/profiler-hardening-migration.md).
 
-`ProfilingCoverage` retains its original data-class constructor and generated methods. Inferred coverage owns an immutable diagnostic record through its existing warnings-list projection; ordinary `copy` calls retain that record, and merging prior coverage explicitly merges its typed failures. Internal warning augmentation uses `withWarnings` to retain diagnostics when recorded-eBPF, mutation-trap, or policy/DSL checks add warnings. These diagnostics remain available on the final public result and session snapshot. An external caller explicitly replacing the warnings projection also replaces that record. No global side map or native-memory reference is involved.
+Tier E sessions have one authoritative `Collecting → Finished → Closed` lifecycle. `finish()` drains
+and reads the agent dictionary once, caches one immutable profile, and cannot accumulate telemetry on
+repeat calls. Polling after finish or close fails. Pending attribution and retained result limits are
+independently configurable and default to 100,000; overflow drops new records, increments loss
+accounting, and makes integrity incomplete. Architecture-aware translation is owned by
+`ProfileObservationEbpfCollector`; raw ring retention is owned by `TierERingBufferCollector`.
+
+Descendant strace parsing tokenizes quoted and escaped operands and nested structures before choosing
+the exact open/openat/openat2 flags operand. Numeric bits are preserved and unknown symbols remain
+explicit incomplete evidence. The collector owns the complete spawned process tree: cancellation,
+timeout, or failure terminates descendants and parent, reaps within a bound, and preserves interruption.
 
 To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
 

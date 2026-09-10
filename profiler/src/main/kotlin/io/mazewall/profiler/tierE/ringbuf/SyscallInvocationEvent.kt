@@ -6,7 +6,7 @@ package io.mazewall.profiler.tierE.ringbuf
  * It deliberately carries the explicit native-agent invocation id. Resolution to a Java stack
  * happens later through the matching invocation definition; no timestamp correlation is valid.
  */
-public data class SyscallInvocationEvent(
+public class SyscallInvocationEvent(
     public val ktimeNs: ULong,
     public val tgid: UInt,
     public val tid: UInt,
@@ -14,11 +14,26 @@ public data class SyscallInvocationEvent(
     public val flags: Int,
     public val invocationId: ULong,
     public val sequence: ULong,
-    public val args: List<ULong>,
+    args: List<ULong>,
 ) {
+    public val args: List<ULong> = java.util.List.copyOf(args)
+
     init {
         require(args.size == ARGUMENT_COUNT) { "syscall event needs exactly $ARGUMENT_COUNT arguments" }
     }
+
+    override fun equals(other: Any?): Boolean =
+        other is SyscallInvocationEvent &&
+            ktimeNs == other.ktimeNs &&
+            tgid == other.tgid &&
+            tid == other.tid &&
+            syscallNr == other.syscallNr &&
+            flags == other.flags &&
+            invocationId == other.invocationId &&
+            sequence == other.sequence &&
+        args == other.args
+
+    override fun hashCode(): Int = listOf(ktimeNs, tgid, tid, syscallNr, flags, invocationId, sequence, args).hashCode()
 
     public companion object {
         public const val ARGUMENT_COUNT: Int = 6

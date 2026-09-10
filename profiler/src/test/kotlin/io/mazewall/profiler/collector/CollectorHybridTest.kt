@@ -1,5 +1,6 @@
 package io.mazewall.profiler.collector
 
+import io.mazewall.core.Arch
 import io.mazewall.core.Tid
 import io.mazewall.profiler.EbpfLoad
 import io.mazewall.profiler.IncompleteProfileException
@@ -15,6 +16,7 @@ import io.mazewall.profiler.ProfileOptions
 import io.mazewall.profiler.ProfileStrategy
 import io.mazewall.profiler.ProfilingCoverage
 import io.mazewall.profiler.StackAttribution
+import io.mazewall.profiler.engine.ObservedSyscall
 import io.mazewall.profiler.engine.PathResolution
 import io.mazewall.profiler.engine.PathResolutionFailure
 import org.junit.jupiter.api.Test
@@ -24,6 +26,18 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CollectorHybridTest {
+    @Test
+    fun `eBPF syscall mapping uses selected architecture and retains unknown numbers`() {
+        assertEquals(
+            ObservedSyscall.Known(io.mazewall.core.Syscall.OPENAT),
+            ProfileObservationEbpfCollector.syscallFor(Arch.AARCH64, Arch.AARCH64.openat),
+        )
+        assertEquals(
+            ObservedSyscall.Unknown("syscall:999999"),
+            ProfileObservationEbpfCollector.syscallFor(Arch.AMD64, 999999),
+        )
+    }
+
     @Test
     fun `collector merge retains distinct typed failures and reports mixed coverage`() {
         val correlation = ObservationCorrelation(1, Tid(7), 5)

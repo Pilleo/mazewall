@@ -15,10 +15,12 @@ import io.mazewall.profiler.ProfileObservation
  * Example:
  * `kind=uring tid=12 tgid=10 ktime=99 opcode=IORING_OP_OPENAT path=/tmp/x`
  */
-public data class EbpfParseResult(
-    val observations: List<ProfileObservation>,
-    val droppedLines: Int,
-)
+public class EbpfParseResult(
+    observations: List<ProfileObservation>,
+    public val droppedLines: Int,
+) {
+    public val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+}
 
 public object EbpfEventParser {
     public fun parse(log: String): EbpfParseResult {
