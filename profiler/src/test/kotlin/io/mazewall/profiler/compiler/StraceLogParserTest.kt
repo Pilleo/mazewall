@@ -46,6 +46,18 @@ class StraceLogParserTest {
     }
 
     @Test
+    fun `incomplete open flags are not compiled as numeric zero`() {
+        val observation = StraceLogParser.parseLine(
+            "123 open(\"/tmp/write-target\", O_WRONLY|O_FUTURE) = 4",
+        ) as ProfileObservation.Syscall
+
+        val bill = BobCompiler.compileObservations(listOf(observation))
+
+        assertEquals(setOf("/tmp/write-target"), bill.opens)
+        assertEquals(emptySet(), bill.fsWritePaths)
+    }
+
+    @Test
     fun `octal bytes use filesystem encoding and C control escapes`() {
         val observation = StraceLogParser.parseLine(
             """123 open("/tmp/caf\303\251\b", O_RDONLY) = 4""",

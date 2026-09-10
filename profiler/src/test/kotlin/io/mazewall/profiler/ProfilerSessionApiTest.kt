@@ -493,6 +493,7 @@ class ProfilerSessionApiTest {
                 ObservationSource.USER_NOTIF,
                 "OPENAT",
                 paths = listOf("/tmp/x"),
+                openFlags = 0,
             ),
         )
         val coverage = ProfilingCoverage.infer(

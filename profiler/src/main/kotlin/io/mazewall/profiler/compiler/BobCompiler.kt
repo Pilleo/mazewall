@@ -5,6 +5,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.profiler.BillOfBehavior
 import io.mazewall.profiler.FsEffect
 import io.mazewall.profiler.NetworkEndpoint
+import io.mazewall.profiler.OpenFlagsEvidence
 import io.mazewall.profiler.ProfileObservation
 import io.mazewall.profiler.UringOp
 import io.mazewall.profiler.engine.TraceEvent
@@ -74,13 +75,22 @@ object BobCompiler {
         when {
             name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
             name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
-                val flags = obs.openFlags ?: 0L
-                if ((flags and NativeConstants.O_PATH.toLong()) != 0L) {
-                    // O_PATH descriptor only, does not grant file read or write access
-                } else if (isOpenWrite(flags)) {
-                    fsWritePaths.addAll(obs.paths)
-                } else {
-                    opens.addAll(obs.paths)
+                when (val evidence = obs.openFlagsEvidence) {
+                    is OpenFlagsEvidence.Complete -> {
+                        val flags = evidence.value
+                        if ((flags and NativeConstants.O_PATH.toLong()) != 0L) {
+                            // O_PATH descriptor only, does not grant file read or write access.
+                        } else if (isOpenWrite(flags)) {
+                            fsWritePaths.addAll(obs.paths)
+                        } else {
+                            opens.addAll(obs.paths)
+                        }
+                    }
+                    is OpenFlagsEvidence.Incomplete, null -> {
+                        // Unknown access mode is not a numeric zero. Preserve only the
+                        // least-privileged read projection; coverage marks it incomplete.
+                        opens.addAll(obs.paths)
+                    }
                 }
             }
             isFileSystemMutation(name) -> fsWritePaths.addAll(obs.paths)
