@@ -1,5 +1,7 @@
 package demo.vulnapp.config
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.mazewall.profiler.BillOfBehavior
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -9,7 +11,10 @@ import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.nio.file.StandardOpenOption.CREATE_NEW
 import java.nio.file.StandardOpenOption.WRITE
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
+
+internal const val ALLOW_INCOMPLETE_ENFORCEMENT_PROPERTY = "mazewall.allow-incomplete-profile-enforcement"
 
 internal enum class ProfilePublicationComponent {
     EVIDENCE,
@@ -23,6 +28,13 @@ internal data class PublishedProfileGeneration(
     val stackDictionary: Path,
     val integrity: Path,
 )
+
+internal class IncompleteProfileEvidenceException(
+    reason: String,
+) : IllegalStateException(
+        "Refusing to enforce incomplete profile evidence: $reason. " +
+            "Set -D$ALLOW_INCOMPLETE_ENFORCEMENT_PROPERTY=true only after accepting the unsafe fallback.",
+    )
 
 /** Publishes immutable component sets, then atomically points readers at the complete generation. */
 internal object ProfileArtifactPublisher {
@@ -71,8 +83,9 @@ internal object ProfileArtifactPublisher {
             directory.resolve(INTEGRITY_FILE),
         )
         val integrity = Files.readString(generation.integrity, StandardCharsets.UTF_8)
-        validateDigest(integrity, "evidenceSha256", generation.evidence)
-        validateDigest(integrity, "stackDictionarySha256", generation.stackDictionary)
+        val integrityRecord = parseIntegrity(integrity)
+        validateDigest(integrityRecord, "evidenceSha256", generation.evidence)
+        validateDigest(integrityRecord, "stackDictionarySha256", generation.stackDictionary)
         return generation
     }
 
@@ -80,10 +93,20 @@ internal object ProfileArtifactPublisher {
     fun resolveEvidencePath(target: Path): Path {
         if (!Files.exists(target)) return target
         val content = Files.readString(target, StandardCharsets.UTF_8).trim()
-        return if (POINTER_PATTERN.matches(content)) readCurrent(target).evidence else target
+        if (!POINTER_PATTERN.matches(content)) return target
+
+        val generation = readCurrent(target)
+        val integrity = parseIntegrity(Files.readString(generation.integrity, StandardCharsets.UTF_8))
+        if (!integrity.path("complete").asBoolean(false) && !allowIncompleteEnforcement()) {
+            throw IncompleteProfileEvidenceException(integrity.path("reason").asText("unspecified failure"))
+        }
+        return generation.evidence
     }
 
-    private fun publishPointer(target: Path, generationId: String) {
+    private fun publishPointer(
+        target: Path,
+        generationId: String,
+    ) {
         val pointer = """{"format":"$FORMAT","generation":"$generationId"}"""
         val temporary = target.resolveSibling(".${target.fileName}.${UUID.randomUUID()}.tmp")
         try {
@@ -94,35 +117,65 @@ internal object ProfileArtifactPublisher {
         }
     }
 
-    private fun writeImmutable(target: Path, content: String) {
+    private fun writeImmutable(
+        target: Path,
+        content: String,
+    ) {
         Files.writeString(target, content, StandardCharsets.UTF_8, CREATE_NEW, WRITE)
     }
 
-    private fun integrityJson(evidence: String, stackDictionary: String, drain: ExecutorDrain): String {
+    private fun integrityJson(
+        evidence: String,
+        stackDictionary: String,
+        drain: ExecutorDrain,
+    ): String {
         val complete = drain is ExecutorDrain.Complete
         val reason = if (drain is ExecutorDrain.Incomplete) drain.reason else "complete"
-        return """{"complete":$complete,"reason":"${escape(reason)}","evidenceSha256":"${digest(evidence)}","stackDictionarySha256":"${digest(stackDictionary)}"}"""
+        return JSON.writeValueAsString(
+            JSON
+                .createObjectNode()
+                .put("complete", complete)
+                .put("reason", reason)
+                .put("evidenceSha256", digest(evidence))
+                .put("stackDictionarySha256", digest(stackDictionary)),
+        )
     }
 
-    private fun validateDigest(integrity: String, field: String, component: Path) {
-        val expected = Regex(""""$field":"([0-9a-f]{64})"""").find(integrity)?.groupValues?.get(1)
+    private fun parseIntegrity(integrity: String): JsonNode = JSON.readTree(integrity) ?: error("Profile integrity must contain a JSON object")
+
+    private fun validateDigest(
+        integrity: JsonNode,
+        field: String,
+        component: Path,
+    ) {
+        val expected = integrity
+            .path(field)
+            .textValue()
+            ?.takeIf { it.matches(SHA_256_PATTERN) }
             ?: error("Profile integrity is missing $field")
         val actual = digest(Files.readString(component, StandardCharsets.UTF_8))
         check(actual == expected) { "Profile generation component failed $field validation" }
     }
 
+    private fun allowIncompleteEnforcement(): Boolean {
+        val configured = System.getProperty(ALLOW_INCOMPLETE_ENFORCEMENT_PROPERTY) ?: return false
+        return configured.toBooleanStrictOrNull()
+            ?: error("$ALLOW_INCOMPLETE_ENFORCEMENT_PROPERTY must be true or false")
+    }
+
     private fun digest(content: String): String =
-        MessageDigest.getInstance("SHA-256")
+        MessageDigest
+            .getInstance("SHA-256")
             .digest(content.toByteArray(StandardCharsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(Locale.ROOT, it) }
 
     private fun generationRoot(target: Path): Path = target.resolveSibling(".${target.fileName}.generations")
-
-    private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private const val FORMAT = "mazewall-profile-generation-v1"
     private const val EVIDENCE_FILE = "sbob.json"
     private const val STACK_DICTIONARY_FILE = "stacktraces.json"
     private const val INTEGRITY_FILE = "integrity.json"
     private val POINTER_PATTERN = Regex("""\{"format":"$FORMAT","generation":"([0-9a-f-]{36})"\}""")
+    private val SHA_256_PATTERN = Regex("[0-9a-f]{64}")
+    private val JSON = ObjectMapper()
 }

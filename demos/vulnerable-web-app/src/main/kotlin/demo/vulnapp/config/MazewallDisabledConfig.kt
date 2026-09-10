@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 @ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "false", matchIfMissing = true)
 class MazewallDisabledConfig {
-
     @Bean
     fun adminService(): AdminService = DefaultAdminService()
 

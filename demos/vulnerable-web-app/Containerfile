@@ -11,6 +11,10 @@ COPY build/libs/vulnerable-app.jar /app/vulnerable-app.jar
 # Unpack the jar to support exploded classpath resolution for profiler daemon subprocesses
 RUN mkdir -p /app/unpacked && cd /app/unpacked && jar -xf ../vulnerable-app.jar
 
+# Create the exact Landlock roots before filters are installed. Missing roots would
+# otherwise make the demo fall back to protecting their broader /app parent.
+RUN mkdir -p /app/uploads /app/data && chown root:root /app/uploads /app/data && chmod 0755 /app/data && chmod 0770 /app/uploads
+
 # Expose ports
 EXPOSE 8080
 

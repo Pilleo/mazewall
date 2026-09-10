@@ -1,5 +1,6 @@
 package demo.vulnapp.config
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.mazewall.profiler.BillOfBehavior
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -38,6 +39,44 @@ class ProfileArtifactPublisherTest {
         val integrity = Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity)
         assertTrue(integrity.contains("\"complete\":false"))
         assertTrue(integrity.contains("timeout"))
+    }
+
+    @Test
+    fun `incomplete profile is diagnostic only unless unsafe enforcement is explicit`() {
+        val target = directory.resolve("sbob.json")
+        ProfileArtifactPublisher.publish(target, BillOfBehavior(), ExecutorDrain.Incomplete.Timeout(Duration.ofMillis(7)))
+
+        val failure = assertFailsWith<IllegalStateException> {
+            ProfileArtifactPublisher.resolveEvidencePath(target)
+        }
+
+        assertTrue(failure.message.orEmpty().contains("timeout after 7ms"))
+        System.setProperty("mazewall.allow-incomplete-profile-enforcement", "true")
+        try {
+            assertEquals(
+                ProfileArtifactPublisher.readCurrent(target).evidence,
+                ProfileArtifactPublisher.resolveEvidencePath(target),
+            )
+        } finally {
+            System.clearProperty("mazewall.allow-incomplete-profile-enforcement")
+        }
+    }
+
+    @Test
+    fun `integrity diagnostics are valid JSON for every control character`() {
+        val reason = "quote\" slash\\ newline\n tab\t return\r backspace\b formfeed\u000C nul\u0000"
+        val target = directory.resolve("sbob.json")
+        ProfileArtifactPublisher.publish(
+            target,
+            BillOfBehavior(),
+            ExecutorDrain.Incomplete.ProfilerCleanup(reason),
+        )
+
+        val integrity = Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity)
+        val parsed = ObjectMapper().readTree(integrity)
+
+        assertFalse(parsed.path("complete").booleanValue())
+        assertEquals("profiler cleanup failed: $reason", parsed.path("reason").textValue())
     }
 
     @Test

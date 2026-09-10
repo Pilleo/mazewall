@@ -17,7 +17,9 @@ internal sealed interface ExecutorDrain {
     sealed interface Incomplete : ExecutorDrain {
         val reason: String
 
-        data class Timeout(val waited: Duration) : Incomplete {
+        data class Timeout(
+            val waited: Duration,
+        ) : Incomplete {
             override val reason: String = "timeout after ${waited.toMillis()}ms"
         }
 
@@ -25,11 +27,15 @@ internal sealed interface ExecutorDrain {
             override val reason: String = "interrupted"
         }
 
-        data class ProfilerCleanup(val message: String) : Incomplete {
+        data class ProfilerCleanup(
+            val message: String,
+        ) : Incomplete {
             override val reason: String = "profiler cleanup failed: $message"
         }
 
-        data class Multiple(val failures: List<Incomplete>) : Incomplete {
+        data class Multiple(
+            val failures: List<Incomplete>,
+        ) : Incomplete {
             init {
                 require(failures.size >= 2) { "multiple failures requires at least two causes" }
             }
@@ -39,7 +45,10 @@ internal sealed interface ExecutorDrain {
     }
 
     companion object {
-        fun combine(first: ExecutorDrain, second: Incomplete): Incomplete =
+        fun combine(
+            first: ExecutorDrain,
+            second: Incomplete,
+        ): Incomplete =
             when (first) {
                 Complete -> second
                 is Incomplete.Multiple -> Incomplete.Multiple(first.failures + second)
@@ -49,12 +58,21 @@ internal sealed interface ExecutorDrain {
 }
 
 /** One admission and lifecycle boundary for every service-specific executor. */
-internal class OwnedServiceExecutor(private val delegate: ExecutorService) {
+internal class OwnedServiceExecutor(
+    private val delegate: ExecutorService,
+) {
     private val accepting = AtomicBoolean(true)
 
     fun <T> call(block: () -> T): T {
         if (!accepting.get()) throw RejectedExecutionException("service executor is draining")
-        return delegate.submit(Callable(block)).get()
+        val accepted = delegate.submit(Callable(block))
+        return try {
+            accepted.get()
+        } catch (failure: InterruptedException) {
+            accepted.cancel(true)
+            Thread.currentThread().interrupt()
+            throw failure
+        }
     }
 
     fun execute(block: () -> Unit) {
@@ -88,9 +106,12 @@ internal class OwnedServiceExecutor(private val delegate: ExecutorService) {
     }
 }
 
-internal class ServiceExecutorOwner(private val drainTimeout: Duration) {
+internal class ServiceExecutorOwner(
+    private val drainTimeout: Duration,
+) {
     private val executors = CopyOnWriteArrayList<OwnedServiceExecutor>()
     private val closed = AtomicBoolean()
+
     @Volatile private var result: ExecutorDrain? = null
 
     @Synchronized
