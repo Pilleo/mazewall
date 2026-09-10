@@ -198,7 +198,10 @@ internal class NativeProfilerTransport(
             .send(raw, listener, ConfinedSegment(resp))
         ) {
             io.mazewall.platform.seccomp.UserNotifReplyResult.Sent -> SeccompReplyResult.SENT
-            io.mazewall.platform.seccomp.UserNotifReplyResult.NotificationGone -> SeccompReplyResult.NOTIFICATION_GONE
+            io.mazewall.platform.seccomp.UserNotifReplyResult.NotificationGone -> {
+                logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${NativeConstants.ENOENT}")
+                SeccompReplyResult.NOTIFICATION_GONE
+            }
             is io.mazewall.platform.seccomp.UserNotifReplyResult.Failed -> {
                 logger.warning("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${outcome.errno}")
                 throw IllegalStateException("SECCOMP_IOCTL_NOTIF_SEND failed with errno=${outcome.errno}")
