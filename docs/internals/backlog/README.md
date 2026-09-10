@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 552
+*Total Active Issues:* 76 | *Total Resolved Issues:* 553
+
+Review-hardening Task 6 broker resolved: [bounded child output and fatal checkout retirement](resolved/issue-20260910-184603-286-contain-portal-child-output-and-retire-fatal-check.md).
 
 Review-hardening Task 5 resolved: [terminal profiler notifications and ACK failures](resolved/issue-20260910-182202-258-make-profiler-notification-and-ack-failures-termin.md).
 

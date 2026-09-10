@@ -1,6 +1,5 @@
 package io.mazewall.portal
 
-import io.mazewall.core.ChildStdoutPump
 import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -194,6 +193,7 @@ public class ProcessBroker(
         idle.put(slot)
     }
 
+    @Suppress("TooGenericExceptionCaught") // Every fatal checkout failure must retire its process before preserving the original Error.
     internal fun call(
         method: PortalMethod,
         payload: ByteArray,
@@ -246,6 +246,13 @@ public class ProcessBroker(
                 scheduleRecycle(slot)
             }
             throw PortalCallException("portal RPC failed", expectedRpcFailure)
+        } catch (fatal: Error) {
+            if (!returnedToPool) {
+                val cleanup = runCatching { destroySlot(slot) }.exceptionOrNull()
+                cleanup?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
+                runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
+            }
+            throw fatal
         }
     }
 
@@ -411,19 +418,7 @@ public class ProcessBroker(
             val process = JvmChildProcess.start(launcher, spec)
             synchronized(attempt) { attempt.process = process }
             check(active()) { "portal worker acquisition cancelled" }
-            val pump =
-            JvmChildProcess.startStdoutPump(
-                process,
-                "MAZEWALL_PORTAL_WORKER_READY",
-                { line ->
-                    System.err.println("[PORTAL-WORKER] $line")
-                    runCatching {
-                        java.io.File("/tmp/portalworker_err.log").appendText(line + "\n")
-                    }
-                },
-                "portal-worker-stdout",
-                { runCatching { System.err.println("[PORTAL-WORKER-EXIT] code=${process.exitValue()}") } },
-            )
+            val pump = PortalWorkerOutput(process.inputStream)
             synchronized(attempt) { attempt.pump = pump }
             val peer = acceptWithin(server, process, ep.path, deadline, active)
             synchronized(attempt) { attempt.peer = peer }
@@ -440,7 +435,7 @@ public class ProcessBroker(
                 check(remaining > 0) { "portal worker failed to become ready before startup deadline" }
                 pump.ready.await(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
             }
-            check(JvmChildProcess.awaitReady(pump, 0)) { "portal worker failed readiness validation" }
+            check(pump.readinessObserved) { "portal worker failed readiness validation" }
             check(process.isAlive) { "portal worker exited during readiness handshake" }
             check(active()) { "portal worker acquisition cancelled" }
             val slot = WorkerSlot(
@@ -461,6 +456,9 @@ public class ProcessBroker(
         } catch (failure: Throwable) {
             synchronized(attempt) { attempt.acquisitionFinished = true }
             val cleanupFailure = runCatching { retireStartupAttempt(attempt) }.exceptionOrNull()
+            attempt.pump?.snapshot()?.let { diagnostics ->
+                failure.addSuppressed(IllegalStateException("portal worker startup diagnostics: $diagnostics"))
+            }
             throwWithCleanupFailure(failure, cleanupFailure)
         }
     }
@@ -653,7 +651,7 @@ public class ProcessBroker(
         val channel: PortalChannel,
         val endpoint: PrivateUnixEndpoint,
         val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-        val pump: ChildStdoutPump,
+        val pump: PortalWorkerOutput,
     ) {
         var channelRetired: Boolean = false
         var serverRetired: Boolean = false
@@ -799,7 +797,7 @@ public class ProcessBroker(
     ) {
         var server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         var process: Process? = null
-        var pump: ChildStdoutPump? = null
+        var pump: PortalWorkerOutput? = null
         var peer: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         var channel: PortalChannel? = null
         var acquisitionFinished = false

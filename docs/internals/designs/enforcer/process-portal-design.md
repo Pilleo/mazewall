@@ -54,6 +54,13 @@ is destroyed and reaped first; replenishment runs independently, is logged separ
 replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
 so a slot cannot be returned after closing admission begins.
 
+A fatal broker call error retires and reaps its checked-out worker before propagation. The
+original error retains cleanup failures as suppressed evidence; replacement remains separate
+maintenance. Each child output pump drains incrementally into at most 64 diagnostic lines of
+1,024 characters, records truncation/drop counts and stream failures, and recognizes readiness
+only from an exact complete sentinel line. Child output is never appended to a shared file or
+forwarded continuously into broker logs. Startup failures carry the bounded diagnostic snapshot.
+
 The worker request loop has the closed states `AwaitingRequest → Dispatching → SendingReply`.
 `ReplySucceeded` is the only transition back to `AwaitingRequest`; `ReplyFailed` terminates the
 channel. Builtin and generated methods are resolved before one dispatch-failure boundary, which

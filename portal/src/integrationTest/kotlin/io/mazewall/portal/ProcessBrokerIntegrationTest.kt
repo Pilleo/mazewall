@@ -22,6 +22,50 @@ import java.util.zip.Adler32
 @Execution(ExecutionMode.SAME_THREAD)
 class ProcessBrokerIntegrationTest {
     @Test
+    fun `fatal checkout retires child before propagating original error and suppresses cleanup`() {
+        val children = java.util.concurrent.CopyOnWriteArrayList<Process>()
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
+        }
+        val cleanup = java.io.IOException("listener cleanup failed")
+        val failClose = java.util.concurrent.atomic
+            .AtomicBoolean(false)
+        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
+            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+                if (failClose.compareAndSet(true, false)) throw cleanup
+                io.mazewall.core.RealSocketManager
+                    .close(fd)
+            }
+        }
+        val broker = ProcessBroker(launcher = launcher, sockets = sockets)
+        broker.start()
+        val child = children.single()
+        val runtime = io.mazewall.LinuxNative.snapshot()
+        val fatal = AssertionError("fatal request write")
+        io.mazewall.LinuxNative.setEngine(object : io.mazewall.NativeEngine by runtime {
+            override val memory = object : io.mazewall.NativeMemory by runtime.memory {
+                override fun write(
+                    fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership>,
+                    buf: io.mazewall.ffi.memory.ManagedSegment,
+                    count: Long,
+                ): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> = throw fatal
+            }
+        })
+        try {
+            failClose.set(true)
+            assertSame(fatal, assertThrows(AssertionError::class.java) { broker.echo("fail") })
+            assertFalse(child.isAlive, "fatal return must not leave checked-out process alive")
+            assertTrue(fatal.suppressed.contains(cleanup), "channel cleanup must preserve fatal identity")
+        } finally {
+            io.mazewall.LinuxNative.resetToDefault()
+            broker.close()
+        }
+    }
+
+    @Test
     fun `join timeout retains late process publication until it is reaped`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         val launchEntered = CountDownLatch(1)
