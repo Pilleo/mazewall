@@ -36,9 +36,47 @@ final class TestHealthPluginFunctionalTest {
                     classpath = sourceSets.test.runtimeClasspath
                     useJUnitPlatform()
                 }
+                tasks.register('freshTest', Test) {
+                    testClassesDirs = sourceSets.test.output.classesDirs
+                    classpath = sourceSets.test.runtimeClasspath
+                    useJUnitPlatform { includeTags 'needs-fresh-jvm' }
+                    doFirst new io.mazewall.build.FreshJvmClassFilterAction()
+                }
                 """, StandardCharsets.UTF_8);
             write(root, "src/test/java/fixture/FirstTest.java", testSource("FirstTest"));
             write(root, "src/test/java/fixture/SecondTest.java", testSource("SecondTest"));
+            write(root, "src/test/java/io/mazewall/NeedsFreshJvm.java", """
+                package io.mazewall;
+                import java.lang.annotation.*;
+                import org.junit.jupiter.api.Tag;
+                @Inherited @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.TYPE, ElementType.METHOD})
+                @Tag("needs-fresh-jvm") public @interface NeedsFreshJvm {}
+                """);
+            write(root, "src/test/java/fixture/FreshTest.java", """
+                package fixture;
+                import io.mazewall.NeedsFreshJvm;
+                import org.junit.jupiter.api.*;
+                import org.junit.jupiter.api.extension.*;
+                import org.junit.jupiter.params.ParameterizedTest;
+                import org.junit.jupiter.params.provider.ValueSource;
+                import java.util.stream.Stream;
+                abstract class FreshBase {
+                    @NeedsFreshJvm @ParameterizedTest @ValueSource(strings = {"a", "b"}) void parameterized(String value) {}
+                    @NeedsFreshJvm @RepeatedTest(2) void repeated() {}
+                    @NeedsFreshJvm @TestTemplate @ExtendWith(Contexts.class) void template() {}
+                }
+                class Contexts implements TestTemplateInvocationContextProvider {
+                    public boolean supportsTestTemplate(ExtensionContext context) { return true; }
+                    public Stream<TestTemplateInvocationContext> provideTestTemplateInvocationContexts(ExtensionContext context) {
+                        return Stream.of(new TestTemplateInvocationContext() {});
+                    }
+                }
+                public class FreshTest extends FreshBase {
+                    @Nested class Inner {
+                        @NeedsFreshJvm @Test void nested() {}
+                    }
+                }
+                """);
             Path fragments = Files.createDirectories(root.resolve("build/reports/test-health/fragments"));
             Files.writeString(fragments.resolve("stale.json"), "{\"taskPath\":\":stale\"}");
 
@@ -61,6 +99,17 @@ final class TestHealthPluginFunctionalTest {
             equal(true, aggregate.contains("\"freshForks\": [\n    \n  ]"));
             equal(true, aggregate.contains("\":test\""));
             equal(true, aggregate.contains("\":secondTest\""));
+
+            BuildResult fresh = run(root, "freshTest");
+            equal(TaskOutcome.SUCCESS, fresh.task(":freshTest").getOutcome());
+            String freshXml = Files.readString(root.resolve("build/test-results/freshTest/TEST-fixture.FreshTest.xml"));
+            equal(true, freshXml.contains("tests=\"5\""));
+            String nestedXml = Files.readString(root.resolve("build/test-results/freshTest/TEST-fixture.FreshTest$Inner.xml"));
+            equal(true, nestedXml.contains("tests=\"1\""));
+            BuildResult unmatched = GradleRunner.create().withProjectDir(root.toFile())
+                .withPluginClasspath(pluginClasspath()).withArguments("freshTest", "--tests", "fixture.MissingTest")
+                .buildAndFail();
+            equal(true, unmatched.getOutput().contains("No tests found"));
         } catch (Exception failure) {
             throw new AssertionError("Test-health Gradle wiring contract failed", failure);
         }

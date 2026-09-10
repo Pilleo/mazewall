@@ -12,6 +12,80 @@ import kotlin.test.assertTrue
 
 class IsolatedProcessTesterLifecycleTest {
     @Test
+    fun `successful completion still cleans and reaps descendants`() {
+        val process = ProcessBuilder("/bin/true").start()
+        assertTrue(process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS))
+        val lifecycle = RecordingLifecycle(waitResult = true, awaitResults = ArrayDeque(listOf(true)))
+        IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofSeconds(1), listOf("fixture"), lifecycle)
+        assertTrue(lifecycle.destroyed, "successful parent completion must still retire its process tree")
+        assertTrue(lifecycle.awaitResults.isEmpty(), "cleanup must await exit even after successful completion")
+    }
+
+    @Test
+    fun `successful parent exit cannot abandon an observed descendant`() {
+        val root = Files.createTempDirectory("isolated-success-descendant-")
+        val observed = AtomicBoolean()
+        IsolatedProcessTester.runIsolatedTest(
+            IsolatedProcessLifecycleFixture::class.java.name,
+            "exit-with-child",
+            root.toString(),
+            onDescendantsObserved = { descendants ->
+                if (descendants.isNotEmpty() && observed.compareAndSet(false, true)) {
+                    Files.writeString(root.resolve("release"), "observed")
+                }
+            },
+        )
+        assertTrue(observed.get())
+        assertEventuallyDead(root.resolve("parent.pid"))
+        assertEventuallyDead(root.resolve("child.pid"))
+    }
+
+    @Test
+    fun `interruption during successful cleanup is restored`() {
+        val process = ProcessBuilder("/bin/true").start()
+        assertTrue(process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS))
+        val lifecycle = RecordingLifecycle(waitResult = true, awaitFailure = InterruptedException("cleanup interrupted"))
+        try {
+            runCatching {
+                IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofSeconds(1), listOf("fixture"), lifecycle)
+            }
+            assertTrue(Thread.currentThread().isInterrupted, "successful-path cleanup must preserve interruption")
+            assertTrue(lifecycle.forced, "interrupted graceful reaping must still force cleanup")
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun `forced cleanup also owns descendants discovered during graceful cleanup`() {
+        val process = ProcessBuilder("/bin/true").start()
+        val lateChild = ProcessHandle.current()
+        val lifecycle = RecordingLifecycle(
+            awaitResults = ArrayDeque(listOf(false, true)),
+            descendantResults = ArrayDeque(listOf(emptyList(), listOf(lateChild))),
+        )
+        assertIs<IllegalStateException>(
+            runCatching {
+                IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofMillis(1), listOf("fixture"), lifecycle)
+            }.exceptionOrNull(),
+        )
+        assertTrue(lifecycle.forcedHandles == listOf(lateChild), "late descendants must join forced cleanup ownership")
+    }
+
+    @Test
+    fun `fatal wait failure retains identity and attaches cleanup failure`() {
+        val process = ProcessBuilder("/bin/true").start()
+        val fatal = AssertionError("fatal fixture")
+        val cleanup = IllegalStateException("cleanup fixture")
+        val lifecycle = RecordingLifecycle(waitFailure = fatal, destroyFailure = cleanup)
+        val caught = runCatching {
+            IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofSeconds(1), listOf("fixture"), lifecycle)
+        }.exceptionOrNull()
+        assertTrue(caught === fatal)
+        assertTrue(fatal.suppressed.contentEquals(arrayOf(cleanup)))
+    }
+
+    @Test
     fun `unconfirmed forced cleanup is an explicit failure`() {
         val process = ProcessBuilder("/bin/true").start()
         val lifecycle = RecordingLifecycle(waitResult = false, awaitResults = ArrayDeque(listOf(false, false)))
@@ -22,7 +96,12 @@ class IsolatedProcessTesterLifecycleTest {
             }.exceptionOrNull(),
         )
 
-        assertTrue(failure.message!!.contains("could not confirm termination"), failure.message)
+        assertTrue(
+            failure.suppressed
+            .single()
+            .message!!
+            .contains("could not confirm termination"),
+        )
         assertTrue(lifecycle.forced)
         assertTrue(lifecycle.awaitResults.isEmpty(), "both graceful and forced cleanup waits must be checked")
     }
@@ -142,21 +221,26 @@ class IsolatedProcessTesterLifecycleTest {
 
     private class RecordingLifecycle(
         private val waitResult: Boolean = false,
-        private val waitFailure: InterruptedException? = null,
+        private val waitFailure: Throwable? = null,
         private val enumerationFailure: RuntimeException? = null,
         private val destroyFailure: RuntimeException? = null,
+        private val awaitFailure: InterruptedException? = null,
         val awaitResults: ArrayDeque<Boolean> = ArrayDeque(),
+        val descendantResults: ArrayDeque<List<ProcessHandle>> = ArrayDeque(),
     ) : IsolatedProcessTester.ProcessLifecycleOperations {
         var forced = false
+        var destroyed = false
+        val forcedHandles = mutableListOf<ProcessHandle>()
 
         override fun waitFor(
             process: Process,
             timeout: Duration,
         ): Boolean = waitFailure?.let { throw it } ?: waitResult
 
-        override fun descendants(process: Process): List<ProcessHandle> = enumerationFailure?.let { throw it } ?: emptyList()
+        override fun descendants(process: Process): List<ProcessHandle> = enumerationFailure?.let { throw it } ?: descendantResults.removeFirstOrNull() ?: emptyList()
 
         override fun destroy(process: Process) {
+            destroyed = true
             destroyFailure?.let { throw it }
         }
 
@@ -168,12 +252,13 @@ class IsolatedProcessTesterLifecycleTest {
 
         override fun destroyForcibly(handle: ProcessHandle) {
             forced = true
+            forcedHandles.add(handle)
         }
 
         override fun awaitExit(
             process: Process,
             descendants: List<ProcessHandle>,
-        ): Boolean = awaitResults.removeFirst()
+        ): Boolean = awaitFailure?.let { throw it } ?: awaitResults.removeFirstOrNull() ?: true
     }
 
     private fun waitFor(path: java.nio.file.Path) {

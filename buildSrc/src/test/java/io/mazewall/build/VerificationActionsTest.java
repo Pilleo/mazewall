@@ -49,13 +49,21 @@ public final class VerificationActionsTest {
                 @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD)
                 public @interface Test {}
                 """);
+            for (String annotation : List.of("ParameterizedTest", "RepeatedTest", "TestTemplate", "Nested")) {
+                String pkg = annotation.equals("ParameterizedTest") ? "org.junit.jupiter.params" : "org.junit.jupiter.api";
+                write(sources, pkg.replace('.', '/') + "/" + annotation + ".java",
+                    "package " + pkg + "; import java.lang.annotation.*; @Retention(RetentionPolicy.RUNTIME) "
+                        + "public @interface " + annotation + " {}");
+            }
             write(sources, "sample/Fixtures.java", """
                 package sample;
                 import io.mazewall.NeedsFreshJvm;
                 import org.junit.jupiter.api.Test;
+                import org.junit.jupiter.api.*;
+                import org.junit.jupiter.params.ParameterizedTest;
                 class MentionOnly { Class<?> marker = NeedsFreshJvm.class; }
-                @NeedsFreshJvm class ClassTagged {}
-                class MethodTagged { @NeedsFreshJvm void test() {} }
+                @NeedsFreshJvm class ClassTagged { @Test void test() {} }
+                class MethodTagged { @Test @NeedsFreshJvm void test() {} }
                 class MethodOnlyBase { @NeedsFreshJvm void test() {} }
                 class MethodOnlyChild extends MethodOnlyBase {}
                 abstract class InheritedMethodBase { @Test @NeedsFreshJvm void inheritedTest() {} }
@@ -65,25 +73,51 @@ public final class VerificationActionsTest {
                 class InheritedInterfaceChild implements InheritedMethodInterface {}
                 class OverriddenInterfaceChild implements InheritedMethodInterface { @Override public void inheritedInterfaceTest() {} }
                 class InheritedTagged extends ClassTagged {}
-                class Outer { @NeedsFreshJvm static class NestedTagged {} }
+                class Outer { @Nested class NestedTagged { @Test @NeedsFreshJvm void nestedTest() {} } }
+                abstract class TemplateBase {
+                    @ParameterizedTest @NeedsFreshJvm void parameterized(String value) {}
+                    @RepeatedTest @NeedsFreshJvm void repeated() {}
+                    @TestTemplate @NeedsFreshJvm void template() {}
+                }
+                class ParameterizedChild extends TemplateBase {
+                    @Override void repeated() {} @Override void template() {}
+                }
+                class RepeatedChild extends TemplateBase {
+                    @Override void parameterized(String value) {} @Override void template() {}
+                }
+                class TemplateChild extends TemplateBase {
+                    @Override void parameterized(String value) {} @Override void repeated() {}
+                }
                 """);
             var compiler = ToolProvider.getSystemJavaCompiler();
-            int result = compiler.run(null, null, null, "-d", classes.toString(),
-                sources.resolve("io/mazewall/NeedsFreshJvm.java").toString(),
-                sources.resolve("org/junit/jupiter/api/Test.java").toString(),
-                sources.resolve("sample/Fixtures.java").toString());
+            var arguments = new java.util.ArrayList<>(List.of("-d", classes.toString()));
+            try (var files = Files.walk(sources)) {
+                files.filter(path -> path.toString().endsWith(".java")).map(Path::toString).forEach(arguments::add);
+            }
+            int result = compiler.run(null, null, null, arguments.toArray(String[]::new));
             equal(0, result);
             equal(List.of(
                 "sample.ClassTagged",
                 "sample.InheritedInterfaceChild",
-                "sample.InheritedMethodBase",
                 "sample.InheritedMethodChild",
-                "sample.InheritedMethodInterface",
                 "sample.InheritedTagged",
-                "sample.MethodOnlyBase",
                 "sample.MethodTagged",
-                "sample.Outer$NestedTagged"
+                "sample.Outer",
+                "sample.ParameterizedChild",
+                "sample.RepeatedChild",
+                "sample.TemplateChild"
             ), FreshJvmClassSelector.select(List.of(classes.toFile())));
+            Path empty = Files.createDirectories(root.resolve("empty"));
+            equal(List.of(), FreshJvmClassSelector.select(List.of(empty.toFile())));
+            Path invalid = Files.createDirectories(root.resolve("invalid/sample"));
+            Files.copy(classes.resolve("sample/MethodOnlyBase.class"), invalid.resolve("MethodOnlyBase.class"));
+            try {
+                FreshJvmClassSelector.select(List.of(invalid.getParent().toFile()));
+                throw new AssertionError("Declared fresh-JVM marker without executable tests must fail");
+            } catch (IllegalStateException expected) {
+                equal(true, expected.getMessage().contains("sample.MethodOnlyBase"));
+                equal(true, expected.getMessage().contains("no executable"));
+            }
         } catch (Exception failure) {
             throw new AssertionError("Fresh-JVM metadata contract failed", failure);
         }
