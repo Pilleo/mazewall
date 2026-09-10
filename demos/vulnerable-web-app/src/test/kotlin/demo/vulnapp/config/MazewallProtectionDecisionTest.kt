@@ -4,8 +4,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.mock.env.MockEnvironment
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MazewallProtectionDecisionTest {
