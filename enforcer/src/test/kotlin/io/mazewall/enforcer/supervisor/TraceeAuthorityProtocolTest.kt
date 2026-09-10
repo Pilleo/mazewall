@@ -40,4 +40,101 @@ class TraceeAuthorityProtocolTest {
             TraceeAuthorityProtocol.readDecision(DataInputStream(ByteArrayInputStream(byteArrayOf(99))))
         }
     }
+
+    @Test
+    fun `all authority routes and bounded snapshots round trip without aliasing`() {
+        val routes = listOf(SupervisorRoute.Continue, SupervisorRoute.AskJvm, SupervisorRoute.InjectFd, SupervisorRoute.SecureExec, SupervisorRoute.Abort(13, "denied"))
+        for (route in routes) {
+            val address = byteArrayOf(2, 0, 1, 127)
+            val snapshot = TraceeAuthoritySnapshot(17, "/tmp/λ", "/tmp/λ", route, address)
+            address[0] = 99
+            val output = ByteArrayOutputStream()
+            TraceeAuthorityProtocol.writeSnapshot(DataOutputStream(output), snapshot)
+            val received = TraceeAuthorityProtocol.readSnapshot(DataInputStream(ByteArrayInputStream(output.toByteArray())))
+            assertEquals(17, received.ppid)
+            assertEquals("/tmp/λ", received.path)
+            assertEquals("/tmp/λ", received.resolvedPath)
+            assertArrayEquals(byteArrayOf(2, 0, 1, 127), received.address)
+            received.address!![0] = 3
+            assertEquals(2.toByte(), received.address!![0])
+            if (route is SupervisorRoute.Abort) {
+                assertEquals(route.errno, (received.route as SupervisorRoute.Abort).errno)
+            } else {
+                assertEquals(route, received.route)
+            }
+            output.reset()
+            TraceeAuthorityProtocol.writeDecision(DataOutputStream(output), TraceeAuthorityDecision(route, null))
+            val decision = TraceeAuthorityProtocol.readDecision(DataInputStream(ByteArrayInputStream(output.toByteArray())))
+            assertNull(decision.path)
+            if (route is SupervisorRoute.Abort) {
+                assertEquals(route.errno, (decision.route as SupervisorRoute.Abort).errno)
+            } else {
+                assertEquals(route, decision.route)
+            }
+        }
+    }
+
+    @Test
+    fun `terminal effects transfer one descriptor only for descriptor carrying variants`() {
+        val fixture = SupervisorBoundaryFixture()
+        val descriptor = SupervisorOwnedFd(
+            io.mazewall.core.TestFileDescriptors
+            .replace<io.mazewall.core.FileDescriptorRole.Generic>(52921),
+                fixture.engine.fileSystem,
+        )
+        val exec = SecureExecRequest(io.mazewall.core.Tid(123), 12, 13, Arch.AMD64.execveat.toLong())
+        val effects = listOf(
+            SupervisorReplyEffect.Continue,
+            SupervisorReplyEffect.Error(13),
+            SupervisorReplyEffect.Value(7),
+            SupervisorReplyEffect.AddFdAndReply(descriptor, io.mazewall.core.NewFdFlags(524288)),
+            SupervisorReplyEffect.SecureExecAndReply(exec, SupervisorDescriptorResult.Opened(descriptor), 1234),
+            SupervisorReplyEffect.SecureExecAndReply(exec, SupervisorDescriptorResult.Denied(1), 0),
+            SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory),
+        )
+        descriptor.use {
+            for (effect in effects) {
+                val output = ByteArrayOutputStream()
+                var sent = 0
+                var received = 0
+                TraceeAuthorityProtocol.writeEffect(DataOutputStream(output), effect) { actual ->
+                    assertSame(descriptor, actual)
+                    sent++
+                }
+                val result = TraceeAuthorityProtocol.readEffect(DataInputStream(ByteArrayInputStream(output.toByteArray()))) {
+                    received++
+                    descriptor
+                }
+                assertEquals(effect, result)
+                assertEquals(
+                    if (effect is SupervisorReplyEffect.AddFdAndReply ||
+                    effect is SupervisorReplyEffect.SecureExecAndReply &&
+                    effect.target is SupervisorDescriptorResult.Opened
+                    ) {
+                        1
+                    } else {
+                        0
+                    },
+                        sent,
+                )
+                assertEquals(sent, received)
+            }
+        }
+        assertEquals(1, fixture.closed.count { it == 52921 })
+    }
+
+    @Test
+    fun `invalid effect headers never consume a descriptor`() {
+        val frames = listOf(byteArrayOf(99), byteArrayOf(3, 0, 0, 0, 1), byteArrayOf(1, 0, 0, 0, 0))
+        for (frame in frames) {
+            assertThrows(IOException::class.java) {
+            TraceeAuthorityProtocol.readEffect(DataInputStream(ByteArrayInputStream(frame))) { error("descriptor receipt must follow complete validation") }
+        }
+        }
+        for (path in listOf("a\u0000b", "a".repeat(4096))) {
+            assertThrows(IllegalArgumentException::class.java) {
+            TraceeAuthorityProtocol.writePath(DataOutputStream(ByteArrayOutputStream()), path)
+        }
+        }
+    }
 }
