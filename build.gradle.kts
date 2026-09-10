@@ -16,6 +16,13 @@ plugins {
     id("base")
 }
 
+val testHealthFragments = layout.buildDirectory.dir("reports/test-health/fragments")
+val testHealthAggregate = layout.buildDirectory.file("reports/test-health/test-tier-health.json")
+val prepareTestHealth by tasks.registering(Delete::class) {
+    description = "Clears test-health fragments so cached tasks cannot masquerade as fresh execution"
+    delete(testHealthFragments)
+}
+
 allprojects {
     group = "io.mazewall"
     version = "0.0.1-prealpha-SNAPSHOT"
@@ -79,6 +86,12 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
+        dependsOn(rootProject.tasks.named("prepareTestHealth"))
+        val healthModule = project.path.ifBlank { ":" }
+        systemProperty("io.mazewall.testHealth.fragmentDir", testHealthFragments.get().asFile.absolutePath)
+        systemProperty("io.mazewall.testHealth.module", healthModule)
+        systemProperty("io.mazewall.testHealth.task", name)
+        systemProperty("io.mazewall.testHealth.taskPath", path)
         // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
         systemProperty("junit.jupiter.execution.timeout.default", "2 m")
         systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
@@ -617,6 +630,34 @@ tasks.register("kernelCheck") {
     dependsOn(subprojects.filterNot { it.path.startsWith(":demos") }.map { "${it.path}:kernelCheck" })
 }
 
+val aggregateTestHealth by tasks.registering {
+    group = "verification"
+    description = "Deterministically aggregates fresh per-module/task/fork test-health evidence"
+    outputs.file(testHealthAggregate)
+    outputs.upToDateWhen { false }
+}
+
+gradle.projectsEvaluated {
+    val expectedTasks =
+        allprojects
+            .flatMap { candidate -> candidate.tasks.withType<Test>().map { test -> test.path } }
+            .sorted()
+    aggregateTestHealth.configure {
+        inputs.property("expectedTestTasks", expectedTasks)
+        doLast(
+            io.mazewall.build.TestHealthAggregateAction(
+                testHealthFragments.get().asFile,
+                testHealthAggregate.get().asFile,
+                expectedTasks,
+            ),
+        )
+    }
+}
+
+tasks.named("unitCheck") { finalizedBy(aggregateTestHealth) }
+tasks.named("kernelCheck") { finalizedBy(aggregateTestHealth) }
+tasks.named("check") { finalizedBy(aggregateTestHealth) }
+
 evaluationDependsOn(":profiler")
 
 val triageRuntimeClasspath by configurations.creating {
@@ -744,7 +785,9 @@ tasks.register("validateBacklogIndex") {
     group = "verification"
     description = "Ensures the backlog index has one authoritative summary line"
     val index = layout.projectDirectory.file("docs/internals/backlog/README.md").asFile
+    val issues = fileTree(layout.projectDirectory.dir("docs/internals/backlog")) { include("**/issue-*.md") }
     inputs.file(index)
+    inputs.files(issues)
     doLast(io.mazewall.build.ValidateBacklogIndexAction(index))
 }
 

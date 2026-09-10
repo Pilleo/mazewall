@@ -6,10 +6,16 @@ import org.junit.platform.launcher.LauncherSessionListener
 import org.junit.platform.launcher.TestExecutionListener
 import org.junit.platform.launcher.TestIdentifier
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class TestSuiteHealthListener : LauncherSessionListener {
+    private companion object {
+        val sessionSequence = AtomicInteger(0)
+    }
+
     private val classStats = ConcurrentHashMap<String, Stats>()
 
     class Stats {
@@ -95,7 +101,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
                 ),
             )
 
-            jsonLines.add("""    "$className": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed }""")
+            jsonLines.add("""    "${escape(className)}": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed }""")
         }
         println("--------------------------------")
         println(
@@ -110,11 +116,38 @@ class TestSuiteHealthListener : LauncherSessionListener {
         )
         println("================================\n")
 
-        val reportDir = File("build/reports")
-
+        val reportDir =
+            File(
+                System.getProperty(
+                    "io.mazewall.testHealth.fragmentDir",
+                    "build/reports/test-health/fragments",
+                ),
+            )
+        val module = System.getProperty("io.mazewall.testHealth.module", "unknown")
+        val task = System.getProperty("io.mazewall.testHealth.task", "unknown")
+        val taskPath = System.getProperty("io.mazewall.testHealth.taskPath", "unknown")
+        val fork = "${ProcessHandle.current().pid()}-${sessionSequence.incrementAndGet()}"
         reportDir.mkdirs()
-        val reportFile = File(reportDir, "test-tier-health.json")
-        reportFile.writeText("{\n" + jsonLines.joinToString(",\n") + "\n}\n")
+        val reportFile = File(reportDir, "${safe(module)}-${safe(task)}-$fork.json")
+        val payload =
+            """{
+              "module": "${escape(module)}",
+              "task": "${escape(task)}",
+              "taskPath": "${escape(taskPath)}",
+              "fork": "${escape(fork)}",
+              "totals": { "executed": $totalExecuted, "skipped": $totalSkipped, "aborted": $totalAborted, "failed": $totalFailed },
+              "classes": {
+            ${jsonLines.joinToString(",\n")}
+              }
+            }
+            """.trimIndent() + "\n"
+        val temporary = Files.createTempFile(reportDir.toPath(), reportFile.name, ".tmp")
+        Files.writeString(temporary, payload)
+        try {
+            Files.move(temporary, reportFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(temporary, reportFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
 
         val strictMode = System.getProperty("io.mazewall.strictTestTier") == "true"
         if (strictMode) {
@@ -125,4 +158,8 @@ class TestSuiteHealthListener : LauncherSessionListener {
             }
         }
     }
+
+    private fun safe(value: String): String = value.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+
+    private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 }

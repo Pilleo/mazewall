@@ -1,6 +1,8 @@
 package io.mazewall
 
 import java.io.File
+import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * Standardized utility for running integration tests in an isolated JVM process.
@@ -12,6 +14,9 @@ import java.io.File
  * is not enabled (C1 mmap PROT_EXEC EPERM / exit 1).
  */
 object IsolatedProcessTester {
+    private const val DEFAULT_TIMEOUT_SECONDS = 120L
+    private const val REAP_TIMEOUT_SECONDS = 2L
+
     /**
      * Spawns a new JVM process to run the specified [testClassName]'s [main] method with [args].
      * Asserts that the process exits with code 0.
@@ -48,12 +53,65 @@ object IsolatedProcessTester {
             .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
-        val exitCode = process.waitFor()
+        val timeout = configuredTimeout()
+        val completed =
+            try {
+                process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)
+            } catch (interrupted: InterruptedException) {
+                terminateTree(process)
+                Thread.currentThread().interrupt()
+                throw IllegalStateException("Interrupted while waiting for isolated test process", interrupted)
+            }
+        if (!completed) {
+            terminateTree(process)
+            throw IllegalStateException(
+                "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
+                    "Command: ${command.joinToString(" ")}",
+            )
+        }
+        val exitCode = process.exitValue()
         if (exitCode != 0) {
             throw IllegalStateException(
                 "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}",
             )
         }
+    }
+
+    private fun configuredTimeout(): Duration {
+        val raw = System.getProperty("io.mazewall.isolatedTestTimeoutSeconds") ?: return Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS)
+        val seconds = raw.toLongOrNull()
+            ?: throw IllegalArgumentException("io.mazewall.isolatedTestTimeoutSeconds must be an integer")
+        require(seconds in 1..3600) { "io.mazewall.isolatedTestTimeoutSeconds must be between 1 and 3600" }
+        return Duration.ofSeconds(seconds)
+    }
+
+    private fun terminateTree(process: Process) {
+        val descendants = process.descendants().toList().asReversed()
+        descendants.forEach(ProcessHandle::destroy)
+        process.destroy()
+        if (!awaitExit(process, descendants)) {
+            descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
+            process.destroyForcibly()
+            awaitExit(process, descendants)
+        }
+    }
+
+    private fun awaitExit(
+        process: Process,
+        descendants: List<ProcessHandle>,
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REAP_TIMEOUT_SECONDS)
+        descendants.forEach { child ->
+            val remaining = deadline - System.nanoTime()
+            if (remaining > 0) {
+                runCatching { child.onExit().get(remaining, TimeUnit.NANOSECONDS) }
+            }
+        }
+        val remaining = deadline - System.nanoTime()
+        if (remaining > 0) {
+            runCatching { process.waitFor(remaining, TimeUnit.NANOSECONDS) }
+        }
+        return !process.isAlive && descendants.none(ProcessHandle::isAlive)
     }
 
     /**

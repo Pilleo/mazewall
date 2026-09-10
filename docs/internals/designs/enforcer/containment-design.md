@@ -439,10 +439,10 @@ the limits of the checked segment accessor. Key layouts:
 
 ### `sock_filter` (8 bytes)
 ```
-offset 0: code  (short / JAVA_SHORT, 2 bytes)
-offset 2: jt    (byte  / JAVA_BYTE,  1 byte)
-offset 3: jf    (byte  / JAVA_BYTE,  1 byte)
-offset 4: k     (int   / JAVA_INT,   4 bytes)   ← MUST be JAVA_INT, not JAVA_LONG
+offset 0: code  (unsigned short / JAVA_SHORT, 2 bytes)
+offset 2: jt    (unsigned byte  / JAVA_BYTE,  1 byte)
+offset 3: jf    (unsigned byte  / JAVA_BYTE,  1 byte)
+offset 4: k     (unsigned int   / JAVA_INT,   4 bytes)   ← MUST be JAVA_INT, not JAVA_LONG
 ```
 
 ### `sock_fprog` (16 bytes on x86_64)

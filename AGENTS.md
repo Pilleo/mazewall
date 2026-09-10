@@ -8,7 +8,7 @@ mazewall is a Linux JVM sandboxing library built on Seccomp-BPF, Landlock, and t
 - Never block JVM coordination syscalls. The complete list and argument constraints are in [enforcer/AGENTS.md](enforcer/AGENTS.md).
 - Never install seccomp from a virtual thread; it permanently contaminates its carrier. See [enforcer/AGENTS.md](enforcer/AGENTS.md).
 - Never combine `SECCOMP_FILTER_FLAG_TSYNC` with `SECCOMP_FILTER_FLAG_NEW_LISTENER`.
-- Never use `JAVA_LONG` for a 32-bit C `int` or `sock_filter` field.
+- Match every `sock_filter` member to the Linux UAPI: `code` is 16-bit, `jt`/`jf` are 8-bit, and `k` is 32-bit. Never widen `k` or a C `int` to `JAVA_LONG`.
 - Never modify, filter, or handle `GITHUB_TOKEN`; credential management is the operator's responsibility.
 - Do not make breaking API changes, add dependencies, or change the core BPF linear-scan design without explicit approval.
 - Thread-scoped containment is not a complete ACE boundary. Preserve the process-wide Tier 1 baseline and document exact limitations.

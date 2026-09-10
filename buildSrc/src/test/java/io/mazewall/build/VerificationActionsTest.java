@@ -1,6 +1,10 @@
 package io.mazewall.build;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import javax.tools.ToolProvider;
 
 /** Dependency-free executable checks for our warning inventory contract. */
 public final class VerificationActionsTest {
@@ -21,7 +25,122 @@ public final class VerificationActionsTest {
             malformedRejected = true;
         }
         equal(true, malformedRejected);
+        verifiesFreshJvmClassMetadata();
+        verifiesBacklogContracts();
+        verifiesTestHealthAggregation();
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
+    }
+
+    private static void verifiesFreshJvmClassMetadata() {
+        try {
+            Path root = Files.createTempDirectory("fresh-jvm-metadata-");
+            Path sources = Files.createDirectories(root.resolve("sources"));
+            Path classes = Files.createDirectories(root.resolve("classes"));
+            write(sources, "io/mazewall/NeedsFreshJvm.java", """
+                package io.mazewall;
+                import java.lang.annotation.*;
+                @Inherited @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.TYPE, ElementType.METHOD})
+                public @interface NeedsFreshJvm {}
+                """);
+            write(sources, "sample/Fixtures.java", """
+                package sample;
+                import io.mazewall.NeedsFreshJvm;
+                class MentionOnly { Class<?> marker = NeedsFreshJvm.class; }
+                @NeedsFreshJvm class ClassTagged {}
+                class MethodTagged { @NeedsFreshJvm void test() {} }
+                class InheritedTagged extends ClassTagged {}
+                class Outer { @NeedsFreshJvm static class NestedTagged {} }
+                """);
+            var compiler = ToolProvider.getSystemJavaCompiler();
+            int result = compiler.run(null, null, null, "-d", classes.toString(),
+                sources.resolve("io/mazewall/NeedsFreshJvm.java").toString(),
+                sources.resolve("sample/Fixtures.java").toString());
+            equal(0, result);
+            equal(List.of(
+                "sample.ClassTagged",
+                "sample.InheritedTagged",
+                "sample.MethodTagged",
+                "sample.Outer$NestedTagged"
+            ), FreshJvmClassSelector.select(List.of(classes.toFile())));
+        } catch (Exception failure) {
+            throw new AssertionError("Fresh-JVM metadata contract failed", failure);
+        }
+    }
+
+    private static void write(Path root, String relative, String value) throws Exception {
+        Path target = root.resolve(relative);
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, value, StandardCharsets.UTF_8);
+    }
+
+    private static void verifiesBacklogContracts() {
+        try {
+            Path backlog = Files.createTempDirectory("backlog-contract-");
+            write(backlog, "issue-open.md", issue("open", "open-id"));
+            write(backlog, "resolved/issue-done.md", issue("resolved", "done-id"));
+            Path index = backlog.resolve("README.md");
+            Files.writeString(index, """
+                # Index
+                *Total Active Issues:* 1 | *Total Resolved Issues:* 1
+                | Issue | Title | Priority | Component |
+                |---|---|---|---|
+                | [open](issue-open.md) | Open | high | testing |
+                """);
+            BacklogIndexValidator.validate(index);
+
+            Files.writeString(index, Files.readString(index).replace("issue-open.md", "missing.md"));
+            rejects(() -> BacklogIndexValidator.validate(index), "Broken backlog link");
+            Files.writeString(index, "*Total Active Issues:* 0 | *Total Resolved Issues:* 1\n");
+            rejects(() -> BacklogIndexValidator.validate(index), "membership mismatch");
+
+            Path duplicate = backlog.resolve("nested/issue-copy.md");
+            write(backlog, "nested/issue-copy.md", issue("open", "open-id"));
+            Files.writeString(index, "*Total Active Issues:* 2 | *Total Resolved Issues:* 1\n");
+            rejects(() -> BacklogIndexValidator.validate(index), "Duplicate backlog issue id");
+            Files.delete(duplicate);
+            Files.writeString(backlog.resolve("issue-open.md"), issue("resolved", "open-id"));
+            rejects(() -> BacklogIndexValidator.validate(index), "status/location mismatch");
+        } catch (Exception failure) {
+            throw new AssertionError("Backlog validator contract failed", failure);
+        }
+    }
+
+    private static String issue(String status, String id) {
+        return "---\nstatus: \"" + status + "\"\n---\n<!-- id: " + id + " file: ignored.md -->\n";
+    }
+
+    private static void verifiesTestHealthAggregation() {
+        try {
+            Path root = Files.createTempDirectory("test-health-contract-");
+            Path fragments = Files.createDirectories(root.resolve("fragments"));
+            Files.writeString(fragments.resolve("z.json"), "{\"module\":\":profiler\",\"task\":\"test\",\"taskPath\":\":profiler:test\",\"fork\":\"2\"}");
+            Files.writeString(fragments.resolve("a.json"), "{\"module\":\":platform\",\"task\":\"test\",\"taskPath\":\":platform:test\",\"fork\":\"1\"}");
+            Path output = root.resolve("aggregate.json");
+            TestHealthAggregateAction.aggregate(fragments.toFile(), output.toFile(),
+                List.of(":enforcer:test", ":platform:test", ":profiler:test"));
+            String first = Files.readString(output);
+            equal(true, first.indexOf("platform") < first.indexOf("profiler"));
+            equal(true, first.contains("\"cachedOrNotExecutedTasks\": [\":enforcer:test\"]"));
+            TestHealthAggregateAction.aggregate(fragments.toFile(), output.toFile(),
+                List.of(":enforcer:test", ":platform:test", ":profiler:test"));
+            equal(first, Files.readString(output));
+        } catch (Exception failure) {
+            throw new AssertionError("Test-health aggregation contract failed", failure);
+        }
+    }
+
+    private static void rejects(ThrowingRunnable action, String expected) throws Exception {
+        try {
+            action.run();
+            throw new AssertionError("Expected rejection containing " + expected);
+        } catch (IllegalArgumentException failure) {
+            if (!failure.getMessage().contains(expected)) throw failure;
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     private static void equal(Object expected, Object actual) {

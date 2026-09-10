@@ -77,7 +77,9 @@ class ProcessBrokerIntegrationTest {
             broker.close()
             closeReturned.countDown()
         }
-        Thread.sleep(100)
+        awaitCondition(java.time.Duration.ofSeconds(2), "close waiting for startup owner") {
+            closer.state in setOf(Thread.State.WAITING, Thread.State.TIMED_WAITING, Thread.State.BLOCKED)
+        }
         closer.interrupt()
         assertTrue(closeReturned.await(2, TimeUnit.SECONDS))
 
@@ -148,7 +150,9 @@ class ProcessBrokerIntegrationTest {
         assertTrue(secondLaunchEntered.await(10, TimeUnit.SECONDS))
 
         val closing = CompletableFuture.runAsync { broker.close() }
-        Thread.sleep(100)
+        awaitCondition(java.time.Duration.ofSeconds(2), "broker entered closing lifecycle") {
+            broker.lifecycleState() == ProcessBrokerLifecycle.Closing
+        }
         assertFalse(closing.isDone, "close must join the startup owner before publishing Closed")
         releaseSecondLaunch.countDown()
 
