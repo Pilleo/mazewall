@@ -1,0 +1,33 @@
+@startuml
+skinparam backgroundColor transparent
+skinparam shadowing false
+title Vulnerable web demo — startup and evidence lifecycle
+
+start
+:Spring prepares Environment;
+:Resolve mazewall.enabled once;
+if (Protection enabled?) then (yes)
+  :Install process-wide NO_EXEC baseline;
+  :Publish resolved-enabled=true;
+  :Create contained service executors;
+else (no)
+  :Publish resolved-enabled=false;
+  if (Profile mode?) then (yes)
+    :Create profiling service executors;
+  else (no)
+    :Create deliberately unprotected services;
+  endif
+endif
+:Accept service work;
+:Spring shutdown begins;
+:Stop admission;
+:Drain all accepted work to one deadline;
+if (Profile mode?) then (yes)
+  :Close profiler sessions;
+  :Freeze Bill of Behavior;
+  :Atomically replace stack trace artifact;
+  :Atomically replace SBoB;
+  :Atomically replace digest-backed integrity manifest;
+endif
+stop
+@enduml

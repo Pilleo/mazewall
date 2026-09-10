@@ -36,7 +36,7 @@ dependencies {
     implementation(platform("org.springframework.boot:spring-boot-dependencies:3.4.0"))
 
     implementation(project(":enforcer"))
-    testImplementation(project(":profiler"))
+    implementation(project(":profiler"))
 
     // Spring Boot Starters
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -58,6 +58,8 @@ dependencies {
     implementation("com.thoughtworks.xstream:xstream:1.4.17")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation(kotlin("test"))
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -121,7 +123,7 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
 
 
 jacoco {
-    toolVersion = "0.8.12"
+    toolVersion = "0.8.14"
 }
 
 tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {

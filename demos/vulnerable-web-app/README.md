@@ -2,6 +2,9 @@
 
 This subproject demonstrates `mazewall`'s kernel-level security guarantees by running automated attacks against a Spring Boot application that has inherited real-world vulnerabilities from its dependencies.
 
+The canonical [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg)
+shows the single protection decision and shutdown ordering.
+
 ## Vulnerability Matrix
 
 | Attack Vector | Vulnerability | CVE / Link | Impact | Mazewall Protection (Standard JVM) |
@@ -38,10 +41,13 @@ The easiest way to execute the entire real-world CVE exploitation demo is to run
 
 ```bash
 # Execute the complete automated exploitation and verification
-./gradlew :demos:vulnerable-web-app:test --tests VulnerableWebAppIntegrationTest
+./gradlew :demos:vulnerable-web-app:test --tests '*VulnerableWebAppFreshJvmTest'
 ```
 
-This task will build the application, start the Testcontainers environment, wait for both services to be healthy and active, run all 11 exploits against both instances, and assert the security boundaries programmatically.
+The test runs the benign control and the command-execution probe in separate JVMs, proves that
+the unprotected probe succeeds without overwriting a pre-existing fixture, proves that the
+protected probe is denied while benign work still succeeds, and requires a non-empty profiler
+observation. Tests create private temporary roots and remove only files they own.
 
 ---
 
@@ -55,9 +61,10 @@ If you prefer to perform each step manually:
 ```
 
 ### 2. Start the Environment
-This starts two instances of the same application:
+This starts three loopback-only instances of the same application:
 - **Unprotected** (`http://localhost:8082`): Standard JVM, no Mazewall filters.
 - **Protected** (`http://localhost:8081`): Scoped Mazewall filters applied to vulnerable threads.
+- **Profile** (`http://localhost:8083`): observation mode; writes the final SBoB on orderly shutdown.
 
 ```bash
 podman compose -f demos/vulnerable-web-app/compose.yml up -d
@@ -80,6 +87,23 @@ Ensure that Mazewall hasn't broken the legitimate features of the application:
 ```bash
 python3 exploits/health_check.py http://localhost:8081
 ```
+
+All compose host bindings use `127.0.0.1`; the deliberately vulnerable services are not exposed
+on every host interface.
+
+### Profiling lifecycle
+
+`MAZEWALL_ENABLED` is resolved once by Spring's prepared environment before the application
+context creates worker pools. The resolved value is then published as
+`mazewall.resolved-enabled`; both the process-wide baseline and protected/unprotected bean
+selection consume that one decision.
+
+Profiling is intentionally a separate instance from enforcement. On shutdown it first rejects
+new service work, then drains all accepted service tasks against one bounded deadline, and only
+then snapshots profiler evidence. The SBoB and stack-trace files are published with same-directory
+atomic replacement. `sbob.json.integrity.json` records `complete`, a reason, and a SHA-256 digest;
+a timeout or interruption is never presented as complete evidence. Configure the drain deadline
+with `-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
 
 ### 5. Generate Comparison Report
 Capture results into JSON and generate a Markdown summary:

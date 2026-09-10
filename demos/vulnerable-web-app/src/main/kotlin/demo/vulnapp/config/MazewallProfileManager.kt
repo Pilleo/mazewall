@@ -1,0 +1,82 @@
+package demo.vulnapp.config
+
+import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.Profiler
+import jakarta.annotation.PreDestroy
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.stereotype.Component
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.logging.Logger
+
+/** Stops admission and drains profiled work before publishing one immutable snapshot. */
+@Component
+@ConditionalOnProperty(name = ["mazewall.profile"], havingValue = "true")
+internal class MazewallProfileManager(private val executorOwner: ServiceExecutorOwner) {
+    private val logger = Logger.getLogger(MazewallProfileManager::class.java.name)
+    private val wrappers = CopyOnWriteArrayList<Profiler.ProfilerExecutorWrapper>()
+    private val published = AtomicBoolean()
+
+    fun register(wrapper: Profiler.ProfilerExecutorWrapper): OwnedServiceExecutor {
+        wrappers += wrapper
+        return executorOwner.own(wrapper)
+    }
+
+    fun generateSbob(): BillOfBehavior = wrappers.fold(BillOfBehavior()) { merged, wrapper ->
+        merged + wrapper.compileBillOfBehavior()
+    }
+
+    fun resolveSbobPath(configuredPath: String?): Path {
+        if (!configuredPath.isNullOrBlank() && configuredPath != "/app/sbob.json") return Paths.get(configuredPath)
+        var current = java.io.File(".").absoluteFile
+        while (current.parentFile != null) {
+            if (java.io.File(current, "settings.gradle.kts").exists()) {
+                return java.io.File(current, "demos/output/sbob.json").toPath().toAbsolutePath()
+            }
+            current = current.parentFile
+        }
+        val containerOutput = java.io.File("/app/output")
+        if (containerOutput.exists() && containerOutput.canWrite()) return containerOutput.toPath().resolve("sbob.json")
+        val containerApp = java.io.File("/app")
+        if (containerApp.exists() && containerApp.canWrite()) return containerApp.toPath().resolve("sbob.json")
+        return Paths.get("sbob.json").toAbsolutePath()
+    }
+
+    @Synchronized
+    internal fun publish(path: Path): ExecutorDrain {
+        check(!published.get()) { "profile evidence was already published" }
+        var drain = executorOwner.stopAdmissionAndDrain()
+        try {
+            Profiler.shutdown()
+        } catch (failure: Exception) {
+            drain = ExecutorDrain.Incomplete.ProfilerCleanup(failure.message ?: failure.javaClass.name)
+        }
+        val evidence = generateSbob()
+        ProfileArtifactPublisher.publishText(
+            path.resolveSibling(path.fileName.toString().replace(".json", "_stacktraces.json")),
+            evidence.toStackTracesJson(),
+        )
+        ProfileArtifactPublisher.publish(path, evidence, drain)
+        published.set(true)
+        return drain
+    }
+
+    @PreDestroy
+    fun onShutdown() {
+        if (wrappers.isEmpty() || published.get()) return
+        val path = resolveSbobPath(System.getProperty("mazewall.sbob.path"))
+        try {
+            val drain = publish(path)
+            if (drain is ExecutorDrain.Incomplete) {
+                logger.warning("Published incomplete profiling evidence: ${drain.reason}")
+            } else {
+                logger.info("Published profiling evidence to $path")
+            }
+        } catch (failure: Exception) {
+            logger.severe("Failed to publish profiling evidence to $path: ${failure.message}")
+            throw failure
+        }
+    }
+}

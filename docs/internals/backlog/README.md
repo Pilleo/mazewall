@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 549
+*Total Active Issues:* 75 | *Total Resolved Issues:* 550
+
+Task 12 resolved: [authoritative vulnerable-web lifecycle and profiling evidence](resolved/issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md).
 
 Task 8 resolved: [immutable profiler evidence](resolved/issue-20260910-000101-freeze-profiler-evidence-boundaries.md),
 [exact strace flag parsing](resolved/issue-20260910-000102-parse-exact-strace-open-flags.md),

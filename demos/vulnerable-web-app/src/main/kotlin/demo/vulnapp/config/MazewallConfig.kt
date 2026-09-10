@@ -12,21 +12,16 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.web.multipart.MultipartFile
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-
-import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.event.EventListener
 import java.util.logging.Logger
 import java.nio.file.Files
 import java.nio.file.Paths
 
 @Configuration
-@ConditionalOnProperty(name = ["mazewall.enabled"], havingValue = "true")
-class MazewallConfig {
+@ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "true")
+internal class MazewallConfig(private val executorOwner: ServiceExecutorOwner) {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
-    private val executors = java.util.concurrent.CopyOnWriteArrayList<ExecutorService>()
 
-    private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, Uncompiled>): ExecutorService {
-        executors.add(delegate)
+    private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, Uncompiled>): OwnedServiceExecutor {
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
         val finalPolicy = if (Files.exists(bobFile)) {
@@ -37,19 +32,7 @@ class MazewallConfig {
             basePolicy
         }
 
-        return ContainedExecutors.wrap(delegate, finalPolicy as Policy<*, Uncompiled>)
-    }
-
-    @jakarta.annotation.PreDestroy
-    fun onDestroy() {
-        logger.info("Spring context shutting down. Terminating Mazewall protected executors...")
-        for (executor in executors) {
-            try {
-                executor.shutdown()
-            } catch (e: Exception) {
-                // Suppress shutdown exception to avoid interrupting other PreDestroy hooks
-            }
-        }
+        return executorOwner.own(ContainedExecutors.wrap(delegate, finalPolicy))
     }
 
     @Bean
@@ -59,7 +42,7 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : AdminService {
             override fun logMessage(apiVersion: String) =
-                executor.submit<String> { realService.logMessage(apiVersion) }.get()
+                executor.call { realService.logMessage(apiVersion) }
         }
     }
 
@@ -70,7 +53,7 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : ProxyService {
             override fun fetchUrl(url: String) =
-                executor.submit<String> { realService.fetchUrl(url) }.get()
+                executor.call { realService.fetchUrl(url) }
         }
     }
 
@@ -86,10 +69,10 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : XmlImportService {
             override fun importXStream(xmlContent: String) =
-                executor.submit<String> { realService.importXStream(xmlContent) }.get()
+                executor.call { realService.importXStream(xmlContent) }
 
             override fun importXXE(xmlContent: String) =
-                executor.submit<String> { realService.importXXE(xmlContent) }.get()
+                executor.call { realService.importXXE(xmlContent) }
         }
     }
 
@@ -105,7 +88,7 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : YamlImportService {
             override fun importYaml(yamlContent: String) =
-                executor.submit<String> { realService.importYaml(yamlContent) }.get()
+                executor.call { realService.importYaml(yamlContent) }
         }
     }
 
@@ -122,10 +105,10 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : FileService {
             override fun extractZip(file: MultipartFile) =
-                executor.submit<String> { realService.extractZip(file) }.get()
+                executor.call { realService.extractZip(file) }
 
             override fun runCommand(cmd: String) =
-                executor.submit<String> { realService.runCommand(cmd) }.get()
+                executor.call { realService.runCommand(cmd) }
         }
     }
 
@@ -141,10 +124,10 @@ class MazewallConfig {
         val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
         return object : DeserializationService {
             override fun importJackson(jsonContent: String) =
-                executor.submit<String> { realService.importJackson(jsonContent) }.get()
+                executor.call { realService.importJackson(jsonContent) }
 
             override fun importJava(bytes: ByteArray) =
-                executor.submit<String> { realService.importJava(bytes) }.get()
+                executor.call { realService.importJava(bytes) }
         }
     }
 }

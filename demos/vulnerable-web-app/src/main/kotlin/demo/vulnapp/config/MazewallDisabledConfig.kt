@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
 @Configuration
-@ConditionalOnProperty(name = ["mazewall.enabled"], havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "false", matchIfMissing = true)
 class MazewallDisabledConfig {
 
     @Bean
