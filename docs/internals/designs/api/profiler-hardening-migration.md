@@ -10,6 +10,12 @@ operand was decoded. `Incomplete(value, unknownSymbols)` preserves recognized/nu
 making every unknown token explicit; the compatibility `openFlags` projection is `null` for an
 incomplete decode so policy compilation remains fail-closed.
 
+`ProfileObservation.Syscall` equality and hashing include `openFlagsEvidence`. Observations with
+missing flag evidence, or with different sets of unknown symbols, are intentionally distinct. Strace
+octal path escapes are decoded as byte sequences using the declared filesystem charset. Truncated
+quoted values and undecodable byte sequences are exposed as failed path resolution evidence rather
+than accepted path prefixes.
+
 `TierEOptions` adds `maxPendingRecords` and `maxRetainedRecords`, both defaulting to 100,000. New
 records beyond either bound are discarded and included in session loss accounting, making
 `SessionIntegrity.guarantee` incomplete. `TierEProfilerSession.finish()` reads terminal definitions

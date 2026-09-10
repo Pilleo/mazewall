@@ -4,8 +4,12 @@ import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
 import io.mazewall.profiler.OpenFlagsEvidence
 import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.engine.PathResolution
+import io.mazewall.profiler.engine.PathResolutionFailure
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class StraceLogParserTest {
     @Test
@@ -39,6 +43,43 @@ class StraceLogParserTest {
             observation.openFlagsEvidence,
         )
         assertEquals(null, observation.openFlags)
+    }
+
+    @Test
+    fun `octal bytes use filesystem encoding and C control escapes`() {
+        val observation = StraceLogParser.parseLine(
+            """123 open("/tmp/caf\303\251\b", O_RDONLY) = 4""",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(listOf("/tmp/café\b"), observation.paths)
+    }
+
+    @Test
+    fun `truncated quoted pathname is incomplete instead of an accepted prefix`() {
+        val observation = StraceLogParser.parseLine(
+            """123 open("/prefix"..., O_RDONLY) = 4""",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(emptyList(), observation.paths)
+        val resolution = assertIs<PathResolution.Failed>(observation.pathResolution)
+        assertEquals(PathResolutionFailure.Reason.Truncated, resolution.failures.single().reason)
+    }
+
+    @Test
+    fun `undecodable pathname bytes are incomplete`() {
+        val observation = StraceLogParser.parseLine(
+            """123 open("/tmp/\377", O_RDONLY) = 4""",
+        ) as ProfileObservation.Syscall
+
+        assertEquals(emptyList(), observation.paths)
+        val resolution = assertIs<PathResolution.Failed>(observation.pathResolution)
+        assertEquals(PathResolutionFailure.Reason.Truncated, resolution.failures.single().reason)
+        assertTrue(
+            resolution.failures
+            .single()
+            .detail
+            .contains("undecodable"),
+        )
     }
 
     @Test

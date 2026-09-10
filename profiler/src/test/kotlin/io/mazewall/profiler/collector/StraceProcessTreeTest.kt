@@ -9,7 +9,8 @@ import kotlin.test.assertTrue
 class StraceProcessTreeTest {
     @Test
     fun `interruption terminates descendants and preserves interrupt status`() {
-        val process = ProcessBuilder("sh", "-c", "sleep 30 & wait").start()
+        val process = ProcessBuilder("sh", "-c", "sh -c 'trap \"\" TERM; while :; do :; done' & wait").start()
+        val child = awaitDescendant(process)
         val interrupted = AtomicBoolean()
         val waiter = Thread {
             try {
@@ -19,21 +20,33 @@ class StraceProcessTreeTest {
             }
         }
         waiter.start()
-        while (process
-            .toHandle()
-            .descendants()
-            .findAny()
-            .isEmpty
-        ) {
-                Thread.onSpinWait()
-            }
+        try {
+            waiter.interrupt()
+            waiter.join(5_000)
 
-        waiter.interrupt()
-        waiter.join(5_000)
+            assertFalse(waiter.isAlive)
+            assertTrue(interrupted.get())
+            assertFalse(process.isAlive)
+            assertFalse(child.isAlive, "captured TERM-resistant child must be killed after reparenting")
+        } finally {
+            child.destroyForcibly()
+            process.destroyForcibly()
+            waiter.interrupt()
+            waiter.join(5_000)
+        }
+    }
 
-        assertFalse(waiter.isAlive)
-        assertTrue(interrupted.get())
-        assertFalse(process.isAlive)
-        assertTrue(process.toHandle().descendants().noneMatch(ProcessHandle::isAlive))
+    private fun awaitDescendant(process: Process): ProcessHandle {
+        val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
+        while (System.nanoTime() < deadline) {
+            process
+                .toHandle()
+                .descendants()
+                .findFirst()
+                .orElse(null)
+                ?.let { return it }
+            Thread.onSpinWait()
+        }
+        error("child process did not start")
     }
 }

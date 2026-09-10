@@ -218,7 +218,9 @@ The private profiler daemon/JVM event frame is now version 1: big-endian TID, ve
 copy-style methods, destructuring components, structural equality, and Java getters, but are no longer
 Kotlin data classes. That deliberate source migration lets constructors own immutable argument and
 path snapshots instead of returning caller collections by identity. Typed factories preserve path
-resolution evidence across ordinary copies. `ProfilingCoverage` follows the same owned-value pattern:
+resolution evidence across ordinary copies. Syscall equality and hashing include `openFlagsEvidence`,
+so missing evidence and distinct incomplete decodes remain distinct observations even when their
+compatibility `openFlags` projections are both null. `ProfilingCoverage` follows the same owned-value pattern:
 warnings and typed failures are immutable, and `copy` retains both unless explicitly replaced. See
 the [profiler hardening migration](../api/profiler-hardening-migration.md).
 
@@ -231,8 +233,12 @@ accounting, and makes integrity incomplete. Architecture-aware translation is ow
 
 Descendant strace parsing tokenizes quoted and escaped operands and nested structures before choosing
 the exact open/openat/openat2 flags operand. Numeric bits are preserved and unknown symbols remain
-explicit incomplete evidence. The collector owns the complete spawned process tree: cancellation,
-timeout, or failure terminates descendants and parent, reaps within a bound, and preserves interruption.
+explicit incomplete evidence. Octal escapes are accumulated as bytes and decoded once with the JVM's
+declared filesystem charset; C control escapes are decoded explicitly. A strace-truncated quoted path
+or an undecodable byte sequence produces typed incomplete path evidence and never publishes the visible
+prefix as an authorized path. The collector captures descendant handles before signalling the parent;
+cancellation, timeout, or failure then terminates and independently waits for every survivor within a
+bound, including descendants reparented after the parent exits, and restores interruption afterward.
 
 To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
 

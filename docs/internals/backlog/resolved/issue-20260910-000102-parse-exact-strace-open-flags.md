@@ -20,6 +20,8 @@ symbolic flags to zero.
 
 **Resolution:** The parser now tokenizes top-level operands, decodes strace escapes, handles openat2's
 `flags=` member, preserves numeric bits, and makes unknown symbols explicit incomplete evidence.
+Octal path escapes are decoded together with the declared filesystem charset; truncated or
+undecodable quoted operands publish failed path evidence rather than an apparently valid prefix.
 
 ---
 <!-- id: issue-20260910-000102-parse-exact-strace-open-flags  file: issue-20260910-000102-parse-exact-strace-open-flags.md -->

@@ -8,7 +8,9 @@ import io.mazewall.profiler.compiler.StraceLogParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Descendant `strace -f` collector. Emits [ProfileObservation]s only.
@@ -119,26 +121,68 @@ internal object StraceProcessTree {
     }
 
     fun terminate(process: Process) {
-        var interrupted = Thread.interrupted()
+        val interruption = CleanupInterruption(Thread.interrupted())
         val descendants = process
             .toHandle()
             .descendants()
             .toList()
             .asReversed()
-        descendants.forEach(ProcessHandle::destroy)
-        process.destroy()
-        try {
-            if (!process.waitFor(reapTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
-                process.destroyForcibly()
-                process.waitFor(reapTimeout.toMillis(), TimeUnit.MILLISECONDS)
-            }
-        } catch (_: InterruptedException) {
-            interrupted = true
-            descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
-            process.destroyForcibly()
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt()
+        val handles = descendants + process.toHandle()
+
+        handles.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy)
+        awaitEach(handles, reapTimeout, interruption)
+
+        val survivors = handles.filter(ProcessHandle::isAlive)
+        survivors.forEach(ProcessHandle::destroyForcibly)
+        awaitEach(survivors, reapTimeout, interruption)
+        awaitProcess(process, reapTimeout, interruption)
+
+        if (interruption.seen) {
+            Thread.currentThread().interrupt()
         }
     }
+
+    private fun awaitEach(
+        handles: List<ProcessHandle>,
+        timeout: Duration,
+        interruption: CleanupInterruption,
+    ) {
+        val deadline = System.nanoTime() + timeout.toNanos()
+        handles.forEach { handle ->
+            while (handle.isAlive) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) return@forEach
+                try {
+                    handle.onExit().get(remaining, TimeUnit.NANOSECONDS)
+                } catch (_: InterruptedException) {
+                    interruption.seen = true
+                } catch (_: TimeoutException) {
+                    return@forEach
+                } catch (_: ExecutionException) {
+                    return@forEach
+                }
+            }
+        }
+    }
+
+    private fun awaitProcess(
+        process: Process,
+        timeout: Duration,
+        interruption: CleanupInterruption,
+    ) {
+        val deadline = System.nanoTime() + timeout.toNanos()
+        while (process.isAlive) {
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0) return
+            try {
+                if (!process.waitFor(remaining, TimeUnit.NANOSECONDS)) return
+            } catch (_: InterruptedException) {
+                interruption.seen = true
+            }
+        }
+    }
+
+    private class CleanupInterruption(
+        var seen: Boolean,
+    )
 }

@@ -116,7 +116,8 @@ public sealed interface ProfileObservation {
                 args == other.args &&
                 pathResolution == other.pathResolution &&
                 openFlags == other.openFlags &&
-                contextId == other.contextId
+                contextId == other.contextId &&
+                openFlagsEvidence == other.openFlagsEvidence
 
         override fun hashCode(): Int {
             var result = correlation.hashCode()
@@ -126,11 +127,12 @@ public sealed interface ProfileObservation {
             result = 31 * result + pathResolution.hashCode()
             result = 31 * result + (openFlags?.hashCode() ?: 0)
             result = 31 * result + (contextId?.hashCode() ?: 0)
+            result = 31 * result + (openFlagsEvidence?.hashCode() ?: 0)
             return result
         }
 
         override fun toString(): String =
-            "Syscall(correlation=$correlation, source=$source, name=$name, args=$args, paths=$paths, openFlags=$openFlags, contextId=$contextId, pathResolution=$pathResolution)"
+            "Syscall(correlation=$correlation, source=$source, name=$name, args=$args, paths=$paths, openFlags=$openFlags, contextId=$contextId, openFlagsEvidence=$openFlagsEvidence, pathResolution=$pathResolution)"
     }
 
     public class IoUring(

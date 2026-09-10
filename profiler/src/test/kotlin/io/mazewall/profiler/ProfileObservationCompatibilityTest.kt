@@ -19,6 +19,28 @@ import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
 class ProfileObservationCompatibilityTest {
+    @Test
+    fun `syscall identity distinguishes missing and incomplete flag evidence`() {
+        val correlation = ObservationCorrelation(7, Tid(8))
+        val missing = ProfileObservation.Syscall(correlation, ObservationSource.STRACE, "OPEN")
+        val future = ProfileObservation.Syscall(
+            correlation,
+            ObservationSource.STRACE,
+            "OPEN",
+            openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf("O_FUTURE")),
+        )
+        val other = ProfileObservation.Syscall(
+            correlation,
+            ObservationSource.STRACE,
+            "OPEN",
+            openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf("O_OTHER")),
+        )
+
+        assertNotEquals(missing, future)
+        assertNotEquals(future, other)
+        assertEquals(3, hashSetOf(missing, future, other).size)
+    }
+
     private val correlation = ObservationCorrelation(1, Tid(7), 42L)
     private val endpoint = NetworkEndpoint("127.0.0.1", 80)
 
