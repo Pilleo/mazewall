@@ -85,7 +85,9 @@ class AgentTools(
     }
 
     private fun authorizeExec(stack: List<StackTraceElement>): Boolean {
-        val isLegit = stack.any { it.className.contains("AgentTools") && it.methodName.contains("executeDataAnalysis") }
+        val isLegit = stack.any {
+            it.className == AgentTools::class.java.name && it.methodName == "executeAuthorizedAnalysis"
+        }
         if (!isLegit) {
             println("[MAZEWALL] [BLOCKED] Process spawn blocked! Execution stack did not originate from executeDataAnalysis!")
         } else {
@@ -136,13 +138,16 @@ class AgentTools(
 
     @Tool("Execute data analysis script")
     fun executeDataAnalysis(script: String): String {
-        return analysisExecutor.submit<String> {
-            println("[TOOL] Executing script: $script")
-            val process = ProcessBuilder("sh", "-c", script).start()
-            val result = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
-            result
-        }.get()
+        return analysisExecutor.submit<String> { executeAuthorizedAnalysis(script) }.get()
+    }
+
+    // A named non-inline method keeps authority independent of compiler-generated lambda names.
+    private fun executeAuthorizedAnalysis(script: String): String {
+        println("[TOOL] Executing script: $script")
+        val process = ProcessBuilder("sh", "-c", script).start()
+        val result = process.inputStream.bufferedReader().use { it.readText() }
+        check(process.waitFor() == 0) { "analysis process exited unsuccessfully" }
+        return result
     }
 
     fun shutdown() {

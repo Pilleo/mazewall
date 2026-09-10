@@ -26,12 +26,14 @@ class AgentScenarioFreshJvmTest {
 
     @Suppress("unused")
     fun legitimateBody() {
-        assertTrue(runAgentScenario("rce_legit", useMazewall = true).passed)
+        val result = runAgentScenario("rce_legit", useMazewall = true)
+        assertTrue(result.passed, result.render())
     }
 
     @Suppress("unused")
     fun legitimateFileBody() {
-        assertTrue(runAgentScenario("file_legit", useMazewall = true).passed)
+        val result = runAgentScenario("file_legit", useMazewall = true)
+        assertTrue(result.passed, result.render())
     }
 
     @Suppress("unused")

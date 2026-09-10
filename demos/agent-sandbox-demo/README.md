@@ -20,7 +20,7 @@ Each run declares whether the selected operation must be allowed or denied and e
     *   **Mitigation:** `mazewall` applies Landlock LSM rules to the file-handling thread, physically restricting its filesystem view to *only* the designated workspace directory. The kernel blocks the path traversal with `EACCES`.
 3.  **Arbitrary Command Execution / RCE (`--scenario rce_malicious` vs `--scenario rce_legit`)**
     *   **Goal:** The agent has a legitimate `executeDataAnalysis` tool that executes shell commands. However, prompt injection hijacks the `fetchWebpage` tool (or native code injection occurs) to spawn a malicious reverse shell.
-    *   **Mitigation:** `mazewall` uses **Stacktrace-Enforced Execution**. Spawning process commands is supervised and authorized *only* if the JVM calling stack trace originates from the legitimate `executeDataAnalysis` tool. Attempts to spawn processes from other contexts (like `fetchWebpage`) are denied by the kernel.
+    *   **Mitigation:** `mazewall` uses **Stacktrace-Enforced Execution**. Spawning process commands is supervised and authorized only when the JVM stack contains the exact `io.mazewall.demo.agent.AgentTools.executeAuthorizedAnalysis` frame, a named body called by the legitimate `executeDataAnalysis` tool. Class or method substrings do not confer authority. Attempts from other contexts (like `fetchWebpage`) are denied by the kernel.
 
 ---
 

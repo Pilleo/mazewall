@@ -112,6 +112,63 @@ class AgentDemoOutcomeTest {
     }
 
     @Test
+    fun `cleanup failure cannot replace fatal scenario error`() {
+        val fatal = AssertionError("fatal")
+        val cleanup = IOException("cleanup failed")
+        val thrown = assertFailsWith<AssertionError> {
+            runScenarioBoundary(action = { throw fatal }, cleanup = { throw cleanup })
+        }
+        assertEquals(fatal, thrown)
+        assertEquals(listOf(cleanup), thrown.suppressed.toList())
+    }
+
+    @Test
+    fun `reflective and executor wrappers cannot turn a fatal error into an outcome`() {
+        val fatal = OutOfMemoryError("fatal fixture")
+        val thrown = assertFailsWith<OutOfMemoryError> {
+            captureRecoverable<String> {
+                throw java.lang.reflect.InvocationTargetException(ExecutionException(fatal))
+            }
+        }
+        assertEquals(fatal, thrown)
+    }
+
+    @Test
+    fun `fatal cleanup escapes an ordinary failed scenario`() {
+        val ordinary = IOException("work failed")
+        val fatal = LinkageError("cleanup failed")
+        val thrown = assertFailsWith<LinkageError> {
+            runScenarioBoundary(action = { throw ordinary }, cleanup = { throw fatal })
+        }
+        assertEquals(fatal, thrown)
+        assertEquals(listOf(ordinary), thrown.suppressed.toList())
+    }
+
+    @Test
+    fun `lookalike class and method names do not authorize process execution`() {
+        AgentDemoFixture.create().use { fixture ->
+            val tools = AgentTools(false, fixture.workspace)
+            try {
+                val authorize = AgentTools::class.java.getDeclaredMethod("authorizeExec", List::class.java)
+                    .apply { isAccessible = true }
+                listOf(
+                    StackTraceElement("evil.AgentTools", "executeDataAnalysis", "evil.kt", 1),
+                    StackTraceElement("io.mazewall.demo.agent.AgentTools", "executeDataAnalysisEvil", "evil.kt", 1),
+                    StackTraceElement("evil.AgentTools", "executeAuthorizedAnalysis", "evil.kt", 1),
+                    StackTraceElement("io.mazewall.demo.agent.AgentTools", "executeAuthorizedAnalysisEvil", "evil.kt", 1),
+                ).forEach { frame ->
+                    assertFalse(authorize.invoke(tools, listOf(frame)) as Boolean, frame.toString())
+                }
+                assertTrue(authorize.invoke(tools, listOf(
+                    StackTraceElement("io.mazewall.demo.agent.AgentTools", "executeAuthorizedAnalysis", "Tools.kt", 1),
+                )) as Boolean)
+            } finally {
+                tools.shutdown()
+            }
+        }
+    }
+
+    @Test
     fun `protected demo includes a benign file workload`() {
         val result = runAgentScenario("file_legit", useMazewall = false)
 

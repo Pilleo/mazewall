@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 556
+*Total Active Issues:* 75 | *Total Resolved Issues:* 558
+
+Review-hardening Task 9 resolved: [verifiable CLI and agent controls](resolved/issue-20260910-212626-611-make-cli-and-agent-containment-claims-verifiable.md) and [cached supervisor ptrace authority](resolved/issue-20260910-210337-751-restore-ptrace-authority-when-reusing-a-cached-sup.md).
 
 Review-hardening Task 7 resolved: [explicit compiled worker artifacts and validated boundary metadata](resolved/issue-20260910-192121-101-compile-portal-dispatchers-in-an-explicit-worker-a.md).
 
@@ -24,7 +26,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20260910-210337-751-restore-ptrace-authority-when-reusing-a-cached-sup](issue-20260910-210337-751-restore-ptrace-authority-when-reusing-a-cached-sup.md) | Restore ptrace authority when reusing a cached supervisor daemon | high | enforcer |
 | [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |

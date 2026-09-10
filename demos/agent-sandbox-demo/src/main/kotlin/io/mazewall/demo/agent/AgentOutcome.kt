@@ -57,6 +57,7 @@ internal fun classifyToolOutcome(result: Result<String>): AgentOutcome =
     result.fold(
         onSuccess = { AgentOutcome.Completed(it) },
         onFailure = { failure ->
+            rethrowFatalOrRestoreInterruption(failure)
             val diagnostic = ContainmentViolationDetector.diagnose(failure)
             when (diagnostic?.evidence) {
                 io.mazewall.enforcer.api.ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL ->
@@ -73,20 +74,57 @@ internal inline fun <T> captureRecoverable(action: () -> T): Result<T> =
     try {
         Result.success(action())
     } catch (failure: Exception) {
+        rethrowFatalOrRestoreInterruption(failure)
         Result.failure(failure)
     }
+
+/** Executor/reflection transport wrappers do not change the failure's JVM semantics. */
+internal fun rethrowFatalOrRestoreInterruption(failure: Throwable) {
+    var current = failure
+    val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+    while (seen.add(current)) {
+        when (current) {
+            is Error -> throw current
+            is InterruptedException -> {
+                Thread.currentThread().interrupt()
+                return
+            }
+            is java.util.concurrent.ExecutionException,
+            is java.util.concurrent.CompletionException,
+            is java.lang.reflect.InvocationTargetException,
+            -> current = current.cause ?: return
+            else -> return
+        }
+    }
+}
 
 internal fun runScenarioBoundary(
     action: () -> AgentOutcome,
     cleanup: () -> Unit,
-): AgentOutcome =
-    try {
-        action()
+): AgentOutcome {
+    var primary: Throwable? = null
+    return try {
+        action().also { if (it is AgentOutcome.InfrastructureFailure) primary = it.cause }
     } catch (failure: Exception) {
+        primary = failure
         AgentOutcome.InfrastructureFailure(failure)
+    } catch (fatal: Error) {
+        primary = fatal
+        throw fatal
     } finally {
-        cleanup()
+        try {
+            cleanup()
+        } catch (failure: Throwable) {
+            val original = primary
+            if (original == null) throw failure
+            if (failure is Error && original !is Error) {
+                failure.addSuppressed(original)
+                throw failure
+            }
+            if (failure !== original) original.addSuppressed(failure)
+        }
     }
+}
 
 internal class AgentDemoFixture private constructor(
     val root: File,
