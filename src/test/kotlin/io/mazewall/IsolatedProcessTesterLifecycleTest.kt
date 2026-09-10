@@ -12,6 +12,32 @@ import kotlin.test.assertTrue
 
 class IsolatedProcessTesterLifecycleTest {
     @Test
+    fun `unconfirmed forced cleanup is an explicit failure`() {
+        val process = ProcessBuilder("/bin/true").start()
+        val lifecycle = RecordingLifecycle(waitResult = false, awaitResults = ArrayDeque(listOf(false, false)))
+
+        val failure = assertIs<IllegalStateException>(
+            runCatching {
+                IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofMillis(1), listOf("fixture"), lifecycle)
+            }.exceptionOrNull(),
+        )
+
+        assertTrue(failure.message!!.contains("could not confirm termination"), failure.message)
+        assertTrue(lifecycle.forced)
+        assertTrue(lifecycle.awaitResults.isEmpty(), "both graceful and forced cleanup waits must be checked")
+    }
+
+    @Test
+    fun `interrupt survives exceptional descendant enumeration`() {
+        assertInterruptedCleanupFailure(IllegalStateException("enumeration failed"), throwDuringDestroy = false)
+    }
+
+    @Test
+    fun `interrupt survives exceptional destroy`() {
+        assertInterruptedCleanupFailure(IllegalStateException("destroy failed"), throwDuringDestroy = true)
+    }
+
+    @Test
     fun `invalid timeout is rejected before the child starts`() {
         val root = Files.createTempDirectory("isolated-invalid-timeout-")
         withTimeoutProperty("invalid") {
@@ -87,6 +113,67 @@ class IsolatedProcessTesterLifecycleTest {
         } finally {
             if (previous == null) System.clearProperty(key) else System.setProperty(key, previous)
         }
+    }
+
+    private fun assertInterruptedCleanupFailure(
+        cleanupFailure: RuntimeException,
+        throwDuringDestroy: Boolean,
+    ) {
+        val process = ProcessBuilder("/bin/true").start()
+        val lifecycle =
+            RecordingLifecycle(
+                waitFailure = InterruptedException("wait interrupted"),
+                enumerationFailure = cleanupFailure.takeUnless { throwDuringDestroy },
+                destroyFailure = cleanupFailure.takeIf { throwDuringDestroy },
+            )
+        try {
+            val failure = assertIs<IllegalStateException>(
+                runCatching {
+                    IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofSeconds(1), listOf("fixture"), lifecycle)
+                }.exceptionOrNull(),
+            )
+            assertIs<InterruptedException>(failure.cause)
+            assertTrue(failure.suppressed.contentEquals(arrayOf(cleanupFailure)))
+            assertTrue(Thread.currentThread().isInterrupted, "cleanup exceptions must not prevent interrupt restoration")
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    private class RecordingLifecycle(
+        private val waitResult: Boolean = false,
+        private val waitFailure: InterruptedException? = null,
+        private val enumerationFailure: RuntimeException? = null,
+        private val destroyFailure: RuntimeException? = null,
+        val awaitResults: ArrayDeque<Boolean> = ArrayDeque(),
+    ) : IsolatedProcessTester.ProcessLifecycleOperations {
+        var forced = false
+
+        override fun waitFor(
+            process: Process,
+            timeout: Duration,
+        ): Boolean = waitFailure?.let { throw it } ?: waitResult
+
+        override fun descendants(process: Process): List<ProcessHandle> = enumerationFailure?.let { throw it } ?: emptyList()
+
+        override fun destroy(process: Process) {
+            destroyFailure?.let { throw it }
+        }
+
+        override fun destroy(handle: ProcessHandle) = Unit
+
+        override fun destroyForcibly(process: Process) {
+            forced = true
+        }
+
+        override fun destroyForcibly(handle: ProcessHandle) {
+            forced = true
+        }
+
+        override fun awaitExit(
+            process: Process,
+            descendants: List<ProcessHandle>,
+        ): Boolean = awaitResults.removeFirst()
     }
 
     private fun waitFor(path: java.nio.file.Path) {

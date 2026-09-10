@@ -17,6 +17,73 @@ object IsolatedProcessTester {
     private const val DEFAULT_TIMEOUT_SECONDS = 120L
     private const val REAP_TIMEOUT_SECONDS = 2L
 
+    /** Injectable process-tree boundary used by lifecycle contract tests. */
+    interface ProcessLifecycleOperations {
+        @Throws(InterruptedException::class)
+        fun waitFor(
+            process: Process,
+            timeout: Duration,
+        ): Boolean
+
+        fun descendants(process: Process): List<ProcessHandle>
+
+        fun destroy(process: Process)
+
+        fun destroy(handle: ProcessHandle)
+
+        fun destroyForcibly(process: Process)
+
+        fun destroyForcibly(handle: ProcessHandle)
+
+        fun awaitExit(
+            process: Process,
+            descendants: List<ProcessHandle>,
+        ): Boolean
+    }
+
+    private object JdkProcessLifecycle : ProcessLifecycleOperations {
+        override fun waitFor(
+            process: Process,
+            timeout: Duration,
+        ): Boolean = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)
+
+        override fun descendants(process: Process): List<ProcessHandle> = process.descendants().toList().asReversed()
+
+        override fun destroy(process: Process) {
+            process.destroy()
+        }
+
+        override fun destroy(handle: ProcessHandle) {
+            handle.destroy()
+        }
+
+        override fun destroyForcibly(process: Process) {
+            process.destroyForcibly()
+        }
+
+        override fun destroyForcibly(handle: ProcessHandle) {
+            handle.destroyForcibly()
+        }
+
+        override fun awaitExit(
+            process: Process,
+            descendants: List<ProcessHandle>,
+        ): Boolean {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REAP_TIMEOUT_SECONDS)
+            descendants.forEach { child ->
+                val remaining = deadline - System.nanoTime()
+                if (remaining > 0) {
+                    runCatching { child.onExit().get(remaining, TimeUnit.NANOSECONDS) }
+                }
+            }
+            val remaining = deadline - System.nanoTime()
+            if (remaining > 0) {
+                runCatching { process.waitFor(remaining, TimeUnit.NANOSECONDS) }
+            }
+            return !process.isAlive && descendants.none(ProcessHandle::isAlive)
+        }
+    }
+
     /**
      * Spawns a new JVM process to run the specified [testClassName]'s [main] method with [args].
      * Asserts that the process exits with code 0.
@@ -56,20 +123,45 @@ object IsolatedProcessTester {
             .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
-        val completed =
+        verifyLifecycleForTesting(process, timeout, command, JdkProcessLifecycle)
+    }
+
+    /** Executes the post-start lifecycle contract through an injectable process boundary. */
+    fun verifyLifecycleForTesting(
+        process: Process,
+        timeout: Duration,
+        command: List<String>,
+        lifecycle: ProcessLifecycleOperations,
+    ) {
+        val completed = try {
+            lifecycle.waitFor(process, timeout)
+        } catch (interrupted: InterruptedException) {
+            val failure = IllegalStateException("Interrupted while waiting for isolated test process", interrupted)
             try {
-                process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)
-            } catch (interrupted: InterruptedException) {
-                terminateTree(process)
+                terminateTree(process, lifecycle)
+            } catch (cleanupFailure: Throwable) {
+                failure.addSuppressed(cleanupFailure)
+            } finally {
                 Thread.currentThread().interrupt()
-                throw IllegalStateException("Interrupted while waiting for isolated test process", interrupted)
             }
+            throw failure
+        }
         if (!completed) {
-            terminateTree(process)
-            throw IllegalStateException(
+            val timeoutFailure = IllegalStateException(
                 "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
                     "Command: ${command.joinToString(" ")}",
             )
+            try {
+                terminateTree(process, lifecycle)
+            } catch (cleanupFailure: Throwable) {
+                val failure = IllegalStateException(
+                    "Isolated test process cleanup failed: ${cleanupFailure.message}",
+                    cleanupFailure,
+                )
+                failure.addSuppressed(timeoutFailure)
+                throw failure
+            }
+            throw timeoutFailure
         }
         val exitCode = process.exitValue()
         if (exitCode != 0) {
@@ -87,33 +179,20 @@ object IsolatedProcessTester {
         return Duration.ofSeconds(seconds)
     }
 
-    private fun terminateTree(process: Process) {
-        val descendants = process.descendants().toList().asReversed()
-        descendants.forEach(ProcessHandle::destroy)
-        process.destroy()
-        if (!awaitExit(process, descendants)) {
-            descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
-            process.destroyForcibly()
-            awaitExit(process, descendants)
-        }
-    }
-
-    private fun awaitExit(
+    private fun terminateTree(
         process: Process,
-        descendants: List<ProcessHandle>,
-    ): Boolean {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REAP_TIMEOUT_SECONDS)
-        descendants.forEach { child ->
-            val remaining = deadline - System.nanoTime()
-            if (remaining > 0) {
-                runCatching { child.onExit().get(remaining, TimeUnit.NANOSECONDS) }
-            }
+        lifecycle: ProcessLifecycleOperations,
+    ) {
+        val descendants = lifecycle.descendants(process)
+        descendants.forEach(lifecycle::destroy)
+        lifecycle.destroy(process)
+        if (lifecycle.awaitExit(process, descendants)) return
+
+        descendants.forEach(lifecycle::destroyForcibly)
+        lifecycle.destroyForcibly(process)
+        if (!lifecycle.awaitExit(process, descendants)) {
+            throw IllegalStateException("Process cleanup could not confirm termination after forced cleanup")
         }
-        val remaining = deadline - System.nanoTime()
-        if (remaining > 0) {
-            runCatching { process.waitFor(remaining, TimeUnit.NANOSECONDS) }
-        }
-        return !process.isAlive && descendants.none(ProcessHandle::isAlive)
     }
 
     /**
