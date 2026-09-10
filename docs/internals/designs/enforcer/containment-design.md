@@ -557,6 +557,10 @@ stage (prepared, filter applied, descriptor transferred, ready) when setup fails
 a late successful kernel installation cannot erase a previous failure or its
 irreversible application. The permanent supervisor lifetime rejects later task
 registrations after listener failure, including failure observed during startup.
+Applied-stage publication is complete only after its callback returns or throws.
+Timeout cleanup joins any in-flight publication and observes the same callback
+failure without invoking it twice. This callback must be short and nonblocking;
+its completion is required even after the handshake budget expires.
 
 Default installation IPC creates a private CLOEXEC socket with nonblocking connect,
 then restores its stream flags for the existing listener. SCM_RIGHTS sends use

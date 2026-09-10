@@ -3,7 +3,6 @@ package io.mazewall.ffi.networking
 import io.mazewall.core.Deadline
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal enum class SeccompInstallStage { Prepared, Applied, Transferred, Ready }
 
@@ -69,7 +68,9 @@ internal class SeccompInstallHandshake(
 ) {
     val installed = CountDownLatch(1)
     val proceed = CountDownLatch(1)
-    private val appliedPublished = AtomicBoolean(false)
+    private val publicationLock = Any()
+    private var appliedPublished = false
+    private var publicationFailure: Throwable? = null
     private val timeout = IllegalStateException("Seccomp installation handshake timed out")
     private var state: SeccompInstallState = SeccompInstallState.Pending(SeccompInstallStage.Prepared)
 
@@ -98,9 +99,27 @@ internal class SeccompInstallHandshake(
         }
     }
 
+    /**
+     * A claim is not completion: timeout cleanup must join an already-running publisher.
+     * Keep this lock separate so publication cannot prevent the deadline recording failure.
+     * The callback must be short and nonblocking; its completion is required even after timeout.
+     */
+    @Suppress("TooGenericExceptionCaught") // Every publisher observes the same callback result, including fatal errors.
     fun publishApplied() {
         val applied = synchronized(this) { state.stage >= SeccompInstallStage.Applied }
-        if (applied && appliedPublished.compareAndSet(false, true)) onFilterApplied()
+        if (!applied) return
+        synchronized(publicationLock) {
+            if (!appliedPublished) {
+                try {
+                    onFilterApplied()
+                } catch (failure: Throwable) {
+                    publicationFailure = failure
+                } finally {
+                    appliedPublished = true
+                }
+            }
+            publicationFailure?.let { throw it }
+        }
     }
 
     fun remainingMillis(): Int {
