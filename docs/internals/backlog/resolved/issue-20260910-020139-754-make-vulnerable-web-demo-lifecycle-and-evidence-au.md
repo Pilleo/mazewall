@@ -30,13 +30,16 @@ Spring's prepared environment now resolves protection once before application wo
 same published property selects protected or unprotected beans. Profiling configuration ships in
 the application and uses a shared executor owner that stops admission and drains all accepted work
 against one deadline. Profiler sessions close before an immutable snapshot is atomically published,
-with a digest-backed integrity manifest that explicitly records timeout, interruption, or cleanup
-failure. Compose separates protected, unprotected, and profiling modes and binds all host ports to
-loopback. Fresh-JVM tests prove unprotected command execution, protected denial with a benign
-control, non-empty profiling evidence, owned fixtures, atomic output, and incomplete drain states.
+with a coherent immutable generation containing SBoB, stack dictionary, and digest-backed
+integrity state. One atomic pointer publishes only complete generations, while combined failure
+outcomes retain timeout/interruption and cleanup failures together. Compose separates protected,
+unprotected, and profiling modes; both the packaged application default and compose bind to
+loopback. Fresh-JVM tests start the real Spring server and exercise bootstrap, conditional beans,
+HTTP command/benign boundaries, shutdown publication, owned fixtures, and non-empty evidence.
 
-Evidence: `:demos:vulnerable-web-app:test` passed all 13 tests, including three isolated-JVM
-scenarios, on JDK 25; the canonical lifecycle PlantUML/SVG was regenerated.
+Evidence: focused and full `:demos:vulnerable-web-app:test` verification, including three
+isolated-JVM Spring application scenarios, is recorded in the Task 12 implementation report; the
+canonical lifecycle PlantUML/SVG was regenerated from authoritative code order.
 
 ---
 <!-- id: issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au  file: issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md -->

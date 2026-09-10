@@ -28,6 +28,23 @@ internal sealed interface ExecutorDrain {
         data class ProfilerCleanup(val message: String) : Incomplete {
             override val reason: String = "profiler cleanup failed: $message"
         }
+
+        data class Multiple(val failures: List<Incomplete>) : Incomplete {
+            init {
+                require(failures.size >= 2) { "multiple failures requires at least two causes" }
+            }
+
+            override val reason: String = failures.joinToString(separator = "; ", transform = Incomplete::reason)
+        }
+    }
+
+    companion object {
+        fun combine(first: ExecutorDrain, second: Incomplete): Incomplete =
+            when (first) {
+                Complete -> second
+                is Incomplete.Multiple -> Incomplete.Multiple(first.failures + second)
+                is Incomplete -> Incomplete.Multiple(listOf(first, second))
+            }
     }
 }
 

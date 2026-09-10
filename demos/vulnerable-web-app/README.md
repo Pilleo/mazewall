@@ -19,7 +19,7 @@ shows the single protection decision and shutdown ordering.
 | **SQLi**      | JdbcTemplate | [SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection) | Database Compromise | *Out of Scope (Data-plane)* |
 
 ### ⚠️ The "Thread-Hopping" Exfiltration Caveat
-Notice the distinction in the matrix above. For **Untrusted Data** attacks (SSRF, XXE, Log4Shell's initial JNDI lookup), Mazewall intercepts the synchronous system calls on the worker thread, providing absolute protection.
+Notice the distinction in the matrix above. For **Untrusted Data** attacks (SSRF, XXE, Log4Shell's initial JNDI lookup), Mazewall can intercept the relevant synchronous system calls when they execute on the scoped worker thread.
 
 However, for attacks that grant **Arbitrary Code Execution (Java logic)** such as SnakeYAML or Thymeleaf SSTI, the attacker can use standard Java concurrency APIs like `CompletableFuture.runAsync(...)` to execute their payload on the global `ForkJoinPool`. 
 
@@ -44,10 +44,12 @@ The easiest way to execute the entire real-world CVE exploitation demo is to run
 ./gradlew :demos:vulnerable-web-app:test --tests '*VulnerableWebAppFreshJvmTest'
 ```
 
-The test runs the benign control and the command-execution probe in separate JVMs, proves that
-the unprotected probe succeeds without overwriting a pre-existing fixture, proves that the
-protected probe is denied while benign work still succeeds, and requires a non-empty profiler
-observation. Tests create private temporary roots and remove only files they own.
+The test starts the real Spring application in separate JVMs. It exercises the environment
+bootstrap, conditional service beans, embedded HTTP server, benign admin endpoint, vulnerable
+command endpoint, orderly context shutdown, and profile publication. It proves that the
+unprotected command succeeds without overwriting a pre-existing fixture, that the protected
+command is denied while benign HTTP work still succeeds, and that the profiling instance
+publishes non-empty evidence. Tests create private temporary roots and remove only files they own.
 
 ---
 
@@ -70,26 +72,21 @@ This starts three loopback-only instances of the same application:
 podman compose -f demos/vulnerable-web-app/compose.yml up -d
 ```
 
-### 3. Run Automated Exploits
-Run the python exploit suite to see Mazewall in action:
+### 3. Exercise the HTTP boundary
+
+The packaged app exposes a deliberately unsafe command route for the executable comparison. Use a
+disposable container instance; do not expose this application to an untrusted network.
 
 ```bash
-# Run exploits against the unprotected instance (Expected: All succeed)
-python3 exploits/run_all.py http://localhost:8082
+# Benign control through a protected service executor
+curl -fsS -H 'X-Api-Version: 1.0' http://127.0.0.1:8081/admin/log
 
-# Run exploits against the protected instance (Expected: All RCE/IO blocked)
-python3 exploits/run_all.py http://localhost:8081
+# The /command comparison is covered by the isolated integration test above.
+# It succeeds on :8082 and is expected to fail on :8081.
 ```
 
-### 4. Verify Functionality
-Ensure that Mazewall hasn't broken the legitimate features of the application:
-
-```bash
-python3 exploits/health_check.py http://localhost:8081
-```
-
-All compose host bindings use `127.0.0.1`; the deliberately vulnerable services are not exposed
-on every host interface.
+The application itself defaults `server.address` to `127.0.0.1`, and all compose host bindings
+also use `127.0.0.1`; the deliberately vulnerable services are not exposed on every host interface.
 
 ### Profiling lifecycle
 
@@ -100,44 +97,34 @@ selection consume that one decision.
 
 Profiling is intentionally a separate instance from enforcement. On shutdown it first rejects
 new service work, then drains all accepted service tasks against one bounded deadline, and only
-then snapshots profiler evidence. The SBoB and stack-trace files are published with same-directory
-atomic replacement. `sbob.json.integrity.json` records `complete`, a reason, and a SHA-256 digest;
-a timeout or interruption is never presented as complete evidence. Configure the drain deadline
-with `-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
-
-### 5. Generate Comparison Report
-Capture results into JSON and generate a Markdown summary:
-
-```bash
-python3 exploits/run_all.py http://localhost:8082 > unprotected.json
-python3 exploits/run_all.py http://localhost:8081 > protected.json
-python3 exploits/verify_results.py unprotected.json protected.json demos/vulnerable-web-app/report.md
-```
+then snapshots profiler evidence. Each publication writes the SBoB, stack dictionary, and
+digest-backed integrity record into one immutable generation directory. Only after all three
+components exist does one atomic replacement make `sbob.json` point to that generation. Readers
+resolve and validate that pointer, so an interrupted publication cannot combine components from
+different generations or advertise an incomplete generation as current. The integrity record
+contains `complete`, every drain/cleanup failure reason, and SHA-256 digests for both evidence
+components; timeout and interruption are never overwritten by a later cleanup failure. Legacy
+direct SBoB files remain readable by enforcement. Configure the drain deadline with
+`-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
 
 ## How It Works
 
 The demo uses **Scoped Bean Protection**. Instead of locking down the entire Spring Boot process (which would break the embedded Tomcat), we wrap specific `ExecutorService` beans that handle untrusted parsing:
 
 ```kotlin
-@Bean
-fun importExecutor(): ExecutorService =
+val executor = executorOwner.own(
     ContainedExecutors.wrap(
         Executors.newFixedThreadPool(4),
-        Policy.builder()
-            .base(Policy.NO_NETWORK)
-            .allowMmapExec()
-            .allowFsRead("/app/data") // Landlock restriction
-            .allowJvmClasspath()
-            .build()
-    )
+        servicePolicy,
+    ),
+)
 ```
 
 In the controllers, we simply submit the vulnerable task to the protected executor:
 
 ```kotlin
-@PostMapping("/import/yaml")
-fun importYaml(@RequestBody body: String): String {
-    return yamlImportService.import(body) // This runs inside the sandbox
+override fun importYaml(body: String) = executor.call {
+    realService.importYaml(body)
 }
 ```
 

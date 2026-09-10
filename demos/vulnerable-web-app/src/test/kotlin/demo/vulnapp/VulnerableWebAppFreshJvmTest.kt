@@ -1,18 +1,22 @@
 package demo.vulnapp
 
-import demo.vulnapp.config.ServiceExecutorOwner
+import demo.vulnapp.config.MazewallProtectionBootstrap
+import demo.vulnapp.config.ProfileArtifactPublisher
 import demo.vulnapp.service.DefaultFileService
+import demo.vulnapp.service.FileService
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
-import io.mazewall.Policy
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import io.mazewall.profiler.Profiler
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
-import java.time.Duration
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import java.net.URI
+import java.net.URLEncoder
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
+import org.springframework.boot.SpringApplication
+import org.springframework.boot.web.context.WebServerApplicationContext
+import org.springframework.context.ConfigurableApplicationContext
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -43,8 +47,14 @@ class VulnerableWebAppFreshJvmTest {
         Files.writeString(marker, "preserve")
         val created = root.resolve("created")
         try {
-            DefaultFileService().runCommand("printf exploited > '${created}'")
-            assertEquals("exploited", Files.readString(created))
+            startApplication(enabled = false).use { application ->
+                assertTrue(application.getBean(FileService::class.java) is DefaultFileService)
+                assertEquals("false", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
+                val response = postCommand(application, "printf exploited > '${created}'")
+                assertEquals(200, response.statusCode())
+                assertEquals("exploited", Files.readString(created))
+                assertEquals("preserve", Files.readString(marker))
+            }
             assertEquals("preserve", Files.readString(marker))
         } finally {
             Files.deleteIfExists(created)
@@ -55,47 +65,90 @@ class VulnerableWebAppFreshJvmTest {
 
     @Suppress("unused")
     fun protectedBody() {
-        val owner = ServiceExecutorOwner(Duration.ofSeconds(2))
-        val protected = owner.own(
-            ContainedExecutors.wrap(
-                Executors.newSingleThreadExecutor(),
-                Policy.threadLocalBuilder().base(Policy.NO_EXEC).allowMmapExec().build(),
-            ),
-        )
+        val root = Files.createTempDirectory("mazewall-web-protected-")
+        val marker = root.resolve("marker")
         try {
-            assertEquals("benign", protected.call { "benign" })
-            val failure = runCatching { protected.call { DefaultFileService().runCommand("true") } }.exceptionOrNull()
-            assertTrue(failure is ExecutionException)
-            assertTrue(ContainmentViolationDetector.findViolationCause(failure) != null)
+            startApplication(enabled = true).use { application ->
+                assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
+                assertEquals("true", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
+                val benign = getAdmin(application, "1.0")
+                assertEquals(200, benign.statusCode())
+                assertTrue(benign.body().contains("Log processed"))
+
+                val exploit = postCommand(application, "printf escaped > '${marker}'")
+                assertTrue(exploit.statusCode() >= 500)
+                assertFalse(Files.exists(marker), "protected HTTP command must not create its marker")
+            }
         } finally {
-            owner.stopAdmissionAndDrain()
+            Files.deleteIfExists(marker)
+            Files.deleteIfExists(root)
         }
     }
 
     @Suppress("unused")
     fun profileBody() {
         val root = Files.createTempDirectory("mazewall-web-profile-")
-        val input = root.resolve("input")
-        Files.writeString(input, "evidence")
-        val wrapper = Profiler.wrap(
-            Executors.newSingleThreadExecutor(),
-            Policy.threadLocalBuilder().base(Policy.PURE_COMPUTE_UNSAFE).allowMmapExec().build(),
-        )
+        val target = root.resolve("sbob.json")
+        val marker = root.resolve("profile-marker")
+        System.setProperty("mazewall.sbob.path", target.toString())
         try {
-            assertEquals("evidence", wrapper.submit<String> { Files.readString(input) }.get())
-            wrapper.shutdown()
-            assertTrue(wrapper.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS))
-            val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
-            while (wrapper.recentLogs.isEmpty() && System.nanoTime() < deadline) {
-                java.util.concurrent.locks.LockSupport.parkNanos(Duration.ofMillis(10).toNanos())
+            startApplication(enabled = false, profile = true, sbobPath = target).use { application ->
+                assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
+                assertEquals(200, postCommand(application, "printf profiled > '${marker}'").statusCode())
+                assertEquals("profiled", Files.readString(marker))
+                assertFalse(Files.exists(target), "current-generation pointer must be published only during shutdown")
             }
-            val evidence = wrapper.compileBillOfBehavior()
-            assertFalse(evidence.opens.isEmpty(), "profiling must produce filesystem evidence")
+
+            val generation = ProfileArtifactPublisher.readCurrent(target)
+            val evidence = io.mazewall.profiler.BillOfBehavior.fromFile(generation.evidence)
+            assertTrue(evidence.execs.isNotEmpty() || evidence.syscalls.isNotEmpty(), "shutdown must publish observed HTTP service evidence")
+            assertTrue(Files.readString(generation.stackDictionary).isNotBlank())
+            assertTrue(Files.readString(generation.integrity).contains("\"complete\":true"))
         } finally {
-            wrapper.shutdownNow()
-            Files.deleteIfExists(input)
-            Files.deleteIfExists(root)
-            Profiler.shutdown()
+            System.clearProperty("mazewall.sbob.path")
+            root.toFile().deleteRecursively()
         }
+    }
+
+    private fun startApplication(
+        enabled: Boolean,
+        profile: Boolean = false,
+        sbobPath: java.nio.file.Path? = null,
+    ): ConfigurableApplicationContext {
+        System.setProperty("org.springframework.boot.logging.LoggingSystem", "none")
+        val application = SpringApplication(VulnAppApplication::class.java)
+        application.addListeners(MazewallProtectionBootstrap())
+        val arguments = mutableListOf(
+            "--mazewall.enabled=$enabled",
+            "--mazewall.profile=$profile",
+            "--server.port=0",
+            "--spring.main.banner-mode=off",
+        )
+        sbobPath?.let { arguments += "--mazewall.sbob.path=$it" }
+        return application.run(*arguments.toTypedArray()).also {
+            assertEquals("127.0.0.1", it.environment.getProperty("server.address"))
+        }
+    }
+
+    private fun postCommand(application: ConfigurableApplicationContext, command: String): HttpResponse<String> {
+        val body = "cmd=" + URLEncoder.encode(command, StandardCharsets.UTF_8)
+        val request = HttpRequest.newBuilder(uri(application, "/command"))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build()
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+    }
+
+    private fun getAdmin(application: ConfigurableApplicationContext, version: String): HttpResponse<String> {
+        val request = HttpRequest.newBuilder(uri(application, "/admin/log"))
+            .header("X-Api-Version", version)
+            .GET()
+            .build()
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+    }
+
+    private fun uri(application: ConfigurableApplicationContext, path: String): URI {
+        val port = (application as WebServerApplicationContext).webServer.port
+        return URI("http://127.0.0.1:$port$path")
     }
 }

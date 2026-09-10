@@ -14,7 +14,13 @@ import java.util.logging.Logger
 /** Stops admission and drains profiled work before publishing one immutable snapshot. */
 @Component
 @ConditionalOnProperty(name = ["mazewall.profile"], havingValue = "true")
-internal class MazewallProfileManager(private val executorOwner: ServiceExecutorOwner) {
+internal class MazewallProfileManager private constructor(
+    private val executorOwner: ServiceExecutorOwner,
+    private val shutdownProfiler: () -> Unit,
+) {
+    @org.springframework.beans.factory.annotation.Autowired
+    constructor(executorOwner: ServiceExecutorOwner) : this(executorOwner, Profiler::shutdown)
+
     private val logger = Logger.getLogger(MazewallProfileManager::class.java.name)
     private val wrappers = CopyOnWriteArrayList<Profiler.ProfilerExecutorWrapper>()
     private val published = AtomicBoolean()
@@ -49,15 +55,14 @@ internal class MazewallProfileManager(private val executorOwner: ServiceExecutor
         check(!published.get()) { "profile evidence was already published" }
         var drain = executorOwner.stopAdmissionAndDrain()
         try {
-            Profiler.shutdown()
+            shutdownProfiler()
         } catch (failure: Exception) {
-            drain = ExecutorDrain.Incomplete.ProfilerCleanup(failure.message ?: failure.javaClass.name)
+            drain = ExecutorDrain.combine(
+                drain,
+                ExecutorDrain.Incomplete.ProfilerCleanup(failure.message ?: failure.javaClass.name),
+            )
         }
         val evidence = generateSbob()
-        ProfileArtifactPublisher.publishText(
-            path.resolveSibling(path.fileName.toString().replace(".json", "_stacktraces.json")),
-            evidence.toStackTracesJson(),
-        )
         ProfileArtifactPublisher.publish(path, evidence, drain)
         published.set(true)
         return drain
@@ -78,5 +83,12 @@ internal class MazewallProfileManager(private val executorOwner: ServiceExecutor
             logger.severe("Failed to publish profiling evidence to $path: ${failure.message}")
             throw failure
         }
+    }
+
+    companion object {
+        internal fun forTesting(
+            executorOwner: ServiceExecutorOwner,
+            shutdownProfiler: () -> Unit,
+        ): MazewallProfileManager = MazewallProfileManager(executorOwner, shutdownProfiler)
     }
 }

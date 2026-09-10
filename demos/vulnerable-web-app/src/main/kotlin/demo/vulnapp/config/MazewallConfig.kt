@@ -24,9 +24,10 @@ internal class MazewallConfig(private val executorOwner: ServiceExecutorOwner) {
     private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, Uncompiled>): OwnedServiceExecutor {
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
-        val finalPolicy = if (Files.exists(bobFile)) {
+        val evidenceFile = ProfileArtifactPublisher.resolveEvidencePath(bobFile)
+        val finalPolicy = if (Files.exists(evidenceFile)) {
             logger.info("Engaging SBoB ENFORCEMENT mode. Loading ruleset from: $sbobPath")
-            SbobParser.parseToPolicy(bobFile, basePolicy)
+            SbobParser.parseToPolicy(evidenceFile, basePolicy)
         } else {
             logger.warning("SBoB file not found at $sbobPath. Falling back to default static policy.")
             basePolicy
