@@ -74,6 +74,15 @@ public final class VerificationActionsTest {
                 class OverriddenInterfaceChild implements InheritedMethodInterface { @Override public void inheritedInterfaceTest() {} }
                 class InheritedTagged extends ClassTagged {}
                 class Outer { @Nested class NestedTagged { @Test @NeedsFreshJvm void nestedTest() {} } }
+                abstract class AbstractNestedBase {
+                    @Nested class InheritedInner { @Test @NeedsFreshJvm void inheritedNestedTest() {} }
+                }
+                class InheritedNestedFirst extends AbstractNestedBase {}
+                class InheritedNestedSecond extends AbstractNestedBase {}
+                abstract class UntaggedNestedBase {
+                    @Nested class UntaggedInner { @Test void inheritedNestedTest() {} }
+                }
+                @NeedsFreshJvm class TaggedNestedChild extends UntaggedNestedBase {}
                 abstract class TemplateBase {
                     @ParameterizedTest @NeedsFreshJvm void parameterized(String value) {}
                     @RepeatedTest @NeedsFreshJvm void repeated() {}
@@ -100,11 +109,14 @@ public final class VerificationActionsTest {
                 "sample.ClassTagged",
                 "sample.InheritedInterfaceChild",
                 "sample.InheritedMethodChild",
+                "sample.InheritedNestedFirst",
+                "sample.InheritedNestedSecond",
                 "sample.InheritedTagged",
                 "sample.MethodTagged",
                 "sample.Outer",
                 "sample.ParameterizedChild",
                 "sample.RepeatedChild",
+                "sample.TaggedNestedChild",
                 "sample.TemplateChild"
             ), FreshJvmClassSelector.select(List.of(classes.toFile())));
             Path empty = Files.createDirectories(root.resolve("empty"));

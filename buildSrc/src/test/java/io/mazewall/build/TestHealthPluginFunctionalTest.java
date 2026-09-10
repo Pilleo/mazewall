@@ -77,6 +77,17 @@ final class TestHealthPluginFunctionalTest {
                     }
                 }
                 """);
+            write(root, "src/test/java/fixture/InheritedNestedTest.java", """
+                package fixture;
+                import io.mazewall.NeedsFreshJvm;
+                import org.junit.jupiter.api.*;
+                abstract class AbstractNestedBase {
+                    @Nested class InheritedInner {
+                        @NeedsFreshJvm @Test void inheritedNested() {}
+                    }
+                }
+                public class InheritedNestedTest extends AbstractNestedBase {}
+                """);
             Path fragments = Files.createDirectories(root.resolve("build/reports/test-health/fragments"));
             Files.writeString(fragments.resolve("stale.json"), "{\"taskPath\":\":stale\"}");
 
@@ -106,6 +117,13 @@ final class TestHealthPluginFunctionalTest {
             equal(true, freshXml.contains("tests=\"5\""));
             String nestedXml = Files.readString(root.resolve("build/test-results/freshTest/TEST-fixture.FreshTest$Inner.xml"));
             equal(true, nestedXml.contains("tests=\"1\""));
+            // Use an explicit subclass filter: selecting the lexical abstract base
+            // cannot launch the inherited nested test in JUnit.
+            BuildResult inheritedNested = run(root, "freshTest", "--tests", "fixture.InheritedNestedTest");
+            equal(TaskOutcome.SUCCESS, inheritedNested.task(":freshTest").getOutcome());
+            String inheritedNestedXml = Files.readString(root.resolve(
+                "build/test-results/freshTest/TEST-fixture.AbstractNestedBase$InheritedInner.xml"));
+            equal(true, inheritedNestedXml.contains("tests=\"1\""));
             BuildResult unmatched = GradleRunner.create().withProjectDir(root.toFile())
                 .withPluginClasspath(pluginClasspath()).withArguments("freshTest", "--tests", "fixture.MissingTest")
                 .buildAndFail();

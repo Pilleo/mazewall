@@ -47,9 +47,10 @@ final class FreshJvmClassSelector {
         }
         Set<String> selected = new LinkedHashSet<>();
         classes.values().stream().sorted(Comparator.comparing(ClassMetadata::className))
-            .filter(metadata -> (metadata.access() & (ACC_ABSTRACT | ACC_INTERFACE)) == 0)
-            .filter(metadata -> hasFreshTest(metadata, classes))
-            .map(metadata -> discoveryClass(metadata, classes)).forEach(selected::add);
+            .filter(FreshJvmClassSelector::concrete)
+            .filter(metadata -> !metadata.nested())
+            .filter(metadata -> hasFreshTestTree(metadata, classes, false, new LinkedHashSet<>()))
+            .map(ClassMetadata::className).forEach(selected::add);
         if (selected.isEmpty()) {
             List<String> declarations = classes.values().stream()
                 .filter(metadata -> metadata.classAnnotated() || metadata.methods().stream().anyMatch(MethodMetadata::freshJvmAnnotated))
@@ -62,12 +63,40 @@ final class FreshJvmClassSelector {
         return selected.stream().sorted().toList();
     }
 
-    private static boolean hasFreshTest(ClassMetadata metadata, Map<String, ClassMetadata> classes) {
+    private static boolean concrete(ClassMetadata metadata) {
+        return (metadata.access() & (ACC_ABSTRACT | ACC_INTERFACE)) == 0;
+    }
+
+    /** Evaluate nested tests in the concrete discovery context, including inherited containers. */
+    private static boolean hasFreshTestTree(
+        ClassMetadata metadata,
+        Map<String, ClassMetadata> classes,
+        boolean enclosingTagged,
+        Set<String> visiting
+    ) {
+        if (!visiting.add(metadata.className())) return false;
+        boolean tagged = enclosingTagged || classTagged(metadata, classes, new LinkedHashSet<>());
+        if (hasFreshTest(metadata, classes, tagged)) return true;
+        // JUnit inherits @Nested members from abstract and concrete bases.
+        // Their enclosing instance is the current discovery class, so emitting
+        // the lexical base would skip subclass-only nested test executions.
+        Set<String> containers = new LinkedHashSet<>();
+        ClassMetadata container = metadata;
+        while (container != null && containers.add(container.className())) {
+            container = classes.get(container.superName());
+        }
+        return classes.values().stream()
+            .filter(ClassMetadata::nested)
+            .filter(FreshJvmClassSelector::concrete)
+            .filter(nested -> containers.contains(enclosingName(nested)))
+            .anyMatch(nested -> hasFreshTestTree(nested, classes, tagged, new LinkedHashSet<>(visiting)));
+    }
+
+    private static boolean hasFreshTest(ClassMetadata metadata, Map<String, ClassMetadata> classes, boolean tagged) {
         Map<String, MethodMetadata> methods = new java.util.LinkedHashMap<>();
         collectMethods(metadata, classes, new LinkedHashSet<>(), methods);
-        boolean classTagged = classTagged(metadata, classes, new LinkedHashSet<>());
         return methods.values().stream().anyMatch(method -> method.junitTestAnnotated()
-            && method.canOverride() && (classTagged || method.freshJvmAnnotated()));
+            && method.canOverride() && (tagged || method.freshJvmAnnotated()));
     }
 
     private static boolean classTagged(ClassMetadata metadata, Map<String, ClassMetadata> classes, Set<String> visiting) {
@@ -89,13 +118,6 @@ final class FreshJvmClassSelector {
             .forEach(method -> methods.putIfAbsent(method.signature(), method));
         collectMethods(classes.get(metadata.superName()), classes, visiting, methods);
         metadata.interfaces().forEach(name -> collectMethods(classes.get(name), classes, visiting, methods));
-    }
-
-    private static String discoveryClass(ClassMetadata metadata, Map<String, ClassMetadata> classes) {
-        if (!metadata.nested()) return metadata.className();
-        ClassMetadata enclosing = classes.get(enclosingName(metadata));
-        if (enclosing == null) throw new IllegalStateException("Missing enclosing class for fresh-JVM nested test " + metadata.className());
-        return discoveryClass(enclosing, classes);
     }
 
     private static String enclosingName(ClassMetadata metadata) {
