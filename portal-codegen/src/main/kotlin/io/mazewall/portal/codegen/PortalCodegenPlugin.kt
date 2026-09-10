@@ -223,12 +223,13 @@ public class PortalCodegenPlugin : Plugin<Project> {
                     .invoke(kotlinWorker) as SourceDirectorySet
                 workerSources.srcDir(generate.map { task -> task.dispatcherOutputDir })
                 worker.resources.srcDir(generate.map { task -> task.workerResourceDir })
-                project.tasks.register("portalWorkerJar", Jar::class.java) { task ->
+                val workerJar = project.tasks.register("portalWorkerJar", Jar::class.java) { task ->
                     task.group = "build"
                     task.description = "Package guest implementations, generated dispatchers and worker descriptors"
                     task.archiveClassifier.set("portal-worker")
                     task.from(worker.output)
                 }
+                project.tasks.named("assemble").configure { task -> task.dependsOn(workerJar) }
             }
         }
     }

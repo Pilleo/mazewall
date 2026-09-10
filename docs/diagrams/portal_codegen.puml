@@ -4,6 +4,7 @@ skinparam componentStyle rectangle
 component "Compiled service API" as api
 component "Validated immutable schema\nwire IDs + boundary readers" as schema
 component "Atomic output publisher" as publisher
+component "assemble / build\n(worker opt-in)" as build
 package "Host main source set / jar" {
   component "Generated host stub" as stub
 }
@@ -19,6 +20,7 @@ schema --> publisher
 publisher --> stub
 publisher --> dispatcher
 publisher --> descriptor
+build --> dispatcher : compile and package worker artifact
 dispatcher --> guest
 descriptor --> loader
 loader --> dispatcher : validate before guest construction

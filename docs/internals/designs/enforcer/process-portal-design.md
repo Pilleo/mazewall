@@ -193,6 +193,9 @@ Host builds emit stubs only by default. Applications opt into a dedicated guest 
 `portalCodegen { workerSourceSet.set("portalWorker") }` and place guest implementations under
 `src/portalWorker/kotlin`. The plugin compiles dispatchers in that source set and exposes
 `portalWorkerJar`, containing guest classes and `META-INF/mazewall/portal/<service>` descriptors.
+For opted-in projects, `assemble` (and therefore `build`) depends on this worker artifact, so
+ordinary verification compiles guest implementations and generated dispatchers. Host-only projects
+retain their ordinary lifecycle without a worker artifact task.
 Only this artifact belongs on the worker classpath; ordinary `jar` contains neither dispatchers
 nor descriptors. `main` and `test` are rejected as worker output source sets. The worker resolves
 one descriptor per configured service through its own defining classloader before constructing

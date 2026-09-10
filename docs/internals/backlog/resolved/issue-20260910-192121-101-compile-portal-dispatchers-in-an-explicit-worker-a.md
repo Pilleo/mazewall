@@ -23,6 +23,8 @@ Review hardening Task 7: generated dispatchers were emitted without a compiled w
 
 **Resolution:** Dedicated `workerSourceSet` and `portalWorkerJar` keep generated dispatchers and service descriptors out of the host artifact. Production workers require bounded validated descriptors through their defining loader. Kotlin records use property readers; computed/delegated constructor readers and non-inbound or nested ReadFd are rejected. All generated output trees participate in atomic publication and rollback.
 
+**Review follow-up:** Opted-in projects attach the worker artifact to `assemble`/`build`. A build-only fixture containing an invalid guest function must fail worker compilation; a valid ordinary build must package the worker jar, while host-only builds have no worker artifact task.
+
 **Evidence:** `PortalCodegenFunctionalTest` compiles and round-trips Java records, POJOs, Kotlin data classes and `@JvmRecord`, including inherited overrides and case-distinct names; checks host/worker jars, host-only generation, invalid main selection, stale outputs and rollback. `PortalStubGeneratorTest` verifies canonical wire IDs, capability diagnostics and invalid components. `PortalGeneratedDescriptorTest` verifies missing, valid and malformed metadata. `:portal-codegen:test :portal-worker:test :portal-codegen:detektMain :portal-worker:detektMain` passed; see the canonical process-portal design and `docs/diagrams/portal_codegen.puml`/`.svg`.
 
 ---

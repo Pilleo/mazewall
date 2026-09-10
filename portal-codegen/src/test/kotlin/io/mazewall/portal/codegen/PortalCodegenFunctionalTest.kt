@@ -29,9 +29,24 @@ class PortalCodegenFunctionalTest {
     fun `host only configuration publishes no worker code or descriptor`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(apiJar, listOf("fixture.A"), workerSourceSet = null)
-        runner("jar").build()
+        val result = runner("build").build()
+        assertEquals(null, result.task(":portalWorkerJar"))
         assertTrue(generatedContents().keys.all { it.name.endsWith("PortalStub.kt") })
         assertFalse(generatedContents().isEmpty())
+    }
+
+    @Test
+    fun `ordinary build compiles opted in worker sources`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A"))
+        projectDir.resolve("src/portalWorker/kotlin/fixture/Main.kt").writeText(
+            "package fixture\nfun brokenGuest(): String = workerCompilationMustRun()\n",
+        )
+
+        val result = runner("build").buildAndFail()
+
+        assertEquals(TaskOutcome.FAILED, result.task(":compilePortalWorkerKotlin")?.outcome)
+        assertTrue(result.output.contains("workerCompilationMustRun"), result.output)
     }
 
     @Test
@@ -56,9 +71,10 @@ class PortalCodegenFunctionalTest {
             compileGenerated = true,
         )
 
-        val result = runner("roundTrip", "jar", "portalWorkerJar").build()
+        val result = runner("build", "roundTrip").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":compileKotlin")?.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":portalWorkerJar")?.outcome)
         assertTrue(result.output.contains("ROUND_TRIP_OK"), result.output)
         val jars = Files.list(projectDir.resolve("build/libs")).use { it.toList() }
         val host = jars.single { !it.fileName.toString().contains("portal-worker") }
