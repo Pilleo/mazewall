@@ -28,3 +28,39 @@ interface Overloads {
 
     fun echo(n: Int): String
 }
+
+interface InheritedBase {
+    fun inherited(value: String): String
+
+    fun overridden(value: Int): Int
+}
+
+interface InheritedService : InheritedBase {
+    override fun overridden(value: Int): Int
+
+    fun payload(
+        payload: String,
+        reader: String,
+        result: String,
+        impl: String,
+        method: String,
+        granted: String,
+        broker: String,
+    ): String
+
+    fun ping(value: Int): Int
+
+    fun PING(value: String): String
+}
+
+interface ValidPojoService {
+    fun echo(value: ValidPojo): ValidPojo
+}
+
+interface UnreadablePojoService {
+    fun echo(value: UnreadablePojo): UnreadablePojo
+}
+
+interface WrongReaderPojoService {
+    fun echo(value: WrongReaderPojo): WrongReaderPojo
+}

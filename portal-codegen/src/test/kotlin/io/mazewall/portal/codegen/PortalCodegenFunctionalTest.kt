@@ -1,0 +1,230 @@
+package io.mazewall.portal.codegen
+
+import org.gradle.testkit.runner.GradleRunner
+import org.gradle.testkit.runner.TaskOutcome
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.jar.JarEntry
+import java.util.jar.JarOutputStream
+import javax.tools.ToolProvider
+import kotlin.io.path.createDirectories
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
+
+class PortalCodegenFunctionalTest {
+    @TempDir
+    lateinit var projectDir: Path
+
+    @Test
+    fun `generated sources compile and dispatcher round trips inherited hostile service`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A"), compileGenerated = true)
+
+        val result = runner("roundTrip").build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":compileKotlin")?.outcome)
+        assertTrue(result.output.contains("ROUND_TRIP_OK"), result.output)
+    }
+
+    @Test
+    fun `generation synchronizes A B to A to empty without stale outputs`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A", "fixture.B"))
+        runner("generatePortalStubs").build()
+        assertGeneratedServices(setOf("A", "B"))
+
+        writeFixture(apiJar, listOf("fixture.A"))
+        runner("generatePortalStubs", "--rerun-tasks").build()
+        assertGeneratedServices(setOf("A"))
+
+        writeFixture(apiJar, emptyList())
+        runner("generatePortalStubs", "--rerun-tasks").build()
+        assertGeneratedServices(emptySet())
+    }
+
+    @Test
+    fun `schema failure leaves both previously published trees unchanged`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A", "fixture.B"))
+        runner("generatePortalStubs").build()
+        val before = generatedContents()
+
+        writeFixture(apiJar, listOf("fixture.A", "fixture.Missing"))
+        runner("generatePortalStubs", "--rerun-tasks").buildAndFail()
+
+        assertEquals(before, generatedContents())
+    }
+
+    private fun writeFixture(
+        apiJar: Path,
+        services: List<String>,
+        compileGenerated: Boolean = false,
+    ) {
+        projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"portal-codegen-fixture\"\n")
+        val portalJar = Path.of(System.getProperty("portal.codegen.portalJar")).toAbsolutePath()
+        val platformJar = Path.of(System.getProperty("portal.codegen.platformJar")).toAbsolutePath()
+        val enforcerJar = Path.of(System.getProperty("portal.codegen.enforcerJar")).toAbsolutePath()
+        val quotedServices = services.joinToString(", ") { "\"$it\"" }
+        val extra =
+            if (compileGenerated) {
+                """
+                kotlin.sourceSets.getByName("main").kotlin.srcDir(layout.buildDirectory.dir("generated/portal-dispatchers"))
+                tasks.register<JavaExec>("roundTrip") {
+                    dependsOn("classes")
+                    classpath = sourceSets["main"].runtimeClasspath
+                    mainClass.set("fixture.MainKt")
+                }
+                """.trimIndent()
+            } else {
+                ""
+            }
+        projectDir.resolve("build.gradle.kts").writeText(
+            """
+            plugins {
+                kotlin("jvm") version "2.4.20-Beta1"
+                id("io.mazewall.portal.codegen")
+            }
+            repositories { mavenCentral() }
+            dependencies {
+                implementation(files("${apiJar.toAbsolutePath()}", "$portalJar", "$platformJar", "$enforcerJar"))
+            }
+            portalCodegen { interfaces.set(listOf($quotedServices)) }
+            $extra
+            """.trimIndent(),
+        )
+        val sourceDir = projectDir.resolve("src/main/kotlin/fixture").createDirectories()
+        sourceDir.resolve("Main.kt").writeText(
+            """
+            package fixture
+            import io.mazewall.portal.PortalCodec
+            import io.mazewall.portal.PortalMethod
+            private fun methodId(name: String, parameterTypes: String): Int =
+                (("fixture.A#" + name + "#" + parameterTypes).hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000
+            fun main() {
+                val implementation = object : A {
+                    override fun inherited(value: String): String = "inherited:" + value
+                    override fun overridden(value: Int): Int = value + 1
+                    override fun payload(payload: String, reader: String, result: String, impl: String, method: String, granted: String, broker: String) =
+                        payload + reader + result + impl + method + granted + broker
+                    override fun ping(value: Int): Int = value
+                    override fun PING(value: String): String = value
+                    override fun echoPojo(value: SamplePojo): SamplePojo = SamplePojo(value.getName() + "!", value.count() + 1)
+                }
+                val inherited = APortalDispatcher.handle(
+                    implementation,
+                    PortalMethod.Generated(methodId("inherited", "java.lang.String")),
+                    PortalCodec.encodeString("safe"),
+                    emptyList(),
+                )
+                check(PortalCodec.Reader(inherited).string() == "inherited:safe")
+                val pojoPayload = PortalCodec.concat(listOf(PortalCodec.encodeString("safe"), PortalCodec.encodeInt(4)))
+                val pojo = APortalDispatcher.handle(
+                    implementation,
+                    PortalMethod.Generated(methodId("echoPojo", "fixture.SamplePojo")),
+                    pojoPayload,
+                    emptyList(),
+                )
+                val reader = PortalCodec.Reader(pojo)
+                check(reader.string() == "safe!")
+                check(reader.int() == 5)
+                println("ROUND_TRIP_OK")
+            }
+            """.trimIndent(),
+        )
+    }
+
+    private fun compileApiJar(root: Path): Path {
+        val sources = root.resolve("api-src/fixture").createDirectories()
+        sources.resolve("A.java").writeText(
+            """
+            package fixture;
+            public interface A extends Base {
+                @Override int overridden(int value);
+                String payload(String payload, String reader, String result, String impl, String method, String granted, String broker);
+                int ping(int value);
+                String PING(String value);
+                SamplePojo echoPojo(SamplePojo value);
+            }
+            """.trimIndent(),
+        )
+        sources.resolve("B.java").writeText(
+            "package fixture; public interface B extends A {}",
+        )
+        sources.resolve("Base.java").writeText(
+            "package fixture; public interface Base { String inherited(String value); int overridden(int value); }",
+        )
+        sources.resolve("SamplePojo.java").writeText(
+            """
+            package fixture;
+            public final class SamplePojo {
+                private final String name;
+                private final int count;
+                public SamplePojo(String name, int count) { this.name = name; this.count = count; }
+                public String getName() { return name; }
+                public int count() { return count; }
+            }
+            """.trimIndent(),
+        )
+        val classes = root.resolve("api-classes").createDirectories()
+        val compiler = checkNotNull(ToolProvider.getSystemJavaCompiler())
+        val exit =
+            compiler.run(
+                null,
+                null,
+                null,
+                "-parameters",
+                "-d",
+                classes.toString(),
+                sources.resolve("A.java").toString(),
+                sources.resolve("B.java").toString(),
+                sources.resolve("Base.java").toString(),
+                sources.resolve("SamplePojo.java").toString(),
+            )
+        assertEquals(0, exit)
+        val jar = root.resolve("api.jar")
+        JarOutputStream(Files.newOutputStream(jar)).use { output ->
+            Files.walk(classes).use { paths ->
+                paths.filter(Files::isRegularFile).sorted().forEach { file ->
+                    val entry = classes.relativize(file).toString().replace('\\', '/')
+                    output.putNextEntry(JarEntry(entry))
+                    Files.copy(file, output)
+                    output.closeEntry()
+                }
+            }
+        }
+        return jar
+    }
+
+    private fun assertGeneratedServices(expected: Set<String>) {
+        val files = generatedContents().keys.map { it.name }.toSet()
+        val expectedFiles = expected.flatMap { listOf("${it}PortalStub.kt", "${it}PortalDispatcher.kt") }.toSet()
+        assertEquals(expectedFiles, files)
+        assertFalse(files.any { it.contains("Missing") })
+    }
+
+    private fun generatedContents(): Map<Path, String> {
+        val root = projectDir.resolve("build/generated")
+        if (!root.exists()) return emptyMap()
+        return Files.walk(root).use { paths ->
+            paths
+                .iterator()
+                .asSequence()
+                .filter(Files::isRegularFile)
+                .associateWith { it.readText() }
+        }
+    }
+
+    private fun runner(vararg arguments: String): GradleRunner =
+        GradleRunner
+            .create()
+            .withProjectDir(projectDir.toFile())
+            .withPluginClasspath()
+            .withArguments(*arrayOf("--stacktrace", *arguments))
+}

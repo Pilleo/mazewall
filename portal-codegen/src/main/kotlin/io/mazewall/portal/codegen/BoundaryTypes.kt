@@ -6,6 +6,30 @@ import java.lang.reflect.RecordComponent
 internal object BoundaryTypes {
     const val READ_FD: String = "io.mazewall.portal.Capability\$ReadFd"
 
+    private val scalarKinds: Map<Class<*>, Kind> =
+        mapOf(
+            Void.TYPE to Kind.UnitT,
+            Void::class.java to Kind.UnitT,
+            java.lang.Boolean.TYPE to Kind.BooleanT,
+            java.lang.Boolean::class.java to Kind.BooleanT,
+            java.lang.Byte.TYPE to Kind.ByteT,
+            java.lang.Byte::class.java to Kind.ByteT,
+            java.lang.Short.TYPE to Kind.ShortT,
+            java.lang.Short::class.java to Kind.ShortT,
+            java.lang.Integer.TYPE to Kind.IntT,
+            java.lang.Integer::class.java to Kind.IntT,
+            java.lang.Long.TYPE to Kind.LongT,
+            java.lang.Long::class.java to Kind.LongT,
+            java.lang.Float.TYPE to Kind.FloatT,
+            java.lang.Float::class.java to Kind.FloatT,
+            java.lang.Double.TYPE to Kind.DoubleT,
+            java.lang.Double::class.java to Kind.DoubleT,
+            Character.TYPE to Kind.CharT,
+            Character::class.java to Kind.CharT,
+            String::class.java to Kind.StringT,
+            ByteArray::class.java to Kind.BytesT,
+        )
+
     sealed interface Kind {
         data object BooleanT : Kind
 
@@ -34,44 +58,44 @@ internal object BoundaryTypes {
         data class RecordT(
             val fqcn: String,
             val components: List<Component>,
-        ) : Kind
+        ) : Kind {
+            init {
+                require(components.isNotEmpty()) { "structured boundary type must have components" }
+            }
+        }
 
         data class Component(
             val name: String,
             val kind: Kind,
+            val reader: Reader,
         )
+
+        sealed interface Reader {
+            val name: String
+
+            data class Field(
+                override val name: String,
+            ) : Reader
+
+            data class Method(
+                override val name: String,
+            ) : Reader
+        }
     }
 
     fun kindOf(
         type: Class<*>,
         stack: MutableSet<String> = mutableSetOf(),
     ): Kind {
-        if (type == Void.TYPE || type == Void::class.java) return Kind.UnitT
-        if (type == java.lang.Boolean.TYPE || type == java.lang.Boolean::class.java) return Kind.BooleanT
-        if (type == java.lang.Byte.TYPE || type == java.lang.Byte::class.java) return Kind.ByteT
-        if (type == java.lang.Short.TYPE || type == java.lang.Short::class.java) return Kind.ShortT
-        if (type == java.lang.Integer.TYPE || type == java.lang.Integer::class.java) return Kind.IntT
-        if (type == java.lang.Long.TYPE || type == java.lang.Long::class.java) return Kind.LongT
-        if (type == java.lang.Float.TYPE || type == java.lang.Float::class.java) return Kind.FloatT
-        if (type == java.lang.Double.TYPE || type == java.lang.Double::class.java) return Kind.DoubleT
-        if (type == Character.TYPE || type == Character::class.java) return Kind.CharT
-        if (type == String::class.java) return Kind.StringT
-        if (type == ByteArray::class.java) return Kind.BytesT
+        scalarKinds[type]?.let { return it }
         if (type.name == READ_FD) return Kind.ReadFd
-        if (type.isArray) {
-            throw IllegalArgumentException("portal boundary forbids array type ${type.name}; only byte[] is allowed")
+        require(!type.isArray) { "portal boundary forbids array type ${type.name}; only byte[] is allowed" }
+        require(!type.isInterface && !type.isEnum && !type.isPrimitive) { "portal boundary forbids type ${type.name}" }
+        require(!isJdkForbidden(type)) {
+            "portal boundary forbids type ${type.name}; allowed: primitives, String, byte[], records/POJOs of those, Capability.ReadFd"
         }
-        if (type.isInterface || type.isEnum || type.isPrimitive) {
-            throw IllegalArgumentException("portal boundary forbids type ${type.name}")
-        }
-        if (isJdkForbidden(type)) {
-            throw IllegalArgumentException(
-                "portal boundary forbids type ${type.name}; allowed: primitives, String, byte[], records/POJOs of those, Capability.ReadFd",
-            )
-        }
-        if (!stack.add(type.name)) {
-            throw IllegalArgumentException("portal boundary forbids recursive type ${type.name}")
-        }
+        require(Modifier.isPublic(type.modifiers)) { "portal boundary type ${type.name} must be public" }
+        require(stack.add(type.name)) { "portal boundary forbids recursive type ${type.name}" }
         return try {
             describeStructured(type, stack)
         } finally {
@@ -80,15 +104,15 @@ internal object BoundaryTypes {
     }
 
     private fun isJdkForbidden(type: Class<*>): Boolean {
-        val n = type.name
-        return n.startsWith("java.io.") ||
-            n.startsWith("java.nio.") ||
-            n.startsWith("java.net.") ||
-            n.startsWith("java.util.") ||
-            n.startsWith("javax.") ||
-            n.startsWith("kotlin.jvm.functions.") ||
-            n == "java.lang.Object" ||
-            n == "java.lang.Class"
+        val name = type.name
+        return name.startsWith("java.io.") ||
+            name.startsWith("java.nio.") ||
+            name.startsWith("java.net.") ||
+            name.startsWith("java.util.") ||
+            name.startsWith("javax.") ||
+            name.startsWith("kotlin.jvm.functions.") ||
+            name == "java.lang.Object" ||
+            name == "java.lang.Class"
     }
 
     private fun describeStructured(
@@ -97,33 +121,83 @@ internal object BoundaryTypes {
     ): Kind {
         if (type.isRecord) {
             val components =
-                type.recordComponents.map { rc: RecordComponent ->
-                    if (rc.name.isNullOrBlank()) {
-                        throw IllegalArgumentException("record ${type.name} has an unnamed component")
+                type.recordComponents.map { component: RecordComponent ->
+                    val name = component.name
+                    require(name.isNotBlank()) { "record ${type.name} has an unnamed component" }
+                    require(Modifier.isPublic(component.accessor.modifiers)) {
+                        "record ${type.name} component $name has no public readable accessor"
                     }
-                    Kind.Component(rc.name, kindOf(rc.type, stack))
+                    Kind.Component(name, kindOf(component.type, stack), Kind.Reader.Method(component.accessor.name))
                 }
-            if (components.isEmpty()) {
-                throw IllegalArgumentException("record ${type.name} has no components")
-            }
-            return Kind.RecordT(type.name, components)
+            require(components.isNotEmpty()) { "record ${type.name} has no components" }
+            return Kind.RecordT(type.name, java.util.List.copyOf(components))
         }
-        val ctors = type.constructors.filter { Modifier.isPublic(it.modifiers) && it.parameterCount > 0 }
-        val ctor =
-            ctors.singleOrNull()
+
+        val constructors = type.constructors.filter { Modifier.isPublic(it.modifiers) && it.parameterCount > 0 }
+        val constructor =
+            constructors.singleOrNull()
                 ?: throw IllegalArgumentException(
                     "portal boundary forbids type ${type.name}: need a java record or a single public all-args constructor",
                 )
         val components =
-            ctor.parameters.map { p ->
-                val name = p.name
-                if (name.matches(Regex("arg\\d+"))) {
-                    throw IllegalArgumentException(
-                        "portal POJO ${type.name} lost constructor parameter names; compile with -parameters or use a record",
-                    )
+            constructor.parameters.map { parameter ->
+                val name = parameter.name
+                require(!name.matches(Regex("arg\\d+"))) {
+                    "portal POJO ${type.name} lost constructor parameter names; compile with -parameters or use a record"
                 }
-                Kind.Component(name, kindOf(p.type, stack))
+                Kind.Component(name, kindOf(parameter.type, stack), readableAccessor(type, name, parameter.type))
             }
-        return Kind.RecordT(type.name, components)
+        return Kind.RecordT(type.name, java.util.List.copyOf(components))
     }
+
+    private fun readableAccessor(
+        type: Class<*>,
+        component: String,
+        expectedType: Class<*>,
+    ): Kind.Reader {
+        val suffix = component.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val candidateNames =
+            buildList {
+                add(component)
+                add("get$suffix")
+                if (expectedType == Boolean::class.javaPrimitiveType || expectedType == Boolean::class.java) add("is$suffix")
+            }
+        val methods =
+            type.methods.filter {
+                it.name in candidateNames && it.parameterCount == 0 && Modifier.isPublic(it.modifiers) && !Modifier.isStatic(it.modifiers)
+            }
+        val compatible = candidateNames.firstNotNullOfOrNull { name ->
+            methods.firstOrNull { it.name == name && sameBoundaryType(it.returnType, expectedType) }
+        }
+        if (compatible != null) return Kind.Reader.Method(compatible.name)
+
+        val fields = type.fields.filter { it.name == component && Modifier.isPublic(it.modifiers) && !Modifier.isStatic(it.modifiers) }
+        val field = fields.firstOrNull { sameBoundaryType(it.type, expectedType) }
+        if (field != null) return Kind.Reader.Field(field.name)
+
+        require(methods.isEmpty() && fields.isEmpty()) {
+            "portal POJO ${type.name} component $component needs a type-compatible reader for ${expectedType.typeName}"
+        }
+        throw IllegalArgumentException(
+            "portal POJO ${type.name} component $component needs a public readable accessor ($component(), get$suffix(), or public field)",
+        )
+    }
+
+    private fun sameBoundaryType(
+        actual: Class<*>,
+        expected: Class<*>,
+    ): Boolean = boxed(actual) == boxed(expected)
+
+    private fun boxed(type: Class<*>): Class<*> =
+        when (type) {
+            java.lang.Boolean.TYPE -> java.lang.Boolean::class.java
+            java.lang.Byte.TYPE -> java.lang.Byte::class.java
+            java.lang.Short.TYPE -> java.lang.Short::class.java
+            java.lang.Integer.TYPE -> java.lang.Integer::class.java
+            java.lang.Long.TYPE -> java.lang.Long::class.java
+            java.lang.Float.TYPE -> java.lang.Float::class.java
+            java.lang.Double.TYPE -> java.lang.Double::class.java
+            Character.TYPE -> Character::class.java
+            else -> type
+        }
 }

@@ -30,6 +30,38 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
     compilerOptions.javaParameters.set(true)
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.add("-parameters")
+}
+
 tasks.test {
     useJUnitPlatform()
+    dependsOn(":portal:jar", ":platform:jar", ":enforcer:jar")
+    systemProperty(
+        "portal.codegen.portalJar",
+        project(":portal")
+            .tasks
+            .named<Jar>("jar")
+            .flatMap { it.archiveFile }
+            .get()
+            .asFile,
+    )
+    systemProperty(
+        "portal.codegen.platformJar",
+        project(":platform")
+            .tasks
+            .named<Jar>("jar")
+            .flatMap { it.archiveFile }
+            .get()
+            .asFile,
+    )
+    systemProperty(
+        "portal.codegen.enforcerJar",
+        project(":enforcer")
+            .tasks
+            .named<Jar>("jar")
+            .flatMap { it.archiveFile }
+            .get()
+            .asFile,
+    )
 }

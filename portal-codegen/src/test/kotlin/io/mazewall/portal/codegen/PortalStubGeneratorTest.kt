@@ -1,10 +1,14 @@
 package io.mazewall.portal.codegen
 
 import io.mazewall.portal.codegen.testapi.BadStream
+import io.mazewall.portal.codegen.testapi.InheritedService
 import io.mazewall.portal.codegen.testapi.Overloads
 import io.mazewall.portal.codegen.testapi.SampleFd
 import io.mazewall.portal.codegen.testapi.SampleGeom
 import io.mazewall.portal.codegen.testapi.SampleGreeter
+import io.mazewall.portal.codegen.testapi.UnreadablePojoService
+import io.mazewall.portal.codegen.testapi.ValidPojoService
+import io.mazewall.portal.codegen.testapi.WrongReaderPojoService
 import org.gradle.testfixtures.ProjectBuilder
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -25,7 +29,7 @@ class PortalStubGeneratorTest {
         assertTrue(stub.contains("GREET_METHOD_ID"))
         assertFalse(stub.contains("Impl("))
         assertTrue(dispatcher.contains("SampleGreeterPortalDispatcher"))
-        assertTrue(dispatcher.contains("impl.greet"))
+        assertTrue(dispatcher.contains(".greet"))
         assertTrue(dispatcher.contains("method: PortalMethod.Generated"))
         assertTrue(dispatcher.contains("GREET_METHOD_ID"))
         assertFalse(dispatcher.contains("Impl("))
@@ -43,6 +47,22 @@ class PortalStubGeneratorTest {
             .let { listOf(it.replace("_", "").toInt()) }
         assertTrue(ids.isNotEmpty())
         assertTrue(ids.all { it >= 1000 }, "generated ids must not collide with builtins: $ids")
+    }
+
+    @Test
+    fun `existing wire method ids remain stable`() {
+        assertTrue(
+            PortalStubGenerator.methodId(
+                SampleGreeter::class.java,
+                SampleGreeter::class.java.getDeclaredMethod("greet", String::class.java),
+            ) == 367_740_916,
+        )
+        assertTrue(
+            PortalStubGenerator.methodId(
+                SampleGreeter::class.java,
+                SampleGreeter::class.java.getDeclaredMethod("add", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
+            ) == 575_993_707,
+        )
     }
 
     @Test
@@ -79,6 +99,76 @@ class PortalStubGeneratorTest {
                 PortalStubGenerator.generate(Overloads::class.java)
             }
         assertTrue(ex.message!!.contains("overloads"))
+        assertTrue(ex.message!!.contains("echo(java.lang.String)"), ex.message)
+        assertTrue(ex.message!!.contains("echo(int)"), ex.message)
+    }
+
+    @Test
+    fun `effective inherited methods and override are generated once`() {
+        val files = PortalStubGenerator.generate(InheritedService::class.java)
+        val stub = files.single { it.name == "InheritedServicePortalStub" }.toString()
+        val dispatcher = files.single { it.name == "InheritedServicePortalDispatcher" }.toString()
+
+        assertTrue(stub.contains("override fun inherited"), stub)
+        assertTrue(stub.contains("override fun overridden"), stub)
+        assertTrue(dispatcher.split(".overridden").size == 2, dispatcher)
+        assertTrue(dispatcher.contains("PING_METHOD_ID"), dispatcher)
+        assertTrue(dispatcher.contains("PING_METHOD_ID_"), dispatcher)
+    }
+
+    @Test
+    fun `compiled schema collections reject mutation`() {
+        val schema = PortalServiceSchema.compile(InheritedService::class.java)
+
+        @Suppress("UNCHECKED_CAST")
+        val methods = schema.methods as MutableList<PortalMethodSchema>
+        assertThrows(UnsupportedOperationException::class.java) { methods.clear() }
+        @Suppress("UNCHECKED_CAST")
+        val parameters = schema.methods.first { it.method.name == "payload" }.parameters as MutableList<PortalParameterSchema>
+        assertThrows(UnsupportedOperationException::class.java) { parameters.clear() }
+    }
+
+    @Test
+    fun `hostile parameter names do not collide with generated locals`() {
+        val stub =
+            PortalStubGenerator
+                .generate(InheritedService::class.java)
+                .single { it.name == "InheritedServicePortalStub" }
+                .toString()
+        assertTrue(stub.contains("val payload_"), stub)
+        assertTrue(stub.contains("val reader_"), stub)
+        assertTrue(stub.contains("val result_"), stub)
+    }
+
+    @Test
+    fun `pojo readers are validated and emitted explicitly`() {
+        val stub =
+            PortalStubGenerator
+                .generate(ValidPojoService::class.java)
+                .single { it.name == "ValidPojoServicePortalStub" }
+                .toString()
+        assertTrue(stub.contains(".getName()"), stub)
+        assertTrue(stub.contains(".count()"), stub)
+    }
+
+    @Test
+    fun `pojo without readable constructor component is rejected`() {
+        val ex =
+            assertThrows(IllegalArgumentException::class.java) {
+                PortalStubGenerator.generate(UnreadablePojoService::class.java)
+            }
+        assertTrue(ex.message!!.contains("readable accessor"), ex.message)
+        assertTrue(ex.message!!.contains("hidden"), ex.message)
+    }
+
+    @Test
+    fun `pojo reader with incompatible type is rejected`() {
+        val ex =
+            assertThrows(IllegalArgumentException::class.java) {
+                PortalStubGenerator.generate(WrongReaderPojoService::class.java)
+            }
+        assertTrue(ex.message!!.contains("type-compatible"), ex.message)
+        assertTrue(ex.message!!.contains("value"), ex.message)
     }
 
     @Test

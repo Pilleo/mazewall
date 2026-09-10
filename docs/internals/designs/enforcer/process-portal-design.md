@@ -165,6 +165,20 @@ KotlinPoet is a **plugin** dependency. Ask before adding it; do not put it on `:
 
 Marker interface + factory, fail closed if the stub class is missing. Host stub: serialize args, attach FDs, wait for result. Worker dispatcher: deserialize, call impl, serialize result. Boundary types validated at generate time (primitives, `String`, records/POJOs, `byte[]`, `Capability.ReadFd` only).
 
+The generator compiles each requested service into one immutable schema before emitting either
+side. The schema contains the effective inherited method set, resolves overrides, validates every
+constructor component against a public type-compatible reader, and assigns IDs from the root
+service plus erased method signature. Overloads remain unsupported and fail with all conflicting
+signatures. Generated identifiers use independent KotlinPoet allocators for member constants,
+parameters, receivers, and locals, so keywords, hostile parameter names, and case-distinct method
+names cannot collide.
+
+The Gradle task emits stubs and dispatchers into task-owned staging trees. It publishes both trees
+only after every configured interface validates and every file is generated, replacing prior trees
+with atomic same-filesystem moves. A removed interface therefore removes its old generated files;
+a validation or generation failure leaves both previously published trees intact. Generated wire
+IDs and frame bytes are unaffected.
+
 Hand-written stub must work before KotlinPoet so protocol bugs are not hidden in generated code.
 
 ## Explicitly not Glassbox
