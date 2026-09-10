@@ -29,6 +29,24 @@ import java.nio.file.Path
 
 class PortalWorkerDriverTest {
     @Test
+    fun `fatal receive failure transitions worker to stopped before propagation`() {
+        val fatal = AssertionError("transport invariant failed")
+        val driver = PortalWorkerDriver(
+            transport = object : PortalWorkerTransport {
+                override fun receive(): PortalWorkerReceive = throw fatal
+
+                override fun send(frame: PortalFrame) = Unit
+
+                override fun close() = Unit
+            },
+            dispatcher = PortalWorkerDispatcher { _, _, _ -> ByteArray(0) },
+        )
+
+        assertThrows(AssertionError::class.java) { driver.run() }
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+    }
+
+    @Test
     fun `capability and transport cleanup failures are suppressed on reflected fatal error`(
         @TempDir directory: Path,
     ) {
