@@ -14,7 +14,10 @@ import java.util.Set;
 
 /** Minimal class-file metadata reader used to select annotated tests without class loading. */
 final class FreshJvmClassSelector {
-    private static final String ANNOTATION_DESCRIPTOR = "Lio/mazewall/NeedsFreshJvm;";
+    private static final String FRESH_JVM_DESCRIPTOR = "Lio/mazewall/NeedsFreshJvm;";
+    private static final String JUNIT_TEST_DESCRIPTOR = "Lorg/junit/jupiter/api/Test;";
+    private static final int ACC_PRIVATE = 0x0002;
+    private static final int ACC_STATIC = 0x0008;
 
     private FreshJvmClassSelector() {}
 
@@ -43,21 +46,31 @@ final class FreshJvmClassSelector {
     }
 
     private static boolean annotated(ClassMetadata metadata, Map<String, ClassMetadata> classes, Set<String> visiting) {
-        if (metadata.classAnnotated() || metadata.methodAnnotated()) return true;
+        if (metadata.classAnnotated() || metadata.methods().stream().anyMatch(MethodMetadata::freshJvmAnnotated)) return true;
         if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
         ClassMetadata parent = classes.get(metadata.superName());
-        return parent != null && inheritedClassAnnotation(parent, classes, visiting);
+        if (parent == null) return false;
+        Set<String> overridden = metadata.methods().stream()
+            .filter(MethodMetadata::canOverride)
+            .map(MethodMetadata::signature)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return inheritedAnnotation(parent, classes, visiting, overridden);
     }
 
-    private static boolean inheritedClassAnnotation(
+    private static boolean inheritedAnnotation(
         ClassMetadata metadata,
         Map<String, ClassMetadata> classes,
-        Set<String> visiting
+        Set<String> visiting,
+        Set<String> overridden
     ) {
         if (metadata.classAnnotated()) return true;
+        if (metadata.methods().stream().anyMatch(method -> method.inheritedFreshJvmTest() && !overridden.contains(method.signature()))) {
+            return true;
+        }
         if (metadata.superName() == null || !visiting.add(metadata.className())) return false;
+        metadata.methods().stream().filter(MethodMetadata::canOverride).map(MethodMetadata::signature).forEach(overridden::add);
         ClassMetadata parent = classes.get(metadata.superName());
-        return parent != null && inheritedClassAnnotation(parent, classes, visiting);
+        return parent != null && inheritedAnnotation(parent, classes, visiting, overridden);
     }
 
     private static ClassMetadata read(File file) throws IOException {
@@ -70,9 +83,9 @@ final class FreshJvmClassSelector {
             int superIndex = input.readUnsignedShort();
             String parent = superIndex == 0 ? null : className(pool, superIndex);
             input.skipNBytes(input.readUnsignedShort() * 2L);
-            skipMembers(input, pool, false);
-            boolean methodAnnotated = skipMembers(input, pool, true);
-            return new ClassMetadata(name, parent, attributesAnnotated(input, pool), methodAnnotated);
+            skipMembers(input, pool);
+            List<MethodMetadata> methods = readMethods(input, pool);
+            return new ClassMetadata(name, parent, attributesAnnotated(input, pool), List.copyOf(methods));
         }
     }
 
@@ -100,8 +113,7 @@ final class FreshJvmClassSelector {
         return name.replace('/', '.');
     }
 
-    private static boolean skipMembers(DataInputStream input, Object[] pool, boolean inspect) throws IOException {
-        boolean annotated = false;
+    private static void skipMembers(DataInputStream input, Object[] pool) throws IOException {
         int members = input.readUnsignedShort();
         for (int member = 0; member < members; member++) {
             input.skipNBytes(6);
@@ -111,10 +123,33 @@ final class FreshJvmClassSelector {
                 int length = input.readInt();
                 byte[] bytes = input.readNBytes(length);
                 if (bytes.length != length) throw new IOException("Truncated member attribute");
-                if (inspect && annotationAttribute(name) && hasTargetAnnotation(bytes, pool)) annotated = true;
             }
         }
-        return annotated;
+    }
+
+    private static List<MethodMetadata> readMethods(DataInputStream input, Object[] pool) throws IOException {
+        List<MethodMetadata> methods = new java.util.ArrayList<>();
+        int members = input.readUnsignedShort();
+        for (int member = 0; member < members; member++) {
+            int access = input.readUnsignedShort();
+            String name = (String) pool[input.readUnsignedShort()];
+            String descriptor = (String) pool[input.readUnsignedShort()];
+            boolean freshJvm = false;
+            boolean junitTest = false;
+            int count = input.readUnsignedShort();
+            for (int index = 0; index < count; index++) {
+                String attribute = (String) pool[input.readUnsignedShort()];
+                int length = input.readInt();
+                byte[] bytes = input.readNBytes(length);
+                if (bytes.length != length) throw new IOException("Truncated member attribute");
+                if (annotationAttribute(attribute)) {
+                    freshJvm |= hasAnnotation(bytes, pool, FRESH_JVM_DESCRIPTOR);
+                    junitTest |= hasAnnotation(bytes, pool, JUNIT_TEST_DESCRIPTOR);
+                }
+            }
+            methods.add(new MethodMetadata(name + descriptor, freshJvm, junitTest, (access & (ACC_PRIVATE | ACC_STATIC)) == 0));
+        }
+        return methods;
     }
 
     private static boolean attributesAnnotated(DataInputStream input, Object[] pool) throws IOException {
@@ -125,7 +160,7 @@ final class FreshJvmClassSelector {
             int length = input.readInt();
             byte[] bytes = input.readNBytes(length);
             if (bytes.length != length) throw new IOException("Truncated class attribute");
-            if (annotationAttribute(name) && hasTargetAnnotation(bytes, pool)) annotated = true;
+            if (annotationAttribute(name) && hasAnnotation(bytes, pool, FRESH_JVM_DESCRIPTOR)) annotated = true;
         }
         return annotated;
     }
@@ -134,36 +169,43 @@ final class FreshJvmClassSelector {
         return "RuntimeVisibleAnnotations".equals(name) || "RuntimeInvisibleAnnotations".equals(name);
     }
 
-    private static boolean hasTargetAnnotation(byte[] bytes, Object[] pool) throws IOException {
+    private static boolean hasAnnotation(byte[] bytes, Object[] pool, String descriptor) throws IOException {
         try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(bytes))) {
             int count = input.readUnsignedShort();
-            for (int index = 0; index < count; index++) if (readAnnotation(input, pool)) return true;
-            return false;
+            boolean found = false;
+            for (int index = 0; index < count; index++) found |= readAnnotation(input, pool, descriptor);
+            return found;
         }
     }
 
-    private static boolean readAnnotation(DataInputStream input, Object[] pool) throws IOException {
-        boolean target = ANNOTATION_DESCRIPTOR.equals(pool[input.readUnsignedShort()]);
+    private static boolean readAnnotation(DataInputStream input, Object[] pool, String descriptor) throws IOException {
+        boolean target = descriptor.equals(pool[input.readUnsignedShort()]);
         int pairs = input.readUnsignedShort();
         for (int index = 0; index < pairs; index++) {
             input.readUnsignedShort();
-            skipElement(input, pool);
+            skipElement(input, pool, descriptor);
         }
         return target;
     }
 
-    private static void skipElement(DataInputStream input, Object[] pool) throws IOException {
+    private static void skipElement(DataInputStream input, Object[] pool, String descriptor) throws IOException {
         switch (input.readUnsignedByte()) {
             case 'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z', 's', 'c' -> input.readUnsignedShort();
             case 'e' -> input.skipNBytes(4);
-            case '@' -> readAnnotation(input, pool);
+            case '@' -> readAnnotation(input, pool, descriptor);
             case '[' -> {
                 int count = input.readUnsignedShort();
-                for (int index = 0; index < count; index++) skipElement(input, pool);
+                for (int index = 0; index < count; index++) skipElement(input, pool, descriptor);
             }
             default -> throw new IOException("Invalid annotation element");
         }
     }
 
-    private record ClassMetadata(String className, String superName, boolean classAnnotated, boolean methodAnnotated) {}
+    private record ClassMetadata(String className, String superName, boolean classAnnotated, List<MethodMetadata> methods) {}
+
+    private record MethodMetadata(String signature, boolean freshJvmAnnotated, boolean junitTestAnnotated, boolean canOverride) {
+        boolean inheritedFreshJvmTest() {
+            return freshJvmAnnotated && junitTestAnnotated && canOverride;
+        }
+    }
 }

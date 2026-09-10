@@ -43,24 +43,37 @@ public final class VerificationActionsTest {
                 @Inherited @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.TYPE, ElementType.METHOD})
                 public @interface NeedsFreshJvm {}
                 """);
+            write(sources, "org/junit/jupiter/api/Test.java", """
+                package org.junit.jupiter.api;
+                import java.lang.annotation.*;
+                @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD)
+                public @interface Test {}
+                """);
             write(sources, "sample/Fixtures.java", """
                 package sample;
                 import io.mazewall.NeedsFreshJvm;
+                import org.junit.jupiter.api.Test;
                 class MentionOnly { Class<?> marker = NeedsFreshJvm.class; }
                 @NeedsFreshJvm class ClassTagged {}
                 class MethodTagged { @NeedsFreshJvm void test() {} }
                 class MethodOnlyBase { @NeedsFreshJvm void test() {} }
                 class MethodOnlyChild extends MethodOnlyBase {}
+                abstract class InheritedMethodBase { @Test @NeedsFreshJvm void inheritedTest() {} }
+                class InheritedMethodChild extends InheritedMethodBase {}
+                class OverriddenMethodChild extends InheritedMethodBase { @Override void inheritedTest() {} }
                 class InheritedTagged extends ClassTagged {}
                 class Outer { @NeedsFreshJvm static class NestedTagged {} }
                 """);
             var compiler = ToolProvider.getSystemJavaCompiler();
             int result = compiler.run(null, null, null, "-d", classes.toString(),
                 sources.resolve("io/mazewall/NeedsFreshJvm.java").toString(),
+                sources.resolve("org/junit/jupiter/api/Test.java").toString(),
                 sources.resolve("sample/Fixtures.java").toString());
             equal(0, result);
             equal(List.of(
                 "sample.ClassTagged",
+                "sample.InheritedMethodBase",
+                "sample.InheritedMethodChild",
                 "sample.InheritedTagged",
                 "sample.MethodOnlyBase",
                 "sample.MethodTagged",
