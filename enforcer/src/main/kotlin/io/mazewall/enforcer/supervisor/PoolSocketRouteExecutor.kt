@@ -32,7 +32,12 @@ internal class PoolSocketRouteExecutor(
             when (result) {
                 SocketHelperResult.Connected -> SupervisorReplyEffect.Recycle("Unexpected connect result for accept")
                 is SocketHelperResult.Failed -> SupervisorReplyEffect.Error(result.errno)
-                is SocketHelperResult.Accepted -> SupervisorReplyEffect.AcceptedSocket(result.descriptor, request, result.address, result.length)
+                is SocketHelperResult.Accepted ->
+                    try {
+                        SupervisorReplyEffect.AcceptedSocket(result.descriptor, request, result.address, result.length)
+                    } catch (failure: Throwable) {
+                        result.descriptor.use { throw failure }
+                    }
             }
         }
 
