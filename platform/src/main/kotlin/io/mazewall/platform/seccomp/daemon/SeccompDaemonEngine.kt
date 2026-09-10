@@ -24,6 +24,7 @@ import io.mazewall.ffi.networking.SeccompConnectionOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
+import io.mazewall.platform.daemon.UnixListenDaemonOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
@@ -133,7 +134,19 @@ public class SeccompDaemonEngine(
     }
 
     internal fun applyEvent(event: UnixListenDaemonEvent): UnixListenDaemonTransition {
-        return UnixListenDaemonMachine.apply(stateRef, event, ::executeEffects)
+        return UnixListenDaemonMachine.apply(stateRef, event, ::executeEffects).also { transition ->
+            when (val outcome = transition.outcome) {
+                UnixListenDaemonOutcome.Advanced,
+                UnixListenDaemonOutcome.Terminated,
+                -> Unit
+                is UnixListenDaemonOutcome.BenignObservation ->
+                    System.err.println("[SECCOMP-DAEMON] Lifecycle observation: ${outcome.name}")
+                is UnixListenDaemonOutcome.ProtocolViolation ->
+                    System.err.println("[SECCOMP-DAEMON] Lifecycle protocol violation: ${outcome.state} + ${outcome.event}")
+                is UnixListenDaemonOutcome.PostTerminalObservation ->
+                    System.err.println("[SECCOMP-DAEMON] Post-terminal lifecycle observation: ${outcome.event}")
+            }
+        }
     }
 
     private fun executeEffects(effects: List<UnixListenDaemonEffect>) {
