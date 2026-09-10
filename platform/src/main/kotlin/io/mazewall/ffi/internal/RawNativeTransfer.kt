@@ -28,6 +28,7 @@ internal object RawNativeTransfer {
                 if (nr == arch.sendto.toLong()) a.bytes(4, a.number(5))
             }
             arch.getcwd.toLong(), arch.getrandom.toLong() -> a.bytes(0, a.number(1), writable = true)
+            arch.mprotect.toLong(), arch.pkeyMprotect.toLong() -> a.bytes(0, a.number(1))
             arch.readlink.toLong() -> {
                 a.path(0)
                 a.bytes(1, a.number(2), writable = true)

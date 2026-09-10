@@ -13,6 +13,26 @@ import org.junit.jupiter.api.assertThrows
 
 class RawManagedBoundaryValidationTest {
     @Test
+    fun `managed protection calls validate the full address range`() {
+        NativeArena.ofConfined().use { arena ->
+            for (number in listOf(Arch.current().mprotect, Arch.current().pkeyMprotect)) {
+                val buffer = arena.allocate(16).asSlice(0, 8)
+                val args = arrayOf<NativeArg>(NativeArg.MemoryArg(buffer), NativeArg.LongArg(8), NativeArg.LongArg(1), NativeArg.LongArg(-1), NativeArg.LongArg(0), NativeArg.LongArg(0))
+                org.junit.jupiter.api
+                    .assertDoesNotThrow {
+                        io.mazewall.ffi.internal.RawNativeTransfer
+                        .validate(number.toLong(), args)
+                    }
+                args[1] = NativeArg.LongArg(9)
+                assertThrows<IllegalArgumentException> {
+                    io.mazewall.ffi.internal.RawNativeTransfer
+                    .validate(number.toLong(), args)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `correctly sized FIONREAD buffers still reach the kernel`() {
         NativeArena.ofConfined().use { arena ->
             val pair = RealNativeEngine.networking.socketpair(1, 1, 0, arena.allocate(8))

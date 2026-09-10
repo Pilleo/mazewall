@@ -265,7 +265,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
                         io.mazewall.LinuxNative.raw.syscall(
                             nr.toLong(),
                             io.mazewall.core.NativeArg
-                                .MemoryArg(ConfinedSegment(addr)),
+                                .MemoryArg(ConfinedSegment(addr.reinterpret(4096L))),
                             io.mazewall.core.NativeArg
                                 .LongArg(4096L),
                             io.mazewall.core.NativeArg
