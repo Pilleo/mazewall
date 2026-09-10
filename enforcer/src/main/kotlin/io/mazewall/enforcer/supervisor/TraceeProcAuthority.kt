@@ -21,18 +21,33 @@ internal class TraceeProcAuthority private constructor(
     val ppid: Int,
 ) : AutoCloseable {
     private var memory: SupervisorOwnedFd? = null
-    private val directories = mutableMapOf<Int, SupervisorOwnedFd>()
+    private val directories = mutableMapOf<DirectoryKey, SupervisorOwnedFd>()
+
+    private sealed interface DirectoryKey {
+        data object Root : DirectoryKey
+
+        data object Cwd : DirectoryKey
+
+        data class Imported(
+            val descriptor: TraceeDirFd,
+        ) : DirectoryKey
+    }
 
     context(arena: NativeArena) fun directory(
         dirfd: TraceeDirFd,
         absolute: Boolean = false,
     ): SupervisorOwnedFd {
-        val key = if (absolute) ROOT_KEY else dirfd.value
+        val key = when {
+            absolute -> DirectoryKey.Root
+            dirfd.value == NativeConstants.AT_FDCWD -> DirectoryKey.Cwd
+            dirfd.value >= 0 -> DirectoryKey.Imported(dirfd)
+            else -> throw TraceeAuthorityFailure(NativeConstants.EBADF)
+        }
         return directories.getOrPut(key) {
             when (key) {
-                ROOT_KEY -> openRelative("root", NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
-                -100 -> openRelative("cwd", NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
-                else -> import(key)
+                DirectoryKey.Root -> openRelative("root", NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+                DirectoryKey.Cwd -> openRelative("cwd", NativeConstants.O_PATH or NativeConstants.O_CLOEXEC)
+                is DirectoryKey.Imported -> import(key.descriptor.value)
             }
         }
     }
@@ -119,7 +134,6 @@ internal class TraceeProcAuthority private constructor(
     }
 
     companion object {
-        private const val ROOT_KEY = Int.MIN_VALUE
         private const val MAX_STATUS_BYTES = 65536
         private const val MAX_MAPS_BYTES = 4 * 1024 * 1024
 

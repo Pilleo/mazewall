@@ -539,6 +539,11 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.supervisor.TraceeProcAuthority\$DirectoryKey" to setOf(
+                "io.mazewall.enforcer.supervisor.TraceeProcAuthority\$DirectoryKey\$Root",
+                "io.mazewall.enforcer.supervisor.TraceeProcAuthority\$DirectoryKey\$Cwd",
+                "io.mazewall.enforcer.supervisor.TraceeProcAuthority\$DirectoryKey\$Imported",
+            ),
             "io.mazewall.enforcer.supervisor.SocketOperation" to setOf(
                 "io.mazewall.enforcer.supervisor.SocketOperation\$Connect",
                 "io.mazewall.enforcer.supervisor.SocketOperation\$Accept",

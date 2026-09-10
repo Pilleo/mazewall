@@ -627,6 +627,9 @@ are not atomic against concurrent tracee mmap/mprotect operations; this remains
 a bounded argument snapshot, not a guarantee of atomic memory capture. Directory capabilities
 are retained through authorization and execution. Relative opens use the tracee's
 captured cwd or imported dirfd, including after rename. Absolute opens use its root
+through a distinct typed capability key, never a numeric tracee-dirfd sentinel.
+Relative operations reject negative dirfds other than AT_FDCWD with EBADF before
+capability lookup. Absolute opens ignore the supplied dirfd as the kernel does,
 with openat2 RESOLVE_IN_ROOT; the existing absolute-path RESOLVE_BENEATH rejection
 and open_how values remain enforced. Canonical bypass roots are captured from the
 daemon before notification processing; the helper's classpath cannot widen them.

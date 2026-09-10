@@ -160,6 +160,34 @@ class TraceeAuthorityIntegrationTest {
 
     private fun authority(result: CompletableFuture<SocketHelperResult>): SupervisorReplyEffect = assertInstanceOf(SocketHelperResult.Authority::class.java, result.get(10, TimeUnit.SECONDS)).effect
 
+    @Test
+    fun `invalid relative open dirfd cannot select the captured root capability`() = invalidDirfdCannotSelectRoot(exec = false)
+
+    @Test
+    fun `invalid relative secure exec dirfd cannot select the captured root capability`() = invalidDirfdCannotSelectRoot(exec = true)
+
+    private fun invalidDirfdCannotSelectRoot(exec: Boolean) {
+        probe(directory, "bin/true").use { tracee ->
+            SocketHelperPool(1, 1, SocketHelperProcess::start).use { pool ->
+                for (dirfd in listOf(Int.MIN_VALUE, Int.MIN_VALUE + 1, -101, -1)) {
+                    pool.session().use { session ->
+                        val arch = Arch.current()
+                        val args = if (exec) longArrayOf(dirfd.toLong(), tracee.address, 0x1234, 0x5678, 0, 0) else longArrayOf(dirfd.toLong(), tracee.address, 524288, 0, 0, 0)
+                        val notification = SeccompNotification(47, tracee.tid, arch.audit, if (exec) arch.execveat else arch.openat, args)
+                        val job = TraceeAuthorityJob(notification, Deadline.afterMillis(30000), emptyList())
+                        val result = session.submitAuthority(job)
+                        job.prepared.get(10, TimeUnit.SECONDS)
+                        job.decision.complete(TraceeAuthorityDecision(if (exec) SupervisorRoute.SecureExec else SupervisorRoute.InjectFd, null))
+                        val effect = authority(result)
+                        SupervisorReplyHandoff(effect).use {
+                            assertEquals(SupervisorReplyEffect.Error(9), effect, "invalid relative dirfd $dirfd must return EBADF")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun startHelper(pid: AtomicLong): SocketHelperProcess {
         val before = ProcessHandle.current().children().use { children -> children.map { it.pid() }.toList().toSet() }
         return SocketHelperProcess.start().also {
