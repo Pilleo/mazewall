@@ -7,31 +7,7 @@ import io.mazewall.ffi.memory.readShort
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeShort
 
-internal data class SeccompNotification(
-    val id: Long,
-    val pid: Int,
-    val nr: Int,
-    val args: LongArray,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as SeccompNotification
-        if (id != other.id) return false
-        if (pid != other.pid) return false
-        if (nr != other.nr) return false
-        if (!args.contentEquals(other.args)) return false
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = id.hashCode()
-        result = 31 * result + pid
-        result = 31 * result + nr
-        result = 31 * result + args.contentHashCode()
-        return result
-    }
-}
+internal typealias SeccompNotification = io.mazewall.platform.seccomp.SeccompNotification
 
 internal data class PollEvents(
     val socketRevents: Short,
@@ -52,9 +28,8 @@ internal interface SeccompNotificationParser {
 
 internal object RealSeccompNotificationParser : SeccompNotificationParser {
     override fun readNotif(notif: ManagedSegment): SeccompNotification {
-        val parsed = io.mazewall.platform.seccomp.SeccompNotifications
+        return io.mazewall.platform.seccomp.SeccompNotifications
             .read(notif)
-        return SeccompNotification(parsed.id, parsed.pid, parsed.nr, parsed.args)
     }
 
     override fun readPollEvents(pollFds: ManagedSegment): PollEvents {

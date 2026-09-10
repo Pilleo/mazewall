@@ -139,8 +139,9 @@ public class ProfilerDaemonManager(
         startup.startOutputPump(
                 sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL,
                 onLine = { line ->
-                    System.err.println("[DAEMON] $line")
-                    System.err.flush()
+                    // Child diagnostics may include arbitrary tracee input. Readiness is
+                    // consumed by the resource owner; ordinary output exposes only a size.
+                    logger.fine("Profiler daemon diagnostic received (${line.length} characters)")
                 },
                 threadName = "profiler-daemon-output",
             )

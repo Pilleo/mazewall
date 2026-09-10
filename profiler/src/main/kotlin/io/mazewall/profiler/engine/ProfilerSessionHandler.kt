@@ -69,6 +69,7 @@ internal class ProfilerSessionHandler(
         sessionArena.close()
     }
 
+    @Suppress("TooGenericExceptionCaught") // Accepted notifications must be settled even when an injected parser or reader fails.
     context(arena: NativeArena) override fun beginNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
@@ -76,17 +77,50 @@ internal class ProfilerSessionHandler(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         deadline: Deadline,
     ): NotificationWork {
-        val notification = parser.readNotif(notif)
+        val notification = try {
+            parser.readNotif(notif)
+        } catch (failure: Exception) {
+            logSessionFailure("Malformed notification", failure)
+            terminateSession()
+            return object : NotificationWork {
+                context(arena: NativeArena) override fun poll(): NotificationProgress =
+                    NotificationProgress.Ready(
+                        reply = {
+                            UserNotifReply.encodeError(resp, notif.readLong(Layouts.SECCOMP_NOTIF_ID_OFFSET), NativeConstants.EPERM)
+                            UserNotifReply.send(ioOps.raw, listenerFd, resp)
+                        },
+                        result = NotifResult.TERMINATE,
+                    )
+            }
+        }
         return object : NotificationWork {
             private var control: ControlSocketExchange? = null
             private var waiting: ProfilerState? = null
             private var sentRecorded = false
 
+            private var completed = false
+
             context(arena: NativeArena) override fun poll(): NotificationProgress {
+                check(!completed) { "Notification work is already terminal" }
+                return try {
+                    advance()
+                } catch (failure: Exception) {
+                    logSessionFailure("Notification preparation failed", failure)
+                    terminateSession()
+                    reply(NativeConstants.EPERM, NotifResult.TERMINATE)
+                }
+            }
+
+            override fun close() {
+                if (!completed) terminateSession()
+                completed = true
+            }
+
+            context(arena: NativeArena) private fun advance(): NotificationProgress {
                 val exchange = control
                 if (exchange == null) {
                     val current = state as? ProfilerState.ActiveSession ?: return reply(ECONNRESET, NotifResult.TERMINATE)
-                    ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong()))
+                    ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
                     val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
                     if (isNoisePath(notification.nr, event)) {
                         state = ProfilerSessionMachine.evaluate(current, ProfilerSessionEvent.NoisePathBypassed).state
@@ -107,22 +141,26 @@ internal class ProfilerSessionHandler(
                     }
                     received ?: return NotificationProgress.Await
                 } catch (failure: ControlSocketFailure) {
+                    logSessionFailure("ACK transport failed", failure)
                     state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
                     return reply(ECONNRESET, NotifResult.TERMINATE)
                 }
-                // Preserve the four-byte private ACK protocol, including ACK-before-shutdown reply ordering.
-                if (PASS_THROUGH_COMMAND_BYTE in bytes) {
-                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.PassedThrough).state
-                    return reply(0, NotifResult.PASS_THROUGH)
+                return when (val ack = ProfilerAckOutcome.decode(bytes)) {
+                    ProfilerAckOutcome.PassThrough -> {
+                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.PassedThrough).state
+                        reply(0, NotifResult.PASS_THROUGH)
+                    }
+                    is ProfilerAckOutcome.Acknowledged -> {
+                        ledger.record(SessionEvent.AckReceived(System.nanoTime(), notification.pid.toLong()))
+                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.AckSucceeded).state
+                        reply(0, NotifResult.HANDLED, ack.shutdown)
+                    }
+                    is ProfilerAckOutcome.Rejected -> {
+                        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), notification.pid.toLong(), ack.reason.name, null))
+                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
+                        reply(ECONNRESET, NotifResult.TERMINATE, ack.reason == ProfilerHandshakeFailure.Shutdown)
+                    }
                 }
-                if (PROTOCOL_ACK_BYTE in bytes) {
-                    ledger.record(SessionEvent.AckReceived(System.nanoTime(), notification.pid.toLong()))
-                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.AckSucceeded).state
-                    return reply(0, NotifResult.HANDLED, SHUTDOWN_COMMAND_BYTE in bytes)
-                }
-                if (SHUTDOWN_COMMAND_BYTE in bytes) onShutdown("Parent Command during notification")
-                state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
-                return reply(ECONNRESET, NotifResult.TERMINATE)
             }
 
             private fun reply(
@@ -141,15 +179,24 @@ internal class ProfilerSessionHandler(
                 },
                 result = result,
                 onReply = { outcome ->
-                    if (outcome == UserNotifReplyResult.Sent) {
+                    completed = true
+                    when (outcome) {
+                    UserNotifReplyResult.Sent -> {
                         if (errno == 0) {
                             ledger.record(SessionEvent.ContinueReplied(System.nanoTime(), notification.pid.toLong(), 0))
                         } else {
                             ledger.record(SessionEvent.ErrorReplied(System.nanoTime(), notification.pid.toLong(), errno))
                         }
                         if (shutdown) onShutdown("Parent Command (deferred, ACK took priority)")
-                    } else {
+                    }
+                    UserNotifReplyResult.NotificationGone -> {
+                        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), notification.pid.toLong(), "notification-gone", null))
                         terminateSession()
+                    }
+                    is UserNotifReplyResult.Failed -> {
+                        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), notification.pid.toLong(), "SECCOMP_IOCTL_NOTIF_SEND", outcome.errno))
+                        terminateSession()
+                    }
                     }
                 },
             )
@@ -189,7 +236,6 @@ internal class ProfilerSessionHandler(
         val pidVal = parsedNotif.pid
         val nr = parsedNotif.nr
 
-        System.err.println("[DAEMON-DEBUG] Received notification: id=$id, pid=$pidVal, nr=$nr")
         val handshake = HandshakeSession.Active(id, listenerFd)
         val reply = ReplyAttempt()
 
@@ -224,7 +270,7 @@ internal class ProfilerSessionHandler(
         response: ManagedSegment,
         reply: ReplyAttempt,
     ): NotifResult {
-        ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong()))
+        ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
         val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
         if (isNoisePath(notification.nr, event)) {
             state = ProfilerSessionMachine.evaluate(currentState, ProfilerSessionEvent.NoisePathBypassed).state
@@ -279,7 +325,6 @@ internal class ProfilerSessionHandler(
         pid: Int,
         reply: ReplyAttempt,
     ): NotifResult {
-        System.err.println("[DAEMON-WARN] Handshake failed or shutdown triggered")
         state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.HandshakeFailed).state
         reply.attempted = true
         val sent = with(arena.unwrap) { responder.sendSeccompError(result, response.unwrap, ECONNRESET) }
@@ -295,7 +340,6 @@ internal class ProfilerSessionHandler(
         pid: Int,
         reply: ReplyAttempt,
     ): NotifResult {
-        System.err.println("[DAEMON-DEBUG] Handshake returned PassThrough")
         state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.PassedThrough).state
         reply.attempted = true
         val sent = with(arena.unwrap) { responder.sendSeccompContinue(result.acknowledged(), response.unwrap) }
@@ -336,7 +380,10 @@ internal class ProfilerSessionHandler(
         category: String,
         failure: Throwable,
     ) {
-        logger.severe { "$category in processNotification: ${failure.message}. Dumping SessionEventLedger:\n${ledger.dump().joinToString("\n")}" }
+        if (failure is InterruptedException || failure is java.nio.channels.ClosedByInterruptException) Thread.currentThread().interrupt()
+        // Exceptions may contain tracee-controlled paths or data. Keep only the type and bounded numeric ledger.
+        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), 0, failure.javaClass.simpleName.take(80), (failure as? ControlSocketFailure)?.errno))
+        logger.severe { "$category (${failure.javaClass.simpleName.take(80)}); recent events=${ledger.dump().takeLast(8).joinToString("; ")}" }
     }
 
     /** Materializes native notification fields into a heap-only event before publication. */
@@ -375,11 +422,9 @@ internal class ProfilerSessionHandler(
         handshake: HandshakeSession.Active,
     ): HandshakeSession {
         parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
-        System.err.println("[DAEMON-DEBUG] Sending event to JVM listener: tid=$pid, syscall=${event.syscallName}, paths=${event.paths}")
         with(arena.unwrap) {
             publisher.sendTraceEvent(socketFd, event)
         }
-        System.err.println("[DAEMON-DEBUG] Event sent to JVM listener.")
         ledger.record(SessionEvent.EventSent(System.nanoTime(), pid.toLong()))
         return with(arena.unwrap) {
             handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
@@ -415,8 +460,6 @@ internal class ProfilerSessionHandler(
                             .current(),
                         ),
                     path,
-                    io.mazewall.enforcer.supervisor.BypassPaths
-                        .resolveForPolicy(path),
                     io.mazewall.enforcer.supervisor.BypassPaths.safeBypassPaths,
                 )
             } catch (_: java.nio.file.InvalidPathException) {

@@ -29,6 +29,59 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = [-1, 0, 2])
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `failed ACK closes endpoint before reading another event`(written: Long) {
+        val frame = TraceEventEncoder.encode(
+            io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
+                io.mazewall.core.Tid(7),
+                "GETPID",
+                emptyList(),
+                io.mazewall.profiler.engine.PathResolution.NotApplicable,
+            ),
+        )
+        val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte()) + frame + frame)
+        val ackAttempts = AtomicInteger()
+        val closes = AtomicInteger()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val bytes = input.readNBytes(count.toInt())
+                    bytes.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(bytes.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    ackAttempts.incrementAndGet()
+                    return if (written < 0) LinuxNative.SyscallResult.Error(32, -1L) else LinuxNative.SyscallResult.Success(written)
+                }
+            },
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+        )
+        ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), null, mutableMapOf(), { null }, native).use { listener ->
+            listener.start(CountDownLatch(1))
+            assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+            assertEquals(1, ackAttempts.get(), "ACK failure must stop before the second buffered frame")
+            assertEquals(1, closes.get())
+            assertTrue(listener.ackWriteFailure != null)
+            assertFalse(listener.drainComplete)
+        }
+    }
+
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `duplicate paths preserve distinct failed operands and ACK every event`() {

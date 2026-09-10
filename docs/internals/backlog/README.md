@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 551
+*Total Active Issues:* 76 | *Total Resolved Issues:* 552
+
+Review-hardening Task 5 resolved: [terminal profiler notifications and ACK failures](resolved/issue-20260910-182202-258-make-profiler-notification-and-ack-failures-termin.md).
 
 Task 12 resolved: [authoritative vulnerable-web lifecycle and profiling evidence](resolved/issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md).
 

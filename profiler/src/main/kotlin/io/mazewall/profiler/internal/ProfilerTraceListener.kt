@@ -122,6 +122,10 @@ internal class ProfilerTraceListener(
     var droppedEvents: Int = 0
         private set
 
+    @Volatile
+    internal var ackWriteFailure: TraceCommandWriteResult? = null
+        private set
+
     private val gracefulDrainRequested = java.util.concurrent.atomic
         .AtomicBoolean(false)
 
@@ -295,7 +299,8 @@ internal class ProfilerTraceListener(
         when (result) {
             TraceCommandWriteResult.Written -> Unit
             is TraceCommandWriteResult.NativeFailure -> logger.fine("Failed to send pass-through command: errno=${result.errno}")
-            is TraceCommandWriteResult.Threw -> logger.fine("Failed to send pass-through command: ${result.cause.message}")
+            is TraceCommandWriteResult.ShortWrite -> logger.fine("Failed to send pass-through command: bytes=${result.bytes}")
+            is TraceCommandWriteResult.Threw -> logger.fine("Failed to send pass-through command: ${result.cause.javaClass.simpleName}")
         }
     }
 
@@ -320,13 +325,11 @@ internal class ProfilerTraceListener(
                 readyLatch.countDown()
             }
 
-            System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
             while (true) {
                 state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
                 val event = try {
                     readNextEvent(dis)
                 } catch (_: java.io.EOFException) {
-                    System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
                     break
                 } catch (expectedCloseIoFailure: java.io.IOException) {
                     if (closed.get()) {
@@ -352,7 +355,6 @@ internal class ProfilerTraceListener(
     }
 
     private fun readNextEvent(dis: DataInputStream): TraceEvent {
-        System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
         val tidValue = dis.readInt()
         state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
@@ -372,10 +374,6 @@ internal class ProfilerTraceListener(
             state,
             TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount),
         )
-        System.err.println(
-            "[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, " +
-                "syscall=${decoded.event.syscallName}, paths=${decoded.event.paths}",
-        )
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
         // in kernel space using seccomp and awaits an ACK from this listener thread. While the
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
@@ -393,10 +391,8 @@ internal class ProfilerTraceListener(
     }
 
     private fun processAndQueueEvent(event: TraceEvent) {
-         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
          val resolution = event.pathResolution
          if (resolution is PathResolution.Resolved && isDuplicate(event.syscallName, resolution)) {
-             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
              return
          }
 
@@ -405,7 +401,22 @@ internal class ProfilerTraceListener(
     }
 
     private fun sendAck() {
-        sendCommand(PROTOCOL_ACK_BYTE)
+        val result = sendCommand(PROTOCOL_ACK_BYTE)
+        val failure = when (result) {
+            TraceCommandWriteResult.Written -> return
+            is TraceCommandWriteResult.NativeFailure -> java.io.IOException("Profiler ACK failed: errno=${result.errno}")
+            is TraceCommandWriteResult.ShortWrite -> java.io.IOException("Profiler ACK incomplete: bytes=${result.bytes}")
+            is TraceCommandWriteResult.Threw -> java.io.IOException("Profiler ACK write threw", result.cause)
+        }
+        ackWriteFailure = result
+        droppedEvents += 1
+        drainComplete = false
+        // The daemon is still waiting for this ACK. Closing immediately exposes failure even if
+        // another complete frame is buffered locally; no subsequent frame may be processed.
+        closeSocketOnce()
+        val cleanup = cleanupOutcome
+        if (cleanup is SeccompCleanupOutcome.Incomplete) cleanup.failures.forEach(failure::addSuppressed)
+        throw failure
     }
 
     private fun isDuplicate(
@@ -421,7 +432,7 @@ internal class ProfilerTraceListener(
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
         return if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {
-            logger.fine("[PROFILER] Deduplicated duplicate event for $cacheKey")
+            logger.fine("Deduplicated profiler event")
             true
         } else {
             pathCache[cacheKey] = now
@@ -451,10 +462,14 @@ internal sealed interface TraceCommandWriteResult {
         val cause: Exception,
     ) : TraceCommandWriteResult
 
+    data class ShortWrite(
+        val bytes: Long,
+    ) : TraceCommandWriteResult
+
     companion object {
         fun from(result: LinuxNative.SyscallResult<Long, *>): TraceCommandWriteResult =
             when (result) {
-                is LinuxNative.SyscallResult.Success -> Written
+                is LinuxNative.SyscallResult.Success -> if (result.value == 1L) Written else ShortWrite(result.value)
                 is LinuxNative.SyscallResult.Error -> NativeFailure(result.errno)
             }
     }

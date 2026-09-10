@@ -12,6 +12,13 @@ import java.util.stream.Stream
 import kotlin.reflect.KClass
 
 internal class ProfilerSessionMachineTest {
+    @org.junit.jupiter.api.Test
+    fun `terminal states reject new protocol input`() {
+        val transition = ProfilerSessionMachine.evaluate(ProfilerState.Terminated(), ProfilerSessionEvent.AckSucceeded)
+        assertTrue(transition.protocolViolation)
+        assertTrue(transition.terminate)
+    }
+
     companion object {
         private val socket = TestFileDescriptors
             .replace<FileDescriptorRole.UnixSocket>(3)

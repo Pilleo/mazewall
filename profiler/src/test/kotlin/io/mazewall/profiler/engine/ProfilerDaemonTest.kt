@@ -59,6 +59,135 @@ class ProfilerDaemonTest {
     }
 
     @Test
+    fun `reactor noise reply failure is terminal without publication or another attempt`() {
+        for (errno in listOf(2, 1)) {
+            val transport = MockTransport().apply { nextIoctlResult = LinuxNative.SyscallResult.Error(errno, -1L) }
+            val reader = object : ProfilerMemoryReader {
+                context(arena: io.mazewall.ffi.memory.NativeArena) override fun readStringFromProcess(
+                    tid: Tid,
+                    remoteAddr: Long,
+                    maxLen: Int,
+                ): String = System.getProperty("java.home") + "/lib/modules"
+            }
+            withReactorWork(transport, reader) { handler, work ->
+                val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                ready.onReply(ready.reply())
+                assertTrue(handler.state is ProfilerState.Terminated)
+                assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                assertEquals(0, transport.handshakeWrites)
+                assertTrue(handler.ledger.dump().none { it is SessionEvent.EventSent || it is SessionEvent.AckReceived })
+                assertThrows(IllegalStateException::class.java) { work.poll() }
+                assertEquals(1, transport.ioctlCalls.size)
+            }
+        }
+    }
+
+    @Test
+    fun `malformed parser output receives terminal denial for original notification id`() {
+        val parser = object : SeccompNotificationParser by RealSeccompNotificationParser {
+            override fun readNotif(notif: ManagedSegment): SeccompNotification = throw IllegalArgumentException("malformed structure")
+        }
+        val transport = MockTransport()
+        withReactorWork(transport, MockReader(), parser) { handler, work ->
+            val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+            assertEquals(NotifResult.TERMINATE, ready.result)
+            ready.onReply(ready.reply())
+            assertTrue(handler.state is ProfilerState.Terminated)
+            assertEquals(1, transport.ioctlCalls.size)
+            assertEquals(0, transport.handshakeWrites)
+        }
+    }
+
+    private fun withReactorWork(
+        transport: MockTransport,
+        reader: ProfilerMemoryReader,
+        parser: SeccompNotificationParser = RealSeccompNotificationParser,
+        block: context(io.mazewall.ffi.memory.NativeArena) (ProfilerSessionHandler, io.mazewall.platform.seccomp.daemon.NotificationWork) -> Unit,
+    ) {
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), parser) {}.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    val notif = allocate(Layouts.SECCOMP_NOTIF)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                    handler
+                        .beginNotification(
+                        notif,
+                        allocate(Layouts.SECCOMP_NOTIF_RESP),
+                        listener,
+                        socket,
+                        io.mazewall.core.Deadline
+                        .afterMillis(30_000),
+                    ).use {
+                        block(handler, it)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `notification parsing retains kernel architecture metadata`() {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+            notif.writeInt(Layouts.SECCOMP_NOTIF_ARCH_OFFSET, 0xC00000B7.toInt())
+            val parsed = RealSeccompNotificationParser.readNotif(notif)
+            assertEquals(
+                io.mazewall.platform.seccomp.SeccompNotifications
+                .read(notif),
+                    parsed,
+            )
+        }
+    }
+
+    @Test
+    fun `reactor structural failure offers one terminal denial without publishing`() {
+        val transport = MockTransport()
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        val reader = object : ProfilerMemoryReader {
+            context(arena: io.mazewall.ffi.memory.NativeArena) override fun readPathString(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): PathStringRead = throw IllegalArgumentException("private path must not appear in diagnostics")
+        }
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN")) {}.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    val notif = allocate(Layouts.SECCOMP_NOTIF)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                    val response = allocate(Layouts.SECCOMP_NOTIF_RESP)
+                    handler
+                        .beginNotification(
+                        notif,
+                        response,
+                        listener,
+                        socket,
+                        io.mazewall.core.Deadline
+                        .afterMillis(30_000),
+                    ).use { work ->
+                        val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                        assertEquals(NotifResult.TERMINATE, ready.result)
+                        ready.onReply(ready.reply())
+                        assertTrue(handler.state is ProfilerState.Terminated)
+                        assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                        assertTrue(transport.sentEvents.isEmpty())
+                        assertEquals(0, transport.handshakeWrites)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun `reactor adapter completes the event and ACK before offering a reply`() {
         val transport = object : MockTransport() {
             override fun write(
@@ -122,6 +251,7 @@ class ProfilerDaemonTest {
         var rawPolls: Int = 0
         var nextWriteResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
             LinuxNative.SyscallResult.Success(1L)
+        var nextIoctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
         context(arena: Arena) override fun sendTraceEvent(
             socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -220,6 +350,7 @@ class ProfilerDaemonTest {
                 arg: ManagedSegment,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
+                if (request == SECCOMP_IOCTL_NOTIF_SEND) return nextIoctlResult
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
                     val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
                     argSeg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
