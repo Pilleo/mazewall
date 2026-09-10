@@ -140,6 +140,8 @@ public object SupervisorSeccompNotifInstaller {
         }
 
     @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
     public fun install(
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
@@ -153,6 +155,8 @@ public object SupervisorSeccompNotifInstaller {
     }
 
     @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
     public fun install(
         native: NativeEngine,
         userNotifSupported: Boolean,
@@ -168,6 +172,8 @@ public object SupervisorSeccompNotifInstaller {
     }
 
     @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
     public fun install(
         native: NativeEngine,
         userNotifSupported: Boolean,
@@ -239,6 +245,7 @@ public object SupervisorSeccompNotifInstaller {
 
     /** Allocation and coordinator waits stay outside [installationGate]. */
     @io.mazewall.MazewallInternal
+    // SUPPRESSION-RATIONALE: Platform support, irreversible installation and bounded handshake failures retain distinct throw sites and explicit partial-installation evidence.
     public fun installOwned(
         native: NativeEngine,
         userNotifSupported: Boolean,

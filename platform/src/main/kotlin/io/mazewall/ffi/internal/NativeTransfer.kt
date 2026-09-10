@@ -56,7 +56,7 @@ internal object NativeTransfer {
         length: ManagedSegment,
     ) {
         if (address.address() == 0L) return
-        bytes(length, 4, writable = true)
+        bytes(length, Int.SIZE_BYTES.toLong(), writable = true)
         val count = Integer.toUnsignedLong(length.native.get(java.lang.foreign.ValueLayout.JAVA_INT, 0))
         bytes(address, count, writable = true)
     }

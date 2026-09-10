@@ -37,8 +37,8 @@ internal object ProfilerSocket {
                     0,
                 )
 
-                val fdVal = when (fdRes) {
-                    is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
+                when (fdRes) {
+                    is LinuxNative.SyscallResult.Success -> Unit
                     is LinuxNative.SyscallResult.Error -> {
                         lastErrno = fdRes.errno
                         Thread.sleep(delayMs)

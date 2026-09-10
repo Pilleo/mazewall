@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <!-- Reviewed native/helper boundaries only; see native-helper-exceptions.md. -->
+  <ManuallySuppressedIssues>
+    <ID>CyclomaticComplexMethod:RawNativeTransfer.kt:RawNativeTransfer$fun validate</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$16</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$199L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$212L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$241L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$271L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$298L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$3</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$3L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$4</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$47L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$5</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$53L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$6</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$64L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$73L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$7L</ID>
+    <ID>MagicNumber:RawNativeTransfer.kt:RawNativeTransfer$8</ID>
+    <ID>ReturnCount:ControlSocketExchange.kt:ControlSocketExchange$context(arena: NativeArena) public fun poll: ByteArray?</ID>
+    <ID>ReturnCount:SeccompSessionHandler.kt:SeccompSessionHandler$context(arena: NativeArena) private fun advancePending: LoopAction</ID>
+    <ID>ThrowsCount:SupervisorSocketUtils.kt:SupervisorSocketUtils$public fun connectDescriptorWithRetry: FileDescriptor&lt;FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned&gt;</ID>
+  </ManuallySuppressedIssues>
+  <CurrentIssues/>
+</SmellBaseline>

@@ -14,13 +14,20 @@ internal object TraceeAuthorityProtocol {
     const val OPERATION = 4
     private const val MAX_ROOTS = 1024
     private const val MAX_PATH = 4095
+    private const val REGISTER_COUNT = 6
+    private const val MAX_ERRNO = 4095
+    private const val ROUTE_EXEC = 3
+    private const val ROUTE_ABORT = 4
+    private const val EFFECT_FD = 3
+    private const val EFFECT_EXEC = 4
+    private const val EFFECT_UNSUPPORTED = 5
 
     fun writeRequest(
         output: DataOutputStream,
         notification: SeccompNotification,
         roots: List<String>,
     ) {
-        require(notification.args.size == 6 && roots.size <= MAX_ROOTS)
+        require(notification.args.size == REGISTER_COUNT && roots.size <= MAX_ROOTS)
         output.writeLong(notification.id)
         output.writeInt(notification.pid)
         output.writeInt(notification.arch)
@@ -31,8 +38,9 @@ internal object TraceeAuthorityProtocol {
         output.flush()
     }
 
+    // SUPPRESSION-RATIONALE: Identity, allocation bounds and absolute roots are validated independently before helper authority is acquired.
     fun readRequest(input: DataInputStream): Pair<SeccompNotification, List<String>> {
-        val notification = SeccompNotification(input.readLong(), input.readInt(), input.readInt(), input.readInt(), LongArray(6) { input.readLong() })
+        val notification = SeccompNotification(input.readLong(), input.readInt(), input.readInt(), input.readInt(), LongArray(REGISTER_COUNT) { input.readLong() })
         if (notification.pid <= 0) throw IOException("Invalid authority tracee identity")
         val count = bounded(input.readInt(), 0..MAX_ROOTS, "bypass roots")
         val roots = List(count) { readPath(input) ?: throw IOException("Null bypass root") }
@@ -74,9 +82,9 @@ internal object TraceeAuthorityProtocol {
             SupervisorRoute.Continue -> output.writeByte(0)
             SupervisorRoute.AskJvm -> output.writeByte(1)
             SupervisorRoute.InjectFd -> output.writeByte(2)
-            SupervisorRoute.SecureExec -> output.writeByte(3)
+            SupervisorRoute.SecureExec -> output.writeByte(ROUTE_EXEC)
             is SupervisorRoute.Abort -> {
-                output.writeByte(4)
+                output.writeByte(ROUTE_ABORT)
                 output.writeInt(route.errno)
             }
         }
@@ -87,8 +95,8 @@ internal object TraceeAuthorityProtocol {
         0 -> SupervisorRoute.Continue
         1 -> SupervisorRoute.AskJvm
         2 -> SupervisorRoute.InjectFd
-        3 -> SupervisorRoute.SecureExec
-        4 -> SupervisorRoute.Abort(bounded(input.readInt(), 1..4095, "errno"), "authority preparation")
+        ROUTE_EXEC -> SupervisorRoute.SecureExec
+        ROUTE_ABORT -> SupervisorRoute.Abort(bounded(input.readInt(), 1..MAX_ERRNO, "errno"), "authority preparation")
         else -> throw IOException("Invalid authority route")
     }
 
@@ -113,12 +121,12 @@ internal object TraceeAuthorityProtocol {
                 null
             }
             is SupervisorReplyEffect.AddFdAndReply -> {
-                output.writeByte(3)
+                output.writeByte(EFFECT_FD)
                 output.writeInt(effect.flags.value)
                 effect.descriptor
             }
             is SupervisorReplyEffect.SecureExecAndReply -> {
-                output.writeByte(4)
+                output.writeByte(EFFECT_EXEC)
                 output.writeInt(effect.request.tid.value)
                 output.writeLong(effect.request.argv)
                 output.writeLong(effect.request.envp)
@@ -136,7 +144,7 @@ internal object TraceeAuthorityProtocol {
                 }
             }
             is SupervisorReplyEffect.UnsupportedAuthority -> {
-                output.writeByte(5)
+                output.writeByte(EFFECT_UNSUPPORTED)
                 null
             }
             is SupervisorReplyEffect.AcceptedSocket, is SupervisorReplyEffect.Recycle -> throw IOException("Invalid authority terminal effect")
@@ -151,21 +159,21 @@ internal object TraceeAuthorityProtocol {
     ): SupervisorReplyEffect =
         when (input.readUnsignedByte()) {
         0 -> SupervisorReplyEffect.Continue
-        1 -> SupervisorReplyEffect.Error(bounded(input.readInt(), 1..4095, "errno"))
+        1 -> SupervisorReplyEffect.Error(bounded(input.readInt(), 1..MAX_ERRNO, "errno"))
         2 -> SupervisorReplyEffect.Value(input.readLong())
-        3 -> {
+        EFFECT_FD -> {
             val flags = input.readInt()
-            if (flags != 0 && flags != 524288) throw IOException("Invalid injected fd flags")
+            if (flags != 0 && flags != io.mazewall.ffi.NativeConstants.O_CLOEXEC) throw IOException("Invalid injected fd flags")
             SupervisorReplyEffect.AddFdAndReply(receive(), NewFdFlags(flags))
         }
-        4 -> {
+        EFFECT_EXEC -> {
             val request = SecureExecRequest(Tid(input.readInt()), input.readLong(), input.readLong(), input.readLong())
             val nul = input.readLong()
-            val errno = bounded(input.readInt(), 0..4095, "exec errno")
+            val errno = bounded(input.readInt(), 0..MAX_ERRNO, "exec errno")
             val target = if (errno == 0) SupervisorDescriptorResult.Opened(receive()) else SupervisorDescriptorResult.Denied(errno)
             SupervisorReplyEffect.SecureExecAndReply(request, target, nul)
         }
-        5 -> SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory)
+        EFFECT_UNSUPPORTED -> SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory)
         else -> throw IOException("Invalid authority effect")
     }
 

@@ -13,3 +13,7 @@ as reductions rather than absorbed into a new budget.
 Update these files only from independently reviewed reports. A compatibility exception belongs
 on the exact declaration with a rationale and a reviewed suppression entry, never in a larger
 per-module warning allowance.
+
+The review-hardening native/helper exceptions are individually documented in
+[native-helper-exceptions.md](../native-helper-exceptions.md); their exact signatures are
+manually selected in module baselines. These do not refresh or enlarge the warning inventories.

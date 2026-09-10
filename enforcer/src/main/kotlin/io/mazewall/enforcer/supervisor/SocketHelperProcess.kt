@@ -34,6 +34,7 @@ internal class SocketHelperProcess private constructor(
     private val input = DataInputStream(process.inputStream)
     private val output = DataOutputStream(process.outputStream)
 
+    // SUPPRESSION-RATIONALE: Every private frame identity and descriptor receipt is checked before handoff; distinct failures retain their protocol boundary.
     override fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect {
         check(lifetime.accepting) { "Socket helper is stopping or closed" }
         val notification = job.notification

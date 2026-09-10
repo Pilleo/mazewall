@@ -1,6 +1,18 @@
 # Reviewed production suppressions only.
 # Format: relative/path/to/File.kt:annotation-line:RuleId
 #
-# This list intentionally starts empty. A line is valid only when the annotation has an adjacent
+# A line is valid only when the annotation has an adjacent
 # SUPPRESSION-RATIONALE comment that names the invariant, failure behavior, and why a narrower
 # construct cannot express it.
+
+# Review-hardening compatibility shims retain their binary signatures while rejecting raw ownership.
+platform/src/main/kotlin/io/mazewall/core/FileDescriptor.kt:357:UnusedParameter
+platform/src/main/kotlin/io/mazewall/core/FileDescriptor.kt:366:UnusedParameter
+platform/src/main/kotlin/io/mazewall/core/FileDescriptor.kt:444:UnusedParameter
+platform/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt:59:UnusedParameter
+enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller.kt:144:UnusedParameter
+enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller.kt:159:UnusedParameter
+enforcer/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller.kt:176:UnusedParameter
+profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt:241:UnusedParameter
+# One immutable vararg composition occurs before the irreversible baseline installation.
+enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt:217:SpreadOperator

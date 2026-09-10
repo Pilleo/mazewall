@@ -69,18 +69,18 @@ internal class TraceeProcAuthority private constructor(
     context(arena: NativeArena) fun readPath(address: Long): String? {
         if (address == 0L) return null
         val output = ByteArrayOutputStream()
-        while (output.size() < 4096) {
+        while (output.size() < PATH_LIMIT) {
             val cursor = address + output.size()
-            val length = minOf(4096 - output.size(), 4096 - (cursor and 4095L).toInt())
+            val length = minOf(PATH_LIMIT - output.size(), PAGE_BYTES - (cursor and PAGE_MASK).toInt())
             val bytes = read(cursor, length)
             val end = bytes.indexOf(0)
             output.write(bytes, 0, if (end >= 0) end else bytes.size)
             if (end >= 0) return output.toString(Charsets.UTF_8)
         }
-        throw TraceeAuthorityFailure(36)
+        throw TraceeAuthorityFailure(NativeConstants.ENAMETOOLONG)
     }
 
-    /** Check both sides of a forced proc read. Concurrent map mutation is still not an atomic snapshot. */
+    /** SUPPRESSION-RATIONALE: Check overflow, permission and range guards before forced reads; concurrent map mutation still is not an atomic snapshot. */
     context(arena: NativeArena) private fun readable(
         address: Long,
         length: Int,
@@ -102,6 +102,7 @@ internal class TraceeProcAuthority private constructor(
         throw TraceeAuthorityFailure(NativeConstants.EFAULT)
     }
 
+    // SUPPRESSION-RATIONALE: Malformed or non-executable proc-map records are skipped independently; only a validated readable executable mapping can supply the snapshot.
     context(arena: NativeArena) fun readOnlyNul(): Long {
         val maps = readFile(proc, "maps", MAX_MAPS_BYTES, engine)
         for (line in maps.lineSequence()) {
@@ -136,6 +137,9 @@ internal class TraceeProcAuthority private constructor(
     companion object {
         private const val MAX_STATUS_BYTES = 65536
         private const val MAX_MAPS_BYTES = 4 * 1024 * 1024
+        private const val PATH_LIMIT = 4096
+        private const val PAGE_BYTES = 4096
+        private const val PAGE_MASK = PAGE_BYTES - 1L
 
         @Suppress("TooGenericExceptionCaught") // Roll back every acquired descriptor on construction failure.
         context(arena: NativeArena) fun capture(tid: Int, engine: NativeEngine): TraceeProcAuthority {
@@ -149,7 +153,7 @@ internal class TraceeProcAuthority private constructor(
                 pidfd = own(engine.process.pidfdOpen(tgid, 0), engine)
                 // A surviving pinned /proc/task directory cannot alias a reused task.
                 // Recheck after pidfd acquisition before any memory/import operation.
-                if (field(readFile(proc, "status", MAX_STATUS_BYTES, engine), "Tgid:") != tgid) throw TraceeAuthorityFailure(3)
+                if (field(readFile(proc, "status", MAX_STATUS_BYTES, engine), "Tgid:") != tgid) throw TraceeAuthorityFailure(NativeConstants.ESRCH)
                 return TraceeProcAuthority(engine, proc, pidfd, ppid)
             } catch (failure: Throwable) {
                 val cleanup = SocketCleanup(failure)
@@ -169,7 +173,7 @@ internal class TraceeProcAuthority private constructor(
                 .firstOrNull { it.startsWith(key) }
             ?.substringAfter(':')
                 ?.trim()
-                ?.toIntOrNull() ?: throw TraceeAuthorityFailure(3)
+                ?.toIntOrNull() ?: throw TraceeAuthorityFailure(NativeConstants.ESRCH)
 
         context(arena: NativeArena) private fun readFile(
             proc: SupervisorOwnedFd,
@@ -179,14 +183,14 @@ internal class TraceeProcAuthority private constructor(
         ): String =
             own(engine.fileSystem.openat(proc.handle, arena.allocateFrom(name), OpenFlags(NativeConstants.O_CLOEXEC)), engine).use { source ->
                 val output = ByteArrayOutputStream()
-                val buffer = arena.allocate(4096)
+                val buffer = arena.allocate(PAGE_BYTES.toLong())
                 while (true) {
-                    val count = when (val read = engine.memory.read(source.handle, buffer, 4096)) {
+                    val count = when (val read = engine.memory.read(source.handle, buffer, PAGE_BYTES.toLong())) {
                         is LinuxNative.SyscallResult.Error -> throw TraceeAuthorityFailure(read.errno)
                         is LinuxNative.SyscallResult.Success -> read.value.toInt()
                     }
                     if (count == 0) break
-                    if (count !in 1..4096 || output.size() + count > limit) throw TraceeAuthorityFailure(75)
+                    if (count !in 1..PAGE_BYTES || output.size() + count > limit) throw TraceeAuthorityFailure(NativeConstants.EOVERFLOW)
                     val bytes = ByteArray(count)
                     ManagedSegment.copy(buffer, 0, bytes, 0, count)
                     output.write(bytes)

@@ -55,12 +55,15 @@ public object SupervisorSocketUtils {
     }
 
     @Deprecated("Use connectDescriptorWithRetry to preserve descriptor ownership")
+    // SUPPRESSION-RATIONALE: Binary migration parameters remain callable, but this raw-ownership entry always rejects before native acquisition.
+    @Suppress("UnusedParameter")
     public fun connectWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
     ): Int = error("Raw descriptor transport is disabled; use connectDescriptorWithRetry")
 
+    // SUPPRESSION-RATIONALE: Each native acquisition and interruption failure is reported at its boundary; collapsing throws would obscure which owner needs cleanup.
     public fun connectDescriptorWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
@@ -72,8 +75,8 @@ public object SupervisorSocketUtils {
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
                 val fdRes = LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
-                val fdVal = when (fdRes) {
-                    is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
+                when (fdRes) {
+                    is LinuxNative.SyscallResult.Success -> Unit
                     is LinuxNative.SyscallResult.Error -> {
                         lastErrno = fdRes.errno
                         try {

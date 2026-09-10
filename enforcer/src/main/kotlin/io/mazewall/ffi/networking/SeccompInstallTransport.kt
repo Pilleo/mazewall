@@ -18,7 +18,8 @@ internal class SeccompInstallTransport(
     private val native: NativeEngine,
     private val handshake: SeccompInstallHandshake,
 ) {
-    @Suppress("TooGenericExceptionCaught") // Roll back each genuine acquisition before preserving its failure.
+    // SUPPRESSION-RATIONALE: Confined memory, deadline retry and descriptor rollback scopes must all surround connect; every failure preserves its acquired owner.
+    @Suppress("TooGenericExceptionCaught")
     fun connect(path: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
         NativeArena.ofConfined().use { arena ->
             val address = SupervisorSocketUtils.setupSockAddrUn(arena, path)

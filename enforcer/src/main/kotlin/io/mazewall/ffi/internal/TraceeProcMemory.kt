@@ -19,7 +19,7 @@ internal class TraceeProcMemory(
         address: Long,
         length: Int,
     ): LinuxNative.SyscallResult<ByteArray, LinuxNative.SyscallHandledState.Unhandled> {
-        require(length in 1..4096)
+        require(length in 1..MAX_READ_BYTES)
         val buffer = arena.allocate(length.toLong())
         return when (
             val result = engine.raw.syscall4(
@@ -38,5 +38,9 @@ internal class TraceeProcMemory(
                 LinuxNative.SyscallResult.Success(bytes)
             }
         }
+    }
+
+    private companion object {
+        const val MAX_READ_BYTES = 4096
     }
 }

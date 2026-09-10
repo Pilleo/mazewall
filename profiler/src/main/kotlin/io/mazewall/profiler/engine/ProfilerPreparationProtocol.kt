@@ -14,6 +14,7 @@ import java.io.IOException
 internal object ProfilerPreparationProtocol {
     private const val MAX_FRAME_BYTES = 128 * 1024
     private const val MAX_NAME_LENGTH = 256
+    private const val SYSCALL_ARGUMENT_COUNT = 6
 
     data class Request(
         val notification: SeccompNotification,
@@ -25,7 +26,7 @@ internal object ProfilerPreparationProtocol {
         request: Request,
     ) {
         val notification = request.notification
-        require(notification.args.size == 6 && request.syscallName.length <= MAX_NAME_LENGTH)
+        require(notification.args.size == SYSCALL_ARGUMENT_COUNT && request.syscallName.length <= MAX_NAME_LENGTH)
         output.writeLong(notification.id)
         output.writeInt(notification.pid)
         output.writeInt(notification.arch)
@@ -36,7 +37,7 @@ internal object ProfilerPreparationProtocol {
     }
 
     fun readRequest(input: DataInputStream): Request {
-        val notification = SeccompNotification(input.readLong(), input.readInt(), input.readInt(), input.readInt(), LongArray(6) { input.readLong() })
+        val notification = SeccompNotification(input.readLong(), input.readInt(), input.readInt(), input.readInt(), LongArray(SYSCALL_ARGUMENT_COUNT) { input.readLong() })
         val name = input.readUTF()
         require(name.length <= MAX_NAME_LENGTH) { "Invalid preparation syscall name" }
         return Request(notification, name)

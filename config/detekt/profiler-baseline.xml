@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <!-- Reviewed native handshake polling boundaries; see native-helper-exceptions.md. -->
+  <ManuallySuppressedIssues>
+    <ID>ReturnCount:HandshakeSession.kt:HandshakeSession.Active$fun performHandshake: HandshakeSession</ID>
+    <ID>ReturnCount:ProfilerSessionHandler.kt:ProfilerSessionHandler.&lt;no name provided&gt;$context(arena: NativeArena) private fun advance: NotificationProgress</ID>
+  </ManuallySuppressedIssues>
+  <CurrentIssues/>
+</SmellBaseline>

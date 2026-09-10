@@ -33,6 +33,7 @@ internal class TraceeAuthorityNotificationWork(
     private var exec: NotificationWork? = null
     private var closed = false
 
+    // SUPPRESSION-RATIONALE: This bounded interpreter explicitly yields at helper, verdict and exec stages; each terminal branch transfers exactly one owned effect.
     context(arena: NativeArena) override fun poll(): NotificationProgress {
         check(!closed)
         exec?.let { return it.poll() }
@@ -78,7 +79,7 @@ internal class TraceeAuthorityNotificationWork(
             }
         }
         if (effect is SupervisorReplyEffect.SecureExecAndReply) {
-            check(effect.capturedEmptyPath != null) { "Authority helper omitted secure-exec snapshot" }
+            checkNotNull(effect.capturedEmptyPath) { "Authority helper omitted secure-exec snapshot" }
             exec = replies.prepareSecureExec(effect, SupervisorReplyContext(job.notification.id, response), deadline)
             return NotificationProgress.Await
         }

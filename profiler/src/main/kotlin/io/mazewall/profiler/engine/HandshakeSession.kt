@@ -37,11 +37,7 @@ internal sealed class HandshakeSession {
 
         fun passedThrough() = PassedThrough(notifId, listenerFd)
 
-        /**
-         * Performs the byte-level protocol handshake with the parent JVM.
-         * Decouples IPC polling from orchestration.
-         */
-
+        /** SUPPRESSION-RATIONALE: Each byte-level handshake outcome returns at its boundary to make terminal reply and ACK failure handling explicit. */
         fun performHandshake(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,

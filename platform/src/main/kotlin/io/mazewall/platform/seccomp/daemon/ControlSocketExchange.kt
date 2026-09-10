@@ -55,7 +55,7 @@ public class ControlSocketExchange(
         }
     }
 
-    /** Null means Await. Completion is returned only after the full request and response. */
+    /** SUPPRESSION-RATIONALE: Null means Await; each partial transfer yields immediately to preserve one I/O attempt per poll. */
     context(arena: NativeArena) public fun poll(): ByteArray? {
         if (nanoTime() - deadline.nanoTime >= 0) throw ControlSocketFailure(NativeConstants.ETIMEDOUT)
         if (sent < request.size) {

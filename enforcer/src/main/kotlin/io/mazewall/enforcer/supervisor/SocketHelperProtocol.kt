@@ -11,6 +11,8 @@ internal object SocketHelperProtocol {
     const val MAX_ADDRESS_BYTES = 128
     const val MAX_ERRNO = 4095
     const val MAX_PATH_BYTES = 4095
+    const val OPENED_RESULT = 3
+    private const val OPEN_OPERATION = 3
 
     fun readResult(
         input: DataInputStream,
@@ -25,7 +27,7 @@ internal object SocketHelperProtocol {
                 if (bytes.size != length) throw IOException("Inconsistent helper address length")
                 SocketHelperResult.Accepted(receive(), bytes, length)
             }
-            3 -> SocketHelperResult.Opened(receive())
+            OPENED_RESULT -> SocketHelperResult.Opened(receive())
             else -> throw IOException("Invalid helper result $tag")
         }
 
@@ -53,7 +55,7 @@ internal object SocketHelperProtocol {
                 output.writeInt(operation.flags)
             }
             is SocketOperation.OpenAt2 -> {
-                output.writeByte(3)
+                output.writeByte(OPEN_OPERATION)
                 val path = operation.path.toByteArray(Charsets.UTF_8)
                 output.writeInt(path.size)
                 output.write(path)
@@ -76,7 +78,7 @@ internal object SocketHelperProtocol {
             SocketOperation.Connect(bytes)
         }
         2 -> SocketOperation.Accept(input.readInt())
-        3 -> readOpen(input)
+        OPEN_OPERATION -> readOpen(input)
         else -> throw IOException("Invalid helper operation $tag")
     }
 

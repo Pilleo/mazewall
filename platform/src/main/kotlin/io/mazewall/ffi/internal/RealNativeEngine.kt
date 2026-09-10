@@ -194,7 +194,13 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        NativeTransfer.elements(fds, nfds, 8, writable = true)
+        NativeTransfer.elements(
+            fds,
+            nfds,
+            io.mazewall.ffi.Layouts.POLLFD
+            .byteSize(),
+                writable = true,
+        )
         return SyscallInvoker.poll(POLL, fds.native, nfds, timeout)
     }
 }
@@ -434,14 +440,14 @@ internal object RealNativeNetworking : NativeNetworking {
         protocol: Int,
         sv: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        NativeTransfer.bytes(sv, 8, writable = true)
+        NativeTransfer.bytes(sv, 2L * Int.SIZE_BYTES, writable = true)
         val result = SyscallInvoker.socketpair(SOCKETPAIR, domain, type, protocol, sv.native)
         if (result is LinuxNative.SyscallResult.Success) {
             result.descriptorReceipts = listOf(
                 io.mazewall.core.NativeDescriptorReceipt
                     .acquired(sv.readInt(0)),
                 io.mazewall.core.NativeDescriptorReceipt
-                    .acquired(sv.readInt(4)),
+                    .acquired(sv.readInt(Int.SIZE_BYTES.toLong())),
             )
         }
         return result
@@ -632,7 +638,7 @@ internal object RealNativeProcess : NativeProcess {
         code: Int,
         addr: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        NativeTransfer.bytes(addr, 8, writable = true)
+        NativeTransfer.bytes(addr, Long.SIZE_BYTES.toLong(), writable = true)
         val handle = ARCH_PRCTL_ADDR ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         return SyscallInvoker.archPrctlAddr(handle, code, addr.native)
     }

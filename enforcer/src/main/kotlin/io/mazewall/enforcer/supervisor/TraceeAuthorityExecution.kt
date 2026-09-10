@@ -125,6 +125,14 @@ internal class TraceeAuthorityExecution(
         execPreparationErrno?.let { errno ->
             return SupervisorReplyEffect.SecureExecAndReply(request, SupervisorDescriptorResult.Denied(errno), 0)
         }
+        return captureExecutable(request, jvmPath)
+    }
+
+    context(arena: NativeArena) private fun captureExecutable(
+        request: SecureExecRequest,
+        jvmPath: String?,
+    ): SupervisorReplyEffect {
+        val args = notification.args
         val path = when (val plan = planExecRewrite(arch, arguments.pathStr, jvmPath)) {
             is ExecRewritePlan.Ready -> plan.path
             ExecRewritePlan.MissingPath, ExecRewritePlan.UnsupportedArch -> return SupervisorReplyEffect.SecureExecAndReply(request, SupervisorDescriptorResult.Denied(NativeConstants.EPERM), 0)
@@ -132,10 +140,10 @@ internal class TraceeAuthorityExecution(
         val nul = authority.readOnlyNul()
         if (nul == 0L) return SupervisorReplyEffect.SecureExecAndReply(request, SupervisorDescriptorResult.Denied(NativeConstants.EPERM), 0)
         val execFlags = if (notification.nr == arch.execveat) args[4].toInt() else 0
-        val target = if (path.isEmpty() && execFlags and 0x1000 != 0) {
+        val target = if (path.isEmpty() && execFlags and NativeConstants.AT_EMPTY_PATH != 0) {
             SupervisorDescriptorResult.Opened(authority.import(arguments.dirfd.value))
         } else {
-            val flags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or if (execFlags and 0x100 != 0) 0x20000 else 0
+            val flags = NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or if (execFlags and NativeConstants.AT_SYMLINK_NOFOLLOW != 0) NativeConstants.O_NOFOLLOW else 0
             openAt(path, flags.toLong(), 0, 0)
         }
         return SupervisorReplyEffect.SecureExecAndReply(request, target, nul)
@@ -149,12 +157,12 @@ internal class TraceeAuthorityExecution(
     ): SupervisorDescriptorResult {
         val absolute = path.startsWith('/')
         // Retain the existing openat2 BENEATH rejection for an absolute input.
-        if (absolute && resolve and NativeConstants.RESOLVE_BENEATH.toLong() != 0L) return SupervisorDescriptorResult.Denied(18)
+        if (absolute && resolve and NativeConstants.RESOLVE_BENEATH.toLong() != 0L) return SupervisorDescriptorResult.Denied(NativeConstants.EXDEV)
         val directory = authority.directory(arguments.dirfd, absolute)
         val how = arena.allocate(Layouts.OPEN_HOW_SIZE)
         how.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
         how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, mode)
-        how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve or if (absolute) 0x10L else 0)
+        how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve or if (absolute) NativeConstants.RESOLVE_IN_ROOT else 0)
         return SupervisorDescriptorResult.from(engine.fileSystem.openat2(directory.handle, arena.allocateFrom(path), how, Layouts.OPEN_HOW_SIZE), engine)
     }
 

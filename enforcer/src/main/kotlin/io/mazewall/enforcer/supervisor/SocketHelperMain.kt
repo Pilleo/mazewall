@@ -57,6 +57,7 @@ internal object SocketHelperMain {
                 }
     }
 
+    // SUPPRESSION-RATIONALE: Each exhaustive effect branch validates its own transfer; finally disposes the effect on every failed write or descriptor send.
     private fun sendResult(
         output: DataOutputStream,
         channel: io.mazewall.core.FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
@@ -78,7 +79,7 @@ internal object SocketHelperMain {
                             if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Accepted descriptor send failed")
                         }
                         is SocketHelperResult.Opened -> {
-                            output.writeByte(3)
+                            output.writeByte(SocketHelperProtocol.OPENED_RESULT)
                             output.flush()
                             if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Opened descriptor send failed")
                         }

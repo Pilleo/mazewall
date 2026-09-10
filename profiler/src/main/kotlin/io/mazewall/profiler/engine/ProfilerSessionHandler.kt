@@ -119,6 +119,7 @@ internal class ProfilerSessionHandler(
                 preparing?.close()
             }
 
+            // SUPPRESSION-RATIONALE: Preparation, publication and ACK each yield to the reactor; terminal outcomes return immediately to exclude another reply attempt.
             context(arena: NativeArena) private fun advance(): NotificationProgress {
                 val exchange = control
                 if (exchange == null) {
@@ -236,14 +237,14 @@ internal class ProfilerSessionHandler(
         notif: ManagedSegment,
         resp: ManagedSegment,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
-        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        // SUPPRESSION-RATIONALE: The migration signature retains this parameter; the active session owns the endpoint and never fabricates ownership.
+        @Suppress("UnusedParameter") socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     ): NotifResult {
         val currentState = state as? ProfilerState.ActiveSession ?: return NotifResult.TERMINATE
 
         val parsedNotif = parser.readNotif(notif)
         val id = parsedNotif.id
         val pidVal = parsedNotif.pid
-        val nr = parsedNotif.nr
 
         val handshake = HandshakeSession.Active(id, listenerFd)
         val reply = ReplyAttempt()
@@ -391,8 +392,8 @@ internal class ProfilerSessionHandler(
     ) {
         if (failure is InterruptedException || failure is java.nio.channels.ClosedByInterruptException) Thread.currentThread().interrupt()
         // Exceptions may contain tracee-controlled paths or data. Keep only the type and bounded numeric ledger.
-        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), 0, failure.javaClass.simpleName.take(80), (failure as? ControlSocketFailure)?.errno))
-        logger.severe { "$category (${failure.javaClass.simpleName.take(80)}); recent events=${ledger.dump().takeLast(8).joinToString("; ")}" }
+        ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), 0, failure.javaClass.simpleName.take(MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH), (failure as? ControlSocketFailure)?.errno))
+        logger.severe { "$category (${failure.javaClass.simpleName.take(MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH)}); recent events=${ledger.dump().takeLast(MAX_RECENT_SESSION_EVENTS).joinToString("; ")}" }
     }
 
     /** Materializes native notification fields into a heap-only event before publication. */

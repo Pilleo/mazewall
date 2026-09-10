@@ -10,6 +10,7 @@ import java.lang.foreign.ValueLayout
 
 /** Explicit top-level pointer schemas; unknown managed arguments never reach syscall(2). */
 internal object RawNativeTransfer {
+    // SUPPRESSION-RATIONALE: This UAPI schema table keeps argument indices and native widths adjacent; requireComplete rejects every uncovered pointer.
     fun validate(
         nr: Long,
         args: Array<NativeArg>,
@@ -133,7 +134,7 @@ internal object RawNativeTransfer {
             val buffer = memory(address)
             val size = memory(length)
             if (buffer != null && buffer.address() != 0L) {
-                require(size != null) { "Managed socket output requires a managed length" }
+                requireNotNull(size) { "Managed socket output requires a managed length" }
                 NativeTransfer.socketAddress(buffer, size)
             }
         }

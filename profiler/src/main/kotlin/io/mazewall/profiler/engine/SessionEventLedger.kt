@@ -3,6 +3,9 @@ package io.mazewall.profiler.engine
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReferenceArray
 
+internal const val MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH = 80
+internal const val MAX_RECENT_SESSION_EVENTS = 8
+
 sealed interface SessionEvent {
     val timestampNanos: Long
     val threadId: Long
@@ -25,7 +28,7 @@ sealed interface SessionEvent {
         val operation: String,
         val errno: Int?,
     ) : SessionEvent {
-        override fun toString() = "[$timestampNanos] Thread $threadId: REPLY_FAILED ${operation.take(80)} errno=$errno"
+        override fun toString() = "[$timestampNanos] Thread $threadId: REPLY_FAILED ${operation.take(MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH)} errno=$errno"
     }
 
     class VmReadvResolved(

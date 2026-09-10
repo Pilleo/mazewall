@@ -28,6 +28,7 @@ internal class SupervisorNotificationWork(
     private var execWork: NotificationWork? = null
     private var closed = false
 
+    // SUPPRESSION-RATIONALE: Poll yields separately at preparation, verdict and reply phases; fall-through would permit blocking or repeated terminal work.
     context(arena: NativeArena) override fun poll(): NotificationProgress {
         check(!closed)
         execWork?.let { return it.poll() }

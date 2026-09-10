@@ -194,6 +194,7 @@ public class SeccompSessionHandler(
         return LoopAction.Continue
     }
 
+    // SUPPRESSION-RATIONALE: Terminal claim, timeout and Await paths must return independently so a notification cannot reach a second reply branch.
     context(arena: NativeArena) private fun advancePending(pollFds: ManagedSegment): LoopAction {
         val current = checkNotNull(pending)
         if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current)

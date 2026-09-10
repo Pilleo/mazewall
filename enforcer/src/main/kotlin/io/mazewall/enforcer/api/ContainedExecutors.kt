@@ -213,6 +213,8 @@ object ContainedExecutors {
      * successful stages remain irreversible and are recorded by the ordinary installer.
      */
     @io.mazewall.MazewallInternal
+    // SUPPRESSION-RATIONALE: One defensive vararg composition precedes the irreversible child baseline; preserving the existing PolicyDefinition API avoids semantic changes.
+    @Suppress("SpreadOperator")
     fun installOnDedicatedProcess(vararg policies: Policy<*, Uncompiled>): io.mazewall.InstallationReceipt {
         validateLinuxAndNotVirtual()
         check(Platform.configuredFallback() == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
@@ -463,7 +465,7 @@ object ContainedExecutors {
             val session = if (plan.needsNewFilter) {
                 // Kernel depth belongs to this thread's complete filter tree, even
                 // though process policy coverage is planned from processState only.
-                FilterInstallationPlanner.verifyFilterDepth(resolveCurrentState().filterDepth)
+                FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
                 applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy, attempt)
             } else {
                 null
@@ -503,7 +505,7 @@ object ContainedExecutors {
         policy: PolicyDefinition<*>,
         attempt: InstallationAttempt,
     ): LandlockStep {
-        if (!needsLandlock(policy)) return LandlockStep.UNCHANGED
+        if (!policy.enforceLandlock) return LandlockStep.UNCHANGED
 
         synchronized(processLock) {
             val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
@@ -550,32 +552,6 @@ object ContainedExecutors {
             }
             return LandlockStep.UNCHANGED
         }
-    }
-
-    /**
-     * Landlock is required if the policy enforces Landlock (regardless of whether paths are empty).
-     * Note: We no longer implicitly trigger Landlock for io_uring_setup bypass prevention here.
-     * Instead, if Landlock is not enforced (empty paths) and a policy restricts open/openat but allows io_uring_setup,
-     * PolicyBuilder/PolicyDefinition automatically blocks io_uring_setup in seccomp.
-     */
-    private fun needsLandlock(policy: PolicyDefinition<*>) = policy.enforceLandlock
-
-    /**
-     * True when every [childPaths] entry lies beneath some [parentPaths] entry.
-     *
-     * Uses the canonical [io.mazewall.core.isUnder] containment predicate with realpath resolution
-     * on both sides (see [io.mazewall.core.resolveReal]): Landlock binds rules to dentries, so a
-     * symlinked spelling of an already-allowed directory must compare equal, while an operand that
-     * cannot be resolved compares only by its syntactic value — two different spellings that fail
-     * resolution identically still match, and anything else is rejected (fail closed).
-     */
-    private fun isPathSubset(
-        parentPaths: Set<SandboxedPath>,
-        childPaths: Set<SandboxedPath>,
-    ): Boolean {
-        if (childPaths.isEmpty()) return true
-        val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
-        return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
     }
 
     private fun handleUnsupportedPlatform() {
@@ -660,8 +636,6 @@ object ContainedExecutors {
         }
     }
 
-    private fun resolveCurrentState(): ContainerState = ContainerState.resolveCurrentState()
-
     private fun applyBpfFilter(
         processWide: Boolean,
         toInstall: PolicyDefinition<*>,
@@ -695,7 +669,7 @@ object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
-            val currentState = resolveCurrentState()
+            val currentState = ContainerState.resolveCurrentState()
             val priorFilterDepth = currentState.filterDepth
 
             // Compute merged state for union-aware self-verification (issue-20260824-011900)
@@ -727,4 +701,19 @@ object ContainedExecutors {
             return AutoCloseable {}
         }
     }
+}
+
+/**
+ * True when every [childPaths] entry lies beneath some [parentPaths] entry.
+ * Uses canonical real paths on both sides because Landlock binds rules to dentries.
+ * Unresolvable operands compare only by their syntactic value; different unresolved
+ * spellings are rejected, preserving the existing fail-closed subset semantics.
+ */
+private fun isPathSubset(
+    parentPaths: Set<SandboxedPath>,
+    childPaths: Set<SandboxedPath>,
+): Boolean {
+    if (childPaths.isEmpty()) return true
+    val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
+    return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
 }

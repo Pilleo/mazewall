@@ -353,6 +353,8 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
          * Consume the result of a native acquisition with getFdOrThrow instead.
          */
         @Deprecated("Raw descriptor adoption is disabled; consume a native acquisition result with getFdOrThrow")
+        // SUPPRESSION-RATIONALE: Binary migration signature is retained, but raw integers always fail before ownership can be fabricated.
+        @Suppress("UnusedParameter")
         public fun <R : FileDescriptorRole> adopt(
             value: Int,
             role: R,
@@ -360,6 +362,8 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
         ): FileDescriptor<R, FdState.Open, FdOwnership.Owned> = error("Raw descriptor adoption is disabled; consume a native acquisition result with getFdOrThrow")
 
         @Deprecated("Raw descriptor replacement is disabled; use a native acquisition receipt")
+        // SUPPRESSION-RATIONALE: Binary migration signature is retained, but replacement always fails before touching any descriptor.
+        @Suppress("UnusedParameter")
         public fun <R : FileDescriptorRole> replace(
             value: Int,
             arena: NativeArena? = null,
@@ -436,6 +440,8 @@ public fun ebadfUnlessLive(vararg args: NativeArg): LinuxNative.SyscallResult<Lo
     return null
 }
 
+// SUPPRESSION-RATIONALE: Legacy linkage retains cmd; ownership now originates exclusively in the native acquisition receipt and this adapter is identity-only.
+@Suppress("UnusedParameter")
 public fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.claimDupIfNeeded(cmd: Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
     // Compatibility helper only. Actual acquisition receipts are minted by native fcntl.
 

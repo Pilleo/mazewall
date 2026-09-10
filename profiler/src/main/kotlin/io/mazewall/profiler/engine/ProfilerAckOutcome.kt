@@ -22,9 +22,11 @@ internal sealed interface ProfilerAckOutcome {
             ) {
                     return Rejected(ProfilerHandshakeFailure.MalformedReply)
                 }
-            if (PASS_THROUGH_COMMAND_BYTE in bytes) return PassThrough
-            if (PROTOCOL_ACK_BYTE in bytes) return Acknowledged(SHUTDOWN_COMMAND_BYTE in bytes)
-            return Rejected(ProfilerHandshakeFailure.Shutdown)
+            return when {
+                PASS_THROUGH_COMMAND_BYTE in bytes -> PassThrough
+                PROTOCOL_ACK_BYTE in bytes -> Acknowledged(SHUTDOWN_COMMAND_BYTE in bytes)
+                else -> Rejected(ProfilerHandshakeFailure.Shutdown)
+            }
         }
     }
 }

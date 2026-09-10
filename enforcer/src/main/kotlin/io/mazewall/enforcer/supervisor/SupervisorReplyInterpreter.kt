@@ -45,7 +45,7 @@ internal class SupervisorReplyInterpreter(
         NativeArena.ofConfined().use { arena ->
         val buffer = arena.allocate(8L)
         buffer.writeLong(0L, id)
-        repeat(8) {
+            repeat(MAX_IOCTL_ATTEMPTS) {
             when (val result = engine.raw.ioctl(listener, NativeConstants.SECCOMP_IOCTL_NOTIF_ID_VALID, buffer)) {
                 is LinuxNative.SyscallResult.Success -> return@use true
                 is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR) return@use false
@@ -183,7 +183,7 @@ internal class SupervisorReplyInterpreter(
         add.setFlags(operation)
         add.setSrcfd(descriptor.handle.value)
         add.setNewfdFlags(flags.value)
-        repeat(8) {
+        repeat(MAX_IOCTL_ATTEMPTS) {
             val result = engine.raw.ioctl(listener, IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD, add.managed.typed<IoctlPayload.SeccompNotifAddFd>())
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) return@repeat
             return when (result) {
@@ -232,5 +232,9 @@ internal class SupervisorReplyInterpreter(
             is SupervisorDescriptorResult.Opened -> imported.descriptor.close()
         }
         return sendError(context, NativeConstants.EPERM)
+    }
+
+    private companion object {
+        const val MAX_IOCTL_ATTEMPTS = 8
     }
 }

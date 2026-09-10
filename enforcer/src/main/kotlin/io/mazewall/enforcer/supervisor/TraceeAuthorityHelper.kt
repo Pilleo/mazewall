@@ -7,6 +7,7 @@ import java.io.DataOutputStream
 
 /** Serial child interpreter. Proc/pidfd/mem/cwd handles never leave this request's scope. */
 internal object TraceeAuthorityHelper {
+    // SUPPRESSION-RATIONALE: Nested arena, authority and reply owners enclose the serial helper transaction so every exceptional exit releases acquired descriptors.
     fun serve(
         input: DataInputStream,
         output: DataOutputStream,
