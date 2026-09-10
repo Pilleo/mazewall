@@ -16,6 +16,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SeccompNotifAddFdSegment
 import io.mazewall.ffi.memory.fill
+import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
 import io.mazewall.platform.seccomp.UserNotifReply
 import io.mazewall.platform.seccomp.UserNotifReplyResult
@@ -40,6 +41,19 @@ internal class SupervisorReplyInterpreter(
     private val descriptors: TraceeDescriptorImporter,
     private val readOnlyNul: (Tid) -> Long? = { tid -> NativeArena.ofConfined().use { arena -> with(arena) { TraceeReadOnlyNul.find(tid) } } },
 ) {
+    fun isNotificationValid(id: Long): Boolean =
+        NativeArena.ofConfined().use { arena ->
+        val buffer = arena.allocate(8L)
+        buffer.writeLong(0L, id)
+        repeat(8) {
+            when (val result = engine.raw.ioctl(listener, NativeConstants.SECCOMP_IOCTL_NOTIF_ID_VALID, buffer)) {
+                is LinuxNative.SyscallResult.Success -> return@use true
+                is LinuxNative.SyscallResult.Error -> if (result.errno != NativeConstants.EINTR) return@use false
+            }
+        }
+        false
+    }
+
     /** Nonterminal exec injection/rewrite precedes the reactor's terminal reply lease. */
     context(arena: NativeArena) fun prepareSecureExec(
         effect: SupervisorReplyEffect.SecureExecAndReply,
@@ -56,7 +70,7 @@ internal class SupervisorReplyInterpreter(
                     is FdInjectionResult.Failed -> Unit
                     is FdInjectionResult.Injected -> {
                         descriptor = injected.fd
-                        emptyPath = readOnlyNul(effect.request.tid) ?: 0L
+                        emptyPath = effect.capturedEmptyPath ?: readOnlyNul(effect.request.tid) ?: 0L
                     }
                 }
             }
@@ -90,6 +104,12 @@ internal class SupervisorReplyInterpreter(
                     confirmed(UserNotifReply.send(engine.raw, listener, context.response))
                 }
                 is SupervisorReplyEffect.Error -> sendError(context, effect.errno)
+                is SupervisorReplyEffect.UnsupportedAuthority -> {
+                    java.util.logging.Logger
+                        .getLogger(SupervisorReplyInterpreter::class.java.name)
+                        .warning("Unsupported tracee authority: ${effect.authority}; notification=${context.id}; denied with EPERM")
+                    sendError(context, NativeConstants.EPERM)
+                }
                 is SupervisorReplyEffect.AddFdAndReply -> effect.descriptor.use { injectReply(context, it, effect.flags) }
                 is SupervisorReplyEffect.AcceptedSocket -> acceptedReply(effect, context)
                 is SupervisorReplyEffect.SecureExecAndReply -> secureExec(effect, context)

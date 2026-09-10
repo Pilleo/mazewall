@@ -65,8 +65,11 @@ internal object SocketHelperProtocol {
         output.flush()
     }
 
-    fun readOperation(input: DataInputStream): SocketOperation =
-        when (val tag = input.readUnsignedByte()) {
+    fun readOperation(
+        input: DataInputStream,
+        tag: Int = input.readUnsignedByte(),
+    ): SocketOperation =
+        when (tag) {
         1 -> {
             val bytes = readBytes(input)
             if (bytes.size < 2) throw IOException("Short socket address")

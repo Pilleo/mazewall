@@ -58,6 +58,23 @@ internal class SocketHelperPool(
         Session().also { sessions += it }
     }
 
+    /** Startup-only: initialize every slot before any listener is admitted. */
+    fun prewarm() {
+        val owner = synchronized(gate) {
+            check(executor.taskCount == 0L) { "Helper prewarm must precede operation admission" }
+            session()
+        }
+        owner.use {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            // ThreadPoolExecutor assigns each of its first corePoolSize jobs a new worker.
+            val jobs = List(executor.corePoolSize) { owner.prewarmSlot() }
+            jobs.forEach { job ->
+                SocketCleanup.await(deadline - System.nanoTime()) { job.finished.await(it, TimeUnit.NANOSECONDS) }
+                check(job.result.join() == SocketHelperResult.Connected) { "Authority helper startup failed" }
+            }
+        }
+    }
+
     inner class Session internal constructor() : AutoCloseable {
         private var retired = false
         private val jobs = mutableSetOf<Job>()
@@ -65,24 +82,40 @@ internal class SocketHelperPool(
         fun submit(
             operation: SocketOperation,
             descriptor: SupervisorOwnedFd,
-        ): CompletableFuture<SocketHelperResult> {
-            val job = Job(this, operation, descriptor)
+        ): CompletableFuture<SocketHelperResult> = enqueue(SocketHelperRequest.Operation(operation, descriptor)).result
+
+        fun submitAuthority(authority: TraceeAuthorityJob): CompletableFuture<SocketHelperResult> =
+            enqueue(SocketHelperRequest.Authority(authority)).result.also { result ->
+                result.whenComplete { value, failure ->
+                    if (failure != null) authority.prepared.completeExceptionally(failure)
+                    if (value is SocketHelperResult.Failed) {
+                        authority.prepared.complete(
+                        TraceeAuthoritySnapshot(0, null, null, SupervisorRoute.Abort(value.errno, "authority helper failed")),
+                    )
+                    }
+                }
+            }
+
+        internal fun prewarmSlot(): Job = enqueue(SocketHelperRequest.Prewarm)
+
+        private fun enqueue(request: SocketHelperRequest): Job {
+            val job = Job(this, request)
             synchronized(gate) {
                 if (retired || closed) {
-                    descriptor.close()
+                    request.close()
                     job.result.cancel(false)
-                    return job.result
+                    return job
                 }
                 jobs += job
                 try {
                     executor.execute(job)
                 } catch (_: RejectedExecutionException) {
                     jobs -= job
-                    descriptor.close()
+                    request.close()
                     job.result.complete(SocketHelperResult.Failed(EAGAIN))
                 }
             }
-            return job.result
+            return job
         }
 
         fun cancel() {
@@ -119,8 +152,7 @@ internal class SocketHelperPool(
 
     internal inner class Job(
         private val session: Session,
-        private val operation: SocketOperation,
-        private val descriptor: SupervisorOwnedFd,
+        private val request: SocketHelperRequest,
     ) : Runnable {
         val result = CompletableFuture<SocketHelperResult>()
         val finished = CountDownLatch(1)
@@ -135,10 +167,11 @@ internal class SocketHelperPool(
                 helper?.let { worker -> reaping = reap { worker.close() } }
                 executor.remove(this)
             }
+            request.cancel()
             result.cancel(false)
             if (queued) {
                 try {
-                    descriptor.close()
+                    request.close()
                 } finally {
                     session.remove(this)
                     finished.countDown()
@@ -149,14 +182,14 @@ internal class SocketHelperPool(
         override fun run() {
             val outcome = SocketJobOutcome()
             outcome.cleanup.attempt {
-                descriptor.use {
+                request.use {
                     if (synchronized(gate) { cancelled || session.isClosed() }) return@use
                     val worker = helpers.computeIfAbsent(Thread.currentThread()) { SocketHelperSlot(factory()) }
                     val run = synchronized(gate) {
                         helper = worker
                         !cancelled && !session.isClosed()
                     }
-                    if (run) outcome.output = worker.execute(operation, descriptor)
+                    if (run) outcome.output = request.execute(worker)
                 }
             }
             if (outcome.cleanup.failure != null) {

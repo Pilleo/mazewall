@@ -19,6 +19,7 @@ internal class SupervisorNotificationSession(
     private val exchange: JvmVerdictExchange,
     private val replies: SupervisorReplyInterpreter,
     private val reportUncaught: (Throwable) -> Unit,
+    private val authority: ((SeccompNotification, ManagedSegment, Deadline) -> NotificationWork)? = null,
 ) : AutoCloseable {
     private val active = mutableSetOf<NotificationWork>()
     private var closed = false
@@ -36,8 +37,12 @@ internal class SupervisorNotificationSession(
             }
         var acquired: SupervisorRouteExecutor? = null
         try {
-            val executor = SupervisorRouteExecutor(engine, descriptors, helpers).also { acquired = it }
-            val delegate = SupervisorNotificationWork(notification, response, deadline, preparation, exchange, SupervisorRouteDispatcher(executor), replies, reportUncaught)
+            val delegate = if (authority != null) {
+                authority.invoke(notification, response, deadline)
+            } else {
+                val executor = SupervisorRouteExecutor(engine, descriptors, helpers).also { acquired = it }
+                SupervisorNotificationWork(notification, response, deadline, preparation, exchange, SupervisorRouteDispatcher(executor), replies, reportUncaught)
+            }
             return object : NotificationWork {
                 private var retired = false
 
@@ -48,7 +53,7 @@ internal class SupervisorNotificationSession(
                     retired = true
                     val cleanup = SocketCleanup()
                     cleanup.attempt { delegate.close() }
-                    cleanup.attempt { executor.cancel() }
+                    cleanup.attempt { acquired?.cancel() }
                     cleanup.attempt { capacity.close() }
                     active -= this
                     cleanup.rethrow()

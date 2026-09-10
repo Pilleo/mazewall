@@ -545,10 +545,16 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.SocketOperation\$OpenAt2",
             ),
             "io.mazewall.enforcer.supervisor.SocketHelperResult" to setOf(
+                "io.mazewall.enforcer.supervisor.SocketHelperResult\$Authority",
                 "io.mazewall.enforcer.supervisor.SocketHelperResult\$Connected",
                 "io.mazewall.enforcer.supervisor.SocketHelperResult\$Failed",
                 "io.mazewall.enforcer.supervisor.SocketHelperResult\$Accepted",
                 "io.mazewall.enforcer.supervisor.SocketHelperResult\$Opened",
+            ),
+            "io.mazewall.enforcer.supervisor.SocketHelperRequest" to setOf(
+                "io.mazewall.enforcer.supervisor.SocketHelperRequest\$Prewarm",
+                "io.mazewall.enforcer.supervisor.SocketHelperRequest\$Operation",
+                "io.mazewall.enforcer.supervisor.SocketHelperRequest\$Authority",
             ),
             "io.mazewall.ffi.networking.SeccompInstallState" to setOf(
                 "io.mazewall.ffi.networking.SeccompInstallState\$Pending",
@@ -563,6 +569,7 @@ class ArchitectureTest {
                 "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Ready",
             ),
             "io.mazewall.enforcer.supervisor.SupervisorReplyEffect" to setOf(
+                "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$UnsupportedAuthority",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Continue",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Value",
                 "io.mazewall.enforcer.supervisor.SupervisorReplyEffect\$Error",

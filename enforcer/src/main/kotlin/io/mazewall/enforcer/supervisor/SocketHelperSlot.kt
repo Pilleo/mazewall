@@ -7,6 +7,11 @@ internal class SocketHelperSlot(
     @Volatile private var accepting = true
     private var closed = false
 
+    override fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect {
+        check(accepting) { "Socket helper is retiring" }
+        return delegate.executeAuthority(job)
+    }
+
     override fun execute(
         operation: SocketOperation,
         socket: SupervisorOwnedFd,

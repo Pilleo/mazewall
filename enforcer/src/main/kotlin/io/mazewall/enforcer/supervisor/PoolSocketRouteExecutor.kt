@@ -20,7 +20,7 @@ internal class PoolSocketRouteExecutor(
             when (result) {
                 SocketHelperResult.Connected -> SupervisorReplyEffect.Value(0)
                 is SocketHelperResult.Failed -> SupervisorReplyEffect.Error(result.errno)
-                is SocketHelperResult.Accepted, is SocketHelperResult.Opened -> {
+                is SocketHelperResult.Accepted, is SocketHelperResult.Opened, is SocketHelperResult.Authority -> {
                     result.dispose()
                     SupervisorReplyEffect.Recycle("Unexpected accepted descriptor for connect")
                 }
@@ -32,7 +32,7 @@ internal class PoolSocketRouteExecutor(
             when (result) {
                 SocketHelperResult.Connected -> SupervisorReplyEffect.Recycle("Unexpected connect result for accept")
                 is SocketHelperResult.Failed -> SupervisorReplyEffect.Error(result.errno)
-                is SocketHelperResult.Opened -> {
+                is SocketHelperResult.Opened, is SocketHelperResult.Authority -> {
                     result.dispose()
                     SupervisorReplyEffect.Recycle("Unexpected opened descriptor for accept")
                 }

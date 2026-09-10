@@ -23,10 +23,21 @@ internal class OpenRouteExecutor(
         how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, plan.mode)
         how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, plan.resolve)
         val path = arena.allocateFrom(plan.path)
-        val opened = if (plan.useCurrentWorkingDirectory) {
+        val opened = if (plan.path.startsWith('/')) {
             SupervisorDescriptorResult.from(engine.fileSystem.openat2(FileDescriptor.AT_FDCWD, path, how, Layouts.OPEN_HOW_SIZE), engine)
         } else {
-            when (val imported = descriptors.import(tid, plan.traceeDirfd.value)) {
+            val directory = if (plan.useCurrentWorkingDirectory) {
+                SupervisorDescriptorResult.from(
+                    engine.fileSystem.open(
+                        arena.allocateFrom("/proc/${tid.value}/cwd"),
+                        io.mazewall.core.OpenFlags(io.mazewall.ffi.NativeConstants.O_PATH or io.mazewall.ffi.NativeConstants.O_CLOEXEC),
+                    ),
+                    engine,
+                )
+            } else {
+                descriptors.import(tid, plan.traceeDirfd.value)
+            }
+            when (val imported = directory) {
                 is SupervisorDescriptorResult.Denied -> return SupervisorReplyEffect.Error(imported.errno)
                 is SupervisorDescriptorResult.Opened -> imported.descriptor.produce {
                     SupervisorDescriptorResult.from(engine.fileSystem.openat2(imported.descriptor.handle, path, how, Layouts.OPEN_HOW_SIZE), engine)

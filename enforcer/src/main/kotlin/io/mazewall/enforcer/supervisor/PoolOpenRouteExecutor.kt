@@ -23,7 +23,7 @@ internal class PoolOpenRouteExecutor(
                 when (result) {
                     is SocketHelperResult.Opened -> SupervisorReplyEffect.AddFdAndReply(result.descriptor, flags)
                     is SocketHelperResult.Failed -> SupervisorReplyEffect.Error(result.errno)
-                    is SocketHelperResult.Accepted, SocketHelperResult.Connected -> {
+                    is SocketHelperResult.Accepted, is SocketHelperResult.Authority, SocketHelperResult.Connected -> {
                         result.dispose()
                         SupervisorReplyEffect.Recycle("Unexpected helper result for open")
                     }

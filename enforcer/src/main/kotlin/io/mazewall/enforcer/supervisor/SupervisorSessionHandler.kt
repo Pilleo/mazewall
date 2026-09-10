@@ -35,6 +35,7 @@ internal class SupervisorSessionHandler(
     private val replyArena: () -> NativeArena = NativeArena::ofConfined,
     socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
     admission: SupervisorAdmission = SupervisorSocketHelpers.admission,
+    authorityRoots: List<String>? = null,
 ) : SeccompNotifHandler,
     AutoCloseable {
     private val reader = NotificationReader(engine, logger)
@@ -43,7 +44,19 @@ internal class SupervisorSessionHandler(
     private val routeExecutor = SupervisorRouteExecutor(engine, descriptors, socketHelpers)
     private val routes = SupervisorRouteDispatcher(routeExecutor)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)
-    private val notifications = SupervisorNotificationSession(admission, engine, descriptors, socketHelpers, preparation, exchange, replies, ::reportUncaught)
+    private val notifications = SupervisorNotificationSession(
+        admission,
+        engine,
+        descriptors,
+        socketHelpers,
+        preparation,
+        exchange,
+        replies,
+        ::reportUncaught,
+        authorityRoots?.let { roots ->
+            TraceeAuthorityWorkFactory(socketHelpers, roots, exchange, replies, ::reportUncaught)::begin
+        },
+    )
     private val terminated = AtomicBoolean(false)
     private val replyGate = Any()
 

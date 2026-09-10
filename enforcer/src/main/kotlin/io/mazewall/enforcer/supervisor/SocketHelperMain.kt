@@ -22,14 +22,23 @@ internal object SocketHelperMain {
         SocketHelperOwner.watch(args[1].toLong())
         val channel = RealSocketManager.connect(args[0])
         try {
+            io.mazewall.ffi.networking.SupervisorHelperCredentials
+                .verify(LinuxNative, channel, args[1].toLong())
             val input = DataInputStream(System.`in`)
             val output = DataOutputStream(System.out)
             while (true) {
-                val operation = try {
-                    SocketHelperProtocol.readOperation(input)
+                val tag = try {
+                    input.readUnsignedByte()
                 } catch (_: EOFException) {
                     return
                 }
+                if (tag == TraceeAuthorityProtocol.OPERATION) {
+                    TraceeAuthorityHelper.serve(input, output) { descriptor ->
+                        if (!RealSocketManager.sendDescriptor(channel, descriptor.handle)) throw IOException("Authority descriptor send failed")
+                    }
+                    continue
+                }
+                val operation = SocketHelperProtocol.readOperation(input, tag)
                 val result = receiveOperation(channel, operation)
                 sendResult(output, channel, result)
             }
@@ -55,6 +64,7 @@ internal object SocketHelperMain {
     ) {
                 try {
                     when (result) {
+                        is SocketHelperResult.Authority -> throw IOException("Authority reply in socket protocol")
                         SocketHelperResult.Connected -> output.writeByte(0)
                         is SocketHelperResult.Failed -> {
                             output.writeByte(1)

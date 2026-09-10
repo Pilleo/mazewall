@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 551
+*Total Active Issues:* 76 | *Total Resolved Issues:* 551
 
 Task 12 resolved: [authoritative vulnerable-web lifecycle and profiling evidence](resolved/issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md).
 
@@ -14,6 +14,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
 | [issue-197-graceful-fallback-for-ai-agent-failures](code_health/issue-197-graceful-fallback-for-ai-agent-failures.md) | Graceful Fallback for AI Agent Failures | high | orchestrator |

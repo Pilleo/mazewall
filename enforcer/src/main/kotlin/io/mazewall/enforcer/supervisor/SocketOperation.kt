@@ -28,6 +28,10 @@ internal sealed interface SocketOperation {
 }
 
 internal sealed interface SocketHelperResult {
+    class Authority(
+        val effect: SupervisorReplyEffect,
+    ) : SocketHelperResult
+
     data object Connected : SocketHelperResult
 
     data class Failed(
@@ -50,6 +54,8 @@ internal sealed interface SocketHelperResult {
 
 /** Close must terminate/reap the independent process, including a blocked execute. */
 internal interface SocketHelper : AutoCloseable {
+    fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect = error("Helper does not implement tracee authority")
+
     fun execute(
         operation: SocketOperation,
         socket: SupervisorOwnedFd,
@@ -60,6 +66,7 @@ internal fun SocketHelperResult.dispose() {
     when (this) {
         is SocketHelperResult.Accepted -> descriptor.close()
         is SocketHelperResult.Opened -> descriptor.close()
+        is SocketHelperResult.Authority -> SupervisorReplyHandoff(effect).close()
         SocketHelperResult.Connected, is SocketHelperResult.Failed -> Unit
     }
 }

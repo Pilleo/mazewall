@@ -30,7 +30,9 @@ internal class SupervisorReplyHandoff(
                     is SupervisorDescriptorResult.Opened -> target.descriptor.close()
                     is SupervisorDescriptorResult.Denied -> Unit
                 }
-            SupervisorReplyEffect.Continue, is SupervisorReplyEffect.Value, is SupervisorReplyEffect.Error, is SupervisorReplyEffect.Recycle -> Unit
+            SupervisorReplyEffect.Continue, is SupervisorReplyEffect.Value, is SupervisorReplyEffect.Error, is SupervisorReplyEffect.Recycle,
+            is SupervisorReplyEffect.UnsupportedAuthority,
+            -> Unit
         }
     }
 }

@@ -38,11 +38,20 @@ internal sealed interface SupervisorReplyEffect {
     data class SecureExecAndReply(
         val request: SecureExecRequest,
         val target: SupervisorDescriptorResult,
+        val capturedEmptyPath: Long? = null,
+    ) : SupervisorReplyEffect
+
+    data class UnsupportedAuthority(
+        val authority: UnsupportedTraceeAuthority,
     ) : SupervisorReplyEffect
 
     data class Recycle(
         val reason: String,
     ) : SupervisorReplyEffect
+}
+
+internal enum class UnsupportedTraceeAuthority {
+    AcceptPeerMemory,
 }
 
 internal data class SupervisorReplyContext(
