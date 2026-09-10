@@ -6,7 +6,9 @@ This document provides the definitive, production-grade technical design for the
 The JVM trace-listener parser rejects out-of-order stages and nonpositive wire TIDs as a
 `TraceListenerState.ProtocolViolation`. The interpreter stops through a distinct protocol
 exception and closes the endpoint; it does not read another event or fabricate an ACK for an
-invalid TID. Rejected handshakes and protocol violations remain terminal during cleanup.
+invalid TID. Protocol violations record lost evidence before propagation, including during a
+locally requested graceful drain; joining the listener cannot make that profile complete.
+Rejected handshakes and protocol violations remain terminal during cleanup.
 Diagnostic report dumps use the JSON serializer, including control characters in probe output.
 
 ---

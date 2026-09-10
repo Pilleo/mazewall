@@ -293,6 +293,12 @@ class ProfilerTraceListenerTest {
         assertRejectedEventSettled(malformedEvent())
     }
 
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid tid during graceful drain remains incomplete without an ACK`() {
+        assertRejectedEventSettled(byteArrayOf(0, 0, 0, 0), expectedAck = false)
+    }
+
     private fun malformedEvent(
         version: Int = 1,
         tag: Int = 3,
@@ -316,7 +322,10 @@ class ProfilerTraceListenerTest {
         return bytes.toByteArray()
     }
 
-    private fun assertRejectedEventSettled(frame: ByteArray) {
+    private fun assertRejectedEventSettled(
+        frame: ByteArray,
+        expectedAck: Boolean = true,
+    ) {
         val timeline = java.util.concurrent.CopyOnWriteArrayList<String>()
         val drainRequested = CountDownLatch(1)
         val reads = AtomicInteger()
@@ -370,11 +379,16 @@ class ProfilerTraceListenerTest {
         listener.start(ready)
         assertTrue(ready.await(2, TimeUnit.SECONDS))
         listener.close()
-        assertEquals(listOf("write:84", "write:172", "close"), timeline)
+        val expectedTimeline = if (expectedAck) listOf("write:84", "write:172", "close") else listOf("write:84", "close")
+        assertEquals(expectedTimeline, timeline)
         assertTrue(logs.isEmpty(), "Malformed evidence must not become an observation")
         assertFalse(listener.drainComplete, "A protocol rejection is not a completed drain")
         assertEquals(1, listener.droppedEvents)
         assertFalse(listenerCoverage(emptyList(), listener.droppedEvents, listener.drainComplete).complete)
+        listener.close()
+        assertEquals(expectedTimeline, timeline, "Repeated cleanup must not acknowledge or close twice")
+        assertEquals(1, listener.droppedEvents)
+        assertFalse(listener.drainComplete)
     }
 
     private fun listenerCoverage(

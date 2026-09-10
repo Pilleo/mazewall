@@ -249,7 +249,11 @@ internal class ProfilerTraceListener(
                 }
             }
 
-            drainComplete = gracefulDrainRequested.get() && workerJoined && collectorJoined && droppedEvents == 0
+            drainComplete = gracefulDrainRequested.get() &&
+                workerJoined &&
+                collectorJoined &&
+                droppedEvents == 0 &&
+                state == TraceListenerState.Disconnected
             if (!collectorJoined) {
                 droppedEvents += 1
             }
@@ -332,7 +336,7 @@ internal class ProfilerTraceListener(
                 } catch (_: java.io.EOFException) {
                     break
                 } catch (expectedCloseIoFailure: java.io.IOException) {
-                    if (closed.get()) {
+                    if (closed.get() && state !is TraceListenerState.ProtocolViolation) {
                         logger.log(
                             java.util.logging.Level.FINE,
                             "Trace listener loop interrupted by close",
@@ -379,7 +383,13 @@ internal class ProfilerTraceListener(
     private fun advanceListener(event: TraceListenerEvent) {
         val next = TraceListenerMachine.evaluate(state, event)
         state = next
-        if (next is TraceListenerState.ProtocolViolation) throw TraceListenerProtocolException(next.reason)
+        if (next is TraceListenerState.ProtocolViolation) {
+            // Retirement may already be draining. Preserve lost evidence before propagating so
+            // close cannot mistake joined threads for a complete event stream.
+            droppedEvents += 1
+            drainComplete = false
+            throw TraceListenerProtocolException(next.reason)
+        }
     }
 
     @Suppress("TooGenericExceptionCaught") // Preserve fatal identity while settling the independent ACK obligation.
