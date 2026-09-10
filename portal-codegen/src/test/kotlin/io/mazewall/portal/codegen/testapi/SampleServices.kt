@@ -70,6 +70,16 @@ data class KotlinDataDto(
     val count: Int,
 )
 
+@JvmRecord
+data class KotlinJvmRecordDto(
+    val name: String,
+    val count: Int,
+)
+
 interface KotlinDataDtoService {
     fun echoKotlin(value: KotlinDataDto): KotlinDataDto
+}
+
+interface KotlinJvmRecordDtoService {
+    fun echoKotlinJvmRecord(value: KotlinJvmRecordDto): KotlinJvmRecordDto
 }
