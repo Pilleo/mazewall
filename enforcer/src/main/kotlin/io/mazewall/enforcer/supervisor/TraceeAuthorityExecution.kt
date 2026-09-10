@@ -26,6 +26,7 @@ internal class TraceeAuthorityExecution(
     private val kind = SupervisedKind.classify(SyscallNumber(notification.nr), arch)
     private val bypass = roots.map(Path::of)
     private var capturedArguments: SyscallArguments? = null
+    private var execPreparationErrno: Int? = null
     private val arguments: SyscallArguments get() = checkNotNull(capturedArguments)
 
     context(arena: NativeArena) fun prepare(): TraceeAuthoritySnapshot {
@@ -34,7 +35,7 @@ internal class TraceeAuthorityExecution(
             Tid(notification.pid),
             notification.args,
             arch,
-            readString = { _, address -> authority.readPath(address) },
+            readString = { _, address -> readPath(address) },
             readBytes = { _, address, length -> authority.read(address, length) },
         )
         val resolved = if (kind is SupervisedKind.Open && arguments.pathStr != null) resolve(checkNotNull(arguments.pathStr)) else null
@@ -52,6 +53,16 @@ internal class TraceeAuthorityExecution(
         }
         return TraceeAuthoritySnapshot(authority.ppid, arguments.pathStr, resolved?.toString(), route, arguments.sockaddrBytes)
     }
+
+    /** Parent-stack authorization is independent of pathname readability; execution is not. */
+    context(arena: NativeArena) private fun readPath(address: Long): String? =
+        try {
+            authority.readPath(address)
+        } catch (failure: TraceeAuthorityFailure) {
+            if (kind !is SupervisedKind.Exec) throw failure
+            execPreparationErrno = failure.errno
+            null
+        }
 
     context(arena: NativeArena) private fun resolve(path: String): Path {
         val directory = authority.directory(arguments.dirfd, path.startsWith('/'))
@@ -111,6 +122,9 @@ internal class TraceeAuthorityExecution(
     context(arena: NativeArena) private fun secureExec(jvmPath: String?): SupervisorReplyEffect {
         val args = notification.args
         val request = SecureExecRequest(Tid(notification.pid), args[if (notification.nr == arch.execve) 1 else 2], args[if (notification.nr == arch.execve) 2 else 3], arch.execveat.toLong())
+        execPreparationErrno?.let { errno ->
+            return SupervisorReplyEffect.SecureExecAndReply(request, SupervisorDescriptorResult.Denied(errno), 0)
+        }
         val path = when (val plan = planExecRewrite(arch, arguments.pathStr, jvmPath)) {
             is ExecRewritePlan.Ready -> plan.path
             ExecRewritePlan.MissingPath, ExecRewritePlan.UnsupportedArch -> return SupervisorReplyEffect.SecureExecAndReply(request, SupervisorDescriptorResult.Denied(NativeConstants.EPERM), 0)

@@ -64,6 +64,10 @@ helper-owned throughout the authorization conversation. Root authority has its o
 typed key; an arbitrary caller dirfd cannot select it. The parent validates the
 notification before decision and terminal completion. Unknown/unsupported supervised
 operations deny; unresolved `.class`, `.jar` and `META-INF` paths have no bypass.
+An unreadable exec pathname retains its acquisition errno while the captured
+parent identity still reaches stack authorization. An allowed callback cannot
+override that failure: the secure-exec handshake reports a denied target, with
+no descriptor injection or CONTINUE.
 
 Cancellation removes queued work and retires active helpers. A slot is reusable
 only after its previous process is reaped. A process in uninterruptible kernel
