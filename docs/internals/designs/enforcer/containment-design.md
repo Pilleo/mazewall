@@ -611,8 +611,14 @@ every existing filesystem operation. Argument/path preparation, `/proc` inspecti
 open routes, and read-only-NUL discovery retain their existing bounded-size but
 potentially blocking native/filesystem calls. Deadline checks before and after a
 work poll reject late completion, but cannot preempt a stalled synchronous call.
-Moving those operations into independently terminable helper processes is a
-prerequisite for an end-to-end liveness guarantee; open semantics are unchanged.
+Relative openat/openat2 operations with an explicit tracee dirfd now run in a
+helper after the daemon imports the directory capability. Their potentially
+blocking openat2 call no longer runs on the reactor. Argument preparation and
+descriptor import still run there, as do absolute-path, AT_FDCWD, secure-exec,
+and read-only-NUL operations. Moving those remaining prerequisites into
+independently terminable processes is required for an end-to-end liveness
+guarantee. This stage leaves their existing path/cwd semantics unchanged;
+it does not substitute the helper's working directory for tracee context.
 
 `SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
 
@@ -627,6 +633,24 @@ Open fast-path authorization requires a resolved path and a copied pathname. Unr
 Supervised `connect` imports the original socket with `pidfd_getfd`, transfers a duplicate with SCM_RIGHTS, and connects that same open-file description. It returns the terminal value zero, not a replacement FD. Socket type, binding, options, and status flags therefore remain attached to the original tracee descriptor. `accept`/`accept4` create a new descriptor and retain atomic ADDFD-with-SEND, including requested CLOEXEC behavior. Native `EINPROGRESS`, `EAGAIN`, permission errors, and timeout errno are returned unchanged; neither route changes shared file status flags or retries by creating another socket.
 
 The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Slots start lazily, execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation closes the imported local descriptor and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors; bounded private pipe frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots. No tracee pointer or confined arena crosses the process boundary.
+
+The same daemon-owned pool also carries capability-relative opens. A request
+contains a copied relative UTF-8 pathname (0–4095 bytes, rejecting NUL, malformed
+UTF-8 and absolute names), the three 64-bit open_how fields, and an owned
+SCM_RIGHTS directory duplicate. The helper executes openat2 against that
+capability and transfers an owned result descriptor; the reactor alone can
+inject it. Existing open flags/mode and openat2 RESOLVE_BENEATH composition
+remain unchanged. Empty pathnames reach the kernel for normal errno validation.
+Import permission errors deny without fallback. Cancellation,
+late-result disposal and capacity accounting use the notification's existing
+helper session, shared with its socket routes. The direct open executor remains
+live for paths outside this capability stage and direct test fixtures.
+
+No tracee inspection authority is introduced into the helper protocol. Completing
+preparation isolation requires a separately verified minimum authority path for
+tracee memory, proc identity/cwd, descriptor imports and secure-exec preparation,
+including ptrace/Yama permission failures and captured bypass roots. A child must
+not infer those capabilities from a tracee PID or independently authorize routes.
 
 Each reactor notification owns a helper request session under its listener owner.
 Notification timeout or listener teardown removes queued work, retires active

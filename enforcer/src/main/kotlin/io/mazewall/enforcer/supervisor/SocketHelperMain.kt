@@ -3,10 +3,12 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.LinuxNative
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.RealSocketManager
+import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
@@ -65,6 +67,11 @@ internal object SocketHelperMain {
                             output.flush()
                             if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Accepted descriptor send failed")
                         }
+                        is SocketHelperResult.Opened -> {
+                            output.writeByte(3)
+                            output.flush()
+                            if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Opened descriptor send failed")
+                        }
                     }
                     output.flush()
                 } finally {
@@ -109,6 +116,21 @@ internal class SocketOperationExecutor(
                         accepted.descriptor.use { throw failure }
                     }
                 }
+            }
+        }
+        is SocketOperation.OpenAt2 -> {
+            val how = arena.allocate(Layouts.OPEN_HOW_SIZE)
+            how.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, operation.flags)
+            how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, operation.mode)
+            how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, operation.resolve)
+            when (
+                val opened = SupervisorDescriptorResult.from(
+                engine.fileSystem.openat2(socket.handle, arena.allocateFrom(operation.path), how, Layouts.OPEN_HOW_SIZE),
+                    engine,
+            )
+            ) {
+                is SupervisorDescriptorResult.Denied -> SocketHelperResult.Failed(opened.errno)
+                is SupervisorDescriptorResult.Opened -> SocketHelperResult.Opened(opened.descriptor)
             }
         }
     }

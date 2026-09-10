@@ -12,6 +12,19 @@ internal sealed interface SocketOperation {
     data class Accept(
         val flags: Int,
     ) : SocketOperation
+
+    /** The accompanying owned descriptor is the directory; no tracee identity is delegated. */
+    data class OpenAt2(
+        val path: String,
+        val flags: Long,
+        val mode: Long,
+        val resolve: Long,
+    ) : SocketOperation {
+        init {
+            require(!path.startsWith('/') && '\u0000' !in path)
+            require(path.toByteArray(Charsets.UTF_8).size <= SocketHelperProtocol.MAX_PATH_BYTES)
+        }
+    }
 }
 
 internal sealed interface SocketHelperResult {
@@ -19,6 +32,10 @@ internal sealed interface SocketHelperResult {
 
     data class Failed(
         val errno: Int,
+    ) : SocketHelperResult
+
+    class Opened(
+        val descriptor: SupervisorOwnedFd,
     ) : SocketHelperResult
 
     class Accepted(
@@ -42,6 +59,7 @@ internal interface SocketHelper : AutoCloseable {
 internal fun SocketHelperResult.dispose() {
     when (this) {
         is SocketHelperResult.Accepted -> descriptor.close()
+        is SocketHelperResult.Opened -> descriptor.close()
         SocketHelperResult.Connected, is SocketHelperResult.Failed -> Unit
     }
 }

@@ -3,11 +3,14 @@ package io.mazewall.enforcer.supervisor
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 /** Private serial protocol. Every variable-sized allocation is bounded before allocation. */
 internal object SocketHelperProtocol {
     const val MAX_ADDRESS_BYTES = 128
     const val MAX_ERRNO = 4095
+    const val MAX_PATH_BYTES = 4095
 
     fun readResult(
         input: DataInputStream,
@@ -22,6 +25,7 @@ internal object SocketHelperProtocol {
                 if (bytes.size != length) throw IOException("Inconsistent helper address length")
                 SocketHelperResult.Accepted(receive(), bytes, length)
             }
+            3 -> SocketHelperResult.Opened(receive())
             else -> throw IOException("Invalid helper result $tag")
         }
 
@@ -48,6 +52,15 @@ internal object SocketHelperProtocol {
                 output.writeByte(2)
                 output.writeInt(operation.flags)
             }
+            is SocketOperation.OpenAt2 -> {
+                output.writeByte(3)
+                val path = operation.path.toByteArray(Charsets.UTF_8)
+                output.writeInt(path.size)
+                output.write(path)
+                output.writeLong(operation.flags)
+                output.writeLong(operation.mode)
+                output.writeLong(operation.resolve)
+            }
         }
         output.flush()
     }
@@ -60,7 +73,21 @@ internal object SocketHelperProtocol {
             SocketOperation.Connect(bytes)
         }
         2 -> SocketOperation.Accept(input.readInt())
+        3 -> readOpen(input)
         else -> throw IOException("Invalid helper operation $tag")
+    }
+
+    private fun readOpen(input: DataInputStream): SocketOperation.OpenAt2 {
+        val length = readBounded(input, 0..MAX_PATH_BYTES, "path length")
+        val bytes = ByteArray(length).also(input::readFully)
+        val path = Charsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+        if (path.startsWith('/') || '\u0000' in path) throw IOException("Invalid helper relative path")
+        return SocketOperation.OpenAt2(path, input.readLong(), input.readLong(), input.readLong())
     }
 
     fun writeBytes(
