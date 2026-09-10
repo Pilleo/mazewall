@@ -35,7 +35,8 @@ integrity state. One atomic pointer publishes only complete generations, while c
 outcomes retain timeout/interruption and cleanup failures together. Compose separates protected,
 unprotected, and profiling modes; both the packaged application default and compose bind to
 loopback. Fresh-JVM tests start the real Spring server and exercise bootstrap, conditional beans,
-HTTP command/benign boundaries, shutdown publication, owned fixtures, and non-empty evidence.
+an existing benign HTTP route, protected/unprotected service wiring, shutdown publication, owned
+fixtures, and non-empty evidence. They also prove no command-execution HTTP route is exposed.
 
 Evidence: focused and full `:demos:vulnerable-web-app:test` verification, including three
 isolated-JVM Spring application scenarios, is recorded in the Task 12 implementation report; the

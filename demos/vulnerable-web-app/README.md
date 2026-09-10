@@ -45,11 +45,12 @@ The easiest way to execute the entire real-world CVE exploitation demo is to run
 ```
 
 The test starts the real Spring application in separate JVMs. It exercises the environment
-bootstrap, conditional service beans, embedded HTTP server, benign admin endpoint, vulnerable
-command endpoint, orderly context shutdown, and profile publication. It proves that the
-unprotected command succeeds without overwriting a pre-existing fixture, that the protected
-command is denied while benign HTTP work still succeeds, and that the profiling instance
-publishes non-empty evidence. Tests create private temporary roots and remove only files they own.
+bootstrap, conditional service beans, embedded HTTP server, existing benign admin endpoint,
+service-bean execution boundary, orderly context shutdown, and profile publication. It proves
+that an unprotected command succeeds without overwriting a pre-existing fixture, that the same
+operation is denied by the protected bean while benign HTTP work still succeeds, and that the
+profiling instance publishes non-empty evidence. The test also asserts that no `/command` HTTP
+route exists. Tests create private temporary roots and remove only files they own.
 
 ---
 
@@ -72,17 +73,14 @@ This starts three loopback-only instances of the same application:
 podman compose -f demos/vulnerable-web-app/compose.yml up -d
 ```
 
-### 3. Exercise the HTTP boundary
+### 3. Exercise the existing HTTP boundary
 
-The packaged app exposes a deliberately unsafe command route for the executable comparison. Use a
-disposable container instance; do not expose this application to an untrusted network.
+Use a disposable container instance; do not expose this deliberately vulnerable application to an
+untrusted network.
 
 ```bash
 # Benign control through a protected service executor
 curl -fsS -H 'X-Api-Version: 1.0' http://127.0.0.1:8081/admin/log
-
-# The /command comparison is covered by the isolated integration test above.
-# It succeeds on :8082 and is expected to fail on :8081.
 ```
 
 The application itself defaults `server.address` to `127.0.0.1`, and all compose host bindings

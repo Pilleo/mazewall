@@ -6,14 +6,13 @@ import demo.vulnapp.service.DefaultFileService
 import demo.vulnapp.service.FileService
 import io.mazewall.EnabledIfLinuxAndSupported
 import io.mazewall.IsolatedProcessTester
+import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.net.URI
-import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.charset.StandardCharsets
 import org.springframework.boot.SpringApplication
 import org.springframework.boot.web.context.WebServerApplicationContext
 import org.springframework.context.ConfigurableApplicationContext
@@ -50,8 +49,8 @@ class VulnerableWebAppFreshJvmTest {
             startApplication(enabled = false).use { application ->
                 assertTrue(application.getBean(FileService::class.java) is DefaultFileService)
                 assertEquals("false", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
-                val response = postCommand(application, "printf exploited > '${created}'")
-                assertEquals(200, response.statusCode())
+                assertEquals(404, missingCommandRoute(application).statusCode())
+                application.getBean(FileService::class.java).runCommand("printf exploited > '${created}'")
                 assertEquals("exploited", Files.readString(created))
                 assertEquals("preserve", Files.readString(marker))
             }
@@ -75,9 +74,11 @@ class VulnerableWebAppFreshJvmTest {
                 assertEquals(200, benign.statusCode())
                 assertTrue(benign.body().contains("Log processed"))
 
-                val exploit = postCommand(application, "printf escaped > '${marker}'")
-                assertTrue(exploit.statusCode() >= 500)
-                assertFalse(Files.exists(marker), "protected HTTP command must not create its marker")
+                val failure = runCatching {
+                    application.getBean(FileService::class.java).runCommand("printf escaped > '${marker}'")
+                }.exceptionOrNull()
+                assertTrue(ContainmentViolationDetector.findViolationCause(requireNotNull(failure)) != null)
+                assertFalse(Files.exists(marker), "protected service command must not create its marker")
             }
         } finally {
             Files.deleteIfExists(marker)
@@ -94,7 +95,8 @@ class VulnerableWebAppFreshJvmTest {
         try {
             startApplication(enabled = false, profile = true, sbobPath = target).use { application ->
                 assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
-                assertEquals(200, postCommand(application, "printf profiled > '${marker}'").statusCode())
+                assertEquals(200, getAdmin(application, "profile-control").statusCode())
+                application.getBean(FileService::class.java).runCommand("printf profiled > '${marker}'")
                 assertEquals("profiled", Files.readString(marker))
                 assertFalse(Files.exists(target), "current-generation pointer must be published only during shutdown")
             }
@@ -130,11 +132,9 @@ class VulnerableWebAppFreshJvmTest {
         }
     }
 
-    private fun postCommand(application: ConfigurableApplicationContext, command: String): HttpResponse<String> {
-        val body = "cmd=" + URLEncoder.encode(command, StandardCharsets.UTF_8)
+    private fun missingCommandRoute(application: ConfigurableApplicationContext): HttpResponse<String> {
         val request = HttpRequest.newBuilder(uri(application, "/command"))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .POST(HttpRequest.BodyPublishers.noBody())
             .build()
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
     }

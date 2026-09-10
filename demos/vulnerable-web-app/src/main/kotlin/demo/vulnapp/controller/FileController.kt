@@ -11,9 +11,6 @@ class FileController(
     private val fileService: FileService
 ) {
 
-    @PostMapping("/command")
-    fun runCommand(@RequestParam("cmd") command: String): String = fileService.runCommand(command)
-
     @PostMapping("/upload")
     fun uploadFile(@RequestParam("file") file: MultipartFile): String {
         return fileService.extractZip(file)
