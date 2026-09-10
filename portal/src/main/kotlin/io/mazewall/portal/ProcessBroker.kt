@@ -307,7 +307,14 @@ public class ProcessBroker(
                 }
             }
         }
-        cleanup.outcome().failureOrNull()?.let { throw it }
+        val outcome = cleanup.outcome()
+        outcome.failureOrNull()?.let { throw it }
+        if (!allRetired) {
+            throw IncompleteBrokerCleanupException(
+                "ProcessBroker close did not retire every owned resource",
+                outcome.failures.map { BrokerCleanupFailure(it.resource, it.cause) },
+            )
+        }
     }
 
     private fun prepareClose(): ClosePreparation =
@@ -799,6 +806,21 @@ public class ProcessBroker(
                     endpointRetired
     }
 }
+
+/**
+ * [ProcessBroker.close] could not prove that every process, channel, endpoint, and maintenance
+ * action reached a terminal state. Individual resource failures are retained for diagnostics.
+ */
+public class IncompleteBrokerCleanupException(
+    message: String,
+    public val failures: List<BrokerCleanupFailure>,
+) : IllegalStateException(message)
+
+/** A named resource cleanup failure retained by [IncompleteBrokerCleanupException]. */
+public data class BrokerCleanupFailure(
+    val resource: String,
+    val cause: Throwable,
+)
 
 private fun raiseBrokerFailure(failure: Throwable): Nothing = throw failure
 
