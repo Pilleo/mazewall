@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Owns a bounded set of persistent reader processes. Only these children execute remote-memory reads.
  * Reactor cancellation kills a child's process without waiting; its worker reaps before replenishing.
+ * An unconfirmed reap fails the pool closed: retained children never become replacement capacity.
  * Closing the pool outside the reactor waits boundedly and reports any incomplete cleanup.
  */
 internal class ProfilerPreparationPool(
@@ -37,6 +38,8 @@ internal class ProfilerPreparationPool(
     private val jobs = ConcurrentHashMap.newKeySet<Job>()
     private val localChild = ThreadLocal<Child>()
     private val cleanupFailures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+    private val poolFailure = java.util.concurrent.atomic
+        .AtomicReference<Throwable?>()
 
     override fun submit(
         notification: SeccompNotification,
@@ -44,6 +47,10 @@ internal class ProfilerPreparationPool(
     ): ProfilerPreparationJob {
         val job = Job(ProfilerPreparationProtocol.Request(notification.copy(args = notification.args.copyOf()), syscallName))
         jobs.add(job)
+        poolFailure.get()?.let {
+            job.reject(it)
+            return job
+        }
         try {
             workers.execute(job)
         } catch (failure: RejectedExecutionException) {
@@ -79,6 +86,15 @@ internal class ProfilerPreparationPool(
         private val cancellation = java.util.concurrent.CancellationException("Profiler preparation cancelled")
         private var active: Child? = null
 
+        fun reject(failure: Throwable) {
+            synchronized(this) {
+                result.completeExceptionally(RejectedExecutionException("Profiler preparation pool has unreaped resources", failure))
+                active?.process?.toHandle()?.destroyForcibly()
+            }
+            workers.remove(this)
+            jobs.remove(this)
+        }
+
         override fun close() {
             synchronized(this) {
                 result.completeExceptionally(cancellation)
@@ -92,7 +108,11 @@ internal class ProfilerPreparationPool(
 
         @Suppress("TooGenericExceptionCaught") // Complete the request and retire the process on all failure paths; fatal identity is rethrown.
         override fun run() {
-            if (result.isCancelled) return
+            if (result.isDone) return
+            poolFailure.get()?.let {
+                reject(it)
+                return
+            }
             var child: Child? = null
             var primary: Throwable? = null
             try {
@@ -100,7 +120,7 @@ internal class ProfilerPreparationPool(
                     localChild.set(it)
                 }
                 synchronized(this) {
-                    if (result.isCancelled) {
+                    if (result.isDone) {
                         child.process.toHandle().destroyForcibly()
                         return
                     }
@@ -132,14 +152,15 @@ internal class ProfilerPreparationPool(
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // Unconfirmed cleanup must revoke capacity even for unexpected process API failures.
     private fun reap(
         process: Process,
         primary: Throwable? = null,
     ) {
-        process.toHandle().destroyForcibly()
         try {
+            process.toHandle().destroyForcibly()
             if (!process.waitFor(CLOSE_SECONDS, TimeUnit.SECONDS)) {
-                cleanupFailures.add(IOException("Profiler preparation child did not terminate"))
+                failPool(IOException("Profiler preparation child did not terminate"))
                 return
             }
             for (stream in listOf(process.inputStream, process.outputStream, process.errorStream)) {
@@ -154,9 +175,20 @@ internal class ProfilerPreparationPool(
             children.remove(process)
         } catch (failure: InterruptedException) {
             Thread.currentThread().interrupt()
-            cleanupFailures.add(failure)
-        } catch (failure: IOException) {
-            cleanupFailures.add(failure)
+            failPool(failure)
+        } catch (failure: Exception) {
+            failPool(failure)
+        } catch (failure: Error) {
+            failPool(failure)
+            throw failure
+        }
+    }
+
+    private fun failPool(failure: Throwable) {
+        cleanupFailures.add(failure)
+        if (poolFailure.compareAndSet(null, failure)) {
+            workers.shutdown()
+            jobs.forEach { it.reject(failure) }
         }
     }
 

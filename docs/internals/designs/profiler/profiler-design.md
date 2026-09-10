@@ -209,7 +209,10 @@ inherit Yama ptracer eligibility. A notification awaiting preparation remains su
 reactor's absolute 30-second deadline: expiry claims one terminal denial and signals the
 active helper through `ProcessHandle`, without closing a concurrently read pipe on the reactor.
 The I/O worker reaps cancelled helpers before replacement; late evidence cannot publish or
-reply. Pool shutdown is bounded and reports incomplete cleanup. These helpers resolve evidence
+reply. If termination cannot be confirmed (timeout, interruption, or process API failure),
+the pool fails closed and rejects queued and new preparation requests. The unreaped child
+remains owned for shutdown; its capacity is never reused by a replacement helper. Pool
+shutdown is bounded and reports incomplete cleanup. These helpers resolve evidence
 only and never issue kernel replies or make supervisor authorization decisions.
 
 Listener ACK failure closes its endpoint once. If event capture or queueing already failed,
