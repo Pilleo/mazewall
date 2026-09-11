@@ -134,27 +134,12 @@ private fun PortalDispatcherTable.Builder.registerEntry(
     val impl = Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
     require(serviceClass.isInstance(impl)) { "implementation does not implement ${serviceClass.name}" }
 
-    val explicitDispatcher = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
-    val dispatcherName = explicitDispatcher ?: PortalGeneratedNames.dispatcherBinaryName(serviceClass)
-    val dispatcherClass = try {
-        Class.forName(dispatcherName, true, loader)
-    } catch (missing: ClassNotFoundException) {
-        require(explicitDispatcher == null && '$' in serviceClass.name) {
-            "dispatcher $dispatcherName not found"
-        }
-        val legacyName = serviceClass.name.replace('$', '_') + "PortalDispatcher"
-        try {
-            Class.forName(legacyName, true, loader)
-        } catch (_: ClassNotFoundException) {
-            throw missing
-        }
-    }
-    if (explicitDispatcher == null && '$' in serviceClass.name) {
-        val legacyName = serviceClass.name.replace('$', '_') + "PortalDispatcher"
-        if (legacyName != dispatcherClass.name && runCatching { Class.forName(legacyName, false, loader) }.isSuccess) {
-            require(false) { "multiple portal dispatchers found for ${serviceClass.name}; specify one explicitly" }
-        }
-    }
+    val dispatcherClass = resolveDispatcherClass(
+        serviceClass,
+        parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() },
+        loader,
+    )
+    val dispatcherName = dispatcherClass.name
     val dispatcherObject =
         dispatcherClass.getDeclaredField("INSTANCE").get(null)
             ?: error("dispatcher $dispatcherName is not a Kotlin object")
@@ -166,4 +151,42 @@ private fun PortalDispatcherTable.Builder.registerEntry(
         handle.invoke(dispatcherObject, impl, generatedMethod, payload, granted) as ByteArray
     }
     if (replace) registerReplacing(methodIds, registered) else register(methodIds, registered)
+}
+
+private fun resolveDispatcherClass(
+    serviceClass: Class<*>,
+    explicitName: String?,
+    loader: ClassLoader,
+): Class<*> {
+    if (explicitName != null) return Class.forName(explicitName, true, loader)
+
+    val candidates = listOf(
+        PortalGeneratedNames.dispatcherBinaryName(serviceClass),
+        legacyNestedDispatcherBinaryName(serviceClass),
+    ).distinct()
+    val matches = candidates.mapNotNull { name ->
+        try {
+            Class.forName(name, false, loader)
+        } catch (_: ClassNotFoundException) {
+            null
+        }
+    }
+    require(matches.size <= 1) {
+        "multiple portal dispatchers found for ${serviceClass.name}: " +
+            "${matches.joinToString { it.name }}; specify one explicitly as Interface=Impl;Dispatcher"
+    }
+    return matches.singleOrNull()
+        ?: throw ClassNotFoundException(
+            "missing portal dispatcher for ${serviceClass.name}; tried ${candidates.joinToString()}. " +
+                "Regenerate portal sources or specify one explicitly as Interface=Impl;Dispatcher.",
+        )
+}
+
+/** Binary name emitted for nested services before canonical nested names were introduced. */
+private fun legacyNestedDispatcherBinaryName(serviceClass: Class<*>): String {
+    val packageName = serviceClass.packageName
+    val relativeName =
+        if (packageName.isEmpty()) serviceClass.name else serviceClass.name.removePrefix("$packageName.")
+    val simpleName = relativeName.replace('$', '_') + "PortalDispatcher"
+    return if (packageName.isEmpty()) simpleName else "$packageName.$simpleName"
 }
