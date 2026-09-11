@@ -3,6 +3,7 @@ package io.mazewall.platform.seccomp.daemon
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.RawSyscallOperations
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -30,11 +31,26 @@ import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
 import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+
+/** Result of the bounded daemon handshake acknowledgement write. */
+internal sealed interface HandshakeWriteOutcome {
+    data object Sent : HandshakeWriteOutcome
+
+    /** The socket was not writable; the reactor must poll before trying again. */
+    data object RetryAfterPoll : HandshakeWriteOutcome
+
+    data object TimedOut : HandshakeWriteOutcome
+
+    data class Failed(
+        val errno: Int,
+    ) : HandshakeWriteOutcome
+}
 
 /**
  * Unified daemon engine for handling seccomp user notification UNIX server, client connections,
@@ -77,6 +93,7 @@ public class SeccompDaemonEngine(
     private val incompleteConnections = CopyOnWriteArrayList<SeccompConnection>()
     private val failedServerCloses = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
     private val cleanupFailures = CopyOnWriteArrayList<Exception>()
+    private val handshakeDeadlines = ConcurrentHashMap<Int, Deadline>()
 
     /** Historical failures stay visible even if a later shutdown retry releases all descriptors. */
     @io.mazewall.MazewallInternal
@@ -100,6 +117,8 @@ public class SeccompDaemonEngine(
         private const val ACK_BUF_SIZE = 1L
         private const val CONNECTION_WORKER_DRAIN_TIMEOUT_MS = 5_000L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+        private const val MAX_HANDSHAKE_INTERRUPTS = 8
+        private const val HANDSHAKE_ACK_TIMEOUT_MS = 30_000L
     }
 
     public fun run() {
@@ -367,9 +386,7 @@ public class SeccompDaemonEngine(
             if (count < 0) {
                 return applyConnectionEvent(connection, SeccompConnectionEvent.PollFailed)
             }
-            if (count == 0L) {
-                return applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
-            }
+            if (count == 0L) return applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
         }
 
         val event = when (connection) {
@@ -384,22 +401,61 @@ public class SeccompDaemonEngine(
             is SeccompConnection.FdAttached -> {
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, handshakeAckByte)
-                var ackOk = false
-                while (true) {
-                    val res = handshakeWriter(socketFd, ackBuf, ACK_BUF_SIZE)
-                    if (res is LinuxNative.SyscallResult.Success) {
-                        ackOk = true
-                        break
-                    }
-                    val errno = (res as LinuxNative.SyscallResult.Error).errno
-                    if (errno == NativeConstants.EINTR) continue
-                    break
+                val deadline = handshakeDeadlines.computeIfAbsent(socketFd.value) {
+                    Deadline.afterMillis(HANDSHAKE_ACK_TIMEOUT_MS)
                 }
-                if (ackOk) SeccompConnectionEvent.AckSucceeded else SeccompConnectionEvent.AckFailed
+                when (writeHandshakeAck(socketFd, ackBuf, deadline)) {
+                    HandshakeWriteOutcome.Sent -> {
+                        handshakeDeadlines.remove(socketFd.value)
+                        SeccompConnectionEvent.AckSucceeded
+                    }
+                    HandshakeWriteOutcome.RetryAfterPoll -> return connection
+                    HandshakeWriteOutcome.TimedOut,
+                    is HandshakeWriteOutcome.Failed,
+                    -> {
+                        handshakeDeadlines.remove(socketFd.value)
+                        SeccompConnectionEvent.AckFailed
+                    }
+                }
             }
             is SeccompConnection.Active -> SeccompConnectionEvent.SessionFinished
         }
         return applyConnectionEvent(connection, event)
+    }
+
+    /**
+     * Writes the one-byte handshake acknowledgement without allowing EINTR to turn into an
+     * unbounded synchronous loop. The deadline is absolute and is never renewed by retries.
+     */
+    internal fun writeHandshakeAck(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
+        ack: ManagedSegment,
+        deadline: Deadline,
+    ): HandshakeWriteOutcome {
+        var interruptions = 0
+        while (true) {
+            if (deadline.isExpired()) return HandshakeWriteOutcome.TimedOut
+            when (val result = handshakeWriter(socketFd, ack, ACK_BUF_SIZE)) {
+                is LinuxNative.SyscallResult.Success ->
+                    return if (result.value == ACK_BUF_SIZE) {
+                        HandshakeWriteOutcome.Sent
+                    } else {
+                        HandshakeWriteOutcome.Failed(NativeConstants.EIO)
+                    }
+                is LinuxNative.SyscallResult.Error -> {
+                    if (result.errno == NativeConstants.EAGAIN) {
+                        return HandshakeWriteOutcome.RetryAfterPoll
+                    }
+                    if (result.errno != NativeConstants.EINTR) {
+                        return HandshakeWriteOutcome.Failed(result.errno)
+                    }
+                    interruptions++
+                    if (interruptions >= MAX_HANDSHAKE_INTERRUPTS) {
+                        return HandshakeWriteOutcome.Failed(NativeConstants.EINTR)
+                    }
+                }
+            }
+        }
     }
 
     private fun applyConnectionEvent(
