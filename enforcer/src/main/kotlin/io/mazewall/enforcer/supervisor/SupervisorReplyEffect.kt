@@ -38,11 +38,20 @@ internal sealed interface SupervisorReplyEffect {
     data class SecureExecAndReply(
         val request: SecureExecRequest,
         val target: SupervisorDescriptorResult,
+        val capturedEmptyPath: Long? = null,
+    ) : SupervisorReplyEffect
+
+    data class UnsupportedAuthority(
+        val authority: UnsupportedTraceeAuthority,
     ) : SupervisorReplyEffect
 
     data class Recycle(
         val reason: String,
     ) : SupervisorReplyEffect
+}
+
+internal enum class UnsupportedTraceeAuthority {
+    AcceptPeerMemory,
 }
 
 internal data class SupervisorReplyContext(
@@ -56,5 +65,7 @@ internal sealed interface ReplyExecutionResult {
 
     data class ReplyFailed(
         val cause: Throwable,
+        val outcome: io.mazewall.platform.seccomp.UserNotifReplyResult = io.mazewall.platform.seccomp.UserNotifReplyResult
+            .Failed(NativeConstants.EIO),
     ) : ReplyExecutionResult
 }

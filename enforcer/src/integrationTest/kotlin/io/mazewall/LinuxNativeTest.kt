@@ -2,6 +2,7 @@ package io.mazewall
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
@@ -109,8 +110,14 @@ LinuxNative.networking.listen(fd, 5)
         LinuxNative.networking.socketpair(1, 1, 0, fds) // AF_UNIX, SOCK_STREAM
 
         if (result is LinuxNative.SyscallResult.Success) {
-            LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.Generic>(fds.readInt(0)))
-            LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.Generic>(fds.readInt(4)))
+            LinuxNative.fileSystem.close(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(fds.readInt(0)),
+            )
+            LinuxNative.fileSystem.close(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(fds.readInt(4)),
+            )
         }
     }
 

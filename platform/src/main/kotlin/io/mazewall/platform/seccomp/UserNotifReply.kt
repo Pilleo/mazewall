@@ -74,15 +74,17 @@ public object UserNotifReply {
         raw: RawSyscallOperations,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership>,
         resp: ManagedSegment,
+        maxAttempts: Int = 8,
     ): UserNotifReplyResult {
-        while (true) {
+        require(maxAttempts > 0)
+        repeat(maxAttempts) {
             val res = raw.ioctl(
                 listenerFd,
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND,
                 resp.typed<IoctlPayload.SeccompNotifResp>(),
             )
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
-                continue
+                return@repeat
             }
             return when (res) {
                 is LinuxNative.SyscallResult.Success -> UserNotifReplyResult.Sent
@@ -90,5 +92,6 @@ public object UserNotifReply {
                     if (res.errno == NativeConstants.ENOENT) UserNotifReplyResult.NotificationGone else UserNotifReplyResult.Failed(res.errno)
             }
         }
+        return UserNotifReplyResult.Failed(NativeConstants.EINTR)
     }
 }

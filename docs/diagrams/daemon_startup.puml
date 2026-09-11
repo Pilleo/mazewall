@@ -1,0 +1,25 @@
+@startuml daemon_startup
+hide empty description
+title Child daemon startup transaction and retirement
+[*] --> EndpointOwned : create private endpoint
+EndpointOwned --> ChildOwned : start child specification
+ChildOwned --> Observing : acquire output pump and shutdown hook
+Observing --> Ready : sentinel + live process within readiness budget
+Ready --> Committed : transfer ChildProcessResources
+Committed --> Retiring : shutdown / death / owner close
+EndpointOwned --> Rollback : acquisition failure
+ChildOwned --> Rollback : setup failure
+Observing --> Rollback : timeout / invalid readiness
+Ready --> Rollback : commit failure
+Rollback --> Retiring : attempt all owned cleanup
+Retiring --> Closed : every resource terminal
+Retiring --> CleanupIncomplete : preserve owners + aggregate failures
+CleanupIncomplete --> Retiring : explicit cleanup retry
+Closed --> [*]
+note right of Committed
+  Publish only after commit.
+  Retire dead prior owner before replacement.
+  Shared ownership mechanics;
+  distinct supervisor/profiler authority policies.
+end note
+@enduml

@@ -3,10 +3,12 @@ package io.mazewall.enforcer.supervisor
 import io.mazewall.LinuxNative
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.RealSocketManager
+import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
@@ -20,14 +22,23 @@ internal object SocketHelperMain {
         SocketHelperOwner.watch(args[1].toLong())
         val channel = RealSocketManager.connect(args[0])
         try {
+            io.mazewall.ffi.networking.SupervisorHelperCredentials
+                .verify(LinuxNative, channel, args[1].toLong())
             val input = DataInputStream(System.`in`)
             val output = DataOutputStream(System.out)
             while (true) {
-                val operation = try {
-                    SocketHelperProtocol.readOperation(input)
+                val tag = try {
+                    input.readUnsignedByte()
                 } catch (_: EOFException) {
                     return
                 }
+                if (tag == TraceeAuthorityProtocol.OPERATION) {
+                    TraceeAuthorityHelper.serve(input, output) { descriptor ->
+                        if (!RealSocketManager.sendDescriptor(channel, descriptor.handle)) throw IOException("Authority descriptor send failed")
+                    }
+                    continue
+                }
+                val operation = SocketHelperProtocol.readOperation(input, tag)
                 val result = receiveOperation(channel, operation)
                 sendResult(output, channel, result)
             }
@@ -46,6 +57,7 @@ internal object SocketHelperMain {
                 }
     }
 
+    // SUPPRESSION-RATIONALE: Each exhaustive effect branch validates its own transfer; finally disposes the effect on every failed write or descriptor send.
     private fun sendResult(
         output: DataOutputStream,
         channel: io.mazewall.core.FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
@@ -53,6 +65,7 @@ internal object SocketHelperMain {
     ) {
                 try {
                     when (result) {
+                        is SocketHelperResult.Authority -> throw IOException("Authority reply in socket protocol")
                         SocketHelperResult.Connected -> output.writeByte(0)
                         is SocketHelperResult.Failed -> {
                             output.writeByte(1)
@@ -64,6 +77,11 @@ internal object SocketHelperMain {
                             SocketHelperProtocol.writeBytes(output, result.address)
                             output.flush()
                             if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Accepted descriptor send failed")
+                        }
+                        is SocketHelperResult.Opened -> {
+                            output.writeByte(SocketHelperProtocol.OPENED_RESULT)
+                            output.flush()
+                            if (!RealSocketManager.sendDescriptor(channel, result.descriptor.handle)) throw IOException("Opened descriptor send failed")
                         }
                     }
                     output.flush()
@@ -109,6 +127,21 @@ internal class SocketOperationExecutor(
                         accepted.descriptor.use { throw failure }
                     }
                 }
+            }
+        }
+        is SocketOperation.OpenAt2 -> {
+            val how = arena.allocate(Layouts.OPEN_HOW_SIZE)
+            how.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, operation.flags)
+            how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, operation.mode)
+            how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, operation.resolve)
+            when (
+                val opened = SupervisorDescriptorResult.from(
+                engine.fileSystem.openat2(socket.handle, arena.allocateFrom(operation.path), how, Layouts.OPEN_HOW_SIZE),
+                    engine,
+            )
+            ) {
+                is SupervisorDescriptorResult.Denied -> SocketHelperResult.Failed(opened.errno)
+                is SupervisorDescriptorResult.Opened -> SocketHelperResult.Opened(opened.descriptor)
             }
         }
     }

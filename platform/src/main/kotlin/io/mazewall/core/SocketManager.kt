@@ -58,13 +58,13 @@ public object RealSocketManager : SocketManager {
             ManagedSegment.NULL,
             io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC,
         )
-        return res.getFdOrThrow("accept").let { FileDescriptor.adopt(it.value, FileDescriptorRole.UnixSocket) }
+        return res.getFdOrThrow("accept", FileDescriptorRole.UnixSocket)
     }
 
     override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         val fdVal = io.mazewall.ffi.networking.SupervisorSocketUtils
-            .connectWithRetry(socketPath)
-        return FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
+            .connectDescriptorWithRetry(socketPath)
+        return fdVal
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {

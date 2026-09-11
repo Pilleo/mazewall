@@ -14,6 +14,16 @@ object IsolatedProcessLifecycleFixture {
         if (mode == "exit") return
         val child = ProcessBuilder("/bin/sh", "-c", "trap '' TERM; echo \$\$ > '${root.resolve("child.pid")}'; while :; do sleep 1; done").start()
         Files.writeString(root.resolve("ready"), child.pid().toString())
+        if (mode == "exit-with-child") {
+            val deadline = System.nanoTime() +
+                java.util.concurrent.TimeUnit.SECONDS
+                .toNanos(5)
+            while (!Files.exists(root.resolve("release"))) {
+                check(System.nanoTime() < deadline) { "Parent did not observe the descendant" }
+                LockSupport.parkNanos(1_000_000L)
+            }
+            return
+        }
         while (true) LockSupport.parkNanos(1_000_000_000L)
     }
 }

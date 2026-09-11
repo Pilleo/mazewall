@@ -6,6 +6,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
@@ -24,12 +25,13 @@ class SeccompDaemonEngineTest {
             socketPath = "/tmp/test.sock",
             notifHandlerFactory = { _, _ ->
                 object : SeccompNotifHandler, AutoCloseable {
-                    context(arena: NativeArena) override fun processNotification(
+                    context(arena: NativeArena) override fun beginNotification(
                         notif: ManagedSegment,
                         resp: ManagedSegment,
                         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-                    ): NotifResult = NotifResult.HANDLED
+                        deadline: io.mazewall.core.Deadline,
+                    ): NotificationWork = error("unused")
 
                     override fun close() {
                         notificationHandlerClosed = true
@@ -38,8 +40,10 @@ class SeccompDaemonEngineTest {
             },
             engine = nativeEngine,
         )
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(11)
         val connection = SeccompConnection.Active(socketFd, listenerFd)
 
         NativeArena.ofConfined().use { arena ->

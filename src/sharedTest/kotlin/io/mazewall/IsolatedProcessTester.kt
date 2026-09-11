@@ -12,6 +12,10 @@ import java.util.concurrent.TimeUnit
  * Do not use [io.mazewall.core.JvmChildProcess] here. Daemon children use a different
  * argv. Isolated children also drop inherited JAVA_TOOL_OPTIONS so GraalVM JVMCI
  * is not enabled (C1 mmap PROT_EXEC EPERM / exit 1).
+ *
+ * The external waiter owns the child and every observed descendant until bounded
+ * cleanup completes, including successful exits. This cooperative test fixture
+ * does not contain processes that escape ancestry before they can be observed.
  */
 object IsolatedProcessTester {
     private const val DEFAULT_TIMEOUT_SECONDS = 120L
@@ -41,13 +45,39 @@ object IsolatedProcessTester {
         ): Boolean
     }
 
-    private object JdkProcessLifecycle : ProcessLifecycleOperations {
+    private class JdkProcessLifecycle(
+        private val onDescendantsObserved: (List<ProcessHandle>) -> Unit,
+    ) : ProcessLifecycleOperations {
+        private val observedDescendants = linkedMapOf<Long, ProcessHandle>()
+
         override fun waitFor(
             process: Process,
             timeout: Duration,
-        ): Boolean = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        ): Boolean {
+            val deadline = System.nanoTime() + timeout.toNanos()
+            do {
+                descendants(process)
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) return !process.isAlive
+                if (process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(10)), TimeUnit.NANOSECONDS)) {
+                    descendants(process)
+                    return true
+                }
+            } while (true)
+        }
 
-        override fun descendants(process: Process): List<ProcessHandle> = process.descendants().toList().asReversed()
+        override fun descendants(process: Process): List<ProcessHandle> {
+            process.descendants().use { handles -> handles.forEach { observedDescendants[it.pid()] = it } }
+            // Retain authority to discover grandchildren even after their parent
+            // has outlived and been reparented away from the isolated JVM.
+            observedDescendants.values.toList().forEach { child ->
+                child.descendants().use { handles -> handles.forEach { observedDescendants[it.pid()] = it } }
+            }
+            return observedDescendants.values
+                .toList()
+                .asReversed()
+                .also(onDescendantsObserved)
+        }
 
         override fun destroy(process: Process) {
             process.destroy()
@@ -70,27 +100,34 @@ object IsolatedProcessTester {
             descendants: List<ProcessHandle>,
         ): Boolean {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REAP_TIMEOUT_SECONDS)
-            descendants.forEach { child ->
-                val remaining = deadline - System.nanoTime()
-                if (remaining > 0) {
-                    runCatching { child.onExit().get(remaining, TimeUnit.NANOSECONDS) }
+            var interrupted = Thread.interrupted()
+            try {
+                while (process.isAlive || descendants.any(ProcessHandle::isAlive)) {
+                    val remaining = deadline - System.nanoTime()
+                    if (remaining <= 0) return false
+                    try {
+                        TimeUnit.NANOSECONDS.sleep(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(10)))
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
                 }
+                return true
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
             }
-            val remaining = deadline - System.nanoTime()
-            if (remaining > 0) {
-                runCatching { process.waitFor(remaining, TimeUnit.NANOSECONDS) }
-            }
-            return !process.isAlive && descendants.none(ProcessHandle::isAlive)
         }
     }
 
     /**
      * Spawns a new JVM process to run the specified [testClassName]'s [main] method with [args].
      * Asserts that the process exits with code 0.
+     * [onDescendantsObserved] is a synchronous, nonblocking observation seam for
+     * lifecycle fixture barriers; it must not transfer or dispose process ownership.
      */
     fun runIsolatedTest(
         testClassName: String,
         vararg args: String,
+        onDescendantsObserved: (List<ProcessHandle>) -> Unit = {},
     ) {
         // Validate configuration before acquiring a child-process resource. A bad
         // test setting must never launch an unowned process.
@@ -123,52 +160,60 @@ object IsolatedProcessTester {
             .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()
-        verifyLifecycleForTesting(process, timeout, command, JdkProcessLifecycle)
+        verifyLifecycleForTesting(process, timeout, command, JdkProcessLifecycle(onDescendantsObserved))
     }
 
-    /** Executes the post-start lifecycle contract through an injectable process boundary. */
+    /**
+     * Owns [process] through post-start verification and unconditional cleanup.
+     * Original failures retain identity; cleanup failures are suppressed and
+     * interruption is restored only after all bounded cleanup attempts finish.
+     */
     fun verifyLifecycleForTesting(
         process: Process,
         timeout: Duration,
         command: List<String>,
         lifecycle: ProcessLifecycleOperations,
     ) {
-        val completed = try {
-            lifecycle.waitFor(process, timeout)
-        } catch (interrupted: InterruptedException) {
-            val failure = IllegalStateException("Interrupted while waiting for isolated test process", interrupted)
-            try {
-                terminateTree(process, lifecycle)
-            } catch (cleanupFailure: Throwable) {
-                failure.addSuppressed(cleanupFailure)
-            } finally {
-                Thread.currentThread().interrupt()
-            }
-            throw failure
-        }
-        if (!completed) {
-            val timeoutFailure = IllegalStateException(
-                "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
-                    "Command: ${command.joinToString(" ")}",
-            )
-            try {
-                terminateTree(process, lifecycle)
-            } catch (cleanupFailure: Throwable) {
-                val failure = IllegalStateException(
-                    "Isolated test process cleanup failed: ${cleanupFailure.message}",
-                    cleanupFailure,
+        var failure: Throwable? = null
+        var interrupted = Thread.interrupted()
+        try {
+            if (interrupted) throw InterruptedException("Isolated test waiter was already interrupted")
+            if (!lifecycle.waitFor(process, timeout)) {
+                failure = IllegalStateException(
+                    "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
+                        "Command: ${command.joinToString(" ")}",
                 )
-                failure.addSuppressed(timeoutFailure)
-                throw failure
+            } else {
+                val exitCode = process.exitValue()
+                if (exitCode != 0) {
+                    failure = IllegalStateException(
+                        "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}",
+                    )
+                }
             }
-            throw timeoutFailure
+        } catch (caught: Throwable) {
+            interrupted = interrupted || caught is InterruptedException
+            failure = if (caught is InterruptedException) {
+                IllegalStateException("Interrupted while waiting for isolated test process", caught)
+            } else {
+                caught
+            }
+        } finally {
+            interrupted = Thread.interrupted() || interrupted
+            try {
+                terminateTree(process, lifecycle)
+            } catch (cleanupFailure: Throwable) {
+                if (failure == null) {
+                    failure = cleanupFailure
+                } else if (failure !== cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure)
+                }
+            } finally {
+                interrupted = Thread.interrupted() || interrupted
+                if (interrupted) Thread.currentThread().interrupt()
+            }
         }
-        val exitCode = process.exitValue()
-        if (exitCode != 0) {
-            throw IllegalStateException(
-                "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}",
-            )
-        }
+        failure?.let { throw it }
     }
 
     private fun configuredTimeout(): Duration {
@@ -183,15 +228,40 @@ object IsolatedProcessTester {
         process: Process,
         lifecycle: ProcessLifecycleOperations,
     ) {
-        val descendants = lifecycle.descendants(process)
-        descendants.forEach(lifecycle::destroy)
-        lifecycle.destroy(process)
-        if (lifecycle.awaitExit(process, descendants)) return
+        var failure: Throwable? = null
+        var interrupted = Thread.interrupted()
 
-        descendants.forEach(lifecycle::destroyForcibly)
-        lifecycle.destroyForcibly(process)
-        if (!lifecycle.awaitExit(process, descendants)) {
-            throw IllegalStateException("Process cleanup could not confirm termination after forced cleanup")
+        fun attempt(action: () -> Unit) {
+            try {
+                action()
+            } catch (caught: Throwable) {
+                interrupted = interrupted || caught is InterruptedException
+                if (failure == null) {
+                    failure = caught
+                } else if (failure !== caught) {
+                    failure.addSuppressed(caught)
+                }
+            } finally {
+                interrupted = Thread.interrupted() || interrupted
+            }
+        }
+        try {
+            var descendants = emptyList<ProcessHandle>()
+            attempt { descendants = lifecycle.descendants(process) }
+            descendants.forEach { child -> attempt { lifecycle.destroy(child) } }
+            attempt { lifecycle.destroy(process) }
+            var reaped = false
+            attempt { reaped = lifecycle.awaitExit(process, descendants) }
+            if (!reaped) {
+                attempt { descendants = (descendants + lifecycle.descendants(process)).distinctBy(ProcessHandle::pid) }
+                descendants.forEach { child -> attempt { lifecycle.destroyForcibly(child) } }
+                attempt { lifecycle.destroyForcibly(process) }
+                attempt { reaped = lifecycle.awaitExit(process, descendants) }
+                if (!reaped) attempt { error("Process cleanup could not confirm termination after forced cleanup") }
+            }
+            failure?.let { throw it }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 

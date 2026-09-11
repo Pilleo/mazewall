@@ -88,7 +88,19 @@ public object LinuxNative : NativeEngine {
      */
     public sealed interface SyscallResult<out T, out Handled : SyscallHandledState> {
         /** The call succeeded. */
-        public data class Success<out T, out Handled : SyscallHandledState>(val value: T) : SyscallResult<T, Handled>
+        public data class Success<out T, out Handled : SyscallHandledState>(val value: T) : SyscallResult<T, Handled> {
+            @get:JvmSynthetic
+            @set:JvmSynthetic
+            internal var descriptorReceipts: List<io.mazewall.core.NativeDescriptorReceipt> = emptyList()
+            private var nextDescriptorReceipt = 0
+
+            @JvmSynthetic
+            @Synchronized
+            internal fun takeDescriptorReceipt(): io.mazewall.core.NativeDescriptorReceipt {
+                check(nextDescriptorReceipt < descriptorReceipts.size) { "Result has no unconsumed native descriptor acquisition receipt" }
+                return descriptorReceipts[nextDescriptorReceipt++]
+            }
+        }
 
         /** The call failed with a specific Linux [errno]. */
         public data class Error<out Handled : SyscallHandledState>(val errno: Int, val rawValue: Long) : SyscallResult<Nothing, Handled> {
@@ -233,7 +245,7 @@ public fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
  * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
  */
 public fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
-    FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
+    getFdOrThrow("asFd")
 
 /**
  * Convenience extension for [LinuxNative.SyscallResult] of [Long].
@@ -249,6 +261,13 @@ public fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
  */
 public fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
     when (this) {
-        is LinuxNative.SyscallResult.Success -> FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
+        is LinuxNative.SyscallResult.Success -> takeDescriptorReceipt().consume(FileDescriptorRole.Generic)
+        is LinuxNative.SyscallResult.Error -> throwErrno(context)
+    }
+
+/** Consumes native acquisition evidence while preserving the requested descriptor role. */
+public fun <R : FileDescriptorRole> LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String, role: R): FileDescriptor<R, FdState.Open, FdOwnership.Owned> =
+    when (this) {
+        is LinuxNative.SyscallResult.Success -> takeDescriptorReceipt().consume(role)
         is LinuxNative.SyscallResult.Error -> throwErrno(context)
     }

@@ -34,6 +34,23 @@ internal class SocketHelperProcess private constructor(
     private val input = DataInputStream(process.inputStream)
     private val output = DataOutputStream(process.outputStream)
 
+    // SUPPRESSION-RATIONALE: Every private frame identity and descriptor receipt is checked before handoff; distinct failures retain their protocol boundary.
+    override fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect {
+        check(lifetime.accepting) { "Socket helper is stopping or closed" }
+        val notification = job.notification
+        output.writeByte(TraceeAuthorityProtocol.OPERATION)
+        TraceeAuthorityProtocol.writeRequest(output, notification, job.bypassRoots)
+        if (input.readLong() != notification.id) throw IOException("Authority snapshot identity mismatch")
+        job.prepared.complete(TraceeAuthorityProtocol.readSnapshot(input))
+        val decision = job.decision.get(job.deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
+        TraceeAuthorityProtocol.writeDecision(output, decision)
+        if (input.readLong() != notification.id) throw IOException("Authority result identity mismatch")
+        return TraceeAuthorityProtocol.readEffect(input) {
+            val fd = RealSocketManager.recvDescriptor(channel, FileDescriptorRole.Generic) ?: throw IOException("Missing authority descriptor")
+            SupervisorOwnedFd(fd, LinuxNative.fileSystem)
+        }
+    }
+
     override fun execute(
         operation: SocketOperation,
         socket: SupervisorOwnedFd,
@@ -68,6 +85,8 @@ internal class SocketHelperProcess private constructor(
                 process = ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.INHERIT).start()
                 awaitConnection(server)
                 channel = RealSocketManager.accept(server)
+                io.mazewall.ffi.networking.SupervisorHelperCredentials
+                    .verify(LinuxNative, channel, process.pid())
                 RealSocketManager.close(server)
                 server = null
                 return SocketHelperProcess(process, channel, endpoint)

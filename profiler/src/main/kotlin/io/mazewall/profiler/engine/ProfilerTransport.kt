@@ -118,6 +118,24 @@ internal interface NativeIoOperations {
     fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
 }
 
+/** Managed-segment adapter used by the shared nonblocking reactor exchange. */
+internal fun NativeIoOperations.controlMemory(): io.mazewall.NativeMemory =
+    object : io.mazewall.NativeMemory by LinuxNative.memory {
+    override fun read(
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+        buf: ManagedSegment,
+        count: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        this@controlMemory.read(fd, buf.native, count) as LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+
+    override fun write(
+        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+        buf: ManagedSegment,
+        count: Long,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        this@controlMemory.write(fd, buf.native, count) as LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
+}
+
 /**
  * Interface for socket creation and connection handling.
  */

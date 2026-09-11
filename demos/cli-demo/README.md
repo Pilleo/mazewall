@@ -5,9 +5,11 @@ This application runs executable positive and negative controls and exits non-ze
 ## Modes
 
 - `unsafe` expects the simulated JNDI exploit to create a marker inside an owned private temporary directory.
-- `safe` applies the combined `Policy.NO_EXEC` and `Policy.NO_NETWORK` contract and expects the exploit to be denied without creating the marker.
-- `profile` profiles synchronous file/socket work, compiles the observation, verifies the legitimate workload, and executes negative controls.
-- `both` runs only `unsafe` and `safe`; `all` also runs `profile`.
+- `safe` applies the combined `Policy.NO_EXEC` and `Policy.NO_NETWORK` contract and exercises both process execution and a loopback connection. The network control first verifies the destination is reachable without containment.
+- `profile` profiles a synchronous configuration-file read, refuses incomplete evidence, and reruns the same named operation under the compiled policy. Configuration content changes between runs so cached content cannot satisfy the positive control. It also attempts unprofiled and unauthorized-stack reads.
+- `both` and the default `all` run `unsafe` and `safe` only. Profiling requires the explicit `profile` command.
+
+Incomplete profiles are printed as diagnostics and never installed for enforcement. A profile run that cannot produce complete evidence exits with code `2`. Stack authorization compares both the exact declaring class and method name; lookalike names do not authorize a syscall. Profile artifacts are not written over existing repository files.
 
 The profile demonstration’s native file probe is a direct synchronous `open(2)` call. It does not initialize an io_uring queue, submit an SQE, or demonstrate asynchronous io_uring containment. The broader Seccomp/Landlock io_uring threat model is documented elsewhere in the project, but it must not be inferred from this executable.
 

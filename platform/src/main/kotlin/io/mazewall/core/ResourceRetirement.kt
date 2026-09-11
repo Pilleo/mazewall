@@ -35,15 +35,7 @@ internal class ResourceRetirement {
             interrupted = true
             Thread.interrupted()
         }
-        val previous = failure
-        if (previous == null) {
-            failure = next
-        } else if (next is Error && previous !is Error) {
-            next.addSuppressed(previous)
-            failure = next
-        } else if (previous !== next) {
-            previous.addSuppressed(next)
-        }
+        failure = CleanupFailures.merge(failure, next)
     }
 
     fun finish() {

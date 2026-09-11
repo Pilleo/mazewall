@@ -26,8 +26,7 @@ internal object UnixServerSocket {
                     SupervisorSocketUtils.AF_UNIX,
                     SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
                     0,
-                ).getFdOrThrow("socket(AF_UNIX)")
-                    .let { FileDescriptor.adopt(it.value, FileDescriptorRole.UnixSocket) }
+                ).getFdOrThrow("socket(AF_UNIX)", FileDescriptorRole.UnixSocket)
                 owned = fd
                 runtime.networking
                     .bind(fd, address.managed, SupervisorSocketUtils.SOCKADDR_UN_SIZE)

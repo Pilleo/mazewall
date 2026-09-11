@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -11,9 +12,18 @@ import java.util.stream.Stream
 import kotlin.reflect.KClass
 
 internal class ProfilerSessionMachineTest {
+    @org.junit.jupiter.api.Test
+    fun `terminal states reject new protocol input`() {
+        val transition = ProfilerSessionMachine.evaluate(ProfilerState.Terminated(), ProfilerSessionEvent.AckSucceeded)
+        assertTrue(transition.protocolViolation)
+        assertTrue(transition.terminate)
+    }
+
     companion object {
-        private val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(3)
-        private val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(4)
+        private val socket = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(3)
+        private val listener = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(4)
         private val active = ProfilerState.ActiveSession(socket, listener)
         private val event = SyscallEvent<SyscallEventState.Resolved>(
             tid = Tid(1),

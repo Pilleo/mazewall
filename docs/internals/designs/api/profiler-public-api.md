@@ -22,6 +22,12 @@ keywords: ["public-api", "profiling", "coverage", "session-lifecycle"]
 
 USER_NOTIF runtime ownership is now internal to `ProfilerService` and `ProfilerSession`; independent services isolate dependencies, listeners, TIDs, buffers and cleanup outcomes. The static `Profiler` API delegates to one default service. Its `shutdown()` drains current sessions into pass-through while preserving the daemon for installed filters and allowing later sessions. The executor wrapper still exposes mutable recent logs, and its shutdown methods control only the delegate executor. A public executor-session ownership API remains a separate proposal. Iterative profiling also retains its separate registration model.
 
+`ProfilerExecutorWrapper.snapshot()` now returns an immutable `ProfilingResult<Unit>` containing
+both behavior and collector coverage. Stop admission and drain the executor, then call
+`Profiler.shutdown()` before consuming a final snapshot. Active or incompletely drained collectors
+remain incomplete; a closed wrapper that never attempted collection contributes an empty drained
+snapshot. `compileBillOfBehavior()` remains compatible but carries no completeness proof by itself.
+
 ### Strategy Selection
 
 USER_NOTIF, iterative Landlock and descendant `strace` profiling have separate entry points and different limitations. A facade should accept `ProfileStrategy.AUTO`, select only a compatible strategy, and record the selected strategy and reason. It must never silently claim equivalent coverage between strategies.

@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.core.Arch
 import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
+import io.mazewall.core.SyscallNumber
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
@@ -10,6 +11,7 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.seccomp.SupervisedKind
 import io.mazewall.seccomp.*
 import java.util.logging.Logger
 
@@ -121,6 +123,16 @@ object BpfFilter {
         allowUnsafePrctl: Boolean = false,
         profilingMode: Boolean = false,
     ): BpfProgram<BpfStatus.Unverified> {
+        if (!profilingMode) {
+            require(defaultAction != SeccompAction.ACT_NOTIFY) {
+                "Default ACT_NOTIFY has no supervisor handler for unknown syscalls; supervise supported syscalls explicitly"
+            }
+            syscallActions.forEach { (nr, action) ->
+                require(action != SeccompAction.ACT_NOTIFY || SupervisedKind.classify(SyscallNumber(nr), arch) != SupervisedKind.Unknown) {
+                    "ACT_NOTIFY syscall $nr on ${arch.name} has no supervisor handler"
+                }
+            }
+        }
         val effectiveSyscallActions = syscallActions.toMutableMap()
 
         if (profilingMode) {

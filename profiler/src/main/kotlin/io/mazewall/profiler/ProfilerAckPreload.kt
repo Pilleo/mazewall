@@ -30,6 +30,12 @@ internal object ProfilerAckPreload {
             TraceListenerState.ReadingArguments::class.java.name,
             TraceListenerState.ProcessingEvent::class.java.name,
             TraceListenerState.Disconnected::class.java.name,
+            TraceListenerState.ProtocolViolation::class.java.name,
+            io.mazewall.profiler.internal.TraceListenerProtocolException::class.java.name,
+            io.mazewall.profiler.internal.TraceCommandWriteResult.Written::class.java.name,
+            io.mazewall.profiler.internal.TraceCommandWriteResult.NativeFailure::class.java.name,
+            io.mazewall.profiler.internal.TraceCommandWriteResult.ShortWrite::class.java.name,
+            io.mazewall.profiler.internal.TraceCommandWriteResult.Threw::class.java.name,
         )
 
     fun ensureLoaded() {

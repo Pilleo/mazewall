@@ -7,6 +7,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -41,16 +42,19 @@ class SeccompSessionHandlerTest {
         }
         val engine = MockNativeEngine(memory = memory)
         val notifHandler = object : SeccompNotifHandler {
-            context(arena: NativeArena) override fun processNotification(
+            context(arena: NativeArena) override fun beginNotification(
                 notif: ManagedSegment,
                 resp: ManagedSegment,
                 listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                 socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-            ): NotifResult = NotifResult.HANDLED
+                deadline: io.mazewall.core.Deadline,
+            ): io.mazewall.platform.seccomp.daemon.NotificationWork = error("unused")
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = notifHandler,
             engine = engine,
         )

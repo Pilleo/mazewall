@@ -1,5 +1,6 @@
 #!/bin/bash
-# Helper script to run tests inside the Podman container environment
+# Helper script to run tests inside the configured container environment.
+# Podman is preferred; run_containerized_tests.sh falls back to Docker.
 
 # Ensure we are in the project root
 cd "$(dirname "$0")/.." || exit

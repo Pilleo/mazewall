@@ -18,6 +18,6 @@ internal object BobDeserializer {
     }
 
     fun deserialize(content: String): BillOfBehaviorDto {
-        return json.decodeFromString(BillOfBehaviorDto.serializer(), content)
+        return json.decodeFromString<BillOfBehaviorDto>(content)
     }
 }

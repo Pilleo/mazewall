@@ -7,6 +7,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -43,17 +44,26 @@ class SeccompSessionHandlerTest {
             }
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = object : SeccompNotifHandler {
-                context(arena: NativeArena) override fun processNotification(
+                context(arena: NativeArena) override fun beginNotification(
                     notif: ManagedSegment,
                     resp: ManagedSegment,
                     listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                     socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-                ): NotifResult {
+                    deadline: io.mazewall.core.Deadline,
+                ): NotificationWork {
                     notificationHandlerCalls += 1
-                    return NotifResult.PASS_THROUGH
+                    return object : NotificationWork {
+                        context(arena: NativeArena) override fun poll(): NotificationProgress =
+                            NotificationProgress.Ready(
+                            { io.mazewall.platform.seccomp.UserNotifReplyResult.Sent },
+                            NotifResult.PASS_THROUGH,
+                        )
+                    }
                 }
             },
             engine = engine,

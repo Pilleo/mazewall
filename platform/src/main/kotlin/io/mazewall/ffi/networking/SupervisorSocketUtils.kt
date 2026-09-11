@@ -14,6 +14,7 @@ import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
 import io.mazewall.ffi.memory.unwrap
+import io.mazewall.getFdOrThrow
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -53,19 +54,29 @@ public object SupervisorSocketUtils {
         return sockaddrUn
     }
 
+    @Deprecated("Use connectDescriptorWithRetry to preserve descriptor ownership")
+    // SUPPRESSION-RATIONALE: Binary migration parameters remain callable, but this raw-ownership entry always rejects before native acquisition.
+    @Suppress("UnusedParameter")
     public fun connectWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
-    ): Int {
+    ): Int = error("Raw descriptor transport is disabled; use connectDescriptorWithRetry")
+
+    // SUPPRESSION-RATIONALE: Each native acquisition and interruption failure is reported at its boundary; collapsing throws would obscure which owner needs cleanup.
+    public fun connectDescriptorWithRetry(
+        socketPath: String,
+        maxRetries: Int = 500,
+        delayMs: Long = 10L,
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
                 val fdRes = LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
-                val fdVal = when (fdRes) {
-                    is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
+                when (fdRes) {
+                    is LinuxNative.SyscallResult.Success -> Unit
                     is LinuxNative.SyscallResult.Error -> {
                         lastErrno = fdRes.errno
                         try {
@@ -77,10 +88,10 @@ public object SupervisorSocketUtils {
                         continue
                     }
                 }
-                val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
+                val fd = fdRes.getFdOrThrow("socket", FileDescriptorRole.UnixSocket)
                 val connRes = LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fdVal
+                    return fd
                 }
                 lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
                 LinuxNative.fileSystem.close(fd)
@@ -214,7 +225,7 @@ public object SupervisorSocketUtils {
             controlLength in CMSG_RIGHTS_LEN..MSG_CONTROL_BUF_SIZE &&
             cmsg.getCmsgLen() == CMSG_RIGHTS_LEN &&
             descriptors.size == 1
-        if (valid) return FileDescriptor.adopt(descriptors.single(), role)
+        if (valid) return FileDescriptor.acquired(descriptors.single(), role)
         closeRejectedDescriptors(descriptors, role, fileSystem)
         return null
     }
@@ -245,7 +256,7 @@ public object SupervisorSocketUtils {
         var cleanupFailure: Throwable? = null
         descriptors.forEach { received ->
             try {
-                fileSystem.close(FileDescriptor.adopt(received, role)).getOrThrow("close rejected SCM_RIGHTS descriptor")
+                fileSystem.close(FileDescriptor.acquired(received, role)).getOrThrow("close rejected SCM_RIGHTS descriptor")
             } catch (fatal: Error) {
                 val previous = cleanupFailure
                 if (previous == null) {

@@ -12,13 +12,34 @@ internal sealed interface SocketOperation {
     data class Accept(
         val flags: Int,
     ) : SocketOperation
+
+    /** The accompanying owned descriptor is the directory; no tracee identity is delegated. */
+    data class OpenAt2(
+        val path: String,
+        val flags: Long,
+        val mode: Long,
+        val resolve: Long,
+    ) : SocketOperation {
+        init {
+            require(!path.startsWith('/') && '\u0000' !in path)
+            require(path.toByteArray(Charsets.UTF_8).size <= SocketHelperProtocol.MAX_PATH_BYTES)
+        }
+    }
 }
 
 internal sealed interface SocketHelperResult {
+    class Authority(
+        val effect: SupervisorReplyEffect,
+    ) : SocketHelperResult
+
     data object Connected : SocketHelperResult
 
     data class Failed(
         val errno: Int,
+    ) : SocketHelperResult
+
+    class Opened(
+        val descriptor: SupervisorOwnedFd,
     ) : SocketHelperResult
 
     class Accepted(
@@ -33,6 +54,8 @@ internal sealed interface SocketHelperResult {
 
 /** Close must terminate/reap the independent process, including a blocked execute. */
 internal interface SocketHelper : AutoCloseable {
+    fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect = error("Helper does not implement tracee authority")
+
     fun execute(
         operation: SocketOperation,
         socket: SupervisorOwnedFd,
@@ -42,6 +65,8 @@ internal interface SocketHelper : AutoCloseable {
 internal fun SocketHelperResult.dispose() {
     when (this) {
         is SocketHelperResult.Accepted -> descriptor.close()
+        is SocketHelperResult.Opened -> descriptor.close()
+        is SocketHelperResult.Authority -> SupervisorReplyHandoff(effect).close()
         SocketHelperResult.Connected, is SocketHelperResult.Failed -> Unit
     }
 }

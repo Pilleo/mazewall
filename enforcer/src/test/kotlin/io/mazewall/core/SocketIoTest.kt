@@ -27,7 +27,8 @@ class SocketIoTest {
                         return LinuxNative.SyscallResult.Success(n)
                     }
                 }
-            val fd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(7)
+            val fd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(7)
             val res = SocketIo.writeFully(memory, fd, buf, 8)
             assertTrue(res is LinuxNative.SyscallResult.Success)
             assertEquals(8L, (res as LinuxNative.SyscallResult.Success).value)
@@ -47,7 +48,8 @@ class SocketIoTest {
                         count: Long,
                     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
                 }
-            val fd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(7)
+            val fd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(7)
             val res = SocketIo.readFully(
                 memory,
                 fd,
@@ -86,7 +88,8 @@ class SocketIoTest {
                     LinuxNative.SyscallResult.Success(0L)
                 }
             }
-            val fd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(7)
+            val fd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(7)
             val res = SocketIo.readFully(
                 memory,
                 fd,
@@ -117,7 +120,8 @@ class SocketIoTest {
                         return LinuxNative.SyscallResult.Success(count)
                     }
                 }
-            val fd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(7)
+            val fd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(7)
             val expired = Deadline.afterMillis(0L, nowNanoTime = 0L)
             val res = SocketIo.readFully(memory, fd, buf, 4, expired, readablePoll())
             assertTrue(res is LinuxNative.SyscallResult.Error)

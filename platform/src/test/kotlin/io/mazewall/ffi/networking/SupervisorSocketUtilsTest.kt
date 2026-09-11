@@ -7,6 +7,8 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.MsghdrSegment
@@ -149,7 +151,8 @@ class SupervisorSocketUtilsTest {
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
         LinuxNative.setEngine(mockEngine)
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
         val result = SupervisorSocketUtils.recvDescriptor(socketFd)
         assertEquals(42, result?.value)
         assertEquals(3, callCount)
@@ -172,7 +175,8 @@ class SupervisorSocketUtilsTest {
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
         LinuxNative.setEngine(mockEngine)
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
         val result = SupervisorSocketUtils.recvDescriptor(socketFd)
         assertNull(result)
         assertEquals(1, callCount)
@@ -194,7 +198,8 @@ class SupervisorSocketUtilsTest {
 
         LinuxNative.setEngine(object : MockNativeEngine(networking = mockNetworking) {})
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
         assertNull(SupervisorSocketUtils.recvDescriptor(socketFd))
         assertEquals(1, callCount)
     }
@@ -217,7 +222,7 @@ class SupervisorSocketUtilsTest {
         LinuxNative.setEngine(mockEngine)
 
         assertThrows<IllegalStateException> {
-            SupervisorSocketUtils.connectWithRetry("/tmp/test_nonexistent.sock", maxRetries = 1)
+            SupervisorSocketUtils.connectDescriptorWithRetry("/tmp/test_nonexistent.sock", maxRetries = 1)
         }
 
         val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
@@ -261,14 +266,15 @@ class SupervisorSocketUtilsTest {
                 flags: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 accept4Flags = flags
-                return LinuxNative.SyscallResult.Success(99L)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(99L).testAcquisition()
             }
         }
 
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
         LinuxNative.setEngine(mockEngine)
 
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
         val clientFd = io.mazewall.core.RealSocketManager
             .accept(serverFd)
 

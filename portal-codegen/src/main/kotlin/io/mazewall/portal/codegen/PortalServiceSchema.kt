@@ -47,13 +47,30 @@ internal data class PortalServiceSchema(
                         parameters =
                             java.util.List.copyOf(
                                 method.parameters.map { parameter ->
-                                    PortalParameterSchema(parameter.name, parameter.type, BoundaryTypes.kindOf(parameter.type))
+                                    val kind = BoundaryTypes.kindOf(parameter.type)
+                                    validateCapabilityPlacement(kind, "${service.name}.${method.name}.${parameter.name}", directInbound = true)
+                                    PortalParameterSchema(parameter.name, parameter.type, kind)
                                 },
                             ),
-                        returnKind = BoundaryTypes.kindOf(method.returnType),
+                        returnKind = BoundaryTypes.kindOf(method.returnType).also {
+                            validateCapabilityPlacement(it, "${service.name}.${method.name}.return", directInbound = false)
+                        },
                     )
                 }
             return PortalServiceSchema(service, java.util.List.copyOf(methods))
+        }
+
+        private fun validateCapabilityPlacement(
+            kind: BoundaryTypes.Kind,
+            path: String,
+            directInbound: Boolean,
+        ) {
+            if (kind is BoundaryTypes.Kind.ReadFd) {
+                require(directInbound) { "portal boundary $path: Capability.ReadFd is supported only as a direct inbound parameter" }
+            }
+            if (kind is BoundaryTypes.Kind.RecordT) {
+                kind.components.forEach { validateCapabilityPlacement(it.kind, "$path.${it.name}", directInbound = false) }
+            }
         }
 
         private fun resolveOverride(

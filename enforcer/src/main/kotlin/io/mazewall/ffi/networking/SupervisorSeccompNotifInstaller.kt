@@ -32,20 +32,8 @@ import java.util.concurrent.atomic.AtomicReference
  * to prevent deadlocks when supervising critical JVM operations (like open/openat).
  */
 public object SupervisorSeccompNotifInstaller {
-    private fun awaitCoordinator(proceedLatch: CountDownLatch) {
-        var interrupted = false
-        while (true) {
-            try {
-                proceedLatch.await()
-                break
-            } catch (_: InterruptedException) {
-                interrupted = true
-            }
-        }
-        if (interrupted) {
-            Thread.currentThread().interrupt()
-        }
-    }
+    private val defaultConnect: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { SupervisorSocketUtils.connectDescriptorWithRetry(it) }
+    private val defaultSend: (Int, Int) -> Boolean = { socket, listener -> SupervisorSocketUtils.sendDescriptor(socket, listener) }
 
     private fun synchronizeProcessFilter(
         native: NativeEngine,
@@ -84,43 +72,39 @@ public object SupervisorSeccompNotifInstaller {
     private fun startCoordinator(
         native: NativeEngine,
         socketPath: String,
-        listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>>,
-        setupError: AtomicReference<Throwable?>,
-        installLatch: CountDownLatch,
-        proceedLatch: CountDownLatch,
-        connectWithRetry: (String) -> Int,
+        listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?>,
+        handshake: SeccompInstallHandshake,
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         sendDescriptor: (Int, Int) -> Boolean,
-        onFilterApplied: () -> Unit,
-        onSocketConnected: (Int, CountDownLatch) -> Unit,
+        onSocketConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
     ): Thread =
         Thread {
             try {
+                val transport = SeccompInstallTransport(native, handshake)
                 // Wait for the tracee thread to complete the seccomp installation
-                installLatch.await()
-                val fdRef = listenerFdVal.get()
-                if (fdRef.value < 0) {
-                    val err = setupError.get() ?: IllegalStateException("Failed to install seccomp filter")
-                    throw err
-                }
+                handshake.await(handshake.installed)
 
                 // Publish the successful irreversible kernel stage even if connect or
                 // readiness subsequently fails. The callback captures the tracee's holder.
-                onFilterApplied()
+                handshake.publishApplied()
+                handshake.checkActive()
 
                 // Connect to socket and send the descriptor (runs uncontained)
-                val socketFd = connectWithRetry(socketPath)
+                val socketFd = if (connectWithRetry === defaultConnect) transport.connect(socketPath) else connectWithRetry(socketPath)
                 var socketTransferred = false
                 try {
-                    val sent = sendDescriptor(socketFd, fdRef.value)
-                    if (!sent) {
-                        throw IllegalStateException("Failed to send seccomp listener FD to daemon")
+                    handshake.checkActive()
+                    // The coordinator claims the local listener only when ready to send it.
+                    // Until then the failing installer may reclaim it; never close under sendmsg.
+                    val fdRef = checkNotNull(listenerFdVal.getAndSet(null)) { "Seccomp listener handoff cancelled" }
+                    try {
+                        val sent = if (sendDescriptor === defaultSend) transport.send(socketFd, fdRef.value) else sendDescriptor(socketFd.value, fdRef.value)
+                        check(sent) { "Failed to send seccomp listener FD to daemon" }
+                    } finally {
+                        native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener")
                     }
-
-                    // The daemon now has a copy of the listener FD via SCM_RIGHTS.
-                    // We must close our local copy. If we don't, the kernel will not abort
-                    // pending notifications when the daemon exits (since our FD would remain open),
-                    // causing tracee threads to deadlock forever in __seccomp_filter.
-                    native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener")
+                    handshake.advance(SeccompInstallStage.Transferred)
+                    handshake.checkActive()
 
                     val readyLatch = CountDownLatch(1)
 
@@ -129,27 +113,25 @@ public object SupervisorSeccompNotifInstaller {
                     onSocketConnected(socketFd, readyLatch)
 
                     // Wait until the listener is fully initialized and ready
-                    readyLatch.await()
+                    handshake.await(readyLatch)
                 } catch (expectedCoordinatorFailure: Exception) {
                     if (!socketTransferred) {
-                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                        native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket")
                     }
                     throw expectedCoordinatorFailure
                 } catch (expectedCoordinatorError: Error) {
                     if (!socketTransferred) {
-                        native.fileSystem.close(FileDescriptor.adopt(socketFd, FileDescriptorRole.UnixSocket)).getOrThrow("close failed coordinator socket")
+                        native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket")
                     }
                     throw expectedCoordinatorError
                 }
 
                 // Handshake is fully configured, wake up tracee thread
-                proceedLatch.countDown()
+                handshake.advance(SeccompInstallStage.Ready)
             } catch (expectedCoordinatorFailure: Exception) {
-                setupError.set(expectedCoordinatorFailure)
-                proceedLatch.countDown()
+                handshake.fail(expectedCoordinatorFailure)
             } catch (expectedCoordinatorError: Error) {
-                setupError.set(expectedCoordinatorError)
-                proceedLatch.countDown()
+                handshake.fail(expectedCoordinatorError)
             }
         }.apply {
             isDaemon = true
@@ -157,6 +139,9 @@ public object SupervisorSeccompNotifInstaller {
             start()
         }
 
+    @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
     public fun install(
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
@@ -166,7 +151,54 @@ public object SupervisorSeccompNotifInstaller {
         onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
     ) {
-        install(
+        error("Raw descriptor callbacks are disabled; use installOwned")
+    }
+
+    @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit = {},
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        error("Raw descriptor callbacks are disabled; use installOwned")
+    }
+
+    @Deprecated("Raw descriptor callbacks are disabled; use installOwned")
+    // SUPPRESSION-RATIONALE: The binary migration overload retains its parameters but rejects before invoking callbacks or installing irreversible filters.
+    @Suppress("UnusedParameter")
+    public fun install(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: (String) -> Int,
+        sendDescriptor: (Int, Int) -> Boolean,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        error("Raw descriptor callbacks are disabled; use installOwned")
+    }
+
+    public fun installOwned(
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean = false,
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = defaultConnect,
+        sendDescriptor: (Int, Int) -> Boolean = defaultSend,
+        onFilterApplied: () -> Unit = {},
+        onSocketConnected: (socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, readyLatch: CountDownLatch) -> Unit,
+    ) {
+        installOwned(
             LinuxNative.snapshot(),
             Platform.featureMatrix.seccompUserNotifSupported,
             socketPath,
@@ -182,20 +214,22 @@ public object SupervisorSeccompNotifInstaller {
     /**
      * Installation under one captured native authority, including the uncontained coordinator.
      * [onSocketConnected] takes ownership of its socket on entry, including callback failure.
+     * Custom connect/send callbacks are fault-injection seams. Production uses the defaults,
+     * whose nonblocking native I/O and readiness checks share the installation deadline.
      */
     @io.mazewall.MazewallInternal
-    public fun install(
+    public fun installOwned(
         native: NativeEngine,
         userNotifSupported: Boolean,
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
         processWide: Boolean,
-        connectWithRetry: (String) -> Int,
-        sendDescriptor: (Int, Int) -> Boolean,
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = defaultConnect,
+        sendDescriptor: (Int, Int) -> Boolean = defaultSend,
         onFilterApplied: () -> Unit = {},
-        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+        onSocketConnected: (socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, readyLatch: CountDownLatch) -> Unit,
     ) {
-        install(
+        installOwned(
             native,
             userNotifSupported,
             socketPath,
@@ -211,17 +245,18 @@ public object SupervisorSeccompNotifInstaller {
 
     /** Allocation and coordinator waits stay outside [installationGate]. */
     @io.mazewall.MazewallInternal
-    public fun install(
+    // SUPPRESSION-RATIONALE: Platform support, irreversible installation and bounded handshake failures retain distinct throw sites and explicit partial-installation evidence.
+    public fun installOwned(
         native: NativeEngine,
         userNotifSupported: Boolean,
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
         processWide: Boolean,
-        connectWithRetry: (String) -> Int,
-        sendDescriptor: (Int, Int) -> Boolean,
+        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = defaultConnect,
+        sendDescriptor: (Int, Int) -> Boolean = defaultSend,
         onFilterApplied: () -> Unit,
         installationGate: SeccompInstallationGate,
-        onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,
+        onSocketConnected: (socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, readyLatch: CountDownLatch) -> Unit,
     ) {
         validateNotVirtual()
         if (!userNotifSupported) {
@@ -246,12 +281,10 @@ public object SupervisorSeccompNotifInstaller {
             null
         }
 
-        // Coordination structures
-        val installLatch = CountDownLatch(1)
-        val proceedLatch = CountDownLatch(1)
-        val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>> =
-            AtomicReference(FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(-1))
-        val setupError = AtomicReference<Throwable?>()
+        val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
+        val handshake = SeccompInstallHandshake(onFilterApplied)
+        val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?> =
+            AtomicReference(null)
 
         // Coordinator thread spawned BEFORE the seccomp filter is active.
         // This ensures the helper is completely uncontained.
@@ -259,17 +292,14 @@ public object SupervisorSeccompNotifInstaller {
             native,
             socketPath,
             listenerFdVal,
-            setupError,
-            installLatch,
-            proceedLatch,
+            handshake,
             connectWithRetry,
             sendDescriptor,
-            onFilterApplied,
             onSocketConnected,
         )
 
         try {
-            val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
+            handshake.checkActive()
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
             val r = installationGate.commit {
@@ -281,25 +311,20 @@ public object SupervisorSeccompNotifInstaller {
                 )
             }
 
-            val rawFd = when (r) {
-                is LinuxNative.SyscallResult.Success -> r.value.toInt()
+            when (r) {
+                is LinuxNative.SyscallResult.Success -> handshake.advance(SeccompInstallStage.Applied)
                 is LinuxNative.SyscallResult.Error -> {
-                    setupError.set(IllegalStateException("seccomp syscall failed with errno ${r.errno}"))
-                    installLatch.countDown()
-                    proceedLatch.countDown()
-                    throw checkNotNull(setupError.get())
+                    throw IllegalStateException("seccomp syscall failed with errno ${r.errno}")
                 }
             }
 
-            listenerFdVal.set(FileDescriptor.adopt(rawFd, FileDescriptorRole.SeccompNotif))
-            installLatch.countDown() // Release the coordinator to connect & send descriptor
+            listenerFdVal.set(r.getFdOrThrow("install seccomp listener", FileDescriptorRole.SeccompNotif))
+            handshake.installed.countDown()
 
             // Block tracee thread until the coordinator completes descriptor passing and listener startup
             // We wait uninterruptibly to ensure the handshake completes even if the thread is interrupted
             // during executor shutdown. This prevents state desync between the kernel and JVM.
-            awaitCoordinator(proceedLatch)
-
-            setupError.get()?.let { throw it }
+            handshake.await(handshake.proceed)
 
             // Step 2: Synchronize filter tree process-wide if processWide is true
             // We run this AFTER the coordinator has connected, handshaked, and started the listener.
@@ -309,21 +334,33 @@ public object SupervisorSeccompNotifInstaller {
                 synchronizeProcessFilter(native, arch, dummyBpf, installationGate)
             }
         } catch (expectedInstallFailure: Exception) {
-            setupError.compareAndSet(null, expectedInstallFailure)
-            installLatch.countDown()
-            val fdRef = listenerFdVal.get()
-            if (fdRef.isValid) {
-                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
-            }
+            cleanupFailedInstallation(handshake, listenerFdVal, native, expectedInstallFailure)
             throw expectedInstallFailure
         } catch (expectedInstallError: Error) {
-            setupError.compareAndSet(null, expectedInstallError)
-            installLatch.countDown()
-            val fdRef = listenerFdVal.get()
-            if (fdRef.isValid) {
-                native.fileSystem.close(fdRef).getOrThrow("close failed seccomp listener")
-            }
+            cleanupFailedInstallation(handshake, listenerFdVal, native, expectedInstallError)
             throw expectedInstallError
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Cleanup preserves the original failure, including fatal errors.
+    private fun cleanupFailedInstallation(
+        handshake: SeccompInstallHandshake,
+        listener: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?>,
+        native: NativeEngine,
+        failure: Throwable,
+    ) {
+        handshake.fail(failure)
+        handshake.installed.countDown()
+        try {
+            listener.getAndSet(null)?.let { native.fileSystem.close(it).getOrThrow("close failed seccomp listener") }
+        } catch (cleanup: Throwable) {
+            if (cleanup !== failure) failure.addSuppressed(cleanup)
+        }
+        try {
+            // Even a coordinator that never ran cannot erase a completed kernel installation.
+            handshake.publishApplied()
+        } catch (publication: Throwable) {
+            if (publication !== failure) failure.addSuppressed(publication)
         }
     }
 }

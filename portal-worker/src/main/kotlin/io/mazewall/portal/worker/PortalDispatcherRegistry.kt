@@ -108,9 +108,17 @@ internal fun PortalDispatcherTable.Builder.bootstrapStrict(raw: String?): Int {
     return entries.size
 }
 
+internal fun PortalDispatcherTable.Builder.registerGeneratedEntry(
+    entry: String,
+    loader: ClassLoader,
+) {
+    registerEntry(entry, replace = false, loader = loader)
+}
+
 private fun PortalDispatcherTable.Builder.registerEntry(
     entry: String,
     replace: Boolean,
+    loader: ClassLoader = PortalDispatcherRegistry::class.java.classLoader,
 ) {
     require(entry.isNotEmpty()) { "empty entry" }
     val parts = entry.split(';')
@@ -119,8 +127,9 @@ private fun PortalDispatcherTable.Builder.registerEntry(
     require(servicePair.size == 2 && servicePair.all { it.isNotBlank() }) {
         "expected Interface=Impl(;Dispatcher)"
     }
-    val serviceClass = Class.forName(servicePair[0].trim())
-    val impl = Class.forName(servicePair[1].trim()).getDeclaredConstructor().newInstance()
+    val serviceClass = Class.forName(servicePair[0].trim(), false, loader)
+    val impl = Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
+    require(serviceClass.isInstance(impl)) { "implementation does not implement ${serviceClass.name}" }
 
     val defaultName =
         serviceClass.packageName.let { pkg ->
@@ -128,7 +137,7 @@ private fun PortalDispatcherTable.Builder.registerEntry(
         }
     val dispatcherName = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultName
     val dispatcherObject =
-        Class.forName(dispatcherName).getDeclaredField("INSTANCE").get(null)
+        Class.forName(dispatcherName, true, loader).getDeclaredField("INSTANCE").get(null)
             ?: error("dispatcher $dispatcherName is not a Kotlin object")
 
     val methodIds = dispatcherObject.javaClass.getMethod("getMETHOD_IDS").invoke(dispatcherObject) as IntArray

@@ -3,6 +3,7 @@ package io.mazewall.profiler.engine
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -10,8 +11,10 @@ import org.junit.jupiter.api.Test
 class ProfilerInstallerStateTest {
     @Test
     fun `test state properties`() {
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(42)
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(43)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(42)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(43)
 
         val connecting = ProfilerInstallerState.Connecting(listenerFd)
         assertEquals(listenerFd, connecting.listenerFd)

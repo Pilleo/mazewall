@@ -2,25 +2,28 @@ package io.mazewall.profiler.internal
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.getFdOrThrow
 
 internal object ProfilerSocket {
-    fun connectWithRetry(
+    fun connectDescriptorWithRetry(
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
-    ): Int = connectWithRetry(socketPath, LinuxNative.snapshot(), maxRetries, delayMs)
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = connectDescriptorWithRetry(socketPath, LinuxNative.snapshot(), maxRetries, delayMs)
 
-    fun connectWithRetry(
+    fun connectDescriptorWithRetry(
         socketPath: String,
         native: NativeEngine,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
-    ): Int {
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
 
@@ -34,15 +37,15 @@ internal object ProfilerSocket {
                     0,
                 )
 
-                val fdVal = when (fdRes) {
-                    is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
+                when (fdRes) {
+                    is LinuxNative.SyscallResult.Success -> Unit
                     is LinuxNative.SyscallResult.Error -> {
                         lastErrno = fdRes.errno
                         Thread.sleep(delayMs)
                         continue
                     }
                 }
-                val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
+                val fd = fdRes.getFdOrThrow("socket", FileDescriptorRole.UnixSocket)
                 val connRes =
                 native.networking.connect(
                     fd,
@@ -51,7 +54,7 @@ internal object ProfilerSocket {
                 )
 
                 if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fdVal
+                    return fd
                 }
                 lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
                 native.fileSystem.close(fd).getOrThrow("close failed profiler connection")

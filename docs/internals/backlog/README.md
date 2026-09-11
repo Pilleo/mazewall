@@ -1,6 +1,20 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 75 | *Total Resolved Issues:* 551
+*Total Active Issues:* 76 | *Total Resolved Issues:* 564
+
+Review-hardening scoped evidence resolved: [native boundaries](resolved/issue-20260910-225751-359-validate-native-transfers-and-descriptor-acquisiti.md), [reactor deadline](resolved/issue-20260910-225751-953-bound-user-notif-reactor-work-and-terminal-reply-o.md), [supervisor authority](resolved/issue-20260910-225752-609-record-fail-closed-supervisor-routing-and-installa.md), [isolated tests](resolved/issue-20260910-225753-174-record-isolated-test-process-and-selector-hardenin.md), [web evidence](resolved/issue-20260910-225753-764-record-web-artifact-and-complete-profile-deploymen.md), and [failure taxonomy](resolved/issue-20260910-225754-299-record-explicit-lifecycle-and-cleanup-failure-evid.md). See the [30-finding manifest](../designs/core/post-review-hardening-evidence.md#liveness-and-boundary-review-rh) and its separate final-gate record.
+
+Review-hardening Task 9 resolved: [verifiable CLI and agent controls](resolved/issue-20260910-212626-611-make-cli-and-agent-containment-claims-verifiable.md) and [cached supervisor ptrace authority](resolved/issue-20260910-210337-751-restore-ptrace-authority-when-reusing-a-cached-sup.md).
+
+Review-hardening Task 7 resolved: [explicit compiled worker artifacts and validated boundary metadata](resolved/issue-20260910-192121-101-compile-portal-dispatchers-in-an-explicit-worker-a.md).
+
+Review-hardening Task 6 worker transport resolved: [terminal transport and startup failures](resolved/issue-20260910-185837-079-make-portal-worker-transport-and-startup-failure-t.md).
+
+Review-hardening Task 6 worker baseline resolved: [process-wide worker Landlock](resolved/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md).
+
+Review-hardening Task 6 broker resolved: [bounded child output and fatal checkout retirement](resolved/issue-20260910-184603-286-contain-portal-child-output-and-retire-fatal-check.md).
+
+Review-hardening Task 5 resolved: [terminal profiler notifications and ACK failures](resolved/issue-20260910-182202-258-make-profiler-notification-and-ack-failures-termin.md).
 
 Task 12 resolved: [authoritative vulnerable-web lifecycle and profiling evidence](resolved/issue-20260910-020139-754-make-vulnerable-web-demo-lifecycle-and-evidence-au.md).
 
@@ -14,6 +28,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid](issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md) | Record review hardening liveness and boundary evidence | high | core |
+| [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
 | [issue-197-graceful-fallback-for-ai-agent-failures](code_health/issue-197-graceful-fallback-for-ai-agent-failures.md) | Graceful Fallback for AI Agent Failures | high | orchestrator |
@@ -75,7 +91,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
 | [issue-20260808-032520-owned-contained-executor-lifecycle](security/issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
-| [issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local](security/issue-20260907-081119-keep-portal-worker-landlock-process-scoped-not-thread-local.md) | Keep portal-worker Landlock process-scoped not thread-local | high | docs |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](testing/issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
 | [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
 | [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |

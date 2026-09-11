@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.NewFdFlags
 import io.mazewall.core.Tid
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeByte
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -11,6 +12,14 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 
 class SupervisorReplyInterpreterMatrixTest {
+    @Test
+    fun `helper overload error has only one interrupted terminal attempt`() {
+        val fixture = SupervisorBoundaryFixture()
+        fixture.replyResult = SupervisorBoundaryFixture.failure(4)
+        assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, execute(fixture, SupervisorReplyEffect.Error(11)))
+        assertEquals(listOf(KernelReply(42, -11, 0, false)), fixture.replies)
+    }
+
     @ParameterizedTest
     @ValueSource(ints = [0, 1, 13])
     fun `secure exec continues only after nonterminal injection and affirmative rewrite ACK`(replyErrno: Int) {
@@ -129,7 +138,7 @@ class SupervisorReplyInterpreterMatrixTest {
         }
 
     private fun opened(fixture: SupervisorBoundaryFixture): SupervisorOwnedFd =
-        (SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002), fixture.engine) as SupervisorDescriptorResult.Opened).descriptor
+        (SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002).testAcquisition(), fixture.engine) as SupervisorDescriptorResult.Opened).descriptor
 
     private fun interpreter(fixture: SupervisorBoundaryFixture) =
         SupervisorReplyInterpreter(fixture.engine, fixture.listener, SupervisorExecRewriteExchange(fixture.engine, fixture.socket), TraceeDescriptorImporter(fixture.engine) { it }, { 12288 })

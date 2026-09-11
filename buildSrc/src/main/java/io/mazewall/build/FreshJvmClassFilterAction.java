@@ -13,8 +13,10 @@ public final class FreshJvmClassFilterAction implements Action<Task> {
     @Override
     public void execute(Task task) {
         Test test = (Test) task;
-        test.getFilter().setFailOnNoMatchingTests(false);
-        for (String className : FreshJvmClassSelector.select(test.getTestClassesDirs().getFiles())) {
+        var selected = FreshJvmClassSelector.select(test.getTestClassesDirs().getFiles());
+        if (selected.isEmpty()) throw new org.gradle.api.tasks.StopExecutionException("No @NeedsFreshJvm declarations in " + test.getPath());
+        test.getFilter().setFailOnNoMatchingTests(true);
+        for (String className : selected) {
             test.getFilter().includeTestsMatching(className);
         }
     }

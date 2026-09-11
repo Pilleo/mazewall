@@ -16,11 +16,15 @@ internal class SupervisorDaemonEngine(
     private val socketManager: SocketManager = io.mazewall.core.RealSocketManager,
     private val socketHelpers: SocketHelperPool = SocketHelperPool(factory = SocketHelperProcess::start),
 ) {
+    private val admission = SupervisorAdmission()
+
+    // Capture daemon roots before listener admission; helper classpaths/agents cannot widen them.
+    private val authorityRoots = BypassPaths.safeBypassPaths.map { it.toString() }
     private val delegate = SeccompDaemonEngine(
         socketPath = socketPath,
         readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
         notifHandlerFactory = { socketFd, listenerFd ->
-            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers)
+            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers, admission = admission, authorityRoots = authorityRoots)
         },
         handshakeAckByte = 0xAC.toByte(),
         maxConnections = MAX_CONNECTIONS,
@@ -40,6 +44,7 @@ internal class SupervisorDaemonEngine(
 
     fun run(block: (() -> Unit)? = null) {
         try {
+            socketHelpers.prewarm()
             delegate.run()
         } finally {
             socketHelpers.close()

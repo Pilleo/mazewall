@@ -21,6 +21,7 @@ import io.mazewall.ffi.networking.SeccompConnectionEffect
 import io.mazewall.ffi.networking.SeccompConnectionEvent
 import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.ffi.networking.SeccompConnectionOutcome
+import io.mazewall.getFdOrThrow
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
@@ -219,7 +220,7 @@ public class SeccompDaemonEngine(
                     }
 
                     if (clientFdVal < 0L) return
-                    clientFd = FileDescriptor.adopt(clientFdVal.toInt(), FileDescriptorRole.UnixSocket)
+                    clientFd = res.getFdOrThrow("accept client", FileDescriptorRole.UnixSocket)
                 }
 
                 if (clientSockets.size >= maxConnections) {
@@ -464,12 +465,18 @@ public class SeccompDaemonEngine(
                     pfd2.setEvents(NativeConstants.POLLIN)
 
                     while (!isGlobalShutdown()) {
-                        val pollRes = raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                        // Expiration and helper completions are reactor events even on idle/EINTR polls.
+                        pfd1.setRevents(0)
+                        pfd2.setRevents(0)
+                        val pollRes = raw.poll(pollFds, 2L, sessionHandler.pollTimeoutMillis())
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use
                             0L
                         }
-                        if (count <= 0) continue
+                        if (count <= 0) {
+                            pfd1.setRevents(0)
+                            pfd2.setRevents(0)
+                        }
 
                         var shouldBreak = false
                         NativeArena.ofConfined().use { iterationArena ->

@@ -8,6 +8,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.*
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.profiler.EbpfLoad
@@ -28,6 +29,150 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid wire tid closes without publishing or acknowledging an event`() {
+        val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte(), 0, 0, 0, 0))
+        val writes = AtomicInteger()
+        val closes = AtomicInteger()
+        val logs = mutableListOf<TraceEvent>()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val bytes = input.readNBytes(count.toInt())
+                    bytes.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(bytes.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    writes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(count)
+                }
+            },
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+        )
+        ProfilerTraceListener(TestFileDescriptors.replace(309), logs, null, mutableMapOf(), { null }, native).use { listener ->
+            listener.start(CountDownLatch(1))
+            assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+            assertEquals(0, writes.get())
+            assertEquals(1, closes.get())
+            assertTrue(logs.isEmpty())
+            assertFalse(listener.drainComplete)
+        }
+        assertEquals(1, closes.get())
+    }
+
+    @Test
+    fun `processing failure remains primary when ACK and close also fail`() {
+        for (original in listOf(IllegalStateException("capture failed"), LinkageError("fatal capture"))) {
+            val closes = AtomicInteger()
+            val native = MockNativeEngine(
+                memory = object : MockNativeMemory() {
+                    override fun write(
+                        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        buf: ManagedSegment,
+                        count: Long,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(32, -1L)
+                },
+                fileSystem = object : MockNativeFileSystem() {
+                    override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        closes.incrementAndGet()
+                        return LinuxNative.SyscallResult.Error(5, -1L)
+                    }
+                },
+            )
+            val listener = ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), mutableMapOf(), mutableMapOf(), { throw original }, native)
+            val event = TraceEvent.fromSyscallEvent(
+                io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
+                io.mazewall.core.Tid(7),
+                    "GETPID",
+                    emptyList(),
+                    io.mazewall.profiler.engine.PathResolution.NotApplicable,
+            ),
+            )
+            val process = ProfilerTraceListener::class.java.getDeclaredMethod("processEvent", TraceEvent::class.java).apply { isAccessible = true }
+            val thrown = org.junit.jupiter.api.Assertions
+                .assertThrows(java.lang.reflect.InvocationTargetException::class.java) { process.invoke(listener, event) }
+            org.junit.jupiter.api.Assertions
+                .assertSame(original, thrown.cause)
+            assertEquals(1, original.suppressed.size)
+            assertEquals(
+                1,
+                original.suppressed
+                .single()
+                .suppressed.size,
+            )
+            listener.closeWithResult()
+            assertEquals(1, closes.get())
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = [-1, 0, 2])
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `failed ACK closes endpoint before reading another event`(written: Long) {
+        val frame = TraceEventEncoder.encode(
+            io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
+                io.mazewall.core.Tid(7),
+                "GETPID",
+                emptyList(),
+                io.mazewall.profiler.engine.PathResolution.NotApplicable,
+            ),
+        )
+        val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte()) + frame + frame)
+        val ackAttempts = AtomicInteger()
+        val closes = AtomicInteger()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val bytes = input.readNBytes(count.toInt())
+                    bytes.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(bytes.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    ackAttempts.incrementAndGet()
+                    return if (written < 0) LinuxNative.SyscallResult.Error(32, -1L) else LinuxNative.SyscallResult.Success(written)
+                }
+            },
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+        )
+        ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), null, mutableMapOf(), { null }, native).use { listener ->
+            listener.start(CountDownLatch(1))
+            assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+            assertEquals(1, ackAttempts.get(), "ACK failure must stop before the second buffered frame")
+            assertEquals(1, closes.get())
+            assertTrue(listener.ackWriteFailure != null)
+            assertFalse(listener.drainComplete)
+        }
+    }
+
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `duplicate paths preserve distinct failed operands and ACK every event`() {
@@ -115,7 +260,8 @@ class ProfilerTraceListenerTest {
         val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
         val stacks = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
         ProfilerTraceListener(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(308),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(308),
             accumulatedLogs = logs,
             stackTracesMap = stacks,
             pathCache = mutableMapOf(),
@@ -147,6 +293,12 @@ class ProfilerTraceListenerTest {
         assertRejectedEventSettled(malformedEvent())
     }
 
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    fun `invalid tid during graceful drain remains incomplete without an ACK`() {
+        assertRejectedEventSettled(byteArrayOf(0, 0, 0, 0), expectedAck = false)
+    }
+
     private fun malformedEvent(
         version: Int = 1,
         tag: Int = 3,
@@ -170,7 +322,10 @@ class ProfilerTraceListenerTest {
         return bytes.toByteArray()
     }
 
-    private fun assertRejectedEventSettled(frame: ByteArray) {
+    private fun assertRejectedEventSettled(
+        frame: ByteArray,
+        expectedAck: Boolean = true,
+    ) {
         val timeline = java.util.concurrent.CopyOnWriteArrayList<String>()
         val drainRequested = CountDownLatch(1)
         val reads = AtomicInteger()
@@ -212,7 +367,8 @@ class ProfilerTraceListenerTest {
         )
         val logs = java.util.concurrent.CopyOnWriteArrayList<TraceEvent>()
         val listener = ProfilerTraceListener(
-            FileDescriptor.replace<FileDescriptorRole.UnixSocket>(309),
+            TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(309),
             logs,
             null,
             mutableMapOf(),
@@ -223,11 +379,16 @@ class ProfilerTraceListenerTest {
         listener.start(ready)
         assertTrue(ready.await(2, TimeUnit.SECONDS))
         listener.close()
-        assertEquals(listOf("write:84", "write:172", "close"), timeline)
+        val expectedTimeline = if (expectedAck) listOf("write:84", "write:172", "close") else listOf("write:84", "close")
+        assertEquals(expectedTimeline, timeline)
         assertTrue(logs.isEmpty(), "Malformed evidence must not become an observation")
         assertFalse(listener.drainComplete, "A protocol rejection is not a completed drain")
         assertEquals(1, listener.droppedEvents)
         assertFalse(listenerCoverage(emptyList(), listener.droppedEvents, listener.drainComplete).complete)
+        listener.close()
+        assertEquals(expectedTimeline, timeline, "Repeated cleanup must not acknowledge or close twice")
+        assertEquals(1, listener.droppedEvents)
+        assertFalse(listener.drainComplete)
     }
 
     private fun listenerCoverage(
@@ -281,7 +442,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(300)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(300)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -326,7 +488,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(301)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(301)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -423,7 +586,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(302)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(302)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = accumulatedLogs,
@@ -469,7 +633,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(303)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(303)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),
@@ -508,7 +673,8 @@ class ProfilerTraceListenerTest {
         )
 
         run {
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(304)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(304)
             val listener = ProfilerTraceListener(
                 socketFd = socketFd,
                 accumulatedLogs = mutableListOf(),

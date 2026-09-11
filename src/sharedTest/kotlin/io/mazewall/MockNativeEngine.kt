@@ -1,5 +1,7 @@
 package io.mazewall
 
+import io.mazewall.core.testAcquisition
+import io.mazewall.core.testSyscallAcquisition
 import io.mazewall.core.FdOwnership
 
 import io.mazewall.core.FdState
@@ -47,7 +49,7 @@ public open class MockNativeEngine(
         a4: io.mazewall.core.NativeArg,
         a5: io.mazewall.core.NativeArg,
         a6: io.mazewall.core.NativeArg,
-    ) = ebadfUnlessLive(a1, a2, a3, a4, a5, a6) ?: onSyscall(nr, a1, a2, a3, a4, a5, a6)
+    ) = ebadfUnlessLive(a1, a2, a3, a4, a5, a6) ?: onSyscall(nr, a1, a2, a3, a4, a5, a6).testSyscallAcquisition(nr, a1, a2, a3)
 
     override fun syscall4(
         nr: Long,
@@ -56,7 +58,7 @@ public open class MockNativeEngine(
         a3: io.mazewall.core.NativeArg,
         a4: io.mazewall.core.NativeArg,
     ) = ebadfUnlessLive(a1, a2, a3, a4)
-        ?: onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L))
+        ?: onSyscall(nr, a1, a2, a3, a4, io.mazewall.core.NativeArg.LongArg(0L), io.mazewall.core.NativeArg.LongArg(0L)).testSyscallAcquisition(nr, a1, a2, a3)
 
     override fun <Req, Res> ioctl(
         fd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -87,7 +89,7 @@ public open class MockNativeEngine(
         fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         cmd: Int,
         arg: Long,
-    ) = fd.ebadfUnlessLive() ?: fcntlResult.claimDupIfNeeded(cmd)
+    ) = fd.ebadfUnlessLive() ?: if (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) fcntlResult.testAcquisition() else fcntlResult
 
     override fun poll(
         fds: ManagedSegment,
@@ -110,21 +112,21 @@ public open class MockNativeFileSystem : NativeFileSystem {
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        onOpen?.invoke(path, flags, 0) ?: openResult
+        (onOpen?.invoke(path, flags, 0) ?: openResult).testAcquisition()
 
     override fun open(
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        onOpen?.invoke(path, flags, mode) ?: open(path, flags)
+        (onOpen?.invoke(path, flags, mode) ?: open(path, flags)).testAcquisition()
 
     override fun openat(
         dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
         flags: io.mazewall.core.OpenFlags,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, 0) ?: openResult
+        dirfd.ebadfUnlessDirfd() ?: (onOpenat?.invoke(dirfd, path, flags, 0) ?: openResult).testAcquisition()
 
     public var onOpenat2: ((dirfd: FileDescriptor<*, FdState.Open, FdOwnership>, path: ManagedSegment, how: ManagedSegment, size: Long) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null
 
@@ -134,7 +136,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        dirfd.ebadfUnlessDirfd() ?: onOpenat?.invoke(dirfd, path, flags, mode) ?: openat(dirfd, path, flags)
+        dirfd.ebadfUnlessDirfd() ?: (onOpenat?.invoke(dirfd, path, flags, mode) ?: openat(dirfd, path, flags)).testAcquisition()
 
     override fun openat2(
         dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -142,7 +144,7 @@ public open class MockNativeFileSystem : NativeFileSystem {
         how: ManagedSegment,
         size: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-        dirfd.ebadfUnlessDirfd() ?: onOpenat2?.invoke(dirfd, path, how, size) ?: openResult
+        dirfd.ebadfUnlessDirfd() ?: (onOpenat2?.invoke(dirfd, path, how, size) ?: openResult).testAcquisition()
 
     override fun readlink(
         path: ManagedSegment,
@@ -195,7 +197,7 @@ public open class MockNativeNetworking : NativeNetworking {
         domain: Int,
         type: Int,
         protocol: Int,
-    ) = onSocket(domain, type, protocol)
+    ) = onSocket(domain, type, protocol).testAcquisition()
 
     override fun bind(
         sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -212,14 +214,14 @@ public open class MockNativeNetworking : NativeNetworking {
         sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
-    ) = sockfd.ebadfUnlessLive() ?: onAccept(sockfd, addr, addrlen)
+    ) = sockfd.ebadfUnlessLive() ?: onAccept(sockfd, addr, addrlen).testAcquisition()
 
     override fun accept4(
         sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         addr: ManagedSegment,
         addrlen: ManagedSegment,
         flags: Int,
-    ) = sockfd.ebadfUnlessLive() ?: onAccept4(sockfd, addr, addrlen, flags)
+    ) = sockfd.ebadfUnlessLive() ?: onAccept4(sockfd, addr, addrlen, flags).testAcquisition()
 
     override fun connect(
         sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -275,13 +277,13 @@ public open class MockNativeProcess : NativeProcess {
     override fun pidfdOpen(
         pid: Int,
         flags: Int,
-    ) = onPidfdOpen(pid, flags)
+    ) = onPidfdOpen(pid, flags).testAcquisition()
 
     override fun pidfdGetFd(
         pidfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         targetFd: Int,
         flags: Int,
-    ) = pidfd.ebadfUnlessLive() ?: onPidfdGetFd(pidfd, targetFd, flags)
+    ) = pidfd.ebadfUnlessLive() ?: onPidfdGetFd(pidfd, targetFd, flags).testAcquisition()
 
     override fun archPrctl(code: Int, addr: Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         lastArchPrctlCode = code

@@ -3,6 +3,7 @@ package io.mazewall
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ForeignFdGuard
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.*
 import io.mazewall.seccomp.BpfInstruction
@@ -112,7 +113,8 @@ class LinuxNativeDelegationTest {
         LinuxNative.setEngine(mock)
 
         val seg = allocate(8)
-        val fd = FileDescriptor.replace<FileDescriptorRole.Generic>(1)
+        val fd = TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(1)
 
         mock.networking.acceptResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10)
         assertEquals(10L, LinuxNative.networking.accept(fd, seg, seg).getOrThrow("test"))

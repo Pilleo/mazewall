@@ -8,6 +8,7 @@ import io.mazewall.MockNativeEngine
 import io.mazewall.Policy
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.Syscall
+import io.mazewall.core.testAcquisition
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.ffi.internal.RealNativeEngine
@@ -516,7 +517,7 @@ class LandlockTest : BaseIntegrationTest() {
                 ) {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42) // Fake ruleset FD
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition() // Fake ruleset FD
                 } else {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0) // Success for other syscalls
                 }

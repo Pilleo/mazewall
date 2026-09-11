@@ -33,6 +33,12 @@ internal sealed interface ExecutorDrain {
             override val reason: String = "profiler cleanup failed: $message"
         }
 
+        data class CollectorCoverage(
+            val message: String,
+        ) : Incomplete {
+            override val reason: String = "profiler coverage incomplete: $message"
+        }
+
         data class Multiple(
             val failures: List<Incomplete>,
         ) : Incomplete {

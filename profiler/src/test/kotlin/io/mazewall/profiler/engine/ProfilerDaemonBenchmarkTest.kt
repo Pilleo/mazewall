@@ -6,6 +6,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -140,12 +141,17 @@ class ProfilerDaemonBenchmarkTest {
             arg: MemorySegment,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(99)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(99)
 
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            FileDescriptor.replace(100)
+            TestFileDescriptors
+                .replace(100)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(101)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(101)
 
         override fun sendDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
@@ -154,7 +160,9 @@ class ProfilerDaemonBenchmarkTest {
 
         override fun recvDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
+            TestFileDescriptors
+            .replace(20)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {}
     }
@@ -183,8 +191,10 @@ class ProfilerDaemonBenchmarkTest {
 
         val startTime = System.currentTimeMillis()
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,

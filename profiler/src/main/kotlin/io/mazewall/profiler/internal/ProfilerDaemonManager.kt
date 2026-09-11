@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.core.ChildProcessResources
 import io.mazewall.core.ChildStartupTransaction
+import io.mazewall.core.DaemonPtracer
 import io.mazewall.core.JavaAgentSelection
 import io.mazewall.core.JvmChildProcess
 import io.mazewall.core.JvmChildSpec
@@ -59,11 +60,7 @@ public class ProfilerDaemonManager(
             retirePendingStartup()
             val existing = sharedDaemonContext
             if (existing != null && existing.daemonProcess.isAlive && ownedResources?.isClosed != true) {
-                engine.process
-                    .prctl(
-                    io.mazewall.core.PrctlCommand
-                        .SetPtracer(existing.daemonProcess.pid()),
-                ).getOrThrow("prctl(PR_SET_PTRACER)")
+                DaemonPtracer.authorize(engine, existing.daemonProcess)
 
                 return existing
             }
@@ -89,6 +86,7 @@ public class ProfilerDaemonManager(
 
     public fun cleanupDaemon(context: DaemonContext) {
         synchronized(daemonLock) {
+            DaemonPtracer.retire(engine, context.daemonProcess)
             val resources = ownedResources ?: return
             require(resources.process === context.daemonProcess) { "Cannot retire a daemon not owned by this manager" }
             resources.use {
@@ -128,19 +126,15 @@ public class ProfilerDaemonManager(
         logger.info("Spawning ProfilerDaemon: ${pbArgs.joinToString(" ")}")
 
         val daemonProcess = startup.start(spec)
-        val daemonPid = daemonProcess.pid()
 
-        engine.process
-            .prctl(
-                io.mazewall.core.PrctlCommand
-                    .SetPtracer(daemonPid),
-            ).getOrThrow("prctl(PR_SET_PTRACER)")
+        DaemonPtracer.authorize(engine, daemonProcess)
 
         startup.startOutputPump(
                 sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL,
                 onLine = { line ->
-                    System.err.println("[DAEMON] $line")
-                    System.err.flush()
+                    // Child diagnostics may include arbitrary tracee input. Readiness is
+                    // consumed by the resource owner; ordinary output exposes only a size.
+                    logger.fine("Profiler daemon diagnostic received (${line.length} characters)")
                 },
                 threadName = "profiler-daemon-output",
             )

@@ -11,13 +11,22 @@ internal class SupervisorRouteExecutor(
     helpers: SocketHelperPool = SupervisorSocketHelpers.pool,
 ) : AutoCloseable {
     private val open = OpenRouteExecutor(engine, descriptors)
-    private val sockets = PoolSocketRouteExecutor(descriptors, helpers.session())
+    private val session = helpers.session()
+    private val sockets = PoolSocketRouteExecutor(descriptors, session)
+    private val capabilityOpen = PoolOpenRouteExecutor(descriptors, session)
     private val exec = SecureExecRouteExecutor(engine)
 
     context(arena: NativeArena) fun inject(context: SupervisorRouteContext): CompletableFuture<SupervisorReplyEffect> {
         val header = context.request.header
         return when (val plan = SupervisorInjectionPlan.create(header.nr, header.arch, header.args, context.extracted)) {
-            is SupervisorInjectionPlan.Open -> CompletableFuture.completedFuture(open.execute(plan.request, header.tid))
+            is SupervisorInjectionPlan.Open -> {
+                val arguments = SupervisorOpenPlan.create(plan.request)
+                if (arguments.useCurrentWorkingDirectory) {
+                    CompletableFuture.completedFuture(open.execute(plan.request, header.tid))
+                } else {
+                    capabilityOpen.execute(arguments, header.tid)
+                }
+            }
             is SupervisorInjectionPlan.Connect -> sockets.connect(header.tid, header.args[0].toInt(), plan.sockaddr)
             is SupervisorInjectionPlan.Deny -> CompletableFuture.completedFuture(SupervisorReplyEffect.Error(plan.errno))
             SupervisorInjectionPlan.Accept -> sockets.accept(
@@ -32,6 +41,8 @@ internal class SupervisorRouteExecutor(
     ): SupervisorReplyEffect = exec.execute(context, path)
 
     override fun close() = sockets.close()
+
+    fun cancel() = sockets.cancel()
 
     private companion object {
         const val ACCEPT_FLAGS_ARGUMENT = 3

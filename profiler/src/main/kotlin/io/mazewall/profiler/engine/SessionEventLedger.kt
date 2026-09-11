@@ -3,16 +3,32 @@ package io.mazewall.profiler.engine
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReferenceArray
 
+internal const val MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH = 80
+internal const val MAX_RECENT_SESSION_EVENTS = 8
+
 sealed interface SessionEvent {
     val timestampNanos: Long
     val threadId: Long
 
-    class Notified(
+    class Notified
+        @JvmOverloads
+        constructor(
         override val timestampNanos: Long,
         override val threadId: Long,
         val syscall: Long,
+        val arch: Int? = null,
     ) : SessionEvent {
-        override fun toString() = "[$timestampNanos] Thread $threadId: NOTIFIED syscall $syscall"
+        override fun toString() = "[$timestampNanos] Thread $threadId: NOTIFIED syscall $syscall arch=$arch"
+    }
+
+    /** Bounded diagnostic metadata only; paths, arguments and exception messages are excluded. */
+    class ReplyFailed(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val operation: String,
+        val errno: Int?,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: REPLY_FAILED ${operation.take(MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH)} errno=$errno"
     }
 
     class VmReadvResolved(

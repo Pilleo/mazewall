@@ -375,7 +375,7 @@ object Landlock {
 
         fdResult
             .onSuccess { value ->
-            FileDescriptor.adopt(value.toInt(), FileDescriptorRole.OPath).use { pathFd ->
+            fdResult.getFdOrThrow("open classpath", FileDescriptorRole.OPath).use { pathFd ->
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
@@ -454,12 +454,12 @@ object Landlock {
             val fallbackFlags = io.mazewall.core.OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
             val openResult = openPath(parentPath, fallbackFlags)
             return when (openResult) {
-                is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(openResult.value.toInt(), FileDescriptorRole.OPath), true)
+                is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.getFdOrThrow("open path", FileDescriptorRole.OPath), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
             }
         }
         return when (res) {
-            is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.OPath), false)
+            is LinuxNative.SyscallResult.Success -> OpenResult.Success(res.getFdOrThrow("open path", FileDescriptorRole.OPath), false)
             is LinuxNative.SyscallResult.Error -> OpenResult.Error(res.errno)
         }
     }
@@ -696,7 +696,7 @@ object Landlock {
     private fun mapCreateRuleset(res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>): LandlockFdOutcome {
         return when (res) {
             is LinuxNative.SyscallResult.Success ->
-                LandlockFdOutcome.Ok(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.Ruleset))
+                LandlockFdOutcome.Ok(res.getFdOrThrow("create ruleset", FileDescriptorRole.Ruleset))
             is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
         }
     }

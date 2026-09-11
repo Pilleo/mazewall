@@ -7,6 +7,8 @@ import io.mazewall.Platform
 import io.mazewall.Policy
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.FileDescriptor
+import io.mazewall.core.TestFileDescriptors
+import io.mazewall.core.testAcquisition
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -46,7 +48,10 @@ class LandlockApplyResultTest {
 
     @Test
     fun `ruleset creation evaluates to rule addition before restriction`() {
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
 
         val transition = LandlockInstall.evaluate(
             LandlockState.CreatingRuleset(6),
@@ -62,7 +67,10 @@ class LandlockApplyResultTest {
 
     @Test
     fun `successful restriction evaluates to applied and closes the owned ruleset`() {
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
 
         val transition = LandlockInstall.evaluate(
             LandlockState.Enforcing(ruleset.fd),
@@ -75,7 +83,10 @@ class LandlockApplyResultTest {
 
     @Test
     fun `failed restriction retains enforcing phase and closes the owned ruleset`() {
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val failure = IllegalStateException("landlock_restrict_self failed")
 
         val transition = LandlockInstall.evaluate(
@@ -133,7 +144,10 @@ class LandlockApplyResultTest {
             }
         })
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val result = Landlock.tryEnforceRuleset(ruleset, false)
         val error = assertIs<LandlockRestrictOutcome.Err>(result)
         assertEquals(NativeConstants.EPERM, error.errno)
@@ -158,7 +172,10 @@ class LandlockApplyResultTest {
             }
         })
 
-        val ruleset = LandlockRuleset<RulesetState.Building>(FileDescriptor.replace(42))
+        val ruleset = LandlockRuleset<RulesetState.Building>(
+            TestFileDescriptors
+            .replace(42),
+        )
         val result = LandlockLifecycle.RulesAdded(ruleset).tryRestrictSelf()
 
         val error = assertIs<LandlockRestrictOutcome.Err>(result)
@@ -246,7 +263,7 @@ class LandlockApplyResultTest {
                 a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                 when (nr) {
-                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition()
                 NativeConstants.LANDLOCK_ADD_RULE_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
                 else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
@@ -279,7 +296,7 @@ class LandlockApplyResultTest {
                 a6: io.mazewall.core.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
                 when (nr) {
-                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success(42)
+                NativeConstants.LANDLOCK_CREATE_RULESET_NR -> LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition()
                 NativeConstants.LANDLOCK_RESTRICT_SELF_NR -> LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
                 else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
@@ -326,7 +343,7 @@ class LandlockApplyResultTest {
                 return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1)
             }
             if (nr == NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                return LinuxNative.SyscallResult.Success(5L)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5L).testAcquisition()
             }
             return super.syscall(nr, a1, a2, a3, a4, a5, a6)
         }

@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /** A daemon owns the capacity; sessions own only their queued/active request leases. */
 internal class SocketHelperPool(
@@ -23,6 +24,21 @@ internal class SocketHelperPool(
     private var closed = false
     private val sessions = mutableSetOf<Session>()
     private val helpers = ConcurrentHashMap<Thread, SocketHelper>()
+    private val cleanupFailure = AtomicReference<Throwable?>()
+
+    // At most one reap per active slot. Never wait for a child on the reactor.
+    private val reaper = ThreadPoolExecutor(
+        active,
+        active,
+        1,
+        TimeUnit.SECONDS,
+        ArrayBlockingQueue(active),
+        Thread
+            .ofPlatform()
+            .daemon()
+            .name("supervisor-socket-reap-", 0)
+            .factory(),
+    ).also { it.allowCoreThreadTimeOut(true) }
     private val executor = ThreadPoolExecutor(
         active,
         active,
@@ -42,6 +58,23 @@ internal class SocketHelperPool(
         Session().also { sessions += it }
     }
 
+    /** Startup-only: initialize every slot before any listener is admitted. */
+    fun prewarm() {
+        val owner = synchronized(gate) {
+            check(executor.taskCount == 0L) { "Helper prewarm must precede operation admission" }
+            session()
+        }
+        owner.use {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            // ThreadPoolExecutor assigns each of its first corePoolSize jobs a new worker.
+            val jobs = List(executor.corePoolSize) { owner.prewarmSlot() }
+            jobs.forEach { job ->
+                SocketCleanup.await(deadline - System.nanoTime()) { job.finished.await(it, TimeUnit.NANOSECONDS) }
+                check(job.result.join() == SocketHelperResult.Connected) { "Authority helper startup failed" }
+            }
+        }
+    }
+
     inner class Session internal constructor() : AutoCloseable {
         private var retired = false
         private val jobs = mutableSetOf<Job>()
@@ -49,81 +82,114 @@ internal class SocketHelperPool(
         fun submit(
             operation: SocketOperation,
             descriptor: SupervisorOwnedFd,
-        ): CompletableFuture<SocketHelperResult> {
-            val job = Job(this, operation, descriptor)
+        ): CompletableFuture<SocketHelperResult> = enqueue(SocketHelperRequest.Operation(operation, descriptor)).result
+
+        fun submitAuthority(authority: TraceeAuthorityJob): CompletableFuture<SocketHelperResult> =
+            enqueue(SocketHelperRequest.Authority(authority)).result.also { result ->
+                result.whenComplete { value, failure ->
+                    if (failure != null) authority.prepared.completeExceptionally(failure)
+                    if (value is SocketHelperResult.Failed) {
+                        authority.prepared.complete(
+                        TraceeAuthoritySnapshot(0, null, null, SupervisorRoute.Abort(value.errno, "authority helper failed")),
+                    )
+                    }
+                }
+            }
+
+        internal fun prewarmSlot(): Job = enqueue(SocketHelperRequest.Prewarm)
+
+        private fun enqueue(request: SocketHelperRequest): Job {
+            val job = Job(this, request)
             synchronized(gate) {
                 if (retired || closed) {
-                    descriptor.close()
+                    request.close()
                     job.result.cancel(false)
-                    return job.result
+                    return job
                 }
                 jobs += job
                 try {
                     executor.execute(job)
                 } catch (_: RejectedExecutionException) {
                     jobs -= job
-                    descriptor.close()
+                    request.close()
                     job.result.complete(SocketHelperResult.Failed(EAGAIN))
                 }
             }
-            return job.result
+            return job
+        }
+
+        fun cancel() {
+            val pending = synchronized(gate) {
+                retired = true
+                if (jobs.isEmpty()) sessions -= this
+                jobs.toList()
+            }
+            val cleanup = SocketCleanup()
+            pending.forEach { job -> cleanup.attempt { job.cancel() } }
+            cleanup.rethrow()
         }
 
         override fun close() {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CLEANUP_SECONDS)
             val pending = synchronized(gate) {
                 retired = true
                 jobs.toList()
             }
             val cleanup = SocketCleanup()
-            pending.forEach { job -> cleanup.attempt { job.cancel() } }
-            pending.forEach { job -> cleanup.attempt { SocketCleanup.await(TimeUnit.SECONDS.toNanos(CLEANUP_SECONDS)) { job.finished.await(it, TimeUnit.NANOSECONDS) } } }
+            cleanup.attempt { cancel() }
+            pending.forEach { job -> cleanup.attempt { SocketCleanup.await(deadline - System.nanoTime()) { job.finished.await(it, TimeUnit.NANOSECONDS) } } }
             cleanup.rethrow()
-            synchronized(gate) { sessions -= this }
         }
 
-        internal fun remove(job: Job) = synchronized(gate) { jobs -= job }
+        internal fun remove(job: Job) =
+            synchronized(gate) {
+            jobs -= job
+            if (retired && jobs.isEmpty()) sessions -= this
+        }
 
         internal fun isClosed(): Boolean = retired || closed
     }
 
     internal inner class Job(
         private val session: Session,
-        private val operation: SocketOperation,
-        private val descriptor: SupervisorOwnedFd,
+        private val request: SocketHelperRequest,
     ) : Runnable {
         val result = CompletableFuture<SocketHelperResult>()
         val finished = CountDownLatch(1)
         private var helper: SocketHelper? = null
+        private var reaping: CountDownLatch? = null
         private var cancelled = false
 
         fun cancel() {
-            val active = synchronized(gate) {
+            val queued = synchronized(gate) {
+                if (cancelled) return
                 cancelled = true
-                if (executor.remove(this)) {
-                    try {
-                        descriptor.close()
-                    } finally {
-                        session.remove(this)
-                        finished.countDown()
-                    }
-                }
-                helper
+                helper?.let { worker -> reaping = reap { worker.close() } }
+                executor.remove(this)
             }
+            request.cancel()
             result.cancel(false)
-            active?.close()
+            if (queued) {
+                try {
+                    request.close()
+                } finally {
+                    session.remove(this)
+                    finished.countDown()
+                }
+            }
         }
 
         override fun run() {
             val outcome = SocketJobOutcome()
             outcome.cleanup.attempt {
-                descriptor.use {
+                request.use {
                     if (synchronized(gate) { cancelled || session.isClosed() }) return@use
-                    val worker = helpers.computeIfAbsent(Thread.currentThread()) { factory() }
+                    val worker = helpers.computeIfAbsent(Thread.currentThread()) { SocketHelperSlot(factory()) }
                     val run = synchronized(gate) {
                         helper = worker
                         !cancelled && !session.isClosed()
                     }
-                    if (run) outcome.output = worker.execute(operation, descriptor)
+                    if (run) outcome.output = request.execute(worker)
                 }
             }
             if (outcome.cleanup.failure != null) {
@@ -138,9 +204,17 @@ internal class SocketHelperPool(
                 outcome.cleanup.attempt { retireHelper() }
                 outcome.dispose()
             }
-            session.remove(this)
-            finished.countDown()
-            outcome.publish(result)
+            // A worker may win retirement before its queued reaper runs. Drain that
+            // task before reusing this slot, so stale cleanup cannot fill the queue.
+            reaping?.let { retired ->
+                outcome.cleanup.attempt { SocketCleanup.await(TimeUnit.SECONDS.toNanos(CLEANUP_SECONDS)) { retired.await(it, TimeUnit.NANOSECONDS) } }
+            }
+            try {
+                outcome.publish(result)
+            } finally {
+                session.remove(this)
+                finished.countDown()
+            }
         }
 
         private fun retireHelper() {
@@ -152,22 +226,49 @@ internal class SocketHelperPool(
         }
     }
 
+    @Synchronized
     override fun close() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CLEANUP_SECONDS)
         val owners = synchronized(gate) {
             closed = true
             sessions.toList()
         }
         executor.shutdown()
         val cleanup = SocketCleanup()
-        owners.forEach { owner -> cleanup.attempt { owner.close() } }
-        cleanup.attempt { SocketCleanup.await(TimeUnit.SECONDS.toNanos(CLEANUP_SECONDS)) { executor.awaitTermination(it, TimeUnit.NANOSECONDS) } }
+        owners.forEach { owner -> cleanup.attempt { owner.cancel() } }
+        cleanup.attempt { SocketCleanup.await(deadline - System.nanoTime()) { executor.awaitTermination(it, TimeUnit.NANOSECONDS) } }
+        val retirements = mutableListOf<CountDownLatch>()
         helpers.entries.forEach { (thread, helper) ->
             cleanup.attempt {
-                helper.close()
-                helpers.remove(thread, helper)
+                retirements += reap {
+                    helper.close()
+                    helpers.remove(thread, helper)
+                }
             }
         }
+        retirements.forEach { retired ->
+            cleanup.attempt { SocketCleanup.await(deadline - System.nanoTime()) { retired.await(it, TimeUnit.NANOSECONDS) } }
+        }
+        // Failed release remains retryable; idle cleanup threads time out meanwhile.
+        if (helpers.isEmpty() && executor.isTerminated) reaper.shutdown()
+        if (reaper.isShutdown) cleanup.attempt { SocketCleanup.await(deadline - System.nanoTime()) { reaper.awaitTermination(it, TimeUnit.NANOSECONDS) } }
+        cleanupFailure.getAndSet(null)?.let { failure -> cleanup.attempt { throw failure } }
         cleanup.rethrow()
+    }
+
+    private fun reap(action: () -> Unit): CountDownLatch {
+        val finished = CountDownLatch(1)
+        reaper.execute {
+            val cleanup = SocketCleanup()
+            cleanup.attempt(action)
+            cleanup.failure?.let { cleanupFailure.compareAndSet(null, it) }
+            try {
+                cleanup.rethrow()
+            } finally {
+                finished.countDown()
+            }
+        }
+        return finished
     }
 
     companion object {

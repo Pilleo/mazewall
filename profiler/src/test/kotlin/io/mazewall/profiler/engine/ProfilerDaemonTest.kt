@@ -11,6 +11,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeArg
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -48,6 +49,67 @@ import java.nio.channels.ClosedByInterruptException
 @Isolated
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class ProfilerDaemonTest {
+    @Test
+    fun `stalled preparation expires in reactor and late evidence cannot publish or reply`() {
+        val future = java.util.concurrent.CompletableFuture<SyscallEvent<SyscallEventState.Resolved>>()
+        var cancellations = 0
+        val preparation = ProfilerPreparation { _, _ ->
+            object : ProfilerPreparationJob {
+                override val result = future
+
+                override fun close() {
+                    cancellations++
+                }
+            }
+        }
+        val transport = MockTransport()
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        var now = 0L
+        var replies = 0
+        val native = MockNativeEngine().apply {
+            onIoctl = { _, command, buffer ->
+                when (command) {
+                    SECCOMP_IOCTL_NOTIF_RECV -> {
+                        buffer.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    }
+                    SECCOMP_IOCTL_NOTIF_SEND -> replies++
+                    else -> error("Unexpected ioctl")
+                }
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN"), preparation = preparation) {}.use { handler ->
+            io.mazewall.platform.seccomp.daemon.SeccompSessionHandler(socket, listener, handler, engine = native, socketManager = transport, nanoTime = { now }).use { reactor ->
+                io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                    with(arena) {
+                        val poll = allocate(Layouts.POLLFD, 2)
+                        val listenerPoll = io.mazewall.ffi.memory.PollFdSegment
+                            .of(poll.asSlice(0, Layouts.POLLFD_SIZE))
+                        listenerPoll.setRevents(NativeConstants.POLLIN)
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        listenerPoll.setRevents(0)
+                        now = 29_999_999_999L
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        assertEquals(0, transport.handshakeWrites)
+                        now = 30_000_000_000L
+                        assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                        assertEquals(1, replies)
+                        assertEquals(1, cancellations)
+                        future.complete(SyscallEvent(Tid(456), "OPEN", List(6) { 0L }, listOf("/late")))
+                        assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                        assertEquals(1, replies)
+                        assertEquals(0, transport.handshakeWrites)
+                        assertTrue(transport.ioctlCalls.isEmpty())
+                        assertTrue(handler.state is ProfilerState.Terminated)
+                    }
+                }
+            }
+        }
+    }
+
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
@@ -55,6 +117,174 @@ class ProfilerDaemonTest {
 
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+    }
+
+    @Test
+    fun `reactor noise reply failure is terminal without publication or another attempt`() {
+        for (errno in listOf(2, 1)) {
+            val transport = MockTransport().apply { nextIoctlResult = LinuxNative.SyscallResult.Error(errno, -1L) }
+            val reader = object : ProfilerMemoryReader {
+                context(arena: io.mazewall.ffi.memory.NativeArena) override fun readStringFromProcess(
+                    tid: Tid,
+                    remoteAddr: Long,
+                    maxLen: Int,
+                ): String = System.getProperty("java.home") + "/lib/modules"
+            }
+            withReactorWork(transport, reader) { handler, work ->
+                val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                ready.onReply(ready.reply())
+                assertTrue(handler.state is ProfilerState.Terminated)
+                assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                assertEquals(0, transport.handshakeWrites)
+                assertTrue(handler.ledger.dump().none { it is SessionEvent.EventSent || it is SessionEvent.AckReceived })
+                assertThrows(IllegalStateException::class.java) { work.poll() }
+                assertEquals(1, transport.ioctlCalls.size)
+            }
+        }
+    }
+
+    @Test
+    fun `malformed parser output receives terminal denial for original notification id`() {
+        val parser = object : SeccompNotificationParser by RealSeccompNotificationParser {
+            override fun readNotif(notif: ManagedSegment): SeccompNotification = throw IllegalArgumentException("malformed structure")
+        }
+        val transport = MockTransport()
+        withReactorWork(transport, MockReader(), parser) { handler, work ->
+            val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+            assertEquals(NotifResult.TERMINATE, ready.result)
+            ready.onReply(ready.reply())
+            assertTrue(handler.state is ProfilerState.Terminated)
+            assertEquals(1, transport.ioctlCalls.size)
+            assertEquals(0, transport.handshakeWrites)
+        }
+    }
+
+    private fun withReactorWork(
+        transport: MockTransport,
+        reader: ProfilerMemoryReader,
+        parser: SeccompNotificationParser = RealSeccompNotificationParser,
+        block: context(io.mazewall.ffi.memory.NativeArena) (ProfilerSessionHandler, io.mazewall.platform.seccomp.daemon.NotificationWork) -> Unit,
+    ) {
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), parser, directProfilerPreparation(reader)) {}.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    val notif = allocate(Layouts.SECCOMP_NOTIF)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                    handler
+                        .beginNotification(
+                        notif,
+                        allocate(Layouts.SECCOMP_NOTIF_RESP),
+                        listener,
+                        socket,
+                        io.mazewall.core.Deadline
+                        .afterMillis(30_000),
+                    ).use {
+                        block(handler, it)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `notification parsing retains kernel architecture metadata`() {
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+            val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+            notif.writeInt(Layouts.SECCOMP_NOTIF_ARCH_OFFSET, 0xC00000B7.toInt())
+            val parsed = RealSeccompNotificationParser.readNotif(notif)
+            assertEquals(
+                io.mazewall.platform.seccomp.SeccompNotifications
+                .read(notif),
+                    parsed,
+            )
+        }
+    }
+
+    @Test
+    fun `reactor structural failure offers one terminal denial without publishing`() {
+        val transport = MockTransport()
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        val reader = object : ProfilerMemoryReader {
+            context(arena: io.mazewall.ffi.memory.NativeArena) override fun readPathString(
+                tid: Tid,
+                remoteAddr: Long,
+                maxLen: Int,
+            ): PathStringRead = throw IllegalArgumentException("private path must not appear in diagnostics")
+        }
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), preparation = directProfilerPreparation(reader)) {}.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    val notif = allocate(Layouts.SECCOMP_NOTIF)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                    notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                    notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                    val response = allocate(Layouts.SECCOMP_NOTIF_RESP)
+                    handler
+                        .beginNotification(
+                        notif,
+                        response,
+                        listener,
+                        socket,
+                        io.mazewall.core.Deadline
+                        .afterMillis(30_000),
+                    ).use { work ->
+                        val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                        assertEquals(NotifResult.TERMINATE, ready.result)
+                        ready.onReply(ready.reply())
+                        assertTrue(handler.state is ProfilerState.Terminated)
+                        assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                        assertTrue(transport.sentEvents.isEmpty())
+                        assertEquals(0, transport.handshakeWrites)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `reactor adapter completes the event and ACK before offering a reply`() {
+        val transport = object : MockTransport() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: MemorySegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+        }
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, MockReader(), mapOf(2 to "OPEN"), preparation = directProfilerPreparation(MockReader())) { }.use { handler ->
+            io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                notif.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                notif.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                handler
+                    .beginNotification(
+                    notif,
+                    arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
+                    listener,
+                    socket,
+                    io.mazewall.core.Deadline
+                    .afterMillis(30_000),
+                ).use { work ->
+                    repeat(2) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
+                    val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    assertTrue(transport.ioctlCalls.isEmpty())
+                    assertEquals(io.mazewall.platform.seccomp.UserNotifReplyResult.Sent, ready.reply())
+                    assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                }
+            }
+            }
+        }
     }
 
     @Test
@@ -82,6 +312,7 @@ class ProfilerDaemonTest {
         var rawPolls: Int = 0
         var nextWriteResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
             LinuxNative.SyscallResult.Success(1L)
+        var nextIoctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
         context(arena: Arena) override fun sendTraceEvent(
             socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -180,6 +411,7 @@ class ProfilerDaemonTest {
                 arg: ManagedSegment,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
+                if (request == SECCOMP_IOCTL_NOTIF_SEND) return nextIoctlResult
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
                     val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
                     argSeg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -221,12 +453,17 @@ class ProfilerDaemonTest {
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
         }
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(99)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(99)
 
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            FileDescriptor.replace(100)
+            TestFileDescriptors
+                .replace(100)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(101)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(101)
 
         override fun sendDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
@@ -235,7 +472,9 @@ class ProfilerDaemonTest {
 
         open override fun recvDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
+            TestFileDescriptors
+            .replace(20)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {}
     }
@@ -260,7 +499,8 @@ class ProfilerDaemonTest {
             val number = realNative.fileSystem
                 .open(arena.allocateFrom("/dev/null"), io.mazewall.core.OpenFlags.RDONLY)
                 .getOrThrow("open owned profiler fixture")
-            FileDescriptor.adopt(number.toInt(), FileDescriptorRole.UnixSocket)
+            TestFileDescriptors
+                .adopt(number.toInt(), FileDescriptorRole.UnixSocket)
         }
         var consumed = false
         var attempts = 0
@@ -319,7 +559,10 @@ class ProfilerDaemonTest {
         transport.nextWriteResult = LinuxNative.SyscallResult.Error(5, -1L)
         val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
 
-        engine.handleConnection(FileDescriptor.replace(10))
+        engine.handleConnection(
+            TestFileDescriptors
+            .replace(10),
+        )
 
         assertEquals(1, transport.handshakeWrites)
         assertTrue(transport.rawPolls > 0)
@@ -335,8 +578,10 @@ class ProfilerDaemonTest {
 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -381,8 +626,10 @@ class ProfilerDaemonTest {
 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -424,8 +671,10 @@ class ProfilerDaemonTest {
         val transport = MockTransport().apply {
             ackByte = PASS_THROUGH_COMMAND_BYTE
         }
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
 
         ProfilerSessionHandler(
             socketFd,
@@ -468,8 +717,10 @@ class ProfilerDaemonTest {
             handshakeBytes = byteArrayOf(PROTOCOL_ACK_BYTE, SHUTDOWN_COMMAND_BYTE)
             nextReadResult = LinuxNative.SyscallResult.Success(2L)
         }
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         var shutdownObservedContinue = false
 
         ProfilerSessionHandler(
@@ -516,8 +767,10 @@ class ProfilerDaemonTest {
 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -573,7 +826,10 @@ class ProfilerDaemonTest {
         // Clear interrupt status if any
         Thread.interrupted()
 
-        engine.handleConnection(FileDescriptor.replace(10))
+        engine.handleConnection(
+            TestFileDescriptors
+            .replace(10),
+        )
 
         assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
         // Clear interrupt status after test to avoid affecting other tests
@@ -594,7 +850,10 @@ class ProfilerDaemonTest {
         // Clear interrupt status if any
         Thread.interrupted()
 
-        engine.handleConnection(FileDescriptor.replace(10))
+        engine.handleConnection(
+            TestFileDescriptors
+            .replace(10),
+        )
 
         assertTrue(Thread.currentThread().isInterrupted, "Thread interrupt status should be restored")
         // Clear interrupt status after test to avoid affecting other tests
@@ -619,8 +878,10 @@ class ProfilerDaemonTest {
             ): String? = null
         }
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -686,7 +947,8 @@ class ProfilerDaemonTest {
         try {
             Arena.ofConfined().use { arena ->
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                val listenerFd = FileDescriptor.adopt(20, FileDescriptorRole.SeccompNotif)
+                val listenerFd = TestFileDescriptors
+                    .adopt(20, FileDescriptorRole.SeccompNotif)
                 val successSession = HandshakeSession.Success(123L, listenerFd)
                 val failedSession = HandshakeSession.Failed(123L, listenerFd)
 
@@ -729,7 +991,11 @@ class ProfilerDaemonTest {
         Arena.ofConfined().use { arena ->
             with(arena) {
                 RealProfilerTransport.sendSeccompContinue(
-                    HandshakeSession.Success(123L, FileDescriptor.adopt(20, FileDescriptorRole.SeccompNotif)),
+                    HandshakeSession.Success(
+                        123L,
+                        TestFileDescriptors
+                        .adopt(20, FileDescriptorRole.SeccompNotif),
+                    ),
                     arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
                 )
             }
@@ -763,8 +1029,10 @@ class ProfilerDaemonTest {
                 link: String,
             ): String? = null
         }
-        val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socket = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN")) {}.use { handler ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val notif = arena.allocate(Layouts.SECCOMP_NOTIF)
@@ -813,7 +1081,11 @@ class ProfilerDaemonTest {
         try {
             Arena.ofConfined().use { arena ->
                 val resp = arena.allocate(Layouts.SECCOMP_NOTIF_RESP)
-                val successSession = HandshakeSession.Success(123L, FileDescriptor.adopt(20, FileDescriptorRole.SeccompNotif))
+                val successSession = HandshakeSession.Success(
+                    123L,
+                    TestFileDescriptors
+                    .adopt(20, FileDescriptorRole.SeccompNotif),
+                )
 
                 org.junit.jupiter.api.assertThrows<IllegalStateException> {
                     with(arena) {
@@ -843,8 +1115,10 @@ class ProfilerDaemonTest {
 
         val reader = MockReader()
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -900,8 +1174,10 @@ class ProfilerDaemonTest {
             ): String? = null
         }
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -954,8 +1230,10 @@ class ProfilerDaemonTest {
             ): String? = null
         }
         val syscallMap = mapOf(2 to "OPEN")
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -1018,8 +1296,10 @@ class ProfilerDaemonTest {
                     link: String,
                 ): String? = null
             }
-            val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-            val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+            val socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10)
+            val listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(20)
 
             ProfilerSessionHandler(
                 socketFd,
@@ -1090,7 +1370,10 @@ class ProfilerDaemonTest {
 
         try {
             val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
-            engine.handleConnection(FileDescriptor.replace(10))
+            engine.handleConnection(
+                TestFileDescriptors
+                .replace(10),
+            )
 
             assertTrue(closedFds.contains(20), "Listener FD 20 should have been closed")
             assertTrue(closedFds.contains(10), "Socket FD 10 should have been closed")
@@ -1138,7 +1421,11 @@ class ProfilerDaemonTest {
         // Because we threw OutOfMemoryError (which is an Error), handleNewConnection should rethrow it.
         // Reflection wraps it in InvocationTargetException.
         val exception = org.junit.jupiter.api.assertThrows<java.lang.reflect.InvocationTargetException> {
-            handleNewConnectionMethod.invoke(engine, FileDescriptor.replace<FileDescriptorRole.UnixSocket>(99))
+            handleNewConnectionMethod.invoke(
+                engine,
+                TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(99),
+            )
         }
         assertTrue(exception.cause is OutOfMemoryError, "Cause should be OutOfMemoryError")
 
@@ -1181,7 +1468,11 @@ class ProfilerDaemonTest {
 
         // Generic Exception should be swallowed, so this shouldn't throw.
         org.junit.jupiter.api.assertDoesNotThrow {
-            handleNewConnectionMethod.invoke(engine, FileDescriptor.replace<FileDescriptorRole.UnixSocket>(99))
+            handleNewConnectionMethod.invoke(
+                engine,
+                TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(99),
+            )
         }
 
         // Verify that the accepted client FD (100) was closed

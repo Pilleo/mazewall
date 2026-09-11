@@ -7,6 +7,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.ffi.networking.SeccompInstallationGate
+import io.mazewall.getFdOrThrow
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.engine.TraceEvent
@@ -38,6 +39,7 @@ internal class ProfilerSession(
     private val closed = AtomicBoolean(false)
     private var closureNotified = false
     private var installations = 0
+    private var collectorRequested = false
     private val installer = runtime.installer.forSession(
         SeccompInstallationGate { operation ->
             synchronized(lifecycleLock) {
@@ -56,6 +58,7 @@ internal class ProfilerSession(
         synchronized(lifecycleLock) {
             // Existing wrapped workers retain their kernel filters in pass-through after session close.
             if (closed.get() || thread in appliedThreads) return
+            collectorRequested = true
         }
         validateNotVirtual()
         val tid = runtime.tid()
@@ -79,7 +82,7 @@ internal class ProfilerSession(
                     // A late socket still needs the ACK/pass-through protocol, but cannot publish
                     // observations or resolve TIDs through an already closed session.
                     val listener = ProfilerTraceListener(
-                        FileDescriptor.adopt(fd, FileDescriptorRole.UnixSocket),
+                        fd,
                         if (late) CopyOnWriteArrayList() else logs,
                         if (!late && captureStackTraces) stackProfiles else null,
                         if (late) ConcurrentHashMap() else pathCache,
@@ -161,7 +164,13 @@ internal class ProfilerSession(
             observations = observations,
             stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = listeners.sumOf { it.eventQueue.droppedCount.toInt() + it.droppedEvents },
-            drainComplete = listeners.isNotEmpty() && listeners.all { it.drainComplete },
+            drainComplete = synchronized(lifecycleLock) {
+                closed.get() &&
+                    installations == 0 &&
+                    cleanupOutcome == SeccompCleanupOutcome.Complete &&
+                    (listeners.isNotEmpty() || !collectorRequested) &&
+                    listeners.all { it.drainComplete }
+            },
             environment = runtime.environment(),
         )
         return ProfilingResult(value, compileBillOfBehavior().copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)

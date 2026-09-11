@@ -8,6 +8,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.getFdOrThrow
 
 /** Ownership originates only in a successful native descriptor-producing call. */
 internal class SupervisorOwnedFd(
@@ -53,7 +54,7 @@ internal sealed interface SupervisorDescriptorResult {
                 is LinuxNative.SyscallResult.Error -> Denied(result.errno)
                 is LinuxNative.SyscallResult.Success ->
                     if (result.value in 0..Int.MAX_VALUE.toLong()) {
-                        Opened(SupervisorOwnedFd(FileDescriptor.adopt(result.value.toInt(), FileDescriptorRole.Generic), engine.fileSystem))
+                        Opened(SupervisorOwnedFd(result.getFdOrThrow("acquire supervisor descriptor"), engine.fileSystem))
                     } else {
                         Denied(NativeConstants.EPERM)
                     }

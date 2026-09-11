@@ -1,7 +1,6 @@
 package io.mazewall.profiler.engine
 
 import io.mazewall.core.isUnder
-import io.mazewall.enforcer.supervisor.BypassPaths
 import io.mazewall.platform.seccomp.SupervisedKind
 import java.nio.file.Path
 
@@ -10,15 +9,11 @@ internal object ProfilerNoiseClassifier {
     fun isNoise(
         kind: SupervisedKind,
         original: Path,
-        resolution: BypassPaths.PathResolution,
         bypassPaths: List<Path>,
     ): Boolean {
         if (kind !is SupervisedKind.Open) return false
-        val resolved = when (resolution) {
-            is BypassPaths.PathResolution.Resolved -> resolution.path
-            is BypassPaths.PathResolution.Missing -> resolution.normalized
-            is BypassPaths.PathResolution.Unsafe -> return false
-        }
-        return bypassPaths.any { isUnder(original, it) || isUnder(resolved, it) }
+        // Evidence is already normalized by the resolver. Do not touch arbitrary tracee
+        // filesystem paths on the reactor just to suppress observation noise.
+        return bypassPaths.any { isUnder(original, it) }
     }
 }

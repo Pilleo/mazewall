@@ -333,6 +333,12 @@ syscalls fail before Landlock can activate.
 
 Wrapper wrap methods only call `installOnCurrentThread`, which reaches `installInternal`.
 
+Dedicated child processes use the internal `installOnDedicatedProcess` entry. It accepts
+filesystem policies only with Landlock TSYNC support, rejects fallback, and delegates to
+the same process-wide installation transaction. It therefore records successful irreversible
+stages before returning or throwing and preserves the ordering above. Portal workers require
+this permanent baseline before dispatcher construction or readiness publication.
+
 Do not change this order.
 
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
@@ -548,17 +554,171 @@ The store holds one outstanding authorization per parent process identity. It do
 
 ### Supervisor session and reply ownership
 
+Supervisor/profiler installation uses one 30-second monotonic handshake budget,
+covering the install notification, listener readiness and caller proceed waits.
+`mazewall.supervisor.installTimeoutMillis` may lower this budget to 1–30000 ms;
+invalid values fail before installation. Interruptions do not renew the deadline
+and the caller's interrupt status is restored. A reducer retains the last completed
+stage (prepared, filter applied, descriptor transferred, ready) when setup fails;
+a late successful kernel installation cannot erase a previous failure or its
+irreversible application. The permanent supervisor lifetime rejects later task
+registrations after listener failure, including failure observed during startup.
+Applied-stage publication is complete only after its callback returns or throws.
+Timeout cleanup joins any in-flight publication and observes the same callback
+failure without invoking it twice. This callback must be short and nonblocking;
+its completion is required even after the handshake budget expires.
+
+Default installation IPC creates a private CLOEXEC socket with nonblocking connect,
+then restores its stream flags for the existing listener. SCM_RIGHTS sends use
+MSG_DONTWAIT and deadline-bounded writable polling, with at most eight send attempts.
+Permission failures are terminal. Supervisor and profiler production installers use
+this shared transport; injected connect/send callbacks are fault-injection seams
+and cannot provide the production deadline guarantee when they block arbitrarily.
+The local seccomp listener has one atomic owner: the failing caller may reclaim it
+until the coordinator claims it for send, after which only the coordinator closes
+it. A late connection is closed before callback transfer. Socket ownership passes
+to the listener callback on entry, including startup failure. Invalid supervisor
+acknowledgments publish failed listener health before releasing readiness, and
+cleanup failure cannot suppress that health notification. Neither a setup timeout
+nor listener closure removes an installed kernel filter. Notification admission
+and helper isolation are separate processing stages described below and in the
+[cross-module liveness contract](../core/notification-liveness-contract.md).
+
+The shared `SeccompSessionHandler` accepts one notification at a time and owns its
+30-second monotonic deadline. `SeccompNotifHandler.beginNotification` returns
+reactor-confined `NotificationWork`; every poll yields `Await` or a terminal reply
+effect. Idle and interrupted reactor polls also advance pending work. Supervisor
+helper completions are observed by the reactor; their completion callbacks have
+resource-disposal authority only. A single CAS lease admits either the completed
+reply or the deadline's one EPERM send attempt. ENOENT, hard native failure, and a
+throwing terminal effect consume that lease permanently and terminate the session.
+Normal SEND/RECV interruption retries have an eight-attempt ceiling; timeout denial
+does not retry. Native notification/reply layouts and private control frames are
+unchanged.
+
+Before preparation, a daemon-owned admission ledger permits at most 128 admitted
+notifications total and eight per TID, shared across all listener sessions. Each
+notification owns an idempotent counted lease, released on completion, failure,
+timeout, or listener teardown. Admission rejection bypasses argument inspection
+and JVM validation and makes one EAGAIN terminal send attempt, including under
+EINTR. Helper-queue EAGAIN replies also use one attempt. These limits count work
+received by the reactor; they do not limit notifications still queued in the
+kernel or impose a traps-per-second rate limit.
+
+`ControlSocketExchange` moves a frame through partial nonblocking writes and reads,
+using the same notification deadline throughout. It changes status flags only on
+the daemon-owned private control endpoint, never on an imported tracee socket.
+EAGAIN yields; EINTR has a finite per-exchange budget. Secure-exec rewrite exchange
+is advanced before the terminal reply is admitted. No timer thread, watchdog, or
+blocking JVM worker is introduced by this protocol.
+
+The production daemon now uses an authority-helper conversation for every
+notification. Tracee argument reads, proc inspection, cwd capture, descriptor
+import, path resolution, open execution and secure-exec target/NUL preparation
+run in an independently terminable helper process. The reactor admits the job,
+polls immutable bounded snapshots, advances the JVM control exchange and owns
+all reply ioctls. It checks ID_VALID after preparation, before releasing a JVM
+decision, and before accepting a result. A late or invalid result can only be
+disposed. The older synchronous coordinator and direct executors remain fixture
+seams; the daemon factory explicitly selects authority-helper work.
+
+The helper pins `/proc/<tid>` and the corresponding pidfd, rechecks the pinned
+task after pidfd acquisition, and uses proc-relative handles thereafter. Memory
+reads use read-only positional access through an opened `mem` capability, so
+task exit cannot redirect a read to a recycled numeric PID. Memory ranges
+are checked against readable mapping coverage before and after each memory read;
+pathnames are read in page-sized chunks and stop at the first NUL. Non-readable
+or unmapped arguments fail with EFAULT. `/proc/mem` reads and the mapping checks
+are not atomic against concurrent tracee mmap/mprotect operations; this remains
+a bounded argument snapshot, not a guarantee of atomic memory capture. Directory capabilities
+are retained through authorization and execution. Relative opens use the tracee's
+captured cwd or imported dirfd, including after rename. Absolute opens use its root
+through a distinct typed capability key, never a numeric tracee-dirfd sentinel.
+Relative operations reject negative dirfds other than AT_FDCWD with EBADF before
+capability lookup. Absolute opens ignore the supplied dirfd as the kernel does,
+with openat2 RESOLVE_IN_ROOT; the existing absolute-path RESOLVE_BENEATH rejection
+and open_how values remain enforced. Canonical bypass roots are captured from the
+daemon before notification processing; the helper's classpath cannot widen them.
+The existing filesystem symlink/rename races and thread-containment limitations
+still apply; this is not a claim of race-free policy path resolution.
+
+Accept with a non-null peer-address output (including a null length pointer) has an explicit limitation:
+Linux process_vm_writev accepts only a numeric PID, whereas `/proc/task/mem`
+writes can force access through read-only mappings and change accept's EFAULT
+semantics. The helper returns typed
+`UnsupportedTraceeAuthority.AcceptPeerMemory`; the sole reply interpreter logs
+the limitation and denies with EPERM before accepting or importing a socket.
+Address-less accept is supported. No numeric-PID write or forced-write fallback
+is performed. Restoring this route requires a separately verified memory-write
+capability ([backlog](../../backlog/issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md)).
+
+The notification deadline no longer waits for these tracee filesystem/memory
+operations on the reactor. As with any JVM service, scheduling and native-kernel
+progress are external assumptions: SIGKILL cannot immediately reap a process
+stuck in uninterruptible kernel sleep. Failed bounded reaping keeps the slot
+unavailable, reports failure, and never permits replacement or a second reply.
+This does not claim universally bounded kernel resource reclamation or complete
+accept peer-memory functionality.
+
 `SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
 
 An unusable exchange remains terminal even if closing its connection fails. Its typed outcome retains the cleanup exception alongside the primary failure; the session records both and refuses subsequent notifications. Preparation-only recovery cannot reinterpret an execution or exchange failure as successfully handled work.
 
 Open, socket, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, value replies, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply.
 
-Supervised `connect` imports the original socket with `pidfd_getfd`, transfers a duplicate with SCM_RIGHTS, and connects that same open-file description. It returns the terminal value zero, not a replacement FD. Socket type, binding, options, and status flags therefore remain attached to the original tracee descriptor. `accept`/`accept4` create a new descriptor and retain atomic ADDFD-with-SEND, including requested CLOEXEC behavior. Native `EINPROGRESS`, `EAGAIN`, permission errors, and timeout errno are returned unchanged; neither route changes shared file status flags or retries by creating another socket.
+Enforcement compilation rejects a default `ACT_NOTIFY` action and explicitly supervised syscall numbers without a known supervisor route. Profiling is exempt because it observes rather than authorizes operations. Unknown supervisor kinds deny before JVM validation and cannot gain authority from an allow or FD-injection verdict. An FD-injection verdict is accepted only for open, connect, and accept routes.
 
-The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Slots start lazily, execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation closes the imported local descriptor and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors; bounded private pipe frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots. No tracee pointer or confined arena crosses the process boundary.
+Open fast-path authorization requires a resolved path and a copied pathname. Unresolved names deny with EPERM regardless of `.class`, `.jar`, or `META-INF/` spelling. Resolved JVM bypass paths use the open executor and atomic FD injection, never CONTINUE; other resolved paths require JVM validation. This removes tracee-memory pointer resumption without claiming race-free filesystem resolution: the existing open executor and filesystem preparation limitations above still apply. Ordinary CONTINUE is confined to the audited spawn category after JVM authorization; fork/vfork and clone authorization depend on parent identity and register flags, not clone's stack/TID pointer contents. Secure exec retains its separate, experimental rewrite protocol and documented limitations.
 
-Each supervisor session owns its queued/active request leases. Teardown stops admission, removes queued work, kills/reaps active child processes, and disposes late accepted descriptors. A reply gate prevents a completed operation from sending after session closure; accepted peer-address writes also occur inside that gate, through an owned immutable reply effect rather than the worker callback. The existing kernel response format is unchanged. Helper termination interrupts blocking native calls without changing the original open-file description's flags. Child startup and reap are bounded to five seconds; the owning pool refuses to recycle an unreaped slot. Cleanup tracks successful reap, channel closure and endpoint deletion independently, so failed steps remain retryable without repeating completed releases. Cancellation does not undo a connect already completed by the kernel.
+Supervised `connect` imports the original socket with `pidfd_getfd` inside the authority helper and connects that same open-file description. It returns the terminal value zero, not a replacement FD. Socket type, binding, options, and status flags therefore remain attached to the original tracee descriptor. Supported address-less `accept`/`accept4` create a new descriptor and retain atomic ADDFD-with-SEND, including requested CLOEXEC behavior. Native `EINPROGRESS`, `EAGAIN`, permission errors, and timeout errno are returned unchanged; neither route changes shared file status flags or retries by creating another socket.
+
+The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Production prewarms all slots with ordinary counted jobs before announcing daemon readiness, under one five-second startup budget; failure prevents readiness and runs normal pool cleanup. Fixtures can retain lazy startup. Slots execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation releases request ownership and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors. Standalone socket-operation frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots; no confined arena crosses the process boundary. Authority frames additionally carry the immutable notification registers so only the child performs tracee-memory reads.
+
+The retained standalone-operation protocol also carries capability-relative opens. A request
+contains a copied relative UTF-8 pathname (0–4095 bytes, rejecting NUL, malformed
+UTF-8 and absolute names), the three 64-bit open_how fields, and an owned
+SCM_RIGHTS directory duplicate. The helper executes openat2 against that
+capability and transfers an owned result descriptor; the reactor alone can
+inject it. Existing open flags/mode and openat2 RESOLVE_BENEATH composition
+remain unchanged. Empty pathnames reach the kernel for normal errno validation.
+Import permission errors deny without fallback. Cancellation,
+late-result disposal and capacity accounting use the notification's existing
+helper session, shared with its socket routes. Direct executors and this earlier
+operation-stage seam remain available to fixtures; production preparation and
+execution instead use the complete authority conversation below.
+
+The authority protocol is a separate two-phase operation in the same bounded
+pool: copied notification identity/registers and captured bypass roots produce a
+prepared snapshot; only the reactor then releases its fast-path or JVM-authorized
+decision. Proc/pidfd/memory/directory handles remain owned by the child for that
+conversation. The authenticated parent supplies the notification identity; an
+ID_VALID check binds the prepared authority to the outstanding notification before
+execution. Kernel Yama allows descendants of the registered PR_SET_PTRACER daemon;
+the broker does not change ptrace policy. EPERM/EACCES remain terminal. Both ends
+verify SO_PEERCRED against the expected direct parent/child before exchanging
+authority. Private pipe frames echo the notification ID, cap pathnames at 4095
+UTF-8 bytes, socket addresses at 128 bytes, and bypass roots at 1024 entries.
+Status reads are capped at 64 KiB and maps at 4 MiB. Oversized/malformed input
+fails closed. Only successful result descriptors cross SCM_RIGHTS, with the
+sender closing its owner after transfer and the receiver taking one CLOEXEC owner.
+The child never receives a seccomp listener or terminal-reply capability.
+
+Each reactor notification owns a helper request session under its listener owner.
+Notification timeout or listener teardown removes queued work, retires active
+helpers, and disposes late accepted descriptors. Cancellation returns without
+waiting for helper startup or process reaping; bounded cleanup workers terminate
+children independently of the reactor. It does not interrupt JVM operation
+threads. Helper slots remain unavailable until the old child has been reaped,
+including cancellation during factory startup. Explicit session/pool joins use
+one aggregate ten-second cleanup deadline rather than a fresh wait for each job;
+failed helper release remains retryable and cleanup failure is reported.
+The reactor retains all reply authority and a closed notification can only dispose
+a late result. The compatibility fixture entrypoint retains its reply gate.
+The existing kernel response format is unchanged. Child startup and reap each
+have a five-second bound. Cleanup tracks successful reap, channel closure and
+endpoint deletion independently, without repeating completed releases.
+Cancellation does not undo a connect already completed by the kernel or change
+the original open-file description's flags.
 
 Before opening IPC, a helper verifies its expected direct parent and registers an independent JDK ProcessHandle exit monitor. Owner death (including SIGKILL) halts the helper on the monitor thread, releasing imported descriptors even while the operation thread is blocked in native accept/connect. A parent that died before registration fails the direct-parent check; death during registration completes the exit notification. This private helper mechanism adds no FFM layouts or downcalls.
 

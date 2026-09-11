@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -17,6 +18,7 @@ import io.mazewall.ffi.memory.fill
 import io.mazewall.platform.seccomp.SeccompNotifications
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.NotificationWork
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,6 +34,8 @@ internal class SupervisorSessionHandler(
     private val preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
     private val replyArena: () -> NativeArena = NativeArena::ofConfined,
     socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
+    admission: SupervisorAdmission = SupervisorSocketHelpers.admission,
+    authorityRoots: List<String>? = null,
 ) : SeccompNotifHandler,
     AutoCloseable {
     private val reader = NotificationReader(engine, logger)
@@ -40,16 +44,31 @@ internal class SupervisorSessionHandler(
     private val routeExecutor = SupervisorRouteExecutor(engine, descriptors, socketHelpers)
     private val routes = SupervisorRouteDispatcher(routeExecutor)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)
+    private val notifications = SupervisorNotificationSession(
+        admission,
+        engine,
+        descriptors,
+        socketHelpers,
+        preparation,
+        exchange,
+        replies,
+        ::reportUncaught,
+        authorityRoots?.let { roots ->
+            TraceeAuthorityWorkFactory(socketHelpers, roots, exchange, replies, ::reportUncaught)::begin
+        },
+    )
     private val terminated = AtomicBoolean(false)
     private val replyGate = Any()
 
-    context(arena: NativeArena) override fun processNotification(
+    context(arena: NativeArena) override fun beginNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-    ): NotifResult = if (processNotification(notif, resp)) NotifResult.HANDLED else NotifResult.TERMINATE
+        deadline: Deadline,
+    ): NotificationWork = notifications.begin(SeccompNotifications.read(notif), resp, deadline)
 
+    /** Compatibility fixture seam; production dispatches exclusively through beginNotification. */
     fun processNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,
@@ -234,7 +253,11 @@ internal class SupervisorSessionHandler(
             if (!terminated.compareAndSet(false, true)) return
         }
         try {
-            routeExecutor.close()
+            try {
+                notifications.close()
+            } finally {
+                routeExecutor.cancel()
+            }
         } finally {
             try {
                 exchange.close()

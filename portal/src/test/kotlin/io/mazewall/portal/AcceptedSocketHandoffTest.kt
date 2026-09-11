@@ -6,6 +6,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.RealSocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readInt
@@ -79,8 +80,10 @@ class AcceptedSocketHandoffTest {
         NativeArena.ofConfined().use { arena ->
             val pair = arena.allocate(8)
             LinuxNative.networking.socketpair(1, 1 or NativeConstants.SOCK_CLOEXEC, 0, pair).getOrThrow("socketpair")
-            val accepted = FileDescriptor.adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
-            val peer = FileDescriptor.adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
+            val accepted = TestFileDescriptors
+                .adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
+            val peer = TestFileDescriptors
+                .adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
             try {
                 action(accepted, peer)
             } finally {

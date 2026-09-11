@@ -3,6 +3,20 @@
 
 This document provides the definitive, production-grade technical design for the **Bill of Behavior (BoB) Profiler** and the **Containment Exception Handling Subsystem** inside `mazewall`. It incorporates deep systems-level findings, physics-level kernel constraints, and JVM-specific runtime behaviors.
 
+The [cross-module notification contract](../core/notification-liveness-contract.md)
+defines reactor deadlines and owned helper cancellation. The current
+[profiler evidence sequence](../../../diagrams/profiler_evidence_flow.svg) and
+[shared daemon startup diagram](../../../diagrams/daemon_startup.svg) show the
+separate observation authority and shared resource lifecycle.
+
+The JVM trace-listener parser rejects out-of-order stages and nonpositive wire TIDs as a
+`TraceListenerState.ProtocolViolation`. The interpreter stops through a distinct protocol
+exception and closes the endpoint; it does not read another event or fabricate an ACK for an
+invalid TID. Protocol violations record lost evidence before propagation, including during a
+locally requested graceful drain; joining the listener cannot make that profile complete.
+Rejected handshakes and protocol violations remain terminal during cleanup.
+Diagnostic report dumps use the JSON serializer, including control characters in probe output.
+
 ---
 
 ## 1. Architectural Findings & Physics-Level Constraints
@@ -202,6 +216,23 @@ from `NOTIFICATION_GONE` (`ENOENT`). An expired notification or responder failur
 the profiler session without another reply or a false success ledger event. A failed noise
 bypass never falls through into event publication or ACK waiting. `ProfilerNoiseClassifier`
 is a pure decision over resolved path evidence; resolution and reply I/O remain outside it.
+Remote-memory and `/proc` path preparation runs in a profiler-owned pool of four persistent
+child processes with 64 queued requests, never on the reactor. Private bounded pipe frames
+retain notification identity and architecture. The authorized profiler daemon's descendants
+inherit Yama ptracer eligibility. A notification awaiting preparation remains subject to the
+reactor's absolute 30-second deadline: expiry claims one terminal denial and signals the
+active helper through `ProcessHandle`, without closing a concurrently read pipe on the reactor.
+The I/O worker reaps cancelled helpers before replacement; late evidence cannot publish or
+reply. If termination cannot be confirmed (timeout, interruption, or process API failure),
+the pool fails closed and rejects queued and new preparation requests. The unreaped child
+remains owned for shutdown; its capacity is never reused by a replacement helper. Pool
+shutdown is bounded and reports incomplete cleanup. These helpers resolve evidence
+only and never issue kernel replies or make supervisor authorization decisions.
+
+Listener ACK failure closes its endpoint once. If event capture or queueing already failed,
+that original throwable (including a fatal JVM error) remains primary; ACK and socket-cleanup
+failures are retained as suppressed evidence rather than replacing it.
+
 `NativeProfilerTransport` takes a `NativeEngine` and `SocketManager`; the composite adapter
 does not merge the profiler and supervisor reducers or alter their different authority. See the
 [daemon startup migration guide](../api/daemon-startup-migration.md) for internal helper changes.
@@ -241,6 +272,8 @@ cancellation, timeout, or failure then terminates and independently waits for ev
 bound, including descendants reparented after the parent exits, and restores interruption afterward.
 
 To ensure a stable and leak-free profiling experience, the `:profiler` module adheres to several architectural invariants:
+
+* **Notification and ACK failures:** Production sessions implement the platform's pollable `NotificationWork` contract. The reactor alone claims and sends the terminal kernel reply. Structural preparation failures offer one terminal denial; failed/gone replies terminate without publishing another event or trying another response. The shared heap notification retains the kernel audit architecture in the bounded session ledger. Private ACK decoding has explicit acknowledged, pass-through, and rejected outcomes; unknown bytes reject the exchange even when mixed with an ACK. A failed or short listener ACK write closes the endpoint immediately, marks evidence dropped, and prevents processing any subsequently buffered event. Session diagnostics include bounded numeric metadata and exception types, excluding paths, syscall arguments, and arbitrary exception messages.
 
 *   **Session Ownership:** Internal `ProfilerService` instances capture their runtime dependencies and own their active sessions. Each `ProfilerSession` owns its trace listeners, TID mappings, event/stack buffers, deduplication cache, and cleanup result. `Profiler` is a compatibility facade containing only an atomic default-service reference. A trace listener receives its TID resolver and native dependencies explicitly; identical TIDs in different services cannot resolve through shared state. The captured native engine also governs Yama authorization, `PR_SET_NO_NEW_PRIVS`, BPF allocation, NEW_LISTENER/TSYNC installation, socket connection, SCM_RIGHTS transfer, and descriptor cleanup. Replacing the ambient engine cannot redirect an already constructed service's installation.
 *   **Deterministic Listener Lifecycle:** `ProfilerTraceListener` implements `AutoCloseable`. Ending a session requests pass-through, joins its listener and collector, and closes only its own socket. The session retains `SeccompCleanupOutcome`: a returned native close error is observable and never retried, while a failure before native dispatch retains the live owned token for retry. A descriptor generation already retired by the native engine is terminal even when the call throws. Cancellation propagates after the owner records the outcome. A fatal error also propagates unchanged, with its cause retained in the typed diagnostic; the service keeps the interrupted session and every unattempted listener reachable. Retry drains remaining listeners without closing consumed descriptors again. Session closure is published only after the complete cleanup fold succeeds, and a failed closure callback remains observable and retryable without repeating listener releases.

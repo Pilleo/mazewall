@@ -30,6 +30,45 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
+    @Test
+    fun `cached daemon reacquires ptrace authority after another daemon took it`() {
+        val engine = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        var ptracer = 0L
+        engine.process.onPrctl = { command ->
+            if (command is io.mazewall.core.PrctlCommand.SetPtracer) ptracer = command.tracerPid
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        try {
+            val original = manager.getOrSpawnSharedDaemon()
+            io.mazewall.core.DaemonPtracer
+                .authorize(engine, MockProcess(12345L))
+            val reused = manager.getOrSpawnSharedDaemon()
+            assertEquals(original, reused)
+            assertEquals(9999L, ptracer, "cached supervisor must regain authority before use")
+        } finally {
+            manager.stop()
+        }
+    }
+
+    @Test
+    fun `cached daemon is not returned when restoring ptrace authority fails`() {
+        val engine = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        manager.getOrSpawnSharedDaemon()
+        io.mazewall.core.DaemonPtracer
+            .authorize(engine, MockProcess(12345L))
+        engine.process.onPrctl = { LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L) }
+        try {
+            val failure = assertThrows<IllegalStateException> { manager.getOrSpawnSharedDaemon() }
+            assertTrue(failure.message!!.contains("errno=1"))
+        } finally {
+            manager.stop()
+        }
+    }
+
     @AfterEach
     fun resetContainmentState() {
         ContainmentStateRegistry.processState = ContainerState()

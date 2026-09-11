@@ -8,6 +8,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ProcessLauncher
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.profiler.engine.ProfilerInstallerInterface
 import io.mazewall.profiler.engine.TraceEvent
@@ -104,15 +105,20 @@ class ProfilerTest {
         var connectCalled = false
         var closeCalledCount = AtomicInteger(0)
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(20)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+                .replace(20)
 
         override fun accept(
             serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned>,
-        ): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(21)
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(21)
 
         override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> {
             connectCalled = true
-            return FileDescriptor.replace(22)
+            return TestFileDescriptors
+                .replace(22)
         }
 
         override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership.Owned>) {
@@ -146,7 +152,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    Int,
+                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
@@ -191,7 +197,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    Int,
+                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
@@ -225,7 +231,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    Int,
+                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,

@@ -7,6 +7,7 @@ import io.mazewall.core.Arch
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.SocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.core.Tid
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
@@ -33,8 +34,10 @@ internal typealias NativeResult = LinuxNative.SyscallResult<Long, LinuxNative.Sy
 internal class SupervisorBoundaryFixture {
     val engine = MockNativeEngine()
     val sockets = MockSocketManager()
-    val socket = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(51000)
-    val listener = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(51001)
+    val socket = TestFileDescriptors
+        .replace<FileDescriptorRole.UnixSocket>(51000)
+    val listener = TestFileDescriptors
+        .replace<FileDescriptorRole.SeccompNotif>(51001)
     val replies = CopyOnWriteArrayList<KernelReply>()
     val closed = CopyOnWriteArrayList<Int>()
     val replied = CountDownLatch(1)
@@ -121,8 +124,11 @@ internal class SupervisorBoundaryFixture {
         }
     }
 
-    fun handler(socketManager: SocketManager = sockets) =
-        SupervisorSessionHandler(
+    fun handler(
+        socketManager: SocketManager = sockets,
+        admission: SupervisorAdmission = SupervisorAdmission(),
+        socketHelpers: SocketHelperPool = helperPool,
+    ) = SupervisorSessionHandler(
         socket,
             listener,
             engine,
@@ -132,7 +138,8 @@ internal class SupervisorBoundaryFixture {
             io.mazewall.ffi.memory.FaultingNativeArena
             .observingClose { completion.countDown() }
         },
-            helperPool,
+            socketHelpers,
+            admission,
     )
 
     fun handlerWithReplyArena(replyArena: () -> NativeArena) =

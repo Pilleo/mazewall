@@ -83,3 +83,35 @@ interface KotlinDataDtoService {
 interface KotlinJvmRecordDtoService {
     fun echoKotlinJvmRecord(value: KotlinJvmRecordDto): KotlinJvmRecordDto
 }
+
+interface ReturnedFdService {
+    fun acquire(): Capability.ReadFd
+}
+
+data class NestedFd(
+    val fd: Capability.ReadFd,
+)
+
+interface NestedFdService {
+    fun consume(value: NestedFd): Int
+}
+
+class ComputedDto(
+    value: Int,
+) {
+    val value: Int get() = 1
+}
+
+class DelegatedDto(
+    value: Int,
+) {
+    val value: Int by lazy { value }
+}
+
+interface ComputedDtoService {
+    fun consume(value: ComputedDto): Int
+}
+
+interface DelegatedDtoService {
+    fun consume(value: DelegatedDto): Int
+}

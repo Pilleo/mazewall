@@ -12,6 +12,16 @@
 
 Using seccomp-bpf within the JVM introduces specific architectural risks. This document outlines high-level security properties and implementation trade-offs.
 
+The [notification liveness contract](notification-liveness-contract.md) bounds admitted
+USER_NOTIF work with a reactor-owned 30-second deadline and one terminal reply claim.
+It does not make thread containment an ACE boundary or guarantee immediate reclamation
+of a helper stuck in uninterruptible kernel sleep. Unknown routes and unsupported
+authority fail closed; listener failure invalidates the permanent runtime rather than
+pretending to undo its filter. Profile completeness and authenticated denial evidence
+are separate from observing a permission-looking exception message. The default web
+artifact excludes executable deserialization gadgets; only the explicit isolated
+fixture artifact/profile supplies that attack surface.
+
 ---
 
 ## 1. Thread-Level vs. Process-Level Isolation
@@ -575,14 +585,17 @@ To resolve this permission boundary without requiring elevated privileges or bro
 Immediately upon spawning the daemon process, `mazewall` invokes `prctl` with the `PR_SET_PTRACER` option:
 
 ```kotlin
-// Set the daemon process as our allowed ptrace tracer under Yama
-val daemonPid = daemonProcess.pid()
-LinuxNative.prctl(0x59616d61, daemonPid, 0, 0, 0)
+// Select the exact live daemon through the shared successful-grant record.
+DaemonPtracer.authorize(LinuxNative, daemonProcess)
 ```
 
 This instructs the Yama LSM to allow the specified daemon process to read the parent's memory, enabling high-performance, out-of-process argument resolution for all thread-scoped sandboxed operations.
 
+Both daemon managers use `DaemonPtracer` to record successful selections by process identity. Reusing a supervisor after a completed profile restores its exact PID grant; a failed restoration is propagated before the context is returned. An unchanged successful selection does not repeat `prctl`, which may already be forbidden by the process baseline. Retiring an old daemon cannot invalidate a newer daemon's recorded selection, and a replacement process must authorize again even if its numeric PID was reused.
+
+Yama exposes one selected tracer exception, not an independent grant per daemon. This record covers assignments made by the library through the same native engine; direct external changes to `PR_SET_PTRACER` invalidate that assumption. Finish profiling before switching to supervised enforcement. Independently active profiler and supervisor sessions that both need tracee memory are not a supported concurrent configuration, and a baseline that prevents a required switch produces an explicit permission failure. No broad `PR_SET_PTRACER_ANY` grant or permission fallback is used.
+
 ### Grandchild Process Boundaries
 Note that grandchild processes (e.g. processes spawned by `ProcessBuilder` within a sandboxed thread pool, like `echo` or helper scripts) do not inherit this ptrace tracer permission, and cannot easily invoke `prctl` to declare the daemon as a tracer. As a result, the daemon's `process_vm_readv` calls on grandchild processes will still return `EPERM` under `ptrace_scope = 1`.
 
-The `mazewall` supervisor handles this constraint gracefully: if a `process_vm_readv` call returns `EPERM` on a grandchild process (like during `execve`), the supervisor intercepts the system call, logs the raw address registers, and continues executing it natively without crashing or blocking the worker.
+The supervisor must obtain identity-bound authority before inspecting a child process. If authority acquisition fails with `EPERM` or `EACCES`, it denies the operation; it does not authorize pointer-bearing syscalls through a memory-read failure. The notification deadline and terminal reply owner remain responsible for resolving the notification.

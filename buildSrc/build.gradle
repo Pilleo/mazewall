@@ -25,6 +25,13 @@ tasks.named('check') {
     dependsOn 'verificationActionsTest'
 }
 
+// These are executable contract fixtures, not JUnit classes. The mandatory
+// verificationActionsTest runs their assertions, including real TestKit builds.
+tasks.named('test') {
+    dependsOn 'verificationActionsTest'
+    failOnNoDiscoveredTests = false
+}
+
 // buildSrc is compiled before the root build; exercise its verification logic before use.
 tasks.named('jar') {
     dependsOn 'verificationActionsTest'

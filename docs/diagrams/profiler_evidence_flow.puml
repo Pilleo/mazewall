@@ -1,0 +1,37 @@
+@startuml profiler_evidence_flow
+title Profiler observation, terminal replies and immutable evidence
+participant "Shared notification reactor" as reactor
+participant "Preparation helper pool" as helper
+participant "Profiler work / reducer" as work
+participant "JVM trace listener" as listener
+participant "Frozen result / coverage" as result
+reactor -> work : begin(notification + arch, deadline)
+work -> helper : bounded copied preparation job
+loop reactor polls before original deadline
+  reactor -> work : poll
+  work -> helper : inspect completion without waiting
+end
+helper --> work : typed evidence / failure
+alt ordinary observation
+  work -> listener : bounded event frame
+  listener -> listener : capture exact stack + record evidence
+  listener --> work : typed 0xAC ACK outcome
+  work --> reactor : Ready(CONTINUE)
+else structural failure or ACK failure
+  work --> reactor : Ready(terminal denial)
+else noise
+  work --> reactor : Ready(pass-through reply)
+end
+reactor -> reactor : sole CAS terminal lease\nSent / Gone / Failed
+listener -> result : final immutable behavior + coverage
+note over reactor,helper
+  Deadline expiry: one EPERM attempt, cancel job, terminate session.
+  Late result: dispose only; no publication or reply.
+  Failed reap: retain occupied capacity and fail pool.
+end note
+note over listener,result
+  ACK failure closes before reading next event.
+  Protocol violation during drain stays incomplete.
+  Complete drain alone is not complete collector evidence.
+end note
+@enduml

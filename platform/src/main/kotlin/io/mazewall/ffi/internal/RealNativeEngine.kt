@@ -8,6 +8,7 @@ import io.mazewall.core.claimDupIfNeeded
 import io.mazewall.core.ebadfUnlessDirfd
 import io.mazewall.core.ebadfUnlessLive
 import io.mazewall.core.ebadfUnlessMmapBacking
+import io.mazewall.core.recordDescriptorAcquisition
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -111,7 +112,10 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         a6: io.mazewall.core.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         ebadfUnlessLive(a1, a2, a3, a4, a5, a6)?.let { return it }
-        return SyscallInvoker.syscall(
+        RawNativeTransfer.validate(nr, arrayOf(a1, a2, a3, a4, a5, a6))
+        val arch = io.mazewall.core.Arch
+            .current()
+        val result = SyscallInvoker.syscall(
             SYSCALL,
             nr,
             a1.asLong,
@@ -121,6 +125,20 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
             a5.asLong,
             a6.asLong,
         )
+        val createsDescriptor = nr == arch.open.toLong() ||
+            nr == arch.openat.toLong() ||
+            nr == arch.openat2.toLong() ||
+            nr == arch.socket.toLong() ||
+            nr == arch.memfdCreate.toLong() ||
+            nr == arch.pidfdOpen.toLong() ||
+            nr == arch.pidfdGetFd.toLong() ||
+            (nr == NativeConstants.LANDLOCK_CREATE_RULESET_NR && a3.asLong == 0L) ||
+            (
+                nr == arch.seccompSyscallNumber.toLong() &&
+                a1.asLong == NativeConstants.SECCOMP_SET_MODE_FILTER.toLong() &&
+                a2.asLong and NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong() != 0L
+            )
+        return if (createsDescriptor) result.recordDescriptorAcquisition() else result
     }
 
     override fun syscall4(
@@ -148,6 +166,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         arg: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessLive()?.let { return it }
+        NativeTransfer.ioctl(request, arg)
         return SyscallInvoker.ioctlAddr(IOCTL_ADDR, fd.value, request, arg.native)
     }
 
@@ -166,7 +185,8 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         arg: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         fd.ebadfUnlessLive()?.let { return it }
-        return SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg).claimDupIfNeeded(cmd)
+        val result = SyscallInvoker.fcntl(FCNTL, fd.value, cmd, arg)
+        return if (cmd == NativeConstants.F_DUPFD || cmd == NativeConstants.F_DUPFD_CLOEXEC) result.recordDescriptorAcquisition() else result
     }
 
     override fun poll(
@@ -174,6 +194,13 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
         nfds: Long,
         timeout: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.elements(
+            fds,
+            nfds,
+            io.mazewall.ffi.Layouts.POLLFD
+            .byteSize(),
+                writable = true,
+        )
         return SyscallInvoker.poll(POLL, fds.native, nfds, timeout)
     }
 }
@@ -229,7 +256,8 @@ internal object RealNativeFileSystem : NativeFileSystem {
         flags: io.mazewall.core.OpenFlags,
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.open(OPEN, path.native, flags.value, mode)
+        NativeTransfer.path(path)
+        return SyscallInvoker.open(OPEN, path.native, flags.value, mode).recordDescriptorAcquisition()
     }
 
     override fun openat(
@@ -239,7 +267,8 @@ internal object RealNativeFileSystem : NativeFileSystem {
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         dirfd.ebadfUnlessDirfd()?.let { return it }
-        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value, mode)
+        NativeTransfer.path(path)
+        return SyscallInvoker.openat(OPENAT, dirfd.value, path.native, flags.value, mode).recordDescriptorAcquisition()
     }
 
     override fun openat2(
@@ -248,6 +277,8 @@ internal object RealNativeFileSystem : NativeFileSystem {
         how: ManagedSegment,
         size: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.path(path)
+        NativeTransfer.bytes(how, size)
         dirfd.ebadfUnlessDirfd()?.let { return it }
         val nr = io.mazewall.core.Arch
             .current()
@@ -283,8 +314,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        fd.ebadfUnlessLive()?.let { return it }
-        fd.retireForClose()
+        if (!fd.claimForClose()) return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
         return SyscallInvoker.close(CLOSE, fd.value)
     }
 
@@ -293,6 +323,8 @@ internal object RealNativeFileSystem : NativeFileSystem {
         buf: ManagedSegment,
         bufsiz: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.path(path)
+        NativeTransfer.bytes(buf, bufsiz, writable = true)
         return SyscallInvoker.readlink(READLINK, path.native, buf.native, bufsiz)
     }
 }
@@ -408,7 +440,17 @@ internal object RealNativeNetworking : NativeNetworking {
         protocol: Int,
         sv: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.socketpair(SOCKETPAIR, domain, type, protocol, sv.native)
+        NativeTransfer.bytes(sv, 2L * Int.SIZE_BYTES, writable = true)
+        val result = SyscallInvoker.socketpair(SOCKETPAIR, domain, type, protocol, sv.native)
+        if (result is LinuxNative.SyscallResult.Success) {
+            result.descriptorReceipts = listOf(
+                io.mazewall.core.NativeDescriptorReceipt
+                    .acquired(sv.readInt(0)),
+                io.mazewall.core.NativeDescriptorReceipt
+                    .acquired(sv.readInt(Int.SIZE_BYTES.toLong())),
+            )
+        }
+        return result
     }
 
     override fun accept4(
@@ -417,8 +459,9 @@ internal object RealNativeNetworking : NativeNetworking {
         addrlen: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.socketAddress(addr, addrlen)
         sockfd.ebadfUnlessLive()?.let { return it }
-        return SyscallInvoker.accept4(ACCEPT4, sockfd.value, addr.native, addrlen.native, flags)
+        return SyscallInvoker.accept4(ACCEPT4, sockfd.value, addr.native, addrlen.native, flags).recordDescriptorAcquisition()
     }
 
     override fun socket(
@@ -426,7 +469,7 @@ internal object RealNativeNetworking : NativeNetworking {
         type: Int,
         protocol: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.socket(SOCKET, domain, type, protocol)
+        return SyscallInvoker.socket(SOCKET, domain, type, protocol).recordDescriptorAcquisition()
     }
 
     override fun bind(
@@ -434,6 +477,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(addr, addrlen.toLong())
         sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.bind(BIND, sockfd.value, addr.native, addrlen)
     }
@@ -451,8 +495,9 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.socketAddress(addr, addrlen)
         sockfd.ebadfUnlessLive()?.let { return it }
-        return SyscallInvoker.accept(ACCEPT, sockfd.value, addr.native, addrlen.native)
+        return SyscallInvoker.accept(ACCEPT, sockfd.value, addr.native, addrlen.native).recordDescriptorAcquisition()
     }
 
     override fun connect(
@@ -460,6 +505,7 @@ internal object RealNativeNetworking : NativeNetworking {
         addr: ManagedSegment,
         addrlen: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(addr, addrlen.toLong())
         sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.connect(CONNECT, sockfd.value, addr.native, addrlen)
     }
@@ -469,6 +515,7 @@ internal object RealNativeNetworking : NativeNetworking {
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(msg, Layouts.MSGHDR.byteSize())
         sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.sendmsg(SENDMSG, sockfd.value, msg.native, flags)
     }
@@ -478,6 +525,7 @@ internal object RealNativeNetworking : NativeNetworking {
         msg: ManagedSegment,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(msg, Layouts.MSGHDR.byteSize(), writable = true)
         sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.recvmsg(RECVMSG, sockfd.value, msg.native, flags)
     }
@@ -488,6 +536,7 @@ internal object RealNativeNetworking : NativeNetworking {
         len: Long,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(buf, len, writable = true)
         sockfd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.recv(RECV, sockfd.value, buf.native, len, flags)
     }
@@ -565,7 +614,7 @@ internal object RealNativeProcess : NativeProcess {
         pid: Int,
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return SyscallInvoker.pidfdOpen(PIDFD_OPEN, pid, flags)
+        return SyscallInvoker.pidfdOpen(PIDFD_OPEN, pid, flags).recordDescriptorAcquisition()
     }
 
     override fun pidfdGetFd(
@@ -574,7 +623,7 @@ internal object RealNativeProcess : NativeProcess {
         flags: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         pidfd.ebadfUnlessLive()?.let { return it }
-        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd.value, targetFd, flags)
+        return SyscallInvoker.pidfdGetFd(PIDFD_GETFD, pidfd.value, targetFd, flags).recordDescriptorAcquisition()
     }
 
     override fun archPrctl(
@@ -589,6 +638,7 @@ internal object RealNativeProcess : NativeProcess {
         code: Int,
         addr: ManagedSegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(addr, Long.SIZE_BYTES.toLong(), writable = true)
         val handle = ARCH_PRCTL_ADDR ?: return LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         return SyscallInvoker.archPrctlAddr(handle, code, addr.native)
     }
@@ -666,6 +716,8 @@ internal object RealNativeMemory : NativeMemory {
         riovcnt: Long,
         flags: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.elements(localIov, liovcnt, Layouts.IOVEC.byteSize())
+        NativeTransfer.elements(remoteIov, riovcnt, Layouts.IOVEC.byteSize())
         return SyscallInvoker.processVmReadv(
             PROCESS_VM_READV,
             pid.value,
@@ -685,6 +737,8 @@ internal object RealNativeMemory : NativeMemory {
         riovcnt: Long,
         flags: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.elements(localIov, liovcnt, Layouts.IOVEC.byteSize())
+        NativeTransfer.elements(remoteIov, riovcnt, Layouts.IOVEC.byteSize())
         return SyscallInvoker.processVmWritev(
             PROCESS_VM_WRITEV,
             pid.value,
@@ -701,6 +755,7 @@ internal object RealNativeMemory : NativeMemory {
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(buf, count, writable = true)
         fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.read(READ, fd.value, buf.native, count)
     }
@@ -710,6 +765,7 @@ internal object RealNativeMemory : NativeMemory {
         buf: ManagedSegment,
         count: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.bytes(buf, count)
         fd.ebadfUnlessLive()?.let { return it }
         return SyscallInvoker.write(WRITE, fd.value, buf.native, count)
     }

@@ -12,6 +12,7 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.ForeignFdGuard
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.RealSocketManager
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
@@ -84,7 +85,8 @@ class NativeBoundaryRepairTest {
     fun `O_PATH opens a descriptor that cannot read file contents`() {
         NativeArena.ofConfined().use { arena ->
             val value = real.fileSystem.open(arena.allocateFrom("/dev/null"), OpenFlags(NativeConstants.O_PATH)).getOrThrow("open")
-            val fd = FileDescriptor.adopt(value.toInt(), FileDescriptorRole.Generic)
+            val fd = TestFileDescriptors
+                .adopt(value.toInt(), FileDescriptorRole.Generic)
             try {
                 val result = real.memory.read(fd, arena.allocate(1), 1)
                 assertTrue(result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EBADF)
@@ -221,7 +223,12 @@ class NativeBoundaryRepairTest {
                 assertSame(failure, assertThrows<IllegalStateException> { RealSocketManager.createUnixServer("/unused") })
                 assertFalse(LinuxNative.isDescriptorLive(opened), "acquired socket leaked")
             } finally {
-                if (LinuxNative.isDescriptorLive(opened)) real.fileSystem.close(FileDescriptor.adopt(opened, FileDescriptorRole.UnixSocket))
+                if (LinuxNative.isDescriptorLive(opened)) {
+                    real.fileSystem.close(
+                        TestFileDescriptors
+                    .adopt(opened, FileDescriptorRole.UnixSocket),
+                    )
+                }
             }
         }
     }
@@ -257,7 +264,12 @@ class NativeBoundaryRepairTest {
             delivered.forEach { assertFalse(LinuxNative.isDescriptorLive(it), "received fd $it leaked") }
         } finally {
             delivered.forEach {
-                if (LinuxNative.isDescriptorLive(it)) real.fileSystem.close(FileDescriptor.adopt(it, FileDescriptorRole.Generic))
+                if (LinuxNative.isDescriptorLive(it)) {
+                    real.fileSystem.close(
+                        TestFileDescriptors
+                    .adopt(it, FileDescriptorRole.Generic),
+                    )
+                }
             }
         }
     }
@@ -268,8 +280,10 @@ class NativeBoundaryRepairTest {
         NativeArena.ofConfined().use { arena ->
             val pair = arena.allocate(8)
             real.networking.socketpair(1, 1 or NativeConstants.SOCK_CLOEXEC, 0, pair).getOrThrow("socketpair")
-            val first = FileDescriptor.adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
-            val second = FileDescriptor.adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
+            val first = TestFileDescriptors
+                .adopt(pair.readInt(0), FileDescriptorRole.UnixSocket)
+            val second = TestFileDescriptors
+                .adopt(pair.readInt(4), FileDescriptorRole.UnixSocket)
             try {
                 block(arena, first, second)
             } finally {

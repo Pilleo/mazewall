@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.NewFdFlags
 import io.mazewall.core.Tid
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
@@ -95,7 +96,7 @@ class SupervisorReplyHandoffTest {
         fixture: SupervisorBoundaryFixture,
         secureExec: Boolean,
     ): SupervisorReplyEffect {
-        val opened = SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002), fixture.engine) as SupervisorDescriptorResult.Opened
+        val opened = SupervisorDescriptorResult.from(SupervisorBoundaryFixture.success(51002).testAcquisition(), fixture.engine) as SupervisorDescriptorResult.Opened
         return if (secureExec) {
             SupervisorReplyEffect.SecureExecAndReply(SecureExecRequest(Tid(1), 4096, 8192, 322), opened)
         } else {

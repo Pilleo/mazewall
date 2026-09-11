@@ -5,6 +5,12 @@ This subproject demonstrates `mazewall`'s kernel-level security guarantees by ru
 The canonical [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg)
 shows the single protection decision and shutdown ordering.
 
+The normal application and compose image omit the executable `CustomGadget` and every
+deserialization import/payload HTTP route. These attack fixtures are compiled into a separate
+artifact only by `:demos:vulnerable-web-app:isolatedVulnerableFixtureJar`; its routes additionally
+require the Spring profile `isolated-vulnerable-fixture`. Run that artifact only in an isolated,
+disposable environment. It is deliberately absent from the default compose services.
+
 ## Vulnerability Matrix
 
 | Attack Vector | Vulnerability | CVE / Link | Impact | Mazewall Protection (Standard JVM) |
@@ -64,13 +70,16 @@ If you prefer to perform each step manually:
 ```
 
 ### 2. Start the Environment
-This starts three loopback-only instances of the same application:
+The compose file defines three instances with host-loopback port publishing:
 - **Unprotected** (`http://localhost:8082`): Standard JVM, no Mazewall filters.
 - **Protected** (`http://localhost:8081`): Scoped Mazewall filters applied to vulnerable threads.
 - **Profile** (`http://localhost:8083`): observation mode; writes the final SBoB on orderly shutdown.
 
 ```bash
-podman compose -f demos/vulnerable-web-app/compose.yml up -d
+podman compose -f demos/vulnerable-web-app/compose.yml up -d profile unprotected
+# Exercise the profiling instance, then stop it to publish the generation.
+podman compose -f demos/vulnerable-web-app/compose.yml stop profile
+podman compose -f demos/vulnerable-web-app/compose.yml up -d protected
 ```
 
 ### 3. Exercise the existing HTTP boundary
@@ -95,6 +104,12 @@ context creates worker pools. The resolved value is then published as
 `mazewall.resolved-enabled`; both the process-wide baseline and protected/unprotected bean
 selection consume that one decision.
 
+Profiling writes `/app/profiles/sbob.json` and its generation directory into the named
+`profile-artifacts` volume. Enforcement mounts the same volume read-only and consumes that exact
+path. Start enforcement only after an orderly profiling shutdown has published evidence;
+missing evidence aborts startup instead of silently selecting a static policy. The named volume
+persists across container recreation; `compose down -v` explicitly removes the recorded evidence.
+
 Profiling is intentionally a separate instance from enforcement. On shutdown it first rejects
 new service work, then drains all accepted service tasks against one bounded deadline, and only
 then snapshots profiler evidence. Each publication writes the SBoB, stack dictionary, and
@@ -108,6 +123,13 @@ components; timeout and interruption are never overwritten by a later cleanup fa
 direct SBoB files remain readable by enforcement. Configure the drain deadline with
 `-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
 
+Generation completeness also requires every registered profiler collector to report complete
+coverage. The manager retains each wrapper's immutable behavior/coverage snapshot after profiler
+shutdown; dropped events, unresolved paths, collector-drain failures and collector warnings are
+retained in the integrity record. Clean executor shutdown cannot erase collection loss. Older
+generations containing only a drain-based `complete` marker must be regenerated because they do
+not supply collector evidence.
+
 The unsafe override `-Dmazewall.allow-incomplete-profile-enforcement=true` permits enforcement
 from incomplete evidence only when an operator explicitly accepts the missing-observation risk.
 Profiling and enforcement are mutually exclusive startup modes: setting both
@@ -117,6 +139,19 @@ The container image creates `/app/data` and `/app/uploads` before startup. This 
 rules anchored to those exact directories instead of falling back to the broader `/app` parent.
 
 ## How It Works
+
+To build the optional attack artifact explicitly:
+
+```bash
+./gradlew :demos:vulnerable-web-app:isolatedVulnerableFixtureJar
+# Inside an isolated disposable environment only:
+java -jar demos/vulnerable-web-app/build/libs/isolated-vulnerable-fixture.jar \
+  --spring.profiles.active=isolated-vulnerable-fixture
+```
+
+The standard `bootJar` remains `vulnerable-app.jar` and cannot load the custom command gadget.
+The fixture profile exposes unsafe deserialization routes and a payload generator; it is an
+attack laboratory, not a supported deployment mode or proof of an arbitrary-code boundary.
 
 The demo uses **Scoped Bean Protection**. Instead of locking down the entire Spring Boot process (which would break the embedded Tomcat), we wrap specific `ExecutorService` beans that handle untrusted parsing:
 

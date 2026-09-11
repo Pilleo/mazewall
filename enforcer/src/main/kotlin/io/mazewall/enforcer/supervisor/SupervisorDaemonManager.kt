@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.core.ChildProcessResources
 import io.mazewall.core.ChildStartupTransaction
+import io.mazewall.core.DaemonPtracer
 import io.mazewall.core.JavaAgentSelection
 import io.mazewall.core.JvmChildProcess
 import io.mazewall.core.JvmChildSpec
@@ -96,7 +97,10 @@ public class SupervisorDaemonManager(
         synchronized(daemonLock) {
             when (val handle = daemonHandle) {
                 is DaemonHandle.Running -> {
-                    if (handle.context.daemonProcess.isAlive) return handle.context
+                    if (handle.context.daemonProcess.isAlive) {
+                        DaemonPtracer.authorize(engine, handle.context.daemonProcess)
+                        return handle.context
+                    }
                     markDefunct(handle.context, handle.context.daemonProcess.exitValue())
                     cleanupDaemon(handle.context)
                 }
@@ -143,6 +147,7 @@ public class SupervisorDaemonManager(
     }
 
     private fun cleanupDaemon(context: SupervisorContext) {
+        DaemonPtracer.retire(engine, context.daemonProcess)
         val resources = ownedResources ?: return
         check(resources.process === context.daemonProcess) { "Daemon resource ownership mismatch" }
         daemonHandle = DaemonHandle.NotStarted
@@ -201,13 +206,8 @@ public class SupervisorDaemonManager(
         logger.info("Spawning SupervisorDaemon: ${pbArgs.joinToString(" ")}")
 
         val daemonProcess = startup.start(spec)
-        val daemonPid = daemonProcess.pid()
 
-        engine.process
-            .prctl(
-            io.mazewall.core.PrctlCommand
-                .SetPtracer(daemonPid),
-        ).getOrThrow("prctl(PR_SET_PTRACER)")
+        DaemonPtracer.authorize(engine, daemonProcess)
 
         startup.startOutputPump(
                 sentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,

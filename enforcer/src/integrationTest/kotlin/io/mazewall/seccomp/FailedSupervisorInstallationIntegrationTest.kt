@@ -57,14 +57,14 @@ class FailedSupervisorInstallationIntegrationTest : BaseIntegrationTest() {
             }
         })
         val scoping = object : StacktraceScopingPolicy {
-            override val handlers = mapOf<Syscall, ScopingHandler>(Syscall.GETPPID to { _, _, _ -> true })
+            override val handlers = mapOf<Syscall, ScopingHandler>(Syscall.CONNECT to { _, _, _ -> true })
         }
         val executed = AtomicInteger()
         try {
             Executors.newSingleThreadExecutor().use { worker ->
                 val wrapped = ContainedExecutors.wrap(worker, Policy.builder().allowMmapExec().build(), scoping)
                 val initial = assertFailsWith<ExecutionException> { wrapped.submit { executed.incrementAndGet() }.get() }
-                assertTrue(assertIs<PartialInstallationException>(initial.cause).progress.seccompApplied)
+                assertTrue(assertIs<PartialInstallationException>(initial.cause, initial.stackTraceToString()).progress.seccompApplied, initial.stackTraceToString())
                 assertEquals(1, worker.submit<Int> { ContainmentStateRegistry.threadState.filterDepth }.get())
                 assertTrue(failedCalls.get() > 0)
                 val setupCalls = failedCalls.get()

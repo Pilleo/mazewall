@@ -1,0 +1,43 @@
+@startuml supervisor_installation
+hide empty description
+title Permanent supervisor installation and admitted work
+state "Installation" as installation {
+  [*] --> Prepared
+  Prepared --> Applied : Landlock then Seccomp\npublish irreversible stage
+  Applied --> Transferred : sole listener owner sends SCM_RIGHTS
+  Transferred --> Ready : ready/proceed within original budget
+  Ready --> Failed : reactor death / listener failure
+  Prepared --> Failed : acquisition failure
+  Applied --> Failed : timeout or transport failure\nretain applied stage
+  Transferred --> Failed : invalid handshake / timeout
+  Failed --> Retired : retire owned resources\nfilter remains installed
+  Ready --> Retired : owner/session termination
+}
+state "Per-notification work" as work {
+  [*] --> Admission
+  Admission --> Rejected : total >= 128 or TID >= 8\none EAGAIN attempt
+  Admission --> Helper : acquire counted lease
+  Helper --> Decision : bounded identity-bound snapshot
+  Decision --> Helper : validated JVM verdict\nexecute operation
+  Helper --> Reply : terminal owned result
+  Reply --> Released : reactor claims sole reply
+  Helper --> Cancelled : deadline / teardown
+  Decision --> Cancelled : deadline / teardown
+  Cancelled --> Released : cancel + reap + late FD disposal
+  Rejected --> [*]
+  Released --> [*] : release counted lease once
+}
+Ready --> Admission : task registration lease
+note bottom of installation
+  One monotonic 30s handshake deadline (validated lower override).
+  Callback publication completes only after callback returns/throws.
+  Permanent state cannot be rolled back.
+  Failed listener health rejects new registrations.
+end note
+note right of Helper
+  Default: 4 active / 64 queued helper jobs.
+  Pinned proc/pidfd and typed root/dirfd capabilities.
+  Exact owned-descriptor handoff through private IPC.
+  Reuse slot only after previous child is reaped.
+end note
+@enduml

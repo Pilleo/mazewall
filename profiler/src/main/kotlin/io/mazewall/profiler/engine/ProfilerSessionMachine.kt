@@ -41,7 +41,8 @@ internal object ProfilerSessionMachine {
             is ProfilerState.ActiveSession -> active(state, event)
             is ProfilerState.Notified -> notified(state, event)
             is ProfilerState.WaitingForAck -> waitingForAck(state, event)
-            is ProfilerState.Terminated -> ProfilerSessionTransition(state)
+            is ProfilerState.Terminated ->
+                if (event == ProfilerSessionEvent.PostTerminalObserved) ProfilerSessionTransition(state) else violation(state)
             is ProfilerState.PassThrough,
             is ProfilerState.Connected,
             is ProfilerState.HandshakeAck,

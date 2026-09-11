@@ -8,6 +8,7 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
 import org.junit.jupiter.api.AfterEach
@@ -33,7 +34,7 @@ class ProfilerSocketTest {
                 protocol: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 socketTypeArg = type
-                return LinuxNative.SyscallResult.Success(99L)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(99L).testAcquisition()
             }
 
             override fun connect(
@@ -49,8 +50,8 @@ class ProfilerSocketTest {
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
         LinuxNative.setEngine(mockEngine)
 
-        val fd = ProfilerSocket.connectWithRetry("/tmp/test_profiler.sock", maxRetries = 1)
-        assertEquals(99, fd)
+        val fd = ProfilerSocket.connectDescriptorWithRetry("/tmp/test_profiler.sock", maxRetries = 1)
+        assertEquals(99, fd.value)
         assertTrue(connectCalled)
 
         val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC

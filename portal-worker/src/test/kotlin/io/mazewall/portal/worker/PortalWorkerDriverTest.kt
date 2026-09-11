@@ -6,6 +6,7 @@ import io.mazewall.NativeFileSystem
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.OpenFlags
+import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.portal.Capability
@@ -28,6 +29,20 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class PortalWorkerDriverTest {
+    @Test
+    fun `same fatal failure from transport and close keeps original identity`() {
+        val fatal = AssertionError("shared transport failure")
+        val driver = PortalWorkerDriver(object : PortalWorkerTransport {
+            override fun receive(): PortalWorkerReceive = throw fatal
+
+            override fun send(frame: PortalFrame) = Unit
+
+            override fun close(): Unit = throw fatal
+        }) { _, _, _ -> ByteArray(0) }
+        assertSame(fatal, assertThrows(AssertionError::class.java) { driver.run() })
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+    }
+
     @Test
     fun `fatal receive failure transitions worker to stopped before propagation`() {
         val fatal = AssertionError("transport invariant failed")
@@ -156,7 +171,7 @@ class PortalWorkerDriverTest {
                     arena.allocateFrom(path.toAbsolutePath().toString()),
                     OpenFlags(NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC),
                 ).getOrThrow("open worker test capability")
-            Capability.readFd(FileDescriptor.adopt(raw.toInt(), FileDescriptorRole.Granted))
+            Capability.readFd(TestFileDescriptors.adopt(raw.toInt(), FileDescriptorRole.Granted))
         }
 
     private class FakeTransport(

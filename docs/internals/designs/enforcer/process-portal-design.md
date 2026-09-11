@@ -54,6 +54,13 @@ is destroyed and reaped first; replenishment runs independently, is logged separ
 replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
 so a slot cannot be returned after closing admission begins.
 
+A fatal broker call error retires and reaps its checked-out worker before propagation. The
+original error retains cleanup failures as suppressed evidence; replacement remains separate
+maintenance. Each child output pump drains incrementally into at most 64 diagnostic lines of
+1,024 characters, records truncation/drop counts and stream failures, and recognizes readiness
+only from an exact complete sentinel line. Child output is never appended to a shared file or
+forwarded continuously into broker logs. Startup failures carry the bounded diagnostic snapshot.
+
 The worker request loop has the closed states `AwaitingRequest → Dispatching → SendingReply`.
 `ReplySucceeded` is the only transition back to `AwaitingRequest`; `ReplyFailed` terminates the
 channel. Builtin and generated methods are resolved before one dispatch-failure boundary, which
@@ -68,6 +75,11 @@ See [the portal lifecycle diagram](../../../diagrams/portal_lifecycle.puml).
 
 ## Architecture
 
+Broker request transmission produces `AwaitReply`; worker events after `Stopped` produce a
+`PostTerminalObservation` without another send or close effect. The single worker evaluator
+owns dispatch-result transitions. Resource cleanup shares platform's fatal-first,
+identity-deduplicating failure fold while each owner retains its own cleanup deadlines.
+
 ```
 Broker JVM                         Worker JVM (pool member)
 ─────────                          ───────────────────────
@@ -81,9 +93,16 @@ app → generated stub
 
 Spawn workers **before** the broker calls `installOnProcess`. Children inherit seccomp; `SupervisorDaemonManager.refuseSpawnIfParentIsFiltered()` already encodes this.
 
-Worker first lines after IPC connect:
-1. `ContainedExecutors.installOnProcess(denyProcessCreation + denyNetwork)` (process-wide seccomp).
-2. `ContainedExecutors.installOnCurrentThread(ProcessPolicies.workerFilesystem)` — Landlock allowlist of `java.home` and classpath entries only. `allowJvmClasspath()` is `ThreadLocalOnly` (no ABI v8 TSYNC on existing helper threads). Fail closed if Landlock is unsupported. Extra readable paths are deferred.
+After IPC connection and channel initialization, the worker installs one permanent baseline
+through `ContainedExecutors.installOnDedicatedProcess`: the classpath/`java.home` filesystem
+allowlist plus `denyProcessCreation` and `denyNetwork`. This internal entry requires Landlock
+TSYNC (ABI 8+) and rejects fallback configuration. The ordinary installer applies Landlock
+before Seccomp, records each irreversible stage, and synchronizes both across existing JVM
+threads. Older kernels fail worker startup; there is no thread-only worker baseline.
+Dispatcher validation and guest construction follow containment. Any initialization or readiness
+publication failure closes the owned channel, preserving the original failure and suppressing
+cleanup failures. Only after READY succeeds does ownership pass to the execution driver.
+Extra readable paths are deferred.
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).
 
@@ -112,7 +131,9 @@ budget covers request bytes, every descriptor transfer, and response bytes; fram
 never reset it. Portal-owned sockets use `O_NONBLOCK`, readiness polling, and nonblocking
 `SCM_RIGHTS` attempts. Readiness is advisory: `EAGAIN`/`EINTR` retries recheck the deadline.
 Only a timeout before the first header byte is an idle tick. After any frame progress,
-timeout is a terminal incomplete frame and the channel cannot be reused. A partial received
+timeout is a terminal incomplete frame and the channel cannot be reused. Only zero-byte EOF
+before a new header is `PortalPeerClosedException`; EOF after progress and native I/O errors
+remain terminal failures with their cause. A partial received
 descriptor collection remains locally owned until successful delivery and is closed on failure.
 The terminal channel retains received owners whose pre-native cleanup fails, so later `close()`
 calls retry only unfinished retirement. Closing admission is distinct from retiring the socket;
@@ -173,10 +194,30 @@ signatures. Generated identifiers use independent KotlinPoet allocators for memb
 parameters, receivers, and locals, so keywords, hostile parameter names, and case-distinct method
 names cannot collide.
 
-The Gradle task emits stubs and dispatchers into task-owned staging trees. It publishes both trees
+Host builds emit stubs only by default. Applications opt into a dedicated guest source set with
+`portalCodegen { workerSourceSet.set("portalWorker") }` and place guest implementations under
+`src/portalWorker/kotlin`. The plugin compiles dispatchers in that source set and exposes
+`portalWorkerJar`, containing guest classes and `META-INF/mazewall/portal/<service>` descriptors.
+For opted-in projects, `assemble` (and therefore `build`) depends on this worker artifact, so
+ordinary verification compiles guest implementations and generated dispatchers. Host-only projects
+retain their ordinary lifecycle without a worker artifact task.
+Only this artifact belongs on the worker classpath; ordinary `jar` contains neither dispatchers
+nor descriptors. `main` and `test` are rejected as worker output source sets. The worker resolves
+one descriptor per configured service through its own defining classloader before constructing
+the guest. Missing, duplicate, malformed, or conflicting descriptors abort readiness. Existing
+registry bootstrap APIs remain available for migration; production startup requires generated metadata.
+See [the code-generation diagram](../../../diagrams/portal_codegen.puml).
+
+Boundary validation allows `Capability.ReadFd` only as a direct inbound parameter. Returns and
+structured components report their service/method/property path and fail generation. Java records
+use record methods; Kotlin records and constructor-backed properties use Kotlin property access.
+Computed and delegated constructor component readers are rejected because reconstruction cannot
+preserve their value reliably. Inherited overrides and service-based wire IDs remain unchanged.
+
+The Gradle task emits stubs, dispatchers, and worker resources into task-owned staging trees. It publishes all trees
 only after every configured interface validates and every file is generated, replacing prior trees
 with atomic same-filesystem moves. A removed interface therefore removes its old generated files;
-a validation or generation failure leaves both previously published trees intact. Generated wire
+a validation or generation failure leaves all previously published trees intact. Generated wire
 IDs and frame bytes are unaffected.
 
 Hand-written stub must work before KotlinPoet so protocol bugs are not hidden in generated code.

@@ -38,6 +38,17 @@ internal data class ScenarioResult(
 
 internal data class DemoReport(val results: List<ScenarioResult>) {
     val passed: Boolean get() = results.isNotEmpty() && results.all(ScenarioResult::passed)
+    val exitCode: Int get() = if (passed) 0 else 2
 
     fun summary(): String = results.joinToString(separator = "\n", transform = ScenarioResult::render)
+}
+
+internal fun observeScenario(name: String, expected: ExpectedResult, action: () -> String): ScenarioResult {
+    val outcome = try {
+        ScenarioOutcome.Completed(action())
+    } catch (failure: Exception) {
+        if (failure is InterruptedException) Thread.currentThread().interrupt()
+        classifyContainmentFailure(failure)
+    }
+    return ScenarioResult(name, expected, outcome)
 }

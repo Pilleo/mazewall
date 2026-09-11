@@ -123,6 +123,17 @@ class ProfilerArchitectureTest {
     @ArchTest
     fun observationAndEbpfOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.profiler.engine.ProfilerAckOutcome" to setOf(
+                "io.mazewall.profiler.engine.ProfilerAckOutcome\$Acknowledged",
+                "io.mazewall.profiler.engine.ProfilerAckOutcome\$PassThrough",
+                "io.mazewall.profiler.engine.ProfilerAckOutcome\$Rejected",
+            ),
+            "io.mazewall.profiler.internal.TraceCommandWriteResult" to setOf(
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$Written",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$NativeFailure",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$ShortWrite",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$Threw",
+            ),
             "io.mazewall.profiler.engine.PathResolution" to setOf(
                 "io.mazewall.profiler.engine.PathResolution\$NotApplicable",
                 "io.mazewall.profiler.engine.PathResolution\$Resolved",

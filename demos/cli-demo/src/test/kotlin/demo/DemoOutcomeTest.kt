@@ -7,8 +7,17 @@ import io.mazewall.core.Syscall
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 class DemoOutcomeTest {
+    @Test
+    fun `executor failure cannot disguise fatal error as an outcome`() {
+        val fatal = OutOfMemoryError("fatal fixture")
+        val thrown = assertFailsWith<OutOfMemoryError> {
+            observeScenario("fatal", ExpectedResult.ALLOWED) { throw java.util.concurrent.ExecutionException(fatal) }
+        }
+        assertEquals(fatal, thrown)
+    }
     @Test
     fun `expected allow and denial are successful but opposite observations fail`() {
         assertTrue(ScenarioResult("legitimate", ExpectedResult.ALLOWED, ScenarioOutcome.Completed("ok")).passed)
@@ -59,5 +68,18 @@ class DemoOutcomeTest {
         assertEquals("keep", Files.readString(existing))
         assertTrue(Files.isSymbolicLink(link))
         parent.toFile().deleteRecursively()
+    }
+
+    @Test
+    fun `fixture cleanup cannot follow a symlink inside the owned root`() {
+        val external = Files.createTempDirectory("demo-external-")
+        val keep = Files.writeString(external.resolve("keep"), "preserve")
+        val fixture = DemoFixture.create()
+        Files.createSymbolicLink(fixture.root.resolve("outside"), external)
+        fixture.close()
+        assertEquals("preserve", Files.readString(keep))
+        assertFalse(Files.exists(fixture.root))
+        Files.delete(keep)
+        Files.delete(external)
     }
 }

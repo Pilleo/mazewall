@@ -1,5 +1,7 @@
 package io.mazewall.portal
 
+import io.mazewall.core.CleanupFailures
+
 /** Collects best-effort resource-release failures without skipping later owned resources. */
 internal class CleanupCollector {
     private val failures = mutableListOf<CleanupFailure>()
@@ -28,20 +30,7 @@ internal data class CleanupOutcome(
     fun failureOrNull(): Throwable? {
         var primary: Throwable? = null
         failures.forEach { failure ->
-            val next = failure.cause
-            val current = primary
-            primary = when {
-                current == null -> next
-                next is Error && current !is Error -> {
-                    if (next !== current) next.addSuppressed(current)
-                    next
-                }
-                current !== next -> {
-                    current.addSuppressed(next)
-                    current
-                }
-                else -> current
-            }
+            primary = CleanupFailures.merge(primary, failure.cause)
         }
         return primary
     }

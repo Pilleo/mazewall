@@ -17,9 +17,19 @@ class ProfileArtifactPublisherTest {
     lateinit var directory: Path
 
     @Test
+    fun `old generation with drain-only complete marker cannot bypass collector validation`() {
+        val target = directory.resolve("sbob.json")
+        val generation = ProfileArtifactPublisher.publish(target, BillOfBehavior(), ExecutorDrain.Complete, listOf(collectorCoverage()))
+        val json = ObjectMapper().readTree(Files.readString(generation.integrity)) as com.fasterxml.jackson.databind.node.ObjectNode
+        json.remove("collectors")
+        Files.writeString(generation.integrity, json.toString())
+        assertFailsWith<IncompleteProfileEvidenceException> { ProfileArtifactPublisher.resolveEvidencePath(target) }
+    }
+
+    @Test
     fun `publishes one coherent immutable generation behind an atomic pointer`() {
         val target = directory.resolve("sbob.json")
-        val published = ProfileArtifactPublisher.publish(target, BillOfBehavior(), ExecutorDrain.Complete)
+        val published = ProfileArtifactPublisher.publish(target, BillOfBehavior(), ExecutorDrain.Complete, listOf(collectorCoverage()))
         val current = ProfileArtifactPublisher.readCurrent(target)
 
         assertEquals(published, current)
@@ -70,6 +80,7 @@ class ProfileArtifactPublisherTest {
             target,
             BillOfBehavior(),
             ExecutorDrain.Incomplete.ProfilerCleanup(reason),
+            listOf(collectorCoverage()),
         )
 
         val integrity = Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity)
@@ -83,7 +94,7 @@ class ProfileArtifactPublisherTest {
     fun `failure between generation components leaves prior generation authoritative`() {
         val target = directory.resolve("sbob.json")
         val firstEvidence = BillOfBehavior(opens = setOf("/first"))
-        val first = ProfileArtifactPublisher.publish(target, firstEvidence, ExecutorDrain.Complete)
+        val first = ProfileArtifactPublisher.publish(target, firstEvidence, ExecutorDrain.Complete, listOf(collectorCoverage()))
 
         listOf(ProfilePublicationComponent.EVIDENCE, ProfilePublicationComponent.STACK_DICTIONARY).forEach { failurePoint ->
             assertFailsWith<IllegalStateException> {

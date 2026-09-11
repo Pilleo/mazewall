@@ -36,19 +36,16 @@ object DiagnosticTriageRunner {
         // 5. Capture kernel security configurations
         val kernelConfig = captureKernelConfig()
 
-        // Write a simple JSON structure containing the raw diagnostic dumps
-        val jsonContent = """
-            {
-              "timestamp": ${System.currentTimeMillis()},
-              "diagnostics": {
-                "dmesg_seccomp_logs": ${escapeJson(dmesgLogs)},
-                "jvm_thread_dump": ${escapeJson(jvmThreadDump)},
-                "system_syscall_definitions": ${escapeJson(syscallMapping)},
-                "hs_err_logs": ${escapeJson(hsErrLogs)},
-                "kernel_security_config": ${escapeJson(kernelConfig)}
-              }
-            }
-        """.trimIndent()
+        val jsonContent = diagnosticReportJson(
+            System.currentTimeMillis(),
+            mapOf(
+                "dmesg_seccomp_logs" to dmesgLogs,
+                "jvm_thread_dump" to jvmThreadDump,
+                "system_syscall_definitions" to syscallMapping,
+                "hs_err_logs" to hsErrLogs,
+                "kernel_security_config" to kernelConfig,
+            ),
+        )
 
         targetFile.writeText(jsonContent)
         println("==> Local diagnostic triage complete. Report written to: build/triage_report.json")
@@ -213,14 +210,4 @@ object DiagnosticTriageRunner {
         } catch (expectedOptionalFailure: Exception) {
             onFailure(expectedOptionalFailure)
         }
-
-    private fun escapeJson(value: String): String {
-        return "\"" +
-            value
-                .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r") +
-            "\""
-    }
 }

@@ -3,14 +3,38 @@ package io.mazewall.seccomp
 import io.mazewall.BpfFilter
 import io.mazewall.Policy
 import io.mazewall.core.Arch
+import io.mazewall.core.SeccompAction
 import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SupervisorBpfCompilationTest {
     private val arch = Arch.AMD64
+
+    @ParameterizedTest
+    @ValueSource(strings = ["amd64", "aarch64"])
+    fun `unsupported supervised operations are rejected during compilation`(architecture: String) {
+        val arch = if (architecture == "amd64") Arch.AMD64 else Arch.AARCH64
+        val policy = Policy.builder().addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
+        assertFailsWith<IllegalArgumentException> { BpfFilter.build(arch, policy.definition) }
+    }
+
+    @Test
+    fun `default notify cannot dispatch unhandled operations`() {
+        val policy = Policy.builder().defaultAction(SeccompAction.ACT_NOTIFY).build()
+        assertFailsWith<IllegalArgumentException> { BpfFilter.build(arch, policy.definition) }
+    }
+
+    @Test
+    fun `profiler can observe operations without enforcement handlers`() {
+        val policy = Policy.builder().addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
+        BpfFilter.build(arch, policy.definition, profilingMode = true)
+    }
 
     @Test
     fun `policy builder with supervise produces notify action in bpf filter`() {

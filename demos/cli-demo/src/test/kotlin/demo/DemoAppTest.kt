@@ -12,6 +12,44 @@ import kotlin.test.assertTrue
 
 class DemoAppTest {
     @Test
+    fun `default all never invokes profiling`() {
+        var profiles = 0
+        val result = ScenarioResult("control", ExpectedResult.ALLOWED, ScenarioOutcome.Completed("ok"))
+        val report = runDemo("all", { result }, { listOf(result) }, { profiles++; DemoReport(listOf(result)) })
+        assertTrue(report.passed)
+        assertEquals(0, profiles)
+        runDemo("profile", { result }, { listOf(result) }, { profiles++; DemoReport(listOf(result)) })
+        assertEquals(1, profiles)
+    }
+
+    @Test
+    fun `setup failure produces infrastructure exit outcome`() {
+        val report = runDemo("safe", safe = { throw java.io.IOException("fixture unavailable") })
+        assertEquals(2, report.exitCode)
+        assertTrue(report.results.single().outcome is ScenarioOutcome.InfrastructureFailure)
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `network control reaches loopback uncontained and is blocked with NO_NETWORK`() {
+        io.mazewall.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "networkBody")
+    }
+
+    @Suppress("unused")
+    fun networkBody() {
+        val report = runNoNetwork()
+        when (val outcome = report.outcome) {
+            is ScenarioOutcome.Completed -> kotlin.test.fail(report.render())
+            is ScenarioOutcome.Denied -> assertTrue(report.passed)
+            is ScenarioOutcome.InfrastructureFailure -> {
+                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+                    ContainmentViolationDetector.diagnose(outcome.cause)?.evidence, report.render())
+                assertFalse(report.passed)
+            }
+        }
+    }
+
+    @Test
     fun `inferred permission text is never claimed as authenticated containment`() {
         val inferred = java.io.IOException("Permission denied")
 

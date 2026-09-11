@@ -60,6 +60,7 @@ internal fun runAgentScenario(
     return try {
         runAgentScenarioConfigured(scenario, useMazewall, expected)
     } catch (failure: Exception) {
+        rethrowFatalOrRestoreInterruption(failure)
         AgentScenarioResult(scenario, expected, AgentOutcome.InfrastructureFailure(failure))
     }
 }

@@ -37,6 +37,7 @@ public class ProfilerDaemonEngine internal constructor(
     private val publisher: TraceEventPublisher = transport
     private val responder: SeccompResponder = transport
     private val ioOps: NativeIoOperations = transport
+    private val preparation = ProfilerPreparationPool()
 
     private val syscallMap = mutableMapOf<Int, String>()
 
@@ -60,6 +61,7 @@ public class ProfilerDaemonEngine internal constructor(
                 ioOps = ioOps,
                 memoryReader = memoryReader,
                 syscallMap = syscallMap,
+                preparation = preparation,
                 onShutdown = { source -> triggerGlobalShutdown(source) },
             )
         },
@@ -84,7 +86,9 @@ public class ProfilerDaemonEngine internal constructor(
 
     fun run(block: (() -> Unit)? = null) {
         block?.invoke()
-        delegate.run()
+        preparation.use {
+            delegate.run()
+        }
     }
 
     internal fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {

@@ -51,7 +51,8 @@ internal sealed interface PortalBrokerCallEffect {
         val event: PortalBrokerCallEvent,
     ) : PortalBrokerCallEffect
 
-    data object None : PortalBrokerCallEffect
+    /** Transmission completed; awaiting a reply is a named progress outcome. */
+    data object AwaitReply : PortalBrokerCallEffect
 }
 
 internal data class PortalBrokerCallTransition(
@@ -66,7 +67,7 @@ internal object PortalBrokerCallMachine {
     ): PortalBrokerCallTransition =
         when (state) {
         PortalBrokerCallState.Idle -> when (event) {
-            is PortalBrokerCallEvent.RequestSent -> PortalBrokerCallTransition(PortalBrokerCallState.AwaitingReply(event.request), PortalBrokerCallEffect.None)
+            is PortalBrokerCallEvent.RequestSent -> PortalBrokerCallTransition(PortalBrokerCallState.AwaitingReply(event.request), PortalBrokerCallEffect.AwaitReply)
             is PortalBrokerCallEvent.ReplyReceived -> protocolViolation("reply received before request")
             PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
         }

@@ -2,6 +2,8 @@ package io.mazewall.enforcer
 
 import io.mazewall.LinuxNative
 import io.mazewall.NeedsFreshJvm
+import io.mazewall.core.FdOwnership
+import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
@@ -25,11 +27,11 @@ class SupervisorDoSIntegrationTest {
         val baselineDescriptors = getDescriptorCount(pid)
         System.err.println("Baseline threads for supervisor ($pid): $baselineThreads")
 
-        val connections = mutableListOf<Int>()
+        val connections = mutableListOf<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
         val numConnections = 250 // More than MAX_CONNECTIONS (200)
         try {
             for (i in 1..numConnections) {
-                val fd = SupervisorSocketUtils.connectWithRetry(socketPath)
+                val fd = SupervisorSocketUtils.connectDescriptorWithRetry(socketPath)
                 connections.add(fd)
             }
 
@@ -49,7 +51,7 @@ class SupervisorDoSIntegrationTest {
             )
         } finally {
             connections.forEach {
-                LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.UnixSocket>(it))
+                LinuxNative.fileSystem.close(it)
             }
             SupervisorDaemonManager.getInstance().stop()
         }
