@@ -1,5 +1,4 @@
 package io.mazewall.enforcer.supervisor
-
 import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
 import io.mazewall.core.Deadline
@@ -281,7 +280,16 @@ internal class SupervisorSessionHandler(
         val listener = PollFdSegment.of(pollFds.asSlice(0, Layouts.POLLFD_SIZE))
         return if (listener.getRevents().toInt() and NativeConstants.POLLIN.toInt() != 0) {
             notif.fill(0)
-            if (!reader.recvNotification(listenerFd, notif) || !processNotification(notif, resp)) LoopAction.Break else LoopAction.Continue
+            when (reader.recvNotification(listenerFd, notif)) {
+                io.mazewall.platform.seccomp.daemon.ReceiveOutcome.Received ->
+                    if (processNotification(notif, resp)) LoopAction.Continue else LoopAction.Break
+                io.mazewall.platform.seccomp.daemon.ReceiveOutcome.RetryAfterPoll,
+                io.mazewall.platform.seccomp.daemon.ReceiveOutcome.NotReady,
+                -> LoopAction.Continue
+                io.mazewall.platform.seccomp.daemon.ReceiveOutcome.Closed,
+                is io.mazewall.platform.seccomp.daemon.ReceiveOutcome.Failed,
+                -> LoopAction.Break
+            }
         } else {
             LoopAction.Continue
         }

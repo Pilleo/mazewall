@@ -4,6 +4,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -29,25 +30,19 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
-    fun `resolveAbsolutePath returns path even for non-existent absolute path`() {
+    fun `resolveAbsolutePath rejects a non-existent absolute path`() {
         val nonExistentPath = "/tmp/this/path/does/not/exist/at/all/12345"
 
-        // FIXED BEHAVIOR: resolveAbsolutePath now returns a securely canonicalized non-null Path using toRealPathWithFallback,
-        // resolving the existing parent hierarchy first to prevent directory traversal / symlink escapes.
         val result = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(-100), nonExistentPath)
 
-        assertNotNull(result)
-        assertEquals(Paths.get(nonExistentPath).normalize(), result)
+        assertNull(result)
+        assertTrue(BypassPaths.resolveForPolicy(Paths.get(nonExistentPath)) is BypassPaths.PathResolution.Unsafe)
     }
 
     @Test
-    fun `resolveAbsolutePath returns path even for non-existent path in safeBypassPaths`() {
+    fun `resolveAbsolutePath rejects a non-existent path in safeBypassPaths`() {
         val result = SupervisorFastPath.resolveAbsolutePath(0, TraceeDirFd(-100), "build/non-existent-file-12345")
-        assertNotNull(result)
-        // With AT_FDCWD, the code queries baseDir = /proc/0/cwd, which points to the current working directory.
-        // So the resolved path's prefix will be /proc/0/cwd/build/non-existent-file-12345.
-        // Let's verify that this normalized relative path resolution is correctly resolved.
-        assertEquals(Paths.get("/proc/0/cwd/build/non-existent-file-12345").normalize(), result)
+        assertNull(result)
     }
 
     @Test
@@ -66,7 +61,7 @@ class ResolveAbsolutePathTest {
     }
 
     @Test
-    fun `relative bypass path is matched only after tracee dirfd resolution`() {
+    fun `missing relative bypass path is rejected after tracee dirfd resolution`() {
         val traceeDirectory = Files.createTempDirectory("mazewall-tracee-dir")
         val tracee = ProcessBuilder(
             "bash",
@@ -76,12 +71,7 @@ class ResolveAbsolutePathTest {
 
         try {
             val traceePid = tracee.inputReader().readLine().toInt()
-            val resolvedPath =
-                SupervisorFastPath.resolveAbsolutePath(traceePid, TraceeDirFd(9), "build/secret") as Path
-
-            // "build" is beneath the daemon working directory and is normally bypassed. It must not
-            // bypass when the tracee asks openat() to resolve that same relative spelling under fd 9.
-            assertFalse(BypassPaths.isBypassPath(resolvedPath))
+            assertNull(SupervisorFastPath.resolveAbsolutePath(traceePid, TraceeDirFd(9), "build/secret"))
         } finally {
             tracee.destroyForcibly()
             tracee.waitFor()
@@ -141,6 +131,36 @@ class ResolveAbsolutePathTest {
             Files.deleteIfExists(linkA)
             Files.deleteIfExists(linkB)
             Files.deleteIfExists(tempDir)
+        }
+    }
+
+    @Test
+    fun `policy resolution follows symlinks before parent traversal`() {
+        val root = Files.createTempDirectory("bypass-dotdot")
+        val trusted = Files.createDirectories(root.resolve("trusted"))
+        val outside = Files.createDirectories(root.resolve("outside"))
+        val outsideChild = Files.createDirectories(outside.resolve("child"))
+        val trustedSecret = Files.writeString(trusted.resolve("secret"), "trusted")
+        val outsideSecret = Files.writeString(outside.resolve("secret"), "outside")
+        val link = trusted.resolve("link")
+        Files.createSymbolicLink(link, outsideChild)
+        try {
+            val adversarial = trusted.resolve("link/../secret")
+            val resolved = assertInstanceOf(
+                BypassPaths.PathResolution.Resolved::class.java,
+                BypassPaths.resolveForPolicy(adversarial),
+            )
+
+            assertEquals(outsideSecret.toRealPath(), resolved.path)
+            assertFalse(resolved.path == trustedSecret.toRealPath())
+        } finally {
+            Files.deleteIfExists(link)
+            Files.deleteIfExists(trustedSecret)
+            Files.deleteIfExists(outsideSecret)
+            Files.deleteIfExists(outsideChild)
+            Files.deleteIfExists(trusted)
+            Files.deleteIfExists(outside)
+            Files.deleteIfExists(root)
         }
     }
 }

@@ -89,7 +89,7 @@ final class TestHealthPluginFunctionalTest {
                 public class InheritedNestedTest extends AbstractNestedBase {}
                 """);
             Path fragments = Files.createDirectories(root.resolve("build/reports/test-health/fragments"));
-            Files.writeString(fragments.resolve("stale.json"), "{\"taskPath\":\":stale\"}");
+            Files.writeString(fragments.resolve("stale.json"), "{\"invocationToken\":\"stale\",\"taskPath\":\":stale\",\"executionStatus\":\"completed\"}");
 
             BuildResult first = run(root, "test", "secondTest", "aggregateTestHealth");
             equal(TaskOutcome.SUCCESS, first.task(":aggregateTestHealth").getOutcome());
@@ -102,6 +102,19 @@ final class TestHealthPluginFunctionalTest {
                 fragmentCount = paths.filter(path -> path.toString().endsWith(".json")).count();
             }
             equal(true, fragmentCount >= 4L);
+
+            try (var paths = Files.list(fragments)) {
+                for (Path fragment : paths.filter(path -> path.toString().endsWith(".json")).toList()) {
+                    String contents = Files.readString(fragment);
+                    equal(true, contents.contains("\"invocationToken\":"));
+                    equal(true, contents.contains("\"executionStatus\":\"completed\""));
+                }
+            }
+
+            BuildResult staleOnly = GradleRunner.create().withProjectDir(root.toFile())
+                .withPluginClasspath(pluginClasspath()).withArguments("aggregateTestHealth").buildAndFail();
+            equal(true, staleOnly.getOutput().contains("missing current tasks"));
+            equal(false, Files.exists(root.resolve("build/reports/test-health/test-tier-health.json")));
 
             BuildResult second = run(root, "test", "secondTest", "aggregateTestHealth");
             equal(TaskOutcome.UP_TO_DATE, second.task(":test").getOutcome());
@@ -168,12 +181,14 @@ final class TestHealthPluginFunctionalTest {
                 @Test void writesForkEvidence() throws Exception {
                     String directory = System.getProperty("io.mazewall.testHealth.fragmentDir");
                     String taskPath = System.getProperty("io.mazewall.testHealth.taskPath");
+                    String invocationToken = System.getProperty("io.mazewall.testHealth.invocationToken");
                     String task = System.getProperty("io.mazewall.testHealth.task");
                     Path target = Path.of(directory, task + "-" + ProcessHandle.current().pid() + "-%s.json");
                     Files.createDirectories(target.getParent());
-                    Files.writeString(target, "{\\\"module\\\":\\\":\\\",\\\"task\\\":\\\"" + task
+                    Files.writeString(target, "{\\\"invocationToken\\\":\\\"" + invocationToken
+                        + "\\\",\\\"module\\\":\\\":\\\",\\\"task\\\":\\\"" + task
                         + "\\\",\\\"taskPath\\\":\\\"" + taskPath + "\\\",\\\"fork\\\":\\\""
-                        + ProcessHandle.current().pid() + "\\\"}");
+                        + ProcessHandle.current().pid() + "\\\",\\\"executionStatus\\\":\\\"completed\\\"}");
                 }
             }
             """.formatted(name, name);

@@ -40,7 +40,13 @@ class SocketHelperOwnerDeathTest {
             helper = ProcessHandle.of(identity[0].toLong()).orElseThrow()
             val helperPath = Path.of("/proc", helper.pid().toString())
             val inode = identity[1]
-            await("helper owns imported listener") { Files.list(helperPath.resolve("fd")).use { paths -> paths.anyMatch { Files.readSymbolicLink(it).toString() == inode } } }
+            await("helper owns imported listener") {
+                if (!Files.exists(helperPath.resolve("fd"))) {
+                    false
+                } else {
+                    Files.list(helperPath.resolve("fd")).use { paths -> paths.anyMatch { Files.readSymbolicLink(it).toString() == inode } }
+                }
+            }
             await("helper blocked in native accept") {
                 Files.list(helperPath.resolve("task")).use { paths ->
                     paths.anyMatch { Files.readString(it.resolve("wchan")).contains("accept") }

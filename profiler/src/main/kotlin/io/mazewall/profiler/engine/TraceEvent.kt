@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.profiler.OpenFlagsEvidence
 import java.util.Locale
 
 /** A syscall identity that keeps forward-compatible names explicit. */
@@ -188,6 +189,7 @@ public sealed class TraceEvent {
         val flags: Long,
         val mode: Int,
         stackTrace: List<String>? = null,
+        public val openFlagsEvidence: OpenFlagsEvidence = if (syscallName == "OPENAT2") OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags")) else OpenFlagsEvidence.Complete(flags),
     ) : TraceEvent() {
         override val paths: List<String> = listOf(path)
         override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
@@ -199,7 +201,7 @@ public sealed class TraceEvent {
             flags: Long = this.flags,
             mode: Int = this.mode,
             stackTrace: List<String>? = this.stackTrace,
-        ): Open = copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace))
+        ): Open = copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace, openFlagsEvidence))
 
         public operator fun component1(): Tid = tid
 
@@ -220,6 +222,7 @@ public sealed class TraceEvent {
             if (path != other.path) return false
             if (flags != other.flags) return false
             if (mode != other.mode) return false
+            if (openFlagsEvidence != other.openFlagsEvidence) return false
             if (stackTrace != other.stackTrace) return false
             return pathResolution == other.pathResolution
         }
@@ -229,6 +232,7 @@ public sealed class TraceEvent {
             result = 31 * result + path.hashCode()
             result = 31 * result + flags.hashCode()
             result = 31 * result + mode
+            result = 31 * result + openFlagsEvidence.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             result = 31 * result + pathResolution.hashCode()
             return result
@@ -516,7 +520,7 @@ public sealed class TraceEvent {
                     "OPENAT2" -> 0L // flags are inside a struct pointer in args[2]
                     else -> 0L
                 }
-                Open(tid, syscallName, paths[0], flags, 0, stackTrace)
+                Open(tid, syscallName, paths[0], flags, 0, stackTrace, if (syscallName == "OPENAT2") OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags")) else OpenFlagsEvidence.Complete(flags))
             } else {
                 Generic(tid, syscallName, args.toList(), paths, stackTrace)
             }

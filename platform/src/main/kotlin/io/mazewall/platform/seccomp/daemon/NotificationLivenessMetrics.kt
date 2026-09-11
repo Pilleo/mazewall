@@ -13,6 +13,14 @@ public data class NotificationLivenessSnapshot(
     public val notificationGone: Long = 0,
     public val failed: Long = 0,
     public val lateCompletions: Long = 0,
+    public val pending: Long = 0,
+    public val oldestPendingAgeNanos: Long = 0,
+    public val deadlineNear: Long = 0,
+    public val replyLatencyCount: Long = 0,
+    public val replyLatencyNanos: Long = 0,
+    public val maxReplyLatencyNanos: Long = 0,
+    public val reactorPolls: Long = 0,
+    public val helperSaturation: Long = 0,
 )
 
 /** Internal diagnostics for this daemon process; obtaining a snapshot never resets counters. */
@@ -32,7 +40,47 @@ internal class NotificationLivenessCounters(
     fun snapshot(): NotificationLivenessSnapshot = state.get()
 
     fun started() {
-        state.updateAndGet { it.copy(started = it.started.increment()) }
+        state.updateAndGet {
+            it.copy(
+                started = it.started.increment(),
+                pending = it.pending.increment(),
+            )
+        }
+    }
+
+    fun finished() {
+        state.updateAndGet { it.copy(pending = (it.pending - 1).coerceAtLeast(0)) }
+    }
+
+    fun reactorPoll() {
+        state.updateAndGet { it.copy(reactorPolls = it.reactorPolls.increment()) }
+    }
+
+    fun observePending(
+        ageNanos: Long,
+        deadlineNear: Boolean,
+    ) {
+        state.updateAndGet {
+            it.copy(
+                oldestPendingAgeNanos = maxOf(it.oldestPendingAgeNanos, ageNanos.coerceAtLeast(0)),
+                deadlineNear = if (deadlineNear) it.deadlineNear.increment() else it.deadlineNear,
+            )
+        }
+    }
+
+    fun replyLatency(durationNanos: Long) {
+        val nonNegative = durationNanos.coerceAtLeast(0)
+        state.updateAndGet {
+            it.copy(
+                replyLatencyCount = it.replyLatencyCount.increment(),
+                replyLatencyNanos = it.replyLatencyNanos.saturatingAdd(nonNegative),
+                maxReplyLatencyNanos = maxOf(it.maxReplyLatencyNanos, nonNegative),
+            )
+        }
+    }
+
+    fun helperSaturated() {
+        state.updateAndGet { it.copy(helperSaturation = it.helperSaturation.increment()) }
     }
 
     fun expired(lateCompletion: Boolean) {
@@ -59,4 +107,6 @@ internal class NotificationLivenessCounters(
     }
 
     private fun Long.increment(): Long = if (this == Long.MAX_VALUE) this else this + 1
+
+    private fun Long.saturatingAdd(other: Long): Long = if (this > Long.MAX_VALUE - other) Long.MAX_VALUE else this + other
 }

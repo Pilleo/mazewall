@@ -84,6 +84,26 @@ interface KotlinJvmRecordDtoService {
     fun echoKotlinJvmRecord(value: KotlinJvmRecordDto): KotlinJvmRecordDto
 }
 
+class FirstOuter {
+    interface NestedService {
+        fun echo(value: String): String
+    }
+}
+
+class SecondOuter {
+    interface NestedService {
+        fun echo(value: String): String
+    }
+}
+
+interface CompanionShadowService {
+    fun echo(Companion: String): String
+}
+
+interface NullableService {
+    fun echo(value: String?): String?
+}
+
 interface ReturnedFdService {
     fun acquire(): Capability.ReadFd
 }

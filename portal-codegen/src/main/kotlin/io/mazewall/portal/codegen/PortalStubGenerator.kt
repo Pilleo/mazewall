@@ -15,6 +15,7 @@ import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.UNIT
 import com.squareup.kotlinpoet.asClassName
 import com.squareup.kotlinpoet.asTypeName
+import io.mazewall.portal.PortalGeneratedNames
 import java.io.File
 import java.lang.reflect.Method
 import java.util.Locale
@@ -56,7 +57,8 @@ public object PortalStubGenerator {
 
     private fun hostStub(schema: PortalServiceSchema): FileSpec {
         val service = schema.service
-        val stubName = service.simpleName + "PortalStub"
+        val stubName = PortalGeneratedNames.stubBinaryName(service).substringAfterLast('.')
+        val companionClass = ClassName(service.packageName, stubName).nestedClass("Companion")
         val memberNames = NameAllocator()
         val brokerTag = Any()
         val brokerName = memberNames.newName("broker", brokerTag)
@@ -78,7 +80,7 @@ public object PortalStubGenerator {
         val companion = TypeSpec.companionObjectBuilder()
         schema.methods.forEach { method ->
             companion.addProperty(methodIdProperty(constants.getValue(method.method), method.id))
-            type.addFunction(hostMethod(method, brokerName, constants.getValue(method.method)))
+            type.addFunction(hostMethod(method, brokerName, constants.getValue(method.method), companionClass))
         }
         type.addType(companion.build())
         return FileSpec.builder(service.packageName, stubName).addType(type.build()).build()
@@ -88,6 +90,7 @@ public object PortalStubGenerator {
         method: PortalMethodSchema,
         brokerName: String,
         constantName: String,
+        companionClass: ClassName,
     ): FunSpec {
         val names = NameAllocator()
         val parameterNames =
@@ -99,15 +102,15 @@ public object PortalStubGenerator {
             FunSpec
                 .builder(method.method.name)
                 .addModifiers(KModifier.PUBLIC, KModifier.OVERRIDE)
-                .returns(typeName(method.method.returnType))
+                .returns(typeName(method.method.returnType).copy(nullable = method.returnNullable))
         method.parameters.forEach { parameter ->
-            spec.addParameter(parameterNames.getValue(parameter), typeName(parameter.type))
+            spec.addParameter(parameterNames.getValue(parameter), typeName(parameter.type).copy(nullable = parameter.nullable))
         }
 
         val payloadParts =
             method.parameters
                 .filterNot { it.kind is BoundaryTypes.Kind.ReadFd }
-                .map { encode(it.kind, CodeBlock.of("%N", parameterNames.getValue(it))) }
+                .map { encode(it.kind, CodeBlock.of("%N", parameterNames.getValue(it)), it.nullable) }
         val granted =
             method.parameters
                 .filter { it.kind is BoundaryTypes.Kind.ReadFd }
@@ -127,7 +130,7 @@ public object PortalStubGenerator {
         val invocation =
             CodeBlock
                 .builder()
-                .add("this.%N.invoke(%T.Generated(Companion.%N), %N", brokerName, portalMethod, constantName, payloadName)
+                .add("this.%N.invoke(%T.Generated(%T.%N), %N", brokerName, portalMethod, companionClass, constantName, payloadName)
                 .apply { granted.forEach { add(", %L", it) } }
                 .add(")")
                 .build()
@@ -136,14 +139,14 @@ public object PortalStubGenerator {
         } else {
             spec.addStatement("val %N = %L", resultName, invocation)
             spec.addStatement("val %N = %T(%N)", readerName, codecReader, resultName)
-            spec.addStatement("return %L", decode(method.returnKind, CodeBlock.of("%N", readerName)))
+            spec.addStatement("return %L", decode(method.returnKind, CodeBlock.of("%N", readerName), method.returnNullable))
         }
         return spec.build()
     }
 
     private fun dispatcher(schema: PortalServiceSchema): FileSpec {
         val service = schema.service
-        val name = service.simpleName + "PortalDispatcher"
+        val name = PortalGeneratedNames.dispatcherBinaryName(service).substringAfterLast('.')
         val constants = constantNames(schema.methods)
         val outerNames = NameAllocator()
         val implName = outerNames.newName("impl", DispatcherOuter.Impl)
@@ -178,7 +181,7 @@ public object PortalStubGenerator {
                     handle.addStatement(
                         "val %N = %L",
                         argumentName,
-                        decode(parameter.kind, CodeBlock.of("%N", readerName)),
+                        decode(parameter.kind, CodeBlock.of("%N", readerName), parameter.nullable),
                     )
                 }
             }
@@ -187,8 +190,15 @@ public object PortalStubGenerator {
                 handle.addStatement("%N.%N(%L)", implName, method.method.name, arguments)
                 handle.addStatement("return ByteArray(0)")
             } else {
-                handle.addStatement("val %N = %N.%N(%L)", returnName, implName, method.method.name, arguments)
-                handle.addStatement("return %L", encode(method.returnKind, CodeBlock.of("%N", returnName)))
+                handle.addStatement(
+                    "val %N: %T = %N.%N(%L)",
+                    returnName,
+                    typeName(method.method.returnType).copy(nullable = method.returnNullable),
+                    implName,
+                    method.method.name,
+                    arguments,
+                )
+                handle.addStatement("return %L", encode(method.returnKind, CodeBlock.of("%N", returnName), method.returnNullable))
             }
             handle.endControlFlow()
         }
@@ -243,8 +253,19 @@ public object PortalStubGenerator {
     private fun encode(
         kind: BoundaryTypes.Kind,
         expression: CodeBlock,
-    ): CodeBlock =
-        when (kind) {
+        nullable: Boolean = false,
+    ): CodeBlock {
+        if (nullable) {
+            return CodeBlock.of(
+                "if (%L == null) %T.encodeBoolean(false) else %T.concat(listOf(%T.encodeBoolean(true), %L))",
+                expression,
+                portalCodec,
+                portalCodec,
+                portalCodec,
+                encode(kind, expression),
+            )
+        }
+        return when (kind) {
             BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%T.encodeBoolean(%L)", portalCodec, expression)
             BoundaryTypes.Kind.ByteT -> CodeBlock.of("%T.encodeByte(%L)", portalCodec, expression)
             BoundaryTypes.Kind.ShortT -> CodeBlock.of("%T.encodeShort(%L)", portalCodec, expression)
@@ -267,6 +288,7 @@ public object PortalStubGenerator {
                     .build()
             }
         }
+    }
 
     private fun propertyRead(
         receiver: CodeBlock,
@@ -281,8 +303,12 @@ public object PortalStubGenerator {
     private fun decode(
         kind: BoundaryTypes.Kind,
         reader: CodeBlock,
-    ): CodeBlock =
-        when (kind) {
+        nullable: Boolean = false,
+    ): CodeBlock {
+        if (nullable) {
+            return CodeBlock.of("if (!%L.boolean()) null else %L", reader, decode(kind, reader))
+        }
+        return when (kind) {
             BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%L.boolean()", reader)
             BoundaryTypes.Kind.ByteT -> CodeBlock.of("%L.byte()", reader)
             BoundaryTypes.Kind.ShortT -> CodeBlock.of("%L.short()", reader)
@@ -304,6 +330,7 @@ public object PortalStubGenerator {
                     .build()
             }
         }
+    }
 
     private enum class HostLocal { Payload, Result, Reader }
 

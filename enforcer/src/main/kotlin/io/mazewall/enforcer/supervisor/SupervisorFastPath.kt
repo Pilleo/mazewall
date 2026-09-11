@@ -26,30 +26,29 @@ internal object SupervisorFastPath {
         val path = java.nio.file.Paths
             .get(pathStr)
         if (path.isAbsolute) {
-            try {
-                return BypassPaths.toRealPathWithFallback(path)
-            } catch (_: java.nio.file.NoSuchFileException) {
-                return null
-            } catch (_: java.io.FileNotFoundException) {
-                return null
-            } catch (expectedResolutionFailure: Exception) {
-                logger.severe { "Critical error during absolute path resolution for $pathStr: ${expectedResolutionFailure.message}" }
-                throw expectedResolutionFailure
+            return when (val resolution = BypassPaths.resolveForPolicy(path)) {
+                is BypassPaths.PathResolution.Resolved -> resolution.path
+                is BypassPaths.PathResolution.Missing,
+                is BypassPaths.PathResolution.Unsafe,
+                -> null
             }
         }
         try {
             val baseDir = if (dirfd.value == AT_FDCWD) {
-                BypassPaths.toRealPathWithFallback(
-                    java.nio.file.Paths
-                    .get("/proc/$pid/cwd"),
-                )
+                java.nio.file.Paths
+                    .get("/proc/$pid/cwd")
+                    .toRealPath()
             } else {
-                BypassPaths.toRealPathWithFallback(
-                    java.nio.file.Paths
-                    .get("/proc/$pid/fd/${dirfd.value}"),
-                )
+                java.nio.file.Paths
+                    .get("/proc/$pid/fd/${dirfd.value}")
+                    .toRealPath()
             }
-            return BypassPaths.toRealPathWithFallback(baseDir.resolve(path))
+            return when (val resolution = BypassPaths.resolveForPolicy(baseDir.resolve(path))) {
+                is BypassPaths.PathResolution.Resolved -> resolution.path
+                is BypassPaths.PathResolution.Missing,
+                is BypassPaths.PathResolution.Unsafe,
+                -> null
+            }
         } catch (_: java.nio.file.NoSuchFileException) {
             // /proc/<pid>/cwd or /proc/<pid>/fd/<dirfd> is gone. Do not invent a
             // path under a daemon bypass root; fail closed and let the caller deny.

@@ -62,24 +62,44 @@ public class Capability private constructor() {
     }
 
     public companion object {
+        /**
+         * Retire every supplied owner and return the owners whose close failed before native
+         * dispatch. Callers must retain [CapabilityRetirementOutcome.retained] and retry them.
+         */
+        @Suppress("TooGenericExceptionCaught")
+        internal fun retireAll(capabilities: List<ReadFd>): CapabilityRetirementOutcome {
+            val failures = mutableListOf<CleanupFailure>()
+            capabilities.forEachIndexed { index, capability ->
+                try {
+                    capability.close()
+                } catch (next: Throwable) {
+                    failures += CleanupFailure("portal capability[$index]", next)
+                }
+            }
+            return CapabilityRetirementOutcome(
+                failures = failures.toList(),
+                retained = capabilities.filterNot(ReadFd::isRetired),
+            )
+        }
+
         /** Release every in-process owner, preserving fatal failures and avoiding skipped descriptors. */
         @io.mazewall.MazewallInternal
         @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // Cleanup must drain all owners and prefer fatal failures.
         public fun closeAll(capabilities: List<ReadFd>) {
-            var failure: Throwable? = null
-            capabilities.forEach { capability ->
-                try {
-                    capability.close()
-                } catch (next: Throwable) {
-                    failure = io.mazewall.core.CleanupFailures
-                        .merge(failure, next)
-                }
-            }
-            failure?.let { throw it }
+            retireAll(capabilities).failureOrNull()?.let { throw it }
         }
 
         /** Adopt a granted FD received by the worker. Not a host `InputStream`. */
         @JvmStatic
         public fun readFd(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>): ReadFd = ReadFd(fd)
     }
+}
+
+internal data class CapabilityRetirementOutcome(
+    val failures: List<CleanupFailure>,
+    val retained: List<Capability.ReadFd>,
+) {
+    val complete: Boolean get() = failures.isEmpty() && retained.isEmpty()
+
+    fun failureOrNull(): Throwable? = CleanupOutcome(failures).failureOrNull()
 }

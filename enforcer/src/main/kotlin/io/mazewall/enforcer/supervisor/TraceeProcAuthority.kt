@@ -13,11 +13,25 @@ internal class TraceeAuthorityFailure(
     val errno: Int,
 ) : java.io.IOException("Tracee authority errno=$errno")
 
+/** One pinned task identity. Non-leader imports never borrow the leader's descriptor table. */
+internal class TraceeTaskIdentity(
+    val tid: Int,
+    val tgid: Int,
+    private val pidfd: SupervisorOwnedFd,
+) : AutoCloseable {
+    fun import(
+        fd: Int,
+        engine: NativeEngine,
+    ): SupervisorOwnedFd = TraceeProcAuthority.own(engine.process.pidfdGetFd(pidfd.handle, fd, 0), engine)
+
+    override fun close() = pidfd.close()
+}
+
 /** Child-owned proc and pidfd handles. All proc lookups after acquisition stay relative to the pinned task. */
 internal class TraceeProcAuthority private constructor(
     private val engine: NativeEngine,
     private val proc: SupervisorOwnedFd,
-    private val pidfd: SupervisorOwnedFd,
+    val task: TraceeTaskIdentity,
     val ppid: Int,
 ) : AutoCloseable {
     private var memory: SupervisorOwnedFd? = null
@@ -52,7 +66,7 @@ internal class TraceeProcAuthority private constructor(
         }
     }
 
-    fun import(fd: Int): SupervisorOwnedFd = own(engine.process.pidfdGetFd(pidfd.handle, fd, 0), engine)
+    fun import(fd: Int): SupervisorOwnedFd = task.import(fd, engine)
 
     context(arena: NativeArena) fun read(
         address: Long,
@@ -129,7 +143,7 @@ internal class TraceeProcAuthority private constructor(
         val cleanup = SocketCleanup()
         directories.values.forEach { cleanup.attempt(it::close) }
         cleanup.attempt { memory?.close() }
-        cleanup.attempt(pidfd::close)
+        cleanup.attempt(task::close)
         cleanup.attempt(proc::close)
         cleanup.rethrow()
     }
@@ -149,12 +163,21 @@ internal class TraceeProcAuthority private constructor(
             try {
                 val status = readFile(proc, "status", MAX_STATUS_BYTES, engine)
                 val tgid = field(status, "Tgid:")
+                if (field(status, "Pid:") != tid) throw TraceeAuthorityFailure(NativeConstants.ESRCH)
                 val ppid = field(status, "PPid:")
-                pidfd = own(engine.process.pidfdOpen(tgid, 0), engine)
+                val exactThread = tid != tgid
+                pidfd = own(
+                    engine.process.pidfdOpen(
+                        if (exactThread) tid else tgid,
+                        if (exactThread) NativeConstants.PIDFD_THREAD else 0,
+                    ),
+                    engine,
+                )
                 // A surviving pinned /proc/task directory cannot alias a reused task.
                 // Recheck after pidfd acquisition before any memory/import operation.
-                if (field(readFile(proc, "status", MAX_STATUS_BYTES, engine), "Tgid:") != tgid) throw TraceeAuthorityFailure(NativeConstants.ESRCH)
-                return TraceeProcAuthority(engine, proc, pidfd, ppid)
+                val verified = readFile(proc, "status", MAX_STATUS_BYTES, engine)
+                if (field(verified, "Tgid:") != tgid || field(verified, "Pid:") != tid) throw TraceeAuthorityFailure(NativeConstants.ESRCH)
+                return TraceeProcAuthority(engine, proc, TraceeTaskIdentity(tid, tgid, pidfd), ppid)
             } catch (failure: Throwable) {
                 val cleanup = SocketCleanup(failure)
                 cleanup.attempt { pidfd?.close() }
@@ -198,7 +221,7 @@ internal class TraceeProcAuthority private constructor(
                 output.toString(Charsets.UTF_8)
             }
 
-        private fun own(
+        internal fun own(
             result: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>,
             engine: NativeEngine,
         ): SupervisorOwnedFd =

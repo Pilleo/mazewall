@@ -5,6 +5,7 @@ import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DeploymentContractTest {
@@ -60,6 +61,30 @@ class DeploymentContractTest {
         assertTrue(containerfile.contains("/app/uploads"))
         assertTrue(containerfile.contains("/app/data"))
         assertTrue(containerfile.contains("chown"), "policy roots must have explicit ownership")
+    }
+
+    @Test
+    fun `container runs as an unprivileged user that owns only writable policy roots`() {
+        val containerfile = Files.readString(projectFile("Containerfile"))
+
+        assertTrue(containerfile.lineSequence().any { it.trim() == "USER mazewall" })
+        assertTrue(containerfile.contains("chown mazewall:mazewall /app/uploads /app/data"))
+        assertTrue(containerfile.contains("chown root:mazewall /app/profiles"))
+        assertFalse(containerfile.contains("chown mazewall:mazewall /app/profiles"))
+        assertFalse(containerfile.contains("chown -R"), "the application tree must remain root-owned and read-only")
+    }
+
+    @Test
+    fun `verification report describes only the isolated fixture with provenance`() {
+        val report = Files.readString(projectFile("results_report.md"))
+
+        assertTrue(report.contains("Recorded at (UTC):"))
+        assertTrue(report.contains("isolated-vulnerable-fixture.jar"))
+        assertTrue(report.contains("isolated-vulnerable-fixture"))
+        assertTrue(report.contains("Verification command:"))
+        assertTrue(report.contains("Result:"))
+        assertFalse(report.contains("standard Spring Boot application"))
+        assertFalse(report.contains("Blocked successfully!"))
     }
 
     private fun projectFile(name: String): Path = Path.of(name)

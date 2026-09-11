@@ -96,6 +96,9 @@ object NativeConstants {
     const val O_RDONLY = 0
     const val O_DIRECTORY = 0x00010000
 
+    /** pidfd_open(2): acquire a pidfd for the exact thread rather than its thread-group leader. */
+    const val PIDFD_THREAD = 0x80
+
     /** openat2(2) RESOLVE_BENEATH: path must stay under dirfd. */
     const val RESOLVE_BENEATH = 0x08L
     const val RESOLVE_IN_ROOT = 0x10L
@@ -109,7 +112,10 @@ object NativeConstants {
     // fcntl(2) commands
     const val F_GETFD = 1
     const val F_SETFD = 2
+    const val F_GETFL = 3
+    const val F_SETFL = 4
     const val FD_CLOEXEC = 1
+    const val O_NONBLOCK = 0x800L
 
     // ptrace(2) on x86_64 (fail closed on other arches)
     const val SYS_PTRACE_X86_64 = 101L

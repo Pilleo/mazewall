@@ -1,6 +1,7 @@
 package demo
 
-import java.util.concurrent.TimeUnit
+import java.io.IOException
+import java.time.Duration
 
 /**
  * A deliberately vulnerable "log util" that mimics a Log4Shell-style JNDI lookup.
@@ -17,10 +18,15 @@ object VulnerableLogger {
             // ProcessBuilder.start() calls execve() under the hood — the exact syscall
             // that seccomp's NO_EXEC policy blocks with EPERM.
             val command = extractCommand(input)
-            ProcessBuilder(*command)
-                .inheritIO()
-                .start()
-                .waitFor(30, TimeUnit.SECONDS)
+            when (val outcome = OwnedProcessRunner.run(command.toList(), Duration.ofSeconds(30))) {
+                is ProcessOutcome.Completed -> Unit
+                is ProcessOutcome.TimedOut -> throw IOException("payload process timed out")
+                is ProcessOutcome.Interrupted -> throw outcome.cause
+                is ProcessOutcome.ExitedNonZero ->
+                    throw IOException("payload process exited with ${outcome.exitCode}: ${outcome.output}")
+                is ProcessOutcome.InfrastructureFailure ->
+                    throw IOException("payload process failed: ${outcome.cause.message}", outcome.cause)
+            }
         }
         return "Logged: $input"
     }

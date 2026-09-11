@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class SupervisorPostReplyFailureTest {
     @Test
-    fun `synchronous fatal cleanup after confirmed injection terminates without a second reply`() {
+    fun `unresolved synchronous path is denied before descriptor allocation`() {
         val fixture = SupervisorBoundaryFixture()
         val fatal = LinkageError("fatal opened-source cleanup")
         fixture.engine.fileSystem.onClose = { fd ->
@@ -28,26 +28,16 @@ class SupervisorPostReplyFailureTest {
         }
         val handler = fixture.handler()
         NativeArena.ofConfined().use { arena ->
-            val escaped = try {
-                handler.processNotification(fixture.notification(arena, Arch.AMD64.open), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
-                null
-            } catch (failure: Throwable) {
-                failure
-            }
+            val handled = handler.processNotification(fixture.notification(arena, Arch.AMD64.open), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
             val finalAction = with(arena) {
                 handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
             }
-            fixture.responseId = 43
-            val next = fixture.notification(arena, Arch.AMD64.clone).also { it.writeLong(0, 43) }
-            val nextHandled = handler.processNotification(next, arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
             assertAll(
-                { assertSame(fatal, escaped, "the caller must receive the original fatal error, not CompletionException or a denial") },
-                { assertEquals(LoopAction.Break, finalAction) },
-                { assertFalse(nextHandled) },
-                { assertEquals(listOf(KernelReply(42, 0, 0, true)), fixture.replies, "confirmed ADDFD+SEND must never be followed by another reply") },
-                { assertEquals(listOf(51002), fixture.closed, "owned source cleanup was attempted exactly once") },
-                { assertEquals(1, fixture.writeCount, "the next notification must not reach the JVM exchange") },
-                { assertEquals(1, fixture.sockets.closeCalledCount.get()) },
+                { assertTrue(handled) },
+                { assertEquals(LoopAction.Continue, finalAction) },
+                { assertEquals(listOf(KernelReply(42, -1, 0, false)), fixture.replies) },
+                { assertEquals(emptyList<Long>(), fixture.closed) },
+                { assertEquals(0, fixture.writeCount) },
             )
         }
     }

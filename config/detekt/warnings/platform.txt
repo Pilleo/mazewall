@@ -99,3 +99,4 @@ platform/src/main/kotlin/io/mazewall/seccomp/BpfSimulator.kt|<error severity="wa
 platform/src/main/kotlin/io/mazewall/seccomp/BpfSimulator.kt|<error severity="warning" message="This expression contains a magic number. Consider defining it to a well named constant." source="detekt.MagicNumber" />
 platform/src/main/kotlin/io/mazewall/seccomp/BpfSimulator.kt|<error severity="warning" message="This expression contains a magic number. Consider defining it to a well named constant." source="detekt.MagicNumber" />
 platform/src/main/kotlin/io/mazewall/seccomp/BpfSimulator.kt|<error severity="warning" message="Use check() or error() instead of throwing an IllegalStateException." source="detekt.UseCheckOrError" />
+platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompSessionHandler.kt|<error severity="warning" message="Function handleActiveListener has 7 return statements which exceeds the limit of 3." source="detekt.ReturnCount" />

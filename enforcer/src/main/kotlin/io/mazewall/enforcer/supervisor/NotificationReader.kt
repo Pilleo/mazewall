@@ -6,18 +6,15 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
-import io.mazewall.ffi.IoctlCommand
-import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.ffi.typed
-import io.mazewall.onSuccess
-import io.mazewall.recover
+import io.mazewall.platform.seccomp.daemon.ReceiveOutcome
+import io.mazewall.platform.seccomp.daemon.UserNotifReceive
 
 /**
- * Blocking notification/response IO primitives extracted from [SupervisorSessionHandler]
+ * Deadline-bounded notification/response IO primitives extracted from [SupervisorSessionHandler]
  * (issue-20260823-171956, slice 4).
  *
  * Encapsulates the EINTR-tolerant poll/recv loops and their backoff/interrupt handling.
@@ -115,28 +112,11 @@ internal class NotificationReader(
         }
 
     /**
-     * Single SECCOMP_IOCTL_NOTIF_RECV with an unconditional EINTR retry loop. The caller's outer
-     * poll loop provides the shutdown path (POLLHUP/POLLIN-on-socket → LoopAction.Shutdown), so
-     * EINTR here only re-blocks, matching the previous behavior verbatim.
+     * Performs exactly one nonblocking receive attempt. EINTR and EAGAIN return control to the
+     * reactor so it must observe readiness and its deadline again before another ioctl.
      */
     fun recvNotification(
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         notif: ManagedSegment,
-    ): Boolean {
-        var recvRes: LinuxNative.SyscallResult<Long, *>
-        while (true) {
-            recvRes = engine.raw.ioctl(
-                listenerFd,
-                IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
-                notif.typed<IoctlPayload.SeccompNotif>(),
-            )
-            if (recvRes is LinuxNative.SyscallResult.Error<*> && recvRes.errno == NativeConstants.EINTR) {
-                continue
-            }
-            break
-        }
-        var ok = false
-        recvRes.onSuccess { ok = true }
-        return ok
-    }
+    ): ReceiveOutcome = UserNotifReceive.receiveOne(engine.raw, listenerFd, notif)
 }

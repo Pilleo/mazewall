@@ -20,6 +20,11 @@ public final class TestHealthPlugin implements Plugin<Project> {
         }
         var fragments = root.getLayout().getBuildDirectory().dir(FRAGMENT_DIRECTORY);
         var output = root.getLayout().getBuildDirectory().file(AGGREGATE_FILE);
+        var invocation = root.getGradle().getSharedServices().registerIfAbsent(
+            "mazewallTestHealthInvocation",
+            TestHealthInvocation.class,
+            ignored -> {}
+        );
         TaskProvider<Delete> prepare = root.getTasks().register("prepareTestHealth", Delete.class, task -> {
             task.setDescription("Clears test-health fragments so cached tasks cannot masquerade as fresh execution");
             task.delete(fragments);
@@ -38,6 +43,11 @@ public final class TestHealthPlugin implements Plugin<Project> {
             test.systemProperty("io.mazewall.testHealth.module", project.getPath().isBlank() ? ":" : project.getPath());
             test.systemProperty("io.mazewall.testHealth.task", test.getName());
             test.systemProperty("io.mazewall.testHealth.taskPath", test.getPath());
+            test.usesService(invocation);
+            test.doFirst(ignored -> test.systemProperty(
+                "io.mazewall.testHealth.invocationToken",
+                invocation.get().token()
+            ));
             // This imposes ordering only when a producer is already in the chosen gate.
             // It deliberately does not make unitCheck execute kernel/integration tests.
             aggregateTask.mustRunAfter(test);
@@ -53,11 +63,13 @@ public final class TestHealthPlugin implements Plugin<Project> {
                 .sorted()
                 .toList();
             aggregate.configure(task -> {
+                task.usesService(invocation);
                 task.getInputs().property("expectedTestTasks", expectedTasks);
                 task.doLast(new TestHealthAggregateAction(
                     fragments.get().getAsFile(),
                     output.get().getAsFile(),
-                    expectedTasks
+                    expectedTasks,
+                    invocation
                 ));
             });
         });

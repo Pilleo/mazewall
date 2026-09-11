@@ -228,6 +228,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
+    testImplementation("org.junit.platform:junit-platform-launcher:1.10.2")
     testCompileOnly(project(":platform")) // Resolve the shared MazewallInternal compiler opt-in.
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

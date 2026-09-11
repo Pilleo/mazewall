@@ -171,7 +171,8 @@ class ProcessBrokerIntegrationTest {
 
         val thrown = assertThrows(Exception::class.java) { first.get(10, TimeUnit.SECONDS) }
         assertSame(fatal, thrown.cause)
-        waiter.get(5, TimeUnit.SECONDS)
+        val waiterThrown = assertThrows(Exception::class.java) { waiter.get(5, TimeUnit.SECONDS) }
+        assertSame(fatal, waiterThrown.cause, "every closer must observe the shared cleanup failure")
         assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
 
         broker.close()
@@ -336,6 +337,91 @@ class ProcessBrokerIntegrationTest {
             io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(2), "first RPC checked out the worker") { broker.idleSize() == 0 }
             assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
             first.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
+    fun `interrupted capability admission preserves interruption and never reuses the partial-frame worker`() {
+        ProcessBroker(callTimeoutMs = 5_000).use { broker ->
+            broker.start()
+            val fixture = Files.createTempFile("mazewall-portal-interrupt-", ".txt")
+            Files.writeString(fixture, "blocked grant")
+            val capability = broker.openReadOnly(fixture.parent, fixture.fileName.toString())
+            val borrowEntered = CountDownLatch(1)
+            val releaseBorrow = CountDownLatch(1)
+            val borrower = CompletableFuture.runAsync {
+                capability.borrow {
+                    borrowEntered.countDown()
+                    assertTrue(releaseBorrow.await(5, TimeUnit.SECONDS))
+                }
+            }
+            assertTrue(borrowEntered.await(2, TimeUnit.SECONDS))
+            val interrupted = java.util.concurrent.atomic
+                .AtomicReference<Throwable?>()
+            val interruptPreserved = java.util.concurrent.atomic
+                .AtomicBoolean()
+            val waiting = Thread.ofPlatform().start {
+                try {
+                    broker.checksum(capability)
+                } catch (failure: Throwable) {
+                    interrupted.set(failure)
+                    interruptPreserved.set(Thread.currentThread().isInterrupted)
+                }
+            }
+            awaitCondition(java.time.Duration.ofSeconds(2), "caller admitted channel before blocked capability") {
+                broker.idleSize() == 0 && waiting.state == Thread.State.TIMED_WAITING
+            }
+            waiting.interrupt()
+            waiting.join(2_000)
+            releaseBorrow.countDown()
+            borrower.get(2, TimeUnit.SECONDS)
+            capability.close()
+            Files.deleteIfExists(fixture)
+
+            assertFalse(waiting.isAlive)
+            assertTrue(interruptPreserved.get(), "broker must restore the interrupted flag")
+            val failure = interrupted.get()
+            assertTrue(failure is PortalCallException)
+            assertTrue(failure?.cause is InterruptedException)
+            awaitCondition(java.time.Duration.ofSeconds(10), "interrupted partial-frame worker replaced") {
+                broker.idleSize() == 1 && broker.spawnedWorkers() == 2
+            }
+            assertEquals("still-usable", broker.echo("still-usable"))
+        }
+    }
+
+    @Test
+    fun `interrupted idle checkout preserves interruption without retiring an unclaimed worker`() {
+        ProcessBroker(callTimeoutMs = 5_000).use { broker ->
+            broker.start()
+            val active = CompletableFuture.runAsync { broker.sleep(2_000) }
+            awaitCondition(java.time.Duration.ofSeconds(2), "worker checked out") { broker.idleSize() == 0 }
+            val interrupted = java.util.concurrent.atomic
+                .AtomicReference<Throwable?>()
+            val interruptPreserved = java.util.concurrent.atomic
+                .AtomicBoolean()
+            val waiting = Thread.ofPlatform().start {
+                try {
+                    broker.echo("must-not-run")
+                } catch (failure: Throwable) {
+                    interrupted.set(failure)
+                    interruptPreserved.set(Thread.currentThread().isInterrupted)
+                }
+            }
+            awaitCondition(java.time.Duration.ofSeconds(2), "second caller waiting for worker") {
+                waiting.state == Thread.State.TIMED_WAITING || waiting.state == Thread.State.WAITING
+            }
+            waiting.interrupt()
+            waiting.join(2_000)
+
+            assertFalse(waiting.isAlive)
+            assertTrue(interruptPreserved.get(), "broker must restore the interrupted flag")
+            val failure = interrupted.get()
+            assertTrue(failure is PortalCallException)
+            assertTrue(failure?.cause is InterruptedException)
+            active.get(5, TimeUnit.SECONDS)
+            assertEquals(1, broker.spawnedWorkers())
+            assertEquals("still-usable", broker.echo("still-usable"))
         }
     }
 

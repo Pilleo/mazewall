@@ -10,8 +10,6 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.NativeCloseFailure
 import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
-import io.mazewall.ffi.IoctlCommand
-import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -21,7 +19,6 @@ import io.mazewall.ffi.memory.SeccompSessionBuffers
 import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readLong
-import io.mazewall.ffi.typed
 import io.mazewall.platform.seccomp.UserNotifReply
 import io.mazewall.platform.seccomp.UserNotifReplyResult
 
@@ -32,6 +29,7 @@ import io.mazewall.platform.seccomp.UserNotifReplyResult
  * ownership callback on terminal failure. Close drains work and releases buffers idempotently;
  * a reported pre-retirement failure requires retaining this handler for cleanup retry.
  */
+@Suppress("UseCheckOrError")
 public class SeccompSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
@@ -42,7 +40,13 @@ public class SeccompSessionHandler(
     private val socketManager: SocketManager = RealSocketManager,
     private val nanoTime: () -> Long = System::nanoTime,
 ) : AutoCloseable {
-    private val buffers = SeccompSessionBuffers.acquire()
+    private val buffers: SeccompSessionBuffers
+
+    init {
+        configureListenerNonblocking()
+        buffers = SeccompSessionBuffers.acquire()
+    }
+
     private val ackBuf: ManagedSegment get() = buffers.ack
     private val notif: ManagedSegment get() = buffers.notifLease.segment
     private val resp: ManagedSegment get() = buffers.respLease.segment
@@ -56,9 +60,13 @@ public class SeccompSessionHandler(
     private class PendingNotification(
         val id: Long,
         val deadline: Deadline,
+        val startedAtNanos: Long,
         val lease: NotificationReplyLease = NotificationReplyLease(),
         var work: NotificationWork? = null,
-    )
+    ) {
+        var deadlineNearObserved: Boolean = false
+        var finished: Boolean = false
+    }
 
     public var isTerminated: Boolean = false
         private set
@@ -113,7 +121,9 @@ public class SeccompSessionHandler(
         recordOutcome,
     )
 
+    @Suppress("UseCheckOrError")
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
+        NotificationLivenessMetrics.counters.reactorPoll()
         if (isTerminated) {
             return LoopAction.Break
         }
@@ -137,23 +147,25 @@ public class SeccompSessionHandler(
 
         if ((listenerRevents and NativeConstants.POLLIN.toInt()) != 0) {
             notif.fill(0)
-            var recvRes: LinuxNative.SyscallResult<Long, *>
-            var attempts = 0
-            do {
-                attempts++
-                recvRes = engine.raw.ioctl(
-                    listenerFd,
-                    IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
-                    notif.typed<IoctlPayload.SeccompNotif>(),
-                )
-            } while (recvRes is LinuxNative.SyscallResult.Error<*> && recvRes.errno == NativeConstants.EINTR && attempts < MAX_ATTEMPTS)
-
-            if (recvRes is LinuxNative.SyscallResult.Error<*>) {
-                isTerminated = true
-                return LoopAction.Break
+            when (UserNotifReceive.receiveOne(engine.raw, listenerFd, notif)) {
+                ReceiveOutcome.Received -> Unit
+                ReceiveOutcome.RetryAfterPoll,
+                ReceiveOutcome.NotReady,
+                -> return LoopAction.Continue
+                ReceiveOutcome.Closed,
+                is ReceiveOutcome.Failed,
+                -> {
+                    isTerminated = true
+                    return LoopAction.Break
+                }
             }
 
-            val current = PendingNotification(notif.readLong(0L), Deadline.afterMillis(NOTIFICATION_TIMEOUT_MS, nanoTime()))
+            val startedAtNanos = nanoTime()
+            val current = PendingNotification(
+                notif.readLong(0L),
+                Deadline.afterMillis(NOTIFICATION_TIMEOUT_MS, startedAtNanos),
+                startedAtNanos,
+            )
             pending = current
             NotificationLivenessMetrics.counters.started()
             // Queued tracees must not turn a pending helper wait into a busy listener poll.
@@ -198,6 +210,7 @@ public class SeccompSessionHandler(
     // SUPPRESSION-RATIONALE: Terminal claim, timeout and Await paths must return independently so a notification cannot reach a second reply branch.
     context(arena: NativeArena) private fun advancePending(pollFds: ManagedSegment): LoopAction {
         val current = checkNotNull(pending)
+        observePending(current)
         if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current, expired = true)
         val progress = try {
             checkNotNull(current.work).poll()
@@ -212,8 +225,9 @@ public class SeccompSessionHandler(
             NotificationProgress.Await -> LoopAction.Continue
             is NotificationProgress.Ready -> {
                 if (!current.lease.claim()) return LoopAction.Break
+                var primaryFailure: Throwable? = null
                 try {
-                    val outcome = recordReply(progress.reply)
+                    val outcome = recordReply(current, progress.reply)
                     if (outcome != UserNotifReplyResult.Sent) isTerminated = true
                     progress.onReply(outcome)
                     when (progress.result) {
@@ -227,11 +241,14 @@ public class SeccompSessionHandler(
                     }
                 } catch (expectedReplyFailure: Throwable) {
                     isTerminated = true
-                    throw expectedReplyFailure
+                    primaryFailure = expectedReplyFailure
                 } finally {
                     pending = null
                     PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE)).setFd(listenerFd.value)
-                    current.work?.close()
+                    finish(current)
+                    val cleanup = CleanupCollector(primaryFailure)
+                    cleanup.attempt { current.work?.close() }
+                    cleanup.throwIfFailed()
                 }
                 if (isTerminated) LoopAction.Break else handleControlSocket(pollFds)
             }
@@ -245,25 +262,36 @@ public class SeccompSessionHandler(
     ): LoopAction {
         isTerminated = true
         pending = null
+        var primaryFailure: Throwable? = null
         try {
             if (current.lease.claim()) {
                 if (expired) NotificationLivenessMetrics.counters.expired(lateCompletion)
                 UserNotifReply.encodeError(resp, current.id, NativeConstants.EPERM)
                 // Deadline exhaustion permits one best-effort terminal attempt, no retry loop.
-                recordReply { UserNotifReply.send(engine.raw, listenerFd, resp, maxAttempts = 1) }
+                recordReply(current) { UserNotifReply.send(engine.raw, listenerFd, resp, maxAttempts = 1) }
             }
+        } catch (expectedReplyFailure: Throwable) {
+            primaryFailure = expectedReplyFailure
         } finally {
-            current.work?.close()
+            finish(current)
+            val cleanup = CleanupCollector(primaryFailure)
+            cleanup.attempt { current.work?.close() }
+            cleanup.throwIfFailed()
         }
         return LoopAction.Break
     }
 
-    private fun recordReply(reply: () -> UserNotifReplyResult): UserNotifReplyResult {
+    private fun recordReply(
+        current: PendingNotification,
+        reply: () -> UserNotifReplyResult,
+    ): UserNotifReplyResult {
         val outcome = try {
             reply()
         } catch (expectedReplyFailure: Throwable) {
             NotificationLivenessMetrics.counters.replyThrew()
             throw expectedReplyFailure
+        } finally {
+            NotificationLivenessMetrics.counters.replyLatency(nanoTime() - current.startedAtNanos)
         }
         NotificationLivenessMetrics.counters.reply(outcome)
         return outcome
@@ -279,6 +307,35 @@ public class SeccompSessionHandler(
             if (expectedCleanupFailure !== failure) failure.addSuppressed(expectedCleanupFailure)
         }
         throw failure
+    }
+
+    private fun observePending(current: PendingNotification) {
+        val now = nanoTime()
+        val deadlineNear = !current.deadlineNearObserved && current.deadline.remainingMillis(now) <= DEADLINE_NEAR_MILLIS
+        if (deadlineNear) current.deadlineNearObserved = true
+        NotificationLivenessMetrics.counters.observePending(now - current.startedAtNanos, deadlineNear)
+    }
+
+    private fun finish(current: PendingNotification) {
+        if (current.finished) return
+        current.finished = true
+        NotificationLivenessMetrics.counters.finished()
+    }
+
+    private fun configureListenerNonblocking() {
+        val flags = engine.raw.fcntl(listenerFd, NativeConstants.F_GETFL, 0)
+        val current = when (flags) {
+            is LinuxNative.SyscallResult.Success -> flags.value
+            is LinuxNative.SyscallResult.Error -> throw IllegalStateException(
+                "Unable to read seccomp listener flags: errno=${flags.errno}",
+            )
+        }
+        when (val configured = engine.raw.fcntl(listenerFd, NativeConstants.F_SETFL, current or NativeConstants.O_NONBLOCK)) {
+            is LinuxNative.SyscallResult.Success -> Unit
+            is LinuxNative.SyscallResult.Error -> throw IllegalStateException(
+                "Unable to make seccomp listener nonblocking: errno=${configured.errno}",
+            )
+        }
     }
 
     private fun handleShutdownRequest(
@@ -331,8 +388,34 @@ public class SeccompSessionHandler(
         private const val NOTIFICATION_TIMEOUT_MS = 30_000L
         private const val MAX_ATTEMPTS = 8
         private const val WORK_POLL_MS = 10
+        private const val DEADLINE_NEAR_MILLIS = 5_000
         private const val IDLE_POLL_MS = 1000
         private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte()
         private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte()
+    }
+}
+
+/** Collect one primary operation failure and suppress all later cleanup failures onto it. */
+private class CleanupCollector(
+    primary: Throwable? = null,
+) {
+    private var failure: Throwable? = primary
+
+    @Suppress("TooGenericExceptionCaught")
+    fun attempt(action: () -> Unit) {
+        try {
+            action()
+        } catch (cleanupFailure: Throwable) {
+            val current = failure
+            if (current == null) {
+                failure = cleanupFailure
+            } else if (current !== cleanupFailure && current.suppressed.none { it === cleanupFailure }) {
+                current.addSuppressed(cleanupFailure)
+            }
+        }
+    }
+
+    fun throwIfFailed() {
+        failure?.let { throw it }
     }
 }

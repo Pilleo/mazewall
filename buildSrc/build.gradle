@@ -15,10 +15,23 @@ repositories {
     mavenCentral()
 }
 
+def verificationActionsMarker = layout.buildDirectory.file('verification/verification-actions.success')
+
 tasks.register('verificationActionsTest', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'io.mazewall.build.VerificationActionsTest'
+    inputs.files(sourceSets.main.allSource, sourceSets.test.allSource)
+        .withPropertyName('verificationSources')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file('build.gradle'))
+        .withPropertyName('verificationBuildLogic')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(verificationActionsMarker)
+    args(verificationActionsMarker.get().asFile.absolutePath)
+    doFirst {
+        verificationActionsMarker.get().asFile.delete()
+    }
 }
 
 tasks.named('check') {

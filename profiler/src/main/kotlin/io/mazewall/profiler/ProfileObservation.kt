@@ -248,7 +248,7 @@ public sealed interface ProfileObservation {
             val name = event.syscallName.uppercase()
             val observation = when (event) {
                 is TraceEvent.Open ->
-                    Syscall(corr, source, name, emptyList(), event.paths, event.flags)
+                    Syscall(corr, source, name, emptyList(), event.paths, event.flags, openFlagsEvidence = event.openFlagsEvidence)
                 is TraceEvent.Exec ->
                     Syscall(corr, source, name, emptyList(), event.paths)
                 is TraceEvent.FsMutation ->

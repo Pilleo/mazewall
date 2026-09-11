@@ -3,6 +3,8 @@
 This document provides a high-level "Knowledge Graph" of the `mazewall` system. It is designed to help AI agents and developers understand the distributed nature of the profiler, the immutable boundaries of the enforcer, and the critical IPC loops that connect them.
 
 The completed post-review hardening work has a compact [finding-to-test-to-commit evidence index](post-review-hardening-evidence.md) for reviewers.
+The active follow-up is tracked in the [PMR evidence table](post-review-hardening-evidence.md#post-merge-remediation-evidence-pmr)
+and the [post-merge verification ledger](review-hardening-verification.md#post-merge-remediation-run-ledger).
 The [notification liveness contract](notification-liveness-contract.md) is the cross-module
 entry point for deadlines, admission, helper cancellation, listener health and ownership.
 

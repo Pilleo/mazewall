@@ -1,5 +1,8 @@
 package io.mazewall.portal.codegen
 
+import kotlin.reflect.KParameter
+import kotlin.reflect.jvm.kotlinFunction
+
 internal data class PortalServiceSchema(
     val service: Class<*>,
     val methods: List<PortalMethodSchema>,
@@ -35,6 +38,7 @@ internal data class PortalServiceSchema(
             val seenIds = linkedMapOf<Int, java.lang.reflect.Method>()
             val methods =
                 effective.map { method ->
+                    val nullability = kotlinNullability(service, method)
                     val id = PortalStubGenerator.methodId(service, method)
                     val previous = seenIds.putIfAbsent(id, method)
                     require(previous == null) {
@@ -46,18 +50,40 @@ internal data class PortalServiceSchema(
                         id = id,
                         parameters =
                             java.util.List.copyOf(
-                                method.parameters.map { parameter ->
+                                method.parameters.mapIndexed { index, parameter ->
                                     val kind = BoundaryTypes.kindOf(parameter.type)
                                     validateCapabilityPlacement(kind, "${service.name}.${method.name}.${parameter.name}", directInbound = true)
-                                    PortalParameterSchema(parameter.name, parameter.type, kind)
+                                    PortalParameterSchema(parameter.name, parameter.type, kind, nullability?.parameters?.get(index) ?: false)
                                 },
                             ),
                         returnKind = BoundaryTypes.kindOf(method.returnType).also {
                             validateCapabilityPlacement(it, "${service.name}.${method.name}.return", directInbound = false)
                         },
+                        returnNullable = nullability?.returnNullable ?: false,
                     )
                 }
             return PortalServiceSchema(service, java.util.List.copyOf(methods))
+        }
+
+        private fun kotlinNullability(
+            service: Class<*>,
+            method: java.lang.reflect.Method,
+        ): MethodNullability? {
+            if (method.declaringClass.getAnnotation(Metadata::class.java) == null) return null
+            val function =
+                method.kotlinFunction
+                    ?: throw IllegalArgumentException(
+                        "portal service ${service.name} method ${displaySignature(method)} has Kotlin metadata " +
+                            "but its nullability cannot be resolved",
+                    )
+            val parameters = function.parameters.filter { it.kind == KParameter.Kind.VALUE }
+            require(parameters.size == method.parameterCount) {
+                "portal service ${service.name} method ${displaySignature(method)} has inconsistent Kotlin parameter metadata"
+            }
+            return MethodNullability(
+                java.util.List.copyOf(parameters.map { it.type.isMarkedNullable }),
+                function.returnType.isMarkedNullable,
+            )
         }
 
         private fun validateCapabilityPlacement(
@@ -128,10 +154,17 @@ internal data class PortalMethodSchema(
     val id: Int,
     val parameters: List<PortalParameterSchema>,
     val returnKind: BoundaryTypes.Kind,
+    val returnNullable: Boolean,
 )
 
 internal data class PortalParameterSchema(
     val sourceName: String,
     val type: Class<*>,
     val kind: BoundaryTypes.Kind,
+    val nullable: Boolean,
+)
+
+private data class MethodNullability(
+    val parameters: List<Boolean>,
+    val returnNullable: Boolean,
 )

@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.core.OpenFlags
 import io.mazewall.core.Tid
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readLong
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -96,6 +97,46 @@ class OpenRouteExecutorTest {
             assertEquals(listOf(51005), fixture.closed)
             assertEquals(0, fixture.replies.size)
         }
+    }
+
+    @Test
+    fun `non-leader imports use a thread pidfd`() {
+        val fixture = SupervisorBoundaryFixture()
+        fixture.engine.process.onPidfdOpen = { pid, flags ->
+            assertEquals(77, pid)
+            assertEquals(NativeConstants.PIDFD_THREAD, flags)
+            SupervisorBoundaryFixture.success(51005)
+        }
+        fixture.engine.process.onPidfdGetFd = { _, target, _ ->
+            assertEquals(5, target)
+            SupervisorBoundaryFixture.success(51006)
+        }
+        val importer = TraceeDescriptorImporter(fixture.engine) { 42 }
+
+        val imported = assertInstanceOf(SupervisorDescriptorResult.Opened::class.java, importer.import(Tid(77), 5))
+        imported.descriptor.close()
+
+        assertEquals(listOf(51005, 51006), fixture.closed)
+    }
+
+    @Test
+    fun `unsupported thread pidfd fails closed before descriptor import`() {
+        val fixture = SupervisorBoundaryFixture()
+        var imports = 0
+        fixture.engine.process.onPidfdOpen = { pid, flags ->
+            assertEquals(77, pid)
+            assertEquals(NativeConstants.PIDFD_THREAD, flags)
+            SupervisorBoundaryFixture.failure(NativeConstants.EINVAL)
+        }
+        fixture.engine.process.onPidfdGetFd = { _, _, _ ->
+            imports++
+            SupervisorBoundaryFixture.success(51006)
+        }
+
+        val result = TraceeDescriptorImporter(fixture.engine) { 42 }.import(Tid(77), 5)
+
+        assertEquals(SupervisorDescriptorResult.Denied(NativeConstants.EINVAL), result)
+        assertEquals(0, imports)
     }
 
     private fun executor(fixture: SupervisorBoundaryFixture) = OpenRouteExecutor(fixture.engine, TraceeDescriptorImporter(fixture.engine) { it })

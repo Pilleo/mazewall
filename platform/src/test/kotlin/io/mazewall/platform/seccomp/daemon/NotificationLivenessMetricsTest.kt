@@ -26,4 +26,32 @@ class NotificationLivenessMetricsTest {
         counters.started()
         assertEquals(Long.MAX_VALUE, counters.snapshot().started)
     }
+
+    @Test
+    fun `pending deadline and latency observations contain only aggregate values`() {
+        val counters = NotificationLivenessCounters()
+
+        counters.started()
+        counters.reactorPoll()
+        counters.observePending(ageNanos = 25_000_000_000L, deadlineNear = true)
+        counters.observePending(ageNanos = 26_000_000_000L, deadlineNear = false)
+        counters.replyLatency(27_000_000_000L)
+        counters.helperSaturated()
+        counters.finished()
+
+        assertEquals(
+            NotificationLivenessSnapshot(
+                started = 1,
+                pending = 0,
+                oldestPendingAgeNanos = 26_000_000_000L,
+                deadlineNear = 1,
+                replyLatencyCount = 1,
+                replyLatencyNanos = 27_000_000_000L,
+                maxReplyLatencyNanos = 27_000_000_000L,
+                reactorPolls = 1,
+                helperSaturation = 1,
+            ),
+            counters.snapshot(),
+        )
+    }
 }

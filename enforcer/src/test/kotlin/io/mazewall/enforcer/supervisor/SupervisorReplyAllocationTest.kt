@@ -93,8 +93,8 @@ class SupervisorReplyAllocationTest {
                 { assertEquals(LoopAction.Break, finalAction) },
                 { assertFalse(nextHandled) },
                 { assertEquals(emptyList<KernelReply>(), fixture.replies) },
-                { assertEquals(if (async) listOf(51005, 51006, 51004) else listOf(51002), fixture.closed, "unconsumed effect owns its source descriptor") },
-                { assertEquals(1, fixture.writeCount) },
+                { assertEquals(if (async) listOf(51005, 51006, 51004) else emptyList(), fixture.closed, "unconsumed effect owns its source descriptor") },
+                { assertEquals(if (async) 1 else 0, fixture.writeCount) },
                 { assertEquals(1, fixture.sockets.closeCalledCount.get()) },
             )
         }

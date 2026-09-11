@@ -10,7 +10,7 @@ public object Portal {
         type: Class<T>,
         broker: ProcessBroker,
     ): T {
-        val stubName = type.name + "PortalStub"
+        val stubName = PortalGeneratedNames.stubBinaryName(type)
         val stubClass =
             try {
                 Class.forName(stubName, false, type.classLoader)
