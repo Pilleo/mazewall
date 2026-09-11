@@ -23,7 +23,53 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
+@org.junit.jupiter.api.parallel.Isolated
 class NotificationDeadlineTest {
+    @Test
+    fun `metrics count terminal outcomes once and do not count cleanup as expiry`() {
+        val before = NotificationLivenessMetrics.snapshot()
+        for (errno in listOf(0, NativeConstants.ENOENT, NativeConstants.EIO)) {
+            Fixture().use { fixture ->
+                fixture.ready = true
+                fixture.replyErrno = errno
+                fixture.tick()
+                fixture.tick()
+                fixture.handler.close()
+                fixture.handler.close()
+            }
+        }
+        Fixture().use { fixture ->
+            fixture.tick()
+            fixture.handler.close()
+        }
+        val after = NotificationLivenessMetrics.snapshot()
+        assertEquals(4, after.started - before.started)
+        assertEquals(2, after.sent - before.sent)
+        assertEquals(1, after.notificationGone - before.notificationGone)
+        assertEquals(1, after.failed - before.failed)
+        assertEquals(0, after.deadlineExpiries - before.deadlineExpiries)
+        assertEquals(0, after.lateCompletions - before.lateCompletions)
+    }
+
+    @Test
+    fun `metrics distinguish expired waiting work from a late ready completion`() {
+        val before = NotificationLivenessMetrics.snapshot()
+        for (ready in listOf(false, true)) {
+            Fixture().use { fixture ->
+                fixture.ready = ready
+                fixture.duringPoll = { fixture.now = 30_000_000_000L }
+                assertEquals(LoopAction.Break, fixture.tick())
+                assertEquals(LoopAction.Break, fixture.tick())
+                fixture.handler.close()
+            }
+        }
+        val after = NotificationLivenessMetrics.snapshot()
+        assertEquals(2, after.started - before.started)
+        assertEquals(2, after.deadlineExpiries - before.deadlineExpiries)
+        assertEquals(1, after.lateCompletions - before.lateCompletions)
+        assertEquals(2, after.sent - before.sent)
+    }
+
     @Test
     fun `closing pending work denies before retiring reply buffers`() {
         Fixture().use { fixture ->
@@ -47,6 +93,7 @@ class NotificationDeadlineTest {
 
     @Test
     fun `throwing terminal operation cannot enter denial recovery`() {
+        val before = NotificationLivenessMetrics.snapshot()
         Fixture().use { fixture ->
             fixture.ready = true
             fixture.throwOnSend = true
@@ -54,10 +101,26 @@ class NotificationDeadlineTest {
             assertEquals(LoopAction.Break, fixture.tick())
             assertEquals(listOf(0), fixture.replies)
         }
+        assertEquals(1, NotificationLivenessMetrics.snapshot().failed - before.failed)
+    }
+
+    @Test
+    fun `callback failure after delivery cannot count a second reply outcome`() {
+        val before = NotificationLivenessMetrics.snapshot()
+        Fixture().use { fixture ->
+            fixture.ready = true
+            fixture.onReply = { error("callback failed after send") }
+            assertThrows<IllegalStateException> { fixture.tick() }
+            assertEquals(LoopAction.Break, fixture.tick())
+        }
+        val after = NotificationLivenessMetrics.snapshot()
+        assertEquals(1, after.sent - before.sent)
+        assertEquals(0, after.failed - before.failed)
     }
 
     @Test
     fun `idle reactor expires pending work at thirty seconds and ignores late completion`() {
+        val before = NotificationLivenessMetrics.snapshot()
         val fixture = Fixture()
         fixture.use {
             assertEquals(LoopAction.Continue, fixture.tick())
@@ -73,6 +136,9 @@ class NotificationDeadlineTest {
             assertEquals(listOf(-1), fixture.replies)
             assertEquals(0, fixture.completions)
         }
+        val after = NotificationLivenessMetrics.snapshot()
+        assertEquals(1, after.deadlineExpiries - before.deadlineExpiries)
+        assertEquals(0, after.lateCompletions - before.lateCompletions)
     }
 
     @Test
@@ -131,6 +197,7 @@ class NotificationDeadlineTest {
         var replyErrno = 0
         var throwOnSend = false
         var duringPoll: () -> Unit = {}
+        var onReply: () -> Unit = {}
         val replies = mutableListOf<Int>()
         val arena = NativeArena.ofConfined()
         val pollFds = arena.allocate(Layouts.POLLFD, 2)
@@ -180,6 +247,7 @@ class NotificationDeadlineTest {
                                 UserNotifReply.encodeContinue(resp, 42L)
                                 UserNotifReply.send(engine.raw, listenerFd, resp)
                             },
+                            onReply = { onReply() },
                         )
                         } else {
                             NotificationProgress.Await

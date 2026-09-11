@@ -155,6 +155,7 @@ public class SeccompSessionHandler(
 
             val current = PendingNotification(notif.readLong(0L), Deadline.afterMillis(NOTIFICATION_TIMEOUT_MS, nanoTime()))
             pending = current
+            NotificationLivenessMetrics.counters.started()
             // Queued tracees must not turn a pending helper wait into a busy listener poll.
             pfd1.setFd(-1)
             try {
@@ -197,20 +198,22 @@ public class SeccompSessionHandler(
     // SUPPRESSION-RATIONALE: Terminal claim, timeout and Await paths must return independently so a notification cannot reach a second reply branch.
     context(arena: NativeArena) private fun advancePending(pollFds: ManagedSegment): LoopAction {
         val current = checkNotNull(pending)
-        if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current)
+        if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current, expired = true)
         val progress = try {
             checkNotNull(current.work).poll()
         } catch (expectedNotificationFailure: Throwable) {
             terminateAfterFailure(current, expectedNotificationFailure)
         }
         // Local preparation may consume the last deadline tick. A late completion never wins.
-        if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current)
+        if (nanoTime() - current.deadline.nanoTime >= 0) {
+            return denyAndTerminate(current, expired = true, lateCompletion = progress is NotificationProgress.Ready)
+        }
         return when (progress) {
             NotificationProgress.Await -> LoopAction.Continue
             is NotificationProgress.Ready -> {
                 if (!current.lease.claim()) return LoopAction.Break
                 try {
-                    val outcome = progress.reply()
+                    val outcome = recordReply(progress.reply)
                     if (outcome != UserNotifReplyResult.Sent) isTerminated = true
                     progress.onReply(outcome)
                     when (progress.result) {
@@ -235,19 +238,35 @@ public class SeccompSessionHandler(
         }
     }
 
-    private fun denyAndTerminate(current: PendingNotification): LoopAction {
+    private fun denyAndTerminate(
+        current: PendingNotification,
+        expired: Boolean = false,
+        lateCompletion: Boolean = false,
+    ): LoopAction {
         isTerminated = true
         pending = null
         try {
             if (current.lease.claim()) {
+                if (expired) NotificationLivenessMetrics.counters.expired(lateCompletion)
                 UserNotifReply.encodeError(resp, current.id, NativeConstants.EPERM)
                 // Deadline exhaustion permits one best-effort terminal attempt, no retry loop.
-                UserNotifReply.send(engine.raw, listenerFd, resp, maxAttempts = 1)
+                recordReply { UserNotifReply.send(engine.raw, listenerFd, resp, maxAttempts = 1) }
             }
         } finally {
             current.work?.close()
         }
         return LoopAction.Break
+    }
+
+    private fun recordReply(reply: () -> UserNotifReplyResult): UserNotifReplyResult {
+        val outcome = try {
+            reply()
+        } catch (expectedReplyFailure: Throwable) {
+            NotificationLivenessMetrics.counters.replyThrew()
+            throw expectedReplyFailure
+        }
+        NotificationLivenessMetrics.counters.reply(outcome)
+        return outcome
     }
 
     private fun terminateAfterFailure(

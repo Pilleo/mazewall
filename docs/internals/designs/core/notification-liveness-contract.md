@@ -30,6 +30,17 @@ disposal. The reactor never waits for a blocked helper syscall or process reap.
 The guarantee assumes the reactor continues to run and its bounded local/native
 operations return; it is not a real-time scheduler or protection from kernel hangs.
 
+`NotificationLivenessMetrics.snapshot()` exposes an internal immutable, atomically
+published view of process-local cumulative counters: received notifications,
+deadline expiries, sent replies, gone notifications, failed replies and late
+completions observed by the reactor. Counters saturate at `Long.MAX_VALUE`, retain
+no notification identities or paths, and never reset on observation. A terminal
+reply effect increments exactly one outcome counter, including thrown reply effects
+as failures. Cleanup denial is counted as a reply but is not a deadline expiry.
+Late completion means a `Ready` result returned by polling after its deadline;
+helper results disposed solely during cancellation are outside this counter.
+These counters live in the daemon JVM and do not add a parent-process wire protocol.
+
 ![Notification deadline and terminal reply](../../../diagrams/user_notif_liveness.svg)
 
 ## Supervisor installation, admission and authority
