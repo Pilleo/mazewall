@@ -1,6 +1,6 @@
 # Review-hardening verification record
 
-Baseline: `be425e98`. Implementation through `d5fd310f` on `codex/review-hardening`.
+Baseline: `be425e98`. Implementation through `0004b4e6` on `codex/review-hardening`.
 This record supplements the [30 RH finding rows](post-review-hardening-evidence.md#liveness-and-boundary-review-rh)
 and scoped resolved backlog evidence. A resolved package is not a claim that the
 aggregate branch passes every merge gate.
@@ -9,22 +9,25 @@ aggregate branch passes every merge gate.
 
 | Command | Observed result | Evidence / limit |
 |---|---|---|
-| `./gradlew --no-daemon unitCheck integrationTest integrationTestFreshJvm --continue` | FAILED, 2m41s; 127 tasks: 23 executed, 104 up-to-date | Enforcer host coverage 0.75 < unchanged 0.82 minimum. Fresh-JVM enforcer: 60 tests, one failure, two skips; `ProcessSpawnStacktraceTest.execve inherits parent stack trace for policy validation`. Log: `/tmp/review-hardening-final-gates.log`. |
-| `./scripts/run_tests.sh` | Unavailable, exit 127 before test execution | `podman: command not found`; log `/tmp/review-hardening-container-gates.log`. No container tests claimed. |
-| `./gradlew --no-daemon build --dry-run` | PASSED, 56s; 7 configuration/buildSrc tasks: one executed, six up-to-date | `/tmp/review-hardening-build-graph.log` contains no RefactorFirst/Maven entries. Dry-run does not execute the build gates. |
+| `./gradlew --no-daemon unitCheck integrationTest integrationTestFreshJvm --continue` | PASSED after the scoped follow-up repairs | The earlier coverage and spawn-stack failures were fixed by `a8b77b33`, `1133fe79`, and `07f8161a`; the final merge gate below is the authoritative aggregate result. |
+| `DOCKER_HOST=unix:///var/run/docker.sock docker build -t mazewall-test-runner -f infra/dev/Containerfile .` | PASSED | Docker 29.8.0 built the JDK 25 test image. The repository helper remains Podman-specific; the equivalent Docker invocation is recorded here because Docker is the available engine. |
+| `docker run ... mazewall-test-runner ./gradlew test integrationTest integrationTestFreshJvm --info --no-daemon --stacktrace` | PASSED; 133 tasks: 3 executed, 130 up-to-date | Host-networked Docker run completed with the repository seccomp profile, `SYS_ADMIN`, `SYS_PTRACE`, and `MAZEWALL_IN_CONTAINER=true`. The container was removed automatically. |
+| `./gradlew --no-daemon build --dry-run` | PASSED | The task graph contains no RefactorFirst, RefactorFirst snapshot preparation, or Maven report task. Dry-run does not execute the build gates. |
 | `./gradlew --no-daemon updateClassDiagrams` | PASSED, 50s; 42 tasks: three executed, 39 up-to-date | Enforcer/profiler PlantUML and SVG regenerated from compiled sources. |
 | Headless PlantUML 1.2023.13, seven state/sequence sources | PASSED | Seven matching SVGs generated; supervisor and profiler sequence PNG previews visually inspected. System PlantUML's initial X11 failure was corrected with `-Djava.awt.headless=true`. |
 | `python3 scripts/validate_review_evidence.py` | PASSED | 30 PRH + 30 RH rows; 44 commit objects; current RH regression names; 15 core/backlog documents' local link targets. |
 | `./scripts/adkw check-backlog`, `git diff --check` | PASSED | `validateBacklogIndex` also passed as an executed task in the final build. |
-| `./gradlew --no-daemon build` | FAILED, 2m10s; 102 tasks: 14 executed, 88 up-to-date | Detekt warning ratchet: 131 added normalized findings (66 enforcer, 54 platform, 11 profiler); unchanged inventories were not raised. Fresh-JVM spawn-stack failure reproduced (60 tests, one failure, two skips). Log `/tmp/review-hardening-final-build.log`; no RefactorFirst/Maven invocation. |
+| `./gradlew --no-daemon build` | PASSED; 250 actionable tasks: 90 executed, 160 up-to-date | Warning ratchet and coverage gates passed; no RefactorFirst/Maven invocation. |
 
-The full merge gate is **not passing**. Coverage, warning-ratchet and fresh-JVM
-failures require integration follow-up, and Podman must be available for the
-container gate. Deadline metrics also remain a separate implementation follow-up;
-the current evidence proves deadline behavior, not a metrics interface.
-Cached/up-to-date tests above are reused evidence,
-not fresh test execution. The package-specific RED/GREEN commands are retained in
-the corresponding backlog records and task reports.
+The full merge gate and the Docker-backed integration gate are passing. The
+repository helper `./scripts/run_tests.sh` still names Podman and therefore was
+not used directly; the equivalent Docker command above exercised the same test
+set. Cached/up-to-date tests are reused evidence, not fresh execution. The
+package-specific RED/GREEN commands are retained in the corresponding backlog
+records and task reports. The process-local notification liveness counters and
+their contract are supplied by `0004b4e6` and
+`notification-liveness-contract.md`; helper completions remain intentionally
+unobserved by that aggregate counter.
 
 ## Reproduction and artifacts
 
