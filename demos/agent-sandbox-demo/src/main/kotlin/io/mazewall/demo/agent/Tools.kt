@@ -30,6 +30,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class AgentTools(
     private val useMazewall: Boolean,
@@ -209,11 +210,14 @@ class AgentTools(
 
     private fun <T> awaitOwned(future: Future<T>): T =
         try {
-            future.get()
+            future.get(PROCESS_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
         } catch (failure: InterruptedException) {
             future.cancel(true)
             Thread.currentThread().interrupt()
             throw failure
+        } catch (failure: TimeoutException) {
+            future.cancel(true)
+            throw IOException("agent tool operation timed out after ${PROCESS_TIMEOUT.toMillis()} ms", failure)
         } catch (failure: ExecutionException) {
             throw failure
         }
