@@ -47,7 +47,7 @@ internal object OwnedProcessRunner {
             output = outputReader.submit<String> { drainBounded(process.inputStream) }
         } catch (failure: Throwable) {
             outputReader?.shutdownNow()
-            terminateTree(process)?.let(failure::addSuppressed)
+            terminateTree(process, emptyMap())?.let(failure::addSuppressed)
             rethrowFatal(failure)
             return ProcessOutcome.InfrastructureFailure(failure, "")
         }
@@ -55,17 +55,31 @@ internal object OwnedProcessRunner {
 
         var interrupted: InterruptedException? = null
         var timedOut = false
+        // Keep handles observed while the parent is still alive.  Once a parent
+        // exits, a background child may be re-parented and disappear from the
+        // parent's descendant view, so discovering it only during cleanup is
+        // too late to provide process-tree ownership.
+        val observedDescendants = linkedMapOf<Long, ProcessHandle>()
         try {
-            val remaining = operationDeadline - System.nanoTime()
-            timedOut = remaining <= 0 || !process.waitFor(remaining, TimeUnit.NANOSECONDS)
+            while (process.isAlive) {
+                observeDescendants(process.toHandle(), observedDescendants)
+                val remaining = operationDeadline - System.nanoTime()
+                if (remaining <= 0) {
+                    timedOut = true
+                    break
+                }
+                if (process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(10)), TimeUnit.NANOSECONDS)) break
+            }
+            observeDescendants(process.toHandle(), observedDescendants)
         } catch (failure: InterruptedException) {
             interrupted = failure
         }
 
         var cleanupFailure: Throwable? = null
-        if (timedOut || interrupted != null) {
-            cleanupFailure = terminateTree(process)
-        }
+        // Retire observed descendants on every terminal path, including a
+        // successful/nonzero parent exit. A child that outlives its shell must
+        // never outlive this owner.
+        cleanupFailure = terminateTree(process, observedDescendants)
         val captured = finishOutput(process, readerExecutor, output, cleanupFailure)
         cleanupFailure = captured.second
 
@@ -90,10 +104,30 @@ internal object OwnedProcessRunner {
         }
     }
 
-    private fun terminateTree(process: Process): Throwable? {
+    private fun observeDescendants(
+        parent: ProcessHandle,
+        observed: MutableMap<Long, ProcessHandle>,
+    ) {
+        parent.descendants().use { descendants ->
+            descendants.forEach { observed[it.pid()] = it }
+        }
+        observed.values.toList().forEach { child ->
+            child.descendants().use { descendants ->
+                descendants.forEach { observed[it.pid()] = it }
+            }
+        }
+    }
+
+    private fun terminateTree(
+        process: Process,
+        observed: Map<Long, ProcessHandle>,
+    ): Throwable? {
         val retirementDeadline = deadlineAfter(retirementTimeout)
         var failure: Throwable? = null
-        val descendants = process.toHandle().descendants().toList().asReversed()
+        val descendants = buildList {
+            addAll(observed.values)
+            process.toHandle().descendants().use { addAll(it.toList()) }
+        }.distinctBy(ProcessHandle::pid).asReversed()
         descendants.forEach { child -> failure = attempt(failure) { child.destroy() } }
         failure = attempt(failure) { process.destroy() }
         descendants.forEach { child ->
@@ -107,6 +141,18 @@ internal object OwnedProcessRunner {
                     throw IOException("child process did not terminate within ${retirementTimeout.toMillis()} ms")
                 }
             }
+        while (descendants.any(ProcessHandle::isAlive) && System.nanoTime() < retirementDeadline) {
+            try {
+                TimeUnit.MILLISECONDS.sleep(10)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                failure = merge(failure, interrupted)
+                break
+            }
+        }
+        if (descendants.any(ProcessHandle::isAlive)) {
+            failure = merge(failure, IOException("child process descendant did not terminate within ${retirementTimeout.toMillis()} ms"))
+        }
         return failure
     }
 

@@ -42,6 +42,19 @@ class OwnedProcessRunnerTest {
     }
 
     @Test
+    fun `successful parent exit still retires background descendants`() {
+        val outcome =
+            OwnedProcessRunner.run(
+                listOf("sh", "-c", "sleep 30 >/dev/null 2>&1 & child=\$!; echo \$child; sleep 0.1; exit 0"),
+                Duration.ofSeconds(5),
+            )
+
+        val completed = assertIs<ProcessOutcome.Completed>(outcome)
+        val childPid = completed.output.lineSequence().first { it.isNotBlank() }.trim().toLong()
+        assertFalse(ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false))
+    }
+
+    @Test
     fun `interruption terminates process and restores caller interrupt`() {
         val ready = Files.createTempFile("cli-owned-process-", ".ready")
         Files.delete(ready)
