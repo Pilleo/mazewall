@@ -120,7 +120,7 @@ internal class PortalWorkerDriver(
         try {
             transport.send(sending.frame)
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.ReplySucceeded).state
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.ReplyFailed(failure.message ?: "reply failed")).state
             raiseWorkerFailure(failure)
         }

@@ -61,8 +61,13 @@ public abstract class GeneratePortalStubsTask : DefaultTask() {
         try {
             val urls = classpath.files.map { it.toURI().toURL() }.toTypedArray()
             URLClassLoader(urls, PortalStubGenerator::class.java.classLoader).use { loader ->
-                interfaceNames.get().distinct().sorted().forEach { name ->
-                    val type = Class.forName(name, false, loader)
+                val services = interfaceNames
+                    .get()
+                    .distinct()
+                    .sorted()
+                    .map { name -> Class.forName(name, false, loader) }
+                PortalGeneratedNames.requireUnique(services)
+                services.forEach { type ->
                     writeService(type, stagedStubs, stagedDispatchers, stagedResources)
                 }
             }

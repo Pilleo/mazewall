@@ -94,7 +94,9 @@ internal fun PortalDispatcherTable.Builder.bootstrapFromProperty(raw: String?): 
     if (raw.isNullOrBlank()) return 0
     var count = 0
     for (entry in raw.split(',')) {
-        runCatching { registerEntry(entry.trim(), replace = true) }
+        // Compatibility bootstrap is tolerant of malformed entries, but it
+        // must never overwrite an already-registered method ID.
+        runCatching { registerEntry(entry.trim(), replace = false) }
             .onSuccess { count++ }
             .onFailure { System.err.println("[PORTAL-DISPATCH] skipping '$entry': ${it.message}") }
     }

@@ -7,6 +7,15 @@ package io.mazewall.portal
  * services with the same simple name never target the same generated class.
  */
 public object PortalGeneratedNames {
+    /** Reject generated-artifact collisions while preserving legacy top-level names. */
+    @JvmStatic
+    public fun requireUnique(services: Collection<Class<*>>) {
+        val names = services.flatMap { listOf(stubBinaryName(it), dispatcherBinaryName(it)) }
+        require(names.size == names.toSet().size) {
+            "portal services produce colliding generated names: ${names.groupingBy { it }.eachCount().filterValues { it > 1 }.keys}"
+        }
+    }
+
     @JvmStatic
     public fun stubBinaryName(service: Class<*>): String = binaryName(service, "PortalStub")
 
