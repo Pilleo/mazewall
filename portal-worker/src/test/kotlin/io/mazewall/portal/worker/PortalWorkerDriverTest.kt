@@ -129,6 +129,24 @@ class PortalWorkerDriverTest {
     }
 
     @Test
+    fun `fatal reply failure remains primary and suppresses transport cleanup`() {
+        val fatal = AssertionError("fatal reply write")
+        val cleanup = IOException("transport cleanup")
+        val transport = FakeTransport(
+            listOf(PortalWorkerReceive.Frame(request())),
+            sendFailure = fatal,
+            closeFailure = cleanup,
+        )
+        val driver = PortalWorkerDriver(transport) { _, _, _ -> byteArrayOf(1) }
+
+        assertSame(fatal, assertThrows(AssertionError::class.java) { driver.run() })
+
+        assertEquals(1, transport.sendAttempts)
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+        assertEquals(listOf(cleanup), fatal.suppressed.toList())
+    }
+
+    @Test
     fun `idle timeout continues but partial frame timeout terminates`() {
         val transport = FakeTransport(
             listOf(PortalWorkerReceive.Idle, PortalWorkerReceive.Failure(PortalIncompleteFrameException())),
@@ -176,7 +194,7 @@ class PortalWorkerDriverTest {
 
     private class FakeTransport(
         receives: List<PortalWorkerReceive>,
-        private val sendFailure: IOException? = null,
+        private val sendFailure: Throwable? = null,
         private val closeFailure: IOException? = null,
     ) : PortalWorkerTransport {
         private val remaining = ArrayDeque(receives)

@@ -134,11 +134,29 @@ private fun PortalDispatcherTable.Builder.registerEntry(
     val impl = Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
     require(serviceClass.isInstance(impl)) { "implementation does not implement ${serviceClass.name}" }
 
-    val dispatcherName =
-        parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: PortalGeneratedNames.dispatcherBinaryName(serviceClass)
+    val explicitDispatcher = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    val dispatcherName = explicitDispatcher ?: PortalGeneratedNames.dispatcherBinaryName(serviceClass)
+    val dispatcherClass = try {
+        Class.forName(dispatcherName, true, loader)
+    } catch (missing: ClassNotFoundException) {
+        require(explicitDispatcher == null && '$' in serviceClass.name) {
+            "dispatcher $dispatcherName not found"
+        }
+        val legacyName = serviceClass.name.replace('$', '_') + "PortalDispatcher"
+        try {
+            Class.forName(legacyName, true, loader)
+        } catch (_: ClassNotFoundException) {
+            throw missing
+        }
+    }
+    if (explicitDispatcher == null && '$' in serviceClass.name) {
+        val legacyName = serviceClass.name.replace('$', '_') + "PortalDispatcher"
+        if (legacyName != dispatcherClass.name && runCatching { Class.forName(legacyName, false, loader) }.isSuccess) {
+            require(false) { "multiple portal dispatchers found for ${serviceClass.name}; specify one explicitly" }
+        }
+    }
     val dispatcherObject =
-        Class.forName(dispatcherName, true, loader).getDeclaredField("INSTANCE").get(null)
+        dispatcherClass.getDeclaredField("INSTANCE").get(null)
             ?: error("dispatcher $dispatcherName is not a Kotlin object")
 
     val methodIds = dispatcherObject.javaClass.getMethod("getMETHOD_IDS").invoke(dispatcherObject) as IntArray
