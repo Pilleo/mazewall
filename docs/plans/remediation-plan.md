@@ -34,6 +34,27 @@ Landlock-before-Seccomp ordering, and fail-closed permission handling remain
 unchanged. Watchdogs are reactor-owned monotonic deadlines with one reply lease,
 not interrupting threads.
 
+### Delivered in this reconciliation pass
+
+- `1dec7efc` — nonblocking USER_NOTIF ACK/control transport, identity-keyed
+  handshake deadlines, and bounded validation-channel readiness.
+- `60f9ecf6` — per-operation tracee memory-reader dependency resolution.
+- `6522b8b1` — explicit incomplete `OPENAT2` evidence, fail-closed compiler,
+  evidence-aware merge keys, and copy consistency.
+- `97b20d58` — strace cleanup preserves primary failures and rescans late
+  descendants.
+- `a3be9c6c` — complete JSON escaping for aggregated test-health evidence.
+- `2f236d5e`, `a9217065`, `59be49a0` — fatal worker terminal transitions,
+  duplicate method-ID rejection, collision validation, and legacy nested
+  dispatcher compatibility.
+- `d3d6c0ac` — bounded agent tool futures and disabled global JNDI switches in
+  normal web startup.
+
+The remaining reactor-only interpreter migration and full demo/integration
+matrix are intentionally tracked as follow-up implementation packages; the
+existing compatibility entry points remain in place until their callers are
+migrated.
+
 ---
 
 ## Architecture & Dependency Flow Overview
