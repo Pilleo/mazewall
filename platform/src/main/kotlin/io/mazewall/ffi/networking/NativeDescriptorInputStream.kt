@@ -53,7 +53,6 @@ public open class NativeDescriptorInputStream(
         }
     }
 
-    @Suppress("ThrowsCount")
     private fun readWithRetry(
         buffer: ManagedSegment,
         count: Long,
@@ -63,22 +62,14 @@ public open class NativeDescriptorInputStream(
         var eintrCount = 0
         while (true) {
             if (Thread.currentThread().isInterrupted) {
-                Thread.currentThread().interrupt()
-                throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during $description $operation")
+                throw interrupted(operation)
             }
             when (val result = memory.read(socketFd, buffer, count)) {
                 is LinuxNative.SyscallResult.Success -> {
-                    if (result.value < 0 || result.value > count) throw java.io.IOException("Invalid native read result ${result.value} for count $count")
-                    if (result.value == 0L) return -1
-                    return onRead(result.value)
+                    return successfulRead(result.value, count, onRead)
                 }
                 is LinuxNative.SyscallResult.Error -> {
-                    if (result.errno != EINTR) {
-                        val symbol = ErrnoMapping.getSymbolicName(result.errno)?.let { " ($it)" }.orEmpty()
-                        throw IOException(
-                            "$description $operation failed with errno=${result.errno}$symbol (raw return=${result.rawValue})",
-                        )
-                    }
+                    if (result.errno != EINTR) throw nativeReadFailure(result.errno, result.rawValue, operation)
                     eintrCount++
                     backoff(eintrCount)
                 }
@@ -86,11 +77,35 @@ public open class NativeDescriptorInputStream(
         }
     }
 
+    private fun successfulRead(
+        value: Long,
+        count: Long,
+        onRead: (Long) -> Int,
+    ): Int {
+        if (value < 0 || value > count) throw IOException("Invalid native read result $value for count $count")
+        if (value == 0L) return -1
+        return onRead(value)
+    }
+
+    private fun nativeReadFailure(
+        errno: Int,
+        rawValue: Long,
+        operation: String,
+    ): IOException {
+        val symbol = ErrnoMapping.getSymbolicName(errno)?.let { " ($it)" }.orEmpty()
+        return IOException("$description $operation failed with errno=$errno$symbol (raw return=$rawValue)")
+    }
+
+    private fun interrupted(operation: String): InterruptedIOException {
+        Thread.currentThread().interrupt()
+        return InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during $description $operation")
+    }
+
     private fun backoff(eintrCount: Int) {
-        if (eintrCount <= 1) return
-        if (eintrCount > 3) {
+        if (eintrCount <= FIRST_RETRY) return
+        if (eintrCount > YIELD_RETRIES) {
             try {
-                Thread.sleep(1)
+                Thread.sleep(BACKOFF_MILLIS)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("Thread [${Thread.currentThread().name}] interrupted during EINTR backoff sleep")
@@ -106,5 +121,8 @@ public open class NativeDescriptorInputStream(
         const val BUFFER_SIZE = 8192
         const val BYTE_MASK = 0xFF
         const val EINTR = 4
+        const val FIRST_RETRY = 1
+        const val YIELD_RETRIES = 3
+        const val BACKOFF_MILLIS = 1L
     }
 }

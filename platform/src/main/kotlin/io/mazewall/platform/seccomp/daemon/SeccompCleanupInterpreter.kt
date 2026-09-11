@@ -47,55 +47,75 @@ public object SeccompCleanupInterpreter {
     /** Independent releases all run; cancellation propagates after remaining releases. */
     internal fun closeResources(vararg releases: () -> Unit): SeccompCleanupOutcome = closeResources(releases.asList())
 
-    @Suppress("TooGenericExceptionCaught", "ThrowsCount", "CyclomaticComplexMethod")
     internal fun closeResources(
         releases: Iterable<() -> Unit>,
         recordOutcome: (SeccompCleanupOutcome) -> Unit = { },
     ): SeccompCleanupOutcome {
+        val captured = captureFailures(releases)
+        val outcome = cleanupOutcome(captured.failures, captured.fatal)
+        publishOutcome(recordOutcome, outcome, captured.fatal)
+        restoreInterrupt(captured.failures)
+        throwPrimary(captured.failures, captured.fatal)
+        return outcome
+    }
+
+    private data class CapturedFailures(
+        val failures: List<Exception>,
+        val fatal: Error?,
+    )
+
+    private fun captureFailures(releases: Iterable<() -> Unit>): CapturedFailures {
         val failures = mutableListOf<Exception>()
-        var fatalFailure: Error? = null
-        for (release in releases) {
-            try {
-                release()
-            } catch (failure: Exception) {
-                failures += failure
-            } catch (failure: Error) {
-                if (fatalFailure == null) {
-                    fatalFailure = failure
-                } else if (failure !== fatalFailure) {
-                    fatalFailure.addSuppressed(failure)
+        var fatal: Error? = null
+        releases.forEach { release ->
+            val failure = runCatching { release() }.exceptionOrNull() ?: return@forEach
+            when (failure) {
+                is Error -> if (fatal == null) {
+                    fatal = failure
+                } else if (failure !== fatal) {
+                    fatal.addSuppressed(failure)
                 }
-            } catch (failure: Throwable) {
-                failures += Exception("Non-standard cleanup failure", failure)
+                is Exception -> failures += failure
+                else -> failures += Exception("Non-standard cleanup failure", failure)
             }
         }
-        val reportedFailures =
-            fatalFailure?.let { failures + FatalCleanupFailureException(it) }
-                ?: failures.toList()
-        val outcome = if (reportedFailures.isEmpty()) {
-            SeccompCleanupOutcome.Complete
-        } else {
-            SeccompCleanupOutcome.Incomplete(reportedFailures, emptyList())
-        }
-        try {
-            recordOutcome(outcome)
-        } catch (recordFailure: Throwable) {
-            val fatal = fatalFailure
-            if (fatal == null || recordFailure === fatal) throw recordFailure
-            fatal.addSuppressed(recordFailure)
-        }
-        if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) {
-            Thread.currentThread().interrupt()
-        }
-        fatalFailure?.let { fatal ->
-            failures.forEach(fatal::addSuppressed)
-            throw fatal
+        return CapturedFailures(failures, fatal)
+    }
+
+    private fun cleanupOutcome(
+        failures: List<Exception>,
+        fatal: Error?,
+    ): SeccompCleanupOutcome {
+        val reported = fatal?.let { failures + FatalCleanupFailureException(it) } ?: failures
+        return if (reported.isEmpty()) SeccompCleanupOutcome.Complete else SeccompCleanupOutcome.Incomplete(reported, emptyList())
+    }
+
+    private fun publishOutcome(
+        record: (SeccompCleanupOutcome) -> Unit,
+        outcome: SeccompCleanupOutcome,
+        fatal: Error?,
+    ) {
+        val recordFailure = runCatching { record(outcome) }.exceptionOrNull() ?: return
+        if (fatal == null || recordFailure === fatal) throw recordFailure
+        fatal.addSuppressed(recordFailure)
+    }
+
+    private fun restoreInterrupt(failures: List<Exception>) {
+        if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) Thread.currentThread().interrupt()
+    }
+
+    private fun throwPrimary(
+        failures: List<Exception>,
+        fatal: Error?,
+    ) {
+        fatal?.let { error ->
+            failures.forEach(error::addSuppressed)
+            throw error
         }
         failures.filterIsInstance<CancellationException>().firstOrNull()?.let { cancellation ->
             failures.filter { it !== cancellation }.forEach(cancellation::addSuppressed)
             throw cancellation
         }
-        return outcome
     }
 
     private class FatalCleanupFailureException(

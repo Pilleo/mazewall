@@ -1,6 +1,7 @@
 package io.mazewall.ffi.memory
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeMemory
 import io.mazewall.core.Deadline
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
@@ -75,17 +76,16 @@ public interface TraceeMemoryReader {
                 len++
             }
             if (!hasNullTerminator) {
-                val preview = bytes.take(64).joinToString("") { String.format(Locale.ROOT, "%02X", it) }
+                val preview = bytes.take(HEX_PREVIEW_BYTES).joinToString("") { String.format(Locale.ROOT, "%02X", it) }
                 throw TruncatedStringException(
                     len,
                     preview,
-                    "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(16)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview",
+                    "Remote string from TID ${tid.value} at address 0x${remoteAddr.toString(ADDRESS_RADIX)} lacks null terminator within $maxLen bytes. Read: $len bytes. Hex preview: $preview",
                 )
             }
             return String(bytes, 0, len, StandardCharsets.UTF_8)
         }
 
-        @Suppress("ThrowsCount")
         context(arena: NativeArena) override fun readBytes(
             tid: Tid,
             remoteAddr: Long,
@@ -103,14 +103,35 @@ public interface TraceeMemoryReader {
 
             val retryBudget = ProcessVmReadRetryBudget.default()
             val memory = LinuxNative.snapshot().memory
+            val res = readProcessVm(
+                memory,
+                tid,
+                localIov,
+                remoteIov,
+                retryBudget,
+            )
+            return if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
+                val bytesRead = res.value.toInt()
+                val dest = ByteArray(bytesRead)
+                MemorySegment.copy(localBuf.unwrap, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
+                dest
+            } else {
+                permissionFailure(res, tid, remoteAddr)
+            }
+        }
+
+        private fun readProcessVm(
+            memory: NativeMemory,
+            tid: Tid,
+            localIov: IovecSegment,
+            remoteIov: IovecSegment,
+            retryBudget: ProcessVmReadRetryBudget,
+        ): LinuxNative.SyscallResult<Long, *> {
             var attempts = 0
-            var res: LinuxNative.SyscallResult<Long, *>
             while (true) {
-                if (Thread.currentThread().isInterrupted) {
-                    throw ReadInterruptedException(attempts)
-                }
+                if (Thread.currentThread().isInterrupted) throw ReadInterruptedException(attempts)
                 attempts++
-                res = memory.processVmReadv(
+                val result = memory.processVmReadv(
                     Pid(tid.value),
                     ConfinedSegment(localIov.segment),
                     1,
@@ -118,30 +139,33 @@ public interface TraceeMemoryReader {
                     1,
                     0,
                 )
-                if (res !is LinuxNative.SyscallResult.Error || res.errno != NativeConstants.EINTR) break
+                if (result !is LinuxNative.SyscallResult.Error<*> || result.errno != NativeConstants.EINTR) return result
                 val deadlineExpired = retryBudget.deadline.isExpired()
                 if (attempts >= retryBudget.maxAttempts || deadlineExpired) {
-                    throw ReadRetryExhaustedException(attempts, res.errno, deadlineExpired)
+                    throw ReadRetryExhaustedException(attempts, result.errno, deadlineExpired)
                 }
                 Thread.yield()
             }
-            return if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
-                val bytesRead = res.value.toInt()
-                val dest = ByteArray(bytesRead)
-                MemorySegment.copy(localBuf.unwrap, ValueLayout.JAVA_BYTE, 0L, dest, 0, bytesRead)
-                dest
-            } else {
-                if (res is LinuxNative.SyscallResult.Error && (res.errno == NativeConstants.EPERM || res.errno == NativeConstants.EACCES)) {
-                    throw IllegalStateException(
-                        "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(16)} (errno=${res.errno})",
-                    )
-                } else {
-                    null
-                }
+        }
+
+        private fun permissionFailure(
+            result: LinuxNative.SyscallResult<Long, *>,
+            tid: Tid,
+            remoteAddr: Long,
+        ): ByteArray? {
+            if (result is LinuxNative.SyscallResult.Error<*> &&
+                (result.errno == NativeConstants.EPERM || result.errno == NativeConstants.EACCES)
+            ) {
+                throw IllegalStateException(
+                    "Permission denied reading memory from TID ${tid.value} at address 0x${remoteAddr.toString(ADDRESS_RADIX)} (errno=${result.errno})",
+                )
             }
+            return null
         }
 
         private const val PATH_MAX_VAL = 4096L
+        private const val HEX_PREVIEW_BYTES = 64
+        private const val ADDRESS_RADIX = 16
         private const val PROCESS_VM_READ_TIMEOUT_MS = 100L
         private const val PROCESS_VM_READ_MAX_ATTEMPTS = 8
 
