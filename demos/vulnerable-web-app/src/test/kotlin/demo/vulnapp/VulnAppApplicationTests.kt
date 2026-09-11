@@ -48,13 +48,14 @@ class VulnAppApplicationTests {
         try {
             val application = SpringApplication(VulnAppApplication::class.java)
             application.addListeners(MazewallProtectionBootstrap())
-            application.run(
+            application
+                .run(
                 "--mazewall.profile=true",
                 "--mazewall.enabled=false",
                 "--mazewall.sbob.path=$output",
                 "--server.port=0",
                 "--spring.main.banner-mode=off",
-            ).use { block(it, root) }
+                ).use { block(it, root) }
         } finally {
             restoreProperty(PROFILE_PATH_PROPERTY, previousProfilePath)
             restoreProperty(LOGGING_SYSTEM_PROPERTY, previousLoggingSystem)
