@@ -10,6 +10,8 @@ deserialization import/payload HTTP route. These attack fixtures are compiled in
 artifact only by `:demos:vulnerable-web-app:isolatedVulnerableFixtureJar`; its routes additionally
 require the Spring profile `isolated-vulnerable-fixture`. Run that artifact only in an isolated,
 disposable environment. It is deliberately absent from the default compose services.
+The checked-in `results_report.md` records only fixture packaging/profile verification with its
+exact provenance; it is not evidence that the standard application was attacked.
 
 ## Vulnerability Matrix
 
@@ -135,8 +137,11 @@ from incomplete evidence only when an operator explicitly accepts the missing-ob
 Profiling and enforcement are mutually exclusive startup modes: setting both
 `mazewall.profile=true` and `mazewall.enabled=true` aborts startup.
 
-The container image creates `/app/data` and `/app/uploads` before startup. This keeps Landlock
-rules anchored to those exact directories instead of falling back to the broader `/app` parent.
+The container image runs as the unprivileged `mazewall` user. Only `/app/data` and `/app/uploads`
+are owned by that user; the named-volume mount point `/app/profiles` remains root-owned but is
+group-writable by `mazewall`. The application and exploded classpath remain root-owned and read-only.
+Creating those writable roots before startup keeps Landlock rules anchored to the exact
+directories instead of falling back to the broader `/app` parent.
 
 ## How It Works
 

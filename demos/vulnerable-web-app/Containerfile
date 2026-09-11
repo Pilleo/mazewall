@@ -2,6 +2,9 @@ FROM eclipse-temurin:25-jdk
 
 WORKDIR /app
 
+RUN groupadd --system mazewall && \
+    useradd --system --gid mazewall --home-dir /nonexistent --shell /usr/sbin/nologin mazewall
+
 # Install dependencies (curl for health checks, strace for debugging)
 RUN apt-get update && apt-get install -y curl strace && rm -rf /var/lib/apt/lists/*
 
@@ -13,10 +16,15 @@ RUN mkdir -p /app/unpacked && cd /app/unpacked && jar -xf ../vulnerable-app.jar
 
 # Create the exact Landlock roots before filters are installed. Missing roots would
 # otherwise make the demo fall back to protecting their broader /app parent.
-RUN mkdir -p /app/uploads /app/data && chown root:root /app/uploads /app/data && chmod 0755 /app/data && chmod 0770 /app/uploads
+RUN mkdir -p /app/uploads /app/data /app/profiles && \
+    chown mazewall:mazewall /app/uploads /app/data && \
+    chown root:mazewall /app/profiles && \
+    chmod 0755 /app/data && chmod 0770 /app/uploads /app/profiles
 
 # Expose ports
 EXPOSE 8080
+
+USER mazewall
 
 # Default command: run the exploded classpath
 CMD ["java", "-cp", "/app/unpacked/BOOT-INF/classes:/app/unpacked/BOOT-INF/lib/*", "demo.vulnapp.VulnAppApplicationKt"]
