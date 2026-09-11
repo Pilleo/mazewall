@@ -63,6 +63,7 @@ internal class StraceCollector(
         obs is ProfileObservation.Syscall &&
             obs.name in setOf("IO_URING_SETUP", "IO_URING_ENTER", "IO_URING_REGISTER")
 
+    @Suppress("ThrowingExceptionFromFinally", "TooGenericExceptionCaught")
     private fun spawnAndRead(workloadClass: Class<out TraceableWorkload>): String {
         val tempLog = Files.createTempFile("strace_prof_", ".log")
         val tempOut = Files.createTempFile("strace_prof_", ".out")

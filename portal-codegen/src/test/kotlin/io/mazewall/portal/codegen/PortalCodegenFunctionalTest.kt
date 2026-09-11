@@ -117,6 +117,23 @@ class PortalCodegenFunctionalTest {
         assertEquals(before, generatedContents())
     }
 
+    @Test
+    fun `generation rejects nested artifacts reserved by a legal top level service`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(
+            apiJar,
+            listOf(
+                "fixture.CollisionOuter\$Service",
+                "fixture.Nested_14_CollisionOuter_7_Service",
+            ),
+        )
+
+        val result = runner("generatePortalStubs").buildAndFail()
+
+        assertTrue(result.output.contains("portal services produce colliding generated names"), result.output)
+        assertTrue(generatedContents().isEmpty(), generatedContents().toString())
+    }
+
     private fun writeFixture(
         apiJar: Path,
         services: List<String>,
@@ -139,7 +156,10 @@ class PortalCodegenFunctionalTest {
                     MethodIdShadowService::class.java.protectionDomain.codeSource.location
                     .toURI(),
                 ).toAbsolutePath()
-        val quotedServices = services.joinToString(", ") { "\"$it\"" }
+        val quotedServices = services.joinToString(", ") { service ->
+            val escaped = service.replace("\\", "\\\\").replace("\"", "\\\"").replace("\$", "\\\$")
+            "\"$escaped\""
+        }
         val extra =
             if (compileGenerated) {
                 """
@@ -336,6 +356,12 @@ class PortalCodegenFunctionalTest {
             }
             """.trimIndent(),
         )
+        sources.resolve("CollisionOuter.java").writeText(
+            "package fixture; public final class CollisionOuter { public interface Service { String echo(String value); } }",
+        )
+        sources.resolve("Nested_14_CollisionOuter_7_Service.java").writeText(
+            "package fixture; public interface Nested_14_CollisionOuter_7_Service { String echo(String value); }",
+        )
         val classes = root.resolve("api-classes").createDirectories()
         val compiler = checkNotNull(ToolProvider.getSystemJavaCompiler())
         val exit =
@@ -353,6 +379,8 @@ class PortalCodegenFunctionalTest {
                 sources.resolve("DiamondRight.java").toString(),
                 sources.resolve("SamplePojo.java").toString(),
                 sources.resolve("NestedDtos.java").toString(),
+                sources.resolve("CollisionOuter.java").toString(),
+                sources.resolve("Nested_14_CollisionOuter_7_Service.java").toString(),
             )
         assertEquals(0, exit)
         val jar = root.resolve("api.jar")
