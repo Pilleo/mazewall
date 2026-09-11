@@ -35,6 +35,11 @@ public interface TraceeMemoryReader {
         "Tracee memory read did not complete after $attempts attempt(s): errno=$errno (EINTR), deadlineExpired=$deadlineExpired",
     )
 
+    /** A caller interruption stopped the read before another native attempt could begin. */
+    public class ReadInterruptedException(
+        public val attempts: Int,
+    ) : IllegalStateException("Tracee memory read interrupted after $attempts attempt(s)")
+
     context(arena: NativeArena) public fun readString(
         tid: Tid,
         remoteAddr: Long,
@@ -101,7 +106,7 @@ public interface TraceeMemoryReader {
             var res: LinuxNative.SyscallResult<Long, *>
             while (true) {
                 if (Thread.currentThread().isInterrupted) {
-                    throw ReadRetryExhaustedException(attempts, NativeConstants.EINTR, retryBudget.deadline.isExpired())
+                    throw ReadInterruptedException(attempts)
                 }
                 attempts++
                 res = memory.processVmReadv(

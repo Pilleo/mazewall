@@ -382,6 +382,27 @@ class SeccompCleanupInterpreterTest {
         assertEquals(listOf("first", "second", "third"), attempts)
         assertEquals(listOf(laterFailure), fatal.suppressed.toList())
     }
+
+    @Test
+    fun `fatal-only cleanup is recorded incomplete and recorder failure cannot replace it`() {
+        val fatal = AssertionError("fatal release failure")
+        val recorderFailure = IllegalStateException("outcome recorder failure")
+        val recorded = mutableListOf<SeccompCleanupOutcome>()
+
+        val thrown = assertThrows(AssertionError::class.java) {
+            SeccompCleanupInterpreter.closeResources(
+                listOf({ throw fatal }),
+            ) { outcome ->
+                recorded += outcome
+                throw recorderFailure
+            }
+        }
+
+        assertSame(fatal, thrown)
+        val incomplete = assertInstanceOf(SeccompCleanupOutcome.Incomplete::class.java, recorded.single())
+        assertSame(fatal, incomplete.failures.single().cause)
+        assertEquals(listOf(recorderFailure), fatal.suppressed.toList())
+    }
 }
 
 private class CleanupSocketManager(

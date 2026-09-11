@@ -67,12 +67,21 @@ public object SeccompCleanupInterpreter {
                 }
             }
         }
-        val outcome = if (failures.isEmpty()) {
+        val reportedFailures =
+            fatalFailure?.let { failures + FatalCleanupFailureException(it) }
+                ?: failures.toList()
+        val outcome = if (reportedFailures.isEmpty()) {
             SeccompCleanupOutcome.Complete
         } else {
-            SeccompCleanupOutcome.Incomplete(failures.toList(), emptyList())
+            SeccompCleanupOutcome.Incomplete(reportedFailures, emptyList())
         }
-        recordOutcome(outcome)
+        try {
+            recordOutcome(outcome)
+        } catch (recordFailure: Throwable) {
+            val fatal = fatalFailure
+            if (fatal == null || recordFailure === fatal) throw recordFailure
+            fatal.addSuppressed(recordFailure)
+        }
         if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) {
             Thread.currentThread().interrupt()
         }
@@ -86,4 +95,8 @@ public object SeccompCleanupInterpreter {
         }
         return outcome
     }
+
+    private class FatalCleanupFailureException(
+        failure: Throwable,
+    ) : Exception("Fatal cleanup release failed", failure)
 }
