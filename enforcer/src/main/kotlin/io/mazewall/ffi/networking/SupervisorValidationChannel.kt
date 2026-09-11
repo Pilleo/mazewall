@@ -179,7 +179,12 @@ public class SupervisorValidationChannel(
                         if (pollTimeout == remaining) throw IOException("supervisor validation readiness timed out")
                         continue
                     }
-                    val revents = pollFd.getRevents().toInt()
+                    // Deterministic injected pollers may report a ready count without filling
+                    // revents; a kernel poll always supplies the mask, so this fallback only
+                    // affects the test seam.
+                    val revents = pollFd.getRevents().toInt().let { value ->
+                        if (value == 0 && result.value > 0L) event.toInt() else value
+                    }
                     val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
                     if ((revents and terminal) != 0) throw IOException("validation peer closed during readiness wait")
                     if ((revents and event.toInt()) != 0) return

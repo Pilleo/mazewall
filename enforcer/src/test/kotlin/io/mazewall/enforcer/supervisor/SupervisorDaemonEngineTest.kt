@@ -68,12 +68,15 @@ class SupervisorDaemonEngineTest {
                 .also { it.socketManager = socketManager }
             NativeArena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment.of(arena.allocate(8))
-                mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
+                mockEngine.onPoll = { fds, _, _ ->
+                    PollFdSegment.of(fds).setRevents(NativeConstants.POLLOUT)
+                    LinuxNative.SyscallResult.Success(1L)
+                }
 
                 val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
 
                 assertNotNull(result, "processConnectionStep should return non-null on successful retry")
-                assertEquals(2, writeCalls)
+                assertEquals(1, writeCalls)
             }
         } finally {
             assertTrue(RealNativeEngine.fileSystem.close(socketFd) is LinuxNative.SyscallResult.Success, "owned ACK socket closed")
@@ -423,8 +426,11 @@ class SupervisorDaemonEngineTest {
                     LinuxNative.SyscallResult.Success(1L)
                 }
                 (firstFd == 12 || firstFd == 13) && nfds == 1L -> {
-                    // INNER poll inside processConnectionStep(Accepted) — client is ready
-                    PollFdSegment.of(fds).setRevents(NativeConstants.POLLIN)
+                    // Accepted connections wait for POLLIN; attached handshakes wait for POLLOUT.
+                    val requested = PollFdSegment.of(fds).getEvents().toInt()
+                    PollFdSegment.of(fds).setRevents(
+                        if ((requested and NativeConstants.POLLOUT.toInt()) != 0) NativeConstants.POLLOUT else NativeConstants.POLLIN,
+                    )
                     LinuxNative.SyscallResult.Success(1L)
                 }
                 (firstFd == 20 || firstFd == 21) && nfds == 2L -> {

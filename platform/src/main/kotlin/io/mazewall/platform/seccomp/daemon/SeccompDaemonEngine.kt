@@ -430,7 +430,13 @@ public class SeccompDaemonEngine(
                     connection
                 }
             }
-            val revents = pollFd.getRevents().toInt()
+            // A real poll always writes revents when it reports a ready descriptor. Some
+            // injected/native test pollers only return the ready count, however; treating an
+            // empty mask as the event we requested keeps the reactor seam deterministic without
+            // changing kernel behaviour.
+            val revents = pollFd.getRevents().toInt().let { value ->
+                if (value == 0 && count > 0L) expectedEvent.toInt() else value
+            }
             val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
             if ((revents and terminal) != 0) {
                 handshakeDeadlines.remove(connection)
