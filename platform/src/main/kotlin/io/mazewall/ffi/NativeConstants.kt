@@ -96,6 +96,9 @@ object NativeConstants {
     const val O_RDONLY = 0
     const val O_DIRECTORY = 0x00010000
 
+    /** pidfd_open(2): acquire a pidfd for the exact thread rather than its thread-group leader. */
+    const val PIDFD_THREAD = 0x80
+
     /** openat2(2) RESOLVE_BENEATH: path must stay under dirfd. */
     const val RESOLVE_BENEATH = 0x08L
     const val RESOLVE_IN_ROOT = 0x10L

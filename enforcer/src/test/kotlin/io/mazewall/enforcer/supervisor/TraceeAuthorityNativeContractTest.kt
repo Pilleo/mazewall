@@ -1,6 +1,8 @@
 package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
+import io.mazewall.NativeProcess
 import io.mazewall.core.Arch
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
@@ -22,6 +24,8 @@ class TraceeAuthorityNativeContractTest {
             with(arena) {
             val notification = notification(Arch.current().openat, longArrayOf(-100, arena.allocateFrom(target.toString()).address(), NativeConstants.O_CLOEXEC.toLong(), 0, 0, 0))
             TraceeProcAuthority.capture(notification.pid, LinuxNative).use { authority ->
+                assertEquals(notification.pid, authority.task.tid)
+                assertEquals(ProcessHandle.current().pid().toInt(), authority.task.tgid)
                 val execution = TraceeAuthorityExecution(LinuxNative, authority, notification, emptyList())
                 val snapshot = execution.prepare()
                 assertEquals(SupervisorRoute.AskJvm, snapshot.route)
@@ -40,15 +44,15 @@ class TraceeAuthorityNativeContractTest {
     }
 
     @Test
-    fun `bypass is resolved structurally and missing target retains ENOENT`() {
+    fun `missing bypass target is denied before descriptor injection`() {
         NativeArena.ofConfined().use { arena ->
             with(arena) {
             val target = root.resolve("missing.class")
             val notification = notification(Arch.current().openat, longArrayOf(-100, arena.allocateFrom(target.toString()).address(), 0, 0, 0, 0))
             TraceeProcAuthority.capture(notification.pid, LinuxNative).use { authority ->
                 val execution = TraceeAuthorityExecution(LinuxNative, authority, notification, listOf(root.toString()))
-                assertEquals(SupervisorRoute.InjectFd, execution.prepare().route)
-                assertEquals(SupervisorReplyEffect.Error(2), execution.execute(TraceeAuthorityDecision(SupervisorRoute.InjectFd, null)))
+                val route = assertInstanceOf(SupervisorRoute.Abort::class.java, execution.prepare().route)
+                assertEquals(NativeConstants.EPERM, route.errno)
             }
         }
         }
@@ -114,6 +118,31 @@ class TraceeAuthorityNativeContractTest {
                 assertSame(authority.directory(TraceeDirFd.CurrentWorkingDirectory), authority.directory(TraceeDirFd.CurrentWorkingDirectory))
             }
         }
+        }
+    }
+
+    @Test
+    fun `unsupported thread pidfd makes authority capture fail closed`() {
+        val tid = LinuxNative.process.gettid().value
+        val process = object : NativeProcess by LinuxNative.process {
+            override fun pidfdOpen(
+                pid: Int,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                assertEquals(tid, pid)
+                assertEquals(NativeConstants.PIDFD_THREAD, flags)
+                return LinuxNative.SyscallResult.Error(NativeConstants.EINVAL, -1)
+            }
+        }
+        val engine = object : NativeEngine by LinuxNative {
+            override val process: NativeProcess = process
+        }
+
+        NativeArena.ofConfined().use { arena ->
+            val failure = assertThrows(TraceeAuthorityFailure::class.java) {
+                with(arena) { TraceeProcAuthority.capture(tid, engine) }
+            }
+            assertEquals(NativeConstants.EINVAL, failure.errno)
         }
     }
 

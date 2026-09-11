@@ -64,11 +64,17 @@ internal class TraceeAuthorityExecution(
             null
         }
 
-    context(arena: NativeArena) private fun resolve(path: String): Path {
+    context(arena: NativeArena) private fun resolve(path: String): Path? {
         val directory = authority.directory(arguments.dirfd, path.startsWith('/'))
-        // Resolve the capability itself strictly; never reconstruct a vanished /proc prefix.
         val base = Path.of("/proc/self/fd/${directory.handle.value}").toRealPath()
-        return BypassPaths.toRealPathWithFallback(base.resolve(if (path.startsWith('/')) path.trimStart('/') else path))
+        val candidate = base.resolve(if (path.startsWith('/')) path.trimStart('/') else path)
+        return when (val resolution = BypassPaths.resolveForPolicy(candidate)) {
+            is BypassPaths.PathResolution.Resolved ->
+                resolution.path.takeIf { path.startsWith('/') || isUnder(it, base) }
+            is BypassPaths.PathResolution.Missing,
+            is BypassPaths.PathResolution.Unsafe,
+            -> null
+        }
     }
 
     context(arena: NativeArena) fun execute(decision: TraceeAuthorityDecision): SupervisorReplyEffect =
@@ -162,7 +168,8 @@ internal class TraceeAuthorityExecution(
         val how = arena.allocate(Layouts.OPEN_HOW_SIZE)
         how.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, flags)
         how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, mode)
-        how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve or if (absolute) NativeConstants.RESOLVE_IN_ROOT else 0)
+        val confinement = if (absolute) NativeConstants.RESOLVE_IN_ROOT else NativeConstants.RESOLVE_BENEATH
+        how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, resolve or confinement)
         return SupervisorDescriptorResult.from(engine.fileSystem.openat2(directory.handle, arena.allocateFrom(path), how, Layouts.OPEN_HOW_SIZE), engine)
     }
 

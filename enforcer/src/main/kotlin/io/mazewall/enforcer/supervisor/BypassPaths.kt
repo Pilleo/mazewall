@@ -43,15 +43,17 @@ public object BypassPaths {
      // Expected filesystem states are deliberately mapped to a deny-safe PathResolution.
     public fun resolveForPolicy(path: Path): PathResolution {
         return try {
-            PathResolution.Resolved(toRealPathWithFallback(path))
+            // Do not normalize before the filesystem resolves symlinks. `link/../target`
+            // has kernel semantics that are not equivalent to removing `link/..` lexically.
+            PathResolution.Resolved(path.toRealPath())
         } catch (_: FileSystemLoopException) {
             PathResolution.Unsafe("symlink-loop")
         } catch (_: AccessDeniedException) {
             PathResolution.Unsafe("access-denied")
         } catch (_: NoSuchFileException) {
-            PathResolution.Missing(path.toAbsolutePath().normalize())
+            PathResolution.Unsafe("missing")
         } catch (_: FileNotFoundException) {
-            PathResolution.Missing(path.toAbsolutePath().normalize())
+            PathResolution.Unsafe("missing")
         } catch (_: FileSystemException) {
             PathResolution.Unsafe("filesystem")
         } catch (_: SecurityException) {
@@ -210,13 +212,13 @@ public object BypassPaths {
     public fun isBypassPath(path: Path): Boolean {
         val realPath = when (val status = resolveForPolicy(path)) {
             is PathResolution.Resolved -> status.path
-            is PathResolution.Missing -> status.normalized
+            is PathResolution.Missing -> return false
             is PathResolution.Unsafe -> return false
         }
-        // Canonical containment predicate; the raw spelling and the resolved realpath are both
-        // matched against each bypass entry (either match authorizes the bypass).
+        // Only the object reached by filesystem resolution can authorize a bypass. Matching the
+        // raw spelling would let lexical `..` handling disagree with kernel symlink traversal.
         return safeBypassPaths.any { bypassPath ->
-            io.mazewall.core.isUnder(path, bypassPath) || io.mazewall.core.isUnder(realPath, bypassPath)
+            io.mazewall.core.isUnder(realPath, bypassPath)
         }
     }
 }

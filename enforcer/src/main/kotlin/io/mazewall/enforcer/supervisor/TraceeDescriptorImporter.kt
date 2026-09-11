@@ -11,11 +11,16 @@ internal class TraceeDescriptorImporter(
     fun import(
         tid: Tid,
         target: Int,
-    ): SupervisorDescriptorResult =
-        when (val process = SupervisorDescriptorResult.from(engine.process.pidfdOpen(tgid(tid.value), 0), engine)) {
+    ): SupervisorDescriptorResult {
+        val group = tgid(tid.value)
+        val exactThread = tid.value != group
+        val targetPid = if (exactThread) tid.value else group
+        val flags = if (exactThread) io.mazewall.ffi.NativeConstants.PIDFD_THREAD else 0
+        return when (val process = SupervisorDescriptorResult.from(engine.process.pidfdOpen(targetPid, flags), engine)) {
             is SupervisorDescriptorResult.Denied -> process
             is SupervisorDescriptorResult.Opened -> process.descriptor.produce {
                 SupervisorDescriptorResult.from(engine.process.pidfdGetFd(process.descriptor.handle, target, 0), engine)
             }
         }
+    }
 }
