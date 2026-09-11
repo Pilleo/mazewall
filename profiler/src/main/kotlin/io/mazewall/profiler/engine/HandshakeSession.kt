@@ -1,6 +1,7 @@
 package io.mazewall.profiler.ffi
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -44,12 +45,32 @@ internal sealed class HandshakeSession {
             pollFd: MemorySegment,
             ackBuf: MemorySegment,
             onShutdown: (String) -> Unit,
+        ): HandshakeSession =
+            performHandshake(
+                socketFd,
+                ioOps,
+                pollFd,
+                ackBuf,
+                onShutdown,
+                Deadline.afterMillis(POLL_ACK_TIMEOUT_MS.toLong()),
+            )
+
+        /** Perform both handshake phases against one monotonic deadline. */
+        fun performHandshake(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            ioOps: NativeIoOperations,
+            pollFd: MemorySegment,
+            ackBuf: MemorySegment,
+            onShutdown: (String) -> Unit,
+            deadline: Deadline,
         ): HandshakeSession {
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
             var attempts = 0
             while (attempts++ < MAX_ATTEMPTS) {
-                val pollRes = ioOps.raw.poll(ConfinedSegment(pollFd), 1L, POLL_ACK_TIMEOUT_MS)
+                val remainingMillis = deadline.remainingMillis()
+                if (remainingMillis <= 0) return failed(ProfilerHandshakeFailure.Timeout)
+                val pollRes = ioOps.raw.poll(ConfinedSegment(pollFd), 1L, remainingMillis)
                 val count = pollRes.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
                     return@recover INTERNAL_ERROR_SIGNAL
@@ -60,7 +81,7 @@ internal sealed class HandshakeSession {
 
                 val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
                 if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                    return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown)
+                    return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown, deadline)
                 }
                 return failed()
             }
@@ -72,9 +93,12 @@ internal sealed class HandshakeSession {
             ioOps: NativeIoOperations,
             ackBuf: MemorySegment,
             onShutdown: (String) -> Unit,
+            deadline: Deadline,
         ): HandshakeSession {
             var attempts = 0
             while (attempts++ < MAX_ATTEMPTS) {
+                val remainingMillis = deadline.remainingMillis()
+                if (remainingMillis <= 0) return failed(ProfilerHandshakeFailure.Timeout)
                 val readRes = ioOps.read(socketFd, ackBuf, ACK_BUF_SIZE)
                 val value = readRes.recover { errno, _ ->
                     if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL

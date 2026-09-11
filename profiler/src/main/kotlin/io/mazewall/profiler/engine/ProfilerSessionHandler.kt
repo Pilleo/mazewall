@@ -250,7 +250,14 @@ internal class ProfilerSessionHandler(
         val reply = ReplyAttempt()
 
         return try {
-            handleActiveNotification(currentState, parsedNotif, handshake, resp, reply)
+            handleActiveNotification(
+                currentState,
+                parsedNotif,
+                handshake,
+                resp,
+                reply,
+                Deadline.afterMillis(POLL_ACK_TIMEOUT_MS.toLong()),
+            )
         } catch (e: InterruptedException) {
             terminateSession()
             Thread.currentThread().interrupt()
@@ -279,6 +286,7 @@ internal class ProfilerSessionHandler(
         handshake: HandshakeSession.Active,
         response: ManagedSegment,
         reply: ReplyAttempt,
+        deadline: Deadline,
     ): NotifResult {
         ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
         val event = resolveNotificationEvent(notification.pid, notification.nr, notification.args)
@@ -290,7 +298,7 @@ internal class ProfilerSessionHandler(
         }
         val waitingState = transitionToAckWait(currentState, notification.id, event)
         state = waitingState
-        val result = deliverAndAwaitAck(notification.pid, event, handshake)
+        val result = deliverAndAwaitAck(notification.pid, event, handshake, deadline)
         return handleHandshakeResult(result, waitingState, response, notification.pid, reply)
     }
 
@@ -430,6 +438,7 @@ internal class ProfilerSessionHandler(
         pid: Int,
         event: SyscallEvent<SyscallEventState.Resolved>,
         handshake: HandshakeSession.Active,
+        deadline: Deadline,
     ): HandshakeSession {
         parser.writeSocketPoll(socketPollFd, socketFd.value, NativeConstants.POLLIN)
         with(arena.unwrap) {
@@ -437,7 +446,7 @@ internal class ProfilerSessionHandler(
         }
         ledger.record(SessionEvent.EventSent(System.nanoTime(), pid.toLong()))
         return with(arena.unwrap) {
-            handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown)
+            handshake.performHandshake(socketFd, ioOps, socketPollFd.unwrap, ackBuf.unwrap, onShutdown, deadline)
         }
     }
 
