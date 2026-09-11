@@ -18,13 +18,12 @@ object SafeRunner {
     internal fun runContained(action: () -> String) {
         val executor = Executors.newSingleThreadExecutor()
         try {
-            // Wrap inside try so the raw executor is always shut down in finally,
-            // even if ContainedExecutors.wrap() itself throws (e.g. seccomp install failure).
-            val safeExecutor = ContainedExecutors.wrap(executor, policy)
-            val future = safeExecutor.submit<String> {
-                action()
+            // Put wrapper creation inside the owned submission boundary so even a
+            // seccomp-install failure retires the raw executor before returning.
+            OwnedActionRunner.run(executor) {
+                val safeExecutor = ContainedExecutors.wrap(executor, policy)
+                safeExecutor.submit<String> { action() }
             }
-            future.get()
         } catch (expected: ExecutionException) {
             // We intentionally unwrap the ExecutionException to expose the underlying
             // ContainmentViolationException to the caller for clearer demo output.
@@ -32,9 +31,6 @@ object SafeRunner {
                 throw expected.cause as ContainmentViolationException
             }
             throw expected
-        } finally {
-            // The wrapper delegates shutdown to this executor — shutting down once here is sufficient.
-            executor.shutdown()
         }
     }
 }

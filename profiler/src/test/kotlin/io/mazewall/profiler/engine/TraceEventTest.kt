@@ -2,8 +2,19 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.profiler.EbpfLoad
+import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.OpenFlagsEvidence
+import io.mazewall.profiler.PathResolutionQuality
+import io.mazewall.profiler.ProfileEnvironment
+import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.ProfileStrategy
+import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.StackAttribution
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
@@ -115,5 +126,41 @@ class TraceEventTest {
         assertEquals(AddressFamily.Known.INET, socket.addressFamily)
         assertEquals(SocketType(1), socket.socketType)
         assertEquals(IpProtocol(6), socket.ipProtocol)
+    }
+
+    @Test
+    fun `openat2 pointer flags stay incomplete through profiling coverage`() {
+        val event = assertIs<TraceEvent.Open>(
+            TraceEvent(
+                tidValue = 7,
+                syscallName = "OPENAT2",
+                args = longArrayOf(-100, 0x1000, 0x2000, 24),
+                paths = listOf("/tmp/openat2-target"),
+            ),
+        )
+
+        assertEquals(0L, event.flags, "legacy numeric projection remains compatible")
+        assertEquals(
+            OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags")),
+            event.openFlagsEvidence,
+        )
+
+        val observation = assertIs<ProfileObservation.Syscall>(ProfileObservation.fromTraceEvent(event))
+        assertNull(observation.openFlags)
+        assertEquals(event.openFlagsEvidence, observation.openFlagsEvidence)
+
+        val coverage = ProfilingCoverage.infer(
+            strategy = ProfileStrategy.USER_NOTIF,
+            strategyReason = "openat2 evidence",
+            processWide = false,
+            observations = listOf(observation),
+            stacks = StackAttribution.SKIPPED,
+            droppedEvents = 0,
+            drainComplete = true,
+            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertEquals(PathResolutionQuality.RESOLVED, coverage.pathResolution)
+        assertFalse(coverage.complete)
+        assertEquals(listOf("open_how.flags"), coverage.warnings.filter { it.contains("open_how.flags") }.map { "open_how.flags" })
     }
 }

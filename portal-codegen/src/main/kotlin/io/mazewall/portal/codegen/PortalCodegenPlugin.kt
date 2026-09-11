@@ -1,5 +1,6 @@
 package io.mazewall.portal.codegen
 
+import io.mazewall.portal.PortalGeneratedNames
 import org.gradle.api.DefaultTask
 import org.gradle.api.NamedDomainObjectContainer
 import org.gradle.api.Plugin
@@ -90,7 +91,7 @@ public abstract class GeneratePortalStubsTask : DefaultTask() {
         if (generateWorker.get()) {
             val descriptor = resources.resolve("META-INF/mazewall/portal/${type.name}")
             Files.createDirectories(descriptor.parent)
-            val dispatcherName = listOf(type.packageName, type.simpleName + "PortalDispatcher").filter(String::isNotEmpty).joinToString(".")
+            val dispatcherName = PortalGeneratedNames.dispatcherBinaryName(type)
             Files.writeString(descriptor, "$dispatcherName\n")
         }
     }

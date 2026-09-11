@@ -103,6 +103,38 @@ class PortalOwnershipDeadlineTest {
     }
 
     @Test
+    fun `structured capability retirement retains only pre-native close failures for retry`(
+        @TempDir dir: Path,
+    ) {
+        Files.writeString(dir.resolve("grant"), "x")
+        val capability = openGrantedRead(dir, "grant")
+        val runtime = LinuxNative.snapshot()
+        val failure = java.io.IOException("before native close")
+        var attempts = 0
+        LinuxNative.setEngine(object : io.mazewall.NativeEngine by runtime {
+            override val fileSystem = object : io.mazewall.NativeFileSystem by runtime.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (++attempts == 1) throw failure
+                    return runtime.fileSystem.close(fd)
+                }
+            }
+        })
+        try {
+            val first = Capability.retireAll(listOf(capability))
+            assertSame(failure, first.failureOrNull())
+            assertEquals(listOf(capability), first.retained)
+
+            val second = Capability.retireAll(first.retained)
+            assertTrue(second.complete)
+            assertTrue(second.retained.isEmpty())
+            assertEquals(2, attempts)
+        } finally {
+            LinuxNative.resetToDefault()
+            capability.close()
+        }
+    }
+
+    @Test
     fun `header declaring an absent descriptor is terminal rather than an idle tick`(
         @TempDir dir: Path,
     ) {

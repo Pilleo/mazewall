@@ -15,6 +15,7 @@ import io.mazewall.core.RealSocketManager
 import io.mazewall.core.SocketManager
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -76,6 +77,8 @@ public class ProcessBroker(
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val acceptedHandoffs: MutableSet<AcceptedSocketHandoff> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+    private val retainedCapabilities: MutableSet<Capability.ReadFd> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val startupRetirement = StartupRetirement(sockets)
     private val closeRetirement = CloseRetirement()
 
@@ -85,7 +88,7 @@ public class ProcessBroker(
 
     @Volatile private var startupCompletion: CountDownLatch? = null
 
-    @Volatile private var closeCompletion: CountDownLatch? = null
+    @Volatile private var closeOperation: CloseOperation? = null
 
     @Volatile private var lifecycle: ProcessBrokerLifecycle = ProcessBrokerLifecycle.New
 
@@ -203,9 +206,13 @@ public class ProcessBroker(
     ): ByteArray {
         check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
         val deadline = Deadline.afterMillis(callTimeoutMs)
-        val slot =
+        val slot = try {
             idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("timed out waiting for an idle portal worker")
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw PortalCallException("interrupted while waiting for an idle portal worker", interrupted)
+        }
         var returnedToPool = false
         var callState: PortalBrokerCallState = PortalBrokerCallState.Idle
         return try {
@@ -216,7 +223,7 @@ public class ProcessBroker(
                 .state
             slot.channel.sendCapabilities(request, fds, deadline)
             val (reply, extra) = slot.channel.receive(deadline)
-            Capability.closeAll(extra)
+            retireCapabilities(extra).failureOrNull()?.let(::raiseBrokerFailure)
             val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
             callState = transition.state
             when (val effect = transition.effect) {
@@ -241,6 +248,15 @@ public class ProcessBroker(
                 scheduleRecycle(slot)
             }
             throw e
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            val failure = PortalCallException("portal RPC interrupted", interrupted)
+            if (!returnedToPool) {
+                runCatching { destroySlot(slot) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
+                runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
+            }
+            Thread.currentThread().interrupt()
+            throw failure
         } catch (expectedRpcFailure: Exception) {
             val transportFailure = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.TransportFailed)
             check(transportFailure.state == PortalBrokerCallState.Failed)
@@ -260,56 +276,59 @@ public class ProcessBroker(
 
     override fun close() {
         val preparation = prepareClose()
-        preparation.waitForOtherClose?.let {
-            it.await()
+        preparation.waitForOtherClose?.let { operation ->
+            awaitCloseOperation(operation).raiseIfFailed()
             return
         }
         if (!preparation.executeCleanup) return
         val startupToJoin = preparation.startupToJoin
-        val completionToSignal = preparation.completionToSignal
+        val operation = checkNotNull(preparation.operation)
         val cleanup = CleanupCollector()
         var allRetired = false
+        var failure: Throwable? = null
         try {
-            allRetired = retireOwnedResources(cleanup, startupToJoin)
+            allRetired = retireOwnedResources(cleanup, startupToJoin, operation.deadline)
+            val outcome = cleanup.outcome()
+            failure = outcome.failureOrNull()
+            if (failure == null && !allRetired) {
+                failure = IncompleteBrokerCleanupException(
+                    "ProcessBroker close did not retire every owned resource",
+                    outcome.failures.map { BrokerCleanupFailure(it.resource, it.cause) },
+                )
+            }
+        } catch (unexpected: Throwable) {
+            failure = unexpected
         } finally {
             synchronized(lifecycleGate) {
-                try {
-                    lifecycle = ProcessBrokerLifecycleMachine
-                        .evaluate(
-                            lifecycle,
-                            if (allRetired) {
-                                ProcessBrokerLifecycleEvent.CleanupSucceeded
-                            } else {
-                                ProcessBrokerLifecycleEvent.CleanupFailed("broker cleanup failed")
-                            },
-                        ).state
-                } finally {
-                    completionToSignal?.countDown()
-                }
+                lifecycle = ProcessBrokerLifecycleMachine
+                    .evaluate(
+                        lifecycle,
+                        if (allRetired && failure == null) {
+                            ProcessBrokerLifecycleEvent.CleanupSucceeded
+                        } else {
+                            ProcessBrokerLifecycleEvent.CleanupFailed("broker cleanup failed")
+                        },
+                    ).state
+                operation.result.complete(failure?.let(BrokerCloseResult::Failed) ?: BrokerCloseResult.Succeeded)
             }
         }
-        val outcome = cleanup.outcome()
-        outcome.failureOrNull()?.let { throw it }
-        if (!allRetired) {
-            throw IncompleteBrokerCleanupException(
-                "ProcessBroker close did not retire every owned resource",
-                outcome.failures.map { BrokerCleanupFailure(it.resource, it.cause) },
-            )
-        }
+        failure?.let(::raiseBrokerFailure)
     }
 
     /** Retires every ownership registry after admission has been closed. */
     private fun retireOwnedResources(
         cleanup: CleanupCollector,
         startupToJoin: CountDownLatch?,
+        deadline: Deadline,
     ): Boolean {
         cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
-        val maintenanceStopped = awaitMaintenance()
+        val maintenanceStopped = awaitMaintenance(deadline)
+        retireRetainedCapabilities(cleanup)
         closeRetirement.retireHandoffs(cleanup)
         provisionalSlots.toList().forEach { slot ->
             cleanup.attempt("provisional worker") { destroySlot(slot) }
         }
-        val startupStopped = awaitStartup(startupToJoin)
+        val startupStopped = awaitStartup(startupToJoin, deadline)
         closeRetirement.retireAllSlots(cleanup)
         provisionalAttempts.toList().forEach { attempt ->
             cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
@@ -336,39 +355,78 @@ public class ProcessBroker(
         }
 
         fun allOwnedResourcesRetired(cleanup: CleanupCollector): Boolean =
-            provisionalSlots.isEmpty() &&
+            trackedSlots.isEmpty() &&
+                idle.isEmpty() &&
+                provisionalSlots.isEmpty() &&
                 provisionalAttempts.isEmpty() &&
                 acceptedHandoffs.isEmpty() &&
+                retainedCapabilities.isEmpty() &&
                 cleanup.outcome().complete
     }
 
     private fun prepareClose(): ClosePreparation =
         synchronized(lifecycleGate) {
             if (lifecycle == ProcessBrokerLifecycle.Closed) return@synchronized ClosePreparation.alreadyClosed()
-            if (lifecycle == ProcessBrokerLifecycle.Closing) return@synchronized ClosePreparation.waitFor(closeCompletion)
+            if (lifecycle == ProcessBrokerLifecycle.Closing) return@synchronized ClosePreparation.waitFor(checkNotNull(closeOperation))
             val transition = ProcessBrokerLifecycleMachine.evaluate(lifecycle, ProcessBrokerLifecycleEvent.CloseRequested)
             check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
             lifecycle = transition.state
             startupCancelled = true
-            val completion = CountDownLatch(1)
-            closeCompletion = completion
-            ClosePreparation.execute(startupCompletion, completion)
+            val operation = CloseOperation(Deadline.afterMillis(startupTimeoutMs), CompletableFuture())
+            closeOperation = operation
+            ClosePreparation.execute(startupCompletion, operation)
         }
 
-    private fun awaitStartup(completion: CountDownLatch?): Boolean {
+    private fun awaitStartup(
+        completion: CountDownLatch?,
+        deadline: Deadline,
+    ): Boolean {
         if (completion == null || completion.count == 0L) return true
-        val result = runCatching { completion.await(startupTimeoutMs, TimeUnit.MILLISECONDS) }
+        val result = runCatching { completion.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) }
         if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
         return result.getOrDefault(false)
     }
 
-    private fun awaitMaintenance(): Boolean {
-        val result = runCatching { maintenance.awaitTermination(startupTimeoutMs, TimeUnit.MILLISECONDS) }
+    private fun awaitMaintenance(deadline: Deadline): Boolean {
+        val result = runCatching { maintenance.awaitTermination(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) }
         if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
         val stopped = result.getOrDefault(false)
         if (!stopped) logger.warning("portal maintenance did not terminate before broker cleanup")
         return stopped
     }
+
+    private fun retireCapabilities(capabilities: List<Capability.ReadFd>): CapabilityRetirementOutcome {
+        retainedCapabilities.addAll(capabilities)
+        val outcome = Capability.retireAll(capabilities)
+        capabilities.filter(Capability.ReadFd::isRetired).forEach(retainedCapabilities::remove)
+        return outcome
+    }
+
+    private fun retireRetainedCapabilities(cleanup: CleanupCollector) {
+        if (retainedCapabilities.isEmpty()) return
+        cleanup.attempt("received portal capabilities") {
+            retireCapabilities(retainedCapabilities.toList()).failureOrNull()?.let(::raiseBrokerFailure)
+        }
+    }
+
+    private fun awaitCloseOperation(operation: CloseOperation): BrokerCloseResult =
+        try {
+            val remaining = operation.deadline
+                .remainingMillis()
+                .coerceAtLeast(0)
+                .toLong()
+            operation.result.get(remaining, TimeUnit.MILLISECONDS)
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw PortalCallException("interrupted while waiting for broker cleanup", interrupted)
+        } catch (timedOut: TimeoutException) {
+            throw IncompleteBrokerCleanupException(
+                "ProcessBroker close did not finish before its shared deadline",
+                listOf(BrokerCleanupFailure("concurrent broker close", timedOut)),
+            )
+        } catch (failed: ExecutionException) {
+            throw (failed.cause ?: failed)
+        }
 
     private fun startupIsActive(): Boolean = lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled
 
@@ -667,19 +725,39 @@ public class ProcessBroker(
 
     private data class ClosePreparation(
         val executeCleanup: Boolean,
-        val waitForOtherClose: CountDownLatch?,
+        val waitForOtherClose: CloseOperation?,
         val startupToJoin: CountDownLatch?,
-        val completionToSignal: CountDownLatch?,
+        val operation: CloseOperation?,
     ) {
         companion object {
             fun alreadyClosed(): ClosePreparation = ClosePreparation(false, null, null, null)
 
-            fun waitFor(completion: CountDownLatch?): ClosePreparation = ClosePreparation(false, completion, null, null)
+            fun waitFor(operation: CloseOperation): ClosePreparation = ClosePreparation(false, operation, null, null)
 
             fun execute(
                 startup: CountDownLatch?,
-                completion: CountDownLatch,
-            ): ClosePreparation = ClosePreparation(true, null, startup, completion)
+                operation: CloseOperation,
+            ): ClosePreparation = ClosePreparation(true, null, startup, operation)
+        }
+    }
+
+    private data class CloseOperation(
+        val deadline: Deadline,
+        val result: CompletableFuture<BrokerCloseResult>,
+    )
+
+    private sealed interface BrokerCloseResult {
+        data object Succeeded : BrokerCloseResult
+
+        data class Failed(
+            val failure: Throwable,
+        ) : BrokerCloseResult
+
+        fun raiseIfFailed() {
+            when (this) {
+                Succeeded -> Unit
+                is Failed -> raiseBrokerFailure(failure)
+            }
         }
     }
 

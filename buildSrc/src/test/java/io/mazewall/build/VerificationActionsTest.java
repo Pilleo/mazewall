@@ -9,6 +9,7 @@ import javax.tools.ToolProvider;
 /** Dependency-free executable checks for our warning inventory contract. */
 public final class VerificationActionsTest {
     public static void main(String[] args) {
+        Path successMarker = requireSuccessMarker(args);
         String xml = "<file name=\"module/Example.kt\">\n"
             + "<error line=\"12\" column=\"4\" severity=\"warning\" message=\"first\nsecond\" source=\"detekt.Example\" />\n</file>";
         List<String> normalized = DetektWarningRatchetAction.normalize(xml.lines().toList());
@@ -29,7 +30,31 @@ public final class VerificationActionsTest {
         verifiesBacklogContracts();
         verifiesTestHealthAggregation();
         TestHealthPluginFunctionalTest.verify();
+        writeSuccessMarker(successMarker);
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
+    }
+
+    private static Path requireSuccessMarker(String[] args) {
+        if (args.length != 1 || args[0].isBlank()) {
+            throw new AssertionError("verificationActionsTest requires one success-marker path");
+        }
+        return Path.of(args[0]);
+    }
+
+    private static void writeSuccessMarker(Path marker) {
+        try {
+            Files.createDirectories(marker.getParent());
+            Path temporary = Files.createTempFile(marker.getParent(), marker.getFileName().toString(), ".tmp");
+            Files.writeString(temporary, "verified\n", StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, marker, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, marker, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception failure) {
+            throw new AssertionError("Cannot publish verification-actions success marker", failure);
+        }
     }
 
     private static void verifiesFreshJvmClassMetadata() {
@@ -203,17 +228,25 @@ public final class VerificationActionsTest {
         try {
             Path root = Files.createTempDirectory("test-health-contract-");
             Path fragments = Files.createDirectories(root.resolve("fragments"));
-            Files.writeString(fragments.resolve("z.json"), "{\"module\":\":profiler\",\"task\":\"test\",\"taskPath\":\":profiler:test\",\"fork\":\"2\"}");
-            Files.writeString(fragments.resolve("a.json"), "{\"module\":\":platform\",\"task\":\"test\",\"taskPath\":\":platform:test\",\"fork\":\"1\"}");
+            Files.writeString(fragments.resolve("z.json"), "{\"invocationToken\":\"current\",\"module\":\":profiler\",\"task\":\"test\",\"taskPath\":\":profiler:test\",\"fork\":\"2\",\"executionStatus\":\"completed\"}");
+            Files.writeString(fragments.resolve("a.json"), "{\"invocationToken\":\"current\",\"module\":\":platform\",\"task\":\"test\",\"taskPath\":\":platform:test\",\"fork\":\"1\",\"executionStatus\":\"completed\"}");
             Path output = root.resolve("aggregate.json");
             TestHealthAggregateAction.aggregate(fragments.toFile(), output.toFile(),
-                List.of(":enforcer:test", ":platform:test", ":profiler:test"));
+                List.of(":enforcer:test", ":platform:test", ":profiler:test"), "current");
             String first = Files.readString(output);
             equal(true, first.indexOf("platform") < first.indexOf("profiler"));
             equal(true, first.contains("\"cachedOrNotExecutedTasks\": [\":enforcer:test\"]"));
             TestHealthAggregateAction.aggregate(fragments.toFile(), output.toFile(),
-                List.of(":enforcer:test", ":platform:test", ":profiler:test"));
+                List.of(":enforcer:test", ":platform:test", ":profiler:test"), "current");
             equal(first, Files.readString(output));
+
+            Files.writeString(fragments.resolve("stale.json"), "{\"invocationToken\":\"previous\",\"module\":\":enforcer\",\"task\":\"test\",\"taskPath\":\":enforcer:test\",\"fork\":\"3\",\"executionStatus\":\"completed\"}");
+            rejectsState(
+                () -> TestHealthAggregateAction.aggregate(fragments.toFile(), output.toFile(),
+                    List.of(":enforcer:test", ":platform:test", ":profiler:test"), "current"),
+                "missing current tasks [:enforcer:test]"
+            );
+            equal(false, Files.exists(output));
         } catch (Exception failure) {
             throw new AssertionError("Test-health aggregation contract failed", failure);
         }
@@ -224,6 +257,15 @@ public final class VerificationActionsTest {
             action.run();
             throw new AssertionError("Expected rejection containing " + expected);
         } catch (IllegalArgumentException failure) {
+            if (!failure.getMessage().contains(expected)) throw failure;
+        }
+    }
+
+    private static void rejectsState(ThrowingRunnable action, String expected) throws Exception {
+        try {
+            action.run();
+            throw new AssertionError("Expected rejection containing " + expected);
+        } catch (IllegalStateException failure) {
             if (!failure.getMessage().contains(expected)) throw failure;
         }
     }

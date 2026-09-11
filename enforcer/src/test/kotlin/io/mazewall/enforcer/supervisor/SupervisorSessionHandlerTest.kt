@@ -66,6 +66,8 @@ class SupervisorSessionHandlerTest {
             PollFdSegment.of(poll.asSlice(0, Layouts.POLLFD_SIZE)).setRevents(NativeConstants.POLLIN)
             val result = with(arena) { fixture.handler().handleActiveListener(poll, arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)) }
             assertEquals(LoopAction.Continue, result)
+            PollFdSegment.of(poll.asSlice(0, Layouts.POLLFD_SIZE)).setRevents(NativeConstants.POLLIN)
+            with(arena) { fixture.handler().handleActiveListener(poll, arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)) }
         }
         assertEquals(2, receives)
         assertEquals(listOf(KernelReply(42, 0, 1, false)), fixture.replies)

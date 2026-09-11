@@ -1,14 +1,18 @@
 package io.mazewall.portal.codegen
 
 import io.mazewall.portal.codegen.testapi.BadStream
+import io.mazewall.portal.codegen.testapi.CompanionShadowService
+import io.mazewall.portal.codegen.testapi.FirstOuter
 import io.mazewall.portal.codegen.testapi.InheritedService
 import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
 import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
 import io.mazewall.portal.codegen.testapi.MethodIdShadowService
+import io.mazewall.portal.codegen.testapi.NullableService
 import io.mazewall.portal.codegen.testapi.Overloads
 import io.mazewall.portal.codegen.testapi.SampleFd
 import io.mazewall.portal.codegen.testapi.SampleGeom
 import io.mazewall.portal.codegen.testapi.SampleGreeter
+import io.mazewall.portal.codegen.testapi.SecondOuter
 import io.mazewall.portal.codegen.testapi.UnreadablePojoService
 import io.mazewall.portal.codegen.testapi.ValidPojoService
 import io.mazewall.portal.codegen.testapi.WrongReaderPojoService
@@ -19,6 +23,40 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PortalStubGeneratorTest {
+    @Test
+    fun `nested services receive distinct loadable generated names`() {
+        val first = PortalStubGenerator.generate(FirstOuter.NestedService::class.java)
+        val second = PortalStubGenerator.generate(SecondOuter.NestedService::class.java)
+
+        assertTrue(first.any { it.name == "FirstOuter_NestedServicePortalStub" }, first.toString())
+        assertTrue(first.any { it.name == "FirstOuter_NestedServicePortalDispatcher" }, first.toString())
+        assertTrue(second.any { it.name == "SecondOuter_NestedServicePortalStub" }, second.toString())
+        assertTrue(second.any { it.name == "SecondOuter_NestedServicePortalDispatcher" }, second.toString())
+    }
+
+    @Test
+    fun `Companion parameter cannot shadow generated method id qualifier`() {
+        val stub =
+            PortalStubGenerator
+                .generate(CompanionShadowService::class.java)
+                .single { it.name.endsWith("PortalStub") }
+                .toString()
+
+        assertTrue(stub.contains("Companion: String"), stub)
+        assertTrue(stub.contains("CompanionShadowServicePortalStub.Companion."), stub)
+    }
+
+    @Test
+    fun `nullable Kotlin signatures remain nullable in generated overrides`() {
+        val files = PortalStubGenerator.generate(NullableService::class.java)
+        val stub = files.single { it.name.endsWith("PortalStub") }.toString()
+        val dispatcher = files.single { it.name.endsWith("PortalDispatcher") }.toString()
+
+        assertTrue(Regex("""\w+: String\?""").containsMatchIn(stub), stub)
+        assertTrue(Regex("""fun echo\([^:]+: String\?\): String\?""").containsMatchIn(stub), stub)
+        assertTrue(Regex("""val \w+: String\?""").containsMatchIn(dispatcher), dispatcher)
+    }
+
     @Test
     fun `capability placement reports service method and nested property`() {
         listOf(
@@ -220,7 +258,7 @@ class PortalStubGeneratorTest {
                 .single { it.name == "MethodIdShadowServicePortalStub" }
                 .toString()
         assertTrue(stub.contains("pinned(PINNED_METHOD_ID: String)"), stub)
-        assertTrue(stub.contains("PortalMethod.Generated(Companion.PINNED_METHOD_ID)"), stub)
+        assertTrue(stub.contains("PortalMethod.Generated(MethodIdShadowServicePortalStub.Companion.PINNED_METHOD_ID)"), stub)
     }
 
     @Test

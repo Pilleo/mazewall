@@ -23,6 +23,8 @@ class TestSuiteHealthListener : LauncherSessionListener {
         val skipped = AtomicInteger(0)
         val aborted = AtomicInteger(0)
         val failed = AtomicInteger(0)
+        val containerAborted = AtomicInteger(0)
+        val containerFailed = AtomicInteger(0)
     }
 
     private fun getClassName(testIdentifier: TestIdentifier): String {
@@ -66,6 +68,15 @@ class TestSuiteHealthListener : LauncherSessionListener {
                         TestExecutionResult.Status.SUCCESSFUL -> {}
                         null -> {}
                     }
+                } else if (testIdentifier.isContainer) {
+                    val className = classContainerName(testIdentifier) ?: return
+                    val stats = classStats.getOrPut(className) { Stats() }
+                    when (testExecutionResult.status) {
+                        TestExecutionResult.Status.ABORTED -> stats.containerAborted.incrementAndGet()
+                        TestExecutionResult.Status.FAILED -> stats.containerFailed.incrementAndGet()
+                        TestExecutionResult.Status.SUCCESSFUL -> {}
+                        null -> {}
+                    }
                 }
             }
         })
@@ -77,6 +88,8 @@ class TestSuiteHealthListener : LauncherSessionListener {
         var totalSkipped = 0
         var totalAborted = 0
         var totalFailed = 0
+        var totalContainerAborted = 0
+        var totalContainerFailed = 0
 
         println("\n=== Test Tier Health Summary ===")
         for ((className, stats) in classStats.entries.sortedBy { it.key }) {
@@ -84,34 +97,46 @@ class TestSuiteHealthListener : LauncherSessionListener {
             val skipped = stats.skipped.get()
             val aborted = stats.aborted.get()
             val failed = stats.failed.get()
+            val containerAborted = stats.containerAborted.get()
+            val containerFailed = stats.containerFailed.get()
 
             totalExecuted += executed
             totalSkipped += skipped
             totalAborted += aborted
             totalFailed += failed
+            totalContainerAborted += containerAborted
+            totalContainerFailed += containerFailed
 
             println(
                 String.format(
-                    "Class: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
+                    "Class: %-50s | Executed: %3d | Skipped: %3d | Aborted: %3d | Failed: %3d | Container aborted: %3d | Container failed: %3d",
                 className,
                     executed,
                     skipped,
                     aborted,
                     failed,
+                    containerAborted,
+                    containerFailed,
                 ),
             )
 
-            jsonLines.add("""    "${escape(className)}": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed }""")
+            jsonLines.add(
+                """    "${escape(
+                    className,
+                )}": { "executed": $executed, "skipped": $skipped, "aborted": $aborted, "failed": $failed, "containerAborted": $containerAborted, "containerFailed": $containerFailed }""",
+            )
         }
         println("--------------------------------")
         println(
             String.format(
-                "Total: %-50s | Executed: %3d | Skipped: %3d | Aborted(Assumptions): %3d | Failed: %3d",
+                "Total: %-50s | Executed: %3d | Skipped: %3d | Aborted: %3d | Failed: %3d | Container aborted: %3d | Container failed: %3d",
             "",
                 totalExecuted,
                 totalSkipped,
                 totalAborted,
                 totalFailed,
+                totalContainerAborted,
+                totalContainerFailed,
             ),
         )
         println("================================\n")
@@ -126,16 +151,25 @@ class TestSuiteHealthListener : LauncherSessionListener {
         val module = System.getProperty("io.mazewall.testHealth.module", "unknown")
         val task = System.getProperty("io.mazewall.testHealth.task", "unknown")
         val taskPath = System.getProperty("io.mazewall.testHealth.taskPath", "unknown")
+        val invocationToken = System.getProperty("io.mazewall.testHealth.invocationToken", "missing")
         val fork = "${ProcessHandle.current().pid()}-${sessionSequence.incrementAndGet()}"
+        val executionStatus =
+            when {
+                totalFailed > 0 || totalContainerFailed > 0 -> "failed"
+                totalAborted > 0 || totalContainerAborted > 0 -> "aborted"
+                else -> "completed"
+            }
         reportDir.mkdirs()
         val reportFile = File(reportDir, "${safe(module)}-${safe(task)}-$fork.json")
         val payload =
             """{
+              "invocationToken": "${escape(invocationToken)}",
               "module": "${escape(module)}",
               "task": "${escape(task)}",
               "taskPath": "${escape(taskPath)}",
               "fork": "${escape(fork)}",
-              "totals": { "executed": $totalExecuted, "skipped": $totalSkipped, "aborted": $totalAborted, "failed": $totalFailed },
+              "executionStatus": "$executionStatus",
+              "totals": { "executed": $totalExecuted, "skipped": $totalSkipped, "aborted": $totalAborted, "failed": $totalFailed, "containerAborted": $totalContainerAborted, "containerFailed": $totalContainerFailed },
               "classes": {
             ${jsonLines.joinToString(",\n")}
               }
@@ -151,7 +185,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
 
         val strictMode = System.getProperty("io.mazewall.strictTestTier") == "true"
         if (strictMode) {
-            val totalSkipLike = totalSkipped + totalAborted
+            val totalSkipLike = totalSkipped + totalAborted + totalContainerAborted
             if (totalSkipLike > 0) {
                 System.err.println("Strict Test Tier check failed: found $totalSkipLike skipped/aborted tests.")
                 throw RuntimeException("Strict Test Tier check failed: found $totalSkipLike skipped/aborted tests.")
@@ -160,6 +194,15 @@ class TestSuiteHealthListener : LauncherSessionListener {
     }
 
     private fun safe(value: String): String = value.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+
+    private fun classContainerName(testIdentifier: TestIdentifier): String? {
+        val segments = Regex("\\[(?:class|nested-class):([^\\]]+)]").findAll(testIdentifier.uniqueId).map { it.groupValues[1] }.toList()
+        if (segments.isEmpty()) return null
+        return buildString {
+            append(segments.first())
+            segments.drop(1).forEach { nested -> append('$').append(nested) }
+        }
+    }
 
     private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 }

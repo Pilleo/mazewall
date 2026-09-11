@@ -3,6 +3,7 @@ package demo
 import io.mazewall.LinuxNative
 import io.mazewall.Policy
 import io.mazewall.core.Arch
+import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
@@ -11,7 +12,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import org.junit.jupiter.api.Test
 import java.io.File
-import java.lang.foreign.*
+import java.lang.foreign.Arena
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -20,6 +21,19 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ProtectionDemonstrationTest {
+    @Test
+    fun `non-permission native error is not authenticated containment`() {
+        val result = authenticateNativeDenial(NativeConstants.EINVAL)
+
+        assertTrue(result is ScenarioOutcome.InfrastructureFailure)
+    }
+
+    @Test
+    fun `permission native errors are authenticated containment`() {
+        assertTrue(authenticateNativeDenial(NativeConstants.EPERM) is ScenarioOutcome.Denied)
+        assertTrue(authenticateNativeDenial(NativeConstants.EACCES) is ScenarioOutcome.Denied)
+    }
+
     @Test
     fun `Attack 1 - Classic Shell Execution Protected`() {
         val osName = System.getProperty("os.name")
@@ -83,59 +97,52 @@ class ProtectionDemonstrationTest {
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
 
         try {
-            assertFailsWith<ExecutionException> {
+            val outcome =
                 safeExecutor
-                    .submit {
-                        val linker = Linker.nativeLinker()
-                        val mmap =
-                            linker.downcallHandle(
-                                linker.defaultLookup().find("mmap").get(),
-                                FunctionDescriptor.of(
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.JAVA_LONG,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_LONG,
-                                ),
+                    .submit<ScenarioOutcome> {
+                        val arch = Arch.current()
+                        val pageSize = 4096L
+                        val mapping =
+                            LinuxNative.raw.syscall(
+                                arch.mmap.toLong(),
+                                NativeArg.NullArg,
+                                NativeArg.LongArg(pageSize),
+                                NativeArg.IntArg(PROT_READ or PROT_WRITE),
+                                NativeArg.IntArg(MAP_PRIVATE or MAP_ANONYMOUS),
+                                NativeArg.IntArg(-1),
+                                NativeArg.LongArg(0L),
                             )
-                        val mprotect =
-                            linker.downcallHandle(
-                                linker.defaultLookup().find("mprotect").get(),
-                                FunctionDescriptor.of(
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.JAVA_LONG,
-                                    ValueLayout.JAVA_INT,
-                                ),
-                            )
-
-                        val PROT_READ = 0x1
-                        val PROT_WRITE = 0x2
-                        val PROT_EXEC = 0x4
-                        val MAP_PRIVATE = 0x02
-                        val MAP_ANONYMOUS = 0x20
-
-                        val addr =
-                            mmap.invoke(
-                                MemorySegment.NULL,
-                                4096L,
-                                PROT_READ or PROT_WRITE,
-                                MAP_PRIVATE or MAP_ANONYMOUS,
-                                -1,
-                                0L,
-                            ) as MemorySegment
-                        if (addr.address() == -1L) throw java.io.IOException("mmap failed")
-
-                        val res = mprotect.invoke(addr, 4096L, PROT_READ or PROT_EXEC) as Int
-                        if (res == -1) {
-                            throw java.io.IOException("Operation not permitted")
+                        val address =
+                            when (mapping) {
+                                is LinuxNative.SyscallResult.Success -> mapping.value
+                                is LinuxNative.SyscallResult.Error -> mapping.throwErrno("mmap")
+                            }
+                        try {
+                            when (
+                                val protection =
+                                    LinuxNative.raw.syscall(
+                                        arch.mprotect.toLong(),
+                                        NativeArg.LongArg(address),
+                                        NativeArg.LongArg(pageSize),
+                                        NativeArg.IntArg(PROT_READ or PROT_EXEC),
+                                    )
+                            ) {
+                                is LinuxNative.SyscallResult.Success -> ScenarioOutcome.Completed("mprotect(PROT_EXEC) succeeded")
+                                is LinuxNative.SyscallResult.Error -> {
+                                    val errno = protection.errno
+                                    authenticateNativeDenial(errno)
+                                }
+                            }
+                        } finally {
+                            LinuxNative.raw
+                                .syscall(
+                                    arch.munmap.toLong(),
+                                    NativeArg.LongArg(address),
+                                    NativeArg.LongArg(pageSize),
+                                ).getOrThrow("munmap")
                         }
                     }.get()
-            }.let { e ->
-                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(e)?.evidence)
-            }
+            assertTrue(outcome is ScenarioOutcome.Denied, "Expected authenticated EPERM/EACCES, got $outcome")
         } finally {
             safeExecutor.shutdown()
             executor.shutdown()
@@ -200,5 +207,13 @@ class ProtectionDemonstrationTest {
             safeExecutor.shutdown()
             executor.shutdown()
         }
+    }
+
+    private companion object {
+        const val PROT_READ = 0x1
+        const val PROT_WRITE = 0x2
+        const val PROT_EXEC = 0x4
+        const val MAP_PRIVATE = 0x02
+        const val MAP_ANONYMOUS = 0x20
     }
 }

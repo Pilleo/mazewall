@@ -9,10 +9,12 @@ kotlin {
 
 dependencies {
     compileOnly(libs.kotlinGradlePlugin)
+    compileOnly(kotlin("reflect"))
     implementation(libs.kotlinpoet)
+    implementation(project(":portal"))
     testImplementation(gradleTestKit())
-    testImplementation(project(":portal"))
     testImplementation(kotlin("test"))
+    testImplementation(kotlin("reflect"))
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
 }
