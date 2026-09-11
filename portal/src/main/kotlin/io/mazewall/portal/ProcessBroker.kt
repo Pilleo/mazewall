@@ -274,6 +274,7 @@ public class ProcessBroker(
         }
     }
 
+    @Suppress("TooGenericExceptionCaught")
     override fun close() {
         val preparation = prepareClose()
         preparation.waitForOtherClose?.let { operation ->

@@ -66,6 +66,7 @@ public class Capability private constructor() {
          * Retire every supplied owner and return the owners whose close failed before native
          * dispatch. Callers must retain [CapabilityRetirementOutcome.retained] and retry them.
          */
+        @Suppress("TooGenericExceptionCaught")
         internal fun retireAll(capabilities: List<ReadFd>): CapabilityRetirementOutcome {
             val failures = mutableListOf<CleanupFailure>()
             capabilities.forEachIndexed { index, capability ->
