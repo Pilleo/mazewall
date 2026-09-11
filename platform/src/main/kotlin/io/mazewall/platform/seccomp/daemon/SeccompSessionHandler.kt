@@ -29,6 +29,7 @@ import io.mazewall.platform.seccomp.UserNotifReplyResult
  * ownership callback on terminal failure. Close drains work and releases buffers idempotently;
  * a reported pre-retirement failure requires retaining this handler for cleanup retry.
  */
+@Suppress("UseCheckOrError")
 public class SeccompSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
@@ -120,6 +121,7 @@ public class SeccompSessionHandler(
         recordOutcome,
     )
 
+    @Suppress("UseCheckOrError")
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
         NotificationLivenessMetrics.counters.reactorPoll()
         if (isTerminated) {
