@@ -2,12 +2,14 @@ package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
 import io.mazewall.NativeMemory
+import io.mazewall.core.ErrnoMapping
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
+import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
 
@@ -70,7 +72,12 @@ public open class NativeDescriptorInputStream(
                     return onRead(result.value)
                 }
                 is LinuxNative.SyscallResult.Error -> {
-                    if (result.errno != EINTR) return -1
+                    if (result.errno != EINTR) {
+                        val symbol = ErrnoMapping.getSymbolicName(result.errno)?.let { " ($it)" }.orEmpty()
+                        throw IOException(
+                            "$description $operation failed with errno=${result.errno}$symbol (raw return=${result.rawValue})",
+                        )
+                    }
                     eintrCount++
                     backoff(eintrCount)
                 }

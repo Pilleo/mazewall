@@ -357,6 +357,31 @@ class SeccompCleanupInterpreterTest {
         assertSame(cancellation, thrown)
         assertTrue(arenaClosed)
     }
+
+    @Test
+    fun `fatal cleanup error remains primary after every independent release`() {
+        val fatal = AssertionError("fatal release failure")
+        val laterFailure = IllegalStateException("later release failure")
+        val attempts = mutableListOf<String>()
+
+        val thrown = assertThrows(AssertionError::class.java) {
+            SeccompCleanupInterpreter.closeResources(
+                {
+                    attempts += "first"
+                    throw fatal
+                },
+                {
+                    attempts += "second"
+                    throw laterFailure
+                },
+                { attempts += "third" },
+            )
+        }
+
+        assertSame(fatal, thrown)
+        assertEquals(listOf("first", "second", "third"), attempts)
+        assertEquals(listOf(laterFailure), fatal.suppressed.toList())
+    }
 }
 
 private class CleanupSocketManager(

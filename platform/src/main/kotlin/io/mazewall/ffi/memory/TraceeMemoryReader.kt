@@ -1,6 +1,7 @@
 package io.mazewall.ffi.memory
 
 import io.mazewall.LinuxNative
+import io.mazewall.core.Deadline
 import io.mazewall.core.Pid
 import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
@@ -24,6 +25,15 @@ public interface TraceeMemoryReader {
         public val preview: String,
         message: String,
     ) : IllegalStateException(message)
+
+    /** The kernel kept interrupting a bounded tracee-memory read until its retry budget expired. */
+    public class ReadRetryExhaustedException(
+        public val attempts: Int,
+        public val errno: Int,
+        deadlineExpired: Boolean,
+    ) : IllegalStateException(
+        "Tracee memory read did not complete after $attempts attempt(s): errno=$errno (EINTR), deadlineExpired=$deadlineExpired",
+    )
 
     context(arena: NativeArena) public fun readString(
         tid: Tid,
@@ -85,13 +95,29 @@ public interface TraceeMemoryReader {
             remoteIov.setIovBase(MemorySegment.ofAddress(remoteAddr))
             remoteIov.setIovLen(len.toLong())
 
+            val retryBudget = ProcessVmReadRetryBudget.default()
+            val memory = LinuxNative.snapshot().memory
+            var attempts = 0
             var res: LinuxNative.SyscallResult<Long, *>
             while (true) {
-                res = LinuxNative.memory.processVmReadv(Pid(tid.value), ConfinedSegment(localIov.segment), 1, ConfinedSegment(remoteIov.segment), 1, 0)
-                if (res is LinuxNative.SyscallResult.Error && res.errno == io.mazewall.ffi.NativeConstants.EINTR) {
-                    continue
+                if (Thread.currentThread().isInterrupted) {
+                    throw ReadRetryExhaustedException(attempts, NativeConstants.EINTR, retryBudget.deadline.isExpired())
                 }
-                break
+                attempts++
+                res = memory.processVmReadv(
+                    Pid(tid.value),
+                    ConfinedSegment(localIov.segment),
+                    1,
+                    ConfinedSegment(remoteIov.segment),
+                    1,
+                    0,
+                )
+                if (res !is LinuxNative.SyscallResult.Error || res.errno != NativeConstants.EINTR) break
+                val deadlineExpired = retryBudget.deadline.isExpired()
+                if (attempts >= retryBudget.maxAttempts || deadlineExpired) {
+                    throw ReadRetryExhaustedException(attempts, res.errno, deadlineExpired)
+                }
+                Thread.yield()
             }
             return if (res is LinuxNative.SyscallResult.Success && res.value > 0) {
                 val bytesRead = res.value.toInt()
@@ -110,6 +136,21 @@ public interface TraceeMemoryReader {
         }
 
         private const val PATH_MAX_VAL = 4096L
+        private const val PROCESS_VM_READ_TIMEOUT_MS = 100L
+        private const val PROCESS_VM_READ_MAX_ATTEMPTS = 8
+
+        private data class ProcessVmReadRetryBudget(
+            val deadline: Deadline,
+            val maxAttempts: Int,
+        ) {
+            companion object {
+                fun default(): ProcessVmReadRetryBudget =
+                    ProcessVmReadRetryBudget(
+                        deadline = Deadline.afterMillis(PROCESS_VM_READ_TIMEOUT_MS),
+                        maxAttempts = PROCESS_VM_READ_MAX_ATTEMPTS,
+                    )
+            }
+        }
 
         context(arena: NativeArena) override fun resolveLink(
             tid: Tid,

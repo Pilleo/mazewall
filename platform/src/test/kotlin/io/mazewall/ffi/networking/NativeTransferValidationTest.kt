@@ -4,6 +4,7 @@ import io.mazewall.LinuxNative
 import io.mazewall.NativeMemory
 import io.mazewall.core.*
 import io.mazewall.core.TestFileDescriptors
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.*
 import io.mazewall.getFdOrThrow
@@ -97,6 +98,30 @@ class NativeTransferValidationTest {
                 memory,
             )
             assertThrows<java.io.IOException> { stream.read(ByteArray(4), 0, 1) }
+        }
+    }
+
+    @Test
+    fun `stream reports native read errors instead of treating them as EOF`() {
+        NativeArena.ofConfined().use { arena ->
+            for (errno in listOf(NativeConstants.EBADF, NativeConstants.EIO)) {
+                val memory = object : NativeMemory by RealNativeEngine.memory {
+                    override fun read(
+                        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        buf: ManagedSegment,
+                        count: Long,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(errno, -1L)
+                }
+                val stream = NativeDescriptorInputStream(
+                    TestFileDescriptors.replace<FileDescriptorRole.Generic>(-1),
+                    arena,
+                    "test descriptor",
+                    memory,
+                )
+
+                val failure = assertThrows<java.io.IOException> { stream.read() }
+                assertTrue(failure.message.orEmpty().contains("errno=$errno"))
+            }
         }
     }
 }

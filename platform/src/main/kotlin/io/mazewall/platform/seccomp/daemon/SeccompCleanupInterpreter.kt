@@ -53,11 +53,18 @@ public object SeccompCleanupInterpreter {
         recordOutcome: (SeccompCleanupOutcome) -> Unit = { },
     ): SeccompCleanupOutcome {
         val failures = mutableListOf<Exception>()
+        var fatalFailure: Throwable? = null
         for (release in releases) {
             try {
                 release()
-            } catch (failure: Exception) {
-                failures += failure
+            } catch (failure: Throwable) {
+                if (failure is Exception) {
+                    failures += failure
+                } else if (fatalFailure == null) {
+                    fatalFailure = failure
+                } else if (failure !== fatalFailure) {
+                    fatalFailure.addSuppressed(failure)
+                }
             }
         }
         val outcome = if (failures.isEmpty()) {
@@ -68,6 +75,10 @@ public object SeccompCleanupInterpreter {
         recordOutcome(outcome)
         if (failures.any { it is InterruptedException || it is ClosedByInterruptException }) {
             Thread.currentThread().interrupt()
+        }
+        fatalFailure?.let { fatal ->
+            failures.filter { it !== fatal }.forEach(fatal::addSuppressed)
+            throw fatal
         }
         failures.filterIsInstance<CancellationException>().firstOrNull()?.let { cancellation ->
             failures.filter { it !== cancellation }.forEach(cancellation::addSuppressed)
