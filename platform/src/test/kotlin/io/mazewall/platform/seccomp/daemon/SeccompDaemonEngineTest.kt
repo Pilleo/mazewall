@@ -18,7 +18,27 @@ import org.junit.jupiter.api.Test
 
 class SeccompDaemonEngineTest {
     @Test
-    fun `handshake acknowledgement bounds EINTR retries`() {
+    fun `accepted control socket is requested nonblocking`() {
+        var acceptedFlags = 0
+        val engine = MockNativeEngine().apply {
+            networking.onAccept4 = { _, _, _, flags ->
+                acceptedFlags = flags
+                LinuxNative.SyscallResult.Error(NativeConstants.EAGAIN, -1L)
+            }
+        }
+        val daemon = SeccompDaemonEngine(
+            socketPath = "/tmp/test.sock",
+            notifHandlerFactory = { _, _ -> error("unused") },
+            engine = engine,
+        )
+
+        daemon.handleNewConnection(TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(9))
+
+        assertTrue((acceptedFlags and NativeConstants.O_NONBLOCK.toInt()) != 0)
+    }
+
+    @Test
+    fun `handshake acknowledgement makes one attempt after each poll`() {
         var writes = 0
         val nativeEngine = MockNativeEngine()
         val daemon = SeccompDaemonEngine(
@@ -38,9 +58,46 @@ class SeccompDaemonEngineTest {
                 arena.allocate(1),
                 Deadline.afterMillis(10_000),
             )
-            assertEquals(HandshakeWriteOutcome.Failed(NativeConstants.EINTR), result)
+            assertEquals(HandshakeWriteOutcome.RetryAfterPoll, result)
         }
-        assertEquals(8, writes)
+        assertEquals(1, writes)
+    }
+
+    @Test
+    fun `short handshake acknowledgement fails closed`() {
+        val daemon = SeccompDaemonEngine(
+            socketPath = "/tmp/test.sock",
+            notifHandlerFactory = { _, _ -> error("unused") },
+            handshakeWriter = { _, _, _ ->
+                LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+            },
+        )
+        NativeArena.ofConfined().use { arena ->
+            assertEquals(
+                HandshakeWriteOutcome.Failed(NativeConstants.EIO),
+                daemon.writeHandshakeAck(
+                    TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10),
+                    arena.allocate(1),
+                    Deadline.afterMillis(10_000),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `handshake deadlines distinguish connections that reuse an fd number`() {
+        val deadlines = HandshakeDeadlineRegistry()
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val first = SeccompConnection.Accepted(socket)
+        val second = SeccompConnection.Accepted(socket)
+
+        val firstDeadline = deadlines.getOrCreate(first) { Deadline(100) }
+        val secondDeadline = deadlines.getOrCreate(second) { Deadline(200) }
+        deadlines.remove(first)
+
+        assertEquals(100, firstDeadline.nanoTime)
+        assertEquals(200, secondDeadline.nanoTime)
+        assertEquals(1, deadlines.size)
     }
 
     @Test

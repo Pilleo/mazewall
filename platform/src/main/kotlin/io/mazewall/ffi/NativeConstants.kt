@@ -6,6 +6,7 @@ package io.mazewall.ffi
 object NativeConstants {
     // Poll events
     const val POLLIN: Short = 1
+    const val POLLOUT: Short = 4
     const val POLLERR: Short = 8
     const val POLLHUP: Short = 16
     const val POLLNVAL: Short = 32

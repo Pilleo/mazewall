@@ -9,17 +9,99 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.readByte
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import java.io.IOException
 
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
 class SupervisorValidationChannelTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
+        System.clearProperty("mazewall.supervisor.installTimeoutMillis")
+    }
+
+    @Test
+    fun `validation socket is configured nonblocking before use`() {
+        var configuredFlags = 0L
+        val engine = object : MockNativeEngine() {
+            override fun fcntl(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                cmd: Int,
+                arg: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (cmd == NativeConstants.F_SETFL) configuredFlags = arg
+                return LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        LinuxNative.setEngine(engine)
+
+        SupervisorValidationChannel(TestFileDescriptors.replace(7)).close()
+
+        assertTrue((configuredFlags and NativeConstants.O_NONBLOCK) != 0L)
+    }
+
+    @Test
+    fun `stalled validation peer is bounded by the installation deadline`() {
+        System.setProperty("mazewall.supervisor.installTimeoutMillis", "7")
+        val pollTimeouts = mutableListOf<Int>()
+        val engine = MockNativeEngine().apply {
+            onPoll = { _, _, timeout ->
+                pollTimeouts += timeout
+                if (pollTimeouts.size == 1) {
+                    LinuxNative.SyscallResult.Success(0L)
+                } else {
+                    LinuxNative.SyscallResult.Error(NativeConstants.EIO, -1L)
+                }
+            }
+        }
+        LinuxNative.setEngine(engine)
+        val channel = SupervisorValidationChannel(TestFileDescriptors.replace(7))
+
+        val failure = assertThrows<java.io.IOException> { channel.inputStream.read() }
+
+        assertTrue(failure.message.orEmpty().contains("timed out"))
+        assertEquals(1, pollTimeouts.size)
+        assertTrue(pollTimeouts.single() in 1..7)
+        channel.close()
+    }
+
+    @Test
+    fun `repeated EINTR reads retain one absolute deadline`() {
+        System.setProperty("mazewall.supervisor.installTimeoutMillis", "7")
+        var reads = 0
+        val memory = object : MockNativeMemory() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                reads++
+                return LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+            }
+        }
+        val engine = MockNativeEngine(memory = memory).apply {
+            onPoll = { fds, _, _ ->
+                io.mazewall.ffi.memory.PollFdSegment
+                    .of(fds)
+                    .setRevents(NativeConstants.POLLIN)
+                LinuxNative.SyscallResult.Success(1L)
+            }
+        }
+        LinuxNative.setEngine(engine)
+        val channel = SupervisorValidationChannel(TestFileDescriptors.replace(7))
+
+        val failure = assertThrows<IOException> { channel.inputStream.read() }
+
+        assertTrue(failure.message.orEmpty().contains("timed out"))
+        assertTrue(reads > 1)
+        channel.close()
     }
 
     @Test
@@ -49,6 +131,12 @@ class SupervisorValidationChannelTest {
         }
 
         val mockEngine = object : MockNativeEngine(memory = mockMemory) {}
+        mockEngine.onPoll = { fds, _, _ ->
+            io.mazewall.ffi.memory.PollFdSegment
+                .of(fds)
+                .setRevents(NativeConstants.POLLOUT)
+            LinuxNative.SyscallResult.Success(1L)
+        }
         LinuxNative.setEngine(mockEngine)
 
         val socketFd = TestFileDescriptors
@@ -87,7 +175,16 @@ class SupervisorValidationChannelTest {
                 return LinuxNative.SyscallResult.Success(count)
             }
         }
-        LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
+        LinuxNative.setEngine(
+            object : MockNativeEngine(memory = mockMemory) {}.apply {
+            onPoll = { fds, _, _ ->
+                io.mazewall.ffi.memory.PollFdSegment
+                    .of(fds)
+                    .setRevents(NativeConstants.POLLOUT)
+                LinuxNative.SyscallResult.Success(1L)
+            }
+        },
+        )
         val channel = SupervisorValidationChannel(
             TestFileDescriptors
             .replace(7),
@@ -113,7 +210,16 @@ class SupervisorValidationChannelTest {
                 return LinuxNative.SyscallResult.Success(count)
             }
         }
-        LinuxNative.setEngine(object : MockNativeEngine(memory = mockMemory) {})
+        LinuxNative.setEngine(
+            object : MockNativeEngine(memory = mockMemory) {}.apply {
+            onPoll = { fds, _, _ ->
+                io.mazewall.ffi.memory.PollFdSegment
+                    .of(fds)
+                    .setRevents(NativeConstants.POLLOUT)
+                LinuxNative.SyscallResult.Success(1L)
+            }
+        },
+        )
         val channel = SupervisorValidationChannel(
             TestFileDescriptors
             .replace(7),

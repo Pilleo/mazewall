@@ -11,6 +11,7 @@ import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.PollFdSegment
 
 @MazewallInternal
 public class ControlSocketFailure(
@@ -24,7 +25,7 @@ public class ControlSocketFailure(
  */
 @MazewallInternal
 public class ControlSocketExchange(
-    raw: RawSyscallOperations,
+    private val raw: RawSyscallOperations,
     private val memory: NativeMemory,
     private val socket: FileDescriptor<*, FdState.Open, FdOwnership>,
     outbound: ByteArray,
@@ -37,7 +38,6 @@ public class ControlSocketExchange(
     private val response = ByteArray(responseSize)
     private var sent = 0
     private var received = 0
-    private var interruptions = 0
 
     public val requestSent: Boolean get() = sent == request.size
 
@@ -45,10 +45,10 @@ public class ControlSocketExchange(
         require(responseSize >= 0)
         require(minimumResponseSize in 0..responseSize)
         // This is the daemon's private control endpoint, never a tracee open-file description.
-        val flags = raw.fcntl(socket, F_GETFL, 0)
+        val flags = raw.fcntl(socket, NativeConstants.F_GETFL, 0)
         when (flags) {
             is LinuxNative.SyscallResult.Error -> throw ControlSocketFailure(flags.errno)
-            is LinuxNative.SyscallResult.Success -> when (val configured = raw.fcntl(socket, F_SETFL, flags.value or O_NONBLOCK)) {
+            is LinuxNative.SyscallResult.Success -> when (val configured = raw.fcntl(socket, NativeConstants.F_SETFL, flags.value or NativeConstants.O_NONBLOCK)) {
                 is LinuxNative.SyscallResult.Error -> throw ControlSocketFailure(configured.errno)
                 is LinuxNative.SyscallResult.Success -> Unit
             }
@@ -58,6 +58,8 @@ public class ControlSocketExchange(
     /** SUPPRESSION-RATIONALE: Null means Await; each partial transfer yields immediately to preserve one I/O attempt per poll. */
     context(arena: NativeArena) public fun poll(): ByteArray? {
         if (nanoTime() - deadline.nanoTime >= 0) throw ControlSocketFailure(NativeConstants.ETIMEDOUT)
+        val event = if (sent < request.size) NativeConstants.POLLOUT else NativeConstants.POLLIN
+        if (!ready(event)) return null
         if (sent < request.size) {
             val buffer = arena.allocate((request.size - sent).toLong())
             ManagedSegment.copy(request, sent, buffer, 0, request.size - sent)
@@ -74,30 +76,37 @@ public class ControlSocketExchange(
         return if (received >= minimumResponseSize) response.copyOf(received) else null
     }
 
+    context(arena: NativeArena) private fun ready(event: Short): Boolean {
+        val pollFd = PollFdSegment.of(arena.allocate(io.mazewall.ffi.Layouts.POLLFD))
+        pollFd.setFd(socket.value)
+        pollFd.setEvents(event)
+        pollFd.setRevents(0)
+        return when (val result = raw.poll(pollFd.managed, 1, 0)) {
+            is LinuxNative.SyscallResult.Error -> when (result.errno) {
+                NativeConstants.EINTR, NativeConstants.EAGAIN -> false
+                else -> throw ControlSocketFailure(result.errno)
+            }
+            is LinuxNative.SyscallResult.Success -> {
+                val revents = pollFd.getRevents().toInt()
+                val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+                if ((revents and terminal) != 0) throw ControlSocketFailure(NativeConstants.EIO)
+                result.value > 0 && (revents and event.toInt()) != 0
+            }
+        }
+    }
+
     private fun transfer(
         result: LinuxNative.SyscallResult<Long, *>,
         remaining: Int,
     ): Int? =
         when (result) {
         is LinuxNative.SyscallResult.Error -> when (result.errno) {
-            NativeConstants.EAGAIN -> null
-            NativeConstants.EINTR -> {
-                interruptions++
-                if (interruptions >= MAX_INTERRUPTS) throw ControlSocketFailure(result.errno)
-                null
-            }
+            NativeConstants.EAGAIN, NativeConstants.EINTR -> null
             else -> throw ControlSocketFailure(result.errno)
         }
         is LinuxNative.SyscallResult.Success -> {
             if (result.value <= 0 || result.value > remaining) throw ControlSocketFailure(NativeConstants.EIO)
             result.value.toInt()
         }
-    }
-
-    private companion object {
-        const val F_GETFL = 3
-        const val F_SETFL = 4
-        const val O_NONBLOCK = 0x800L
-        const val MAX_INTERRUPTS = 8
     }
 }

@@ -30,8 +30,9 @@ import io.mazewall.platform.daemon.UnixListenDaemonOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
 import io.mazewall.recover
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.concurrent.CancellationException
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -50,6 +51,20 @@ internal sealed interface HandshakeWriteOutcome {
     data class Failed(
         val errno: Int,
     ) : HandshakeWriteOutcome
+}
+
+/** Deadlines follow connection objects, never recyclable integer descriptor values. */
+internal class HandshakeDeadlineRegistry {
+    private val deadlines = Collections.synchronizedMap(IdentityHashMap<SeccompConnection, Deadline>())
+
+    fun getOrCreate(
+        connection: SeccompConnection,
+        create: () -> Deadline,
+    ): Deadline = synchronized(deadlines) { deadlines[connection] ?: create().also { deadlines[connection] = it } }
+
+    fun remove(connection: SeccompConnection): Deadline? = deadlines.remove(connection)
+
+    val size: Int get() = deadlines.size
 }
 
 /**
@@ -93,7 +108,7 @@ public class SeccompDaemonEngine(
     private val incompleteConnections = CopyOnWriteArrayList<SeccompConnection>()
     private val failedServerCloses = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
     private val cleanupFailures = CopyOnWriteArrayList<Exception>()
-    private val handshakeDeadlines = ConcurrentHashMap<Int, Deadline>()
+    private val handshakeDeadlines = HandshakeDeadlineRegistry()
 
     /** Historical failures stay visible even if a later shutdown retry releases all descriptors. */
     @io.mazewall.MazewallInternal
@@ -117,7 +132,6 @@ public class SeccompDaemonEngine(
         private const val ACK_BUF_SIZE = 1L
         private const val CONNECTION_WORKER_DRAIN_TIMEOUT_MS = 5_000L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
-        private const val MAX_HANDSHAKE_INTERRUPTS = 8
         private const val HANDSHAKE_ACK_TIMEOUT_MS = 30_000L
     }
 
@@ -227,7 +241,7 @@ public class SeccompDaemonEngine(
                         serverFd,
                         ManagedSegment.NULL,
                         ManagedSegment.NULL,
-                        NativeConstants.SOCK_CLOEXEC,
+                        NativeConstants.SOCK_CLOEXEC or NativeConstants.O_NONBLOCK.toInt(),
                     )
                     val clientFdVal = res.recover { errno, _ ->
                         if (errno == NativeConstants.EINTR) return@recover -1L
@@ -306,6 +320,7 @@ public class SeccompDaemonEngine(
         try {
             SeccompCleanupInterpreter.close(connection, ::recordCleanup)
         } finally {
+            handshakeDeadlines.remove(connection)
             val remaining = connection.retryableOwnership()
             if (connection.socketFd !in remaining) clientSockets.remove(connection.socketFd)
             connection.listenerFd?.takeIf { it !in remaining }?.let { activeListeners.remove(it) }
@@ -378,15 +393,51 @@ public class SeccompDaemonEngine(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         pollFdManaged: ManagedSegment,
     ): SeccompConnection? {
-        if (connection is SeccompConnection.Accepted) {
-            val pollRes = raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
+        val handshakeDeadline = if (connection is SeccompConnection.FdAttached) {
+            handshakeDeadlines.getOrCreate(connection) { Deadline.afterMillis(HANDSHAKE_ACK_TIMEOUT_MS) }
+        } else {
+            null
+        }
+        if (handshakeDeadline?.isExpired() == true) {
+            handshakeDeadlines.remove(connection)
+            return applyConnectionEvent(connection, SeccompConnectionEvent.AckFailed)
+        }
+        if (connection !is SeccompConnection.Active) {
+            val pollFd = PollFdSegment.of(pollFdManaged)
+            val expectedEvent = if (connection is SeccompConnection.FdAttached) NativeConstants.POLLOUT else NativeConstants.POLLIN
+            pollFd.setFd(socketFd.value)
+            pollFd.setEvents(expectedEvent)
+            pollFd.setRevents(0)
+            val timeout = handshakeDeadline?.remainingMillis()?.coerceAtMost(POLL_TIMEOUT_MS) ?: POLL_TIMEOUT_MS
+            val pollRes = raw.poll(pollFdManaged, 1L, timeout)
             val count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) 0L else -1L
+                if (errno == NativeConstants.EINTR) return connection
+                -1L
             }
             if (count < 0) {
-                return applyConnectionEvent(connection, SeccompConnectionEvent.PollFailed)
+                handshakeDeadlines.remove(connection)
+                val failure = if (connection is SeccompConnection.FdAttached) SeccompConnectionEvent.AckFailed else SeccompConnectionEvent.PollFailed
+                return applyConnectionEvent(connection, failure)
             }
-            if (count == 0L) return applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
+            if (count == 0L) {
+                if (handshakeDeadline?.isExpired() == true) {
+                    handshakeDeadlines.remove(connection)
+                    return applyConnectionEvent(connection, SeccompConnectionEvent.AckFailed)
+                }
+                return if (connection is SeccompConnection.Accepted) {
+                    applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
+                } else {
+                    connection
+                }
+            }
+            val revents = pollFd.getRevents().toInt()
+            val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+            if ((revents and terminal) != 0) {
+                handshakeDeadlines.remove(connection)
+                val failure = if (connection is SeccompConnection.FdAttached) SeccompConnectionEvent.AckFailed else SeccompConnectionEvent.PollFailed
+                return applyConnectionEvent(connection, failure)
+            }
+            if ((revents and expectedEvent.toInt()) == 0) return connection
         }
 
         val event = when (connection) {
@@ -401,19 +452,17 @@ public class SeccompDaemonEngine(
             is SeccompConnection.FdAttached -> {
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, handshakeAckByte)
-                val deadline = handshakeDeadlines.computeIfAbsent(socketFd.value) {
-                    Deadline.afterMillis(HANDSHAKE_ACK_TIMEOUT_MS)
-                }
+                val deadline = checkNotNull(handshakeDeadline)
                 when (writeHandshakeAck(socketFd, ackBuf, deadline)) {
                     HandshakeWriteOutcome.Sent -> {
-                        handshakeDeadlines.remove(socketFd.value)
+                        handshakeDeadlines.remove(connection)
                         SeccompConnectionEvent.AckSucceeded
                     }
                     HandshakeWriteOutcome.RetryAfterPoll -> return connection
                     HandshakeWriteOutcome.TimedOut,
                     is HandshakeWriteOutcome.Failed,
                     -> {
-                        handshakeDeadlines.remove(socketFd.value)
+                        handshakeDeadlines.remove(connection)
                         SeccompConnectionEvent.AckFailed
                     }
                 }
@@ -432,28 +481,16 @@ public class SeccompDaemonEngine(
         ack: ManagedSegment,
         deadline: Deadline,
     ): HandshakeWriteOutcome {
-        var interruptions = 0
-        while (true) {
-            if (deadline.isExpired()) return HandshakeWriteOutcome.TimedOut
-            when (val result = handshakeWriter(socketFd, ack, ACK_BUF_SIZE)) {
-                is LinuxNative.SyscallResult.Success ->
-                    return if (result.value == ACK_BUF_SIZE) {
-                        HandshakeWriteOutcome.Sent
-                    } else {
-                        HandshakeWriteOutcome.Failed(NativeConstants.EIO)
-                    }
-                is LinuxNative.SyscallResult.Error -> {
-                    if (result.errno == NativeConstants.EAGAIN) {
-                        return HandshakeWriteOutcome.RetryAfterPoll
-                    }
-                    if (result.errno != NativeConstants.EINTR) {
-                        return HandshakeWriteOutcome.Failed(result.errno)
-                    }
-                    interruptions++
-                    if (interruptions >= MAX_HANDSHAKE_INTERRUPTS) {
-                        return HandshakeWriteOutcome.Failed(NativeConstants.EINTR)
-                    }
-                }
+        if (deadline.isExpired()) return HandshakeWriteOutcome.TimedOut
+        return when (val result = handshakeWriter(socketFd, ack, ACK_BUF_SIZE)) {
+            is LinuxNative.SyscallResult.Success -> if (result.value == ACK_BUF_SIZE) {
+                HandshakeWriteOutcome.Sent
+            } else {
+                HandshakeWriteOutcome.Failed(NativeConstants.EIO)
+            }
+            is LinuxNative.SyscallResult.Error -> when (result.errno) {
+                NativeConstants.EAGAIN, NativeConstants.EINTR -> HandshakeWriteOutcome.RetryAfterPoll
+                else -> HandshakeWriteOutcome.Failed(result.errno)
             }
         }
     }
