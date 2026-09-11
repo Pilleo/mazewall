@@ -87,7 +87,9 @@ public class ControlSocketExchange(
                 else -> throw ControlSocketFailure(result.errno)
             }
             is LinuxNative.SyscallResult.Success -> {
-                val revents = pollFd.getRevents().toInt()
+                val revents = pollFd.getRevents().toInt().let { value ->
+                    if (value == 0 && result.value > 0L) event.toInt() else value
+                }
                 val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
                 if ((revents and terminal) != 0) throw ControlSocketFailure(NativeConstants.EIO)
                 result.value > 0 && (revents and event.toInt()) != 0

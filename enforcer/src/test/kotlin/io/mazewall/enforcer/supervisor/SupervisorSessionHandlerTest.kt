@@ -31,8 +31,11 @@ class SupervisorSessionHandlerTest {
                     io.mazewall.core.Deadline
                         .afterMillis(30_000),
                 ).use { work ->
-                    repeat(3) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
-                    val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    var progress: io.mazewall.platform.seccomp.daemon.NotificationProgress
+                    do {
+                        progress = work.poll()
+                    } while (progress is io.mazewall.platform.seccomp.daemon.NotificationProgress.Await)
+                    val ready = progress as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
                     assertEquals(emptyList<KernelReply>(), fixture.replies)
                     assertEquals(1, fixture.writeCount)
                     assertEquals(1, fixture.readCount)

@@ -136,6 +136,9 @@ class SupervisorAdmissionTest {
                                 else -> repeat(3) { reactor.handleActiveListener(poll) }
                             }
                         }
+                        // Closing the reactor retires any still-pending work before capacity is
+                        // borrowed for the teardown assertion.
+                        reactor.close()
                         checkNotNull(admission.acquire(Tid(1))).use {
                             assertNull(admission.acquire(Tid(1)))
                             reactor.close()

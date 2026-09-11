@@ -69,7 +69,8 @@ internal class SupervisorBoundaryFixture {
     init {
         engine.pollResult = success(1)
         engine.onPoll = { fds, _, _ ->
-            PollFdSegment.of(fds).setRevents(NativeConstants.POLLIN)
+            val poll = PollFdSegment.of(fds)
+            poll.setRevents(poll.getEvents())
             engine.pollResult
         }
         engine.memory.onWrite = { _, _, size ->
