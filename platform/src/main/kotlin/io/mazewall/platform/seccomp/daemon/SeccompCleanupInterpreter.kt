@@ -47,7 +47,7 @@ public object SeccompCleanupInterpreter {
     /** Independent releases all run; cancellation propagates after remaining releases. */
     internal fun closeResources(vararg releases: () -> Unit): SeccompCleanupOutcome = closeResources(releases.asList())
 
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount", "CyclomaticComplexMethod")
     internal fun closeResources(
         releases: Iterable<() -> Unit>,
         recordOutcome: (SeccompCleanupOutcome) -> Unit = { },

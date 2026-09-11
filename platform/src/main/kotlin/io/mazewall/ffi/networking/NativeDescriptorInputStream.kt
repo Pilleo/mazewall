@@ -53,6 +53,7 @@ public open class NativeDescriptorInputStream(
         }
     }
 
+    @Suppress("ThrowsCount")
     private fun readWithRetry(
         buffer: ManagedSegment,
         count: Long,
