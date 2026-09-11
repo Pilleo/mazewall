@@ -2,6 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.Syscall
 import io.mazewall.core.Tid
+import io.mazewall.profiler.BillOfBehavior
 import io.mazewall.profiler.EbpfLoad
 import io.mazewall.profiler.ObservationSource
 import io.mazewall.profiler.OpenFlagsEvidence
@@ -13,6 +14,7 @@ import io.mazewall.profiler.ProfilingCoverage
 import io.mazewall.profiler.StackAttribution
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
@@ -84,6 +86,26 @@ class TraceEventTest {
         val set = setOf(event1, event2)
         assertEquals(1, set.size, "Set should deduplicate events by behavior, ignoring TID")
         assertEquals(event1.behavioralKey(), event2.behavioralKey())
+    }
+
+    @Test
+    fun `legacy open factory does not turn missing flags into a readable open`() {
+        val event = TraceEvent(1001, "OPEN", longArrayOf(), listOf("/etc/passwd"))
+
+        val open = assertIs<TraceEvent.Open>(event)
+        assertEquals(OpenFlagsEvidence.Incomplete(0, setOf("flags")), open.openFlagsEvidence)
+        assertFailsWith<IllegalArgumentException> {
+            io.mazewall.profiler.compiler.BobCompiler
+                .compile(listOf(event))
+        }
+    }
+
+    @Test
+    fun `open copy does not carry evidence across syscall kind changes`() {
+        val openat2 = TraceEvent.Open(Tid(7), "OPENAT2", "/tmp/x", 0, 0)
+        val open = openat2.copy(syscallName = "OPEN")
+
+        assertEquals(OpenFlagsEvidence.Complete(0), open.openFlagsEvidence)
     }
 
     @Test
@@ -162,5 +184,58 @@ class TraceEventTest {
         assertEquals(PathResolutionQuality.RESOLVED, coverage.pathResolution)
         assertFalse(coverage.complete)
         assertEquals(listOf("open_how.flags"), coverage.warnings.filter { it.contains("open_how.flags") }.map { "open_how.flags" })
+    }
+
+    @Test
+    fun `open copy keeps numeric flags and typed evidence consistent`() {
+        val original = TraceEvent.Open(
+            tid = Tid(7),
+            syscallName = "OPENAT2",
+            path = "/tmp/target",
+            flags = 1,
+            mode = 0,
+            openFlagsEvidence = OpenFlagsEvidence.Incomplete(1, setOf("O_FUTURE")),
+        )
+
+        val unchanged = original.copy()
+        val changed = original.copy(flags = 2)
+
+        assertEquals(original, unchanged)
+        assertEquals(original.hashCode(), unchanged.hashCode())
+        assertEquals(original.openFlagsEvidence, unchanged.openFlagsEvidence)
+        assertEquals(OpenFlagsEvidence.Complete(2), changed.openFlagsEvidence)
+        assertEquals(changed.flags, changed.openFlagsEvidence.value)
+        assertNotEquals(original, changed)
+        assertEquals(2, hashSetOf(original, unchanged, changed).size)
+        assertFailsWith<IllegalArgumentException> {
+            TraceEvent.Open(
+                tid = Tid(7),
+                syscallName = "OPENAT2",
+                path = "/tmp/target",
+                flags = 2,
+                mode = 0,
+                openFlagsEvidence = original.openFlagsEvidence,
+            )
+        }
+    }
+
+    @Test
+    fun `open flag evidence survives existing behavior JSON round trips`() {
+        val frame = arrayOf(StackTraceElement("Owner", "open", "Owner.kt", 1))
+        val events = listOf(
+            TraceEvent.Open(Tid(7), "OPEN", "/tmp/read", 0, 0),
+            TraceEvent.Open(Tid(7), "OPENAT2", "/tmp/openat2", 0, 0),
+        )
+        val behavior = BillOfBehavior(stackProfile = events.associateWith { listOf(frame) })
+
+        val decoded = BillOfBehavior.fromJson(behavior.toJson())
+        val decodedByName = decoded.stackProfile.keys.associateBy(TraceEvent::syscallName)
+
+        for (event in events) {
+            val decodedEvent = assertIs<TraceEvent.Open>(decodedByName[event.syscallName])
+            assertEquals(event, decodedEvent)
+            assertEquals(event.hashCode(), decodedEvent.hashCode())
+            assertEquals(event.openFlagsEvidence, decodedEvent.openFlagsEvidence)
+        }
     }
 }

@@ -76,7 +76,7 @@ public object ObservationMerger {
     private fun keyOf(obs: ProfileObservation): ObservationKey {
         val payload = when (obs) {
             is ProfileObservation.Syscall ->
-                listOf("syscall", obs.name, obs.paths, obs.openFlags)
+                listOf("syscall", obs.name, obs.paths, obs.openFlags, obs.openFlagsEvidence)
             is ProfileObservation.IoUring ->
                 listOf("uring", obs.opcode, obs.paths)
             is ProfileObservation.Connect ->

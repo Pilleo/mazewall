@@ -3,12 +3,18 @@ package io.mazewall.profiler.compiler
 import io.mazewall.Policy
 import io.mazewall.core.Arch
 import io.mazewall.core.Syscall
+import io.mazewall.core.Tid
+import io.mazewall.profiler.ObservationCorrelation
+import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.OpenFlagsEvidence
+import io.mazewall.profiler.ProfileObservation
 import io.mazewall.profiler.engine.TraceEvent
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -127,11 +133,13 @@ val policy = Policy.builder()
     fun `test OPENAT2 and AT variants categorization`() {
         val events =
             listOf(
-                TraceEvent(
-                    12345,
-                    "OPENAT2",
-                    longArrayOf(0, 0, 0x12345678, 0, 0, 0), // args[2] is a pointer
-                    listOf("/tmp/openat2-test.txt"),
+                TraceEvent.Open(
+                    tid = Tid(12345),
+                    syscallName = "OPENAT2",
+                    path = "/tmp/openat2-test.txt",
+                    flags = O_WRONLY,
+                    mode = 0,
+                    openFlagsEvidence = OpenFlagsEvidence.Complete(O_WRONLY),
                 ),
                 TraceEvent(
                     12345,
@@ -155,11 +163,37 @@ val policy = Policy.builder()
 
         val bob = BobCompiler.compile(events)
 
-        assertTrue(bob.opens.contains("/tmp/openat2-test.txt"), "OPENAT2 without flags is not a proven write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/openat2-test.txt"), "OPENAT2 complete write evidence should be retained")
         assertTrue(bob.fsWritePaths.contains("/tmp/deleted-file.txt"), "UNLINKAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-subdir"), "MKDIRAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/old-name"), "RENAMEAT2 should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-name"), "RENAMEAT2 target should be treated as write")
+    }
+
+    @Test
+    fun `direct compilation rejects missing and incomplete open flags evidence`() {
+        val correlation = ObservationCorrelation(7, Tid(8))
+        val observations = listOf(
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/missing"),
+            ),
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/incomplete"),
+                openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf("open_how.flags")),
+            ),
+        )
+
+        for (observation in observations) {
+            assertFailsWith<IllegalArgumentException>(observation.toString()) {
+                BobCompiler.compileObservations(listOf(observation))
+            }
+        }
     }
 
     @Test

@@ -8,6 +8,7 @@ import io.mazewall.profiler.engine.PathResolution
 import io.mazewall.profiler.engine.PathResolutionFailure
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -46,15 +47,34 @@ class StraceLogParserTest {
     }
 
     @Test
-    fun `incomplete open flags are not compiled as numeric zero`() {
+    fun `openat2 missing open how structure or flags retains explicit incomplete evidence`() {
+        val lines = listOf(
+            "123 openat2(AT_FDCWD, \"/tmp/missing-how\") = -1 EFAULT",
+            "123 openat2(AT_FDCWD, \"/tmp/null-how\", NULL, 24) = -1 EFAULT",
+            "123 openat2(AT_FDCWD, \"/tmp/missing-flags\", {mode=0, resolve=0}, 24) = 4",
+            "123 openat2(AT_FDCWD, \"/tmp/empty-flags\", {flags=, mode=0}, 24) = 4",
+        )
+
+        for (line in lines) {
+            val observation = StraceLogParser.parseLine(line) as ProfileObservation.Syscall
+            assertEquals(
+                OpenFlagsEvidence.Incomplete(0, setOf("open_how.flags")),
+                observation.openFlagsEvidence,
+                line,
+            )
+            assertEquals(null, observation.openFlags, line)
+        }
+    }
+
+    @Test
+    fun `incomplete open flags are rejected instead of compiled as numeric zero`() {
         val observation = StraceLogParser.parseLine(
             "123 open(\"/tmp/write-target\", O_WRONLY|O_FUTURE) = 4",
         ) as ProfileObservation.Syscall
 
-        val bill = BobCompiler.compileObservations(listOf(observation))
-
-        assertEquals(setOf("/tmp/write-target"), bill.opens)
-        assertEquals(emptySet(), bill.fsWritePaths)
+        assertFailsWith<IllegalArgumentException> {
+            BobCompiler.compileObservations(listOf(observation))
+        }
     }
 
     @Test

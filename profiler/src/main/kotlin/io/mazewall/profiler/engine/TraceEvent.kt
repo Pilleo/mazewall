@@ -5,6 +5,16 @@ import io.mazewall.core.Tid
 import io.mazewall.profiler.OpenFlagsEvidence
 import java.util.Locale
 
+private fun defaultOpenFlagsEvidence(
+    syscallName: String,
+    flags: Long,
+): OpenFlagsEvidence =
+    if (syscallName.equals("OPENAT2", ignoreCase = true)) {
+        OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags"))
+    } else {
+        OpenFlagsEvidence.Complete(flags)
+    }
+
 /** A syscall identity that keeps forward-compatible names explicit. */
 public sealed interface ObservedSyscall {
     public data class Known(
@@ -189,10 +199,16 @@ public sealed class TraceEvent {
         val flags: Long,
         val mode: Int,
         stackTrace: List<String>? = null,
-        public val openFlagsEvidence: OpenFlagsEvidence = if (syscallName == "OPENAT2") OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags")) else OpenFlagsEvidence.Complete(flags),
+        public val openFlagsEvidence: OpenFlagsEvidence = defaultOpenFlagsEvidence(syscallName, flags),
     ) : TraceEvent() {
         override val paths: List<String> = listOf(path)
         override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        init {
+            require(flags == openFlagsEvidence.value) {
+                "Legacy flags must agree with typed openFlagsEvidence"
+            }
+        }
 
         public fun copy(
             tid: Tid = this.tid,
@@ -201,7 +217,16 @@ public sealed class TraceEvent {
             flags: Long = this.flags,
             mode: Int = this.mode,
             stackTrace: List<String>? = this.stackTrace,
-        ): Open = copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace, openFlagsEvidence))
+        ): Open {
+            val evidence = if (flags != this.flags) {
+                OpenFlagsEvidence.Complete(flags)
+            } else if (syscallName.equals(this.syscallName, ignoreCase = true)) {
+                openFlagsEvidence
+            } else {
+                defaultOpenFlagsEvidence(syscallName, flags)
+            }
+            return copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace, evidence))
+        }
 
         public operator fun component1(): Tid = tid
 
@@ -514,13 +539,15 @@ public sealed class TraceEvent {
             stackTrace: List<String>?,
         ): TraceEvent {
             return if (paths.isNotEmpty()) {
-                val flags = when (syscallName) {
-                    "OPEN" -> if (args.size > INDEX_OPEN_FLAGS) args[INDEX_OPEN_FLAGS] else 0L
-                    "OPENAT" -> if (args.size > INDEX_OPENAT_FLAGS) args[INDEX_OPENAT_FLAGS] else 0L
-                    "OPENAT2" -> 0L // flags are inside a struct pointer in args[2]
-                    else -> 0L
+                val (flags, evidence) = when (syscallName) {
+                    "OPEN" -> args.getOrNull(INDEX_OPEN_FLAGS)?.let { it to OpenFlagsEvidence.Complete(it) }
+                        ?: 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
+                    "OPENAT" -> args.getOrNull(INDEX_OPENAT_FLAGS)?.let { it to OpenFlagsEvidence.Complete(it) }
+                        ?: 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
+                    "OPENAT2" -> 0L to OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags"))
+                    else -> 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
                 }
-                Open(tid, syscallName, paths[0], flags, 0, stackTrace, if (syscallName == "OPENAT2") OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags")) else OpenFlagsEvidence.Complete(flags))
+                Open(tid, syscallName, paths[0], flags, 0, stackTrace, evidence)
             } else {
                 Generic(tid, syscallName, args.toList(), paths, stackTrace)
             }

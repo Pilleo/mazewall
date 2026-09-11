@@ -300,6 +300,8 @@ class BillOfBehavior(
                     syscall = event.syscallName,
                     paths = event.paths,
                     args = if (event is TraceEvent.Generic) event.args else emptyList(),
+                    openFlagsEvidenceValue = (event as? TraceEvent.Open)?.openFlagsEvidence?.value,
+                    openFlagsUnknownSymbols = ((event as? TraceEvent.Open)?.openFlagsEvidence as? OpenFlagsEvidence.Incomplete)?.unknownSymbols ?: emptySet(),
                     stackTrace = frames.map { frame ->
                         StackFrameDto(
                             classLoader = frame.classLoaderName,
@@ -416,7 +418,25 @@ class BillOfBehavior(
                     syscallName = entry.syscall,
                     args = entry.args.toLongArray(),
                     paths = entry.paths,
-                )
+                ).let { legacy ->
+                    val evidenceValue = entry.openFlagsEvidenceValue
+                    if (legacy is TraceEvent.Open && evidenceValue != null) {
+                        TraceEvent.Open(
+                            tid = legacy.tid,
+                            syscallName = legacy.syscallName,
+                            path = legacy.path,
+                            flags = evidenceValue,
+                            mode = legacy.mode,
+                            openFlagsEvidence = if (entry.openFlagsUnknownSymbols.isEmpty()) {
+                                OpenFlagsEvidence.Complete(evidenceValue)
+                            } else {
+                                OpenFlagsEvidence.Incomplete(evidenceValue, entry.openFlagsUnknownSymbols)
+                            },
+                        )
+                    } else {
+                        legacy
+                    }
+                }
                 val frames = entry.stackTrace
                     .map { frameDto ->
                     StackTraceElement(

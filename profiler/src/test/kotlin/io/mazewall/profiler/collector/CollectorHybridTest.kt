@@ -9,6 +9,7 @@ import io.mazewall.profiler.MazewallProfiler
 import io.mazewall.profiler.NetworkEndpoint
 import io.mazewall.profiler.ObservationCorrelation
 import io.mazewall.profiler.ObservationSource
+import io.mazewall.profiler.OpenFlagsEvidence
 import io.mazewall.profiler.PathResolutionQuality
 import io.mazewall.profiler.ProfileEnvironment
 import io.mazewall.profiler.ProfileObservation
@@ -76,6 +77,24 @@ class CollectorHybridTest {
         }
         val merged = ObservationMerger.merge(listOf(CollectorDrain(observations + observations)))
         assertEquals(6, merged.observations.size)
+    }
+
+    @Test
+    fun `collector merge identity retains distinct typed open flags evidence`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val observations = listOf("O_FUTURE_A", "O_FUTURE_B").map { symbol ->
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/target"),
+                openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf(symbol)),
+            )
+        }
+
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(observations + observations)))
+
+        assertEquals(observations, merged.observations)
     }
 
     @Test

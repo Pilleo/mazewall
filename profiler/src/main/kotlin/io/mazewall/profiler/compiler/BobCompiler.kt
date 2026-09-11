@@ -86,9 +86,14 @@ object BobCompiler {
         opens: MutableSet<String>,
         fsWritePaths: MutableSet<String>,
     ) {
+        val name = obs.name.uppercase(Locale.US)
         when (val evidence = obs.openFlagsEvidence) {
             is OpenFlagsEvidence.Complete -> applyCompleteOpen(obs.paths, evidence.value, opens, fsWritePaths)
-            is OpenFlagsEvidence.Incomplete, null -> opens.addAll(obs.paths)
+            is OpenFlagsEvidence.Incomplete ->
+                throw IllegalArgumentException(
+                    "$name requires complete open flags evidence; unresolved: ${evidence.unknownSymbols.joinToString(",")}",
+                )
+            null -> throw IllegalArgumentException("$name requires open flags evidence")
         }
     }
 

@@ -24,6 +24,9 @@ public class StackProfileEntryDto(
     val paths: List<String> = emptyList(),
     val args: List<Long> = emptyList(),
     val stackTrace: List<StackFrameDto> = emptyList(),
+    /** Additive typed open evidence; absent fields preserve legacy JSON compatibility. */
+    val openFlagsEvidenceValue: Long? = null,
+    val openFlagsUnknownSymbols: Set<String> = emptySet(),
 )
 
 @Serializable

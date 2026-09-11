@@ -218,7 +218,7 @@ public object StraceLogParser {
         when (syscallName) {
             "OPEN" -> operands.getOrNull(1)?.let(::parseOpenFlags)
             "OPENAT" -> operands.getOrNull(2)?.let(::parseOpenFlags)
-            "OPENAT2" -> operands.getOrNull(2)?.let(::parseOpenHowFlags)
+            "OPENAT2" -> operands.getOrNull(2)?.let(::parseOpenHowFlags) ?: missingOpenHowFlags()
             else -> null
         }
 
@@ -277,14 +277,16 @@ public object StraceLogParser {
         return java.util.List.copyOf(result)
     }
 
-    private fun parseOpenHowFlags(structure: String): OpenFlagsEvidence? {
+    private fun parseOpenHowFlags(structure: String): OpenFlagsEvidence {
         val body = structure.trim().removePrefix("{").removeSuffix("}")
         val flags = tokenizeArguments(body)
             .firstOrNull { it.substringBefore('=').trim() == "flags" }
             ?.substringAfter('=', "")
             ?.trim()
-        return flags?.takeIf(String::isNotEmpty)?.let(::parseOpenFlags)
+        return flags?.takeIf(String::isNotEmpty)?.let(::parseOpenFlags) ?: missingOpenHowFlags()
     }
+
+    private fun missingOpenHowFlags(): OpenFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf("open_how.flags"))
 
     private fun parseOpenFlags(raw: String): OpenFlagsEvidence {
         var value = 0L
