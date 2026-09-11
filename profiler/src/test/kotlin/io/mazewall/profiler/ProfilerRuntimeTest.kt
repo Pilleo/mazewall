@@ -299,7 +299,10 @@ class ProfilerRuntimeTest {
             output.writeInt(1) // private profiler event version
             output.writeInt(6)
             output.writeBytes("OPENAT")
-            output.writeInt(0)
+            output.writeInt(3)
+            output.writeLong(-100L)
+            output.writeLong(0L)
+            output.writeLong(0L)
             output.writeInt(1)
             val path = "/tmp/captured-engine"
             output.writeInt(path.length)

@@ -26,11 +26,11 @@ class ProfilerSessionApiTest {
         val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(
             Tid(7),
             "OPEN",
-            emptyList(),
+            listOf(0L, 0L),
             PathResolution.Failed(listOf(failure)),
         )
         val observations = listOf(ProfileObservation.fromSyscallEvent(event))
-        val raw = ProfilingResult("observed", BobCompiler.compileObservations(observations), emptyMap(), pathCoverage(observations), observations)
+        val raw = ProfilingResult("observed", BillOfBehavior(), emptyMap(), pathCoverage(observations), observations)
         val log = directory.resolve("recorded.log")
         java.nio.file.Files
             .writeString(log, "kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/sidecar\n")
@@ -151,7 +151,7 @@ class ProfilerSessionApiTest {
     @Test
     fun `typed resolution is authoritative even for a long complete path`() {
         val resolution = PathResolution.Resolved(listOf("/" + "a".repeat(4096)))
-        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), resolution)
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", listOf(0L, 0L), resolution)
         val coverage = pathCoverage(listOf(ProfileObservation.fromSyscallEvent(event)))
         assertEquals(PathResolutionQuality.RESOLVED, coverage.pathResolution)
         assertTrue(coverage.complete)
