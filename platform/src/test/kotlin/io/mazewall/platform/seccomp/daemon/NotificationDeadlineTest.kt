@@ -19,6 +19,7 @@ import io.mazewall.ffi.memory.writeLong
 import io.mazewall.platform.seccomp.UserNotifReply
 import io.mazewall.platform.seccomp.UserNotifReplyResult
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -139,6 +140,8 @@ class NotificationDeadlineTest {
         val after = NotificationLivenessMetrics.snapshot()
         assertEquals(1, after.deadlineExpiries - before.deadlineExpiries)
         assertEquals(0, after.lateCompletions - before.lateCompletions)
+        assertEquals(1, after.deadlineNear - before.deadlineNear)
+        assertEquals(1, after.replyLatencyCount - before.replyLatencyCount)
     }
 
     @Test
@@ -178,12 +181,69 @@ class NotificationDeadlineTest {
     }
 
     @Test
-    fun `receive interruptions have a finite budget`() {
+    fun `receive interruption yields until the listener is polled again`() {
         Fixture().use { fixture ->
             fixture.receiveInterrupted = true
-            assertEquals(LoopAction.Break, fixture.tick())
-            assertEquals(8, fixture.receives)
+            assertEquals(LoopAction.Continue, fixture.tick())
+            assertEquals(1, fixture.receives)
+
+            fixture.tick()
+            assertEquals(1, fixture.receives)
+
+            fixture.signalListener()
+            assertEquals(LoopAction.Continue, fixture.tick())
+            assertEquals(2, fixture.receives)
             assertTrue(fixture.replies.isEmpty())
+        }
+    }
+
+    @Test
+    fun `not-ready receive is benign and waits for fresh listener readiness`() {
+        Fixture().use { fixture ->
+            fixture.receiveErrno = NativeConstants.EAGAIN
+
+            assertEquals(LoopAction.Continue, fixture.tick())
+            assertEquals(1, fixture.receives)
+            assertEquals(LoopAction.Continue, fixture.tick())
+            assertEquals(1, fixture.receives)
+            assertTrue(fixture.replies.isEmpty())
+        }
+    }
+
+    @Test
+    fun `reply failure remains primary when work cleanup also fails`() {
+        val replyFailure = AssertionError("reply failed")
+        val cleanupFailure = IllegalStateException("cleanup failed")
+        Fixture().use { fixture ->
+            fixture.ready = true
+            fixture.sendFailure = replyFailure
+            fixture.closeFailure = cleanupFailure
+
+            val thrown = assertThrows<AssertionError> { fixture.tick() }
+
+            assertSame(replyFailure, thrown)
+            assertEquals(listOf(cleanupFailure), thrown.suppressed.toList())
+            assertEquals(LoopAction.Break, fixture.tick())
+            fixture.closeFailure = null
+        }
+    }
+
+    @Test
+    fun `timeout reply failure remains primary when cancellation cleanup also fails`() {
+        val replyFailure = AssertionError("timeout reply failed")
+        val cleanupFailure = IllegalStateException("cancellation failed")
+        Fixture().use { fixture ->
+            fixture.tick()
+            fixture.now = 30_000_000_000L
+            fixture.sendFailure = replyFailure
+            fixture.closeFailure = cleanupFailure
+
+            val thrown = assertThrows<AssertionError> { fixture.tick() }
+
+            assertSame(replyFailure, thrown)
+            assertEquals(listOf(cleanupFailure), thrown.suppressed.toList())
+            assertEquals(listOf(-1), fixture.replies)
+            fixture.closeFailure = null
         }
     }
 
@@ -191,11 +251,14 @@ class NotificationDeadlineTest {
         var now = 0L
         var ready = false
         var receiveInterrupted = false
+        var receiveErrno = 0
         var receives = 0
         var closes = 0
         var completions = 0
         var replyErrno = 0
         var throwOnSend = false
+        var sendFailure: Throwable? = null
+        var closeFailure: Throwable? = null
         var duringPoll: () -> Unit = {}
         var onReply: () -> Unit = {}
         val replies = mutableListOf<Int>()
@@ -209,12 +272,15 @@ class NotificationDeadlineTest {
                         buffer.writeLong(0L, 42L)
                         if (receiveInterrupted) {
                             LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+                        } else if (receiveErrno != 0) {
+                            LinuxNative.SyscallResult.Error(receiveErrno, -1L)
                         } else {
                             LinuxNative.SyscallResult.Success(0L)
                         }
                     }
                     IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND.code -> {
                         replies += buffer.readInt(Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET)
+                        sendFailure?.let { throw it }
                         if (throwOnSend) throw IllegalStateException("native reply failed")
                         if (replyErrno == 0) {
                             LinuxNative.SyscallResult.Success(0L)
@@ -256,6 +322,7 @@ class NotificationDeadlineTest {
 
                     override fun close() {
                         closes++
+                        closeFailure?.let { throw it }
                     }
                 }
             },
@@ -272,6 +339,10 @@ class NotificationDeadlineTest {
             val result = handler.handleActiveListener(pollFds)
             PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE)).setRevents(0)
             result
+        }
+
+        fun signalListener() {
+            PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE)).setRevents(NativeConstants.POLLIN)
         }
 
         override fun close() {

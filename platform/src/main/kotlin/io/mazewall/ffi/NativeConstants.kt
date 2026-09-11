@@ -109,7 +109,10 @@ object NativeConstants {
     // fcntl(2) commands
     const val F_GETFD = 1
     const val F_SETFD = 2
+    const val F_GETFL = 3
+    const val F_SETFL = 4
     const val FD_CLOEXEC = 1
+    const val O_NONBLOCK = 0x800L
 
     // ptrace(2) on x86_64 (fail closed on other arches)
     const val SYS_PTRACE_X86_64 = 101L
