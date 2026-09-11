@@ -68,6 +68,7 @@ internal class StraceCollector(
         val tempOut = Files.createTempFile("strace_prof_", ".out")
         val tempErr = Files.createTempFile("strace_prof_", ".err")
         var process: Process? = null
+        var primary: Throwable? = null
         try {
             val cmd = listOf(
                 "strace",
@@ -94,11 +95,16 @@ internal class StraceCollector(
                 )
             }
             return if (Files.exists(tempLog)) Files.readString(tempLog) else ""
+        } catch (failure: Throwable) {
+            primary = failure
+            throw failure
         } finally {
-            process?.takeIf(Process::isAlive)?.let(StraceProcessTree::terminate)
-            Files.deleteIfExists(tempLog)
-            Files.deleteIfExists(tempOut)
-            Files.deleteIfExists(tempErr)
+            runCatching { process?.takeIf(Process::isAlive)?.let(StraceProcessTree::terminate) }
+                .onFailure { cleanup -> primary?.addSuppressed(cleanup) ?: throw cleanup }
+            listOf(tempLog, tempOut, tempErr).forEach { file ->
+                runCatching { Files.deleteIfExists(file) }
+                    .onFailure { cleanup -> primary?.addSuppressed(cleanup) ?: throw cleanup }
+            }
         }
     }
 }
@@ -127,12 +133,12 @@ internal object StraceProcessTree {
 
     fun terminate(process: Process) {
         val interruption = CleanupInterruption(Thread.interrupted())
-        val descendants = process
+        val handles = process
             .toHandle()
             .descendants()
             .toList()
-            .asReversed()
-        val handles = descendants + process.toHandle()
+            .asReversed() +
+            process.toHandle()
 
         handles.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy)
         awaitEach(handles, reapTimeout, interruption)
@@ -141,6 +147,16 @@ internal object StraceProcessTree {
         survivors.forEach(ProcessHandle::destroyForcibly)
         awaitEach(survivors, reapTimeout, interruption)
         awaitProcess(process, reapTimeout, interruption)
+
+        // Descendants can fork while the first wave is being reaped. Rescan
+        // once after forcible termination so grandchildren are not orphaned.
+        val lateDescendants = process
+            .toHandle()
+            .descendants()
+            .toList()
+            .asReversed()
+        lateDescendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
+        awaitEach(lateDescendants, reapTimeout, interruption)
 
         if (interruption.seen) {
             Thread.currentThread().interrupt()
