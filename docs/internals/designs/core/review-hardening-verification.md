@@ -10,8 +10,8 @@ aggregate branch passes every merge gate.
 | Command | Observed result | Evidence / limit |
 |---|---|---|
 | `./gradlew --no-daemon unitCheck integrationTest integrationTestFreshJvm --continue` | PASSED after the scoped follow-up repairs | The earlier coverage and spawn-stack failures were fixed by `a8b77b33`, `1133fe79`, and `07f8161a`; the final merge gate below is the authoritative aggregate result. |
-| `DOCKER_HOST=unix:///var/run/docker.sock docker build -t mazewall-test-runner -f infra/dev/Containerfile .` | PASSED | Docker 29.8.0 built the JDK 25 test image. The repository helper remains Podman-specific; the equivalent Docker invocation is recorded here because Docker is the available engine. |
-| `docker run ... mazewall-test-runner ./gradlew test integrationTest integrationTestFreshJvm --info --no-daemon --stacktrace` | PASSED; 133 tasks: 3 executed, 130 up-to-date | Host-networked Docker run completed with the repository seccomp profile, `SYS_ADMIN`, `SYS_PTRACE`, and `MAZEWALL_IN_CONTAINER=true`. The container was removed automatically. |
+| `DOCKER_HOST=unix:///var/run/docker.sock docker build -t mazewall-test-runner -f infra/dev/Containerfile .` | PASSED | Docker 29.8.0 built the JDK 25 test image. |
+| `DOCKER_HOST=unix:///run/user/1000/podman/podman.sock ./scripts/run_tests.sh` | PASSED; 126 tasks: 1 executed, 125 up-to-date | The engine-neutral helper detected Docker, selected `/var/run/docker.sock` after the stale Podman socket failed, and completed the host-networked run with the repository seccomp profile, `SYS_ADMIN`, `SYS_PTRACE`, and `MAZEWALL_IN_CONTAINER=true`. The container was removed automatically. |
 | `./gradlew --no-daemon build --dry-run` | PASSED | The task graph contains no RefactorFirst, RefactorFirst snapshot preparation, or Maven report task. Dry-run does not execute the build gates. |
 | `./gradlew --no-daemon updateClassDiagrams` | PASSED, 50s; 42 tasks: three executed, 39 up-to-date | Enforcer/profiler PlantUML and SVG regenerated from compiled sources. |
 | Headless PlantUML 1.2023.13, seven state/sequence sources | PASSED | Seven matching SVGs generated; supervisor and profiler sequence PNG previews visually inspected. System PlantUML's initial X11 failure was corrected with `-Djava.awt.headless=true`. |
@@ -20,9 +20,10 @@ aggregate branch passes every merge gate.
 | `./gradlew --no-daemon build` | PASSED; 250 actionable tasks: 90 executed, 160 up-to-date | Warning ratchet and coverage gates passed; no RefactorFirst/Maven invocation. |
 
 The full merge gate and the Docker-backed integration gate are passing. The
-repository helper `./scripts/run_tests.sh` still names Podman and therefore was
-not used directly; the equivalent Docker command above exercised the same test
-set. Cached/up-to-date tests are reused evidence, not fresh execution. The
+engine-neutral `./scripts/run_tests.sh` helper now prefers Podman and falls back
+to Docker, including the standard `/var/run/docker.sock` location when a stale
+Podman `DOCKER_HOST` is present. Cached/up-to-date tests are reused evidence,
+not fresh execution. The
 package-specific RED/GREEN commands are retained in the corresponding backlog
 records and task reports. The process-local notification liveness counters and
 their contract are supplied by `0004b4e6` and
