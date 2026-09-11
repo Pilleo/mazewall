@@ -11,10 +11,12 @@ import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
@@ -239,7 +241,7 @@ class NativeSocketInputStreamTest {
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    fun `read should return -1 on non-EINTR error`() {
+    fun `read should report a non-EINTR error instead of treating it as EOF`() {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 override fun read(
@@ -259,7 +261,8 @@ class NativeSocketInputStreamTest {
                         arena,
                     mock.memory,
                 )
-                assertEquals(-1, stream.read())
+                val failure = assertThrows(IOException::class.java) { stream.read() }
+                assertTrue(failure.message.orEmpty().contains("errno=22 (EINVAL)"))
             }
         }
     }
@@ -308,7 +311,7 @@ class NativeSocketInputStreamTest {
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    fun `bulk read should return -1 on non-EINTR error`() {
+    fun `bulk read should report a non-EINTR error instead of treating it as EOF`() {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 override fun read(
@@ -329,7 +332,8 @@ class NativeSocketInputStreamTest {
                     mock.memory,
                 )
                 val buffer = ByteArray(5)
-                assertEquals(-1, stream.read(buffer))
+                val failure = assertThrows(IOException::class.java) { stream.read(buffer) }
+                assertTrue(failure.message.orEmpty().contains("errno=22 (EINVAL)"))
             }
         }
     }
