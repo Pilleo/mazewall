@@ -16,6 +16,12 @@ import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
+private const val PATH_MAX_VAL = 4096L
+private const val HEX_PREVIEW_BYTES = 64
+private const val ADDRESS_RADIX = 16
+private const val PROCESS_VM_READ_TIMEOUT_MS = 100L
+private const val PROCESS_VM_READ_MAX_ATTEMPTS = 8
+
 /**
  * Shared utility for reading memory and resolving paths from remote processes/threads using process_vm_readv and readlink.
  */
@@ -58,7 +64,10 @@ public interface TraceeMemoryReader {
         link: String,
     ): String?
 
-    public companion object Real : TraceeMemoryReader {
+    private class InjectedReal(
+        private val memory: NativeMemory,
+        private val fileSystem: io.mazewall.NativeFileSystem,
+    ) : TraceeMemoryReader {
         context(arena: NativeArena) override fun readString(
             tid: Tid,
             remoteAddr: Long,
@@ -102,7 +111,6 @@ public interface TraceeMemoryReader {
             remoteIov.setIovLen(len.toLong())
 
             val retryBudget = ProcessVmReadRetryBudget.default()
-            val memory = LinuxNative.snapshot().memory
             val res = readProcessVm(
                 memory,
                 tid,
@@ -163,12 +171,6 @@ public interface TraceeMemoryReader {
             return null
         }
 
-        private const val PATH_MAX_VAL = 4096L
-        private const val HEX_PREVIEW_BYTES = 64
-        private const val ADDRESS_RADIX = 16
-        private const val PROCESS_VM_READ_TIMEOUT_MS = 100L
-        private const val PROCESS_VM_READ_MAX_ATTEMPTS = 8
-
         private data class ProcessVmReadRetryBudget(
             val deadline: Deadline,
             val maxAttempts: Int,
@@ -190,7 +192,7 @@ public interface TraceeMemoryReader {
             val pathSeg = arena.allocateFrom(procPath)
             val buf = arena.allocate(PATH_MAX_VAL)
             val res =
-                LinuxNative.fileSystem.readlink(ConfinedSegment(pathSeg.unwrap), ConfinedSegment(buf.unwrap), PATH_MAX_VAL)
+                fileSystem.readlink(ConfinedSegment(pathSeg.unwrap), ConfinedSegment(buf.unwrap), PATH_MAX_VAL)
 
             return res.onSuccess { }.map { buf.unwrap.copyToString(it.toInt()).removeSuffix(" (deleted)") }.getOrNull()
         }
@@ -200,4 +202,13 @@ public interface TraceeMemoryReader {
             return String(bytes, StandardCharsets.UTF_8)
         }
     }
+
+    public companion object {
+        /** Construct a reader backed by the process' Linux native adapters. */
+        @JvmStatic
+        public fun real(): TraceeMemoryReader = InjectedReal(LinuxNative.memory, LinuxNative.fileSystem)
+    }
+
+    /** Compatibility singleton retained for existing callers. */
+    public object Real : TraceeMemoryReader by InjectedReal(LinuxNative.memory, LinuxNative.fileSystem)
 }

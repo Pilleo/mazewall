@@ -43,18 +43,18 @@ public interface ProfilerMemoryReader : TraceeMemoryReader {
         tid: Tid,
         remoteAddr: Long,
         maxLen: Int,
-    ): String? = TraceeMemoryReader.Real.readString(tid, remoteAddr, maxLen)
+    ): String? = with(TraceeMemoryReader.real()) { readString(tid, remoteAddr, maxLen) }
 
     context(arena: NativeArena) override fun readBytes(
         tid: Tid,
         remoteAddr: Long,
         len: Int,
-    ): ByteArray? = TraceeMemoryReader.readBytes(tid, remoteAddr, len)
+    ): ByteArray? = with(TraceeMemoryReader.real()) { readBytes(tid, remoteAddr, len) }
 
     context(arena: NativeArena) override fun resolveLink(
         tid: Tid,
         link: String,
-    ): String? = TraceeMemoryReader.resolveLink(tid, link)
+    ): String? = with(TraceeMemoryReader.real()) { resolveLink(tid, link) }
 }
 
 /**

@@ -33,7 +33,7 @@ class TraceeMemoryReaderTest {
             NativeArena.ofConfined().use { arena ->
                 with(arena) {
                     val failure = assertThrows(TraceeMemoryReader.ReadRetryExhaustedException::class.java) {
-                        TraceeMemoryReader.Real.readBytes(Tid(42), 0x1000L, 8)
+                        TraceeMemoryReader.real().readBytes(Tid(42), 0x1000L, 8)
                     }
                     assertEquals(failure.attempts, attempts)
                     assertEquals(io.mazewall.ffi.NativeConstants.EINTR, failure.errno)
@@ -66,7 +66,7 @@ class TraceeMemoryReaderTest {
         withNativeEngine(MockNativeEngine(memory = memory)) {
             NativeArena.ofConfined().use { arena ->
                 with(arena) {
-                    assertContentEquals(ByteArray(3), TraceeMemoryReader.Real.readBytes(Tid(42), 0x1000L, 8))
+                    assertContentEquals(ByteArray(3), TraceeMemoryReader.real().readBytes(Tid(42), 0x1000L, 8))
                 }
             }
         }
@@ -96,7 +96,7 @@ class TraceeMemoryReaderTest {
                 NativeArena.ofConfined().use { arena ->
                     with(arena) {
                         assertThrows(TraceeMemoryReader.ReadInterruptedException::class.java) {
-                            TraceeMemoryReader.Real.readBytes(Tid(42), 0x1000L, 8)
+                            TraceeMemoryReader.real().readBytes(Tid(42), 0x1000L, 8)
                         }
                     }
                 }
