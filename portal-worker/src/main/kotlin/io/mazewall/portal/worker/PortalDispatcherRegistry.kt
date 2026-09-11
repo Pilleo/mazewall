@@ -5,6 +5,7 @@ import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.portal.Capability
+import io.mazewall.portal.PortalGeneratedNames
 import io.mazewall.portal.PortalMethod
 
 /**
@@ -131,11 +132,9 @@ private fun PortalDispatcherTable.Builder.registerEntry(
     val impl = Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
     require(serviceClass.isInstance(impl)) { "implementation does not implement ${serviceClass.name}" }
 
-    val defaultName =
-        serviceClass.packageName.let { pkg ->
-            (if (pkg.isNotEmpty()) "$pkg." else "") + serviceClass.simpleName + "PortalDispatcher"
-        }
-    val dispatcherName = parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() } ?: defaultName
+    val dispatcherName =
+        parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: PortalGeneratedNames.dispatcherBinaryName(serviceClass)
     val dispatcherObject =
         Class.forName(dispatcherName, true, loader).getDeclaredField("INSTANCE").get(null)
             ?: error("dispatcher $dispatcherName is not a Kotlin object")

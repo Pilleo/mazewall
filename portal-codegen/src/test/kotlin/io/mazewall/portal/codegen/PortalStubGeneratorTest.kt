@@ -1,5 +1,6 @@
 package io.mazewall.portal.codegen
 
+import io.mazewall.portal.PortalGeneratedNames
 import io.mazewall.portal.codegen.testapi.BadStream
 import io.mazewall.portal.codegen.testapi.CompanionShadowService
 import io.mazewall.portal.codegen.testapi.FirstOuter
@@ -28,10 +29,10 @@ class PortalStubGeneratorTest {
         val first = PortalStubGenerator.generate(FirstOuter.NestedService::class.java)
         val second = PortalStubGenerator.generate(SecondOuter.NestedService::class.java)
 
-        assertTrue(first.any { it.name == "FirstOuter_NestedServicePortalStub" }, first.toString())
-        assertTrue(first.any { it.name == "FirstOuter_NestedServicePortalDispatcher" }, first.toString())
-        assertTrue(second.any { it.name == "SecondOuter_NestedServicePortalStub" }, second.toString())
-        assertTrue(second.any { it.name == "SecondOuter_NestedServicePortalDispatcher" }, second.toString())
+        assertTrue(first.any { it.name == PortalGeneratedNames.stubBinaryName(FirstOuter.NestedService::class.java).substringAfterLast('.') }, first.toString())
+        assertTrue(first.any { it.name == PortalGeneratedNames.dispatcherBinaryName(FirstOuter.NestedService::class.java).substringAfterLast('.') }, first.toString())
+        assertTrue(second.any { it.name == PortalGeneratedNames.stubBinaryName(SecondOuter.NestedService::class.java).substringAfterLast('.') }, second.toString())
+        assertTrue(second.any { it.name == PortalGeneratedNames.dispatcherBinaryName(SecondOuter.NestedService::class.java).substringAfterLast('.') }, second.toString())
     }
 
     @Test

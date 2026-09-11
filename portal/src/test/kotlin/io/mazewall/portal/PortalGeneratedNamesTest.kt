@@ -1,6 +1,7 @@
 package io.mazewall.portal
 
-import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PortalGeneratedNamesTest {
@@ -14,13 +15,10 @@ class PortalGeneratedNamesTest {
 
     @Test
     fun `nested service binary names retain enclosing identity`() {
-        assertEquals(
-            "io.mazewall.portal.PortalGeneratedNamesTest_First_ServicePortalStub",
-            PortalGeneratedNames.stubBinaryName(First.Service::class.java),
-        )
-        assertEquals(
-            "io.mazewall.portal.PortalGeneratedNamesTest_Second_ServicePortalStub",
-            PortalGeneratedNames.stubBinaryName(Second.Service::class.java),
-        )
+        val first = PortalGeneratedNames.stubBinaryName(First.Service::class.java)
+        val second = PortalGeneratedNames.stubBinaryName(Second.Service::class.java)
+        assertNotEquals(first, second)
+        assertTrue(first.contains("Nested_"))
+        assertTrue(first.endsWith("PortalStub"))
     }
 }

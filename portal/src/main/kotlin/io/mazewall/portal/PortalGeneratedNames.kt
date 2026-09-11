@@ -23,7 +23,17 @@ public object PortalGeneratedNames {
         val packageName = service.packageName
         val relativeName =
             if (packageName.isEmpty()) service.name else service.name.removePrefix("$packageName.")
-        val simpleName = relativeName.replace('$', '_') + suffix
+        // Keep top-level names byte-for-byte compatible. Nested names use a
+        // length-prefixed encoding so '$' and '_' cannot collapse distinct
+        // JVM binary names onto the same generated class.
+        val simpleName = if ('$' !in relativeName) {
+            relativeName + suffix
+        } else {
+            val encoded = relativeName.split('$').joinToString("_") { part ->
+                "${part.length}_$part"
+            }
+            "Nested_${encoded}$suffix"
+        }
         return if (packageName.isEmpty()) simpleName else "$packageName.$simpleName"
     }
 }
