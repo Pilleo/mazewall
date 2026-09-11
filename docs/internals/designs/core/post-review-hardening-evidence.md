@@ -97,3 +97,42 @@ Scoped backlog evidence: [native boundaries](../../backlog/resolved/issue-202609
 [CLI/agent](../../backlog/resolved/issue-20260910-212626-611-make-cli-and-agent-containment-claims-verifiable.md),
 [web evidence](../../backlog/resolved/issue-20260910-225753-764-record-web-artifact-and-complete-profile-deploymen.md), and
 [failure taxonomy](../../backlog/resolved/issue-20260910-225754-299-record-explicit-lifecycle-and-cleanup-failure-evid.md).
+
+## Post-merge remediation evidence (PMR)
+
+This section is the hand-off checklist for the remediation that follows the
+review-hardening range above. Unlike the historical PRH/RH tables, a row is not
+marked complete until the package commit exists and the named regression has been
+run in the current checkout. `pending package commit` is intentional evidence of
+an unfinished row, not a claim that a review recommendation has been fixed.
+
+| ID | Invariant | Implementing commit | Regression evidence | Gate | Status |
+|---|---|---|---|---|---|
+| PMR-01 | A ready notification performs at most one receive attempt; EINTR yields to the next reactor poll. | `pending package commit` | `NotificationDeadlineTest#eintr receive yields before another ioctl` | `:platform:test` | pending |
+| PMR-02 | Notification cleanup preserves the primary reply/error and suppresses cleanup failures. | `pending package commit` | `NotificationDeadlineTest#reply and cleanup failures retain the primary throwable` | `:platform:test` | pending |
+| PMR-03 | Unresolved pointer paths and unsupported supervised operations fail closed. | `6f876029` | `SupervisorSessionMatrixTest#unresolved pointer routes are denied` | `:enforcer:test` | implemented; package gate pending |
+| PMR-04 | Thread-specific authority never falls back to a leader FD table. | `6f876029` | `TraceeProcAuthorityTest#non leader import requires thread pidfd` | `:enforcer:integrationTestFreshJvm` | implemented; package gate pending |
+| PMR-05 | Installation readiness and listener health reject registrations after reactor failure. | `pending package commit` | `SupervisorInstallationLifetimeTest#reactor death rejects new leases` | `:enforcer:test` | pending |
+| PMR-06 | Accepted descriptors have one owner through route, queue, cancellation and late-result failure. | `pending package commit` | `PoolSocketRouteExecutorTest#failed transfer closes accepted descriptor once` | `:enforcer:test` | pending |
+| PMR-07 | Broker close is a shared truthful terminal result for concurrent callers. | `pending package commit` | `ProcessBrokerIntegrationTest#concurrent close callers receive the same cleanup failure` | `:portal:integrationTest` | pending |
+| PMR-08 | Capability close failures retain ownership for retry rather than discarding descriptors. | `pending package commit` | `CapabilityOwnershipTest#failed close retains capability for retry` | `:portal:test` | pending |
+| PMR-09 | Portal calls preserve interruption and never reuse a partially failed worker. | `pending package commit` | `ProcessBrokerIntegrationTest#interrupted capability admission preserves interruption` | `:portal:integrationTest` | pending |
+| PMR-10 | Nested generated services use the same canonical binary name at generation and load time. | `pending package commit` | `PortalGeneratedNamesTest#nested service names are loadable` | `:portal-codegen:test` | pending |
+| PMR-11 | Generated nullable overrides and hostile names compile without scope collisions. | `pending package commit` | `PortalStubGeneratorTest#nullable and Companion names compile` | `:portal-codegen:test` | pending |
+| PMR-12 | OPENAT2 flags remain incomplete unless `open_how.flags` was inspected. | `pending package commit` | `TraceEventTest#openat2 retains incomplete flags evidence` | `:profiler:test` | pending |
+| PMR-13 | Incomplete typed open-flag evidence cannot compile into an enforcement policy. | `pending package commit` | `ProfileObservationCompatibilityTest#incomplete evidence is rejected by compiler` | `:profiler:test` | pending |
+| PMR-14 | Profiler structural, noise-reply and ACK failures are terminal with no later publication or reply. | `pending package commit` | `ProfilerSessionMachineTest#failure matrix permits one terminal reply` | `:profiler:test` | pending |
+| PMR-15 | Profiler preparation is injectable in tests and cannot start real helpers unexpectedly. | `pending package commit` | `ProfilerPreparationFactoryTest#test preparation is in memory` | `:profiler:test` | pending |
+| PMR-16 | Owned child runners drain both streams, terminate descendants, reap, and preserve interruption. | `pending package commit` | `OwnedProcessRunnerTest#timeout and interruption reap descendants` | `:demos:cli-demo:test`, `:demos:agent-sandbox-demo:test` | pending |
+| PMR-17 | CLI and agent outcomes distinguish authenticated denial, inconclusive evidence and infrastructure failure. | `pending package commit` | `ProfileAndEnforceDemoTest#inferred denial is inconclusive`; `AgentScenarioFreshJvmTest#inconclusive attack fails verification` | demo fresh-JVM gates | pending |
+| PMR-18 | The default web artifact cannot execute deserialization gadgets and rejects incomplete profiles. | `fbaf6dce` | `DeploymentContractTest#default artifact excludes executable fixtures` | `:demos:vulnerable-web-app:test` | implemented; package gate pending |
+| PMR-19 | Web profile configuration is isolated per test context and temporary roots are owned. | `fbaf6dce` | `VulnAppApplicationTests#profile properties do not leak between contexts` | `:demos:vulnerable-web-app:test` | implemented; package gate pending |
+| PMR-20 | Test-health fragments are tied to the current invocation and include failed/aborted containers. | `pending package commit` | `TestHealthPluginFunctionalTest#stale fragments are rejected`; `VerificationActionsTest#unchanged verification is up to date` | `-p buildSrc check` | pending |
+| PMR-21 | Isolated test processes terminate descendants and restore interruption on every completion path. | `pending package commit` | `IsolatedProcessTesterLifecycleTest#successful parent interruption is restored` | `-p buildSrc check` | pending |
+| PMR-22 | The reactor watchdog observes approaching deadlines without a second authority or reply. | `70d7dcf` | `NotificationDeadlineTest#deadline near metrics are emitted once and late completion cannot reply` | `:platform:test` | implemented; package gate pending |
+| PMR-23 | Documentation and diagrams describe lock, deadline, ownership and protocol-violation guarantees. | `pending documentation commit` | `validate_review_evidence.py`; headless PlantUML render of canonical diagrams | docs/verification gates | pending |
+
+The PMR table intentionally keeps unsupported peer-address `accept`, uninterruptible
+kernel tasks, and non-atomic tracee mapping snapshots as documented fail-closed
+capability limits. They must not be relabeled as fixed findings merely because a
+test exercises the supported path.

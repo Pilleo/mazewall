@@ -41,6 +41,33 @@ Late completion means a `Ready` result returned by polling after its deadline;
 helper results disposed solely during cancellation are outside this counter.
 These counters live in the daemon JVM and do not add a parent-process wire protocol.
 
+### Locks, stalls and the watchdog boundary
+
+The deadline is deliberately a reactor-owned state-machine deadline, not a thread
+that attempts to interrupt a handler. A notification handler must never hold a lock
+while waiting for a tracee, helper process, listener ACK, or another JVM-owned
+coordination primitive. Potentially blocking work is represented by a pollable
+effect and is either advanced by readiness or moved to an independently terminable
+helper. This prevents a watchdog from becoming a second authority that can race the
+reply lease or interrupt arbitrary application code.
+
+Lock contention is observable, but not resolved by force. The reactor records the
+pending count, oldest pending age, deadline-near observation, poll/repoll count,
+reply latency, and helper saturation. A deadline-near observation is emitted at
+most once for a notification and contains no TID, path, descriptor, or payload.
+Operators should treat repeated deadline-near observations, increasing oldest age,
+or sustained helper saturation as a liveness incident and inspect lock ownership
+and helper capacity. Metrics are diagnostics: they do not extend the deadline and
+cannot authorize a second reply.
+
+At expiry the reactor performs one compare-and-claim on the notification lease,
+attempts the terminal `EPERM` reply once, and closes the session. A late helper or
+verdict completion may only dispose its result. It cannot reacquire the lease,
+publish an observation, ACK a listener, or send another kernel reply. If the reactor
+itself stops polling, no in-process watchdog can guarantee recovery; deployment
+health checks should supervise the daemon process and restart it according to the
+fail-closed policy.
+
 ![Notification deadline and terminal reply](../../../diagrams/user_notif_liveness.svg)
 
 ## Supervisor installation, admission and authority

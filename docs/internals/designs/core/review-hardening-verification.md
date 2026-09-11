@@ -65,3 +65,29 @@ The optional RefactorFirst report remains at
   forks and reparents entirely between observations may escape discovery.
 - Docker compose syntax/contracts and loopback Spring scenarios were verified by
   the web package; actual Docker services were not launched as part of that evidence.
+
+## Post-merge remediation run ledger
+
+The current follow-up is tracked separately from the historical aggregate above.
+Its reviewer-readable checklist is the [PMR evidence table](post-review-hardening-evidence.md#post-merge-remediation-evidence-pmr).
+Rows remain pending until their package commit and focused regression are both
+recorded; cached task outcomes are never upgraded to fresh evidence.
+
+| Gate | Required evidence | Result |
+|---|---|---|
+| `:platform:test` | receive EINTR repoll, deadline expiry, one-reply lease, cleanup suppression and liveness metrics | pending implementation |
+| `:enforcer:test` + fresh JVM | strict pointer authority, listener death, admission limits and exact descriptor closure | pending implementation |
+| `:portal:test` + integration | shared close failure, capability retention, interruption and worker non-reuse | pending implementation |
+| `:portal-codegen:test` + `:portal-worker:test` | nested/nullable/hostile-name compilation and worker classpath isolation | pending implementation |
+| `:profiler:test` + fresh JVM | OPENAT2 evidence, reactor failure matrix, ACK and injectable preparation | pending implementation |
+| demo suites | bounded process ownership, authenticated outcomes, web artifact isolation | pending implementation |
+| `-p buildSrc check` | invocation-fresh health records, aborted containers and incremental contract checks | pending implementation |
+| `./scripts/adkw check-backlog`, `git diff --check` | maintenance records and whitespace | pending implementation |
+| `./gradlew --no-daemon build --dry-run` | no RefactorFirst or Maven task in ordinary build graph | pending implementation |
+| `./gradlew --no-daemon build` | final merge gate | pending implementation |
+
+Watchdog review guarantee: no watchdog thread interrupts arbitrary JVM work. The
+reactor owns the monotonic deadline, claims at most one terminal reply, emits
+redacted deadline-near metrics, and disposes late results. A stalled reactor is a
+process-health incident requiring external supervision; metrics do not extend or
+silently bypass the security deadline.
