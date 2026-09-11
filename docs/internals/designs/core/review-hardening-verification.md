@@ -91,3 +91,13 @@ reactor owns the monotonic deadline, claims at most one terminal reply, emits
 redacted deadline-near metrics, and disposes late results. A stalled reactor is a
 process-health incident requiring external supervision; metrics do not extend or
 silently bypass the security deadline.
+# Liveness and boundary follow-ups
+
+| Finding | Evidence | Status |
+|---|---|---|
+| Supervisor ACK retry could spin on EINTR | `SeccompDaemonEngineTest.handshake acknowledgement bounds EINTR retries` | Implemented |
+| Profiler handshake renewed timeout per attempt | `HandshakeSessionTest` absolute-deadline cases | Implemented |
+| Tracee memory reader used global native state | `TraceeMemoryReader.Real` injected adapters | Implemented |
+| CLI descendants survived parent exit | `OwnedProcessRunnerTest` descendant-retirement cases | Implemented |
+| Nested dispatcher names diverged/collided | `PortalGeneratedNamesTest`, `PortalStubGeneratorTest` | Implemented |
+| Test-health JSON rejected control characters | `TestSuiteHealthListener.escape` control-character coverage | Implemented |

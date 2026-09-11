@@ -185,3 +185,15 @@ enforcement startup unless the existing explicitly unsafe override is chosen.
 See the [portal lifecycle](../../../diagrams/portal_lifecycle.svg),
 [codegen boundary](../../../diagrams/portal_codegen.svg), and
 [web evidence lifecycle](../../../diagrams/vulnerable_web_lifecycle.svg).
+# Implementation notes (post-merge hardening)
+
+Handshake acknowledgements and profiler handshakes consume one monotonic deadline. Native
+`EINTR` is retried only within a bounded budget; callers return to the reactor between
+attempts, so a stalled peer cannot pin a worker indefinitely. A terminal outcome owns the
+single reply lease; late work is disposed without a second reply.
+
+The tracee memory reader now accepts native memory and filesystem adapters through its
+implementation seam, making failure paths deterministic in tests. CLI-owned process trees
+are retired on every outcome, including successful and non-zero exits. Generated nested
+portal names use a length-prefixed encoding and compatibility bootstrap resolves names via
+the same canonical helper. Test-health fragments escape all JSON control characters.

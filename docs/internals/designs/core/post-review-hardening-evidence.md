@@ -136,3 +136,13 @@ The PMR table intentionally keeps unsupported peer-address `accept`, uninterrupt
 kernel tasks, and non-atomic tracee mapping snapshots as documented fail-closed
 capability limits. They must not be relabeled as fixed findings merely because a
 test exercises the supported path.
+# Post-merge liveness and boundary follow-ups
+
+| ID | Invariant | Implementation | Regression | Gate | Status |
+|---|---|---|---|---|---|
+| PM-01 | ACK writes cannot spin past their deadline | `SeccompDaemonEngine` | bounded EINTR/expiry tests | `:platform:test` | Implemented |
+| PM-02 | Profiler handshake uses one absolute deadline | `HandshakeSession` | handshake deadline tests | `:profiler:test` | Implemented |
+| PM-03 | Memory reads use injected native adapters | `TraceeMemoryReader.real` | memory-reader seam tests | `:platform:test` | Implemented |
+| PM-04 | Owned CLI descendants are retired on every outcome | `OwnedProcessRunner` | descendant-retirement tests | `:demos:cli-demo:test` | Implemented |
+| PM-05 | Nested generated names are injective and canonical | `PortalGeneratedNames` | nested/collision fixtures | `:portal-codegen:test` | Implemented |
+| PM-06 | Test-health identifiers are valid JSON | `TestSuiteHealthListener.escape` | hostile identifier fixture | `test` | Implemented |
