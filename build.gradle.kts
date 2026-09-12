@@ -95,7 +95,10 @@ allprojects {
             systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         }
 
+        // Child daemons can be intentionally chatty. Keep diagnostics bounded so a
+        // stalled/failing test cannot exhaust the Gradle daemon while we retain output.
         val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
+        val maxCapturedOutputChars = 64 * 1024
 
         if (isVerbose) {
             testLogging {
@@ -119,7 +122,11 @@ allprojects {
 
             addTestOutputListener { descriptor, event ->
                 val testId = "${descriptor.className ?: "UnknownClass"}.${descriptor.name}"
-                failedTestsOutputs.getOrPut(testId) { StringBuilder() }.append(event.message)
+                val buffer = failedTestsOutputs.getOrPut(testId) { StringBuilder() }
+                synchronized(buffer) {
+                    val remaining = maxCapturedOutputChars - buffer.length
+                    if (remaining > 0) buffer.append(event.message.take(remaining))
+                }
             }
 
             addTestListener(

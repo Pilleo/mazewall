@@ -113,7 +113,18 @@ object Profiler {
         }
 
         override fun shutdownNow(): List<Runnable> {
-            return delegate.shutdownNow()
+            val pending = delegate.shutdownNow()
+            // Executor shutdown is the ownership boundary for the profiling session too.
+            // Leaving the session registered keeps its daemon listener (and output pump)
+            // alive after callers have discarded the wrapper, which can stall test/JVM
+            // shutdown and leak a permanent notification path.
+            session.closeWithResult().throwIfIncomplete("Profiler executor session cleanup failed")
+            return pending
+        }
+
+        override fun shutdown() {
+            delegate.shutdown()
+            session.closeWithResult().throwIfIncomplete("Profiler executor session cleanup failed")
         }
 
         /** Compiles a [BillOfBehavior] from the events captured so far. */

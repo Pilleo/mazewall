@@ -399,8 +399,14 @@ class ProfilerDaemonTest {
                 System.err.println("[MOCK] poll nfds=$nfds nextPollResult=$nextPollResult")
                 if (nextPollResult is LinuxNative.SyscallResult.Success && (nextPollResult as LinuxNative.SyscallResult.Success).value > 0) {
                     val fdsSeg = MemorySegment.ofAddress(fds.address()).reinterpret(fds.byteSize())
-                    fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, NativeConstants.POLLIN)
-                    System.err.println("[MOCK] set POLLIN at offset 6. Value=${fdsSeg.get(ValueLayout.JAVA_SHORT, 6L)}")
+                    val requested = fdsSeg.get(ValueLayout.JAVA_SHORT, 4L).toInt()
+                    val ready = if ((requested and NativeConstants.POLLOUT.toInt()) != 0) {
+                        NativeConstants.POLLOUT
+                    } else {
+                        NativeConstants.POLLIN
+                    }
+                    fdsSeg.set(ValueLayout.JAVA_SHORT, 6L, ready)
+                    System.err.println("[MOCK] set revents=$ready at offset 6")
                 }
                 return nextPollResult
             }
