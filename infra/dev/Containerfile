@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     build-essential \
     pkg-config \
+    clang \
+    llvm \
     zsh \
     && rm -rf /var/lib/apt/lists/*
 

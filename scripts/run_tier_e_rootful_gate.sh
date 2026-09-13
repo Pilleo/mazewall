@@ -21,6 +21,8 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
     -v "${HOME}/.gradle:${HOME}/.gradle" \
     -e GRADLE_USER_HOME="${HOME}/.gradle" \
     -e TIER_E_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+    -e TIER_E_AGENT_LIBRARY="${PROJECT_ROOT}/profiler-native/build/libmazewall_stack_agent.so" \
+    -e TIER_E_WORKLOAD_CLASSPATH="${PROJECT_ROOT}/profiler-native/build/agent-test-classes" \
     -e CI="${CI:-false}" \
     -e MAZEWALL_IN_CONTAINER=true \
     -w "${PROJECT_ROOT}" \
@@ -32,8 +34,19 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
         ctest --test-dir profiler-native/build -V 2>&1 | tee "${TIER_E_ARTIFACT_DIR}/native-ctest.log"
         ./scripts/check_tier_e_benchmark.sh profiler-native/build \
             profiler-native/tier-e-benchmark-baseline.env "${TIER_E_ARTIFACT_DIR}/benchmark-gate.log"
+        rm -rf profiler/build/test-results/integrationTestFreshJvm \
+            profiler/build/reports/tests/integrationTestFreshJvm
+        TIER_E_AGENT_LIBRARY="${TIER_E_AGENT_LIBRARY}" \
+        TIER_E_WORKLOAD_CLASSPATH="${TIER_E_WORKLOAD_CLASSPATH}" \
         ./gradlew :profiler:test :profiler:integrationTest :profiler:integrationTestFreshJvm \
-            --no-daemon --stacktrace 2>&1 | tee "${TIER_E_ARTIFACT_DIR}/profiler-tests.log"
+            -Dtier.e.agent="${TIER_E_AGENT_LIBRARY}" \
+            -Dtier.e.workloadClasspath="${TIER_E_WORKLOAD_CLASSPATH}" \
+            --no-daemon --rerun-tasks --stacktrace 2>&1 | tee "${TIER_E_ARTIFACT_DIR}/profiler-tests.log"
+        if grep -q 'TierEEndToEndIntegrationTest' profiler/build/test-results/integrationTestFreshJvm/*.xml && \
+           grep -q 'skipped="1"' profiler/build/test-results/integrationTestFreshJvm/*TierEEndToEndIntegrationTest*.xml; then
+            echo "Tier E native-backed end-to-end fixture was skipped" >&2
+            exit 1
+        fi
     '
 
 cat > "${ARTIFACT_DIR}/run-metadata.txt" <<EOF
