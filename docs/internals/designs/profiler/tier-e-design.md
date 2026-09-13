@@ -9,6 +9,8 @@
 
 ## 1. Summary
 
+> **Status: Implemented contract.**
+
 Tier E adds a **semantic attribution plane** to mazewall profiling. Application code declares
 *why* a thread is executing (`PDF_PARSE`, `STRIPE_CLIENT`, …); an eBPF uprobe records that
 declaration into BPF task-local storage; a `sys_enter` tracepoint program reads it back at
@@ -17,6 +19,8 @@ syscall entry and emits attributed events. The result is a per-syscall answer to
 USER_NOTIF round-trips, and no per-syscall Java work**.
 
 ### 1.1 InvocationId stack backend (supersedes ContextId)
+
+> **Status: Implemented contract.**
 
 The implementation no longer treats an application label as the canonical attribution. A JVMTI
 native-method proxy synchronously captures the current logical Java stack, interns it, allocates a
@@ -79,6 +83,8 @@ compatibility, but a version 1 event marked virtual has no execution identity an
 
 ### 1.1.1 Stack-walk API status and adoption rule
 
+> **Status: Implemented contract.**
+
 `JVMTI GetStackTrace` is the current exact-stack backend. It is a supported JVM TI operation that
 returns logical `{jmethodID, BCI}` frames, including the JVM's view of inlined calls; it is safe to
 call synchronously from the native binding proxy, but it is not a low-latency API. Method/class
@@ -128,6 +134,8 @@ workload syscalls per iteration, and fails unless Tier E is faster. On the 2026-
 These numbers are evidence for that environment, not a portable performance guarantee.
 
 ### 1.2 No-profiler control measurement
+
+> **Status: Historical evidence.**
 
 The Tier E-vs-USER_NOTIF comparison alone is not a measure of application overhead.  On
 2026-09-06, the same file workload (1,000 write/read iterations, JDK 25 Graal, privileged
@@ -199,6 +207,8 @@ openat("/tmp/in.pdf")             sys_enter raw tracepoint
 
 ## 2. Position in the Tier Taxonomy
 
+> **Status: Implemented contract.**
+
 | Tier | Mechanism | Privilege | Output | Completeness |
 |---|---|---|---|---|
 | P | eBPF tracepoints / strace descendant | host root / rootful container | raw syscall stream | complete, unattributed |
@@ -210,6 +220,8 @@ Tier E does not replace policy-grade Tier S. It is a profiling/attribution backe
 stacks for covered native bindings, with explicit UNKNOWN/incomplete results outside that coverage.
 
 ## 2.3 Current implementation contracts (2026-09-13)
+
+> **Status: Implemented contract.**
 
 The current Tier E implementation is in `:profiler` under
 `io.mazewall.profiler.tierE`; the historical `tier-e-proto` and `ebpf-prototype`
@@ -251,6 +263,8 @@ Any future wire-visible change must update these fixtures in the same change.
 
 ## 2.6 Privileged fixture boundary
 
+> **Status: Implemented contract.**
+
 The native CTest suite includes the seccomp denied-attempt boundary fixture, which
 reports `attempt_missed=1 observed_sys_enter=0 verdict=INCOMPLETE`. This is deliberately
 not an exact Tier E observation: attempts denied before the selected `sys_enter` path
@@ -259,6 +273,8 @@ seccomp, and runtime fixtures. Rootless Podman remains an environment limitation
 must be recorded as `INCOMPLETE`, never converted into a passing kernel claim.
 
 ### 2.1 Optional unique-edge emission
+
+> **Status: Implemented contract.**
 
 `TierEEmissionMode.FULL_STREAM` is the default.  The opt-in
 `UNIQUE_STACK_SYSCALL` mode still proves the complete logical stack at every proxied native
@@ -331,6 +347,8 @@ invocation until a validated re-entry boundary is observed.
 
 ## 3. Invariants (non-negotiable, enforced by review and where possible by types)
 
+> **Status: Implemented contract.**
+
 1. **Profiling/enrichment/detection hints only.** Never an enforcement input.
    Enforcement remains seccomp/Landlock + `USER_NOTIF`/`ADDFD`.
 2. **Stack metadata is tracee-controlled and therefore forgeable.** Invocation and dictionary
@@ -361,12 +379,16 @@ invocation until a validated re-entry boundary is observed.
 
 ## 4. Architecture
 
+> **Status: Implemented contract.**
+
 > The ContextId/USDT material below records earlier design iterations. For the implemented stack
 > backend, substitute `InvocationId` for `ContextId`, `mazewall_stack_marker` for the context probe,
 > and the native JVMTI dictionary described in §1.1. The current implementation uses a plain symbol
 > uprobe by default because its dependency-free Kotlin loader resolves the ELF dynamic symbol directly.
 
 ### 4.1 The handoff primitive
+
+> **Status: Implemented contract.**
 
 The context transition itself is made observable to eBPF via a synchronous native call:
 
@@ -396,6 +418,8 @@ userspace/kernel memory-ordering proof to make — this is the property that eli
 previous mmap-slot design (§6).
 
 ### 4.1.1 Marker ABI: Plain uprobe (implemented) vs Mazewall USDT probe (planned)
+
+> **Status: Required hardening.**
 
 > **Decision (2026-08-25):** Tier E context transitions are designed to move to a Mazewall
 > **USDT probe** long-term, with the underlying attribution mechanism remaining uprobe → BPF task
@@ -445,6 +469,8 @@ justify a plain-uprobe fallback with recorded parity evidence before shipping wi
 
 ### 4.2 Data model
 
+> **Status: Implemented contract.**
+
 A context is a positive 64-bit session-local identity (`io.mazewall.profiler.attribution.InvocationId`):
 
 ```text
@@ -460,6 +486,8 @@ encoded as 8-byte little-endian values, plus explicit zero handling for inactive
 no varint, no nullable representation.
 
 ### 4.3 Kernel-side sketch
+
+> **Status: Implemented contract.**
 
 ```c
 struct context_event {
@@ -507,6 +535,8 @@ compile-time per-arch selection.
 
 ### 4.4 Component layout
 
+> **Status: Implemented contract.**
+
 ```text
 ebpf-prototype/                 unwired until Gate G2 passes
 ├── bpf/mazewall_context.bpf.c  uprobe + sys_enter programs, maps, ringbuf
@@ -523,6 +553,8 @@ ebpf-prototype/                 unwired until Gate G2 passes
 
 ### 4.5 Attach mechanics (FFM-feasible path, used by the PR-15 migration)
 
+> **Status: Implemented contract.**
+
 Uprobes are a dynamic PMU since Linux 4.17. Without libbpf:
 
 1. Read PMU type from `/sys/bus/event_source/devices/uprobe/type`.
@@ -536,6 +568,8 @@ verified via `/proc/<pid>/maps` inode match plus `NT_GNU_BUILD_ID` comparison. A
 is a loud attach failure (benign direction: without attachment every event is UNKNOWN).
 
 ## 5. Trust Model
+
+> **Status: Implemented contract.**
 
 > **Tier E context metadata is supplied by the observed JVM and is not trustworthy after
 > compromise of that JVM.**
@@ -559,6 +593,8 @@ is a loud attach failure (benign direction: without attachment every event is UN
 
 ## 6. Rejected Alternative: mmap'd Context Slots ("Tier E Fast")
 
+> **Status: Historical evidence.**
+
 The original design wrote `(generation << 32) | contextId` into a `BPF_F_MMAPABLE` array
 slot from userspace, keyed by host TID resolved across PID namespaces. It was rejected for
 the correctness path because:
@@ -581,6 +617,8 @@ concurrent userspace/kernel access.
 
 ## 7. Verified Kernel Facts (floor: Linux 5.15 LTS)
 
+> **Status: Historical evidence.**
+
 | Fact | Since | Source |
 |---|---|---|
 | `bpf_task_storage_get/delete` helpers | 5.11 (LSM-only), tracing/kprobe/perf-event/raw_tp/tracepoint/tracing progs ~5.12 | Song Liu series, netdev 2021-02; eBPF docs helper page lists `BPF_PROG_TYPE_KPROBE` |
@@ -598,6 +636,8 @@ equivalent caps) — identical ceiling to Tier P, documented in profiler-design.
 
 ## 8. Gates
 
+> **Status: Implemented contract.**
+
 | Gate | Definition | Blocking |
 |---|---|---|
 | **G0** | Deterministic pairing: **G0a** single platform thread, no agent/containers/concurrency — `marker(42)`→`context==42`, `marker(7)`→`context==7` via plain uprobe; **G0b** identical results with USDT attach. 100% repeatable. | PR-03 |
@@ -606,6 +646,8 @@ equivalent caps) — identical ceiling to Tier P, documented in profiler-design.
 | **G3** | Oracle parity matrix (WP-10): Tier E vs `USER_NOTIF` oracle across 7 workload classes; incorrect attribution == 0. | PR-10 |
 
 ## 9. Work Packages
+
+> **Status: Required hardening.**
 
 See backlog registry: `docs/internals/backlog/implementation/issue-20260825-*-tier-e-wp-*.md`.
 
@@ -634,6 +676,8 @@ WP-10 → {WP-11 → WP-12}, WP-13; WP-14 after WP-10; WP-15 last. WP-02..05 liv
 
 ## 10. Reuse Map (existing components, do not re-implement)
 
+> **Status: Implemented contract.**
+
 | Need | Existing component |
 |---|---|
 | Strategy-neutral collection + drop accounting | `ProfileCollector`, `CollectorDrain`, `ObservationMerger` (`:profiler .../collector/`) |
@@ -650,6 +694,8 @@ Non-refactor rule: leave the `TraceEvent` / `SyscallEvent` / `ProfileObservation
 
 ## 11. Risks & Honest Limitations
 
+> **Status: Implemented contract.**
+
 | # | Risk | Direction | Mitigation |
 |---|---|---|---|
 | 1 | Marker latency: classic x86 uprobe ≈ trap + out-of-line step (µs-class), fires once per transition | measurable | G1 microbenchmark; optional skip-if-unchanged guard (ThreadLocal compare before downcall — semantics-preserving). If unacceptable ⇒ evidence for Tier E Fast, not for keeping two backends alive |
@@ -663,6 +709,8 @@ Non-refactor rule: leave the `TraceEvent` / `SyscallEvent` / `ProfileObservation
 
 ## 12. Open Questions
 
+> **Status: Required hardening.**
+
 1. **Public surface placement for `MazewallContext`** (WP-01): new tiny published module vs
    public API nested in an existing artifact. Decide during WP-01 review; default is no new
    module.
@@ -675,12 +723,16 @@ Non-refactor rule: leave the `TraceEvent` / `SyscallEvent` / `ProfileObservation
 
 ## Appendix A. External Reference Review: Oracle, *"From kernel to user-space tracing"* (A. Maguire, 2022-11-15)
 
+> **Status: Historical evidence.**
+
 Reviewed 2026-08-25. Source: blogs.oracle.com/linux/from-kernel-to-user-space-tracing;
 sample code: github.com/oracle-samples/linux-blog-sample-code (branch
 `kernel-to-userspace-tracing`). License of any borrowed snippet must be verified before use
 (reference-only by default).
 
 ### A.1 What it confirms about our design
+
+> **Status: Historical evidence.**
 
 * Uprobe mechanics: registration records the instruction at the target offset and plants a
   breakpoint (x86_64 INT3) into **every VMA mapped from that inode**; the handler runs
@@ -694,6 +746,8 @@ sample code: github.com/oracle-samples/linux-blog-sample-code (branch
 
 ### A.2 USDT adoption decision
 
+> **Status: Historical evidence.**
+
 See §4.1.1. Summary: USDT is the userspace analogue of tracepoints — named probes with
 declared arguments recorded in ELF `.note.stapsdt`, implemented atop uprobes. Adopted as the
 production marker ABI because it converts our marker from an implementation detail into a
@@ -703,6 +757,8 @@ custom `.note.stapsdt` parsing deferred to WP-14 with a documented plain-uprobe 
 path. Semaphores rejected for v1 (no argument-prep cost today).
 
 ### A.3 Future async extension vocabulary (not v1 scope)
+
+> **Status: Historical evidence.**
 
 The synchronous tier keys context by task; asynchronous work (io_uring et al.) must key by
 request identity. USDT gives us the emission side without new machinery:
@@ -720,6 +776,8 @@ the same fail-unknown rules; nothing in this document commits Tier E v1 to it.
 
 ## Appendix B. Gate Results (kernel 7.1.4-xanmod1 x86_64, rootful container, 2026-08-25)
 
+> **Status: Historical evidence.**
+
 | Gate | Result | Evidence |
 |---|---|---|
 | G0a | PASSED (3 runs) | Deterministic pairing via plain symbol uprobe: phases 42×5 → 7×3, silence after reset |
@@ -727,6 +785,8 @@ the same fail-unknown rules; nothing in this document commits Tier E v1 to it.
 | G1 | RECORDED | 10 M transitions per configuration, single-line results |
 
 ### B.1 G1 latency numbers
+
+> **Status: Historical evidence.**
 
 | Configuration | ns / transition |
 |---|---|
@@ -749,6 +809,8 @@ the same fail-unknown rules; nothing in this document commits Tier E v1 to it.
 
 ### B.2 Harness notes
 
+> **Status: Historical evidence.**
+
 * Bench process holds on a gate file after dlopen+warmup so attachment precedes timing;
   first-run defect (attached rounds measuring detached cost due to loader flag rejection)
   was caught by the sanity expectation "attached ≫ detached" and fixed.
@@ -764,6 +826,8 @@ sample code: github.com/oracle-samples/linux-blog-sample-code (branch
 ---
 
 ## Appendix C. JVMTI native-method event backend (investigated, not enabled)
+
+> **Status: Historical evidence.**
 
 JVM TI `MethodEntry` and `MethodExit` are generated for Java methods **including native
 methods**. This makes a generic native-boundary backend technically possible without an
@@ -810,6 +874,8 @@ global MethodEntry/MethodExit events.
 
 ### C.1 PID namespace requirement for kernel gates
 
+> **Status: Implemented contract.**
+
 `bpf_get_current_pid_tgid()` uses the kernel's initial PID namespace identity. Consequently the
 TGID installed in the BPF target map must be the target's host PID. A collector running in a
 separate PID namespace cannot pass its namespace-local `Process.pid()` and expect target
@@ -820,25 +886,258 @@ TGID guard.
 
 ## Appendix D. Updated Tier E hardening contracts
 
+> **Status: Required hardening.**
+
 ### D.1 Live dictionary publication
 
-Live publication is opt-in. The native agent writes the complete MZSD v2 snapshot to a
-temporary sibling and atomically replaces the configured definition path only after the write
-is complete. The session may poll that path while the JVM is alive; a final read remains the
-authoritative terminal snapshot. Dictionary batches retain their opaque identity across a
-retry, and a failed or ambiguous delivery does not advance the watermark.
+> **Status: Required hardening.** The current implementation provides opt-in live
+> publication and transactional dictionary batches. The stronger closure and coherence
+> rules below are the normative target for treating a live snapshot as terminal evidence.
+
+Live publication is opt-in. It has four distinct guarantees:
+
+1. **Atomic visibility:** the producer writes a temporary sibling and atomically replaces
+   the configured path only after the complete snapshot bytes are written.
+2. **Coherent contents:** the bytes represent one immutable, dependency-complete committed
+   dictionary prefix through watermark `W`. Every invocation in that prefix has its required
+   stack and execution definitions in the same prefix.
+3. **Producer closure:** a terminal publication explicitly acknowledges that no later
+   definitions will be produced for the session.
+4. **Durability:** the default guarantee covers process failure and atomic pathname visibility.
+   Host-power durability requires an opt-in file synchronization and containing-directory
+   synchronization step; it is not paid for on every live publication by default.
+
+The live path uses a versioned outer `MZSE` envelope around unchanged MZSD v2 bytes:
+
+```text
+magic            4 bytes: ASCII MZSE
+version          u16 LE: 1
+flags            u16 LE: bit 0 means producer closed
+publication_id   u64 LE
+watermark        u64 LE
+payload_length   u64 LE
+payload          payload_length bytes containing unchanged MZSD v2 data
+```
+
+Raw MZSD v2 files remain readable as legacy snapshots. A raw or open MZSE snapshot is a
+recoverable prefix only; it is not proof of terminal dictionary completeness. The reader
+opens one descriptor and parses both envelope metadata and payload from that descriptor. It
+does not combine metadata from one pathname lookup with bytes from a later lookup.
+
+One publication owner serializes snapshots and rejects publication-id regression. The owner
+captures immutable references to the committed prefix under a short definitions lock, then
+encodes and writes outside that lock. Dirty-generation tracking skips unchanged publications;
+bounded coalescing reduces repeated full rewrites while retaining an explicit final
+publication. Dictionary batches retain their opaque identity across retries, and failed or
+ambiguous delivery never advances the watermark.
 
 ### D.2 Symbol lifetime and epochs
 
-Every stack capture samples the current symbolization epoch before `GetStackTrace` and validates
-it again after metadata resolution. If class loading, retransformation, or redefinition changes
-the epoch during the copy, the capture is rejected rather than admitted under a mixed epoch.
-Metadata is copied while a strong local declaring-class reference is held; cached values carry
-only a weak unload guard after the immutable copy is complete.
+> **Status: Required hardening.** The existing monotonic epoch and weak-guard checks are
+> necessary but do not, by themselves, prove that replacement installation has completed.
+
+`SymbolizationGeneration` denotes a stable installed-definition interval. A capture is admitted
+only while its generation is stable, and the lease is revalidated after stack capture, raw-key
+lookup, and logical metadata copying. Equality of two epoch samples is necessary but
+insufficient while a class replacement may still be in progress.
+
+The required state machine is:
+
+```text
+STABLE
+  -> REPLACEMENT_IN_PROGRESS
+  -> STABLE(next generation)
+
+STABLE
+  -> EXTERNAL_REPLACEMENT_UNPROVEN
+  -> validated resynchronization or new session
+```
+
+Initial class loading becomes stable only after its post-install lifecycle signal. A
+transformation initiated through the supported cooperative path brackets the complete
+operation, including the transformation call's return. A replacement initiated elsewhere
+causes conservative unresolved or `CAUSAL_UNCERTAIN` captures until a validated
+resynchronization boundary; capture threads never wait for replacement completion.
+
+Cache identity includes method identity, installed symbolization generation, and raw location.
+Hash lookup selects candidates, but complete raw-key equality decides identity. Metadata copying
+holds a strong local declaring-class reference until all required strings and frame data are
+copied into immutable records. Weak guards are retained only for later cache validation and
+must never be used to dereference an unloaded class.
+
+No transition may restore an older exact invocation implicitly. Re-entry requires a validated
+new generation and an explicit re-entry event.
 
 ### D.3 Control protocol and receive boundaries
 
-The line protocol is versioned by committed golden fixtures (currently version 1). Any
-wire-visible change updates the fixture and replay assertions in the same change. The daemon
-uses a bounded receive timeout; a timeout during an incomplete length-prefixed frame retires
-the client because the UTF decoder cannot safely resume at an unknown byte offset.
+> **Status: Required hardening.** Version-1 replies are already frozen by fixtures; this
+> section makes the framing and timeout contract precise.
+
+The control protocol is not an unframed line stream. Version 1 uses a two-byte unsigned
+big-endian length prefix followed by Java modified-UTF bytes, as emitted by
+`DataOutputStream.writeUTF` and consumed by `DataInputStream.readUTF`. One decoded frame
+contains one command line; one response frame contains one rendered reply. The maximum
+encoded frame length is 65,535 bytes.
+
+The receiver distinguishes these conditions:
+
+- **Idle timeout:** no frame has started; recheck shutdown and keep the client session alive.
+- **Partial-header timeout:** retire the client without restarting framing.
+- **Partial-payload timeout:** retire the client without restarting framing.
+- **Whole-frame deadline:** bound total time from the first header byte to the final payload
+  byte, so periodic bytes cannot hold the session indefinitely.
+- **Hard socket error:** preserve existing fail-closed session retirement.
+
+The default idle timeout and whole-frame deadline are each 30 seconds. The decoder tracks
+header bytes, declared payload length, payload bytes, frame start time, and terminal reason.
+The current decoder does not preserve resumable partial-frame state, so a partial-frame timeout
+retires the client rather than interpreting the next byte as a new frame. Any wire-visible
+change requires a new protocol version and updated golden transcripts.
+
+## Tier E contract status and boundaries
+
+> **Status: Implemented contract.** This section is the normative summary for the current
+> architecture. Requirements explicitly marked `Required hardening` elsewhere remain planned
+> until their implementation evidence is retained.
+
+Tier E is an exact attribution system for a bounded capture domain, not an oracle for every
+syscall attempt. Exact attribution is valid only when the native boundary has admitted a
+stable symbolization generation, the logical stack has been copied into immutable metadata,
+and the corresponding invocation identity is joined without inference.
+
+The following outcomes are distinct and must not be collapsed:
+
+- `UNKNOWN`: no valid active invocation or no exact attribution available.
+- `CAUSAL_UNCERTAIN`: re-entrancy, callback suppression, or an unproven lifecycle boundary
+  prevents causal attribution.
+- Capture failure: the exact native stack or required arguments could not be captured.
+- Transport loss: a definition, event, acknowledgement, or snapshot could not be delivered.
+- Out-of-domain attempt: an attempt did not reach the selected `sys_enter` path.
+
+Tier E observes records reaching the selected `raw_tp/sys_enter` path for the target process.
+Seccomp-denied or otherwise out-of-domain attempts are represented as boundary diagnostics,
+never fabricated exact events. Attribution, event retention, dictionary resolution, and
+downstream acknowledgement are separate state transitions. Any incomplete dimension keeps
+the final evidence incomplete and prevents policy use.
+
+The complete flow is:
+
+```text
+native boundary
+  -> symbolization generation admission
+  -> exact stack capture
+  -> immutable definition publication
+  -> marker/ring event
+  -> owned userspace record
+  -> invocation/dictionary join
+  -> downstream acknowledgement
+  -> immutable final evidence
+```
+
+## Resource ownership and bounded admission
+
+> **Status: Required hardening.** The current ring reader already returns copied payloads;
+> this section makes the ownership rule explicit for all future delayed paths.
+
+Before the consumer position advances, every record retained asynchronously is copied into
+collector-owned storage. Delayed dictionary joins never retain a view into reusable mapped
+ring memory. Ring draining remains independent of dictionary parsing, snapshot serialization,
+sink I/O, and downstream acknowledgement.
+
+Capture threads never wait for dictionary queue space, snapshot publication, or acknowledgement.
+Admission failure is recorded explicitly and cannot leave an older invocation active; the
+original native operation continues when the instrumentation failure is recoverable.
+
+The retained-state budget accounts for all of the following together:
+
+```text
+dictionary staging
++ pending observations
++ prepared batches
++ outstanding emission tokens
++ snapshot buffers
++ metadata caches
+```
+
+The default bounded staging budget is 64 MiB. Exhaustion records explicit loss and incomplete
+evidence rather than silently evicting state needed for an exact positive attribution. An
+abandoned in-flight dictionary batch remains uncommitted and cannot advance the watermark.
+
+Ownership lifecycle:
+
+```text
+mapped record
+  -> copied owned record
+  -> delayed join
+  -> resolved observation
+  -> immutable retained result
+```
+
+## Native-call preservation contract
+
+> **Status: Required hardening.** This contract applies to every native-method proxy and its
+> failure-injection tests.
+
+Profiler instrumentation is observational around the original operation. It must preserve:
+
+- the original native return value;
+- any pending application exception;
+- applicable `errno` values;
+- execution of the original operation when profiler admission failure is recoverable; and
+- explicit re-entrant attribution boundaries.
+
+Profiler cleanup must not use blanket `ExceptionClear()` or erase an application exception.
+JNI work that is invalid while an exception is pending is avoided or completed before the
+original operation. Profiler-worker syscalls do not inherit application attribution; in
+`FULL_STREAM` they remain retained as unmarked activity rather than being silently removed.
+
+## Performance targets and evidence contract
+
+> **Status: Required hardening.** These are measurable acceptance targets, not claims about
+> every host or JDK.
+
+Warmed exact-cache hits should perform no profiler-owned heap allocation, string formatting,
+or file I/O. Scratch storage is depth-aware for nested native calls, and virtual-thread
+temporary storage is tied to the protected native execution. Snapshot serialization and sink
+I/O run away from capture threads.
+
+Benchmark evidence reports phase totals and:
+
+- cache hits and misses;
+- capture-side lock wait;
+- snapshot bytes and publication latency;
+- pending-observation high-water marks; and
+- dictionary-resolution latency.
+
+Measurements compare publication disabled/enabled, instrumentation disabled/enabled,
+full-stream/unique-edge modes, warmed execution, and class-loading/retransformation churn.
+The existing host measurements remain historical evidence. A 25% regression threshold applies
+to each measured phase and mode total, and logical stack bytes must remain identical before and
+after an optimization.
+
+USDT remains an experimental marker alternative. It can replace the plain-uprobe path only
+after end-to-end evidence proves identical ordering, identity, failure behavior, and wire
+output with a measured improvement. Manual ring notification suppression and removal of
+failure-path clearing transitions are not accepted optimizations.
+
+## Requirements and evidence matrix
+
+> **Status: Implemented contract.** The matrix is the audit index; a `planned` row is not
+> represented as an implemented guarantee.
+
+| Contract | Design section | Current implementation or fixture | Required evidence | Verdict dimension |
+|---|---|---|---|---|
+| Capture-domain boundary | 2.2, Contract status | `CaptureDomain`, seccomp boundary fixture | observed `sys_enter` versus `attempt_missed` artifact | `capture_domain_validity` |
+| Stable installed symbolization generation | D.2 | native agent generation state, redefinition fixture | paused replacement and unload/redefinition artifact | `lifecycle_validity`, `attribution_coverage` |
+| Strong metadata lifetime | D.2 | native metadata resolver and weak cache guards | unload race with no invalid method dereference | `dictionary_integrity` |
+| Coherent live snapshot and terminal closure | D.1 | live definition publication | MZSE bytes, watermark, publication ID, closure acknowledgement | `transport_completeness`, `dictionary_integrity` |
+| Non-blocking bounded admission | Resource ownership | encoder, publisher, retained-result limits | stopped-consumer overload artifact and memory high-water mark | `transport_completeness` |
+| Owned ring records | Resource ownership | `BpfRingBufferReader`, event decoder | delayed join across ring wraparound | `attribution_coverage`, `dictionary_integrity` |
+| Native outcome preservation | Native-call contract | invocation proxy and cleanup path | return, exception, `errno`, and re-entry fixture | `lifecycle_validity` |
+| Version-1 framing | D.3 | `ControlProtocol`, client session, golden transcripts | partial-frame, deadline, and hard-error transcript | `transport_completeness`, `lifecycle_validity` |
+| Exact-stack performance | Performance targets | native phase benchmark and baseline | raw samples, phase medians, stack-byte comparison | `runtime_overhead` |
+
+Each evidence artifact records the source commit, command, environment, raw output location,
+fixture result, and the six machine-readable dimensions:
+`capture_domain_validity`, `transport_completeness`, `attribution_coverage`,
+`dictionary_integrity`, `lifecycle_validity`, and `runtime_overhead`.
