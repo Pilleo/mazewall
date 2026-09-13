@@ -1,5 +1,8 @@
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.net.Socket;
 
 public final class AgentWorkload {
     public static void main(String[] args) throws Exception {
@@ -12,6 +15,10 @@ public final class AgentWorkload {
         int iterations = args.length > 2 ? Integer.parseInt(args[2]) : 1;
         long workloadStarted = System.nanoTime();
         try {
+            if (args.length > 6) {
+                runDaemonWorkflow(args, iterations);
+                return;
+            }
             if (args.length > 1 && args[1].equals("virtual")) {
                 var thread = Thread.ofVirtual().start(() -> {
                     try { exercise(iterations); } catch (Exception failure) { throw new RuntimeException(failure); }
@@ -23,6 +30,37 @@ public final class AgentWorkload {
         } finally {
             System.out.println("agent-workload: workloadNs=" + (System.nanoTime() - workloadStarted));
         }
+    }
+
+    private static void runDaemonWorkflow(String[] args, int iterations) throws Exception {
+        int port = Integer.parseInt(args[3]);
+        String markerPath = args[4];
+        String markerOffset = args[5];
+        String sessionTag = args[6];
+        try (Socket socket = new Socket("127.0.0.1", port)) {
+            var input = new DataInputStream(socket.getInputStream());
+            var output = new DataOutputStream(socket.getOutputStream());
+            String attach = rpc(output, input, "ATTACH " + ProcessHandle.current().pid() + " uprobe " + markerPath + " " + markerOffset + " " + sessionTag);
+            checkReply("attach", attach);
+            System.out.println("tier-e-workflow: " + attach.trim());
+            System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
+            exercise(iterations);
+            System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
+            checkReply("detach", rpc(output, input, "DETACH"));
+            System.out.println("tier-e-workflow: detached");
+            checkReply("shutdown", rpc(output, input, "SHUTDOWN"));
+            System.out.println("tier-e-workflow: shutdown");
+        }
+    }
+
+    private static String rpc(DataOutputStream output, DataInputStream input, String command) throws Exception {
+        output.writeUTF(command);
+        output.flush();
+        return input.readUTF();
+    }
+
+    private static void checkReply(String operation, String reply) {
+        if (!reply.startsWith("OK")) throw new IllegalStateException(operation + " failed: " + reply);
     }
 
     private static void exercise(int iterations) throws Exception {

@@ -150,5 +150,5 @@ internal class TierEDaemonService(
 }
 
 private fun runningAsRoot(): Boolean =
-    (Files.getAttribute(Path.of("/proc/self"), "uid") as? Int) == 0 ||
+    (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Int) == 0 ||
         System.getProperty("user.name") == "root"
