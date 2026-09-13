@@ -18,6 +18,7 @@
 
 #include "binding_manifest.hpp"
 #include "invocation_registry.hpp"
+#include "symbolization_generation.hpp"
 
 extern "C" __attribute__((noinline, visibility("default"))) void mazewall_stack_marker(
     std::uint64_t invocation_id,
@@ -46,7 +47,7 @@ std::atomic<bool> invocation_ids_exhausted{false};
 std::atomic<bool> live_definitions{false};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
-std::atomic<std::uint64_t> redefinition_epoch{1};
+mazewall::profiler::SymbolizationGeneration symbolization_generation;
 std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
@@ -535,7 +536,13 @@ private:
 
         std::array<jvmtiFrameInfo, 129> frames{};
         jint frame_count = 0;
-        const auto capture_epoch = redefinition_epoch.load(std::memory_order_acquire);
+        const auto capture_lease = symbolization_generation.begin_capture();
+        if (!capture_lease.valid()) {
+            stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
+            env->DeleteLocalRef(current_thread);
+            return Capture{0, 5, 0, false};
+        }
+        const auto capture_epoch = capture_lease.value;
         const auto stack_trace_started = std::chrono::steady_clock::now();
         const auto result = global_jvmti->GetStackTrace(
             current_thread,
@@ -596,7 +603,7 @@ private:
             logical.push_back(std::move(frame));
         }
         if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
-        if (redefinition_epoch.load(std::memory_order_acquire) != capture_epoch) {
+        if (!symbolization_generation.validate(capture_lease)) {
             release_guards(env, class_guards);
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             env->DeleteLocalRef(current_thread);
@@ -758,7 +765,7 @@ void JNICALL on_native_method_bind(
 void JNICALL on_class_file_load(
     jvmtiEnv*,
     JNIEnv*,
-    jclass,
+    jclass class_being_redefined,
     jobject,
     const char*,
     jobject,
@@ -766,10 +773,14 @@ void JNICALL on_class_file_load(
     const unsigned char*,
     jint*,
     unsigned char**) noexcept {
-    // Class loading, retransformation, and redefinition all establish a new
-    // symbolization epoch. The epoch is cache identity only; it is not added
-    // to the existing definition wire format.
-    redefinition_epoch.fetch_add(1, std::memory_order_acq_rel);
+    // Initial class loading can close at ClassPrepare. A replacement callback
+    // has no post-install completion signal, so it remains unproven and exact
+    // captures fail closed until an explicit resynchronization boundary.
+    symbolization_generation.begin_replacement(class_being_redefined != nullptr);
+}
+
+void JNICALL on_class_prepare(jvmtiEnv*, JNIEnv*, jthread, jclass) noexcept {
+    symbolization_generation.complete_replacement();
 }
 
 bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
@@ -785,6 +796,7 @@ bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     jvmtiEventCallbacks callbacks{};
     callbacks.NativeMethodBind = on_native_method_bind;
     callbacks.ClassFileLoadHook = on_class_file_load;
+    callbacks.ClassPrepare = on_class_prepare;
     callbacks.VirtualThreadEnd = on_virtual_thread_end;
     if (jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
         return false;

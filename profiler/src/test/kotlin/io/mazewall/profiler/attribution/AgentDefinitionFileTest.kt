@@ -4,9 +4,36 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class AgentDefinitionFileTest {
+    @Test
+    fun `decodes live snapshot envelope without changing embedded MZSD bytes`() {
+        val payload = versionOneFile()
+        val envelope = SnapshotEnvelope.encode(
+            payload = payload,
+            publicationId = 17,
+            watermark = 23,
+            closed = true,
+        )
+
+        val contents = AgentDefinitionFile.decode(envelope)
+
+        assertEquals(SnapshotPublication(17, 23, true), contents.publication)
+        assertEquals(0, contents.agentLosses)
+        assertEquals(0, contents.stacks.size)
+        assertContentEquals(payload, SnapshotEnvelope.decode(envelope).payload)
+    }
+
+    @Test
+    fun `legacy MZSD snapshot has unknown publication closure`() {
+        val contents = AgentDefinitionFile.decode(versionOneFile())
+
+        assertNull(contents.publication)
+    }
+
     @Test
     fun `decodes version two virtual execution identity`() {
         val invocation = payload {
@@ -91,6 +118,18 @@ class AgentDefinitionFileTest {
     }
 
     private fun payload(block: LittleEndianWriter.() -> Unit): ByteArray = LittleEndianWriter().apply(block).bytes()
+
+    private fun versionOneFile(): ByteArray =
+        ByteArrayOutputStream()
+            .apply {
+        val stats = payload {
+            putLong(0)
+            putLong(0)
+        }
+        write("MZSD".toByteArray())
+        write(byteArrayOf(1, 0))
+        record(3, stats)
+    }.toByteArray()
 
     private fun ByteArrayOutputStream.record(
         type: Int,

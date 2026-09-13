@@ -1,13 +1,11 @@
 package io.mazewall.profiler.tierE.daemon
 
-import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.EOFException
 import java.net.Socket
-import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val TIER_E_CLIENT_RECEIVE_TIMEOUT_MS: Int = 30_000
+internal const val TIER_E_CLIENT_FRAME_DEADLINE_MS: Int = 30_000
 
 /** Framed controller session with a bounded idle receive and explicit shutdown polling. */
 internal object TierEClientSession {
@@ -18,21 +16,20 @@ internal object TierEClientSession {
     ) {
         client.soTimeout = TIER_E_CLIENT_RECEIVE_TIMEOUT_MS
         try {
-            DataInputStream(client.getInputStream()).use { input ->
+            TierEFrameDecoder(client.getInputStream()).let { input ->
                 DataOutputStream(client.getOutputStream()).use { output ->
                     while (!stopRequested.get()) {
-                        val line = try {
-                            input.readUTF()
-                        } catch (_: SocketTimeoutException) {
-                            // DataInputStream.readUTF() cannot resume safely after a timeout
-                            // halfway through its length-prefixed frame. Retire this client
-                            // rather than interpreting the remaining bytes as a new frame.
-                            return
-                        } catch (_: EOFException) {
-                            return
+                        when (val frame = input.readFrame(System.nanoTime() + TIER_E_CLIENT_FRAME_DEADLINE_MS * 1_000_000L)) {
+                            FrameReadResult.Idle -> continue
+                            FrameReadResult.PartialTimeout,
+                            FrameReadResult.DeadlineExceeded,
+                            FrameReadResult.EndOfStream,
+                            -> return
+                            is FrameReadResult.Frame -> {
+                                output.writeUTF(executeCommand(frame.value))
+                                output.flush()
+                            }
                         }
-                        output.writeUTF(executeCommand(line))
-                        output.flush()
                     }
                 }
             }

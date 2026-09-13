@@ -17,6 +17,8 @@ public object AgentDefinitionFile {
         public val virtualPinnedScopes: Long = 0,
         /** Sum of native proxy interval durations, measured by the in-process agent. */
         public val virtualPinnedNanos: Long = 0,
+        /** Optional live-publication identity; null means legacy raw MZSD input. */
+        public val publication: SnapshotPublication? = null,
     ) {
         public val stacks: List<StackDefinition> = java.util.List.copyOf(stacks)
         public val invocations: List<InvocationDefinition> = java.util.List.copyOf(invocations)
@@ -26,7 +28,8 @@ public object AgentDefinitionFile {
     public fun read(path: Path): Contents = decode(Files.readAllBytes(path))
 
     public fun decode(bytes: ByteArray): Contents {
-        val input = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val envelope = bytes.takeIf(SnapshotEnvelope::isEnvelope)?.let(SnapshotEnvelope::decode)
+        val input = ByteBuffer.wrap(envelope?.payload ?: bytes).order(ByteOrder.LITTLE_ENDIAN)
         require(input.remaining() >= HEADER_SIZE) { "agent definition file is shorter than its header" }
         require(ByteArray(4).also(input::get).contentEquals(MAGIC)) { "invalid agent definition magic" }
         val version = input.get().toInt() and 0xff
@@ -76,6 +79,7 @@ public object AgentDefinitionFile {
             executions = executions.values.toList(),
             virtualPinnedScopes = virtualPinnedScopes,
             virtualPinnedNanos = virtualPinnedNanos,
+            publication = envelope?.publication,
         )
     }
 
