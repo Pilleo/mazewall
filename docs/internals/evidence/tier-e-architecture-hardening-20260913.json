@@ -36,6 +36,26 @@
         "closed publication flag",
         "non-zero publication watermark"
       ]
+    },
+    "warmed_benchmark": {
+      "command": "java -agentpath:/tmp/tier-e-generation-build/libmazewall_stack_agent.so=benchmark-phases,mode=<full-stream|unique-stack-syscall> -cp /tmp/tier-e-generation-build/agent-test-classes AgentWorkload 0 platform 100",
+      "result": "MEASURED",
+      "full_stream": {
+        "get_stack_trace_ns": 1449615,
+        "raw_key_ns": 271735,
+        "logical_metadata_ns": 6602912,
+        "metadata_cache_hits": 8176,
+        "metadata_cache_misses": 68
+      },
+      "unique_stack_syscall": {
+        "get_stack_trace_ns": 1441304,
+        "raw_key_ns": 633136,
+        "logical_metadata_ns": 461414,
+        "cache_hits": 503,
+        "cache_misses": 11,
+        "metadata_cache_hits": 139,
+        "metadata_cache_misses": 68
+      }
     }
   },
   "verdict_dimensions": {
@@ -44,7 +64,7 @@
     "attribution_coverage": "PASS",
     "dictionary_integrity": "PASS",
     "lifecycle_validity": "PARTIAL",
-    "runtime_overhead": "INCOMPLETE"
+    "runtime_overhead": "MEASURED_NOT_GATED"
   },
   "verified_scope": [
     "transactional dictionary retry and abandoned batch behavior",
