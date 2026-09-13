@@ -92,6 +92,8 @@ allprojects {
                 "-Dfile.encoding=UTF-8",
                 "-Dsun.jnu.encoding=UTF-8",
             )
+            environment("LC_ALL", "C.UTF-8")
+            environment("LANG", "C.UTF-8")
             systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         }
 
