@@ -224,6 +224,15 @@ therefore leaves a later identical observation eligible for retry. The Tier E se
 records only after retaining them in its immutable result, while direct collector integrations must
 call the acknowledgement boundary after their sink succeeds.
 
+The collector is organized as three independent responsibilities: an invocation/dictionary joiner
+holds delayed observations by explicit invocation ID, an integrity accumulator owns loss and
+completeness dimensions, and a unique-edge gate owns acknowledgement-based suppression. None of
+these components performs timestamp matching or restores state from an older invocation.
+
+Capture-domain limitations are recorded separately from observed events. A denied or otherwise
+out-of-domain syscall attempt increments `outOfDomainAttempts` and makes the session incomplete;
+it is never converted into a fabricated exact `sys_enter` observation.
+
 ### 2.2 Capture-domain and attribution state machine
 
 Tier E is a **capture-domain contract**, not an all-syscall attempt oracle.

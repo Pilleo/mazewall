@@ -55,5 +55,10 @@ Open and map the remaining Tier E correctness matrix to close this item:
 | 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (working-tree evidence; commit linkage pending) |
 | 8 dictionary pressure with long-running workload | pending | pending |
 
+The capture-domain contract is also implemented in the collector: `recordOutOfDomainAttempt`
+produces machine-readable `outOfDomainAttempts` evidence and forces an incomplete guarantee.
+This does not claim that the kernel can observe attempts denied before `sys_enter`; it records the
+boundary limitation when an upstream component reports one.
+
 ---
 <!-- id: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid  file: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md -->

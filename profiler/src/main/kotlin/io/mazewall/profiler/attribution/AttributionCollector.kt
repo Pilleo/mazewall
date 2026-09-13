@@ -126,9 +126,7 @@ public class AttributionCollector(
     private val maxPendingRecords: Int = TierEOptions.DEFAULT_RECORD_LIMIT,
     private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
 ) {
-    private val stacks = mutableMapOf<StackTraceId, StackDefinition>()
-    private val invocations = mutableMapOf<InvocationId, InvocationDefinition>()
-    private val pendingByInvocation = mutableMapOf<InvocationId, MutableList<SyscallAttribution>>()
+    private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
     private var pendingCount: Int = 0
@@ -141,21 +139,13 @@ public class AttributionCollector(
         get() = integrityAccumulator.snapshot(emissionMode, captureDomain)
 
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
-        val existing = stacks.putIfAbsent(definition.stackTraceId, definition)
-        require(existing == null || existing == definition) { "conflicting stack definition ${definition.stackTraceId.value}" }
         return java.util.List.copyOf(
-            invocations.values
-            .asSequence()
-            .filter { it.stackTraceId == definition.stackTraceId }
-            .flatMap { resolveReady(it.invocationId).asSequence() }
-            .toList(),
+            dictionaryJoiner.registerStack(definition).flatMap(::resolveReady),
         )
     }
 
     public fun accept(definition: InvocationDefinition): List<ResolvedSyscall> {
-        val existing = invocations.putIfAbsent(definition.invocationId, definition)
-        require(existing == null || existing == definition) { "conflicting invocation definition ${definition.invocationId.value}" }
-        return java.util.List.copyOf(resolveReady(definition.invocationId))
+        return java.util.List.copyOf(resolveReady(dictionaryJoiner.registerInvocation(definition)))
     }
 
     public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
@@ -178,12 +168,10 @@ public class AttributionCollector(
             )
         }
         val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
-        if (pendingCount == maxPendingRecords) {
+        if (!dictionaryJoiner.enqueue(observation)) {
             recordLoss()
             return emptyList()
         }
-        pendingByInvocation.getOrPut(invocationId, ::mutableListOf).add(observation)
-        pendingCount++
         return resolveReady(invocationId)
     }
 
@@ -235,31 +223,26 @@ public class AttributionCollector(
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> =
         java.util.List.copyOf(
-            pendingByInvocation.entries
-            .flatMap { (invocationId, observations) ->
-            val invocation = invocations[invocationId]
-            val status = if (invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
-            integrityAccumulator.recordAttributionFailure(observations.size.toLong())
-            observations.map { ResolvedSyscall(it, null, status) }
+            dictionaryJoiner
+                .pendingEntries()
+            .flatMap { pending ->
+            val status = if (pending.invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
+            integrityAccumulator.recordAttributionFailure(pending.observations.size.toLong())
+            pending.observations.map { ResolvedSyscall(it, null, status) }
         }.also {
-            pendingByInvocation.clear()
-            pendingCount = 0
+            dictionaryJoiner.clearPending()
         },
         )
 
     private fun resolveReady(invocationId: InvocationId): List<ResolvedSyscall> {
-        val invocation = invocations[invocationId] ?: return emptyList()
-        val pending = pendingByInvocation[invocationId] ?: return emptyList()
+        val ready = dictionaryJoiner.takeReady(invocationId) ?: return emptyList()
+        val invocation = ready.invocation
+        val pending = ready.observations
         if (invocation.captureFailure != null) {
-            pendingByInvocation.remove(invocationId)
-            pendingCount -= pending.size
             integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             return pending.map { ResolvedSyscall(it, null, ResolutionStatus.CAPTURE_FAILED) }
         }
-        val stack = invocation.stackTraceId?.let(stacks::get)
-        if (stack == null) return emptyList()
-        pendingByInvocation.remove(invocationId)
-        pendingCount -= pending.size
+        val stack = requireNotNull(ready.stack) { "ready invocation must have a stack or capture failure" }
         var status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
             integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             ResolutionStatus.TRUNCATED_STACK
