@@ -130,6 +130,14 @@ val integrationTestFreshJvm =
         doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
+// Rootful Tier E fixtures run in a fresh worker and need their native paths
+// forwarded explicitly; Gradle project properties are not inherited by every
+// test worker automatically.
+tasks.withType<Test>().configureEach {
+    System.getProperty("tier.e.agent")?.let { systemProperty("tier.e.agent", it) }
+    System.getProperty("tier.e.workloadClasspath")?.let { systemProperty("tier.e.workloadClasspath", it) }
+}
+
 // Fresh-JVM tests spawn a child using this task's runtime classpath. Keep the
 // ordinary integration source set quiescent while that child is loading classes.
 integrationTestFreshJvm.configure {
