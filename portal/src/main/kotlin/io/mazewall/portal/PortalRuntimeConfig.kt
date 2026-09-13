@@ -11,7 +11,20 @@ public class PortalRuntimeConfig(
     public val manifests: List<PortalServiceManifest>,
     public val workerArtifacts: Map<String, PortalWorkerArtifact> = emptyMap(),
     public val workerBundleCache: Path = defaultCacheDirectory(),
+    public val workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
+    public val cgroupRoot: Path? = null,
 ) {
+    internal fun profile(manifest: PortalServiceManifest): PortalWorkerProfile = workerProfiles[manifest.policyProfile] ?: throw PortalWorkerProfileUnavailableException(manifest.policyProfile)
+
+    internal fun validateProfiles() {
+        manifests.forEach { manifest ->
+            val profile = profile(manifest)
+            if (profile.requiresCgroup && cgroupRoot == null) {
+                throw PortalCgroupUnavailableException("profile ${manifest.policyProfile} requires a delegated cgroup root")
+            }
+        }
+    }
+
     internal fun workerClasspath(manifest: PortalServiceManifest): String {
         val artifact =
             workerArtifacts[manifest.workerArtifact]
@@ -32,6 +45,8 @@ public class PortalRuntimeConfig(
             loader: ClassLoader = defaultLoader(),
             workerArtifacts: Map<String, PortalWorkerArtifact> = emptyMap(),
             workerBundleCache: Path = defaultCacheDirectory(),
+            workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
+            cgroupRoot: Path? = null,
         ): PortalRuntimeConfig {
             val generated = PortalWorkerArtifactCatalog.load(loader)
             generated.forEach { (key, generatedArtifact) ->
@@ -45,6 +60,8 @@ public class PortalRuntimeConfig(
                 manifests = PortalServiceManifestCatalog.load(loader),
                 workerArtifacts = generated + workerArtifacts,
                 workerBundleCache = workerBundleCache,
+                workerProfiles = workerProfiles,
+                cgroupRoot = cgroupRoot,
             )
         }
 

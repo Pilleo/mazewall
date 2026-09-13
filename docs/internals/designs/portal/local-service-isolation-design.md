@@ -44,11 +44,32 @@ materialization even when it refers to the same bundle artifact.
 The cache root and every published cache entry must be real directories, never
 symbolic links; an application-controlled redirect is a startup failure.
 
+## Resource profiles
+
+`policyProfile` is resolved by the host's `PortalRuntimeConfig.workerProfiles`
+registry before any worker is spawned. A profile may declare an explicit JVM
+heap maximum, a cgroup v2 memory maximum, and a cgroup v2 CPU quota/period. A
+memory-limited profile must reserve at least 32 MiB above its heap maximum for
+JVM non-heap memory.
+
+Every manifest profile must resolve. A profile with CPU or memory limits also
+requires an application-supplied delegated cgroup v2 root. Portal validates the
+requested controllers, creates a runtime-owned child cgroup, writes limits,
+and attaches the worker PID before it can publish READY or construct guest
+services. Missing delegation, unsupported controllers, or cgroup write failure
+are startup failures; Portal never falls back to an unbounded worker.
+
+Profiles do not vary the process sandbox in this release. Every worker retains
+the existing fail-closed JVM filesystem allowlist, process-creation denial, and
+network denial. Per-profile readable paths and arbitrary syscall policies remain
+deferred.
+
 ## Diagnostics and failure evidence
 
 `PortalRuntime.health()` is read-only local diagnostics: for each group it
 reports availability/state-loss, the worker PIDs still live in that runtime,
-and the most recent invocation's queue-admission and worker-execution
+the resolved policy profile and configured resource contract, and the most
+recent invocation's queue-admission and worker-execution
 durations. These clocks are observations under the existing single absolute
 deadline; they do not add a worker management endpoint or reset a call deadline
 between phases.

@@ -43,11 +43,16 @@ public class ProcessBroker(
     private val startupTimeoutMs: Long = 30_000L,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
+    private val workerProfile: PortalWorkerProfile = PortalWorkerProfile(),
+    private val cgroupRoot: java.nio.file.Path? = null,
 ) : AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
         require(callTimeoutMs > 0) { "callTimeoutMs must be positive" }
         require(startupTimeoutMs > 0) { "startupTimeoutMs must be positive" }
+        require(!workerProfile.requiresCgroup || cgroupRoot != null) {
+            "limited portal worker profile requires a delegated cgroup root"
+        }
     }
 
     public companion object {
@@ -64,6 +69,7 @@ public class ProcessBroker(
     }
 
     private val logger: Logger = Logger.getLogger(ProcessBroker::class.java.name)
+    private val cgroupController: PortalCgroupController = RealPortalCgroupController
 
     private val nextId = AtomicInteger(1)
     private val idle = ArrayBlockingQueue<WorkerSlot>(poolSize)
@@ -86,10 +92,12 @@ public class ProcessBroker(
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val retainedCapabilities: MutableSet<Capability.ReadFd> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
-    private val startupRetirement = StartupRetirement(sockets)
+    private val startupRetirement = StartupRetirement(sockets, cgroupController)
     private val closeRetirement = CloseRetirement()
 
     @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
+
+    @Volatile private var mostRecentWorkerLifecycle: PortalWorkerLifecycle = PortalWorkerLifecycle.notStarted()
 
     private val lifecycleGate = Any()
 
@@ -203,6 +211,10 @@ public class ProcessBroker(
     internal fun workerPids(): List<Long> = trackedSlots.mapNotNull { slot -> slot.process.takeIf(Process::isAlive)?.pid() }.sorted()
 
     internal fun lastInvocationTiming(): PortalInvocationTiming? = mostRecentInvocation
+
+    internal fun lastWorkerLifecycle(): PortalWorkerLifecycle = mostRecentWorkerLifecycle
+
+    internal fun cgroupUsage(): List<PortalCgroupUsage> = trackedSlots.mapNotNull { slot -> slot.cgroup?.let(cgroupController::sample) }.sortedBy { it.directory }
 
     internal fun crashIdleWorkerProcess() {
         val slot =
@@ -493,13 +505,15 @@ public class ProcessBroker(
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
                 mainArgs = listOf(ep.path),
-                maxHeap = "64m",
+                maxHeap = workerProfile.maxHeapBytes?.toString() ?: "64m",
                 javaAgents = JavaAgentSelection.None,
                 classpath = resolveWorkerClasspath(),
                 extraJvmArgs = workerExtraJvmArgs,
             )
             val process = JvmChildProcess.start(launcher, spec)
             synchronized(attempt) { attempt.process = process }
+            val cgroup = cgroupRoot?.let { root -> cgroupController.createAndAttach(root, process.pid(), workerProfile) }
+            synchronized(attempt) { attempt.cgroup = cgroup }
             check(active()) { "portal worker acquisition cancelled" }
             val pump = PortalWorkerOutput(process.inputStream)
             synchronized(attempt) { attempt.pump = pump }
@@ -527,6 +541,7 @@ public class ProcessBroker(
                 attempt.endpoint,
                 server,
                 pump,
+                cgroup,
             )
             synchronized(attempt) {
                 check(active() && !attempt.retirementRequested) { "portal worker acquisition cancelled before publication" }
@@ -534,9 +549,11 @@ public class ProcessBroker(
                 attempt.transferred = true
             }
             spawned.incrementAndGet()
+            mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.STARTED, process.pid())
             provisionalAttempts.remove(attempt)
             return slot
         } catch (failure: Throwable) {
+            mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.STARTUP_FAILED, detail = failure.message?.take(1024))
             synchronized(attempt) { attempt.acquisitionFinished = true }
             val cleanupFailure = runCatching { retireStartupAttempt(attempt) }.exceptionOrNull()
             attempt.pump?.snapshot()?.let { diagnostics ->
@@ -553,6 +570,7 @@ public class ProcessBroker(
             val cleanup = CleanupCollector()
             startupRetirement.retireChannel(attempt, cleanup)
             startupRetirement.retireProcess(attempt, cleanup)
+            startupRetirement.retireCgroup(attempt, cleanup)
             startupRetirement.retirePump(attempt, cleanup)
             startupRetirement.retireServer(attempt, cleanup)
             startupRetirement.retireEndpoint(attempt, cleanup)
@@ -691,6 +709,12 @@ public class ProcessBroker(
                     slot.processReaped = true
                 }
             }
+            if (!slot.cgroupRetired) {
+                cleanup.attempt("worker cgroup") {
+                    slot.cgroup?.let(cgroupController::release)
+                    slot.cgroupRetired = true
+                }
+            }
             if (!slot.pumpRetired) {
                 cleanup.attempt("worker output stream") { slot.process.inputStream.close() }
                 cleanup.attempt("worker output pump") {
@@ -711,6 +735,7 @@ public class ProcessBroker(
                 logger.log(Level.WARNING, "failed to release ${failure.resource}", failure.cause)
             }
             if (slot.fullyRetired) {
+                mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.RETIRED, slot.process.pid())
                 trackedSlots.remove(slot)
                 provisionalSlots.remove(slot)
             }
@@ -725,6 +750,7 @@ public class ProcessBroker(
         val endpoint: PrivateUnixEndpoint,
         val server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         val pump: PortalWorkerOutput,
+        val cgroup: PortalCgroupHandle?,
     ) {
         var channelRetired: Boolean = false
         var serverRetired: Boolean = false
@@ -732,8 +758,9 @@ public class ProcessBroker(
         var processReaped: Boolean = false
         var pumpRetired: Boolean = false
         var endpointRetired: Boolean = false
+        var cgroupRetired: Boolean = false
         val fullyRetired: Boolean
-            get() = channelRetired && serverRetired && processDestroyed && processReaped && pumpRetired && endpointRetired
+            get() = channelRetired && serverRetired && processDestroyed && processReaped && pumpRetired && endpointRetired && cgroupRetired
     }
 
     private data class ClosePreparation(
@@ -776,6 +803,7 @@ public class ProcessBroker(
 
     private class StartupRetirement(
         private val sockets: SocketManager,
+        private val cgroups: PortalCgroupController,
     ) {
         fun retireChannel(
             attempt: StartupAttempt,
@@ -819,6 +847,23 @@ public class ProcessBroker(
                     check(process.waitFor(2, TimeUnit.SECONDS)) { "provisional portal worker did not exit" }
                     attempt.processReaped = true
                 }
+            }
+        }
+
+        fun retireCgroup(
+            attempt: StartupAttempt,
+            cleanup: CleanupCollector,
+        ) {
+            if (attempt.cgroupRetired) return
+            val cgroup = attempt.cgroup
+            if (cgroup == null && attempt.acquisitionFinished) {
+                attempt.cgroupRetired = true
+                return
+            }
+            if (cgroup == null) return
+            cleanup.attempt("provisional worker cgroup") {
+                cgroups.release(cgroup)
+                attempt.cgroupRetired = true
             }
         }
 
@@ -890,6 +935,7 @@ public class ProcessBroker(
     ) {
         var server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         var process: Process? = null
+        var cgroup: PortalCgroupHandle? = null
         var pump: PortalWorkerOutput? = null
         var peer: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
         var channel: PortalChannel? = null
@@ -900,6 +946,7 @@ public class ProcessBroker(
         var serverRetired = false
         var processDestroyed = false
         var processReaped = false
+        var cgroupRetired = false
         var pumpRetired = false
         var endpointRetired = false
         val fullyRetired: Boolean
@@ -909,6 +956,7 @@ public class ProcessBroker(
                     serverRetired &&
                     processDestroyed &&
                     processReaped &&
+                    cgroupRetired &&
                     pumpRetired &&
                     endpointRetired
     }
