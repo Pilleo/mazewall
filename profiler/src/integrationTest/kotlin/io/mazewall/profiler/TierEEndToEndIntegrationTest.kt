@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
 
 @NeedsFreshJvm
@@ -43,9 +44,11 @@ class TierEEndToEndIntegrationTest {
         ).inheritIO().start()
 
         val publishedBatches = mutableListOf<ByteArray>()
+        var publicationAttempts = 0
         val sink = DictionaryBatchSink {
             publishedBatches += it.bytes
-            DictionarySinkResult.Committed
+            publicationAttempts += 1
+            if (publicationAttempts == 1) DictionarySinkResult.RetryableFailure else DictionarySinkResult.Committed
         }
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
@@ -68,10 +71,18 @@ class TierEEndToEndIntegrationTest {
             }
             assertEquals(0, process.waitFor())
 
+            repeat(20) {
+                if (Files.exists(definitions) && Files.size(definitions) > 0) session.poll()
+                if (publicationAttempts >= 2) return@repeat
+                Thread.sleep(5)
+            }
+
             val profile = session.finish(definitions)
             assertTrue(profile.syscalls.isNotEmpty())
             assertTrue(Files.size(definitions) > 0, "captured definitions must be published")
             assertTrue(publishedBatches.isNotEmpty(), "definitions must be published before process exit")
+            assertTrue(publicationAttempts >= 2, "the failed dictionary write must be retried")
+            assertContentEquals(publishedBatches[0], publishedBatches[1])
             assertEquals(0L, profile.integrity.observedLosses)
 
             assertTrue(session.markerTransitionCount() > 0)
