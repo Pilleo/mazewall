@@ -15,8 +15,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: 4d6db4d7-2b54-4b2b-b8b7-62deb67352a9
-paperclip_identifier: MAZ-689
+paperclip_issue_id: "4d4ed433-a4db-4feb-8f19-6f39bc6de194"
+paperclip_identifier: "MAZ-1473"
 ---
 
 # 🟢 [Severity: LOW]: Precompile new_backlog_issue into standalone JVM CLI
