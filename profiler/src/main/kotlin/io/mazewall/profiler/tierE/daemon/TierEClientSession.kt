@@ -24,7 +24,10 @@ internal object TierEClientSession {
                         val line = try {
                             input.readUTF()
                         } catch (_: SocketTimeoutException) {
-                            continue
+                            // DataInputStream.readUTF() cannot resume safely after a timeout
+                            // halfway through its length-prefixed frame. Retire this client
+                            // rather than interpreting the remaining bytes as a new frame.
+                            return
                         } catch (_: EOFException) {
                             return
                         }

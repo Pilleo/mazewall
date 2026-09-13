@@ -138,10 +138,9 @@ public object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_UPDATE))
         val metricDone = p.size
 
-        // Coverage mode retains the first exact (canonical stack, syscall) edge.
-        // A cache hit returns before a ring-buffer reservation; a miss is still
-        // emitted if cache insertion later fails or the LRU has evicted an edge.
-        var coverageMiss: Int? = null
+        // Unique-edge mode keeps a bounded kernel observation map, but never
+        // suppresses ring-buffer observations. The collector owns suppression
+        // because only it can commit an edge after downstream acknowledgement.
         var contextHasNoCoverage: Int? = null
         if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
             // Context 0 is the explicit "no marker" state. It is evidence of
@@ -157,19 +156,12 @@ public object TierEBpfProgramBuilder {
             emit(Insn(STX_DW, dst = FP, src = 5, off = -48))
             emit(Insn(LDX_W, dst = 5, src = FP, off = -40))
             emit(Insn(STX_W, dst = FP, src = 5, off = -48))
-            ldMap(1, 4)
-            emit(Insn(MOV_REG, dst = 2, src = FP))
-            emit(Insn(ADD_IMM, dst = 2, imm = -56))
-            emit(Insn(CALL, imm = H_LOOKUP))
-            coverageMiss = emit(Insn(JEQ_IMM, dst = 0))
-            exits.add(emit(Insn(JA)))
         }
 
         val reserveStart = p.size
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
         p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
-        coverageMiss?.let { p[it] = p[it].copy(off = (reserveStart - it - 1).toShort()) }
         contextHasNoCoverage?.let { p[it] = p[it].copy(off = (reserveStart - it - 1).toShort()) }
         ldMap(1, 1)
         emit(Insn(MOV_IMM, dst = 2, imm = 88))

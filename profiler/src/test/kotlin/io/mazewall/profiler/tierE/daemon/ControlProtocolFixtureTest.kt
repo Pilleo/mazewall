@@ -12,6 +12,7 @@ class ControlProtocolFixtureTest {
     @Serializable
     private data class Fixture(
         val name: String,
+        val protocolVersion: Int = TIER_E_CONTROL_PROTOCOL_VERSION,
         val steps: List<Step>,
     )
 
@@ -32,6 +33,7 @@ class ControlProtocolFixtureTest {
                     .readBytes()
                     .toString(StandardCharsets.UTF_8),
             )
+            assertEquals(TIER_E_CONTROL_PROTOCOL_VERSION, fixture.protocolVersion, fixture.name)
             var state: ControlSessionState = ControlSessionState.Idle
             fixture.steps.forEachIndexed { index, step ->
                 val parsed = parseControlCommand(step.wire)

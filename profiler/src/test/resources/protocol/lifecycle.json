@@ -1,5 +1,6 @@
 {
   "name": "successful attach status detach shutdown lifecycle",
+  "protocolVersion": 1,
   "steps": [
     { "wire": "ATTACH 42 uprobe /opt/libagent.so b0aa 4d5a", "reply": "OK attached pid=42\n", "state": "Attached", "event": "success" },
     { "wire": "STATUS", "reply": "OK engine=active queued=0 lost=0\n", "state": "Attached" },

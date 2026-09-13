@@ -190,18 +190,23 @@ bool resolve_frame(JNIEnv* env, const jvmtiFrameInfo& raw, LogicalFrame& result,
         global_jvmti->GetMethodDeclaringClass(raw.method, &owner) == JVMTI_ERROR_NONE && owner != nullptr &&
         global_jvmti->GetClassSignature(owner, &owner_descriptor, nullptr) == JVMTI_ERROR_NONE &&
         global_jvmti->GetMethodModifiers(raw.method, &modifiers) == JVMTI_ERROR_NONE;
+    // Keep a strong local class reference for the complete metadata copy. The weak
+    // cache guard is created only after all JVMTI strings and modifiers are copied.
+    jclass strong_owner = owner == nullptr ? nullptr : static_cast<jclass>(env->NewLocalRef(owner));
+    if (owner != nullptr && strong_owner == nullptr) ok = false;
     if (ok) {
         result = LogicalFrame{
-            loader_identity(env, owner), owner_descriptor, name, descriptor,
+            loader_identity(env, strong_owner), owner_descriptor, name, descriptor,
             static_cast<std::int64_t>(raw.location), (modifiers & 0x100) != 0};
         if (class_guard != nullptr) {
-            *class_guard = env->NewWeakGlobalRef(owner);
+            *class_guard = env->NewWeakGlobalRef(strong_owner);
             ok = *class_guard != nullptr;
         }
     }
     deallocate(owner_descriptor);
     deallocate(descriptor);
     deallocate(name);
+    if (strong_owner != nullptr) env->DeleteLocalRef(strong_owner);
     if (owner != nullptr) env->DeleteLocalRef(owner);
     return ok;
 }
@@ -530,6 +535,7 @@ private:
 
         std::array<jvmtiFrameInfo, 129> frames{};
         jint frame_count = 0;
+        const auto capture_epoch = redefinition_epoch.load(std::memory_order_acquire);
         const auto stack_trace_started = std::chrono::steady_clock::now();
         const auto result = global_jvmti->GetStackTrace(
             current_thread,
@@ -552,7 +558,7 @@ private:
         const auto raw_key_started = std::chrono::steady_clock::now();
         RawStack raw;
         raw.flags = flags_;
-        raw.symbol_epoch = redefinition_epoch.load(std::memory_order_acquire);
+        raw.symbol_epoch = capture_epoch;
         raw.frames.reserve(retained);
         for (std::size_t index = 0; index < retained; ++index) {
             raw.frames.push_back(RawFrame{reinterpret_cast<std::uintptr_t>(frames[index].method), static_cast<std::int64_t>(frames[index].location)});
@@ -590,6 +596,12 @@ private:
             logical.push_back(std::move(frame));
         }
         if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
+        if (redefinition_epoch.load(std::memory_order_acquire) != capture_epoch) {
+            release_guards(env, class_guards);
+            stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
+            env->DeleteLocalRef(current_thread);
+            return Capture{0, 5, 0, false};
+        }
         env->DeleteLocalRef(current_thread);
         const auto stack_id = intern_stack(std::move(logical), truncated, raw.symbol_epoch);
         if (stack_id == 0) {

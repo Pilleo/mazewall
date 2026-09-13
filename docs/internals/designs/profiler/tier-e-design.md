@@ -817,3 +817,28 @@ matches. The privileged Docker gate must run with `--pid=host` (or receive the h
 container runtime); otherwise both marker and syscall programs correctly reject the target and
 the result is zero observations. This is a fail-unknown condition, never a reason to remove the
 TGID guard.
+
+## Appendix D. Updated Tier E hardening contracts
+
+### D.1 Live dictionary publication
+
+Live publication is opt-in. The native agent writes the complete MZSD v2 snapshot to a
+temporary sibling and atomically replaces the configured definition path only after the write
+is complete. The session may poll that path while the JVM is alive; a final read remains the
+authoritative terminal snapshot. Dictionary batches retain their opaque identity across a
+retry, and a failed or ambiguous delivery does not advance the watermark.
+
+### D.2 Symbol lifetime and epochs
+
+Every stack capture samples the current symbolization epoch before `GetStackTrace` and validates
+it again after metadata resolution. If class loading, retransformation, or redefinition changes
+the epoch during the copy, the capture is rejected rather than admitted under a mixed epoch.
+Metadata is copied while a strong local declaring-class reference is held; cached values carry
+only a weak unload guard after the immutable copy is complete.
+
+### D.3 Control protocol and receive boundaries
+
+The line protocol is versioned by committed golden fixtures (currently version 1). Any
+wire-visible change updates the fixture and replay assertions in the same change. The daemon
+uses a bounded receive timeout; a timeout during an incomplete length-prefixed frame retires
+the client because the UTF decoder cannot safely resume at an unknown byte offset.

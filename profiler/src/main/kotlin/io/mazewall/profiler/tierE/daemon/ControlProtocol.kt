@@ -2,6 +2,9 @@ package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.profiler.attribution.TierEEmissionMode
 
+/** Version of the line-oriented control contract represented by golden fixtures. */
+internal const val TIER_E_CONTROL_PROTOCOL_VERSION: Int = 1
+
 /** Line commands accepted on the control socket (WP-04 wire contract). */
 public sealed interface ControlCommand {
     public data class Attach(

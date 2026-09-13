@@ -1,5 +1,6 @@
 {
   "name": "attach and terminal failure replies",
+  "protocolVersion": 1,
   "steps": [
     { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR BUSY\n", "state": "Idle", "event": "BUSY" },
     { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR ALREADY_BOUND\n", "state": "Idle", "event": "ALREADY_BOUND" },
