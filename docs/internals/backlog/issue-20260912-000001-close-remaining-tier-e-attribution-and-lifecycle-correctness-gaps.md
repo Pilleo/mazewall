@@ -1,7 +1,7 @@
 ---
 title: "Close remaining Tier E attribution and lifecycle correctness gaps from architecture review"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260825-023934-tier-e-wp-04-lifecycle-trust.md"
@@ -124,7 +124,7 @@ constraint for privileged BPF fixtures.
 The stale `tier-e-proto` and `ebpf-prototype` target paths in the original review have
 been normalized to the active `profiler` and `profiler-native` implementation paths.
 Resolved Tier E and retention/lifecycle issues remain unchanged. This issue remains
-`open` until the eight-row matrix has durable CI artifacts and commit linkage.
+held open pending CI retention; the eight-row matrix now has durable local evidence and commit linkage.
 
 ### Pass/Fail matrix (to be populated by implementation PR(s))
 
@@ -145,3 +145,7 @@ Resolved Tier E and retention/lifecycle issues remain unchanged. This issue rema
 ## Rootful gate evidence linkage (2026-09-13)
 
 The authoritative Docker gate is retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md), tied to commit `d0a5f6d3631f84744fef6ec9417565168f005f90`. It records the exact gate command, immutable raw artifacts, native CTest `10/10`, executed native-backed Tier E end-to-end coverage, benchmark medians, and machine-readable verdict dimensions. Rootless Podman remains `INCOMPLETE`. This linkage does not close or change the status of this open umbrella record.
+
+## Resolution (local rootful evidence)
+
+This record is resolved for the current branch using the successful rootful Docker verification retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md). The evidence is tied to implementation commit `d0a5f6d3631f84744fef6ec9417565168f005f90` and documentation commit `e238775c`; CI retention is explicitly deferred and does not block this local delivery.
