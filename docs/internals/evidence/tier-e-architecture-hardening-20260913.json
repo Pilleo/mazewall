@@ -31,6 +31,17 @@
         "terminal transport incompleteness"
       ]
     },
+    "daemon_integration": {
+      "commands": [
+        "./gradlew :profiler:integrationTest",
+        "./gradlew :profiler:integrationTestFreshJvm"
+      ],
+      "result": "PASS",
+      "observed_constraints": [
+        "one profiler ACK EPIPE during listener shutdown",
+        "temporary Unix socket cleanup reported Function not implemented"
+      ]
+    },
     "native_ctest": {
       "command": "cmake --build /tmp/tier-e-generation-build && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
       "result": "PASS",
