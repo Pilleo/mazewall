@@ -45,6 +45,7 @@ std::atomic<std::uint64_t> benchmark_metadata_cache_misses{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::atomic<bool> live_definitions{false};
+std::atomic<std::uint64_t> next_publication_id{1};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
 mazewall::profiler::SymbolizationGeneration symbolization_generation;
@@ -53,7 +54,7 @@ std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
 
-bool write_definitions() noexcept;
+bool write_definitions(bool producer_closed = false) noexcept;
 
 
 struct LogicalFrame final {
@@ -823,60 +824,71 @@ void append_string(std::vector<std::uint8_t>& output, const std::string& value) 
     output.insert(output.end(), value.begin(), value.end());
 }
 
-void append_record(std::ofstream& stream, std::uint8_t type, const std::vector<std::uint8_t>& payload) {
-    stream.put(static_cast<char>(type));
-    std::vector<std::uint8_t> length;
-    append_le<std::uint32_t>(length, static_cast<std::uint32_t>(payload.size()));
-    stream.write(reinterpret_cast<const char*>(length.data()), static_cast<std::streamsize>(length.size()));
-    stream.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+void append_record(std::vector<std::uint8_t>& output, std::uint8_t type, const std::vector<std::uint8_t>& payload) {
+    output.push_back(type);
+    append_le<std::uint32_t>(output, static_cast<std::uint32_t>(payload.size()));
+    output.insert(output.end(), payload.begin(), payload.end());
 }
 
-bool write_definitions() noexcept {
+bool write_definitions(bool producer_closed) noexcept {
     if (definitions_path.empty()) return true;
     try {
         const auto temporary_path = definitions_path + ".tmp";
         std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
         if (!stream) return false;
-        stream.write("MZSD", 4);
-        stream.put(2);
-        stream.put(0);
+        std::vector<std::uint8_t> encoded;
+        encoded.insert(encoded.end(), {'M', 'Z', 'S', 'D', 2, 0});
+        std::uint64_t committed_watermark = 0;
         std::lock_guard lock(definitions_mutex);
         for (const auto& stack : logical_stacks) {
-            std::vector<std::uint8_t> payload;
-            append_le<std::uint32_t>(payload, stack.id);
-            payload.push_back(stack.truncated ? 1 : 0);
-            append_le<std::uint16_t>(payload, static_cast<std::uint16_t>(stack.frames.size()));
+            std::vector<std::uint8_t> record;
+            append_le<std::uint32_t>(record, stack.id);
+            record.push_back(stack.truncated ? 1 : 0);
+            append_le<std::uint16_t>(record, static_cast<std::uint16_t>(stack.frames.size()));
             for (const auto& frame : stack.frames) {
-                append_string(payload, frame.loader);
-                append_string(payload, frame.owner);
-                append_string(payload, frame.name);
-                append_string(payload, frame.descriptor);
-                append_le<std::int64_t>(payload, frame.location);
-                payload.push_back(frame.native_method ? 1 : 0);
+                append_string(record, frame.loader);
+                append_string(record, frame.owner);
+                append_string(record, frame.name);
+                append_string(record, frame.descriptor);
+                append_le<std::int64_t>(record, frame.location);
+                record.push_back(frame.native_method ? 1 : 0);
             }
-            append_record(stream, 1, payload);
+            append_record(encoded, 1, record);
         }
         for (const auto& execution : execution_definitions) {
-            std::vector<std::uint8_t> payload;
-            append_le<std::uint64_t>(payload, execution.id);
-            payload.push_back(static_cast<std::uint8_t>(execution.kind));
-            append_record(stream, 4, payload);
+            std::vector<std::uint8_t> record;
+            append_le<std::uint64_t>(record, execution.id);
+            record.push_back(static_cast<std::uint8_t>(execution.kind));
+            append_record(encoded, 4, record);
         }
         for (const auto& invocation : invocation_definitions) {
-            std::vector<std::uint8_t> payload;
-            append_le<std::uint64_t>(payload, invocation.id);
-            append_le<std::uint64_t>(payload, invocation.parent_id);
-            append_le<std::uint32_t>(payload, invocation.stack_id);
-            payload.push_back(invocation.failure);
-            append_le<std::uint64_t>(payload, invocation.execution_id);
-            append_record(stream, 2, payload);
+            std::vector<std::uint8_t> record;
+            append_le<std::uint64_t>(record, invocation.id);
+            append_le<std::uint64_t>(record, invocation.parent_id);
+            append_le<std::uint32_t>(record, invocation.stack_id);
+            record.push_back(invocation.failure);
+            append_le<std::uint64_t>(record, invocation.execution_id);
+            append_record(encoded, 2, record);
         }
         std::vector<std::uint8_t> stats;
         append_le<std::uint64_t>(stats, stack_capture_failures.load(std::memory_order_relaxed));
         append_le<std::uint64_t>(stats, scope_failures.load(std::memory_order_relaxed));
         append_le<std::uint64_t>(stats, virtual_pinned_scopes.load(std::memory_order_relaxed));
         append_le<std::uint64_t>(stats, virtual_pinned_nanos.load(std::memory_order_relaxed));
-        append_record(stream, 3, stats);
+        append_record(encoded, 3, stats);
+        if (!invocation_definitions.empty()) committed_watermark = invocation_definitions.back().id;
+        if (live_definitions.load(std::memory_order_acquire)) {
+            std::vector<std::uint8_t> envelope;
+            envelope.insert(envelope.end(), {'M', 'Z', 'S', 'E'});
+            append_le<std::uint16_t>(envelope, 1);
+            append_le<std::uint16_t>(envelope, producer_closed ? 1 : 0);
+            append_le<std::uint64_t>(envelope, next_publication_id.fetch_add(1, std::memory_order_relaxed));
+            append_le<std::uint64_t>(envelope, committed_watermark);
+            append_le<std::uint64_t>(envelope, static_cast<std::uint64_t>(encoded.size()));
+            envelope.insert(envelope.end(), encoded.begin(), encoded.end());
+            encoded = std::move(envelope);
+        }
+        stream.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
         stream.flush();
         if (!stream.good()) return false;
         stream.close();
@@ -938,7 +950,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
 }
 
 extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
-    const bool definitions_written = write_definitions();
+    const bool definitions_written = write_definitions(true);
     std::fprintf(
         stderr,
         "mazewall-stack-agent: native-binds=%llu proxied-binds=%llu stack-captures=%llu stack-failures=%llu scope-failures=%llu definitions=%s\n",
