@@ -139,6 +139,19 @@ held open pending CI retention; the eight-row matrix now has durable local evide
 | 7 dedupe retry behavior | later emit proceeds after first failure | permanent dedupe block after transient failure | unique-edge replay output |
 | 8 dictionary pressure | bounded pending queue + incomplete-tail artifact | unbounded memory / silent truncation | profiler memory + tail artifact |
 
+### Incremental hardening evidence (2026-09-13)
+
+The lifecycle and transport gaps are additionally covered by the committed
+artifacts [`tier-e-lifecycle-identity-stress-20260913.json`](../evidence/tier-e-lifecycle-identity-stress-20260913.json)
+and [`tier-e-transport-fault-injection-20260913.json`](../evidence/tier-e-transport-fault-injection-20260913.json),
+both linked to implementation commit `bd8b3966`. The native stress fixture
+passes 13/13 CTest cases, including 12 repeated fork/exec identity cycles.
+The focused Kotlin run passes transactional retry, reconnect, crash,
+terminal-failure, abandoned-batch, opaque-token, detach, exec, PID-reuse,
+sequence-gap, callback, and inner-capture-failure scenarios. The artifacts
+keep capture-domain and runtime-overhead dimensions explicitly separate from
+the dimensions exercised by each fixture.
+
 ---
 <!-- id: issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps  file: issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps.md -->
 

@@ -102,6 +102,17 @@ evidence; that limitation is `INCOMPLETE`, not a weakened policy or a passing re
 This does not claim that the kernel can observe attempts denied before `sys_enter`; it records the
 boundary limitation when an upstream component reports one.
 
+### Incremental lifecycle and transport evidence (2026-09-13)
+
+The current implementation also retains [`tier-e-lifecycle-identity-stress-20260913.json`](../evidence/tier-e-lifecycle-identity-stress-20260913.json)
+and [`tier-e-transport-fault-injection-20260913.json`](../evidence/tier-e-transport-fault-injection-20260913.json),
+both linked to commit `bd8b3966`. The native fixture records 12 repeated
+fork/exec cycles and rejects stale identities before re-entry. The focused
+profiler tests record byte-identical retry, stable watermark, abandoned-batch,
+terminal-failure, reconnect, opaque-token, detach, exec, PID-reuse, sequence
+gap, callback, and capture-failure behavior. Untested dimensions remain
+machine-readable as `INCOMPLETE` in the per-fixture artifacts.
+
 ---
 <!-- id: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid  file: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md -->
 
