@@ -113,8 +113,8 @@ class BpfProgLoadLayoutTest {
             TierEOptions(TierEEmissionMode.UNIQUE_STACK_SYSCALL),
         )
 
-        assertTrue(fullStream.none { it.code == 0x85 && it.imm == 2 }, "full-stream must not update a coverage cache")
-        assertEquals(1, uniqueCoverage.count { it.code == 0x85 && it.imm == 2 })
+        assertEquals(1, fullStream.count { it.code == 0x85 && it.imm == 2 }, "full-stream must update only metrics")
+        assertEquals(2, uniqueCoverage.count { it.code == 0x85 && it.imm == 2 }, "unique mode adds one coverage update")
         uniqueCoverage.forEachIndexed { index, instruction ->
             if (instruction.code == 0x15 || instruction.code == 0x05 || instruction.code == 0x5d) {
                 val target = index + instruction.off + 1

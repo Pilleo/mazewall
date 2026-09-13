@@ -3,8 +3,6 @@ package io.mazewall.profiler.tierE.daemon
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.attribution.TierEOptions
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
-import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.file.Files
@@ -20,8 +18,6 @@ import kotlin.system.exitProcess
  *
  * The native JVMTI agent supplies the marker uprobe and logical stack dictionary.
  */
-private const val CLIENT_SOCKET_TIMEOUT_MS = 10_000
-
 public fun main() {
     if (!runningAsRoot()) {
         System.err.println("[tier-e] refusing: requires root")
@@ -51,21 +47,10 @@ public fun main() {
         val client = runCatching { server.accept() }.getOrNull() ?: break
         thread(name = "tier-e-client") {
             try {
-                client.soTimeout = CLIENT_SOCKET_TIMEOUT_MS
-                DataInputStream(client.getInputStream()).use { input ->
-                    DataOutputStream(client.getOutputStream()).use { out ->
-                        while (!stopRequested.get()) {
-                            val line = input.readUTF()
-                            val reply = daemon.executeCommand(line)
-                            out.writeUTF(reply)
-                            out.flush()
-                        }
-                    }
-                }
+                TierEClientSession.run(client, stopRequested, daemon::executeCommand)
             } catch (expectedClientDisconnect: Exception) {
-                // peer disconnected or timed out — session over
-            } finally {
-                runCatching { client.close() }
+                // Hard socket errors still end the session; idle timeouts are
+                // handled inside TierEClientSession and continue polling.
             }
         }
     }
@@ -106,7 +91,12 @@ internal class TierEDaemonService(
 
             is ControlSessionEffect.RespondStatus -> {
                 val statusText = activeEngine?.let {
-                    "engine=active queued=${it.drainEvents().size} lost=${it.readLossCount()}"
+                    val metrics = it
+                        .readContextMetrics()
+                        .entries
+                        .sortedBy { entry -> entry.key }
+                        .joinToString(",") { entry -> "${entry.key}:${entry.value}" }
+                    "engine=active queued=${it.drainEvents().size} lost=${it.readLossCount()} metrics=$metrics"
                 } ?: "engine=idle"
                 ControlReply.ok(statusText).render().trimEnd()
             }

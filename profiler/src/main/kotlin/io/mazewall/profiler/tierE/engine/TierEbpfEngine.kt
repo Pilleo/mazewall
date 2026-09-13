@@ -35,7 +35,9 @@ public class TierEbpfEngine(
         private const val PERF_EVENT_IOC_SET_BPF: Long = 0x40042408
 
         private const val BPF_MAP_CREATE: Long = 0
+        private const val BPF_MAP_LOOKUP_ELEM: Long = 1
         private const val BPF_MAP_UPDATE_ELEM: Long = 2
+        private const val BPF_MAP_GET_NEXT_KEY: Long = 4
         private const val BPF_PROG_LOAD: Long = 5
         private const val BPF_RAW_TRACEPOINT_OPEN: Long = 17
         private const val BPF_BTF_LOAD: Long = 18
@@ -54,6 +56,7 @@ public class TierEbpfEngine(
         public const val EVENT_SIZE: Int = 88
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
+        private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
     }
 
     /** One eBPF instruction. */
@@ -77,6 +80,7 @@ public class TierEbpfEngine(
         var invocationBtfFd: Int = -1
         var ringFd: Int = -1
         var lossFd: Int = -1
+        var contextMetricFd: Int = -1
         var sessionFd: Int = -1
         var coverageEdgeFd: Int = -1
         var progFd: Int = -1
@@ -129,6 +133,7 @@ public class TierEbpfEngine(
                 installed.coverageEdgeFd = createMap(MAP_LRU_HASH, keySize = 16, valueSize = 8, maxEntries = COVERAGE_EDGE_CAPACITY)
             }
             installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 4)
+            installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 1)
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(8, 4)
@@ -139,7 +144,7 @@ public class TierEbpfEngine(
             installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd, installed.lossFd, installed.sessionFd), PROG_KPROBE, "tier_e_marker")
             installed.progFd = loadProg(
             buildProgram(),
-            listOf(installed.invocationStorageFd, installed.ringFd, installed.lossFd, installed.sessionFd, installed.coverageEdgeFd),
+            listOf(installed.invocationStorageFd, installed.ringFd, installed.lossFd, installed.sessionFd, installed.coverageEdgeFd, installed.contextMetricFd),
             PROG_RAW_TP,
             "tier_e_syscall",
         )
@@ -168,6 +173,42 @@ public class TierEbpfEngine(
     public fun readLastMarkerPidTgid(): Long = readCounter(2)
 
     public fun readMarkerFailureCount(): Long = readCounter(3)
+
+    /** Snapshot of bounded per-invocation event counts from the BPF metric map. */
+    public fun readContextMetrics(): Map<Long, Long> =
+        Arena.ofConfined().use { arena ->
+            val installed = requireInstalled()
+            val key = arena.allocate(8, 8)
+            val nextKey = arena.allocate(8, 8)
+            val value = arena.allocate(8, 8)
+            val metrics = linkedMapOf<Long, Long>()
+            var currentKey: MemorySegment? = null
+            while (true) {
+                val nextAttr = arena.allocate(32)
+                nextAttr.set(ValueLayout.JAVA_INT, 0, installed.contextMetricFd)
+                nextAttr.set(ValueLayout.ADDRESS, 8, currentKey ?: MemorySegment.NULL)
+                nextAttr.set(ValueLayout.ADDRESS, 16, nextKey)
+                when (val result = bpfResult(BPF_MAP_GET_NEXT_KEY, nextAttr, 32)) {
+                    is SyscallResult.Error -> {
+                        if (result.errno == io.mazewall.ffi.NativeConstants.ENOENT) break
+                        result.throwErrno("bpf(BPF_MAP_GET_NEXT_KEY)")
+                    }
+                    is SyscallResult.Success -> Unit
+                }
+                val contextId = nextKey.get(ValueLayout.JAVA_LONG, 0)
+                key.set(ValueLayout.JAVA_LONG, 0, contextId)
+                val lookupAttr = arena.allocate(32)
+                lookupAttr.set(ValueLayout.JAVA_INT, 0, installed.contextMetricFd)
+                lookupAttr.set(ValueLayout.ADDRESS, 8, key)
+                lookupAttr.set(ValueLayout.ADDRESS, 16, value)
+                when (val result = bpfResult(BPF_MAP_LOOKUP_ELEM, lookupAttr, 32)) {
+                    is SyscallResult.Success -> metrics[contextId] = value.get(ValueLayout.JAVA_LONG, 0)
+                    is SyscallResult.Error -> if (result.errno != io.mazewall.ffi.NativeConstants.ENOENT) result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM)")
+                }
+                currentKey = key
+            }
+            metrics.toMap()
+        }
 
     private fun readCounter(index: Int): Long =
         Arena.ofConfined().use { arena ->
@@ -269,6 +310,7 @@ public class TierEbpfEngine(
             installed.markerProgFd,
             installed.ringFd,
             installed.lossFd,
+            installed.contextMetricFd,
             installed.sessionFd,
             installed.coverageEdgeFd,
             installed.invocationStorageFd,

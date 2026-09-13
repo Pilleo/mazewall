@@ -10,6 +10,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /** Deterministic userspace consumer for a Linux `BPF_MAP_TYPE_RINGBUF`. */
+internal enum class BpfRingBufferRecordKind { READY, BUSY, DISCARDED }
+
 internal class BpfRingBufferReader(
     private val native: RawSyscallOperations,
     mapFd: Int,
@@ -37,10 +39,10 @@ internal class BpfRingBufferReader(
         while (position < producerPosition) {
             val recordOffset = pageSize + (position and (capacity - 1))
             val lengthWord = INT_HANDLE.getAcquire(producer, recordOffset) as Int
-            if ((lengthWord and BUSY_BIT) != 0) break
+            if (classify(lengthWord) == BpfRingBufferRecordKind.BUSY) break
             val length = lengthWord and LENGTH_MASK
             check(length == validatedRecordSize) { "unexpected BPF ring record size $length (expected $validatedRecordSize)" }
-            if ((lengthWord and DISCARD_BIT) == 0) {
+            if (classify(lengthWord) == BpfRingBufferRecordKind.READY) {
                 records += producer.asSlice(recordOffset + HEADER_SIZE, length.toLong()).toArray(ValueLayout.JAVA_BYTE)
             }
             position += alignedRecordSize(length)
@@ -83,9 +85,9 @@ internal class BpfRingBufferReader(
     }
 
     private fun mapBoth(fd: Int): Pair<Long, Long> {
-        val consumerMapping = map(fd, pageSize, PROT_READ or PROT_WRITE, 0)
+        val consumerMapping = map(fd, pageSize, METADATA_MAPPING_PROTECTION, 0)
         return try {
-            consumerMapping to map(fd, producerMappingSize, PROT_READ, pageSize)
+            consumerMapping to map(fd, producerMappingSize, DATA_MAPPING_PROTECTION, pageSize)
         } catch (expectedMappingFailure: Throwable) {
             try {
                 unmap(consumerMapping, pageSize)
@@ -114,13 +116,27 @@ internal class BpfRingBufferReader(
         private const val PROT_WRITE = 2
         private const val MAP_SHARED = 1
         private const val HEADER_SIZE = 8L
-        private const val BUSY_BIT = Int.MIN_VALUE
-        private const val DISCARD_BIT = 1 shl 30
-        private const val LENGTH_MASK = BUSY_BIT.inv() and DISCARD_BIT.inv()
+        internal const val BUSY_BIT = Int.MIN_VALUE
+        internal const val DISCARD_BIT = 1 shl 30
+        internal const val LENGTH_MASK = BUSY_BIT.inv() and DISCARD_BIT.inv()
+        internal const val METADATA_MAPPING_PROTECTION = PROT_READ or PROT_WRITE
+        internal const val DATA_MAPPING_PROTECTION = PROT_READ
         private val LONG_HANDLE = ValueLayout.JAVA_LONG.varHandle()
         private val INT_HANDLE = ValueLayout.JAVA_INT.varHandle()
 
+        internal fun classify(lengthWord: Int): BpfRingBufferRecordKind =
+            when {
+            lengthWord and BUSY_BIT != 0 -> BpfRingBufferRecordKind.BUSY
+            lengthWord and DISCARD_BIT != 0 -> BpfRingBufferRecordKind.DISCARDED
+            else -> BpfRingBufferRecordKind.READY
+        }
+
         internal fun alignedRecordSize(payloadSize: Int): Long = (payloadSize + HEADER_SIZE + 7) and -8L
+
+        internal fun nextPosition(
+            position: Long,
+            payloadSize: Int,
+        ): Long = position + alignedRecordSize(payloadSize)
 
         private fun linuxPageSize(): Long {
             val line = Files

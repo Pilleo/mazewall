@@ -163,4 +163,16 @@ class ControlSessionMachineTest {
         val effect = assertIs<ControlSessionEffect.SendReply>(transition.effect)
         assertEquals(ControlReply.err("EMPTY_COMMAND"), effect.reply)
     }
+
+    @Test
+    fun `commands after shutdown fail closed with terminal state`() {
+        val transition = ControlSessionMachine.evaluate(
+            ControlSessionState.Terminated,
+            ControlSessionEvent.CommandReceived(ControlCommand.Status),
+        )
+
+        assertEquals(ControlSessionState.Terminated, transition.state)
+        val effect = assertIs<ControlSessionEffect.SendReply>(transition.effect)
+        assertEquals(ControlReply.err("STATE"), effect.reply)
+    }
 }

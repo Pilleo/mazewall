@@ -102,7 +102,13 @@ public object ControlSessionMachine {
         state: ControlSessionState,
         command: ControlCommand,
     ): ControlSessionTransition =
-        when (command) {
+        if (state == ControlSessionState.Terminated) {
+            ControlSessionTransition(
+                state = ControlSessionState.Terminated,
+                effect = ControlSessionEffect.SendReply(ControlReply.err("STATE")),
+            )
+        } else {
+            when (command) {
             is ControlCommand.Attach -> {
                 val previous = (state as? ControlSessionState.Attached)?.session
                 ControlSessionTransition(
@@ -147,5 +153,6 @@ public object ControlSessionMachine {
                     command.rejectionReply() ?: ControlReply.err("unknown command"),
                 ),
             )
+        }
         }
 }

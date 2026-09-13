@@ -113,6 +113,31 @@ public object TierEBpfProgramBuilder {
         emit(Insn(LDX_W, dst = 5, src = 6, off = 16))
         emit(Insn(STX_W, dst = FP, src = 5, off = -8))
 
+        // Diagnostic counts are keyed by the active invocation, bounded by
+        // the map's LRU capacity, and never participate in attribution.
+        emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
+        val noMetricContext = emit(Insn(JEQ_IMM, dst = 5))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -72))
+        ldMap(1, 5)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -72))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val newMetricContext = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val metricCounted = emit(Insn(JA))
+        val metricInsert = p.size
+        ldMap(1, 5)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -72))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -80))
+        emit(Insn(MOV_REG, dst = 3, src = FP))
+        emit(Insn(ADD_IMM, dst = 3, imm = -80))
+        emit(Insn(MOV_IMM, dst = 4, imm = 0))
+        emit(Insn(CALL, imm = H_UPDATE))
+        val metricDone = p.size
+
         // Coverage mode retains the first exact (canonical stack, syscall) edge.
         // A cache hit returns before a ring-buffer reservation; a miss is still
         // emitted if cache insertion later fails or the LRU has evicted an edge.
@@ -141,6 +166,9 @@ public object TierEBpfProgramBuilder {
         }
 
         val reserveStart = p.size
+        p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
+        p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
+        p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
         coverageMiss?.let { p[it] = p[it].copy(off = (reserveStart - it - 1).toShort()) }
         contextHasNoCoverage?.let { p[it] = p[it].copy(off = (reserveStart - it - 1).toShort()) }
         ldMap(1, 1)

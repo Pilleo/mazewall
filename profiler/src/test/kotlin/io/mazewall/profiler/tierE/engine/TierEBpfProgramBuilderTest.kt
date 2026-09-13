@@ -26,4 +26,14 @@ class TierEBpfProgramBuilderTest {
         assertEquals(0x95, uniqueStackProg.last().code, "Unique stack program must end with EXIT opcode")
         assertTrue(uniqueStackProg.size > fullStreamProg.size, "Unique stack program must include coverage cache lookup and update logic")
     }
+
+    @Test
+    fun `sys enter program reserves a bounded per-context metric map slot`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+
+        assertTrue(
+            program.any { it.code == 0x18 && it.src == 1 && it.imm == 5 },
+            "program must reference the dedicated per-context metrics map",
+        )
+    }
 }

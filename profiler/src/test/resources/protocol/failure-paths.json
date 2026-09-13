@@ -1,0 +1,12 @@
+{
+  "name": "attach and terminal failure replies",
+  "steps": [
+    { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR BUSY\n", "state": "Idle", "event": "BUSY" },
+    { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR ALREADY_BOUND\n", "state": "Idle", "event": "ALREADY_BOUND" },
+    { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR MARKER_BUILD_ID_UNREADABLE\n", "state": "Idle", "event": "MARKER_BUILD_ID_UNREADABLE" },
+    { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR NOT_MAPPED_IN_TARGET\n", "state": "Idle", "event": "NOT_MAPPED_IN_TARGET" },
+    { "wire": "ATTACH 42 uprobe /opt/libagent.so 1 4d5a", "reply": "ERR STATE\n", "state": "Idle", "event": "STATE" },
+    { "wire": "SHUTDOWN", "reply": "OK shutting down\n", "state": "Terminated" },
+    { "wire": "DETACH", "reply": "ERR STATE\n", "state": "Terminated" }
+  ]
+}
