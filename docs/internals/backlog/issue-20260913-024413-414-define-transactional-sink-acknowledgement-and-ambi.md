@@ -51,3 +51,9 @@ Verification:
 - Native CMake build in `/tmp/tier-e-native-build`
 
 Verdict dimensions: `capture_domain_validity=local-pass`, `transport_completeness=local-pass`, `attribution_coverage=local-pass`, `dictionary_integrity=local-pass`, `lifecycle_validity=local-pass`, `rootful_runtime=INCOMPLETE`.
+
+Additional verification evidence:
+
+- `./gradlew :profiler:test :profiler:compileIntegrationTestKotlin` passed.
+- `./gradlew :profiler:integrationTest` passed on the available host.
+- `ctest --test-dir /tmp/tier-e-native-build --output-on-failure` passed 10/10 native fixtures.
