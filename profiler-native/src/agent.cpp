@@ -318,7 +318,8 @@ ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
     const auto virtual_thread = env->CallBooleanMethod(thread, is_virtual) == JNI_TRUE;
     const auto id = env->CallLongMethod(thread, java_thread_id);
     if (env->ExceptionCheck()) {
-        env->ExceptionClear();
+        // Preserve the application's pending exception. Profiler cleanup must
+        // never turn a metadata lookup failure into exception loss.
         return {};
     }
     if (id <= 0) return {};
@@ -344,7 +345,7 @@ void JNICALL on_virtual_thread_end(jvmtiEnv*, JNIEnv* env, jthread thread) noexc
     if (method == nullptr) return;
     const auto id = env->CallLongMethod(thread, method);
     if (env->ExceptionCheck()) {
-        env->ExceptionClear();
+        // The VM owns the pending exception; this callback must not clear it.
         return;
     }
     std::lock_guard lock(definitions_mutex);
