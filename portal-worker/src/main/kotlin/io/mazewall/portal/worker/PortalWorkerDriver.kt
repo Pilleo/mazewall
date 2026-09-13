@@ -112,7 +112,8 @@ internal class PortalWorkerDriver(
         val dispatchEvent = if (actualFailure == null) {
             PortalWorkerEvent.DispatchSucceeded(PortalPayload(checkNotNull(result)))
         } else {
-            val message = (actualFailure.message ?: actualFailure::class.java.simpleName).toByteArray(StandardCharsets.UTF_8)
+            val rawMessage = actualFailure.message ?: actualFailure::class.java.simpleName
+            val message = rawMessage.take(MAX_ERROR_MESSAGE_LENGTH).toByteArray(StandardCharsets.UTF_8)
             PortalWorkerEvent.DispatchFailed(PortalPayload(message))
         }
         val sending = PortalWorkerMachine.evaluate(state, dispatchEvent) as PortalWorkerTransition.Send
@@ -126,12 +127,23 @@ internal class PortalWorkerDriver(
         }
     }
 
-    private tailrec fun unwrapInvocation(failure: Throwable): Throwable =
-        if (failure is java.lang.reflect.InvocationTargetException && failure.targetException != null) {
-            unwrapInvocation(failure.targetException)
+    private fun unwrapInvocation(
+        failure: Throwable,
+        depth: Int = 0,
+        seen: MutableSet<Int> = mutableSetOf(),
+    ): Throwable {
+        if (depth >= MAX_UNWRAP_DEPTH || !seen.add(System.identityHashCode(failure))) return failure
+        return if (failure is java.lang.reflect.InvocationTargetException && failure.targetException != null) {
+            unwrapInvocation(failure.targetException, depth + 1, seen)
         } else {
             failure
         }
+    }
+
+    private companion object {
+        const val MAX_UNWRAP_DEPTH = 16
+        const val MAX_ERROR_MESSAGE_LENGTH = 4096
+    }
 }
 
 private fun raiseWorkerFailure(failure: Throwable): Nothing = throw failure

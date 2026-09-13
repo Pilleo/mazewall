@@ -5,8 +5,8 @@ import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
 import io.mazewall.core.FileDescriptorRole
+import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.readByte
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import java.nio.ByteBuffer
@@ -58,9 +58,7 @@ internal object PortalBuiltinDispatch {
                     is LinuxNative.SyscallResult.Success -> {
                         if (res.value <= 0L) break
                         val chunk = ByteArray(res.value.toInt())
-                        for (i in chunk.indices) {
-                            chunk[i] = buf.readByte(i.toLong())
-                        }
+                        ManagedSegment.copy(buf, 0L, chunk, 0, chunk.size)
                         adler.update(chunk)
                     }
                 }

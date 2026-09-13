@@ -105,11 +105,11 @@ public class ProcessBroker(
         val acquired = ArrayList<WorkerSlot>(poolSize)
         try {
             repeat(poolSize) {
-                checkStartupActive()
+                check(startupIsActive()) { "broker startup cancelled" }
                 val slot = spawnWorker(deadline, ::startupIsActive)
                 provisionalSlots.add(slot)
                 acquired += slot
-                checkStartupActive()
+                check(startupIsActive()) { "broker startup cancelled" }
             }
             synchronized(lifecycleGate) {
                 check(lifecycle == ProcessBrokerLifecycle.Starting) { "broker closed during startup" }
@@ -226,37 +226,33 @@ public class ProcessBroker(
             retireCapabilities(extra).failureOrNull()?.let(::raiseBrokerFailure)
             val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
             callState = transition.state
-            when (val effect = transition.effect) {
-                is PortalBrokerCallEffect.ReturnPayload -> {
+            dispatchBrokerCallEffect(
+                transition.effect,
+                onSuccess = { payloadBytes ->
                     returnToPoolOrDestroy(slot)
                     returnedToPool = true
-                    effect.payload.copyToByteArray()
-                }
-                is PortalBrokerCallEffect.RemoteError -> {
+                    payloadBytes
+                },
+                onRemoteError = { message ->
                     returnToPoolOrDestroy(slot)
                     returnedToPool = true
-                    throw PortalCallException(effect.message)
-                }
-                is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
-                is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
-                is PortalBrokerCallEffect.PostTerminalObservation ->
-                    throw PortalCallException("portal RPC observed ${effect.event} after ${effect.state}")
-                PortalBrokerCallEffect.AwaitReply -> throw PortalCallException("portal RPC produced no terminal result")
-            }
+                    throw PortalCallException(message)
+                },
+            )
         } catch (e: PortalCallException) {
             if (!returnedToPool) {
                 scheduleRecycle(slot)
             }
             throw e
         } catch (interrupted: InterruptedException) {
-            Thread.currentThread().interrupt()
-            val failure = PortalCallException("portal RPC interrupted", interrupted)
-            if (!returnedToPool) {
-                runCatching { destroySlot(slot) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
-                runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
-            }
-            Thread.currentThread().interrupt()
-            throw failure
+            handleInterruptedCall(
+                onCleanup = {
+                    if (!returnedToPool) {
+                        scheduleRecycle(slot)
+                    }
+                },
+                interrupted = interrupted,
+            )
         } catch (expectedRpcFailure: Exception) {
             val transportFailure = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.TransportFailed)
             check(transportFailure.state == PortalBrokerCallState.Failed)
@@ -340,6 +336,16 @@ public class ProcessBroker(
 
     /** Keeps close-only ownership retirement separate from public broker operations. */
     private inner class CloseRetirement {
+        fun retireHandoff(handoff: AcceptedSocketHandoff) {
+            val failure = runCatching { handoff.cancel() }.exceptionOrNull()
+            failure?.let {
+                acceptedHandoffs.add(handoff)
+                logger.log(Level.WARNING, "failed to retire accepted portal socket", failure)
+            }
+            if (handoff.fullyRetired) acceptedHandoffs.remove(handoff)
+            failure?.let { throw it }
+        }
+
         fun retireHandoffs(cleanup: CleanupCollector) {
             acceptedHandoffs.toList().forEach { handoff ->
                 cleanup.attempt("accepted socket handoff") { retireHandoff(handoff) }
@@ -430,10 +436,6 @@ public class ProcessBroker(
         }
 
     private fun startupIsActive(): Boolean = lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled
-
-    private fun checkStartupActive() {
-        check(startupIsActive()) { "broker startup cancelled" }
-    }
 
     /** Pool the slot unless the broker closed meanwhile; destroy orphans either way. */
     private fun returnToPoolOrDestroy(slot: WorkerSlot) {
@@ -592,21 +594,11 @@ public class ProcessBroker(
                 accepted.cancel(true)
                 executor.shutdownNow()
                 runCatching { executor.awaitTermination(2, TimeUnit.SECONDS) }
-                retireHandoff(handoff)
+                closeRetirement.retireHandoff(handoff)
             } else {
                 executor.shutdown()
             }
         }
-    }
-
-    private fun retireHandoff(handoff: AcceptedSocketHandoff) {
-        val failure = runCatching { handoff.cancel() }.exceptionOrNull()
-        failure?.let {
-            acceptedHandoffs.add(handoff)
-            logger.log(Level.WARNING, "failed to retire accepted portal socket", failure)
-        }
-        if (handoff.fullyRetired) acceptedHandoffs.remove(handoff)
-        failure?.let { throw it }
     }
 
     private fun scheduleRecycle(dead: WorkerSlot) {
@@ -930,4 +922,33 @@ private fun throwWithCleanupFailure(
     }
     cleanup?.takeIf { it !== primary }?.let(primary::addSuppressed)
     throw primary
+}
+
+private fun dispatchBrokerCallEffect(
+    effect: PortalBrokerCallEffect,
+    onSuccess: (ByteArray) -> ByteArray,
+    onRemoteError: (String) -> Nothing,
+): ByteArray =
+    when (effect) {
+    is PortalBrokerCallEffect.ReturnPayload -> onSuccess(effect.payload.copyToByteArray())
+    is PortalBrokerCallEffect.RemoteError -> onRemoteError(effect.message)
+    is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
+    is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
+    is PortalBrokerCallEffect.PostTerminalObservation ->
+        throw PortalCallException("portal RPC observed ${effect.event} after ${effect.state}")
+    PortalBrokerCallEffect.AwaitReply -> throw PortalCallException("portal RPC produced no terminal result")
+}
+
+private fun handleInterruptedCall(
+    onCleanup: () -> Unit,
+    interrupted: InterruptedException,
+): Nothing {
+    Thread.currentThread().interrupt()
+    val failure = PortalCallException("portal RPC interrupted", interrupted)
+    try {
+        onCleanup()
+    } finally {
+        Thread.currentThread().interrupt()
+    }
+    throw failure
 }

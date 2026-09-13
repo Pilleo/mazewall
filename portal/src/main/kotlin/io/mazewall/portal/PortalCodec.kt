@@ -50,8 +50,9 @@ public object PortalCodec {
     }
 
     public fun concat(parts: List<ByteArray>): ByteArray {
-        val size = parts.sumOf { it.size }
-        val out = ByteArray(size)
+        val totalSize = parts.sumOf { it.size.toLong() }
+        require(totalSize in 0..Int.MAX_VALUE) { "total size $totalSize exceeds Int.MAX_VALUE" }
+        val out = ByteArray(totalSize.toInt())
         var at = 0
         for (part in parts) {
             part.copyInto(out, at)
@@ -98,7 +99,7 @@ public object PortalCodec {
 
         public fun bytes(): ByteArray {
             val n = int()
-            require(n >= 0 && pos + n <= buf.size) { "portal codec underrun" }
+            require(n in 0..PortalFrame.MAX_PAYLOAD && pos + n <= buf.size) { "portal codec underrun" }
             val slice = buf.copyOfRange(pos, pos + n)
             pos += n
             return slice
