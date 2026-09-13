@@ -1,9 +1,13 @@
+@file:Suppress("ForbiddenImport") // Contract analysis intentionally uses Java reflection metadata.
+
 package io.mazewall.portal.codegen
 
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.asClassName
 import java.lang.reflect.Modifier
+import java.lang.reflect.ParameterizedType
 import java.lang.reflect.RecordComponent
+import java.lang.reflect.Type
 
 internal object BoundaryTypes {
     const val READ_FD: String = "io.mazewall.portal.Capability\$ReadFd"
@@ -30,6 +34,9 @@ internal object BoundaryTypes {
             Character::class.java to Kind.CharT,
             String::class.java to Kind.StringT,
             ByteArray::class.java to Kind.BytesT,
+            java.util.UUID::class.java to Kind.UuidT,
+            java.time.Instant::class.java to Kind.InstantT,
+            java.math.BigDecimal::class.java to Kind.BigDecimalT,
         )
 
     sealed interface Kind {
@@ -53,7 +60,25 @@ internal object BoundaryTypes {
 
         data object BytesT : Kind
 
+        data object UuidT : Kind
+
+        data object InstantT : Kind
+
+        data object BigDecimalT : Kind
+
+        data class EnumT(
+            val typeName: ClassName,
+        ) : Kind
+
         data object ReadFd : Kind
+
+        data class InputSnapshot(
+            val maximumBytes: Int,
+        ) : Kind {
+            init {
+                require(maximumBytes >= 0) { "portal input snapshot maximumBytes must not be negative" }
+            }
+        }
 
         data object UnitT : Kind
 
@@ -65,6 +90,15 @@ internal object BoundaryTypes {
                 require(components.isNotEmpty()) { "structured boundary type must have components" }
             }
         }
+
+        data class ListT(
+            val element: Kind,
+        ) : Kind
+
+        data class MapT(
+            val key: Kind,
+            val value: Kind,
+        ) : Kind
 
         data class Component(
             val name: String,
@@ -90,13 +124,56 @@ internal object BoundaryTypes {
     }
 
     fun kindOf(
+        type: Type,
+        stack: MutableSet<String> = mutableSetOf(),
+    ): Kind =
+        when (type) {
+            is Class<*> -> classKind(type, stack)
+            is ParameterizedType -> parameterizedKind(type, stack)
+            else -> throw IllegalArgumentException("portal boundary forbids unresolved generic type $type")
+        }
+
+    fun kindOf(
         type: Class<*>,
         stack: MutableSet<String> = mutableSetOf(),
+    ): Kind = classKind(type, stack)
+
+    private fun classKind(
+        type: Class<*>,
+        stack: MutableSet<String>,
+    ): Kind =
+        scalarKinds[type]
+            ?: when {
+                type.name == READ_FD -> Kind.ReadFd
+                type.isEnum -> Kind.EnumT(type.asClassName())
+                else -> structuredKind(type, stack)
+            }
+
+    private fun parameterizedKind(
+        type: ParameterizedType,
+        stack: MutableSet<String>,
     ): Kind {
-        scalarKinds[type]?.let { return it }
-        if (type.name == READ_FD) return Kind.ReadFd
+        val raw = type.rawType as? Class<*> ?: throw IllegalArgumentException("portal boundary forbids raw generic type $type")
+        val arguments = type.actualTypeArguments
+        return when (raw) {
+            java.util.List::class.java -> {
+                require(arguments.size == 1) { "portal boundary list $type must have exactly one element type" }
+                Kind.ListT(kindOf(arguments.single(), stack))
+            }
+            java.util.Map::class.java -> {
+                require(arguments.size == 2) { "portal boundary map $type must have key and value types" }
+                Kind.MapT(kindOf(arguments[0], stack), kindOf(arguments[1], stack))
+            }
+            else -> throw IllegalArgumentException("portal boundary forbids generic type $type; only List<T> and Map<K,V> are supported")
+        }
+    }
+
+    private fun structuredKind(
+        type: Class<*>,
+        stack: MutableSet<String>,
+    ): Kind {
         require(!type.isArray) { "portal boundary forbids array type ${type.name}; only byte[] is allowed" }
-        require(!type.isInterface && !type.isEnum && !type.isPrimitive) { "portal boundary forbids type ${type.name}" }
+        require(!type.isInterface && !type.isPrimitive) { "portal boundary forbids type ${type.name}" }
         require(!isJdkForbidden(type)) {
             "portal boundary forbids type ${type.name}; allowed: primitives, String, byte[], records/POJOs of those, Capability.ReadFd"
         }

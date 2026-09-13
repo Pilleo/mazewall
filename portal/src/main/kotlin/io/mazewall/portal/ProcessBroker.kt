@@ -39,7 +39,7 @@ public class ProcessBroker(
     private val callTimeoutMs: Long = 30_000L,
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
-    private val workerClasspath: String = "",
+    private val workerClasspath: String = defaultWorkerClasspath(),
     private val startupTimeoutMs: Long = 30_000L,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
@@ -51,9 +51,16 @@ public class ProcessBroker(
     }
 
     public companion object {
-        public const val WORKER_CLASSPATH_PROPERTY: String = "io.mazewall.portal.worker.classpath"
         private const val LIFECYCLE_POLL_SLICE_MS = 50
         private const val OUTPUT_PUMP_JOIN_TIMEOUT_MS = 1_000L
+
+        /** Legacy system-property injection is test-only and cannot affect production resolution. */
+        private fun defaultWorkerClasspath(): String =
+            if (System.getProperty("io.mazewall.test") == "true") {
+                System.getProperty("io.mazewall.portal.worker.classpath").orEmpty()
+            } else {
+                ""
+            }
     }
 
     private val logger: Logger = Logger.getLogger(ProcessBroker::class.java.name)
@@ -81,6 +88,8 @@ public class ProcessBroker(
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val startupRetirement = StartupRetirement(sockets)
     private val closeRetirement = CloseRetirement()
+
+    @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
 
     private val lifecycleGate = Any()
 
@@ -190,6 +199,11 @@ public class ProcessBroker(
 
     internal fun spawnedWorkers(): Int = spawned.get()
 
+    /** Broker-owned diagnostics; these do not contact, alter, or revive a worker. */
+    internal fun workerPids(): List<Long> = trackedSlots.mapNotNull { slot -> slot.process.takeIf(Process::isAlive)?.pid() }.sorted()
+
+    internal fun lastInvocationTiming(): PortalInvocationTiming? = mostRecentInvocation
+
     internal fun crashIdleWorkerProcess() {
         val slot =
             idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
@@ -206,13 +220,15 @@ public class ProcessBroker(
     ): ByteArray {
         check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
         val deadline = Deadline.afterMillis(callTimeoutMs)
+        val admittedAt = System.nanoTime()
         val slot = try {
             idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
-                ?: throw PortalCallException("timed out waiting for an idle portal worker")
+                ?: throw PortalCallException("timed out waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED)
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw PortalCallException("interrupted while waiting for an idle portal worker", interrupted)
+            throw PortalCallException("interrupted while waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED, interrupted)
         }
+        val dispatchedAt = System.nanoTime()
         var returnedToPool = false
         var callState: PortalBrokerCallState = PortalBrokerCallState.Idle
         return try {
@@ -233,10 +249,10 @@ public class ProcessBroker(
                     returnedToPool = true
                     payloadBytes
                 },
-                onRemoteError = { message ->
+                onRemoteError = { failure ->
                     returnToPoolOrDestroy(slot)
                     returnedToPool = true
-                    throw PortalCallException(message)
+                    throw PortalRemoteCallException(failure.type, failure.message)
                 },
             )
         } catch (e: PortalCallException) {
@@ -259,7 +275,7 @@ public class ProcessBroker(
             if (!returnedToPool) {
                 scheduleRecycle(slot)
             }
-            throw PortalCallException("portal RPC failed", expectedRpcFailure)
+            throw PortalCallException("portal RPC failed", cause = expectedRpcFailure)
         } catch (fatal: Error) {
             if (!returnedToPool) {
                 val cleanup = runCatching { destroySlot(slot) }.exceptionOrNull()
@@ -267,6 +283,13 @@ public class ProcessBroker(
                 runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
             }
             throw fatal
+        } finally {
+            val completedAt = System.nanoTime()
+            mostRecentInvocation =
+                PortalInvocationTiming(
+                    queueWait = java.time.Duration.ofNanos(dispatchedAt - admittedAt),
+                    workerExecution = java.time.Duration.ofNanos(completedAt - dispatchedAt),
+                )
         }
     }
 
@@ -425,7 +448,7 @@ public class ProcessBroker(
             operation.result.get(remaining, TimeUnit.MILLISECONDS)
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw PortalCallException("interrupted while waiting for broker cleanup", interrupted)
+            throw PortalCallException("interrupted while waiting for broker cleanup", cause = interrupted)
         } catch (timedOut: TimeoutException) {
             throw IncompleteBrokerCleanupException(
                 "ProcessBroker close did not finish before its shared deadline",
@@ -449,11 +472,8 @@ public class ProcessBroker(
     }
 
     private fun resolveWorkerClasspath(): String {
-        val cp = workerClasspath.ifBlank { System.getProperty(WORKER_CLASSPATH_PROPERTY).orEmpty() }
-        require(cp.isNotBlank()) {
-            "portal worker classpath is required; set $WORKER_CLASSPATH_PROPERTY or pass workerClasspath"
-        }
-        return cp
+        require(workerClasspath.isNotBlank()) { "portal worker classpath is required from a verified runtime artifact" }
+        return workerClasspath
     }
 
     @Suppress("TooGenericExceptionCaught") // Provisional ownership must roll back on every startup failure.
@@ -927,11 +947,18 @@ private fun throwWithCleanupFailure(
 private fun dispatchBrokerCallEffect(
     effect: PortalBrokerCallEffect,
     onSuccess: (ByteArray) -> ByteArray,
-    onRemoteError: (String) -> Nothing,
+    onRemoteError: (PortalRemoteFailure) -> Nothing,
 ): ByteArray =
     when (effect) {
     is PortalBrokerCallEffect.ReturnPayload -> onSuccess(effect.payload.copyToByteArray())
-    is PortalBrokerCallEffect.RemoteError -> onRemoteError(effect.message)
+    is PortalBrokerCallEffect.RemoteError ->
+        onRemoteError(
+            try {
+                PortalRemoteFailureCodec.decode(effect.payload.copyToByteArray())
+            } catch (invalid: IllegalArgumentException) {
+                throw PortalCallException("portal worker returned an invalid error payload", PortalInvocationEvidence.COMPLETED, invalid)
+            },
+        )
     is PortalBrokerCallEffect.RecycleWorker -> throw PortalCallException(effect.reason)
     is PortalBrokerCallEffect.ProtocolViolation -> throw PortalCallException(effect.reason)
     is PortalBrokerCallEffect.PostTerminalObservation ->
@@ -944,7 +971,7 @@ private fun handleInterruptedCall(
     interrupted: InterruptedException,
 ): Nothing {
     Thread.currentThread().interrupt()
-    val failure = PortalCallException("portal RPC interrupted", interrupted)
+    val failure = PortalCallException("portal RPC interrupted", cause = interrupted)
     try {
         onCleanup()
     } finally {

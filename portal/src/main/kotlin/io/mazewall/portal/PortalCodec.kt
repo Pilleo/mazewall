@@ -9,27 +9,32 @@ import java.nio.charset.StandardCharsets
  * Built-in ECHO/CHECKSUM frames stay raw; do not mix the two layouts.
  */
 public object PortalCodec {
+    private const val MAX_COLLECTION_ELEMENTS: Int = 16_384
+    private const val SHORT_BYTES: Int = 2
+    private const val INT_BYTES: Int = 4
+    private const val LONG_BYTES: Int = 8
+
     public fun encodeBoolean(value: Boolean): ByteArray = byteArrayOf(if (value) 1 else 0)
 
     public fun encodeByte(value: Byte): ByteArray = byteArrayOf(value)
 
     public fun encodeShort(value: Short): ByteArray =
         ByteBuffer
-        .allocate(2)
+        .allocate(SHORT_BYTES)
         .order(ByteOrder.BIG_ENDIAN)
         .putShort(value)
         .array()
 
     public fun encodeInt(value: Int): ByteArray =
         ByteBuffer
-        .allocate(4)
+        .allocate(INT_BYTES)
         .order(ByteOrder.BIG_ENDIAN)
         .putInt(value)
         .array()
 
     public fun encodeLong(value: Long): ByteArray =
         ByteBuffer
-        .allocate(8)
+        .allocate(LONG_BYTES)
         .order(ByteOrder.BIG_ENDIAN)
         .putLong(value)
         .array()
@@ -43,7 +48,7 @@ public object PortalCodec {
     public fun encodeString(value: String): ByteArray = encodeBytes(value.toByteArray(StandardCharsets.UTF_8))
 
     public fun encodeBytes(value: ByteArray): ByteArray {
-        val out = ByteBuffer.allocate(4 + value.size).order(ByteOrder.BIG_ENDIAN)
+        val out = ByteBuffer.allocate(INT_BYTES + value.size).order(ByteOrder.BIG_ENDIAN)
         out.putInt(value.size)
         out.put(value)
         return out.array()
@@ -74,20 +79,23 @@ public object PortalCodec {
         }
 
         public fun short(): Short {
-            val v = ByteBuffer.wrap(buf, pos, 2).order(ByteOrder.BIG_ENDIAN).short
-            pos += 2
+            requireRemaining(SHORT_BYTES)
+            val v = ByteBuffer.wrap(buf, pos, SHORT_BYTES).order(ByteOrder.BIG_ENDIAN).short
+            pos += SHORT_BYTES
             return v
         }
 
         public fun int(): Int {
-            val v = ByteBuffer.wrap(buf, pos, 4).order(ByteOrder.BIG_ENDIAN).int
-            pos += 4
+            requireRemaining(INT_BYTES)
+            val v = ByteBuffer.wrap(buf, pos, INT_BYTES).order(ByteOrder.BIG_ENDIAN).int
+            pos += INT_BYTES
             return v
         }
 
         public fun long(): Long {
-            val v = ByteBuffer.wrap(buf, pos, 8).order(ByteOrder.BIG_ENDIAN).long
-            pos += 8
+            requireRemaining(LONG_BYTES)
+            val v = ByteBuffer.wrap(buf, pos, LONG_BYTES).order(ByteOrder.BIG_ENDIAN).long
+            pos += LONG_BYTES
             return v
         }
 
@@ -106,5 +114,19 @@ public object PortalCodec {
         }
 
         public fun string(): String = bytes().toString(StandardCharsets.UTF_8)
+
+        /** Reads a bounded collection cardinality before decoding its members. */
+        public fun collectionCount(): Int {
+            val count = int()
+            require(count in 0..MAX_COLLECTION_ELEMENTS) { "portal collection count $count exceeds $MAX_COLLECTION_ELEMENTS" }
+            return count
+        }
+
+        /** True only after a decoder has consumed this payload exactly. */
+        public fun exhausted(): Boolean = pos == buf.size
+
+        private fun requireRemaining(size: Int) {
+            require(pos + size <= buf.size) { "portal codec underrun" }
+        }
     }
 }

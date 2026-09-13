@@ -8,10 +8,11 @@ kotlin {
 }
 
 dependencies {
-    compileOnly(libs.kotlinGradlePlugin)
+    implementation(libs.kotlinGradlePlugin)
     compileOnly(kotlin("reflect"))
     implementation(libs.kotlinpoet)
     implementation(project(":portal"))
+    implementation(project(":portal-worker"))
     testImplementation(gradleTestKit())
     testImplementation(kotlin("test"))
     testImplementation(kotlin("reflect"))

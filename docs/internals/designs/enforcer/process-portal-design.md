@@ -17,6 +17,11 @@ keywords: ["process-portal", "broker", "worker", "SCM_RIGHTS", "codegen"]
 >
 > This is an **application** portal (Chrome renderer model). It is not the **syscall** supervisor in [supervisor-proxy-design.md](supervisor-proxy-design.md) (`USER_NOTIF` + `SECCOMP_IOCTL_NOTIF_ADDFD`).
 
+The framework-agnostic service-isolation extension is specified in
+[local-service-isolation-design.md](../portal/local-service-isolation-design.md). It adds
+generated service metadata and a runtime facade without changing the broker/worker
+capability boundary or introducing an application framework dependency.
+
 Thread-scoped mazewall cannot stop native ACE from pivoting through a sibling heap. Separate OS processes can. The missing piece is ergonomics: generated stubs so a first-party module looks like a local call while running in a pooled, process-wide sandboxed JVM.
 
 Presentation context: [article0a-history.md](../../../presentation/article0a-history.md), [article6-isolates.md](../../../presentation/article6-isolates.md) § Portals.

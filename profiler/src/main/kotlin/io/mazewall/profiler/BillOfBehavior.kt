@@ -1,3 +1,5 @@
+@file:Suppress("UseOrEmpty")
+
 package io.mazewall.profiler
 
 import io.mazewall.BillOfBehaviorDto

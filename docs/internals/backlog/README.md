@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 67 | *Total Resolved Issues:* 590
+*Total Active Issues:* 69 | *Total Resolved Issues:* 589
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -82,11 +82,13 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260823-172004-additional-architecture-coverage](implementation/issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
 | [issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec](implementation/issue-20260905-130530-align-codanna-document-indexing-and-agentmemory-semantic-rec.md) | Align Codanna document indexing and agentmemory semantic recall on BGE-M3 vector space | medium | testing |
 | [issue-20260907-232023-285-encode-legal-portal-state-effect-pairs-without-int](issue-20260907-232023-285-encode-legal-portal-state-effect-pairs-without-int.md) | Encode legal portal state-effect pairs without interpreter casts | high | core |
+| [issue-20260913-150350-732-add-framework-agnostic-portal-service-manifest](issue-20260913-150350-732-add-framework-agnostic-portal-service-manifest.md) | Add framework-agnostic portal service manifest | high | core |
 | [issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-](issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-.md) | Preload HotSpot clock wrappers before restrictive iterative profiling | high | profiler |
 | [issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des](issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md) | Correct secure exec cleanup of injected tracee descriptors | medium | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](security/issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
+| [issue-20260808-032520-owned-contained-executor-lifecycle](security/issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](testing/issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
 | [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
 | [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |

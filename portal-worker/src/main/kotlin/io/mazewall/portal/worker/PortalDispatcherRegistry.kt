@@ -118,10 +118,25 @@ internal fun PortalDispatcherTable.Builder.registerGeneratedEntry(
     registerEntry(entry, replace = false, loader = loader)
 }
 
+/** Registers a verified manifest against an instance already owned by its worker-local group. */
+internal fun PortalDispatcherTable.Builder.registerGeneratedManifest(
+    manifest: io.mazewall.portal.PortalServiceManifest,
+    implementation: Any,
+    loader: ClassLoader,
+) {
+    registerEntry(
+        "${manifest.contractName}=${manifest.implementationName};${manifest.dispatcherName}",
+        replace = false,
+        loader = loader,
+        implementation = implementation,
+    )
+}
+
 private fun PortalDispatcherTable.Builder.registerEntry(
     entry: String,
     replace: Boolean,
     loader: ClassLoader = PortalDispatcherRegistry::class.java.classLoader,
+    implementation: Any? = null,
 ) {
     require(entry.isNotEmpty()) { "empty entry" }
     val parts = entry.split(';')
@@ -131,7 +146,7 @@ private fun PortalDispatcherTable.Builder.registerEntry(
         "expected Interface=Impl(;Dispatcher)"
     }
     val serviceClass = Class.forName(servicePair[0].trim(), false, loader)
-    val impl = Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
+    val impl = implementation ?: Class.forName(servicePair[1].trim(), true, loader).getDeclaredConstructor().newInstance()
     require(serviceClass.isInstance(impl)) { "implementation does not implement ${serviceClass.name}" }
 
     val dispatcherClass = resolveDispatcherClass(

@@ -55,7 +55,11 @@ public object PortalWorkerMain {
             },
             createDispatcher = {
                 val builder = PortalDispatcherTable.Builder()
-                builder.bootstrapGenerated(System.getProperty("io.mazewall.portal.worker.dispatchers"), PortalWorkerMain::class.java.classLoader)
+                bootstrapWorkerDispatchers(
+                    builder,
+                    System.getProperty("io.mazewall.portal.worker.dispatchers"),
+                    PortalWorkerMain::class.java.classLoader,
+                )
                 val dispatcherTable = builder.build()
                 PortalWorkerDispatcher { method, payload, fds ->
             when (method) {
