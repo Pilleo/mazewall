@@ -1,11 +1,29 @@
 package io.mazewall.profiler.attribution
 
+/** Typed process-incarnation identity used to reject PID reuse. */
+@JvmInline
+public value class ProcessIncarnationId(
+    public val value: Long,
+)
+
+/** Typed lifetime identity for one kernel task instance. */
+@JvmInline
+public value class TaskLifetimeId(
+    public val value: Long,
+)
+
 /** Identifies one Linux task for one lifetime within a profiled process. */
 public data class TaskIdentity(
     val processEpoch: Long,
     val tid: Int,
     val taskEpoch: Long,
-)
+) {
+    public val processIncarnation: ProcessIncarnationId
+        get() = ProcessIncarnationId(processEpoch)
+
+    public val taskLifetime: TaskLifetimeId
+        get() = TaskLifetimeId(taskEpoch)
+}
 
 /** A session-local native-invocation identity; zero is deliberately invalid. */
 @JvmInline
@@ -169,23 +187,26 @@ public class InvocationReplayMachine {
             StateInvalidated(event.task, it.lastSequence + 1, event.sequence, StateInvalidationReason.SEQUENCE_GAP)
         }
         val state = if (invalidated == null) {
-            previous ?: TaskState(processIncarnation = ProcessIncarnation(event.task.processEpoch))
+            previous ?: TaskState(processIncarnation = event.task.processIncarnation)
         } else {
-            TaskState(processIncarnation = ProcessIncarnation(event.task.processEpoch))
+            TaskState(processIncarnation = event.task.processIncarnation, valid = false)
         }
-        state.lastSequence = event.sequence
+        val sequencedState = state.copy(lastSequence = event.sequence)
 
         return when (event) {
             is InvocationEvent.Activate -> {
-                state.reentrantDepth++
-                state.activeInvocationId = event.invocationId
-                states[event.task] = state
+                val nextState = sequencedState.copy(
+                    activeInvocationId = event.invocationId,
+                    reentrantDepth = sequencedState.reentrantDepth + 1,
+                    valid = true,
+                )
+                states[event.task] = nextState
                 latestTaskByTid[event.task.tid] = event.task
                 ReplayResult.StateChanged(invalidated)
             }
 
-            is InvocationEvent.EndRestore -> endRestore(event, state, invalidated)
-            is InvocationEvent.Syscall -> syscall(event, state, invalidated)
+            is InvocationEvent.EndRestore -> endRestore(event, sequencedState, invalidated)
+            is InvocationEvent.Syscall -> syscall(event, sequencedState, invalidated)
         }
     }
 
@@ -203,7 +224,7 @@ public class InvocationReplayMachine {
         }
     }
 
-    public fun processIncarnationFor(task: TaskIdentity): ProcessIncarnation = states[task]?.processIncarnation ?: ProcessIncarnation(task.processEpoch)
+    public fun processIncarnationFor(task: TaskIdentity): ProcessIncarnation = ProcessIncarnation(states[task]?.processIncarnation?.value ?: task.processIncarnation.value)
 
     public fun reentrantStateFor(task: TaskIdentity): ReentrantBoundaryState = states[task]?.let { ReentrantBoundaryState(depth = it.reentrantDepth) } ?: ReentrantBoundaryState()
 
@@ -212,7 +233,7 @@ public class InvocationReplayMachine {
         state: TaskState,
         invalidated: StateInvalidated?,
     ): ReplayResult {
-        if (state.activeInvocationId != event.endedInvocationId) {
+        if (!state.valid || state.activeInvocationId != event.endedInvocationId) {
             states.remove(event.task)
             return ReplayResult.StateChanged(
                 invalidated ?: StateInvalidated(
@@ -223,11 +244,11 @@ public class InvocationReplayMachine {
                 ),
             )
         }
-        if (state.reentrantDepth > 0) {
-            state.reentrantDepth--
-        }
-        state.activeInvocationId = event.restoredInvocationId
-        states[event.task] = state
+        val nextState = state.copy(
+            reentrantDepth = (state.reentrantDepth - 1).coerceAtLeast(0),
+            activeInvocationId = event.restoredInvocationId,
+        )
+        states[event.task] = nextState
         return ReplayResult.StateChanged(invalidated)
     }
 
@@ -256,10 +277,11 @@ public class InvocationReplayMachine {
         )
     }
 
-    private class TaskState(
-        var lastSequence: Long = 0,
-        var activeInvocationId: InvocationId? = null,
-        var reentrantDepth: Int = 0,
-        val processIncarnation: ProcessIncarnation = ProcessIncarnation(0),
+    private data class TaskState(
+        val lastSequence: Long = 0,
+        val activeInvocationId: InvocationId? = null,
+        val reentrantDepth: Int = 0,
+        val processIncarnation: ProcessIncarnationId = ProcessIncarnationId(0),
+        val valid: Boolean = true,
     )
 }
