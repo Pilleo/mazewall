@@ -54,9 +54,18 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
+    private class LoadedEngine(
+        private val delegate: PureJavaBpfEngine,
+    ) : SeccompEngine<EngineState.Loaded> {
+        override val state: EngineState.Loaded get() = EngineState.LoadedImpl
+        override val isSupported: Boolean get() = delegate.isSupported
+        override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> = delegate.install(policy)
+        override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> = delegate.installOnProcess(policy)
+    }
+
     override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         installInternal(policy, useTsync = false)
-        return this as SeccompEngine<EngineState.Loaded>
+        return LoadedEngine(this)
     }
 
     override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
@@ -64,7 +73,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
         installInternal(policy, useTsync = true)
-        return this as SeccompEngine<EngineState.Loaded>
+        return LoadedEngine(this)
     }
 
     private fun installInternal(
@@ -72,6 +81,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         useTsync: Boolean,
         onApplied: () -> Unit = {},
     ) {
+        check(!Thread.currentThread().isVirtual) { "Cannot install seccomp filter from a virtual thread" }
         // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
         EngineState.UnprivilegedImpl.toString()
         EngineState.LoadedImpl.toString()

@@ -44,7 +44,11 @@ class SocketHelperOwnerDeathTest {
                 if (!Files.exists(helperPath.resolve("fd"))) {
                     false
                 } else {
-                    Files.list(helperPath.resolve("fd")).use { paths -> paths.anyMatch { Files.readSymbolicLink(it).toString() == inode } }
+                    try {
+                        Files.list(helperPath.resolve("fd")).use { paths -> paths.anyMatch { Files.readSymbolicLink(it).toString() == inode } }
+                    } catch (_: java.nio.file.NoSuchFileException) {
+                        false
+                    }
                 }
             }
             await("helper blocked in native accept") {

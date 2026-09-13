@@ -45,12 +45,20 @@ internal data class ContainerState(
         nr: Int,
         arch: Arch,
     ): SeccompAction {
-        for (syscall in Syscall.entries) {
-            if (syscall.numberFor(arch) == nr) {
-                return syscallActions[syscall] ?: defaultAction
+        val syscall = if (nr in 0..MAX_SYSCALL_NR) {
+            when (arch) {
+                Arch.AMD64 -> amd64SyscallTable[nr]
+                Arch.AARCH64 -> aarch64SyscallTable[nr]
+                else -> Syscall.entries.find { it.numberFor(arch) == nr }
             }
+        } else {
+            Syscall.entries.find { it.numberFor(arch) == nr }
         }
-        return defaultAction
+        return if (syscall != null) {
+            syscallActions[syscall] ?: defaultAction
+        } else {
+            defaultAction
+        }
     }
 
     fun withNewSeccompPolicy(
@@ -110,6 +118,24 @@ internal data class ContainerState(
          * are active or shutting down is unsupported, as the state resolution of late-running
          * tasks may interleave with global state transitions.
          */
+        private const val MAX_SYSCALL_NR = 512
+        private val amd64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AMD64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+        private val aarch64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AARCH64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+
         fun resolveCurrentState(): ContainerState {
             return ContainmentStateRegistry.resolveCurrentState()
         }

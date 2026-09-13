@@ -21,7 +21,17 @@ import java.util.concurrent.ConcurrentHashMap
  */
 internal object BpfNativeCache {
     private val sharedArena = NativeArena.ofShared()
-    private val filterCache = ConcurrentHashMap<NativeCacheKey, ManagedSegment>()
+    private const val MAX_ENTRIES = 256
+
+    private class BpfFilterLruMap(
+        initialCapacity: Int,
+        loadFactor: Float,
+        accessOrder: Boolean,
+    ) : LinkedHashMap<NativeCacheKey, ManagedSegment>(initialCapacity, loadFactor, accessOrder) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<NativeCacheKey, ManagedSegment>): Boolean = size > MAX_ENTRIES
+    }
+
+    private val filterCache = BpfFilterLruMap(64, 0.75f, true)
 
     /**
      * Cache key includes [LinuxNative.engineIdentity]: native segments produced while a mock
@@ -46,8 +56,13 @@ internal object BpfNativeCache {
         native: NativeEngine,
     ): ManagedSegment {
         val identity = (native as? RuntimeSnapshot)?.engineIdentity ?: native
-        return filterCache.computeIfAbsent(NativeCacheKey(filters, identity)) {
-            with(sharedArena) { native.memory.newSockFProg(it.filters) }
+        val key = NativeCacheKey(filters, identity)
+        synchronized(filterCache) {
+            filterCache[key]?.let { return it }
+        }
+        val computed = with(sharedArena) { native.memory.newSockFProg(filters) }
+        synchronized(filterCache) {
+            return filterCache.getOrPut(key) { computed }
         }
     }
 
@@ -55,6 +70,8 @@ internal object BpfNativeCache {
      * Clears the native filter cache. Used for testing.
      */
     fun clear() {
-        filterCache.clear()
+        synchronized(filterCache) {
+            filterCache.clear()
+        }
     }
 }
