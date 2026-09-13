@@ -114,6 +114,13 @@ and therefore makes the run incomplete. A production Kubescape integration shoul
 transport with a bounded asynchronous channel while preserving the same binary records and
 fail-incomplete semantics.
 
+The optional `DictionaryBatchSink` is that bounded asynchronous-channel boundary. The encoder keeps
+definitions in its bounded queue until a sink returns `Committed`; `RetryableFailure` rolls back the
+same batch and preserves byte order and watermark, while `TerminalFailure` and any uncommitted tail
+make transport incomplete. Only one batch may be prepared at a time, and `drainEncoded()` remains
+the immediate-commit compatibility adapter. The existing unload-time file remains the default source
+of definitions, so introducing the sink does not change the native agent wire format.
+
 The privileged differential acceptance gate runs the same timed file-workload body through Tier E
 and the existing USER_NOTIF stack oracle. It requires `wrong=0`, `lost=0`, at least five resolved
 workload syscalls per iteration, and fails unless Tier E is faster. On the 2026-09-06 Docker gate
@@ -228,6 +235,9 @@ The collector is organized as three independent responsibilities: an invocation/
 holds delayed observations by explicit invocation ID, an integrity accumulator owns loss and
 completeness dimensions, and a unique-edge gate owns acknowledgement-based suppression. None of
 these components performs timestamp matching or restores state from an older invocation.
+Unique-edge candidates also carry an opaque, session-local `EmissionToken`; acknowledgement consumes
+only the exact outstanding token (or the exact object returned by the compatibility API), so a
+reconstructed, duplicated, or foreign record cannot commit dedupe state.
 
 Dictionary transport has an independent transactional lifecycle: `PREPARED` batches remain owned
 by the pending queue, `COMMITTED` batches are removed and advance the watermark, and
@@ -239,6 +249,9 @@ use prepare/commit/rollback to make write failure observable.
 Capture-domain limitations are recorded separately from observed events. A denied or otherwise
 out-of-domain syscall attempt increments `outOfDomainAttempts` and makes the session incomplete;
 it is never converted into a fabricated exact `sys_enter` observation.
+The machine-readable classifications are `observed_sys_enter` and `attempt_missed`. Final evidence
+exposes separate verdict dimensions for capture-domain validity, transport completeness, attribution
+coverage, dictionary integrity, and lifecycle validity.
 
 ### 2.2 Capture-domain and attribution state machine
 
@@ -312,6 +325,12 @@ The context transition itself is made observable to eBPF via a synchronous nativ
 libmazewall_context.so
     void mazewall_context_marker(uint64_t invocation_id) { /* intentionally empty */ }
 ```
+
+Native raw-stack cache identity includes a monotonic symbolization epoch advanced by JVMTI class
+load/retransform/redefinition notifications. Weak class guards remove entries after unload, and the
+epoch is included in both canonical lookup and logical-stack interning. This prevents a redefined
+method from collapsing into an older stack while keeping the v2 definition record unchanged; all
+symbol names and frames are copied into immutable dictionary records before the weak guard can expire.
 
 * Java calls it through an FFM downcall from inside `MazewallContext.withContext { }`
   (enter) and its `finally` block (restore).

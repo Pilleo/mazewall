@@ -80,8 +80,32 @@ post-acknowledgement suppression; commit and durable artifact linkage remain pen
 The current refactoring sequence also adds transactional dictionary batches (`33c45876`), separate
 integrity/edge components (`954d2ccc`), immutable replay state with typed lifecycle views
 (`57c42afa`), capture-domain limitation evidence (`3b66e900`), and an isolated dictionary joiner
-(`6a978f4b`). The remaining matrix rows still require their dedicated runtime fixtures and durable
-evidence artifacts before this umbrella issue can close.
+(`6a978f4b`). Commit `ff58ffff` completes the safe integration boundary: `DictionaryBatchSink` and
+the publisher preserve definitions and watermarks across retry, opaque emission tokens prevent
+foreign acknowledgements, typed process/session identities reject stale observations, explicit
+replay invalidations fail closed, and the native symbolization cache is versioned by redefinition
+epoch. The umbrella remains open because the environment has no dedicated class-redefinition or
+seccomp-denied-attempt fixture; those constraints are recorded rather than treated as exact-event
+evidence.
+
+### Durable verification evidence
+
+| Dimension | Evidence | Result |
+|---|---|---|
+| Capture-domain validity | `AttributionCollectorTest.capture domain attempt missed is a limitation and never an exact event` | `PASS` for classification; denied-before-`sys_enter` remains an explicit boundary limitation |
+| Transport completeness | `DictionaryBatchPublisherTest.retry keeps the exact batch and watermark unchanged until commit`; terminal and abandoned-tail tests | `PASS` for transactional behavior; incomplete tails remain fail-closed |
+| Attribution coverage | callback, inner capture failure, stale identity, and token-ownership tests in `AttributionCollectorTest`/`InvocationReplayMachineTest` | `PASS` |
+| Dictionary integrity | native symbolization epoch plus weak unload guards; native build and six CTest fixtures | `PASS` for compiled/smoke coverage; `INCOMPLETE` for missing live redefine fixture |
+| Lifecycle validity | `InvocationReplayMachineTest.detach and exec invalidation require validated re-entry before exact attribution`; PID-reuse test | `PASS` |
+
+Exact commands:
+
+```text
+./gradlew :profiler:test
+cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/jseccomp-profiler-native-build -j2
+ctest --test-dir /tmp/jseccomp-profiler-native-build --output-on-failure
+```
 
 ### Pass/Fail matrix (to be populated by implementation PR(s))
 

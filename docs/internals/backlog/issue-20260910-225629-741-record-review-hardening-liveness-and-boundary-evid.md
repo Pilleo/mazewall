@@ -48,15 +48,19 @@ Open and map the remaining Tier E correctness matrix to close this item:
 |---|---|---|
 | 1 supported native → Java callback → unsupported native syscall | `InvocationReplayMachineTest.supported native callback unsupported syscall is causal uncertain` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
 | 2 active outer scope + inner capture failure | `InvocationReplayMachineTest.inner capture failure in reentrant scope does not leave stale exact attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
-| 3 mid-scope detach while session alive | pending | pending |
-| 4 seccomp-denied attempt + active session | pending | pending |
+| 3 mid-scope detach while session alive | `InvocationReplayMachineTest.detach and exec invalidation require validated re-entry before exact attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `ff58ffff`) |
+| 4 seccomp-denied attempt + active session | `AttributionCollectorTest.capture domain attempt missed is a limitation and never an exact event` (focused PASS; reports boundary limitation, not kernel-denied observation) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `ff58ffff`) |
 | 5 PID reuse/exec transition stress | `InvocationReplayMachineTest.pid reuse with new process epoch evicts stale state and resets attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
-| 6 method unload/redefine races | pending | pending |
-| 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `33c45876`) |
-| 8 dictionary pressure with long-running workload | pending | pending |
+| 6 method unload/redefine races | native symbolization epoch + weak class-guard implementation; native fixture compile and smoke PASS (no class-redefinition fixture in this environment) | `cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug && cmake --build /tmp/jseccomp-profiler-native-build -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-build --output-on-failure` (commit `ff58ffff`) |
+| 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement`; `AttributionCollectorTest.emission acknowledgement requires the exact outstanding token` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `ff58ffff`) |
+| 8 dictionary pressure with long-running workload | `DictionaryBatchPublisherTest.retry keeps the exact batch and watermark unchanged until commit`; `DictionaryBatchPublisherTest.termination records an abandoned prepared batch without committing it`; terminal-failure test (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.DictionaryBatchPublisherTest` (commit `ff58ffff`) |
 
-The capture-domain contract is also implemented in the collector: `recordOutOfDomainAttempt`
-produces machine-readable `outOfDomainAttempts` evidence and forces an incomplete guarantee.
+The capture-domain contract is also implemented in the collector: `recordCaptureDomainEvent` maps
+`attempt_missed` to machine-readable `outOfDomainAttempts` evidence and forces an incomplete guarantee;
+`observed_sys_enter` is retained as an explicit in-domain classification. `SessionIntegrity` also
+exposes the independent verdict dimensions for capture domain, transport, attribution, dictionary,
+and lifecycle validity. This does not claim that the kernel can observe attempts denied before
+`sys_enter`; it records the boundary limitation when an upstream component reports one.
 This does not claim that the kernel can observe attempts denied before `sys_enter`; it records the
 boundary limitation when an upstream component reports one.
 
