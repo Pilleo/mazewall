@@ -42,6 +42,10 @@ add_executable(lifecycle_identity_fixture tests/lifecycle_identity_fixture.cpp)
 target_compile_options(lifecycle_identity_fixture PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME lifecycle_identity_fixture COMMAND lifecycle_identity_fixture)
 
+add_executable(lifecycle_identity_stress_fixture tests/lifecycle_identity_stress_fixture.cpp)
+target_compile_options(lifecycle_identity_stress_fixture PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME lifecycle_identity_stress_fixture COMMAND lifecycle_identity_stress_fixture)
+
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
     OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class"
