@@ -145,4 +145,114 @@ class AttributionCollectorTest {
         )
 
     private fun frame(): ManagedFrame = ManagedFrame("loader", "app/Service", "open", "()V", 9, ManagedFrameKind.JAVA)
+
+    @Test
+    fun `causal uncertain observation maps to causal uncertain resolution and is never resolved`() {
+        val collector = AttributionCollector()
+        val observation = causalUncertainObservation()
+
+        val results = collector.accept(observation)
+
+        assertEquals(1, results.size)
+        val resolved = results.single()
+        assertEquals(ResolutionStatus.CAUSAL_UNCERTAIN, resolved.resolutionStatus)
+        assertEquals(null, resolved.stackDefinition)
+        assertEquals(observation, resolved.observation)
+        // attributionFailures must be incremented — fail-closed
+        assertEquals(1, collector.integrity.attributionFailures)
+        // Guarantee must reflect failures
+        assertEquals(CaptureGuarantee.INCOMPLETE, collector.integrity.guarantee)
+    }
+
+    @Test
+    fun `default capture domain is sys_enter tracepoint and excludes seccomp denied attempts`() {
+        val collector = AttributionCollector()
+
+        // By default the capture domain must be SYS_ENTER_TRACEPOINT
+        assertEquals(ObservationScope.SYS_ENTER_TRACEPOINT, collector.integrity.captureDomain)
+        // This domain means seccomp-denied syscalls are NOT in the observed corpus
+        // (documented invariant: absence of an event ≠ syscall was never attempted)
+    }
+
+    @Test
+    fun `capture domain unknown can be declared explicitly`() {
+        val collector = AttributionCollector(captureDomain = ObservationScope.UNKNOWN)
+
+        assertEquals(ObservationScope.UNKNOWN, collector.integrity.captureDomain)
+    }
+
+    @Test
+    fun `sys_enter tracepoint domain means only post-seccomp dispatched syscalls are observed`() {
+        val collector = AttributionCollector(captureDomain = ObservationScope.SYS_ENTER_TRACEPOINT)
+
+        // A successful observation in SYS_ENTER_TRACEPOINT scope confirms seccomp allowed the call
+        val obs = pendingObservation(InvocationId(501))
+        collector.accept(obs)
+
+        assertEquals(ObservationScope.SYS_ENTER_TRACEPOINT, collector.integrity.captureDomain)
+        // Domain has not changed and integrity is not incomplete from the observation alone
+        assertEquals(0L, collector.integrity.observedLosses)
+        assertEquals(0L, collector.integrity.attributionFailures)
+    }
+
+    @Test
+    fun `dictionary drops recorded via recordDictionaryDrops surface as incomplete session`() {
+        val collector = AttributionCollector()
+        val invocationId = InvocationId(101)
+
+        // Simulate encoder dropping an entry under pressure — caller notifies collector
+        collector.recordDictionaryDrops(1)
+
+        // Add a pending observation that will never resolve (its stack was dropped)
+        collector.accept(pendingObservation(invocationId))
+
+        // Finish: unresolved attribution surfaces as DICTIONARY_UNRESOLVED
+        val finished = collector.finish()
+        assertEquals(1, finished.size)
+        assertEquals(ResolutionStatus.DICTIONARY_UNRESOLVED, finished.single().resolutionStatus)
+
+        // Session is incomplete: both a loss (dropped dict) and an attribution failure
+        assertEquals(1L, collector.integrity.observedLosses)
+        assertEquals(CaptureGuarantee.INCOMPLETE, collector.integrity.guarantee)
+    }
+
+    @Test
+    fun `unique edge deduplication suppresses duplicate only after successful first emit`() {
+        val collector = AttributionCollector(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
+        val invocationId = InvocationId(200)
+        val stack = StackDefinition(
+            StackTraceId(1L),
+            listOf(frame()),
+            StackCaptureQuality.COMPLETE,
+        )
+        val invocation = InvocationDefinition(invocationId, null, stack.stackTraceId)
+
+        // First observation — should be emitted (first unique edge)
+        val obs1 = pendingObservation(invocationId)
+        collector.accept(obs1)
+        collector.accept(invocation)
+        val r1 = collector.accept(stack)
+        assertEquals(1, r1.size)
+        assertEquals(ResolutionStatus.RESOLVED, r1.single().resolutionStatus)
+
+        // Second identical edge (same stack + syscall number) — must be suppressed
+        val obs2 = pendingObservation(invocationId)
+        collector.accept(obs2)
+        // Stack and invocation already registered — resolveReady fires immediately, duplicate suppressed
+        val r2 = collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
+        assertEquals(0, r2.size)
+
+        // Integrity: no failures from dedup suppression (it is by design, not a failure)
+        assertEquals(0L, collector.integrity.attributionFailures)
+    }
+
+    private fun causalUncertainObservation(): SyscallAttribution =
+        SyscallAttribution(
+            task = TaskIdentity(1, 2, 3),
+            taskSequence = 5,
+            syscallNumber = 0,
+            args = List(6) { 0 },
+            invocationId = null,
+            attributionStatus = AttributionStatus.CAUSAL_UNCERTAIN,
+        )
 }

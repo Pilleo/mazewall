@@ -17,6 +17,22 @@ public value class InvocationId(
     }
 }
 
+/** Process incarnation token to guard against PID reuse across process epochs. */
+@JvmInline
+public value class ProcessIncarnation(
+    public val value: Long,
+)
+
+/** Represents re-entrancy depth and boundary status for an active task. */
+public data class ReentrantBoundaryState(
+    val depth: Int = 0,
+    val isReentrant: Boolean = depth > 1,
+) {
+    init {
+        require(depth >= 0) { "reentrant depth cannot be negative" }
+    }
+}
+
 /** Reason a syscall could not receive a validated managed-stack attribution. */
 public enum class AttributionStatus {
     PENDING_DICTIONARY,
@@ -24,6 +40,7 @@ public enum class AttributionStatus {
     SEQUENCE_GAP,
     ACTIVATION_MISMATCH,
     KERNEL_CAPTURE_FAILED,
+    CAUSAL_UNCERTAIN,
 }
 
 /** A raw syscall plus the invocation identity that was valid at its ordered capture point. */
@@ -141,19 +158,29 @@ public sealed interface ReplayResult {
 public class InvocationReplayMachine {
     private val states = mutableMapOf<TaskIdentity, TaskState>()
 
+    /** Maps tid → the most recently seen TaskIdentity for that tid, for stale-epoch eviction. */
+    private val latestTaskByTid = mutableMapOf<Int, TaskIdentity>()
+
     public fun accept(event: InvocationEvent): ReplayResult {
         require(event.sequence > 0) { "event sequence must be positive" }
+        evictStaleIncarnation(event.task)
         val previous = states[event.task]
         val invalidated = previous?.takeIf { event.sequence != it.lastSequence + 1 }?.let {
             StateInvalidated(event.task, it.lastSequence + 1, event.sequence, StateInvalidationReason.SEQUENCE_GAP)
         }
-        val state = if (invalidated == null) previous ?: TaskState() else TaskState()
+        val state = if (invalidated == null) {
+            previous ?: TaskState(processIncarnation = ProcessIncarnation(event.task.processEpoch))
+        } else {
+            TaskState(processIncarnation = ProcessIncarnation(event.task.processEpoch))
+        }
         state.lastSequence = event.sequence
 
         return when (event) {
             is InvocationEvent.Activate -> {
+                state.reentrantDepth++
                 state.activeInvocationId = event.invocationId
                 states[event.task] = state
+                latestTaskByTid[event.task.tid] = event.task
                 ReplayResult.StateChanged(invalidated)
             }
 
@@ -161,6 +188,24 @@ public class InvocationReplayMachine {
             is InvocationEvent.Syscall -> syscall(event, state, invalidated)
         }
     }
+
+    /**
+     * Evicts any TaskState stored under a stale processEpoch for the same tid.
+     * Called before any event is processed so that state from a dead/recycled process
+     * can never contaminate attribution for the new incarnation.
+     */
+    private fun evictStaleIncarnation(task: TaskIdentity) {
+        val latest = latestTaskByTid[task.tid] ?: return
+        if (latest.processEpoch != task.processEpoch) {
+            // New process epoch for this tid — evict all states keyed under the old identity
+            states.keys.removeAll { it.tid == task.tid && it.processEpoch != task.processEpoch }
+            latestTaskByTid[task.tid] = task
+        }
+    }
+
+    public fun processIncarnationFor(task: TaskIdentity): ProcessIncarnation = states[task]?.processIncarnation ?: ProcessIncarnation(task.processEpoch)
+
+    public fun reentrantStateFor(task: TaskIdentity): ReentrantBoundaryState = states[task]?.let { ReentrantBoundaryState(depth = it.reentrantDepth) } ?: ReentrantBoundaryState()
 
     private fun endRestore(
         event: InvocationEvent.EndRestore,
@@ -178,6 +223,9 @@ public class InvocationReplayMachine {
                 ),
             )
         }
+        if (state.reentrantDepth > 0) {
+            state.reentrantDepth--
+        }
         state.activeInvocationId = event.restoredInvocationId
         states[event.task] = state
         return ReplayResult.StateChanged(invalidated)
@@ -192,6 +240,7 @@ public class InvocationReplayMachine {
         val status = when {
             invalidated != null -> AttributionStatus.SEQUENCE_GAP
             state.activeInvocationId == null -> AttributionStatus.NO_ACTIVE_INVOCATION
+            state.reentrantDepth > 1 -> AttributionStatus.CAUSAL_UNCERTAIN
             else -> AttributionStatus.PENDING_DICTIONARY
         }
         return ReplayResult.Syscall(
@@ -210,5 +259,7 @@ public class InvocationReplayMachine {
     private class TaskState(
         var lastSequence: Long = 0,
         var activeInvocationId: InvocationId? = null,
+        var reentrantDepth: Int = 0,
+        val processIncarnation: ProcessIncarnation = ProcessIncarnation(0),
     )
 }

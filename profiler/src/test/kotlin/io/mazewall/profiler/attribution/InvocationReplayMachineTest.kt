@@ -53,13 +53,13 @@ class InvocationReplayMachineTest {
         ).filterIsInstance<ReplayResult.Syscall>()
 
         assertEquals(
-            listOf(InvocationId(101), InvocationId(202), InvocationId(101), null),
+            listOf(InvocationId(101), null, InvocationId(101), null),
             observations.map { it.observation.invocationId },
         )
         assertEquals(
             listOf(
                 AttributionStatus.PENDING_DICTIONARY,
-                AttributionStatus.PENDING_DICTIONARY,
+                AttributionStatus.CAUSAL_UNCERTAIN,
                 AttributionStatus.PENDING_DICTIONARY,
                 AttributionStatus.NO_ACTIVE_INVOCATION,
             ),
@@ -105,11 +105,130 @@ class InvocationReplayMachineTest {
         val mismatch = machine.accept(InvocationEvent.EndRestore(task, sequence = 2, endedInvocationId = InvocationId(202), restoredInvocationId = null))
         val syscall = machine.accept(InvocationEvent.Syscall(task, sequence = 3, syscallNumber = 257, args = List(6) { 0 }))
 
-        assertEquals(
-            StateInvalidated(task, expectedSequence = 2, actualSequence = 2, reason = StateInvalidationReason.ACTIVATION_MISMATCH),
-            mismatch.invalidated,
-        )
+        assertEquals(StateInvalidated(task, expectedSequence = 2, actualSequence = 2, reason = StateInvalidationReason.ACTIVATION_MISMATCH), mismatch.invalidated)
         assertEquals(AttributionStatus.NO_ACTIVE_INVOCATION, (syscall as ReplayResult.Syscall).observation.attributionStatus)
         assertEquals(null, syscall.observation.invocationId)
+    }
+
+    @Test
+    fun `process incarnation token change invalidates prior task state and resets reentrancy`() {
+        val initialTask = TaskIdentity(processEpoch = 1, tid = 42, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        machine.accept(InvocationEvent.Activate(initialTask, sequence = 1, invocationId = InvocationId(101)))
+        assertEquals(ProcessIncarnation(1L), machine.processIncarnationFor(initialTask))
+        assertEquals(ReentrantBoundaryState(depth = 1, isReentrant = false), machine.reentrantStateFor(initialTask))
+
+        // New incarnation (e.g. process exec or PID recycled under a new process epoch)
+        val recycledTask = TaskIdentity(processEpoch = 2, tid = 42, taskEpoch = 1)
+        val syscall = machine.accept(InvocationEvent.Syscall(recycledTask, sequence = 1, syscallNumber = 0, args = List(6) { 0 }))
+
+        assertEquals(ProcessIncarnation(2L), machine.processIncarnationFor(recycledTask))
+        assertEquals(ReentrantBoundaryState(depth = 0, isReentrant = false), machine.reentrantStateFor(recycledTask))
+        assertEquals(AttributionStatus.NO_ACTIVE_INVOCATION, (syscall as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(null, syscall.observation.invocationId)
+    }
+
+    @Test
+    fun `nested activations increment reentrancy depth and mark state reentrant`() {
+        val task = TaskIdentity(processEpoch = 1, tid = 42, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        machine.accept(InvocationEvent.Activate(task, sequence = 1, invocationId = InvocationId(101)))
+        assertEquals(ReentrantBoundaryState(depth = 1, isReentrant = false), machine.reentrantStateFor(task))
+
+        machine.accept(InvocationEvent.Activate(task, sequence = 2, invocationId = InvocationId(202)))
+        assertEquals(ReentrantBoundaryState(depth = 2, isReentrant = true), machine.reentrantStateFor(task))
+
+        machine.accept(InvocationEvent.EndRestore(task, sequence = 3, endedInvocationId = InvocationId(202), restoredInvocationId = InvocationId(101)))
+        assertEquals(ReentrantBoundaryState(depth = 1, isReentrant = false), machine.reentrantStateFor(task))
+
+        machine.accept(InvocationEvent.EndRestore(task, sequence = 4, endedInvocationId = InvocationId(101), restoredInvocationId = null))
+        assertEquals(ReentrantBoundaryState(depth = 0, isReentrant = false), machine.reentrantStateFor(task))
+    }
+
+    @Test
+    fun `supported native callback unsupported syscall is causal uncertain`() {
+        val task = TaskIdentity(processEpoch = 1, tid = 42, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        // Outer scope (depth=1): Activate 101
+        machine.accept(InvocationEvent.Activate(task, sequence = 1, invocationId = InvocationId(101)))
+        val outer = machine.accept(InvocationEvent.Syscall(task, sequence = 2, syscallNumber = 257, args = List(6) { 0 }))
+
+        // Inner scope (depth=2): callback re-enters
+        machine.accept(InvocationEvent.Activate(task, sequence = 3, invocationId = InvocationId(202)))
+        val inner = machine.accept(InvocationEvent.Syscall(task, sequence = 4, syscallNumber = 0, args = List(6) { 0 }))
+
+        // Restore inner → outer (depth=1)
+        machine.accept(InvocationEvent.EndRestore(task, sequence = 5, endedInvocationId = InvocationId(202), restoredInvocationId = InvocationId(101)))
+        val restored = machine.accept(InvocationEvent.Syscall(task, sequence = 6, syscallNumber = 1, args = List(6) { 0 }))
+
+        // Close outer (depth=0)
+        machine.accept(InvocationEvent.EndRestore(task, sequence = 7, endedInvocationId = InvocationId(101), restoredInvocationId = null))
+        val noActive = machine.accept(InvocationEvent.Syscall(task, sequence = 8, syscallNumber = 3, args = List(6) { 0 }))
+
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (outer as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(InvocationId(101), outer.observation.invocationId)
+
+        assertEquals(AttributionStatus.CAUSAL_UNCERTAIN, (inner as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(null, inner.observation.invocationId)
+
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (restored as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(InvocationId(101), restored.observation.invocationId)
+
+        assertEquals(AttributionStatus.NO_ACTIVE_INVOCATION, (noActive as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(null, noActive.observation.invocationId)
+    }
+
+    @Test
+    fun `inner capture failure in reentrant scope does not leave stale exact attribution`() {
+        val task = TaskIdentity(processEpoch = 1, tid = 42, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        // Outer scope (depth=1)
+        machine.accept(InvocationEvent.Activate(task, sequence = 1, invocationId = InvocationId(101)))
+
+        // Enter re-entrant inner scope (depth=2)
+        machine.accept(InvocationEvent.Activate(task, sequence = 2, invocationId = InvocationId(202)))
+
+        // Syscall inside inner scope (depth=2) → must be CAUSAL_UNCERTAIN, not PENDING_DICTIONARY
+        val innerSyscall = machine.accept(InvocationEvent.Syscall(task, sequence = 3, syscallNumber = 0, args = List(6) { 0 }))
+        assertEquals(AttributionStatus.CAUSAL_UNCERTAIN, (innerSyscall as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(null, innerSyscall.observation.invocationId)
+
+        // Restore inner → outer (depth=1)
+        machine.accept(InvocationEvent.EndRestore(task, sequence = 4, endedInvocationId = InvocationId(202), restoredInvocationId = InvocationId(101)))
+
+        // Syscall in restored outer scope (depth=1) must be PENDING_DICTIONARY with 101, not contaminated by inner
+        val outerSyscall = machine.accept(InvocationEvent.Syscall(task, sequence = 5, syscallNumber = 1, args = List(6) { 0 }))
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (outerSyscall as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(InvocationId(101), outerSyscall.observation.invocationId)
+    }
+
+    @Test
+    fun `pid reuse with new process epoch evicts stale state and resets attribution`() {
+        val tid = 42
+        val oldTask = TaskIdentity(processEpoch = 1, tid = tid, taskEpoch = 1)
+        val newTask = TaskIdentity(processEpoch = 2, tid = tid, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        // Old incarnation: activate + syscall
+        machine.accept(InvocationEvent.Activate(oldTask, sequence = 1, invocationId = InvocationId(101)))
+        val oldSyscall = machine.accept(InvocationEvent.Syscall(oldTask, sequence = 2, syscallNumber = 257, args = List(6) { 0 }))
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (oldSyscall as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(InvocationId(101), oldSyscall.observation.invocationId)
+        assertEquals(ProcessIncarnation(1L), machine.processIncarnationFor(oldTask))
+
+        // PID recycled: new processEpoch=2, same tid — stale state for epoch=1 must be evicted
+        val newSyscall = machine.accept(InvocationEvent.Syscall(newTask, sequence = 1, syscallNumber = 0, args = List(6) { 0 }))
+
+        // New task has no active invocation — eviction cleared the old context
+        assertEquals(AttributionStatus.NO_ACTIVE_INVOCATION, (newSyscall as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(null, newSyscall.observation.invocationId)
+        assertEquals(ProcessIncarnation(2L), machine.processIncarnationFor(newTask))
+
+        // Old incarnation state must no longer be present
+        assertEquals(ReentrantBoundaryState(depth = 0, isReentrant = false), machine.reentrantStateFor(oldTask))
     }
 }

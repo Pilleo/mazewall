@@ -48,6 +48,20 @@ public enum class CaptureFailure {
     EXECUTION_IDENTITY_CHANGED,
 }
 
+/**
+ * Declares the kernel observation boundary used to collect syscall events.
+ *
+ * - [SYS_ENTER_TRACEPOINT]: Events are captured via the `raw_tracepoint/sys_enter` hook.
+ *   Only syscalls that passed all pre-execution gates (including seccomp) and were
+ *   dispatched by the kernel enter this scope. Seccomp-denied or unprobed syscalls are
+ *   NOT observed and are therefore outside the reported corpus.
+ * - [UNKNOWN]: Capture domain was not declared by the collection session.
+ */
+public enum class ObservationScope {
+    SYS_ENTER_TRACEPOINT,
+    UNKNOWN,
+}
+
 public enum class ResolutionStatus {
     RESOLVED,
     DICTIONARY_UNRESOLVED,
@@ -56,6 +70,7 @@ public enum class ResolutionStatus {
     INVALID_KERNEL_ATTRIBUTION,
     TRUNCATED_STACK,
     EXECUTION_IDENTITY_UNRESOLVED,
+    CAUSAL_UNCERTAIN,
 }
 
 /** A syscall after its invocation and stack references have been resolved, or explicitly failed. */
@@ -75,6 +90,12 @@ public data class SessionIntegrity(
     val virtualPinnedScopes: Long = 0,
     /** Sum of measured virtual native-proxy duration, for operational overhead reporting. */
     val virtualPinnedNanos: Long = 0,
+    /**
+     * Kernel observation boundary used to capture syscall events for this session.
+     * [ObservationScope.SYS_ENTER_TRACEPOINT] means only post-seccomp dispatched syscalls
+     * are observed; seccomp-denied and unprobed attempts are outside this corpus.
+     */
+    val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
 ) {
     public val guarantee: CaptureGuarantee
         get() = when {
@@ -101,6 +122,7 @@ public data class SessionIntegrity(
 public class AttributionCollector(
     private val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     private val maxPendingRecords: Int = TierEOptions.DEFAULT_RECORD_LIMIT,
+    private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
 ) {
     private val stacks = mutableMapOf<StackTraceId, StackDefinition>()
     private val invocations = mutableMapOf<InvocationId, InvocationDefinition>()
@@ -123,6 +145,7 @@ public class AttributionCollector(
             emissionMode = emissionMode,
             virtualPinnedScopes = virtualPinnedScopes,
             virtualPinnedNanos = virtualPinnedNanos,
+            captureDomain = captureDomain,
         )
 
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
@@ -152,6 +175,7 @@ public class AttributionCollector(
                     null,
                     when (observation.attributionStatus) {
                         AttributionStatus.NO_ACTIVE_INVOCATION -> ResolutionStatus.NO_ACTIVE_INVOCATION
+                        AttributionStatus.CAUSAL_UNCERTAIN -> ResolutionStatus.CAUSAL_UNCERTAIN
                         AttributionStatus.SEQUENCE_GAP,
                         AttributionStatus.ACTIVATION_MISMATCH,
                         AttributionStatus.KERNEL_CAPTURE_FAILED,
@@ -173,6 +197,18 @@ public class AttributionCollector(
 
     public fun recordLoss(count: Long = 1) {
         require(count > 0) { "loss count must be positive" }
+        losses = Math.addExact(losses, count)
+    }
+
+    /**
+     * Records dropped stack dictionary entries from a [StackDictionaryStreamEncoder].
+     *
+     * Each dropped entry means one or more pending attributions can never be resolved;
+     * they will surface as [ResolutionStatus.DICTIONARY_UNRESOLVED] at [finish] time,
+     * and the session [integrity] will reflect an incomplete guarantee.
+     */
+    public fun recordDictionaryDrops(count: Long) {
+        require(count > 0) { "dictionary drop count must be positive" }
         losses = Math.addExact(losses, count)
     }
 

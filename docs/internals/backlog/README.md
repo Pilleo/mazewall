@@ -1,6 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 564
+*Total Active Issues:* 77 | *Total Resolved Issues:* 572
+
+Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
 Review-hardening scoped evidence resolved: [native boundaries](resolved/issue-20260910-225751-359-validate-native-transfers-and-descriptor-acquisiti.md), [reactor deadline](resolved/issue-20260910-225751-953-bound-user-notif-reactor-work-and-terminal-reply-o.md), [supervisor authority](resolved/issue-20260910-225752-609-record-fail-closed-supervisor-routing-and-installa.md), [isolated tests](resolved/issue-20260910-225753-174-record-isolated-test-process-and-selector-hardenin.md), [web evidence](resolved/issue-20260910-225753-764-record-web-artifact-and-complete-profile-deploymen.md), and [failure taxonomy](resolved/issue-20260910-225754-299-record-explicit-lifecycle-and-cleanup-failure-evid.md). See the [30-finding manifest](../designs/core/post-review-hardening-evidence.md#liveness-and-boundary-review-rh) and its separate final-gate record.
 
@@ -29,6 +31,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Issue | Title | Priority | Component |
 |---|---|---|---|
 | [issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid](issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md) | Record review hardening liveness and boundary evidence | high | core |
+| [issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps](issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps.md) | Close remaining Tier E attribution and lifecycle correctness gaps | high | profiler |
 | [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
