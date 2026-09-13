@@ -38,6 +38,10 @@ public:
             std::memory_order_release);
     }
 
+    void begin_cooperative_replacement() noexcept { begin_replacement(false); }
+
+    void end_cooperative_replacement() noexcept { complete_replacement(); }
+
     void complete_replacement() noexcept {
         if (state_.load(std::memory_order_acquire) != State::replacement_in_progress) return;
         generation_.fetch_add(1, std::memory_order_acq_rel);

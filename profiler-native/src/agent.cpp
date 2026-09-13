@@ -49,6 +49,7 @@ std::atomic<std::uint64_t> next_publication_id{1};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
 mazewall::profiler::SymbolizationGeneration symbolization_generation;
+thread_local bool cooperative_replacement = false;
 std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
@@ -778,7 +779,9 @@ void JNICALL on_class_file_load(
     // Initial class loading can close at ClassPrepare. A replacement callback
     // has no post-install completion signal, so it remains unproven and exact
     // captures fail closed until an explicit resynchronization boundary.
-    symbolization_generation.begin_replacement(class_being_redefined != nullptr);
+    if (class_being_redefined != nullptr && !cooperative_replacement) {
+        symbolization_generation.begin_replacement(true);
+    }
 }
 
 void JNICALL on_class_prepare(jvmtiEnv*, JNIEnv*, jthread, jclass) noexcept {
@@ -935,6 +938,17 @@ bool parse_options(const char* options) {
 }
 
 } // namespace
+
+extern "C" void mazewall_symbolization_replacement_begin() noexcept {
+    cooperative_replacement = true;
+    symbolization_generation.begin_cooperative_replacement();
+}
+
+extern "C" void mazewall_symbolization_replacement_end() noexcept {
+    if (!cooperative_replacement) return;
+    symbolization_generation.end_cooperative_replacement();
+    cooperative_replacement = false;
+}
 
 extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*) {
     if (vm == nullptr || !parse_options(options)) {
