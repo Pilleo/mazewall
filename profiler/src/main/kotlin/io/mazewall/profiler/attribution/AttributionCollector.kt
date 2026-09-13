@@ -1,5 +1,7 @@
 package io.mazewall.profiler.attribution
 
+import io.mazewall.profiler.tierE.TierERetainedStateBudget
+
 /** Opaque session-local identity of the Java execution that entered an invocation. */
 @JvmInline
 public value class ExecutionId(
@@ -148,10 +150,12 @@ public class AttributionCollector(
     private val maxPendingRecords: Int = TierEOptions.DEFAULT_RECORD_LIMIT,
     private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
     private val expectedProcessIncarnation: ProcessIncarnationId? = null,
+    maxRetainedBytes: Long = TierERetainedStateBudget.DEFAULT_LIMIT_BYTES,
 ) {
     private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
+    private val retainedBudget = TierERetainedStateBudget(maxRetainedBytes)
     private val tokensByResult = java.util.IdentityHashMap<ResolvedSyscall, EmissionToken>()
     private var nextCandidateId: Long = 1
     private var finished = false
@@ -206,7 +210,12 @@ public class AttributionCollector(
             )
         }
         val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
+        if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)) {
+            recordLoss()
+            return emptyList()
+        }
         if (!dictionaryJoiner.enqueue(observation)) {
+            retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
             recordLoss()
             return emptyList()
         }
@@ -303,6 +312,10 @@ public class AttributionCollector(
         val ready = dictionaryJoiner.takeReady(invocationId) ?: return emptyList()
         val invocation = ready.invocation
         val pending = ready.observations
+        retainedBudget.release(
+            TierERetainedStateBudget.Category.PENDING_OBSERVATIONS,
+            pending.size.toLong() * PENDING_OBSERVATION_BYTES,
+        )
         if (invocation.captureFailure != null) {
             integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             return pending.map { ResolvedSyscall(it, null, ResolutionStatus.CAPTURE_FAILED) }
@@ -344,5 +357,6 @@ public class AttributionCollector(
 
     private companion object {
         const val VIRTUAL_THREAD_CAPTURE_FLAG = 1
+        const val PENDING_OBSERVATION_BYTES = 128L
     }
 }
