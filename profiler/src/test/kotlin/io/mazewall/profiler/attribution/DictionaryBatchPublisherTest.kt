@@ -62,6 +62,51 @@ class DictionaryBatchPublisherTest {
         assertEquals(1L, publisher.transportEvidence.terminalFailures)
     }
 
+    @Test
+    fun `partial write followed by reconnect replays identical bytes before commit`() {
+        val encoder = StackDictionaryStreamEncoder(maxPendingEntries = 3)
+        encoder.enqueue(definition(41L))
+        encoder.enqueue(definition(42L))
+        val writes = mutableListOf<ByteArray>()
+        var connectionAttempts = 0
+        val publisher = DictionaryBatchPublisher(
+            encoder,
+            DictionaryBatchSink { batch ->
+                connectionAttempts++
+                writes += batch.bytes
+                if (connectionAttempts == 1) DictionarySinkResult.RetryableFailure else DictionarySinkResult.Committed
+            },
+        )
+
+        assertEquals(DictionaryPublicationStatus.RETRYABLE_FAILURE, publisher.publishAvailable(2))
+        assertEquals(2, encoder.pendingCount)
+        assertEquals(0L, encoder.watermark)
+        assertEquals(DictionaryPublicationStatus.COMMITTED, publisher.publishAvailable(2))
+
+        assertEquals(2, connectionAttempts)
+        assertContentEquals(writes[0], writes[1])
+        assertEquals(0, encoder.pendingCount)
+        assertEquals(42L, encoder.watermark)
+    }
+
+    @Test
+    fun `daemon crash before commit leaves an explicit incomplete abandoned batch`() {
+        val encoder = StackDictionaryStreamEncoder(maxPendingEntries = 2)
+        encoder.enqueue(definition(51L))
+        val publisher = DictionaryBatchPublisher(
+            encoder,
+            DictionaryBatchSink { DictionarySinkResult.TerminalFailure("daemon crashed") },
+        )
+
+        assertEquals(DictionaryPublicationStatus.TERMINAL_FAILURE, publisher.publishAvailable(1))
+        publisher.terminate()
+
+        assertEquals(1, encoder.pendingCount)
+        assertEquals(0L, encoder.watermark)
+        assertEquals(1L, publisher.transportEvidence.terminalFailures)
+        assertEquals(false, publisher.transportEvidence.complete)
+    }
+
     private fun definition(id: Long): StackDefinition =
         StackDefinition(
         StackTraceId(id),
