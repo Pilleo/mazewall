@@ -153,7 +153,6 @@ public class AttributionCollector(
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
     private val tokensByResult = java.util.IdentityHashMap<ResolvedSyscall, EmissionToken>()
-    private val edgesByToken = java.util.IdentityHashMap<EmissionToken, UniqueEdgeGate.Edge>()
     private var nextCandidateId: Long = 1
     private var finished = false
     private var pendingCount: Int = 0
@@ -276,17 +275,17 @@ public class AttributionCollector(
     /** Acknowledges only the exact outstanding candidate represented by [token]. */
     public fun acknowledgeEmission(token: EmissionToken) {
         if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL) return
-        val edge = edgesByToken.remove(token)
-            ?: throw IllegalArgumentException("emission token is stale, duplicated, or foreign")
+        require(tokensByResult.values.any { it === token }) {
+            "emission token is stale, duplicated, or foreign"
+        }
         tokensByResult.entries.removeIf { it.value === token }
-        uniqueEdgeGate.acknowledge(edge)
+        uniqueEdgeGate.acknowledge(token.edge)
     }
 
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> {
         finished = true
         tokensByResult.clear()
-        edgesByToken.clear()
         return java.util.List.copyOf(
             dictionaryJoiner
                 .pendingEntries()
@@ -334,10 +333,9 @@ public class AttributionCollector(
                 ResolvedSyscall(observation, stack, status, invocation.executionContext).also { resolved ->
                     if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !finished) {
                         val candidateId = nextCandidateId++
-                        val token = EmissionToken(candidateId)
                         val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
+                        val token = EmissionToken(candidateId, edge)
                         tokensByResult[resolved] = token
-                        edgesByToken[token] = edge
                     }
                 }
             }

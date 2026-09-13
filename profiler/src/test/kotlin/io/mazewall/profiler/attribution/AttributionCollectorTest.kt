@@ -280,7 +280,9 @@ class AttributionCollectorTest {
             collector.acknowledgeEmission(candidate.copy())
         }
         assertFailsWith<IllegalArgumentException> {
-            collector.acknowledgeEmission(EmissionToken(999L))
+            collector.acknowledgeEmission(
+                EmissionToken(999L, UniqueEdgeGate.Edge(StackTraceId(99L), 99, 0)),
+            )
         }
     }
 

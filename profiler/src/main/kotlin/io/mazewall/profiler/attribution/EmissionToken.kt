@@ -8,4 +8,5 @@ package io.mazewall.profiler.attribution
  */
 public class EmissionToken internal constructor(
     internal val candidateId: Long,
+    internal val edge: UniqueEdgeGate.Edge,
 )
