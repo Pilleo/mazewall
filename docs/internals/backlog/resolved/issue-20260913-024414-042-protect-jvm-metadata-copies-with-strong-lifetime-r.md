@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "InvocationScope"
 open_questions: false
+
+paperclip_issue_id: "46a2a405-7431-404f-906e-d1b0147f79ec"
+paperclip_identifier: "MAZ-1420"
 ---
 
 # 🟡 [Severity: HIGH]: Protect JVM metadata copies with strong lifetime references

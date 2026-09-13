@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: "f9aee2f5-272c-45b4-a920-5351b271df91"
-paperclip_identifier: "MAZ-1391"
+paperclip_issue_id: "75e21b10-3532-4919-bf1e-f6c8ab93f864"
+paperclip_identifier: "MAZ-1429"
 ---
 
 # 🔴 [Severity: MEDIUM]: Automated FFM layout ABI validation across supported architectures

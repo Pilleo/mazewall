@@ -12,8 +12,8 @@ target_symbols:
   - "SupervisorReplyInterpreter"
 open_questions: false
 
-paperclip_issue_id: "2e345d78-110d-443f-852d-62dc78abc50d"
-paperclip_identifier: "MAZ-1370"
+paperclip_issue_id: "11f76edc-b7fb-4b7a-b544-1c2cc4492407"
+paperclip_identifier: "MAZ-1466"
 ---
 
 # 🟡 [Severity: MEDIUM]: Correct secure exec cleanup of injected tracee descriptors

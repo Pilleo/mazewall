@@ -13,6 +13,9 @@ target_files:
 target_symbols: 
   - "AttributionCollector"
 open_questions: false
+
+paperclip_issue_id: "f936ace9-f617-4295-b487-36321503c460"
+paperclip_identifier: "MAZ-1421"
 ---
 
 # 🟡 [Severity: HIGH]: Choose one authoritative Tier E unique-edge suppression boundary

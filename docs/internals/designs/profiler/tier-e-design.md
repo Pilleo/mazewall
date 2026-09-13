@@ -407,7 +407,7 @@ Rootless Podman remains explicitly `INCOMPLETE` and is not used to support a pri
     or `DEAD`), exact attribution must not resume via cache reuse, stale context memory, or process-identity
     overlap.
 
-## 4. Architecture
+## 4. Historical architecture (superseded)
 
 > **Status: Implemented contract.**
 
@@ -1174,3 +1174,253 @@ Each evidence artifact records the source commit, command, environment, raw outp
 fixture result, and the six machine-readable dimensions:
 `capture_domain_validity`, `transport_completeness`, `attribution_coverage`,
 `dictionary_integrity`, `lifecycle_validity`, and `runtime_overhead`.
+
+---
+
+## Current architecture-review contract (normative override)
+
+This section is the current contract for Tier E. Earlier descriptions that mention
+`ContextId`, `MazewallContext`, or `ebpf-prototype/` are historical material and do
+not describe the active implementation.
+
+### Contract status labels
+
+Each requirement in this section is one of:
+
+- **Implemented contract**: present in the repository and covered by focused tests.
+- **Required hardening**: an approved requirement that still needs an implementation or durable fixture.
+- **Historical evidence**: a retained measurement or decision, not a current guarantee.
+
+### Boundaries and guarantees
+
+**Implemented contract.** Tier E observes selected `raw_tp/sys_enter` events, not every
+syscall attempt. Exact attribution is valid only for a proven native-boundary stack.
+`UNKNOWN`, `CAUSAL_UNCERTAIN`, capture failure, transport loss, and out-of-domain
+attempts are distinct evidence outcomes. Tier E evidence is never policy input;
+`policy_eligibility` is always `false`.
+
+Attribution, event retention, dictionary resolution, and transport acknowledgement
+are separate concerns:
+
+```text
+native boundary
+  -> symbolization generation admission
+  -> exact stack capture
+  -> immutable definition publication
+  -> marker/ring event
+  -> owned userspace record
+  -> invocation/dictionary join
+  -> downstream acknowledgement
+  -> immutable final evidence
+```
+
+Fail-closed behavior means an incomplete run remains incomplete. No empty ring, valid
+file, or zero out-of-domain counter is by itself a producer barrier or proof of
+complete syscall-attempt coverage.
+
+### Active native and eBPF path
+
+**Implemented contract.** The active path is the native-method proxy, exact JVMTI
+stack capture, immutable dictionary records, per-invocation `InvocationId`, marker
+uprobe, BPF task storage, selected `raw_tp/sys_enter`, and collector-owned
+resolution. The kernel coverage map in unique-edge mode is diagnostic only. It never
+suppresses, reserves, or submits ring observations. Unique-edge suppression changes
+only after the collector receives successful downstream acknowledgement.
+
+The task-storage value is exactly 24 bytes:
+
+```text
+invocation_id  u64 @ 0
+sequence       u64 @ 8
+flags          u32 @ 16
+reserved       u32 @ 20
+```
+
+The ring record is exactly 88 bytes:
+
+```text
+ktime_ns       u64 @ 0
+ tgid          u32 @ 8
+tid            u32 @ 12
+syscall_nr     s32 @ 16
+flags          u32 @ 20
+invocation_id  u64 @ 24
+sequence       u64 @ 32
+args[6]        u64 @ 40
+```
+
+The event flags are `MARKER_ACTIVE`, `CAUSAL_UNCERTAIN`, `CAPTURE_FAILED`, and
+`OUT_OF_DOMAIN`. Unknown flag bits are evidence-invalid rather than silently ignored.
+The selected raw tracepoint only observes events reaching the selected `sys_enter`
+path; seccomp-denied attempts outside that path are represented as an explicit
+capture-domain limitation, never as fabricated exact events.
+
+A marker update looks up the session and task-storage value, verifies the target
+process, and updates the value returned by `bpf_task_storage_get`. The initialization
+argument applies only when storage is first created. A clear transition writes zero
+invocation and flags while advancing the marker-state version only after a successful
+update. Failed lookup or update leaves attribution conservative. Removing marker
+attachment prevents later `sys_enter` events from restoring an old exact invocation.
+
+### Symbolization generation and cache safety
+
+**Implemented contract.** `SymbolizationGeneration` represents a stable installed-
+definition interval. Equality of before/after samples is necessary but insufficient
+during replacement. Initial class loading closes only after a post-install lifecycle
+signal. Agent-cooperative retransformation brackets the complete operation, including
+return. Unbracketed external replacement yields conservative unresolved attribution;
+capture threads never wait for transformation completion.
+
+The state machine is:
+
+```text
+STABLE
+  -> REPLACEMENT_IN_PROGRESS
+  -> STABLE(next generation)
+
+STABLE
+  -> EXTERNAL_REPLACEMENT_UNPROVEN
+  -> validated resynchronization or new session
+```
+
+Cache keys include method identity, installed generation, and raw location. Strong
+local JVM references are used only while copying metadata. Weak guards validate
+retained entries and are never used to dereference unloaded classes. No transition
+may restore an older exact invocation implicitly.
+
+### MZSE publication and replay
+
+**Implemented contract.** Raw `MZSD v2` bytes remain backward-compatible. MZSE version 1
+remains readable. A session-bound MZSE version 2 has this exact envelope:
+
+```text
+magic            4 bytes: MZSE
+version          u16 LE: 2
+flags            u16 LE
+session_epoch    u64 LE
+publication_id   u64 LE
+watermark        u64 LE
+payload_length   u64 LE
+payload          unchanged MZSD v2 bytes
+```
+
+The watermark is the highest committed `StackTraceId` represented by the committed
+dependency-complete definition set. It is not a byte offset, event sequence, or
+`InvocationId`. A reader admits a live snapshot only when its session identity is
+unbound for legacy compatibility or matches the expected session. A same-ID
+same-content replay is `DUPLICATE_IDENTICAL`; a new identity is `NEW`; a same-ID
+content mismatch is `CONFLICTING` and is terminal dictionary inconsistency.
+Declared lengths, record counts, supported flags, integer overflow, payload bounds,
+and trailing bytes are validated before allocation.
+
+A publication owner performs atomic pathname replacement from a complete temporary
+file. Readers parse metadata and payload from one opened descriptor. One owner
+prevents generation regression; serialization occurs outside capture-side locks.
+Dirty-generation tracking and coalescing avoid repeated unchanged snapshots. The
+optional outer live envelope does not change MZSD bytes. Process-failure durability
+is the default; file and directory synchronization is opt-in host durability.
+Ambiguous remote delivery is terminally incomplete unless the sink explicitly
+provides no-visible-effect or idempotent-receiver semantics.
+
+### Ownership and finite retention
+
+**Implemented contract.** Ring records are copied into collector-owned storage before
+consumer advancement. Delayed dictionary joins never retain mapped ring views. Ring
+drain is independent from dictionary parsing, serialization, sink I/O, and
+acknowledgement. Capture threads never wait for queue space, publication, or
+acknowledgement.
+
+**Required hardening.** One bounded budget covers dictionary staging, pending
+observations, prepared batches, emission tokens, snapshot buffers, and metadata
+caches. The default budget is 64 MiB. Exhaustion produces explicit incomplete
+evidence, not silent eviction. Abandoned in-flight dictionary batches remain
+uncommitted and cannot advance the watermark; their exact bytes remain available for
+terminal accounting until cleanup.
+
+The ownership lifecycle is:
+
+```text
+mapped record
+  -> copied owned record
+  -> delayed join
+  -> resolved observation
+  -> immutable retained result
+```
+
+Conditional capacity calculations are calculations, not measurements: 64 MiB divided
+by an 88-byte payload is approximately 762,600 payloads, which fills in about 12.7
+minutes at 1,000/s, 76 seconds at 10,000/s, or 7.6 seconds at 100,000/s before
+metadata and container overhead.
+
+### Native-call preservation
+
+**Implemented contract.** A profiler proxy preserves the native return value, pending
+application exceptions, and applicable `errno`. If profiler admission or exact
+capture fails, the original operation continues when recoverable. Cleanup must not
+erase application failures. Blanket `ExceptionClear()` is prohibited; only
+profiler-owned exceptions may be cleared after ownership is proven. Re-entrant
+callbacks enter an explicit inactive or uncertain boundary and cannot inherit stale
+exact attribution.
+
+### Control protocol
+
+**Implemented contract.** Protocol version 1 is a two-byte length-prefixed Java
+modified-UTF frame, containing one command line per request and one rendered reply
+per response. The maximum encoded frame length is 65,535 bytes. The idle timeout
+between frames is 30 seconds and the whole-frame deadline is 30 seconds.
+
+Idle timeout before a frame is different from partial-header timeout, partial-payload
+timeout, hard socket failure, and shutdown polling. A partial-frame timeout retires
+the client because the current decoder cannot resume from an unknown byte offset.
+`EAGAIN` and `EWOULDBLOCK` are idle-session events that recheck shutdown state;
+hard socket errors retain hard-error behavior.
+
+### Performance targets and evidence
+
+**Required hardening.** A warmed metadata-cache hit performs no profiler-owned heap
+allocation, string formatting, or file I/O. Full raw-key equality remains the
+identity decision after hash lookup. Scratch storage is depth-aware for nested native
+calls. Snapshot serialization and sink I/O stay off capture threads.
+
+Benchmarks report phase totals, cache hits and misses, lock wait, snapshot bytes,
+publication latency, pending high-water marks, dictionary-resolution latency,
+allocation bytes, retained-state peak, and tail latency. Full-stream and unique-edge
+modes are compared separately, with publication and instrumentation each measured
+enabled and disabled. Warmed workloads include class churn and retransformation.
+USDT remains experimental until ordering, identity, failure behavior, and wire output
+are proven identical to the plain-uprobe path.
+
+A 25 percent increase is a review trigger, with separate blocking budgets for total
+workload, allocation, retained memory, and tail latency. A baseline may be renewed
+only with an explicit hardware, JDK, kernel, or workload rationale. The historical
+1,324 ns and 596 ns values are host-specific evidence, not universal guarantees.
+
+### Evidence dimensions and implementation matrix
+
+Every retained artifact uses these dimensions:
+
+```text
+evidence_integrity: complete | incomplete | unverified
+performance_gate: passed | failed | not_measured
+policy_eligibility: false
+capture_domain_validity
+transport_completeness
+attribution_coverage
+dictionary_integrity
+lifecycle_validity
+runtime_overhead
+```
+
+| Contract | Implementation or fixture | Required evidence | Dimension |
+|---|---|---|---|
+| Collector-owned unique-edge acknowledgement | `AttributionCollector`, `UniqueEdgeGate`, BPF builder | retry and duplicate-ack tests | attribution_coverage |
+| Producer lifecycle and terminal barrier | native agent, session state, marker detach fixture | terminal drain and detach artifacts | lifecycle_validity |
+| Session-bound snapshot replay | `SnapshotEnvelope`, `AgentDefinitionFile`, replay ledger | v1/v2 and conflict fixtures | dictionary_integrity |
+| Bounded ownership | retained-state budget and dictionary encoder | pressure and abandoned-batch artifact | transport_completeness |
+| Native outcome preservation | proxy admission and native tests | return/exception/errno fixture | capture_domain_validity |
+| Selected `sys_enter` boundary | Tier E BPF program | denied-attempt limitation artifact | capture_domain_validity |
+| Phase-level performance | native benchmark and baseline gate | JSON baseline and warmed run | runtime_overhead |
+
+Unimplemented hardening is marked `planned` in evidence, never `implemented`.
+Tier E remains finite, fail-closed, and ineligible as policy input until the required
+fixtures and durable artifacts exist.

@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "ControlProtocolFixtureTest"
 open_questions: false
+
+paperclip_issue_id: "1c6aafb5-dea8-4b1a-9430-633af8d4b5bc"
+paperclip_identifier: "MAZ-1424"
 ---
 
 # 🟡 [Severity: MEDIUM]: Version protocol golden fixtures and remove duplicated cache guarantees

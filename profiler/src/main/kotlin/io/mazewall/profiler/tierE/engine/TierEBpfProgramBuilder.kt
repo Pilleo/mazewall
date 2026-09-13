@@ -90,8 +90,21 @@ public object TierEBpfProgramBuilder {
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         exits.add(emit(Insn(JNE_REG, dst = 5, src = 4)))
 
+        emit(Insn(LDX_W, dst = 5, src = 0, off = 8))
+        val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
+
+        // A detached marker must bypass task storage completely. Otherwise an
+        // old task-storage value could be copied into a new ring observation.
+        val detachedObservation = p.size
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -8))
+        val detachedToReserve = emit(Insn(JA))
+
         // Default to an explicit un-attributed observation. A missing marker is
         // evidence, not permission to hide the target syscall.
+        val defaultObservation = p.size
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
@@ -241,6 +254,8 @@ public object TierEBpfProgramBuilder {
         p[reservationFailed] = p[reservationFailed].copy(off = (lossHandler - reservationFailed - 1).toShort())
         p[noTask] = p[noTask].copy(off = (reserveStart - noTask - 1).toShort())
         p[noStorage] = p[noStorage].copy(off = (reserveStart - noStorage - 1).toShort())
+        p[markerDetached] = p[markerDetached].copy(off = (detachedObservation - markerDetached - 1).toShort())
+        p[detachedToReserve] = p[detachedToReserve].copy(off = (reserveStart - detachedToReserve - 1).toShort())
         p[submitted] = p[submitted].copy(off = (exitIndex - submitted - 2).toShort())
         p[missingLossCounter] = p[missingLossCounter].copy(off = (exitIndex - missingLossCounter - 1).toShort())
         exits.forEach { index -> p[index] = p[index].copy(off = (exitIndex - index - 1).toShort()) }

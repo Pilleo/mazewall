@@ -123,3 +123,17 @@ The authoritative Docker gate is retained in [tier-e-rootful-gate-20260913.md](/
 ## Resolution (local rootful evidence)
 
 This record is resolved for the current branch using the successful rootful Docker verification retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md). The evidence is tied to implementation commit `d0a5f6d3631f84744fef6ec9417565168f005f90` and documentation commit `e238775c`; CI retention is explicitly deferred and does not block this local delivery.
+
+## 2026-09-13 current-tree verification reconciliation
+
+The retained local rootful gate remains the authoritative daemon/native evidence for this
+record and covers attach, capture, dictionary publication, acknowledgement, retry, detach,
+terminal shutdown, and the benchmark gate. The current working tree additionally has fresh
+native CTest evidence: 13/13 tests pass, including lifecycle identity stress, method
+redefinition, seccomp capture-domain reporting, agent smoke, and both benchmark modes.
+
+The host profiler suite and the clean isolated Gradle rerun both completed successfully: `:profiler:test`, `:profiler:integrationTest`, and `:profiler:integrationTestFreshJvm` passed. The first copy omitted buildSrc test sources; the final verification copy restored them and retained the successful raw log.
+The eight matrix rows are represented by the focused tests plus retained rootful artifacts;
+all five integrity dimensions and `runtime_overhead` are recorded independently. Rootless
+Podman remains `INCOMPLETE`, and `policy_eligibility` remains `false`. Resolved records and
+this record's existing status are unchanged.

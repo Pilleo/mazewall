@@ -11,6 +11,9 @@ target_files:
 target_symbols:
   - "Portal"
 open_questions: false
+
+paperclip_issue_id: "d9616795-289f-4fa7-b15b-482ba08d7fbe"
+paperclip_identifier: "MAZ-1470"
 ---
 
 # 🟡 [Severity: MEDIUM]: Add framework-agnostic portal service manifest

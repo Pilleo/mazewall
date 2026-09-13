@@ -134,11 +134,12 @@ public class TierEbpfEngine(
             }
             installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 4)
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
-            installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 1)
+            installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
             Arena.ofConfined().use { arena ->
-            val configuration = arena.allocate(8, 4)
+            val configuration = arena.allocate(16, 4)
             configuration.set(ValueLayout.JAVA_INT, 0, sessionTag)
             configuration.set(ValueLayout.JAVA_INT, 4, targetTgid)
+            configuration.set(ValueLayout.JAVA_INT, 8, 0)
                 updateElem(arena, installed.sessionFd, intSeg(arena, 0), configuration)
             }
             installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd, installed.lossFd, installed.sessionFd), PROG_KPROBE, "tier_e_marker")
@@ -258,6 +259,15 @@ public class TierEbpfEngine(
                 rawIoctl(fd, PERF_EVENT_IOC_ENABLE, 0)
             }
         }
+        setMarkerAttached(installed, true)
+    }
+
+    /** Disables marker admission while keeping the selected sys_enter observer alive. */
+    public fun detachMarker() {
+        val installed = requireInstalled()
+        setMarkerAttached(installed, false)
+        installed.markerPerfFds.toList().forEach(::closeIfOpen)
+        installed.markerPerfFds.clear()
     }
 
     /** Drains committed syscall records without waiting or timestamp correlation. */
@@ -283,6 +293,25 @@ public class TierEbpfEngine(
         synchronized(lifecycleLock) {
         check(lifecycle == Lifecycle.ATTACHED) { "engine is not installed" }
         requireNotNull(resources)
+    }
+
+    private fun setMarkerAttached(
+        installed: Resources,
+        attached: Boolean,
+    ) {
+        Arena.ofConfined().use { arena ->
+            val key = intSeg(arena, 0)
+            val current = arena.allocate(16, 4)
+            val value = arena.allocate(16, 4)
+            val lookup = arena.allocate(32)
+            lookup.set(ValueLayout.JAVA_INT, 0, installed.sessionFd)
+            lookup.set(ValueLayout.ADDRESS, 8, key)
+            lookup.set(ValueLayout.ADDRESS, 16, current)
+            bpfCall(BPF_MAP_LOOKUP_ELEM, lookup, 32)
+            value.copyFrom(current)
+            value.set(ValueLayout.JAVA_INT, 8, if (attached) 1 else 0)
+            updateElem(arena, installed.sessionFd, key, value)
+        }
     }
 
     @Suppress("TooGenericExceptionCaught") // close is best-effort across independently owned native resources

@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "DictionaryBatchSink"
 open_questions: false
+
+paperclip_issue_id: "41197935-ceb5-4402-a85d-2a53a145aa66"
+paperclip_identifier: "MAZ-1417"
 ---
 
 # 🟡 [Severity: HIGH]: Define transactional sink acknowledgement and ambiguous delivery recovery

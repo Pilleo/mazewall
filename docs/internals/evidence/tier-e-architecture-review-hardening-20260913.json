@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-13",
+  "status": "complete",
+  "verification_scope": "current_worktree_plus_retained_rootful_gate",
+  "current_worktree_revision": "04538c0533ca4f668cd69b29a2b55b44f07aaa27+working-tree",
+  "rootful_gate_revision": "50e148591179f94e58012c8a714e05057342068f",
+  "policy_eligibility": false,
+  "commands": {
+    "kotlin_focused": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.SnapshotReplayAdmissionTest --tests io.mazewall.profiler.attribution.AgentDefinitionReplayTest --tests io.mazewall.profiler.attribution.StackDictionaryRetentionBudgetTest --tests io.mazewall.profiler.attribution.StackDictionaryTransactionTest --tests io.mazewall.profiler.attribution.TierEPerformanceGateTest --tests io.mazewall.profiler.attribution.TierEProfilerSessionLifecycleTest --tests io.mazewall.profiler.attribution.AttributionCollectorTest --tests io.mazewall.profiler.attribution.AgentDefinitionFileTest --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest --tests io.mazewall.profiler.tierE.engine.TierEBpfProgramBuilderTest",
+    "native": "cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build && cmake --build /tmp/jseccomp-profiler-native-build -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-build -V",
+    "backlog": "./scripts/adkw check-backlog",
+    "profiler_full": "./gradlew :profiler:test :profiler:integrationTest :profiler:integrationTestFreshJvm --no-daemon --no-configuration-cache --rerun-tasks",
+    "rootful_gate": "retained local Docker gate artifact tier-e-rootful-final-gate-20260913.json"
+  },
+  "artifacts": {
+    "kotlin_log": "docs/internals/evidence/tier-e-kotlin-focused-20260913.log",
+    "profiler_full_log": "docs/internals/evidence/tier-e-profiler-full-20260913.log",
+    "profiler_gradle_log": "docs/internals/evidence/tier-e-profiler-integration-20260913.log",
+    "native_ctest_log": "docs/internals/evidence/tier-e-native-ctest-20260913.log",
+    "performance_baseline": "docs/internals/evidence/tier-e-performance-baseline-20260913.json"
+  },
+  "matrix": [
+    {"id": "callback_inner_syscall", "status": "pass", "test": "TierEDaemonNativeWorkflowIntegrationTest; InvocationReplayMachineTest.callback suppression and validated re-entry", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "capture_failure_no_stale_positive", "status": "pass", "test": "InvocationReplayMachineTest.inner capture failure invalidates exact attribution; retained rootful daemon workflow", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "mid_scope_detach", "status": "pass", "test": "TierEProfilerSessionLifecycleTest.marker detach invalidates attribution without closing session; TierEDaemonNativeWorkflowIntegrationTest", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "seccomp_denied_attempt", "status": "pass", "test": "seccomp_boundary_fixture", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "pid_reuse_exec", "status": "pass", "test": "lifecycle_identity_fixture; lifecycle_identity_stress_fixture; TierEProfilerSessionLifecycleTest.exec and PID reuse", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "method_unload_redefine", "status": "pass", "test": "agent_redefinition_smoke_test; symbolization_generation_test", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "transaction_retry", "status": "pass", "test": "StackDictionaryTransactionTest.rollback preserves byte identity and watermark until commit; retained rootful daemon workflow", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}},
+    {"id": "dictionary_pressure", "status": "pass", "test": "StackDictionaryRetentionBudgetTest; StackDictionaryTransactionTest.abandoned batch never advances watermark", "dimensions": {"capture_domain_validity": "pass", "transport_completeness": "pass", "attribution_coverage": "pass", "dictionary_integrity": "pass", "lifecycle_validity": "pass", "runtime_overhead": "pass"}}
+  ],
+  "constraints": [
+    "Native CTest passed 13/13 on the local supported JDK and kernel; the fresh raw log is retained.",
+    "The retained rootful Docker gate covers daemon/native attach, capture, publication, retry, detach, shutdown, and benchmark evidence.",
+    "The isolated Gradle run completed :profiler:test, :profiler:integrationTest, and :profiler:integrationTestFreshJvm successfully after restoring buildSrc test sources omitted by the first copy; raw output is retained.",
+    "The host profiler suite previously completed with 661 passing tests; the isolated rerun rebuilt and passed the requested profiler and integration targets.",
+    "Rootless Podman remains INCOMPLETE and is not evidence that host BPF policy is safe.",
+    "Current source changes remain uncommitted; retained rootful evidence is linked to its own source revision."
+  ]
+}

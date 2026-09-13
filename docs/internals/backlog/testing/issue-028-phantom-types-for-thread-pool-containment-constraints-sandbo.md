@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: "d4a0a270-2e36-43c1-8129-3f552eff8826"
-paperclip_identifier: "MAZ-1401"
+paperclip_issue_id: "4f8a6ef2-18dd-45e9-9d04-a5d67200749b"
+paperclip_identifier: "MAZ-1430"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`)

@@ -33,19 +33,22 @@ public:
             generation_.load(std::memory_order_acquire) == lease.value;
     }
 
-    void begin_replacement(bool external) noexcept {
+    [[nodiscard]] bool begin_replacement(bool external) noexcept {
+        if (state_.load(std::memory_order_acquire) != State::stable) return false;
         state_.store(external ? State::external_replacement_unproven : State::replacement_in_progress,
             std::memory_order_release);
+        return true;
     }
 
-    void begin_cooperative_replacement() noexcept { begin_replacement(false); }
+    [[nodiscard]] bool begin_cooperative_replacement() noexcept { return begin_replacement(false); }
 
-    void end_cooperative_replacement() noexcept { complete_replacement(); }
+    [[nodiscard]] bool end_cooperative_replacement() noexcept { return complete_replacement(); }
 
-    void complete_replacement() noexcept {
-        if (state_.load(std::memory_order_acquire) != State::replacement_in_progress) return;
+    [[nodiscard]] bool complete_replacement() noexcept {
+        if (state_.load(std::memory_order_acquire) != State::replacement_in_progress) return false;
         generation_.fetch_add(1, std::memory_order_acq_rel);
         state_.store(State::stable, std::memory_order_release);
+        return true;
     }
 
     void resynchronize() noexcept {

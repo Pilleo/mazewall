@@ -68,6 +68,21 @@ class InvocationReplayMachineTest {
     }
 
     @Test
+    fun `multiple syscalls sharing one marker sequence do not create a false gap`() {
+        val task = TaskIdentity(processEpoch = 7, tid = 8123, taskEpoch = 3)
+        val machine = InvocationReplayMachine()
+
+        machine.accept(InvocationEvent.Activate(task, sequence = 1, invocationId = InvocationId(101)))
+        val first = machine.accept(InvocationEvent.Syscall(task, sequence = 1, syscallNumber = 257, args = List(6) { 0 }))
+        val second = machine.accept(InvocationEvent.Syscall(task, sequence = 1, syscallNumber = 0, args = List(6) { 0 }))
+
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (first as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(AttributionStatus.PENDING_DICTIONARY, (second as ReplayResult.Syscall).observation.attributionStatus)
+        assertEquals(InvocationId(101), first.observation.invocationId)
+        assertEquals(InvocationId(101), second.observation.invocationId)
+    }
+
+    @Test
     fun `sequence gap invalidates state and never resurrects an older invocation`() {
         val task = TaskIdentity(processEpoch = 7, tid = 8123, taskEpoch = 3)
         val machine = InvocationReplayMachine()

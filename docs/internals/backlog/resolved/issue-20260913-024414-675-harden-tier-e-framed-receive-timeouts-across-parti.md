@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "TierEClientSession"
 open_questions: false
+
+paperclip_issue_id: "595ac678-aefe-4469-9deb-194587533ac6"
+paperclip_identifier: "MAZ-1423"
 ---
 
 # 🟡 [Severity: MEDIUM]: Harden Tier E framed receive timeouts across partial frames

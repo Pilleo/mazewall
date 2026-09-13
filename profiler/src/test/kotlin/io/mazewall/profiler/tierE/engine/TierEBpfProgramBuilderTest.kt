@@ -28,6 +28,21 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `unique stack mode does not suppress repeated ring observations in the kernel`() {
+        val fullStreamProg = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(emissionMode = TierEEmissionMode.FULL_STREAM),
+        )
+        val uniqueStackProg = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL),
+        )
+
+        assertEquals(
+            fullStreamProg.count { it.code == 0x85 && it.imm == 132 },
+            uniqueStackProg.count { it.code == 0x85 && it.imm == 132 },
+        )
+    }
+
+    @Test
     fun `sys enter program reserves a bounded per-context metric map slot`() {
         val program = TierEBpfProgramBuilder.buildSysEnterProgram()
 

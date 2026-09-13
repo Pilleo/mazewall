@@ -2,9 +2,11 @@
 
 package io.mazewall.profiler.attribution
 
+import io.mazewall.profiler.tierE.TierERetainedStateBudget
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicLong
 
 internal interface TierEEventSource : AutoCloseable {
     fun install(
@@ -18,6 +20,8 @@ internal interface TierEEventSource : AutoCloseable {
         agentLibrary: Path,
         markerOffset: Long,
     )
+
+    fun detachMarker() {}
 
     fun drainEvents(): List<SyscallInvocationEvent>
 
@@ -44,6 +48,8 @@ private class NativeTierEEventSource(
         agentLibrary: Path,
         markerOffset: Long,
     ) = engine.attachMarker(targetPid, agentLibrary, markerOffset)
+
+    override fun detachMarker() = engine.detachMarker()
 
     override fun drainEvents(): List<SyscallInvocationEvent> = engine.drainEvents()
 
@@ -93,14 +99,20 @@ public class TierEProfilerSession internal constructor(
         dictionarySink: DictionaryBatchSink,
     ) : this(NativeTierEEventSource(engine), processEpoch, options, AgentDefinitionFile::read, dictionarySink)
 
-    private val sessionEpoch = SessionEpoch(processEpoch)
+    private val sessionEpoch = SessionEpoch(NEXT_SESSION_EPOCH.incrementAndGet())
+    private val processIncarnation = ProcessIncarnationId(processEpoch)
+    private val retainedBudget = TierERetainedStateBudget(options.maxRetainedBytes)
     private val collector = AttributionCollector(
         options.emissionMode,
         options.maxPendingRecords,
-        expectedProcessIncarnation = ProcessIncarnationId(sessionEpoch.value),
+        expectedProcessIncarnation = processIncarnation,
         maxRetainedBytes = options.maxRetainedBytes,
     )
-    private val dictionaryEncoder = dictionarySink?.let { StackDictionaryStreamEncoder(options.maxPendingRecords) }
+    private val dictionaryEncoder = dictionarySink?.let {
+        StackDictionaryStreamEncoder(options.maxPendingRecords).also { encoder ->
+            encoder.attachRetainedBudget(retainedBudget)
+        }
+    }
     private val dictionaryPublisher = dictionarySink?.let { sink ->
         DictionaryBatchPublisher(requireNotNull(dictionaryEncoder), sink) { batch ->
             batch.definitions.forEach { definition -> retain(collector.accept(definition)) }
@@ -110,8 +122,14 @@ public class TierEProfilerSession internal constructor(
     private var reportedKernelLosses = 0L
     private var reportedMarkerFailures = 0L
     private var state: TierESessionState = TierESessionState.Collecting
+    private var lifecycle: TierESessionLifecycleState = TierESessionLifecycleState.RUNNING
     private var liveDefinitionFile: Path? = null
     private val liveKnownStackIds = mutableSetOf<StackTraceId>()
+    private val liveDefinitionAdmission = SnapshotReplayAdmission()
+
+    init {
+        collector.attachRetainedBudget(retainedBudget)
+    }
 
     /** Enables opt-in publication of definitions while the session is collecting. */
     @Synchronized
@@ -129,8 +147,10 @@ public class TierEProfilerSession internal constructor(
         markerOffset: Long,
     ) {
         requireCollecting()
+        lifecycle = TierESessionLifecycleState.ATTACHING
         source.install(targetPid, sessionTag, options)
         source.attachMarker(targetPid, agentLibrary, markerOffset)
+        lifecycle = TierESessionLifecycleState.RUNNING
     }
 
     /** Non-blocking drain suitable for a dedicated collector thread. */
@@ -159,6 +179,28 @@ public class TierEProfilerSession internal constructor(
         return source.readMarkerTransitionCount()
     }
 
+    /** Detaches marker admission while keeping the syscall observer alive. */
+    @Synchronized
+    public fun detachMarker() {
+        requireCollecting()
+        check(lifecycle == TierESessionLifecycleState.RUNNING) { "attribution lifecycle is not running" }
+        source.detachMarker()
+        collector.invalidateAttribution()
+    }
+
+    /** Reattaches a marker only as an explicit validated attribution re-entry. */
+    @Synchronized
+    public fun reattachMarker(
+        targetPid: Int,
+        agentLibrary: Path,
+        markerOffset: Long,
+    ) {
+        requireCollecting()
+        check(lifecycle == TierESessionLifecycleState.RUNNING) { "attribution lifecycle is not running" }
+        source.attachMarker(targetPid, agentLibrary, markerOffset)
+        collector.validateAttributionReentry()
+    }
+
     @Synchronized
     public fun lastMarkerPidTgid(): Long {
         check(state != TierESessionState.Closed) { "Tier E profiler session is closed" }
@@ -175,20 +217,26 @@ public class TierEProfilerSession internal constructor(
     @Synchronized
     override fun close() {
         if (state == TierESessionState.Closed) return
-        source.close()
-        state = TierESessionState.Closed
+        lifecycle = TierESessionLifecycleState.CLOSING
+        try {
+            source.close()
+            state = TierESessionState.Closed
+        } finally {
+            lifecycle = TierESessionLifecycleState.DEAD
+        }
     }
 
     private fun finishCollecting(definitionFile: Path): TierEProfile {
+        lifecycle = TierESessionLifecycleState.CLOSING
         poll()
-        val definitions = definitionReader(definitionFile)
+        val definitions = readDefinitions(definitionFile)
         if (definitions.agentLosses > 0) collector.recordLoss(definitions.agentLosses)
         collector.recordVirtualPinnedIntervals(definitions.virtualPinnedScopes, definitions.virtualPinnedNanos)
         if (dictionaryPublisher == null) {
             definitions.stacks.forEach { retain(collector.accept(it)) }
         } else {
             definitions.stacks
-                .filter { liveKnownStackIds.add(it.stackTraceId) }
+                .filter(::admitLiveStack)
                 .forEach { requireNotNull(dictionaryEncoder).enqueue(it) }
             while (requireNotNull(dictionaryEncoder).pendingCount > 0) {
                 if (dictionaryPublisher.publishAvailable(options.maxPendingRecords) != DictionaryPublicationStatus.COMMITTED) break
@@ -198,23 +246,46 @@ public class TierEProfilerSession internal constructor(
         }
         definitions.invocations.forEach { retain(collector.accept(it)) }
         retain(collector.finish())
-        val profile = TierEProfile(resolved, collector.integrity)
+        val profile = TierEProfile(
+            resolved,
+            collector.integrity.copy(publicationMetrics = dictionaryPublisher?.metrics ?: SnapshotPublicationMetrics()),
+        )
         state = TierESessionState.Finished(profile)
+        lifecycle = TierESessionLifecycleState.DEAD
         return profile
     }
+
+    private fun readDefinitions(definitionFile: Path): AgentDefinitionFile.Contents =
+        definitionReader(definitionFile).also { definitions ->
+            definitions.publication?.sessionEpoch?.let { publicationSession ->
+                check(publicationSession == sessionEpoch) {
+                    "definition publication belongs to session $publicationSession, expected $sessionEpoch"
+                }
+            }
+        }
 
     private fun publishLiveDefinitions() {
         val definitionFile = liveDefinitionFile ?: return
         val publisher = dictionaryPublisher ?: return
         val encoder = requireNotNull(dictionaryEncoder)
-        val definitions = definitionReader(definitionFile)
+        val definitions = readDefinitions(definitionFile)
         definitions.stacks
-            .filter { liveKnownStackIds.add(it.stackTraceId) }
+            .filter(::admitLiveStack)
             .forEach(encoder::enqueue)
         while (encoder.pendingCount > 0) {
             if (publisher.publishAvailable(options.maxPendingRecords) != DictionaryPublicationStatus.COMMITTED) break
         }
     }
+
+    private fun admitLiveStack(definition: StackDefinition): Boolean =
+        when (liveDefinitionAdmission.admit(definition)) {
+            DefinitionAdmission.NEW -> liveKnownStackIds.add(definition.stackTraceId)
+            DefinitionAdmission.DUPLICATE_IDENTICAL -> false
+            DefinitionAdmission.CONFLICTING -> {
+                collector.recordDictionaryConflict()
+                false
+            }
+        }
 
     private fun retain(batch: List<ResolvedSyscall>) {
         val accepted = (options.maxRetainedRecords - resolved.size).coerceAtLeast(0).coerceAtMost(batch.size)
@@ -244,6 +315,7 @@ public class TierEProfilerSession internal constructor(
 
     private fun requireCollecting() {
         check(state == TierESessionState.Collecting) { "Tier E profiler session is not collecting: $state" }
+        check(lifecycle != TierESessionLifecycleState.DEAD) { "Tier E profiler session is dead" }
     }
 
     private fun SyscallInvocationEvent.toAttribution(): SyscallAttribution {
@@ -260,7 +332,7 @@ public class TierEProfilerSession internal constructor(
         }
         return SyscallAttribution(
             task = TaskIdentity.from(
-                process = ProcessIncarnationId(sessionEpoch.value),
+                process = processIncarnation,
                 tid = tid.toInt(),
                 lifetime = TaskLifetimeId(0),
             ),
@@ -271,6 +343,10 @@ public class TierEProfilerSession internal constructor(
             attributionStatus = status,
             captureFlags = flags,
         )
+    }
+
+    private companion object {
+        private val NEXT_SESSION_EPOCH = AtomicLong()
     }
 }
 

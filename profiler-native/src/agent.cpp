@@ -780,12 +780,12 @@ void JNICALL on_class_file_load(
     // has no post-install completion signal, so it remains unproven and exact
     // captures fail closed until an explicit resynchronization boundary.
     if (class_being_redefined != nullptr && !cooperative_replacement) {
-        symbolization_generation.begin_replacement(true);
+        (void)symbolization_generation.begin_replacement(true);
     }
 }
 
 void JNICALL on_class_prepare(jvmtiEnv*, JNIEnv*, jthread, jclass) noexcept {
-    symbolization_generation.complete_replacement();
+    (void)symbolization_generation.complete_replacement();
 }
 
 bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
@@ -941,12 +941,12 @@ bool parse_options(const char* options) {
 
 extern "C" void mazewall_symbolization_replacement_begin() noexcept {
     cooperative_replacement = true;
-    symbolization_generation.begin_cooperative_replacement();
+    (void)symbolization_generation.begin_cooperative_replacement();
 }
 
 extern "C" void mazewall_symbolization_replacement_end() noexcept {
     if (!cooperative_replacement) return;
-    symbolization_generation.end_cooperative_replacement();
+    (void)symbolization_generation.end_cooperative_replacement();
     cooperative_replacement = false;
 }
 

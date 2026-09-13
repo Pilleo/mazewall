@@ -6,6 +6,7 @@ import java.nio.ByteOrder
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class AgentDefinitionFileTest {
@@ -25,6 +26,24 @@ class AgentDefinitionFileTest {
         assertEquals(0, contents.agentLosses)
         assertEquals(0, contents.stacks.size)
         assertContentEquals(payload, SnapshotEnvelope.decode(envelope).payload)
+    }
+
+    @Test
+    fun `session bound snapshot rejects replay from a different session`() {
+        val payload = versionOneFile()
+        val envelope = SnapshotEnvelope.encode(
+            payload = payload,
+            publicationId = 17,
+            watermark = 23,
+            closed = true,
+            sessionEpoch = SessionEpoch(41),
+        )
+
+        assertEquals(SessionEpoch(41), SnapshotEnvelope.decode(envelope).publication.sessionEpoch)
+        assertEquals(SessionEpoch(41), AgentDefinitionFile.decodeForSession(envelope, SessionEpoch(41)).publication?.sessionEpoch)
+        assertFailsWith<IllegalArgumentException> {
+            AgentDefinitionFile.decodeForSession(envelope, SessionEpoch(42))
+        }
     }
 
     @Test

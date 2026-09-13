@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "CaptureDomainEvent"
 open_questions: false
+
+paperclip_issue_id: "49a45436-dee3-4918-bb1d-7fcb67497d30"
+paperclip_identifier: "MAZ-1422"
 ---
 
 # 🟡 [Severity: MEDIUM]: Qualify out-of-domain syscall attempts by independent evidence source

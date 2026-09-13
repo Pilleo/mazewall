@@ -1,5 +1,6 @@
 package io.mazewall.profiler.attribution
 
+import io.mazewall.profiler.tierE.TierERetainedStateBudget
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -33,6 +34,16 @@ public class StackDictionaryStreamEncoder(
     private var inFlight: EncodedDictionaryBatch? = null
     private var retryBatch: EncodedDictionaryBatch? = null
     private var nextBatchId: Long = 1L
+    private var retainedBudget: TierERetainedStateBudget? = null
+    private val retainedBytes = java.util.IdentityHashMap<StackDefinition, Long>()
+
+    /** Attaches the session-wide retained-state budget before definitions are enqueued. */
+    @Synchronized
+    internal fun attachRetainedBudget(budget: TierERetainedStateBudget) {
+        check(retainedBudget == null) { "retained-state budget is already attached" }
+        check(pending.isEmpty()) { "retained-state budget must be attached before enqueue" }
+        retainedBudget = budget
+    }
 
     @get:Synchronized
     public val pendingCount: Int
@@ -62,19 +73,30 @@ public class StackDictionaryStreamEncoder(
         if (definition.stackTraceId.value <= watermarkedId) {
             return
         }
+        val encodedSize = encodeStackDefinition(definition).size.toLong()
+        if (
+            retainedBudget != null &&
+            !retainedBudget!!.tryReserve(TierERetainedStateBudget.Category.DICTIONARY_STAGING, encodedSize)
+        ) {
+            droppedEntries++
+            return
+        }
         if (pending.size >= maxPendingEntries) {
             val protectedCount = inFlight?.definitions?.size ?: 0
             if (pending.size == protectedCount) {
+                retainedBudget?.release(TierERetainedStateBudget.Category.DICTIONARY_STAGING, encodedSize)
                 droppedEntries++
                 return
             }
             val retained = pending.toMutableList()
-            retained.removeAt(protectedCount)
+            val removed = retained.removeAt(protectedCount)
             pending.clear()
             pending.addAll(retained)
+            releaseRetained(removed)
             droppedEntries++
         }
         pending.addLast(definition)
+        retainedBytes[definition] = encodedSize
     }
 
     /**
@@ -113,6 +135,7 @@ public class StackDictionaryStreamEncoder(
         check(inFlight === batch) { "dictionary batch is not the current in-flight batch" }
         batch.definitions.forEach { expected ->
             check(pending.removeFirst() == expected) { "dictionary queue changed while batch was in flight" }
+            releaseRetained(expected)
         }
         watermarkedId = batch.proposedWatermark
         inFlight = null
@@ -125,6 +148,19 @@ public class StackDictionaryStreamEncoder(
         check(inFlight === batch) { "dictionary batch is not the current in-flight batch" }
         inFlight = null
         retryBatch = batch
+    }
+
+    /** Releases terminally abandoned staging after its evidence has been recorded. */
+    @Synchronized
+    internal fun abandon() {
+        inFlight = null
+        retryBatch = null
+        while (pending.isNotEmpty()) releaseRetained(pending.removeFirst())
+    }
+
+    private fun releaseRetained(definition: StackDefinition) {
+        val bytes = retainedBytes.remove(definition) ?: return
+        retainedBudget?.release(TierERetainedStateBudget.Category.DICTIONARY_STAGING, bytes)
     }
 
     /**

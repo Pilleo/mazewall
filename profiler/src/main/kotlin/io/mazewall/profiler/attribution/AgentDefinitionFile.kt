@@ -27,6 +27,25 @@ public object AgentDefinitionFile {
 
     public fun read(path: Path): Contents = decode(Files.readAllBytes(path))
 
+    public fun readForSession(
+        path: Path,
+        expectedSessionEpoch: SessionEpoch,
+    ): Contents = decodeForSession(Files.readAllBytes(path), expectedSessionEpoch)
+
+    public fun decodeForSession(
+        bytes: ByteArray,
+        expectedSessionEpoch: SessionEpoch,
+    ): Contents {
+        val contents = decode(bytes)
+        val publication = requireNotNull(contents.publication) {
+            "session-bound publication is required for live session admission"
+        }
+        require(publication.sessionEpoch == expectedSessionEpoch) {
+            "snapshot belongs to session ${publication.sessionEpoch}, expected $expectedSessionEpoch"
+        }
+        return contents
+    }
+
     public fun decode(bytes: ByteArray): Contents {
         val envelope = bytes.takeIf(SnapshotEnvelope::isEnvelope)?.let(SnapshotEnvelope::decode)
         val input = ByteBuffer.wrap(envelope?.payload ?: bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -36,7 +55,9 @@ public object AgentDefinitionFile {
         require(version in setOf(VERSION_1, VERSION_2)) { "unsupported agent definition version" }
         require(input.get() == 0.toByte()) { "agent definition reserved byte is non-zero" }
         val stacks = mutableListOf<StackDefinition>()
+        val stacksById = mutableMapOf<StackTraceId, StackDefinition>()
         val invocations = mutableListOf<InvocationDefinition>()
+        val invocationsById = mutableMapOf<InvocationId, InvocationDefinition>()
         val executions = mutableMapOf<ExecutionId, ExecutionContext>()
         var agentLosses = 0L
         var virtualPinnedScopes = 0L
@@ -48,13 +69,28 @@ public object AgentDefinitionFile {
             require(length >= 0 && length <= input.remaining()) { "invalid agent definition record length $length" }
             val payload = input.slice().order(ByteOrder.LITTLE_ENDIAN).apply { limit(length) }
             when (type) {
-                STACK_RECORD -> stacks += decodeStack(payload)
-                INVOCATION_RECORD -> invocations += decodeInvocation(payload, version, executions)
+                STACK_RECORD -> {
+                    val stack = decodeStack(payload)
+                    val previous = stacksById.putIfAbsent(stack.stackTraceId, stack)
+                    when {
+                        previous == null -> stacks += stack
+                        previous != stack -> throw IllegalArgumentException("conflicting stack trace id ${stack.stackTraceId.value}")
+                    }
+                }
+                INVOCATION_RECORD -> {
+                    val invocation = decodeInvocation(payload, version, executions)
+                    val previous = invocationsById.putIfAbsent(invocation.invocationId, invocation)
+                    when {
+                        previous == null -> invocations += invocation
+                        previous != invocation -> throw IllegalArgumentException("conflicting invocation id ${invocation.invocationId.value}")
+                    }
+                }
                 EXECUTION_RECORD -> {
                     require(version >= VERSION_2) { "execution record requires definition version 2" }
                     val execution = decodeExecution(payload)
-                    require(executions.putIfAbsent(execution.executionId, execution) == null) {
-                        "duplicate execution id ${execution.executionId.value}"
+                    val previous = executions.putIfAbsent(execution.executionId, execution)
+                    require(previous == null || previous == execution) {
+                        "conflicting execution id ${execution.executionId.value}"
                     }
                 }
                 STATS_RECORD -> {
@@ -70,8 +106,6 @@ public object AgentDefinitionFile {
             require(!payload.hasRemaining()) { "agent definition record has trailing bytes" }
             input.position(input.position() + length)
         }
-        require(stacks.map { it.stackTraceId }.toSet().size == stacks.size) { "duplicate stack trace id" }
-        require(invocations.map { it.invocationId }.toSet().size == invocations.size) { "duplicate invocation id" }
         return Contents(
             stacks = stacks,
             invocations = invocations,

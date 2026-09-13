@@ -104,10 +104,30 @@ public data class SessionIntegrity(
      * are observed; seccomp-denied and unprobed attempts are outside this corpus.
      */
     val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
+    /** Same-ID definition collisions observed during live replay. */
+    val dictionaryIntegrityFailures: Long = 0,
+    /** Publication cost and retained-buffer accounting; independent of completeness. */
+    val publicationMetrics: SnapshotPublicationMetrics = SnapshotPublicationMetrics(),
 ) {
+    public val evidenceIntegrity: EvidenceIntegrity
+        get() = when {
+            captureDomain == ObservationScope.UNKNOWN -> EvidenceIntegrity.UNVERIFIED
+            guarantee == CaptureGuarantee.INCOMPLETE -> EvidenceIntegrity.INCOMPLETE
+            else -> EvidenceIntegrity.COMPLETE
+        }
+
+    public val performanceGate: PerformanceGateStatus = PerformanceGateStatus.NOT_MEASURED
+
+    public val policyEligibility: Boolean = false
+
     public val guarantee: CaptureGuarantee
         get() = when {
-            observedLosses != 0L || attributionFailures != 0L || outOfDomainAttempts != 0L || lifecycleInvalidations != 0L || !dictionaryTransport.complete -> CaptureGuarantee.INCOMPLETE
+            observedLosses != 0L ||
+                attributionFailures != 0L ||
+                outOfDomainAttempts != 0L ||
+                lifecycleInvalidations != 0L ||
+                dictionaryIntegrityFailures != 0L ||
+                !dictionaryTransport.complete -> CaptureGuarantee.INCOMPLETE
             emissionMode == TierEEmissionMode.FULL_STREAM -> CaptureGuarantee.FULL_STREAM
             else -> CaptureGuarantee.UNIQUE_EDGES
         }
@@ -126,7 +146,7 @@ public data class SessionIntegrity(
             captureDomainValid = captureDomain == ObservationScope.SYS_ENTER_TRACEPOINT && outOfDomainAttempts == 0L,
             transportComplete = dictionaryTransport.complete,
             attributionCoverageValid = observedLosses == 0L && attributionFailures == 0L,
-            dictionaryIntegrityValid = dictionaryTransport.complete,
+            dictionaryIntegrityValid = dictionaryIntegrityFailures == 0L && dictionaryTransport.complete,
             lifecycleValid = lifecycleInvalidations == 0L,
         )
 }
@@ -138,6 +158,18 @@ public data class TierEVerdictDimensions(
     public val dictionaryIntegrityValid: Boolean,
     public val lifecycleValid: Boolean,
 )
+
+public enum class EvidenceIntegrity {
+    COMPLETE,
+    INCOMPLETE,
+    UNVERIFIED,
+}
+
+public enum class PerformanceGateStatus {
+    PASSED,
+    FAILED,
+    NOT_MEASURED,
+}
 
 /**
  * Joins kernel syscall observations with delayed agent definitions without timestamp matching.
@@ -155,14 +187,23 @@ public class AttributionCollector(
     private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
-    private val retainedBudget = TierERetainedStateBudget(maxRetainedBytes)
+    private var retainedBudget = TierERetainedStateBudget(maxRetainedBytes)
     private val tokensByResult = java.util.IdentityHashMap<ResolvedSyscall, EmissionToken>()
     private var nextCandidateId: Long = 1
     private var finished = false
     private var pendingCount: Int = 0
+    private var attributionLifecycleValid = true
 
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
+    }
+
+    /** Shares the session budget without widening the public collector API. */
+    @Synchronized
+    internal fun attachRetainedBudget(budget: TierERetainedStateBudget) {
+        check(pendingCount == 0) { "retained-state budget must be attached before observations" }
+        check(retainedBudget.usedBytes() == 0L) { "retained-state budget is already in use" }
+        retainedBudget = budget
     }
 
     public val integrity: SessionIntegrity
@@ -209,6 +250,16 @@ public class AttributionCollector(
                 ),
             )
         }
+        if (!attributionLifecycleValid) {
+            integrityAccumulator.recordAttributionFailure()
+            return listOf(
+                ResolvedSyscall(
+                    observation.copy(invocationId = null, attributionStatus = AttributionStatus.CAUSAL_UNCERTAIN),
+                    null,
+                    ResolutionStatus.CAUSAL_UNCERTAIN,
+                ),
+            )
+        }
         val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
         if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)) {
             recordLoss()
@@ -239,6 +290,21 @@ public class AttributionCollector(
         }
     }
 
+    /** Invalidates exact attribution until a validated marker re-entry is observed. */
+    public fun invalidateAttribution() {
+        if (attributionLifecycleValid) {
+            integrityAccumulator.recordLifecycleInvalidation()
+            integrityAccumulator.recordAttributionFailure()
+        }
+        attributionLifecycleValid = false
+    }
+
+    /** Reopens exact attribution only after a validated new marker boundary. */
+    public fun validateAttributionReentry() {
+        check(!finished) { "collector is finished" }
+        attributionLifecycleValid = true
+    }
+
     /** Records terminal dictionary transport evidence without repairing incomplete attribution. */
     public fun recordDictionaryTransport(evidence: DictionaryTransportEvidence) {
         integrityAccumulator.recordDictionaryTransport(evidence)
@@ -254,6 +320,11 @@ public class AttributionCollector(
     public fun recordDictionaryDrops(count: Long) {
         require(count > 0) { "dictionary drop count must be positive" }
         integrityAccumulator.recordLoss(count)
+    }
+
+    /** Records a same-ID/different-content definition collision as terminal dictionary evidence. */
+    public fun recordDictionaryConflict() {
+        integrityAccumulator.recordDictionaryIntegrityFailure()
     }
 
     /** Adds terminal agent telemetry; it is diagnostic and never repairs attribution completeness. */
@@ -288,12 +359,17 @@ public class AttributionCollector(
             "emission token is stale, duplicated, or foreign"
         }
         tokensByResult.entries.removeIf { it.value === token }
+        retainedBudget.release(TierERetainedStateBudget.Category.EMISSION_TOKENS, EMISSION_TOKEN_BYTES)
         uniqueEdgeGate.acknowledge(token.edge)
     }
 
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> {
         finished = true
+        retainedBudget.release(
+            TierERetainedStateBudget.Category.EMISSION_TOKENS,
+            tokensByResult.size.toLong() * EMISSION_TOKEN_BYTES,
+        )
         tokensByResult.clear()
         return java.util.List.copyOf(
             dictionaryJoiner
@@ -345,6 +421,10 @@ public class AttributionCollector(
             } else {
                 ResolvedSyscall(observation, stack, status, invocation.executionContext).also { resolved ->
                     if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !finished) {
+                        if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.EMISSION_TOKENS, EMISSION_TOKEN_BYTES)) {
+                            integrityAccumulator.recordAttributionFailure()
+                            return@mapNotNull null
+                        }
                         val candidateId = nextCandidateId++
                         val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
                         val token = EmissionToken(candidateId, edge)
@@ -358,5 +438,6 @@ public class AttributionCollector(
     private companion object {
         const val VIRTUAL_THREAD_CAPTURE_FLAG = 1
         const val PENDING_OBSERVATION_BYTES = 128L
+        const val EMISSION_TOKEN_BYTES = 64L
     }
 }

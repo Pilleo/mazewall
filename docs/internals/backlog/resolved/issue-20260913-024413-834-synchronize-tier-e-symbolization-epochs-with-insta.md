@@ -13,6 +13,9 @@ target_files:
 target_symbols: 
   - "InvocationScope"
 open_questions: false
+
+paperclip_issue_id: "8a9b91af-c239-4c06-b061-e2eecf05d725"
+paperclip_identifier: "MAZ-1419"
 ---
 
 # 🟡 [Severity: HIGH]: Synchronize Tier E symbolization epochs with installed class replacements

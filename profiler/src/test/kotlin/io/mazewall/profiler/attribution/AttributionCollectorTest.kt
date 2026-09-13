@@ -311,6 +311,24 @@ class AttributionCollectorTest {
         assertEquals(false, collector.integrity.verdictDimensions.captureDomainValid)
     }
 
+    @Test
+    fun `detached attribution stays uncertain until explicit reentry`() {
+        val collector = AttributionCollector()
+        val invocation = InvocationId(401)
+        val stack = StackDefinition(StackTraceId(4), listOf(frame()), StackCaptureQuality.COMPLETE)
+        val observation = pendingObservation(invocation)
+        collector.accept(stack)
+        collector.accept(InvocationDefinition(invocation, null, stack.stackTraceId))
+
+        collector.invalidateAttribution()
+        val detached = collector.accept(observation).single()
+        assertEquals(ResolutionStatus.CAUSAL_UNCERTAIN, detached.resolutionStatus)
+        assertEquals(null, detached.observation.invocationId)
+
+        collector.validateAttributionReentry()
+        assertEquals(ResolutionStatus.RESOLVED, collector.accept(observation).single().resolutionStatus)
+    }
+
     private fun causalUncertainObservation(): SyscallAttribution =
         SyscallAttribution(
             task = TaskIdentity(1, 2, 3),

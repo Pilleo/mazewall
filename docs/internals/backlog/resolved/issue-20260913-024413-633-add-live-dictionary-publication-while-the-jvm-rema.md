@@ -12,6 +12,9 @@ target_files:
 target_symbols: 
   - "TierEProfilerSession"
 open_questions: false
+
+paperclip_issue_id: "47bcf3c8-5461-4f9e-8b42-825ec9f0d648"
+paperclip_identifier: "MAZ-1418"
 ---
 
 # 🟡 [Severity: HIGH]: Add live dictionary publication while the JVM remains active

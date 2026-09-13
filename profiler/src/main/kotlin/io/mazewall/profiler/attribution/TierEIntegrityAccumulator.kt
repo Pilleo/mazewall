@@ -8,6 +8,7 @@ internal class TierEIntegrityAccumulator {
     private var virtualPinnedScopes: Long = 0L
     private var virtualPinnedNanos: Long = 0L
     private var lifecycleInvalidations: Long = 0L
+    private var dictionaryIntegrityFailures: Long = 0L
     private var dictionaryTransport = DictionaryTransportEvidence()
 
     fun recordLoss(count: Long) {
@@ -28,6 +29,11 @@ internal class TierEIntegrityAccumulator {
     fun recordLifecycleInvalidation(count: Long = 1L) {
         require(count > 0) { "lifecycle invalidation count must be positive" }
         lifecycleInvalidations = Math.addExact(lifecycleInvalidations, count)
+    }
+
+    fun recordDictionaryIntegrityFailure(count: Long = 1L) {
+        require(count > 0) { "dictionary integrity failure count must be positive" }
+        dictionaryIntegrityFailures = Math.addExact(dictionaryIntegrityFailures, count)
     }
 
     fun recordVirtualPinnedIntervals(
@@ -57,5 +63,6 @@ internal class TierEIntegrityAccumulator {
             virtualPinnedNanos = virtualPinnedNanos,
             captureDomain = captureDomain,
             dictionaryTransport = dictionaryTransport,
+            dictionaryIntegrityFailures = dictionaryIntegrityFailures,
         )
 }

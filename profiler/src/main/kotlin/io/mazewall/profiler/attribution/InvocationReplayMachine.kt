@@ -209,7 +209,7 @@ public class InvocationReplayMachine {
         require(event.sequence > 0) { "event sequence must be positive" }
         evictStaleIncarnation(event.task)
         val previous = states[event.task]
-        val invalidated = previous?.takeIf { event.sequence != it.lastSequence + 1 }?.let {
+        val invalidated = previous?.takeIf { sequenceGap(event, it.lastSequence) }?.let {
             StateInvalidated(event.task, it.lastSequence + 1, event.sequence, StateInvalidationReason.SEQUENCE_GAP)
         }
         val state = if (invalidated == null) {
@@ -321,6 +321,15 @@ public class InvocationReplayMachine {
             invalidated,
         )
     }
+
+    private fun sequenceGap(
+        event: InvocationEvent,
+        lastSequence: Long,
+    ): Boolean =
+        when (event) {
+            is InvocationEvent.Syscall -> event.sequence < lastSequence || event.sequence > lastSequence + 1
+            else -> event.sequence != lastSequence + 1
+        }
 
     private data class TaskState(
         val lastSequence: Long = 0,

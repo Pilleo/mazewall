@@ -25,6 +25,9 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/**"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/**"
 open_questions: false
+
+paperclip_issue_id: "ed5d583c-c5c7-482a-b6cf-9c3c7951633e"
+paperclip_identifier: "MAZ-1416"
 ---
 
 # 🟡 [Severity: MEDIUM]: Close remaining Tier E attribution and lifecycle correctness gaps
@@ -73,7 +76,8 @@ Failure in any one dimension marks the run incomplete; incomplete runs remain fa
 The unique-edge retry boundary is now represented in the profiler collector and design contract:
 resolved records remain retryable until downstream retention is acknowledged, and only acknowledged
 edges are deduplicated. The focused `AttributionCollectorTest` covers failed-first-emission retry and
-post-acknowledgement suppression; commit and durable artifact linkage remain pending until delivery.
+post-acknowledgement suppression; retained focused evidence and the local rootful gate now cover
+the implementation. Future CI retention remains optional follow-up work.
 
 The current refactoring sequence also adds transactional dictionary batches (`33c45876`), separate
 integrity/edge components (`954d2ccc`), immutable replay state with typed lifecycle views
@@ -162,3 +166,17 @@ The authoritative Docker gate is retained in [tier-e-rootful-gate-20260913.md](/
 ## Resolution (local rootful evidence)
 
 This record is resolved for the current branch using the successful rootful Docker verification retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md). The evidence is tied to implementation commit `d0a5f6d3631f84744fef6ec9417565168f005f90` and documentation commit `e238775c`; CI retention is explicitly deferred and does not block this local delivery.
+
+## 2026-09-13 current-tree verification reconciliation
+
+The retained local rootful gate remains the authoritative daemon/native evidence for this
+record and covers attach, capture, dictionary publication, acknowledgement, retry, detach,
+terminal shutdown, and the benchmark gate. The current working tree additionally has fresh
+native CTest evidence: 13/13 tests pass, including lifecycle identity stress, method
+redefinition, seccomp capture-domain reporting, agent smoke, and both benchmark modes.
+
+The host profiler suite and the clean isolated Gradle rerun both completed successfully: `:profiler:test`, `:profiler:integrationTest`, and `:profiler:integrationTestFreshJvm` passed. The first copy omitted buildSrc test sources; the final verification copy restored them and retained the successful raw log.
+The eight matrix rows are represented by the focused tests plus retained rootful artifacts;
+all five integrity dimensions and `runtime_overhead` are recorded independently. Rootless
+Podman remains `INCOMPLETE`, and `policy_eligibility` remains `false`. Resolved records and
+this record's existing status are unchanged.

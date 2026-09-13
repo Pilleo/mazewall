@@ -69,6 +69,22 @@ class TierEProfilerSessionLifecycleTest {
     }
 
     @Test
+    fun `marker detach invalidates attribution without closing session`() {
+        val source = FakeTierEEventSource()
+        val session = TierEProfilerSession(
+            source = source,
+            processEpoch = 1,
+            definitionReader = { emptyDefinitions() },
+        )
+
+        session.detachMarker()
+
+        assertEquals(1, source.detachMarkerCalls)
+        assertEquals(0, source.closeCalls)
+        session.close()
+    }
+
+    @Test
     fun `live dictionary publishes definitions before session finish`() {
         val writes = mutableListOf<ByteArray>()
         val stack = StackDefinition(
@@ -119,6 +135,7 @@ private class FakeTierEEventSource(
     private val events: ArrayDeque<List<SyscallInvocationEvent>> = ArrayDeque(),
 ) : TierEEventSource {
     var closeCalls = 0
+    var detachMarkerCalls = 0
 
     override fun install(
         targetPid: Int,
@@ -131,6 +148,10 @@ private class FakeTierEEventSource(
         agentLibrary: Path,
         markerOffset: Long,
     ) = Unit
+
+    override fun detachMarker() {
+        detachMarkerCalls++
+    }
 
     override fun drainEvents(): List<SyscallInvocationEvent> = events.removeFirstOrNull().orEmpty()
 
