@@ -14,14 +14,17 @@ public data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
+    val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
         require(maxRetainedRecords > 0) { "maxRetainedRecords must be positive" }
+        require(maxRetainedBytes > 0) { "maxRetainedBytes must be positive" }
     }
 
     public companion object {
         public const val DEFAULT_RECORD_LIMIT: Int = 100_000
+        public const val DEFAULT_RETAINED_BYTES: Long = 64L * 1024L * 1024L
     }
 }
 

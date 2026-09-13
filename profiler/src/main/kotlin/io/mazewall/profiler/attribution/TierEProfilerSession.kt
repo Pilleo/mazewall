@@ -96,6 +96,7 @@ public class TierEProfilerSession internal constructor(
         options.emissionMode,
         options.maxPendingRecords,
         expectedProcessIncarnation = ProcessIncarnationId(sessionEpoch.value),
+        maxRetainedBytes = options.maxRetainedBytes,
     )
     private val dictionaryEncoder = dictionarySink?.let { StackDictionaryStreamEncoder(options.maxPendingRecords) }
     private val dictionaryPublisher = dictionarySink?.let { sink ->
