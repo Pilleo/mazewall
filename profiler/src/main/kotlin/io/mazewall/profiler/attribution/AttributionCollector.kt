@@ -85,6 +85,8 @@ public data class ResolvedSyscall(
 public data class SessionIntegrity(
     val observedLosses: Long = 0,
     val attributionFailures: Long = 0,
+    /** Syscall attempts known to fall outside the selected observation path. */
+    val outOfDomainAttempts: Long = 0,
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     /** Native proxy intervals entered by virtual threads; these pin the carrier by JVM contract. */
     val virtualPinnedScopes: Long = 0,
@@ -99,7 +101,7 @@ public data class SessionIntegrity(
 ) {
     public val guarantee: CaptureGuarantee
         get() = when {
-            observedLosses != 0L || attributionFailures != 0L -> CaptureGuarantee.INCOMPLETE
+            observedLosses != 0L || attributionFailures != 0L || outOfDomainAttempts != 0L -> CaptureGuarantee.INCOMPLETE
             emissionMode == TierEEmissionMode.FULL_STREAM -> CaptureGuarantee.FULL_STREAM
             else -> CaptureGuarantee.UNIQUE_EDGES
         }
@@ -188,6 +190,11 @@ public class AttributionCollector(
     public fun recordLoss(count: Long = 1) {
         require(count > 0) { "loss count must be positive" }
         integrityAccumulator.recordLoss(count)
+    }
+
+    /** Records an attempt outside the selected capture path; it is never an exact event. */
+    public fun recordOutOfDomainAttempt(count: Long = 1) {
+        integrityAccumulator.recordOutOfDomainAttempt(count)
     }
 
     /**

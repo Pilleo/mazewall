@@ -4,6 +4,7 @@ package io.mazewall.profiler.attribution
 internal class TierEIntegrityAccumulator {
     private var observedLosses: Long = 0L
     private var attributionFailures: Long = 0L
+    private var outOfDomainAttempts: Long = 0L
     private var virtualPinnedScopes: Long = 0L
     private var virtualPinnedNanos: Long = 0L
 
@@ -15,6 +16,11 @@ internal class TierEIntegrityAccumulator {
     fun recordAttributionFailure(count: Long = 1L) {
         require(count > 0) { "attribution failure count must be positive" }
         attributionFailures = Math.addExact(attributionFailures, count)
+    }
+
+    fun recordOutOfDomainAttempt(count: Long = 1L) {
+        require(count > 0) { "out-of-domain attempt count must be positive" }
+        outOfDomainAttempts = Math.addExact(outOfDomainAttempts, count)
     }
 
     fun recordVirtualPinnedIntervals(
@@ -33,6 +39,7 @@ internal class TierEIntegrityAccumulator {
         SessionIntegrity(
             observedLosses = observedLosses,
             attributionFailures = attributionFailures,
+            outOfDomainAttempts = outOfDomainAttempts,
             emissionMode = emissionMode,
             virtualPinnedScopes = virtualPinnedScopes,
             virtualPinnedNanos = virtualPinnedNanos,

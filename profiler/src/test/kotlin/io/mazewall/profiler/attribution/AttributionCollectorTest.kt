@@ -198,6 +198,17 @@ class AttributionCollectorTest {
     }
 
     @Test
+    fun `out of domain syscall attempt is recorded as a boundary limitation`() {
+        val collector = AttributionCollector()
+
+        collector.recordOutOfDomainAttempt()
+
+        assertEquals(1L, collector.integrity.outOfDomainAttempts)
+        assertEquals(CaptureGuarantee.INCOMPLETE, collector.integrity.guarantee)
+        assertEquals(false, collector.integrity.coverageComplete)
+    }
+
+    @Test
     fun `dictionary drops recorded via recordDictionaryDrops surface as incomplete session`() {
         val collector = AttributionCollector()
         val invocationId = InvocationId(101)
