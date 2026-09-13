@@ -72,3 +72,15 @@ a material part of the cost but not the whole cost.
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the focused profiler/native
 tests and a privileged Tier E differential smoke.
 <!-- id: issue-20260906-221244  file: issue-20260906-221244-reduce-tier-e-per-boundary-jvmti-stack-capture-cost.md -->
+
+## Rootful verification evidence (closure pending CI retention)
+
+Implementation verified against the authoritative rootful Docker gate retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md), source commit `d0a5f6d3631f84744fef6ec9417565168f005f90`, with the follow-up evidence commit `e238775c`.
+
+Verification command:
+
+```text
+DOCKER_HOST=unix:///var/run/docker.sock TIER_E_CONTAINER_ENGINE=docker ./scripts/run_tier_e_rootful_gate.sh
+```
+
+The gate retained native CTest output, profiler unit/integration/fresh-JVM output, benchmark samples, run metadata, and the native-backed Tier E fixture result. Native CTest passed `10/10`; the fresh-JVM Tier E fixture executed with `skipped=0` and `failures=0`; the three-sample full-stream and unique-edge benchmark gates passed their `125%` limits. Machine-readable dimensions are `capture_domain_validity=PASS`, `transport_completeness=PASS`, `attribution_coverage=PASS`, `dictionary_integrity=PASS`, `lifecycle_validity=PASS`, and `runtime_overhead=PASS`. Rootless Podman remains `INCOMPLETE`.
