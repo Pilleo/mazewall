@@ -44,6 +44,37 @@ Missing manifests, generated stubs, containment support, artifacts, digest
 verification, or dispatcher descriptors are startup failures. The host never
 constructs the implementation as a substitute.
 
+## Resource profiles
+
+The generated `policyProfile` is a host-selected key. Pass a matching typed
+profile to `PortalRuntimeConfig`; unknown keys fail while opening the runtime.
+
+```kotlin
+val profiles = mapOf(
+    "baseline" to PortalWorkerProfile(),
+    "restricted-parser" to PortalWorkerProfile(
+        maxHeapBytes = 64L * 1024 * 1024,
+        memoryMaxBytes = 128L * 1024 * 1024,
+        cpuLimit = PortalCpuLimit(Duration.ofMillis(50), Duration.ofMillis(100)),
+    ),
+)
+val runtime = PortalRuntime.open(
+    PortalRuntimeConfig(
+        manifests = manifests,
+        workerArtifacts = artifacts,
+        workerProfiles = profiles,
+        cgroupRoot = delegatedCgroupRoot,
+    ),
+)
+```
+
+Limited profiles require a writable delegated cgroup v2 root containing the
+requested `memory` and `cpu` controllers. Portal attaches the child PID and
+writes limits before worker readiness. It fails closed if that cannot happen.
+The 32 MiB gap between `memoryMaxBytes` and `maxHeapBytes` is mandatory JVM
+non-heap headroom. The fixed Landlock/Seccomp baseline remains identical for
+all profiles; readable-path and syscall differences are not profile features.
+
 ## Lifecycle and failure semantics
 
 An isolation group has a stable identity, policy profile, worker artifact, and
@@ -57,6 +88,10 @@ call.
 `PortalCallException.evidence` distinguishes a call that did not start, one
 that completed with a remote reply, and one with unknown completion. Treat an
 unknown completion as an application-level decision point, not a retry signal.
+
+`PortalRuntime.health()` is local and read-only. It includes each group's
+resolved profile and resource contract alongside worker PIDs, state, and latest
+call timing; it does not perform an RPC, restart a worker, or alter state.
 
 When a worker-side business method throws, the host receives
 `PortalRemoteCallException` with `COMPLETED` evidence and a bounded remote

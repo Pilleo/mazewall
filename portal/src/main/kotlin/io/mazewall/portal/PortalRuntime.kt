@@ -16,6 +16,10 @@ import java.util.concurrent.ConcurrentHashMap
 public class PortalRuntime private constructor(
     private val config: PortalRuntimeConfig,
 ) : AutoCloseable {
+    init {
+        config.validateProfiles()
+    }
+
     private val registry = PortalServiceRegistry(config.manifests)
     private val brokers = ConcurrentHashMap<String, ProcessBroker>()
     private val proxies = ConcurrentHashMap<PortalServiceId, Any>()
@@ -63,8 +67,13 @@ public class PortalRuntime private constructor(
             .toSortedMap()
             .map { (group, members) ->
                 val baseline = statefulGate.health(members.first())
+                val manifest = members.first()
                 val broker = brokers[group]
                 baseline.copy(
+                    policyProfile = manifest.policyProfile,
+                    workerProfile = config.profile(manifest),
+                    cgroupUsage = broker?.cgroupUsage().orEmpty(),
+                    lastWorkerLifecycle = broker?.lastWorkerLifecycle() ?: PortalWorkerLifecycle.notStarted(),
                     workerPids = broker?.workerPids().orEmpty(),
                     lastInvocation = broker?.lastInvocationTiming(),
                 )
@@ -77,7 +86,12 @@ public class PortalRuntime private constructor(
     @Suppress("TooGenericExceptionCaught") // Startup rollback must close a partially started broker for every failure.
     private fun brokerFor(manifest: PortalServiceManifest): ProcessBroker =
         brokers.computeIfAbsent(manifest.isolationGroup) {
-            val broker = ProcessBroker(workerClasspath = config.workerClasspath(manifest))
+            val broker =
+                ProcessBroker(
+                    workerClasspath = config.workerClasspath(manifest),
+                    workerProfile = config.profile(manifest),
+                    cgroupRoot = config.cgroupRoot,
+                )
             try {
                 broker.start()
                 broker
