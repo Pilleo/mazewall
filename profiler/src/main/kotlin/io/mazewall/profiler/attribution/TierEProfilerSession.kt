@@ -154,7 +154,11 @@ public class TierEProfilerSession internal constructor(
 
     private fun retain(batch: List<ResolvedSyscall>) {
         val accepted = (options.maxRetainedRecords - resolved.size).coerceAtLeast(0).coerceAtMost(batch.size)
-        if (accepted > 0) resolved.addAll(batch.subList(0, accepted))
+        if (accepted > 0) {
+            val retained = batch.subList(0, accepted)
+            resolved.addAll(retained)
+            retained.forEach(collector::acknowledgeEmission)
+        }
         val discarded = batch.size - accepted
         if (discarded > 0) collector.recordLoss(discarded.toLong())
     }

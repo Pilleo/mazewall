@@ -222,6 +222,20 @@ public class AttributionCollector(
         virtualPinnedNanos = Math.addExact(virtualPinnedNanos, nanos)
     }
 
+    /**
+     * Confirms that a resolved record reached its downstream sink.
+     *
+     * Unique-edge suppression is committed only after this acknowledgement. If a sink fails,
+     * the caller may submit the same observation again and receive another emission candidate.
+     */
+    public fun acknowledgeEmission(resolved: ResolvedSyscall) {
+        if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL || resolved.resolutionStatus != ResolutionStatus.RESOLVED) return
+        val stack = resolved.stackDefinition ?: return
+        emittedCoverageEdges.add(
+            CoverageEdge(stack.stackTraceId, resolved.observation.syscallNumber, resolved.observation.captureFlags),
+        )
+    }
+
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
     public fun finish(): List<ResolvedSyscall> =
         java.util.List.copyOf(
@@ -268,7 +282,7 @@ public class AttributionCollector(
             if (
                 status == ResolutionStatus.RESOLVED &&
                 emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL &&
-                !emittedCoverageEdges.add(CoverageEdge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags))
+                CoverageEdge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags) in emittedCoverageEdges
             ) {
                 null
             } else {

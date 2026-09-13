@@ -27,7 +27,9 @@ class AttributionCollectorTest {
         collector.accept(InvocationDefinition(invocationId, parentInvocationId = null, stackTraceId = stackTraceId))
         collector.accept(definition)
 
-        assertEquals(1, collector.accept(pendingObservation(invocationId)).size)
+        val first = collector.accept(pendingObservation(invocationId))
+        assertEquals(1, first.size)
+        collector.acknowledgeEmission(first.single())
         assertEquals(emptyList(), collector.accept(pendingObservation(invocationId)))
     }
 
@@ -217,7 +219,7 @@ class AttributionCollectorTest {
     }
 
     @Test
-    fun `unique edge deduplication suppresses duplicate only after successful first emit`() {
+    fun `unique edge deduplication retries after failed emit and suppresses after acknowledgement`() {
         val collector = AttributionCollector(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
         val invocationId = InvocationId(200)
         val stack = StackDefinition(
@@ -235,12 +237,16 @@ class AttributionCollectorTest {
         assertEquals(1, r1.size)
         assertEquals(ResolutionStatus.RESOLVED, r1.single().resolutionStatus)
 
-        // Second identical edge (same stack + syscall number) — must be suppressed
+        // Simulate a failed downstream emit: the same edge remains eligible for retry.
         val obs2 = pendingObservation(invocationId)
-        collector.accept(obs2)
-        // Stack and invocation already registered — resolveReady fires immediately, duplicate suppressed
-        val r2 = collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
-        assertEquals(0, r2.size)
+        val r2 = collector.accept(obs2)
+        assertEquals(1, r2.size)
+
+        // Once the first edge is acknowledged, later duplicates are suppressed.
+        collector.acknowledgeEmission(r2.single())
+        val obs3 = pendingObservation(invocationId)
+        val r3 = collector.accept(obs3)
+        assertEquals(0, r3.size)
 
         // Integrity: no failures from dedup suppression (it is by design, not a failure)
         assertEquals(0L, collector.integrity.attributionFailures)

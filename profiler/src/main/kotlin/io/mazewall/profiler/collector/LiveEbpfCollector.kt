@@ -62,14 +62,36 @@ public class ProfileObservationEbpfCollector(
     }
 
     public companion object {
+        private const val MAX_SYSCALL_NR = 512
+        private val amd64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AMD64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+        private val aarch64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AARCH64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+
         public fun syscallFor(
             arch: Arch,
             nr: Int,
-        ): ObservedSyscall =
-            Syscall.entries
-                .firstOrNull { syscall -> syscall.numberFor(arch).let { mapped -> mapped >= 0 && mapped == nr } }
-                ?.let(ObservedSyscall::Known)
-                ?: ObservedSyscall.Unknown("syscall:$nr")
+        ): ObservedSyscall {
+            val table = when (arch) {
+                Arch.AMD64 -> amd64SyscallTable
+                Arch.AARCH64 -> aarch64SyscallTable
+                else -> null
+            }
+            val syscall = if (table != null && nr in 0..MAX_SYSCALL_NR) table[nr] else null
+            return syscall?.let(ObservedSyscall::Known) ?: ObservedSyscall.Unknown("syscall:$nr")
+        }
 
         public fun syscallName(nr: Int): String =
             when (val syscall = syscallFor(Arch.current(), nr)) {

@@ -163,7 +163,7 @@ internal class ProfilerSession(
             processWide = processWide,
             observations = observations,
             stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
-            droppedEvents = listeners.sumOf { it.eventQueue.droppedCount.toInt() + it.droppedEvents },
+            droppedEvents = listeners.sumOf { it.eventQueue.droppedCount + it.droppedEvents.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
             drainComplete = synchronized(lifecycleLock) {
                 closed.get() &&
                     installations == 0 &&

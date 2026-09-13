@@ -39,11 +39,12 @@ public object StraceLogParser {
         'r' to ASCII_CARRIAGE_RETURN,
     )
 
-    private val fileSystemCharset: Charset = System
-        .getProperty("sun.jnu.encoding")
-        ?.takeIf(String::isNotBlank)
-        ?.let { runCatching { Charset.forName(it) }.getOrNull() }
-        ?: Charset.defaultCharset()
+    private val fileSystemCharset: Charset
+        get() = System
+            .getProperty("sun.jnu.encoding")
+            ?.takeIf(String::isNotBlank)
+            ?.let { runCatching { Charset.forName(it) }.getOrNull() }
+            ?: Charsets.UTF_8
     private val inet = Regex("""sin_port=htons\((\d+)\).*sin_addr=inet_addr\("([^"]+)"\)""")
     private val inetRev = Regex("""sin_addr=inet_addr\("([^"]+)"\).*sin_port=htons\((\d+)\)""")
     private val inet6 = Regex("""sin6_port=htons\((\d+)\).*inet_pton\(AF_INET6,\s*"([^"]+)"""")
@@ -232,10 +233,12 @@ public object StraceLogParser {
         for (index in openParen + 1 until line.length) {
             val char = line[index]
             if (quoted) {
-                when {
-                    escaped -> escaped = false
-                    char == '\\' -> escaped = true
-                    char == '"' -> quoted = false
+                if (escaped) {
+                    escaped = false
+                } else if (char == '\\') {
+                    escaped = true
+                } else if (char == '"') {
+                    quoted = false
                 }
             } else {
                 when (char) {
@@ -256,10 +259,12 @@ public object StraceLogParser {
         var start = 0
         arguments.forEachIndexed { index, char ->
             if (quoted) {
-                when {
-                    escaped -> escaped = false
-                    char == '\\' -> escaped = true
-                    char == '"' -> quoted = false
+                if (escaped) {
+                    escaped = false
+                } else if (char == '\\') {
+                    escaped = true
+                } else if (char == '"') {
+                    quoted = false
                 }
             } else {
                 when (char) {

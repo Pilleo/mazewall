@@ -85,9 +85,14 @@ object Profiler {
     class ProfilerExecutorWrapper internal constructor(
         private val delegate: ExecutorService,
         private val session: ProfilerSession,
-    ) : ExecutorService by delegate {
+    ) : ExecutorService by delegate,
+        AutoCloseable {
         val recentLogs = session.logs
         val recentStackProfiles = session.stackProfiles
+
+        override fun close() {
+            shutdown()
+        }
 
         override fun <T : Any?> submit(task: Callable<T>): Future<T> =
             delegate.submit(
