@@ -125,20 +125,26 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
             a5.asLong,
             a6.asLong,
         )
-        val createsDescriptor = nr == arch.open.toLong() ||
-            nr == arch.openat.toLong() ||
-            nr == arch.openat2.toLong() ||
-            nr == arch.socket.toLong() ||
-            nr == arch.memfdCreate.toLong() ||
-            nr == arch.pidfdOpen.toLong() ||
-            nr == arch.pidfdGetFd.toLong() ||
-            (nr == NativeConstants.LANDLOCK_CREATE_RULESET_NR && a3.asLong == 0L) ||
-            (
-                nr == arch.seccompSyscallNumber.toLong() &&
-                a1.asLong == NativeConstants.SECCOMP_SET_MODE_FILTER.toLong() &&
-                a2.asLong and NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong() != 0L
-            )
+        val createsDescriptor = isDescriptorCreatingSyscall(arch, nr, a1.asLong, a2.asLong, a3.asLong)
         return if (createsDescriptor) result.recordDescriptorAcquisition() else result
+    }
+
+    private fun isDescriptorCreatingSyscall(
+        arch: io.mazewall.core.Arch,
+        nr: Long,
+        a1: Long,
+        a2: Long,
+        a3: Long,
+    ): Boolean {
+        if (arch.isSimpleDescriptorCreatingSyscall(nr)) return true
+
+        val isDup = nr == arch.fcntl.toLong() && (a2 == NativeConstants.F_DUPFD.toLong() || a2 == NativeConstants.F_DUPFD_CLOEXEC.toLong())
+        val isLandlockRuleset = nr == NativeConstants.LANDLOCK_CREATE_RULESET_NR && a3 == 0L
+        val isSeccompListener = nr == arch.seccompSyscallNumber.toLong() &&
+            a1 == NativeConstants.SECCOMP_SET_MODE_FILTER.toLong() &&
+            a2 and NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong() != 0L
+
+        return isDup || isLandlockRuleset || isSeccompListener
     }
 
     override fun syscall4(

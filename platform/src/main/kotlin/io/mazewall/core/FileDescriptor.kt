@@ -78,6 +78,8 @@ internal object FdEpoch {
 
     fun claimOpen(fd: Int): Long = if (fd < 0) 0L else table.computeIfAbsent(fd) { Slot(nextIdentity(), false) }.generation
 
+    fun borrowLiveGeneration(fd: Int): Long = if (fd < 0) 0L else table[fd]?.generation ?: 0L
+
     fun adoptKernelReuse(fd: Int): Long {
         if (fd < 0) return 0L
         val identity = nextIdentity()
@@ -174,7 +176,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
             return value >= 0 &&
                 (owner == null || owner.isAlive) &&
                 !lifecycle.closed &&
-                FdEpoch.isLive(value, lifecycle.generation)
+                (if (lifecycle.generation == 0L) lifecycle.ownership !is FdOwnership.Owned else FdEpoch.isLive(value, lifecycle.generation))
         }
 
     /** Returns true if the file descriptor is closed or invalid. */
@@ -287,7 +289,7 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
         @Deprecated(
             message = "Use role-specific factories for borrowed descriptors, or getFdOrThrow on a native acquisition result for owned descriptors. " +
                 "This method creates non-live tokens for retired FDs and should not be used in production code.",
-            level = DeprecationLevel.WARNING,
+            level = DeprecationLevel.ERROR,
         )
         public fun <R : FileDescriptorRole> unsafe(
             value: Int,
@@ -389,7 +391,14 @@ public class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O :
             ownership: O,
         ): FileDescriptor<R, FdState.Open, O> {
             val closed = value < 0
-            val generation = if (closed) 0L else FdEpoch.claimOpen(value)
+            val generation = if (closed) {
+                0L
+            } else if (ownership is FdOwnership.Owned) {
+                FdEpoch.claimOpen(value)
+            } else {
+                // Unowned descriptor: borrow active generation if already tracked, otherwise 0L (never leak entries into FdEpoch.table)
+                FdEpoch.borrowLiveGeneration(value)
+            }
             return FileDescriptor(
                 FdLifecycle(value, arena, generation, role, ownership, closed = closed),
             )

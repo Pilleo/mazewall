@@ -88,12 +88,17 @@ public object LinuxNative : NativeEngine {
      */
     public sealed interface SyscallResult<out T, out Handled : SyscallHandledState> {
         /** The call succeeded. */
-        public data class Success<out T, out Handled : SyscallHandledState>(val value: T) : SyscallResult<T, Handled> {
+        public data class Success<out T, out Handled : SyscallHandledState>(
+            val value: T,
+            @PublishedApi
             @get:JvmSynthetic
             @set:JvmSynthetic
-            internal var descriptorReceipts: List<io.mazewall.core.NativeDescriptorReceipt> = emptyList()
-            private var nextDescriptorReceipt = 0
-
+            internal var descriptorReceipts: List<io.mazewall.core.NativeDescriptorReceipt> = emptyList(),
+            @PublishedApi
+            @get:JvmSynthetic
+            @set:JvmSynthetic
+            internal var nextDescriptorReceipt: Int = 0,
+        ) : SyscallResult<T, Handled> {
             @JvmSynthetic
             @Synchronized
             internal fun takeDescriptorReceipt(): io.mazewall.core.NativeDescriptorReceipt {
@@ -170,7 +175,11 @@ public inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.Syscal
         callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
     }
     return when (this) {
-        is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success(transform(value))
+        is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success(
+            transform(value),
+            descriptorReceipts = descriptorReceipts,
+            nextDescriptorReceipt = nextDescriptorReceipt,
+        )
         is LinuxNative.SyscallResult.Error -> this
     }
 }

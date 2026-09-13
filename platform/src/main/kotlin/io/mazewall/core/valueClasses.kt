@@ -161,7 +161,9 @@ public value class Deadline(
             nowNanoTime: Long = System.nanoTime(),
         ): Deadline {
             require(ms >= 0L) { "deadline duration must be non-negative" }
-            return Deadline(nowNanoTime + ms * 1_000_000L)
+            val durationNanos = if (ms > Long.MAX_VALUE / 1_000_000L) Long.MAX_VALUE else ms * 1_000_000L
+            val target = if (Long.MAX_VALUE - nowNanoTime < durationNanos) Long.MAX_VALUE else nowNanoTime + durationNanos
+            return Deadline(target)
         }
     }
 }

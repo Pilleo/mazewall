@@ -3,6 +3,8 @@ package io.mazewall.core
 import io.mazewall.LinuxNative
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
+import io.mazewall.getFdOrThrow
+import io.mazewall.map
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
@@ -379,6 +381,7 @@ class FileDescriptorTest {
     }
 
     @Test
+    @Suppress("DEPRECATION_ERROR")
     fun `unsafe on retired fd stays dead`() =
         withArena {
         val intFd = realFd()
@@ -468,5 +471,36 @@ class FileDescriptorTest {
             assertFalse(closed.isValid, roleName)
             assertTrue(closed.isClosedType(), roleName)
             assertEquals(expectedRole, closed.role, roleName)
+        }
+
+    @Test
+    fun `creating and discarding Unowned file descriptors does not leak entries in FdEpoch table`() =
+        withArena {
+            val intFd = realFd()
+            // Clear realFd's active generation from table so intFd is in retired state
+            val liveGen = FdEpoch.borrowLiveGeneration(intFd)
+            if (liveGen != 0L) {
+                FdEpoch.retire(intFd, liveGen)
+            }
+
+            val unowned = FileDescriptor.generic(intFd)
+            assertFalse(FdEpoch.isLive(intFd, unowned.generation))
+            assertTrue(FdEpoch.isRetired(intFd))
+            assertEquals(0L, unowned.generation)
+
+            val roleUnowned = FileDescriptor.unixSocket(intFd)
+            assertEquals(0L, roleUnowned.generation)
+            assertTrue(FdEpoch.isRetired(intFd))
+        }
+
+    @Test
+    fun `map preserves descriptor receipts on success`() =
+        withArena {
+            val res = openPath("/dev/null", OpenFlags.RDONLY)
+            assertTrue(res is LinuxNative.SyscallResult.Success)
+            val mapped = res.map { it }
+            val fd = mapped.getFdOrThrow("mapped getFd")
+            assertTrue(fd.isValid)
+            fd.close()
         }
 }

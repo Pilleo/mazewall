@@ -30,6 +30,6 @@ class RealNativeHelperTest {
         assertEquals(34L, RealNativeHelper.toLong(Tid(34)))
         assertEquals(56L, RealNativeHelper.toLong(Uid(56)))
         assertEquals(1001L, RealNativeHelper.toLong(MemoryAddress(1001L)))
-        assertEquals(99L, RealNativeHelper.toLong(FileDescriptor.unsafe<FileDescriptorRole.Generic>(99)))
+        assertEquals(99L, RealNativeHelper.toLong(FileDescriptor.generic(99)))
     }
 }

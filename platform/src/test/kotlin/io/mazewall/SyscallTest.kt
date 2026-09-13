@@ -184,4 +184,23 @@ class SyscallTest {
             }
         }
     }
+
+    @ParameterizedTest(name = "Checking for duplicate syscall numbers on {0}")
+    @MethodSource("architectures")
+    fun `no syscall number duplicates on any architecture`(arch: Arch) {
+        val numbersToSyscalls = mutableMapOf<Int, MutableList<Syscall>>()
+        for (syscall in Syscall.entries) {
+            val nr = syscall.numberFor(arch)
+            if (nr != -1) {
+                numbersToSyscalls.computeIfAbsent(nr) { mutableListOf() }.add(syscall)
+            }
+        }
+
+        val duplicates = numbersToSyscalls.filter { it.value.size > 1 }
+        assertEquals(
+            emptyMap<Int, List<Syscall>>(),
+            duplicates,
+            "Duplicate syscall numbers found on ${arch.name}: $duplicates",
+        )
+    }
 }

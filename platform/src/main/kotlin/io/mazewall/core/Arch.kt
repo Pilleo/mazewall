@@ -259,7 +259,7 @@ data class Arch(
                 getpeername = 205,
                 sendmsg = 211,
                 sendmmsg = 269,
-                recvmmsg = 268,
+                recvmmsg = 243,
                 openat = 56,
                 openat2 = 437,
                 open = -1,
@@ -298,7 +298,7 @@ data class Arch(
                 umask = 166,
                 chown = -1,
                 lchown = -1,
-                fchown = 54,
+                fchown = 55,
                 fchownat = 54,
                 utime = -1,
                 utimes = -1,
@@ -321,7 +321,7 @@ data class Arch(
                 fchmod = 52,
                 fchmodat = 53,
                 fstatat = 79,
-                statx = 397,
+                statx = 291,
                 read = 63,
                 write = 64,
                 close = 57,
@@ -366,5 +366,21 @@ data class Arch(
                 AUDIT_ARCH_AARCH64 -> AARCH64
                 else -> throw UnsupportedOperationException("Audit architecture not supported: $audit")
             }
+    }
+
+    internal fun isSimpleDescriptorCreatingSyscall(nr: Long): Boolean {
+        val num = nr.toInt()
+        return num == open ||
+            num == openat ||
+            num == openat2 ||
+            num == socket ||
+            num == memfdCreate ||
+            num == pidfdOpen ||
+            num == pidfdGetFd ||
+            num == accept ||
+            num == accept4 ||
+            num == userfaultfd ||
+            num == bpf ||
+            num == ioUringSetup
     }
 }

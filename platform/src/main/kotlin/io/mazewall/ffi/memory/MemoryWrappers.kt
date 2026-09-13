@@ -192,13 +192,45 @@ public value class ErrnoSegment(
     public fun getErrno(): Int = segment.get(JAVA_INT_NATIVE, Layouts.ERRNO_OFFSET)
 
     public companion object {
-        private val threadLocalSegment by threadLocal { Arena.global().allocate(Layouts.ERRNO) }
+        private const val POOL_CAPACITY = 64
+        private val segmentPool = java.util.concurrent.ConcurrentLinkedQueue<MemorySegment>()
+        private val poolSize = java.util.concurrent.atomic
+            .AtomicInteger(0)
+        private val carrierPool = ThreadLocal.withInitial {
+            if (Thread.currentThread().isVirtual) {
+                null
+            } else {
+                Arena.global().allocate(Layouts.ERRNO)
+            }
+        }
 
         /**
-         * Returns a thread-local [ErrnoSegment] used to capture native call errors.
-         * This avoids expensive [Arena.ofConfined] allocations in high-frequency loops.
+         * Returns a thread-safe [ErrnoSegment] used to capture native call errors.
+         * For carrier/platform threads, uses carrier-confined segment allocation without pool overhead.
+         * For virtual threads (Loom), acquires from a bounded pool or allocates a short-lived segment
+         * to avoid unbounded off-heap native memory leakage.
          */
-        public fun getThreadLocal(): ErrnoSegment = ErrnoSegment(threadLocalSegment)
+        public fun getThreadLocal(): ErrnoSegment {
+            if (!Thread.currentThread().isVirtual) {
+                carrierPool.get()?.let { return ErrnoSegment(it) }
+            }
+            val pooled = segmentPool.poll()
+            if (pooled != null) {
+                poolSize.decrementAndGet()
+                return ErrnoSegment(pooled)
+            }
+            return ErrnoSegment(Arena.ofConfined().allocate(Layouts.ERRNO))
+        }
+
+        public fun recycle(segment: ErrnoSegment) {
+            if (!Thread.currentThread().isVirtual && segment.segment == carrierPool.get()) {
+                return
+            }
+            if (poolSize.get() < POOL_CAPACITY) {
+                segmentPool.offer(segment.segment)
+                poolSize.incrementAndGet()
+            }
+        }
 
         context(arena: Arena) public fun allocate(): ErrnoSegment = ErrnoSegment(arena.allocate(Layouts.ERRNO))
     }
