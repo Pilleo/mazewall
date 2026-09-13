@@ -4,7 +4,8 @@ import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalPayload
-import java.nio.charset.StandardCharsets
+import io.mazewall.portal.PortalRemoteFailure
+import io.mazewall.portal.PortalRemoteFailureCodec
 
 internal sealed interface PortalWorkerReceive {
     data class Frame(
@@ -113,8 +114,12 @@ internal class PortalWorkerDriver(
             PortalWorkerEvent.DispatchSucceeded(PortalPayload(checkNotNull(result)))
         } else {
             val rawMessage = actualFailure.message ?: actualFailure::class.java.simpleName
-            val message = rawMessage.take(MAX_ERROR_MESSAGE_LENGTH).toByteArray(StandardCharsets.UTF_8)
-            PortalWorkerEvent.DispatchFailed(PortalPayload(message))
+            val failure =
+                PortalRemoteFailure(
+                    actualFailure::class.java.name,
+                    rawMessage.take(MAX_ERROR_MESSAGE_LENGTH),
+                )
+            PortalWorkerEvent.DispatchFailed(PortalPayload(PortalRemoteFailureCodec.encode(failure)))
         }
         val sending = PortalWorkerMachine.evaluate(state, dispatchEvent) as PortalWorkerTransition.Send
         state = sending.state

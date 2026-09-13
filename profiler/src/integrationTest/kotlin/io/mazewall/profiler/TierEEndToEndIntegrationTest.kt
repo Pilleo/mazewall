@@ -67,14 +67,13 @@ class TierEEndToEndIntegrationTest {
             Files.writeString(gate, "go")
             while (process.isAlive) {
                 if (Files.exists(definitions) && Files.size(definitions) > 0) session.poll()
-                Thread.sleep(5)
+                process.waitFor(5, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
             assertEquals(0, process.waitFor())
 
             repeat(20) {
                 if (Files.exists(definitions) && Files.size(definitions) > 0) session.poll()
                 if (publicationAttempts >= 2) return@repeat
-                Thread.sleep(5)
             }
 
             val profile = session.finish(definitions)

@@ -1,3 +1,5 @@
+@file:Suppress("UnusedVariable")
+
 package io.mazewall.profiler.attribution
 
 /**

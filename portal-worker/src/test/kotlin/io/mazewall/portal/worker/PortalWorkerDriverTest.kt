@@ -16,6 +16,8 @@ import io.mazewall.portal.PortalKind
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalPayload
 import io.mazewall.portal.PortalReadTimeoutException
+import io.mazewall.portal.PortalRemoteFailure
+import io.mazewall.portal.PortalRemoteFailureCodec
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertSame
@@ -171,12 +173,13 @@ class PortalWorkerDriverTest {
         assertEquals(1, transport.sent.size)
         assertEquals(PortalKind.Error, transport.sent.single().kind)
         assertEquals(
-            "guest boom",
-            transport.sent
-            .single()
-            .payload
-            .copyToByteArray()
-            .decodeToString(),
+            PortalRemoteFailure(IllegalArgumentException::class.java.name, "guest boom"),
+            PortalRemoteFailureCodec.decode(
+                transport.sent
+                .single()
+                .payload
+                .copyToByteArray(),
+            ),
         )
     }
 

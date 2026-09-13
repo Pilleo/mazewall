@@ -18,7 +18,7 @@ public object Portal {
                 throw PortalCallException(
                     "Missing generated portal stub $stubName for ${type.name}. " +
                         "Generate it with :portal-codegen. Guest implementations are never loaded in the broker.",
-                    e,
+                    cause = e,
                 )
             }
         require(type.isAssignableFrom(stubClass)) {
@@ -33,7 +33,7 @@ public object Portal {
             } catch (e: NoSuchMethodException) {
                 throw PortalCallException(
                     "Generated stub $stubName must have a constructor(ProcessBroker)",
-                    e,
+                    cause = e,
                 )
             }
 

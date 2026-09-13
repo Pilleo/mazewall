@@ -1,6 +1,7 @@
 package io.mazewall.portal.codegen.testapi
 
 import io.mazewall.portal.Capability
+import io.mazewall.portal.PortalInputSnapshotAdapter
 
 interface SampleGreeter {
     fun greet(name: String): String
@@ -21,6 +22,12 @@ interface SampleFd {
 
 interface BadStream {
     fun read(s: java.io.InputStream): Int
+}
+
+interface SnapshotStream {
+    fun read(
+        @PortalInputSnapshotAdapter(maximumBytes = 64) source: java.io.InputStream,
+    ): Int
 }
 
 interface Overloads {

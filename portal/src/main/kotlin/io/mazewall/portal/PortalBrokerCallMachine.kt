@@ -1,7 +1,5 @@
 package io.mazewall.portal
 
-import java.nio.charset.StandardCharsets
-
 /** Pure lifecycle for one broker-to-worker RPC; socket and FD operations stay in its interpreter. */
 internal sealed interface PortalBrokerCallState {
     data object Idle : PortalBrokerCallState
@@ -33,7 +31,7 @@ internal sealed interface PortalBrokerCallEffect {
     ) : PortalBrokerCallEffect
 
     data class RemoteError(
-        val message: String,
+        val payload: PortalPayload,
     ) : PortalBrokerCallEffect
 
     data class RecycleWorker(
@@ -89,7 +87,7 @@ internal object PortalBrokerCallMachine {
         if (reply.method != request.method) return protocolViolation("method mismatch")
         return when (reply.kind) {
             PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReturnPayload(reply.payload))
-            PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload.copyToByteArray().toString(StandardCharsets.UTF_8)))
+            PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload))
             PortalKind.Request -> protocolViolation("unexpected request frame")
         }
     }

@@ -1,3 +1,5 @@
+@file:Suppress("UseCheckNotNull")
+
 package io.mazewall.profiler.attribution
 
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine

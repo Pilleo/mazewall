@@ -1,5 +1,12 @@
+@file:Suppress("ForbiddenImport") // Resolving inherited Java generic signatures requires reflection metadata.
+
 package io.mazewall.portal.codegen
 
+import java.lang.reflect.GenericArrayType
+import java.lang.reflect.ParameterizedType
+import java.lang.reflect.Type
+import java.lang.reflect.TypeVariable
+import java.lang.reflect.WildcardType
 import kotlin.reflect.KParameter
 import kotlin.reflect.jvm.kotlinFunction
 
@@ -28,17 +35,11 @@ internal data class PortalServiceSchema(
                     .map { (signature, candidates) -> resolveOverride(service, signature, candidates) }
                     .sortedBy(::signature)
 
-            effective.groupBy { it.name }.forEach { (name, overloads) ->
-                require(overloads.size == 1) {
-                    val descriptions = overloads.map(::displaySignature).sorted().joinToString(", ")
-                    "portal codegen forbids overloads of $name on ${service.name}; conflicting effective methods: $descriptions"
-                }
-            }
-
             val seenIds = linkedMapOf<Int, java.lang.reflect.Method>()
             val methods =
                 effective.map { method ->
                     val nullability = kotlinNullability(service, method)
+                    val resolvedTypes = resolveMethodTypes(service, method)
                     val id = PortalStubGenerator.methodId(service, method)
                     val previous = seenIds.putIfAbsent(id, method)
                     require(previous == null) {
@@ -51,12 +52,23 @@ internal data class PortalServiceSchema(
                         parameters =
                             java.util.List.copyOf(
                                 method.parameters.mapIndexed { index, parameter ->
-                                    val kind = BoundaryTypes.kindOf(parameter.type)
+                                    val snapshot = parameter.getAnnotation(io.mazewall.portal.PortalInputSnapshotAdapter::class.java)
+                                    val kind =
+                                        if (parameter.type == java.io.InputStream::class.java && snapshot != null) {
+                                            BoundaryTypes.Kind.InputSnapshot(snapshot.maximumBytes)
+                                        } else {
+                                            require(snapshot == null) {
+                                                "portal input snapshot adapter is supported only on an InputStream parameter: " +
+                                                    "${service.name}.${method.name}.${parameter.name}"
+                                            }
+                                            BoundaryTypes.kindOf(resolvedTypes.parameters[index])
+                                        }
                                     validateCapabilityPlacement(kind, "${service.name}.${method.name}.${parameter.name}", directInbound = true)
-                                    PortalParameterSchema(parameter.name, parameter.type, kind, nullability?.parameters?.get(index) ?: false)
+                                    PortalParameterSchema(parameter.name, resolvedTypes.parameters[index], kind, nullability?.parameters?.get(index) ?: false)
                                 },
                             ),
-                        returnKind = BoundaryTypes.kindOf(method.returnType).also {
+                        returnType = resolvedTypes.returnType,
+                        returnKind = BoundaryTypes.kindOf(resolvedTypes.returnType).also {
                             validateCapabilityPlacement(it, "${service.name}.${method.name}.return", directInbound = false)
                         },
                         returnNullable = nullability?.returnNullable ?: false,
@@ -96,6 +108,11 @@ internal data class PortalServiceSchema(
             }
             if (kind is BoundaryTypes.Kind.RecordT) {
                 kind.components.forEach { validateCapabilityPlacement(it.kind, "$path.${it.name}", directInbound = false) }
+            }
+            if (kind is BoundaryTypes.Kind.ListT) validateCapabilityPlacement(kind.element, "$path[]", directInbound = false)
+            if (kind is BoundaryTypes.Kind.MapT) {
+                validateCapabilityPlacement(kind.key, "$path{key}", directInbound = false)
+                validateCapabilityPlacement(kind.value, "$path{value}", directInbound = false)
             }
         }
 
@@ -146,6 +163,77 @@ internal data class PortalServiceSchema(
         private fun signature(method: java.lang.reflect.Method): String = method.name + "(" + method.parameterTypes.joinToString(",") { it.name } + ")"
 
         private fun displaySignature(method: java.lang.reflect.Method): String = signature(method)
+
+        private fun resolveMethodTypes(
+            service: Class<*>,
+            method: java.lang.reflect.Method,
+        ): ResolvedMethodTypes {
+            val bindings = findBindings(service, method.declaringClass)
+            return ResolvedMethodTypes(
+                method.genericParameterTypes.map { substitute(it, bindings) },
+                substitute(method.genericReturnType, bindings),
+            )
+        }
+
+        private fun findBindings(
+            service: Class<*>,
+            declaringClass: Class<*>,
+        ): Map<TypeVariable<*>, Type> {
+            if (service == declaringClass) return emptyMap()
+            return findBindings(service, declaringClass, emptyMap())
+                ?: throw IllegalArgumentException("portal service ${service.name} cannot resolve inherited contract ${declaringClass.name}")
+        }
+
+        private fun findBindings(
+            current: Class<*>,
+            target: Class<*>,
+            bindings: Map<TypeVariable<*>, Type>,
+        ): Map<TypeVariable<*>, Type>? {
+            current.genericInterfaces.forEach { parent ->
+                val raw = rawClass(parent) ?: return@forEach
+                val parentBindings = bindingsFor(parent, bindings)
+                if (raw == target) return parentBindings
+                findBindings(raw, target, parentBindings)?.let { return it }
+            }
+            return null
+        }
+
+        private fun bindingsFor(
+            type: Type,
+            inherited: Map<TypeVariable<*>, Type>,
+        ): Map<TypeVariable<*>, Type> {
+            val raw = rawClass(type) ?: return emptyMap()
+            val arguments = (type as? ParameterizedType)?.actualTypeArguments ?: return emptyMap()
+            return raw.typeParameters.zip(arguments.map { substitute(it, inherited) }).toMap()
+        }
+
+        private fun rawClass(type: Type): Class<*>? =
+            when (type) {
+                is Class<*> -> type
+                is ParameterizedType -> type.rawType as? Class<*>
+                else -> null
+            }
+
+        private fun substitute(
+            type: Type,
+            bindings: Map<TypeVariable<*>, Type>,
+        ): Type =
+            when (type) {
+                is TypeVariable<*> -> bindings[type]?.let { substitute(it, bindings) } ?: type
+                is ParameterizedType -> ResolvedParameterizedType(
+                    type.rawType,
+                    type.actualTypeArguments.map { substitute(it, bindings) }.toTypedArray(),
+                    type.ownerType?.let { substitute(it, bindings) },
+                )
+                is WildcardType -> {
+                    require(type.lowerBounds.isEmpty() && type.upperBounds.size == 1) {
+                        "portal boundary forbids wildcard type $type"
+                    }
+                    substitute(type.upperBounds.single(), bindings)
+                }
+                is GenericArrayType -> type
+                else -> type
+            }
     }
 }
 
@@ -153,13 +241,33 @@ internal data class PortalMethodSchema(
     val method: java.lang.reflect.Method,
     val id: Int,
     val parameters: List<PortalParameterSchema>,
+    val returnType: Type,
     val returnKind: BoundaryTypes.Kind,
     val returnNullable: Boolean,
 )
 
+private data class ResolvedMethodTypes(
+    val parameters: List<Type>,
+    val returnType: Type,
+)
+
+private class ResolvedParameterizedType(
+    private val raw: Type,
+    private val arguments: Array<Type>,
+    private val owner: Type?,
+) : ParameterizedType {
+    override fun getActualTypeArguments(): Array<Type> = arguments.clone()
+
+    override fun getRawType(): Type = raw
+
+    override fun getOwnerType(): Type? = owner
+
+    override fun getTypeName(): String = "$raw<${arguments.joinToString(",") { it.typeName }}>"
+}
+
 internal data class PortalParameterSchema(
     val sourceName: String,
-    val type: Class<*>,
+    val type: java.lang.reflect.Type,
     val kind: BoundaryTypes.Kind,
     val nullable: Boolean,
 )

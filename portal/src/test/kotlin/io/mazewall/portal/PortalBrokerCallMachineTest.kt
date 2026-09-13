@@ -26,13 +26,22 @@ class PortalBrokerCallMachineTest {
             waiting.state,
             PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Response, 8, PortalMethod.Echo, ByteArray(0), 0)),
         )
+        val errorPayload = PortalRemoteFailureCodec.encode(PortalRemoteFailure("fixture.Invalid", "no"))
         val remoteError = PortalBrokerCallMachine.evaluate(
             waiting.state,
-            PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Error, 7, PortalMethod.Echo, "no".encodeToByteArray(), 0)),
+            PortalBrokerCallEvent.ReplyReceived(
+                PortalFrame(
+                    PortalKind.Error,
+                    7,
+                    PortalMethod.Echo,
+                    errorPayload,
+                    0,
+                ),
+            ),
         )
 
         assertEquals(PortalBrokerCallEffect.ProtocolViolation("request id mismatch"), mismatch.effect)
-        assertEquals(PortalBrokerCallEffect.RemoteError("no"), remoteError.effect)
+        assertEquals(PortalBrokerCallEffect.RemoteError(PortalPayload(errorPayload)), remoteError.effect)
     }
 
     @Test

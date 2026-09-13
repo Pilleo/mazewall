@@ -1,3 +1,5 @@
+@file:Suppress("ForbiddenImport") // Source generation consumes the resolved Java contract model.
+
 package io.mazewall.portal.codegen
 
 import com.squareup.kotlinpoet.ClassName
@@ -6,6 +8,8 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LIST
+import com.squareup.kotlinpoet.MUTABLE_LIST
+import com.squareup.kotlinpoet.MUTABLE_MAP
 import com.squareup.kotlinpoet.NameAllocator
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
@@ -18,6 +22,8 @@ import com.squareup.kotlinpoet.asTypeName
 import io.mazewall.portal.PortalGeneratedNames
 import java.io.File
 import java.lang.reflect.Method
+import java.lang.reflect.ParameterizedType
+import java.lang.reflect.Type
 import java.util.Locale
 
 public object PortalStubGenerator {
@@ -27,12 +33,14 @@ public object PortalStubGenerator {
     private val portalMethod = ClassName("io.mazewall.portal", "PortalMethod")
     private val generatedPortalMethod = portalMethod.nestedClass("Generated")
     private val portalCodec = ClassName("io.mazewall.portal", "PortalCodec")
+    private val declaredExceptionMapper = ClassName("io.mazewall.portal", "PortalDeclaredExceptionMapper")
+    private val remoteCallException = ClassName("io.mazewall.portal", "PortalRemoteCallException")
     private val capability = ClassName("io.mazewall.portal", "Capability")
     private val readFd = capability.nestedClass("ReadFd")
     private val codecReader = portalCodec.nestedClass("Reader")
 
     public fun generate(service: Class<*>): List<FileSpec> {
-        val schema = PortalServiceSchema.compile(service)
+        val schema = ResolvedPortalContract.compile(service)
         return listOf(hostStub(schema), dispatcher(schema))
     }
 
@@ -102,7 +110,7 @@ public object PortalStubGenerator {
             FunSpec
                 .builder(method.method.name)
                 .addModifiers(KModifier.PUBLIC, KModifier.OVERRIDE)
-                .returns(typeName(method.method.returnType).copy(nullable = method.returnNullable))
+                .returns(typeName(method.returnType).copy(nullable = method.returnNullable))
         method.parameters.forEach { parameter ->
             spec.addParameter(parameterNames.getValue(parameter), typeName(parameter.type).copy(nullable = parameter.nullable))
         }
@@ -134,12 +142,31 @@ public object PortalStubGenerator {
                 .apply { granted.forEach { add(", %L", it) } }
                 .add(")")
                 .build()
+        val declaredExceptions = method.method.exceptionTypes
+        val remoteName = names.newName("remote", method)
+        if (declaredExceptions.isNotEmpty()) spec.beginControlFlow("try")
         if (method.returnKind is BoundaryTypes.Kind.UnitT) {
             spec.addStatement("%L", invocation)
         } else {
             spec.addStatement("val %N = %L", resultName, invocation)
             spec.addStatement("val %N = %T(%N)", readerName, codecReader, resultName)
             spec.addStatement("return %L", decode(method.returnKind, CodeBlock.of("%N", readerName), method.returnNullable))
+        }
+        if (declaredExceptions.isNotEmpty()) {
+            val allowed =
+                CodeBlock
+                    .builder()
+                    .add("arrayOf(")
+                    .apply {
+                        declaredExceptions.forEachIndexed { index, type ->
+                        if (index > 0) add(", ")
+                        add("%T::class.java", type.asClassName())
+                    }
+                    }.add(")")
+                    .build()
+            spec.nextControlFlow("catch (%N: %T)", remoteName, remoteCallException)
+            spec.addStatement("%T.rethrow(%N, %L)", declaredExceptionMapper, remoteName, allowed)
+            spec.endControlFlow()
         }
         return spec.build()
     }
@@ -193,7 +220,7 @@ public object PortalStubGenerator {
                 handle.addStatement(
                     "val %N: %T = %N.%N(%L)",
                     returnName,
-                    typeName(method.method.returnType).copy(nullable = method.returnNullable),
+                    typeName(method.returnType).copy(nullable = method.returnNullable),
                     implName,
                     method.method.name,
                     arguments,
@@ -235,7 +262,20 @@ public object PortalStubGenerator {
         id: Int,
     ): PropertySpec = PropertySpec.builder(name, Int::class, KModifier.PRIVATE, KModifier.CONST).initializer("%L", id).build()
 
-    private fun typeName(type: Class<*>): TypeName =
+    private fun typeName(type: Type): TypeName =
+        when (type) {
+            is ParameterizedType -> parameterizedTypeName(type)
+            else -> scalarTypeName(type)
+        }
+
+    private fun parameterizedTypeName(type: ParameterizedType): TypeName =
+        when (type.rawType) {
+            java.util.List::class.java -> MUTABLE_LIST.parameterizedBy(type.actualTypeArguments.map(::typeName))
+            java.util.Map::class.java -> MUTABLE_MAP.parameterizedBy(type.actualTypeArguments.map(::typeName))
+            else -> (typeName(type.rawType) as ClassName).parameterizedBy(type.actualTypeArguments.map(::typeName))
+        }
+
+    private fun scalarTypeName(type: Type): TypeName =
         when (type) {
             Void.TYPE, Void::class.java -> UNIT
             java.lang.Boolean.TYPE, java.lang.Boolean::class.java -> Boolean::class.asTypeName()
@@ -247,6 +287,7 @@ public object PortalStubGenerator {
             java.lang.Double.TYPE, java.lang.Double::class.java -> Double::class.asTypeName()
             Character.TYPE, Character::class.java -> Char::class.asTypeName()
             String::class.java -> String::class.asTypeName()
+            is Class<*> -> type.asTypeName()
             else -> type.asTypeName()
         }
 
@@ -266,17 +307,31 @@ public object PortalStubGenerator {
             )
         }
         return when (kind) {
-            BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%T.encodeBoolean(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.ByteT -> CodeBlock.of("%T.encodeByte(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.ShortT -> CodeBlock.of("%T.encodeShort(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.IntT -> CodeBlock.of("%T.encodeInt(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.LongT -> CodeBlock.of("%T.encodeLong(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.FloatT -> CodeBlock.of("%T.encodeFloat(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.DoubleT -> CodeBlock.of("%T.encodeDouble(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.CharT -> CodeBlock.of("%T.encodeChar(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.StringT -> CodeBlock.of("%T.encodeString(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.BytesT -> CodeBlock.of("%T.encodeBytes(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.BooleanT,
+            BoundaryTypes.Kind.ByteT,
+            BoundaryTypes.Kind.ShortT,
+            BoundaryTypes.Kind.IntT,
+            BoundaryTypes.Kind.LongT,
+            BoundaryTypes.Kind.FloatT,
+            BoundaryTypes.Kind.DoubleT,
+            BoundaryTypes.Kind.CharT,
+            BoundaryTypes.Kind.StringT,
+            BoundaryTypes.Kind.BytesT,
+            -> encodeScalar(kind, expression)
+            BoundaryTypes.Kind.UuidT,
+            BoundaryTypes.Kind.InstantT,
+            BoundaryTypes.Kind.BigDecimalT,
+            -> CodeBlock.of("%T.encodeString(%L.toString())", portalCodec, expression)
+            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%T.encodeString(%L.name)", portalCodec, expression)
             BoundaryTypes.Kind.ReadFd -> error("ReadFd is not encoded in the payload")
+            is BoundaryTypes.Kind.InputSnapshot ->
+                CodeBlock.of(
+                    "%T.capture(%L, %L).use { %T.encodeBytes(it.bytes()) }",
+                    io.mazewall.portal.PortalInputSnapshot::class,
+                    expression,
+                    kind.maximumBytes,
+                    portalCodec,
+                )
             BoundaryTypes.Kind.UnitT -> CodeBlock.of("ByteArray(0)")
             is BoundaryTypes.Kind.RecordT -> {
                 val encoded = kind.components.map { component -> encode(component.kind, propertyRead(expression, component)) }
@@ -287,8 +342,55 @@ public object PortalStubGenerator {
                     .add("))")
                     .build()
             }
+            is BoundaryTypes.Kind.ListT ->
+                CodeBlock.of(
+                    "%T.concat(listOf(%T.encodeInt(%L.size)) + %L.map { item -> %L })",
+                    portalCodec,
+                    portalCodec,
+                    expression,
+                    expression,
+                    encode(kind.element, CodeBlock.of("item")),
+                )
+            is BoundaryTypes.Kind.MapT ->
+                CodeBlock.of(
+                    "%T.concat(listOf(%T.encodeInt(%L.size)) + %L.entries.flatMap { entry -> listOf(%L, %L) })",
+                    portalCodec,
+                    portalCodec,
+                    expression,
+                    expression,
+                    encode(kind.key, CodeBlock.of("entry.key")),
+                    encode(kind.value, CodeBlock.of("entry.value")),
+                )
         }
     }
+
+    private fun encodeScalar(
+        kind: BoundaryTypes.Kind,
+        expression: CodeBlock,
+    ): CodeBlock =
+        when (kind) {
+            BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%T.encodeBoolean(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.ByteT -> CodeBlock.of("%T.encodeByte(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.ShortT -> CodeBlock.of("%T.encodeShort(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.IntT -> CodeBlock.of("%T.encodeInt(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.LongT -> CodeBlock.of("%T.encodeLong(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.FloatT -> CodeBlock.of("%T.encodeFloat(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.DoubleT -> CodeBlock.of("%T.encodeDouble(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.CharT -> CodeBlock.of("%T.encodeChar(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.StringT -> CodeBlock.of("%T.encodeString(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.BytesT -> CodeBlock.of("%T.encodeBytes(%L)", portalCodec, expression)
+            is BoundaryTypes.Kind.EnumT,
+            BoundaryTypes.Kind.ReadFd,
+            is BoundaryTypes.Kind.InputSnapshot,
+            BoundaryTypes.Kind.UuidT,
+            BoundaryTypes.Kind.InstantT,
+            BoundaryTypes.Kind.BigDecimalT,
+            BoundaryTypes.Kind.UnitT,
+            is BoundaryTypes.Kind.RecordT,
+            is BoundaryTypes.Kind.ListT,
+            is BoundaryTypes.Kind.MapT,
+            -> error("non-scalar portal boundary kind: $kind")
+        }
 
     private fun propertyRead(
         receiver: CodeBlock,
@@ -309,6 +411,53 @@ public object PortalStubGenerator {
             return CodeBlock.of("if (!%L.boolean()) null else %L", reader, decode(kind, reader))
         }
         return when (kind) {
+            BoundaryTypes.Kind.BooleanT,
+            BoundaryTypes.Kind.ByteT,
+            BoundaryTypes.Kind.ShortT,
+            BoundaryTypes.Kind.IntT,
+            BoundaryTypes.Kind.LongT,
+            BoundaryTypes.Kind.FloatT,
+            BoundaryTypes.Kind.DoubleT,
+            BoundaryTypes.Kind.CharT,
+            BoundaryTypes.Kind.StringT,
+            BoundaryTypes.Kind.BytesT,
+            -> decodeScalar(kind, reader)
+            BoundaryTypes.Kind.UuidT -> CodeBlock.of("%T.fromString(%L.string())", java.util.UUID::class, reader)
+            BoundaryTypes.Kind.InstantT -> CodeBlock.of("%T.parse(%L.string())", java.time.Instant::class, reader)
+            BoundaryTypes.Kind.BigDecimalT -> CodeBlock.of("%T(%L.string())", java.math.BigDecimal::class, reader)
+            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%T.valueOf(%L.string())", kind.typeName, reader)
+            BoundaryTypes.Kind.ReadFd -> error("ReadFd is taken from granted FDs")
+            is BoundaryTypes.Kind.InputSnapshot -> CodeBlock.of("%L.bytes().inputStream()", reader)
+            BoundaryTypes.Kind.UnitT -> CodeBlock.of("Unit")
+            is BoundaryTypes.Kind.RecordT -> {
+                CodeBlock
+                    .builder()
+                    .add("%T(", kind.typeName)
+                    .add("%L", kind.components.map { component -> decode(component.kind, reader) }.joinToCode())
+                    .add(")")
+                    .build()
+            }
+            is BoundaryTypes.Kind.ListT ->
+                CodeBlock.of(
+                    "buildList { repeat(%L.collectionCount()) { add(%L) } }",
+                    reader,
+                    decode(kind.element, reader),
+                )
+            is BoundaryTypes.Kind.MapT ->
+                CodeBlock.of(
+                    "buildMap { repeat(%L.collectionCount()) { put(%L, %L) } }.toMutableMap()",
+                    reader,
+                    decode(kind.key, reader),
+                    decode(kind.value, reader),
+                )
+        }
+    }
+
+    private fun decodeScalar(
+        kind: BoundaryTypes.Kind,
+        reader: CodeBlock,
+    ): CodeBlock =
+        when (kind) {
             BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%L.boolean()", reader)
             BoundaryTypes.Kind.ByteT -> CodeBlock.of("%L.byte()", reader)
             BoundaryTypes.Kind.ShortT -> CodeBlock.of("%L.short()", reader)
@@ -319,18 +468,18 @@ public object PortalStubGenerator {
             BoundaryTypes.Kind.CharT -> CodeBlock.of("%L.char()", reader)
             BoundaryTypes.Kind.StringT -> CodeBlock.of("%L.string()", reader)
             BoundaryTypes.Kind.BytesT -> CodeBlock.of("%L.bytes()", reader)
-            BoundaryTypes.Kind.ReadFd -> error("ReadFd is taken from granted FDs")
-            BoundaryTypes.Kind.UnitT -> CodeBlock.of("Unit")
-            is BoundaryTypes.Kind.RecordT -> {
-                CodeBlock
-                    .builder()
-                    .add("%T(", kind.typeName)
-                    .add("%L", kind.components.map { component -> decode(component.kind, reader) }.joinToCode())
-                    .add(")")
-                    .build()
-            }
+            is BoundaryTypes.Kind.EnumT,
+            BoundaryTypes.Kind.ReadFd,
+            is BoundaryTypes.Kind.InputSnapshot,
+            BoundaryTypes.Kind.UuidT,
+            BoundaryTypes.Kind.InstantT,
+            BoundaryTypes.Kind.BigDecimalT,
+            BoundaryTypes.Kind.UnitT,
+            is BoundaryTypes.Kind.RecordT,
+            is BoundaryTypes.Kind.ListT,
+            is BoundaryTypes.Kind.MapT,
+            -> error("non-scalar portal boundary kind: $kind")
         }
-    }
 
     private enum class HostLocal { Payload, Result, Reader }
 
