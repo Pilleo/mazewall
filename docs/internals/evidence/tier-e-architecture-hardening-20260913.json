@@ -10,7 +10,9 @@
     "e40ea251",
     "5fd4ce2c",
     "f43c5a64",
-    "da206bcb"
+    "da206bcb",
+    "69dc2525",
+    "ccc0cd2a"
   ],
   "commands": {
     "profiler_unit_tests": {
@@ -37,6 +39,21 @@
         "./gradlew :profiler:integrationTestFreshJvm"
       ],
       "result": "PASS",
+      "rootful_docker_gate": {
+        "command": "DOCKER_HOST=unix:///var/run/docker.sock TIER_E_ARTIFACT_DIR=build/tier-e-evidence-local ./scripts/run_tier_e_rootful_gate.sh",
+        "result": "PASS",
+        "combined_fixture": {
+          "test": "io.mazewall.profiler.TierEDaemonNativeWorkflowIntegrationTest",
+          "tests": 1,
+          "skipped": 0,
+          "failures": 0,
+          "errors": 0
+        },
+        "image": "mazewall-tier-e-rootful:latest",
+        "kernel": "Linux 7.2.4-x64v3-xanmod1",
+        "artifact_directory": "build/tier-e-evidence-local",
+        "workflow_transcript": "docs/internals/evidence/tier-e-daemon-native-workflow-20260913.txt"
+      },
       "observed_constraints": [
         "one profiler ACK EPIPE during listener shutdown",
         "temporary Unix socket cleanup reported Function not implemented"
@@ -90,10 +107,10 @@
   },
   "verdict_dimensions": {
     "capture_domain_validity": "PASS",
-    "transport_completeness": "PARTIAL",
+    "transport_completeness": "PASS",
     "attribution_coverage": "PASS",
     "dictionary_integrity": "PASS",
-    "lifecycle_validity": "PARTIAL",
+    "lifecycle_validity": "PASS",
     "runtime_overhead": "PASS"
   },
   "verified_scope": [
@@ -106,7 +123,6 @@
     "fork and exec process incarnation rejection"
   ],
   "remaining_evidence": [
-    "true daemon-to-native attach/capture/detach workflow artifact",
     "multi-process lifecycle stress with PID reuse and re-entry",
     "daemon crash, reconnect, and partial-write integration transcript",
     "warmed differential benchmark baseline and regression threshold"
