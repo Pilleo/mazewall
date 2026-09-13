@@ -46,13 +46,13 @@ Open and map the remaining Tier E correctness matrix to close this item:
 
 | Test (follow-up issue §Required tests) | Commit linkage | Evidence artifact |
 |---|---|---|
-| 1 supported native → Java callback → unsupported native syscall | pending | pending |
-| 2 active outer scope + inner capture failure | pending | pending |
+| 1 supported native → Java callback → unsupported native syscall | `InvocationReplayMachineTest.supported native callback unsupported syscall is causal uncertain` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
+| 2 active outer scope + inner capture failure | `InvocationReplayMachineTest.inner capture failure in reentrant scope does not leave stale exact attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
 | 3 mid-scope detach while session alive | pending | pending |
 | 4 seccomp-denied attempt + active session | pending | pending |
-| 5 PID reuse/exec transition stress | pending | pending |
+| 5 PID reuse/exec transition stress | `InvocationReplayMachineTest.pid reuse with new process epoch evicts stale state and resets attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
 | 6 method unload/redefine races | pending | pending |
-| 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (working-tree evidence; commit linkage pending) |
+| 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `33c45876`) |
 | 8 dictionary pressure with long-running workload | pending | pending |
 
 The capture-domain contract is also implemented in the collector: `recordOutOfDomainAttempt`

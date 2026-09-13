@@ -229,6 +229,13 @@ holds delayed observations by explicit invocation ID, an integrity accumulator o
 completeness dimensions, and a unique-edge gate owns acknowledgement-based suppression. None of
 these components performs timestamp matching or restores state from an older invocation.
 
+Dictionary transport has an independent transactional lifecycle: `PREPARED` batches remain owned
+by the pending queue, `COMMITTED` batches are removed and advance the watermark, and
+`ROLLED_BACK` batches remain byte-identical and retryable. Only one batch may be in flight; an
+unresolved in-flight batch at session termination is incomplete evidence, never an implicit commit.
+The legacy `drainEncoded()` adapter commits immediately for compatibility, while new sinks must
+use prepare/commit/rollback to make write failure observable.
+
 Capture-domain limitations are recorded separately from observed events. A denied or otherwise
 out-of-domain syscall attempt increments `outOfDomainAttempts` and makes the session incomplete;
 it is never converted into a fabricated exact `sys_enter` observation.

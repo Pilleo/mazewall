@@ -77,6 +77,12 @@ resolved records remain retryable until downstream retention is acknowledged, an
 edges are deduplicated. The focused `AttributionCollectorTest` covers failed-first-emission retry and
 post-acknowledgement suppression; commit and durable artifact linkage remain pending until delivery.
 
+The current refactoring sequence also adds transactional dictionary batches (`33c45876`), separate
+integrity/edge components (`954d2ccc`), immutable replay state with typed lifecycle views
+(`57c42afa`), capture-domain limitation evidence (`3b66e900`), and an isolated dictionary joiner
+(`6a978f4b`). The remaining matrix rows still require their dedicated runtime fixtures and durable
+evidence artifacts before this umbrella issue can close.
+
 ### Pass/Fail matrix (to be populated by implementation PR(s))
 
 | Test | Pass criteria | Failure signature | Required evidence |
