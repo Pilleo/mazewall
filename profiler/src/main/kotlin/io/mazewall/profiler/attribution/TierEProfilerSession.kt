@@ -107,6 +107,16 @@ public class TierEProfilerSession internal constructor(
     private var reportedKernelLosses = 0L
     private var reportedMarkerFailures = 0L
     private var state: TierESessionState = TierESessionState.Collecting
+    private var liveDefinitionFile: Path? = null
+    private val liveKnownStackIds = mutableSetOf<StackTraceId>()
+
+    /** Enables opt-in publication of definitions while the session is collecting. */
+    @Synchronized
+    public fun enableLiveDictionary(definitionFile: Path) {
+        requireCollecting()
+        check(dictionaryPublisher != null) { "live dictionary publication requires a dictionary sink" }
+        liveDefinitionFile = definitionFile
+    }
 
     @Synchronized
     public fun installAndAttach(
@@ -127,6 +137,7 @@ public class TierEProfilerSession internal constructor(
         val batch = source.drainEvents().flatMap { collector.accept(it.toAttribution()) }
         retain(batch)
         refreshLossCounters()
+        publishLiveDefinitions()
         return java.util.List.copyOf(batch)
     }
 
@@ -173,7 +184,9 @@ public class TierEProfilerSession internal constructor(
         if (dictionaryPublisher == null) {
             definitions.stacks.forEach { retain(collector.accept(it)) }
         } else {
-            definitions.stacks.forEach { requireNotNull(dictionaryEncoder).enqueue(it) }
+            definitions.stacks
+                .filter { liveKnownStackIds.add(it.stackTraceId) }
+                .forEach { requireNotNull(dictionaryEncoder).enqueue(it) }
             while (requireNotNull(dictionaryEncoder).pendingCount > 0) {
                 if (dictionaryPublisher.publishAvailable(options.maxPendingRecords) != DictionaryPublicationStatus.COMMITTED) break
             }
@@ -185,6 +198,19 @@ public class TierEProfilerSession internal constructor(
         val profile = TierEProfile(resolved, collector.integrity)
         state = TierESessionState.Finished(profile)
         return profile
+    }
+
+    private fun publishLiveDefinitions() {
+        val definitionFile = liveDefinitionFile ?: return
+        val publisher = dictionaryPublisher ?: return
+        val encoder = requireNotNull(dictionaryEncoder)
+        val definitions = definitionReader(definitionFile)
+        definitions.stacks
+            .filter { liveKnownStackIds.add(it.stackTraceId) }
+            .forEach(encoder::enqueue)
+        while (encoder.pendingCount > 0) {
+            if (publisher.publishAvailable(options.maxPendingRecords) != DictionaryPublicationStatus.COMMITTED) break
+        }
     }
 
     private fun retain(batch: List<ResolvedSyscall>) {

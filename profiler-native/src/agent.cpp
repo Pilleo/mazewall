@@ -43,6 +43,7 @@ std::atomic<std::uint64_t> benchmark_metadata_cache_hits{0};
 std::atomic<std::uint64_t> benchmark_metadata_cache_misses{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
+std::atomic<bool> live_definitions{false};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
 std::atomic<std::uint64_t> redefinition_epoch{1};
@@ -50,6 +51,8 @@ std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
+
+bool write_definitions() noexcept;
 
 
 struct LogicalFrame final {
@@ -284,8 +287,11 @@ std::uint32_t intern_stack(std::vector<LogicalFrame> frames, bool truncated, std
 }
 
 void record_invocation(InvocationDefinition definition) {
-    std::lock_guard lock(definitions_mutex);
-    invocation_definitions.push_back(definition);
+    {
+        std::lock_guard lock(definitions_mutex);
+        invocation_definitions.push_back(definition);
+    }
+    if (live_definitions.load(std::memory_order_acquire)) write_definitions();
 }
 
 ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
@@ -803,7 +809,8 @@ void append_record(std::ofstream& stream, std::uint8_t type, const std::vector<s
 bool write_definitions() noexcept {
     if (definitions_path.empty()) return true;
     try {
-        std::ofstream stream(definitions_path, std::ios::binary | std::ios::trunc);
+        const auto temporary_path = definitions_path + ".tmp";
+        std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
         if (!stream) return false;
         stream.write("MZSD", 4);
         stream.put(2);
@@ -846,7 +853,9 @@ bool write_definitions() noexcept {
         append_le<std::uint64_t>(stats, virtual_pinned_nanos.load(std::memory_order_relaxed));
         append_record(stream, 3, stats);
         stream.flush();
-        return stream.good();
+        if (!stream.good()) return false;
+        stream.close();
+        return std::rename(temporary_path.c_str(), definitions_path.c_str()) == 0;
     } catch (...) {
         return false;
     }
@@ -876,6 +885,8 @@ bool parse_options(const char* options) {
             emission_mode = EmissionMode::unique_stack_syscall;
         } else if (option == "benchmark-phases") {
             benchmark_phases = true;
+        } else if (option == "live-definitions") {
+            live_definitions.store(true, std::memory_order_release);
         } else {
             return false;
         }

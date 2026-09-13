@@ -107,6 +107,36 @@ class DictionaryBatchPublisherTest {
         assertEquals(false, publisher.transportEvidence.complete)
     }
 
+    @Test
+    fun `retry preserves the same opaque batch identity`() {
+        val encoder = StackDictionaryStreamEncoder()
+        encoder.enqueue(definition(61L))
+        val first = requireNotNull(encoder.prepareBatch())
+        encoder.rollback(first)
+
+        val retry = requireNotNull(encoder.prepareBatch())
+
+        assertEquals(first.batchId, retry.batchId)
+        assertContentEquals(first.bytes, retry.bytes)
+        encoder.commit(retry)
+    }
+
+    @Test
+    fun `ambiguous delivery is terminal and cannot be retried`() {
+        val encoder = StackDictionaryStreamEncoder()
+        encoder.enqueue(definition(71L))
+        val publisher = DictionaryBatchPublisher(
+            encoder,
+            DictionaryBatchSink { DictionarySinkResult.AmbiguousDelivery("acknowledgement lost") },
+        )
+
+        assertEquals(DictionaryPublicationStatus.TERMINAL_FAILURE, publisher.publishAvailable(1))
+        assertEquals(1, encoder.pendingCount)
+        assertEquals(0L, encoder.watermark)
+        assertEquals(1L, publisher.transportEvidence.ambiguousFailures)
+        assertEquals(false, publisher.transportEvidence.complete)
+    }
+
     private fun definition(id: Long): StackDefinition =
         StackDefinition(
         StackTraceId(id),

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets
 public class EncodedDictionaryBatch internal constructor(
     bytes: ByteArray,
     definitions: List<StackDefinition>,
+    public val batchId: Long,
     public val proposedWatermark: Long,
 ) {
     private val encodedBytes: ByteArray = bytes.copyOf()
@@ -30,6 +31,8 @@ public class StackDictionaryStreamEncoder(
     private var watermarkedId: Long = 0L
     private var droppedEntries: Long = 0L
     private var inFlight: EncodedDictionaryBatch? = null
+    private var retryBatch: EncodedDictionaryBatch? = null
+    private var nextBatchId: Long = 1L
 
     @get:Synchronized
     public val pendingCount: Int
@@ -84,6 +87,11 @@ public class StackDictionaryStreamEncoder(
     public fun prepareBatch(maxCount: Int = Int.MAX_VALUE): EncodedDictionaryBatch? {
         if (maxCount <= 0 || pending.isEmpty()) return null
         check(inFlight == null) { "a dictionary batch is already in flight" }
+        retryBatch?.let { batch ->
+            check(batch.definitions.size <= maxCount) { "retry batch exceeds requested batch size" }
+            inFlight = batch
+            return batch
+        }
         val definitions = pending.take(maxCount)
         val batch = EncodedDictionaryBatch(
             bytes = definitions
@@ -91,6 +99,7 @@ public class StackDictionaryStreamEncoder(
                 out.write(encodeStackDefinition(definition))
                 out
             }.toByteArray(),
+            batchId = nextBatchId++,
             definitions = definitions,
             proposedWatermark = maxOf(watermarkedId, definitions.maxOf { it.stackTraceId.value }),
         )
@@ -107,6 +116,7 @@ public class StackDictionaryStreamEncoder(
         }
         watermarkedId = batch.proposedWatermark
         inFlight = null
+        retryBatch = null
     }
 
     /** Rolls back a failed delivery while preserving the batch and watermark for retry. */
@@ -114,6 +124,7 @@ public class StackDictionaryStreamEncoder(
     public fun rollback(batch: EncodedDictionaryBatch) {
         check(inFlight === batch) { "dictionary batch is not the current in-flight batch" }
         inFlight = null
+        retryBatch = batch
     }
 
     /**

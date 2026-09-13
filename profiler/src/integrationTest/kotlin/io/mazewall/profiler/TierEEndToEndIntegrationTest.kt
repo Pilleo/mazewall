@@ -33,7 +33,7 @@ class TierEEndToEndIntegrationTest {
         val sessionTag = 0x4d5a
         val process = ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "-agentpath:$agent=definitions=$definitions,session=${sessionTag.toString(16)},mode=full-stream",
+            "-agentpath:$agent=definitions=$definitions,live-definitions,session=${sessionTag.toString(16)},mode=full-stream",
             "-cp",
             workloadClasspath,
             "AgentWorkload",
@@ -42,7 +42,11 @@ class TierEEndToEndIntegrationTest {
             "10",
         ).inheritIO().start()
 
-        val sink = DictionaryBatchSink { DictionarySinkResult.Committed }
+        val publishedBatches = mutableListOf<ByteArray>()
+        val sink = DictionaryBatchSink {
+            publishedBatches += it.bytes
+            DictionarySinkResult.Committed
+        }
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
             processEpoch(process.pid()),
@@ -50,6 +54,7 @@ class TierEEndToEndIntegrationTest {
             sink,
         )
         try {
+            session.enableLiveDictionary(definitions)
             session.installAndAttach(
                 process.pid().toInt(),
                 sessionTag,
@@ -58,7 +63,7 @@ class TierEEndToEndIntegrationTest {
             )
             Files.writeString(gate, "go")
             while (process.isAlive) {
-                session.poll()
+                if (Files.exists(definitions) && Files.size(definitions) > 0) session.poll()
                 Thread.sleep(5)
             }
             assertEquals(0, process.waitFor())
@@ -66,6 +71,7 @@ class TierEEndToEndIntegrationTest {
             val profile = session.finish(definitions)
             assertTrue(profile.syscalls.isNotEmpty())
             assertTrue(Files.size(definitions) > 0, "captured definitions must be published")
+            assertTrue(publishedBatches.isNotEmpty(), "definitions must be published before process exit")
             assertEquals(0L, profile.integrity.observedLosses)
 
             assertTrue(session.markerTransitionCount() > 0)

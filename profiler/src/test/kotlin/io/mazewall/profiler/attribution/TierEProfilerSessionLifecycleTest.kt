@@ -68,6 +68,38 @@ class TierEProfilerSessionLifecycleTest {
         assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored")) }
     }
 
+    @Test
+    fun `live dictionary publishes definitions before session finish`() {
+        val writes = mutableListOf<ByteArray>()
+        val stack = StackDefinition(
+            StackTraceId(7),
+            listOf(ManagedFrame("app", "Foo", "work", "()V", 1, ManagedFrameKind.JAVA)),
+            StackCaptureQuality.COMPLETE,
+        )
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(),
+            processEpoch = 1,
+            definitionReader = {
+                AgentDefinitionFile.Contents(
+                    stacks = listOf(stack),
+                    invocations = emptyList(),
+                    agentLosses = 0,
+                )
+            },
+            dictionarySink = DictionaryBatchSink { batch ->
+                writes += batch.bytes
+                DictionarySinkResult.Committed
+            },
+        )
+
+        session.enableLiveDictionary(Path.of("live-definitions"))
+        session.poll()
+
+        assertEquals(1, writes.size)
+        assertTrue(writes.single().isNotEmpty())
+        session.close()
+    }
+
     private fun emptyDefinitions() = AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
 
     private fun event(sequence: ULong) =

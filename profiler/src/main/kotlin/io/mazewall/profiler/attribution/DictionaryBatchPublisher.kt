@@ -33,6 +33,12 @@ public class DictionaryBatchPublisher(
                 evidence = evidence.copy(retryableFailures = evidence.retryableFailures + 1)
                 DictionaryPublicationStatus.RETRYABLE_FAILURE
             }
+            is DictionarySinkResult.AmbiguousDelivery -> {
+                encoder.rollback(batch)
+                evidence = evidence.copy(ambiguousFailures = evidence.ambiguousFailures + 1)
+                terminated = true
+                DictionaryPublicationStatus.TERMINAL_FAILURE
+            }
             is DictionarySinkResult.TerminalFailure -> {
                 encoder.rollback(batch)
                 evidence = evidence.copy(terminalFailures = evidence.terminalFailures + 1)
