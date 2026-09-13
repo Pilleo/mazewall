@@ -4,7 +4,9 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class StackDictionaryStreamEncoderTest {
     @Test
@@ -98,5 +100,38 @@ class StackDictionaryStreamEncoderTest {
         val defOlder = StackDefinition(StackTraceId(4L), listOf(frame), StackCaptureQuality.COMPLETE)
         encoder.enqueue(defOlder)
         assertEquals(0, encoder.pendingCount)
+    }
+
+    @Test
+    fun `prepared batch can be rolled back and retried byte-for-byte before commit`() {
+        val encoder = StackDictionaryStreamEncoder(maxPendingEntries = 4)
+        val frame = ManagedFrame("app", "Foo", "bar", "()V", 1L, ManagedFrameKind.JAVA)
+        val first = StackDefinition(StackTraceId(10L), listOf(frame), StackCaptureQuality.COMPLETE)
+        val second = StackDefinition(StackTraceId(11L), listOf(frame), StackCaptureQuality.COMPLETE)
+        encoder.enqueue(first)
+        encoder.enqueue(second)
+
+        val prepared = requireNotNull(encoder.prepareBatch(maxCount = 2))
+        assertEquals(2, encoder.pendingCount)
+        assertEquals(0L, encoder.watermark)
+        encoder.rollback(prepared)
+
+        val retry = requireNotNull(encoder.prepareBatch(maxCount = 2))
+        assertContentEquals(prepared.bytes, retry.bytes)
+        assertEquals(prepared.proposedWatermark, retry.proposedWatermark)
+        encoder.commit(retry)
+        assertEquals(0, encoder.pendingCount)
+        assertEquals(11L, encoder.watermark)
+    }
+
+    @Test
+    fun `encoder permits only one outstanding prepared batch`() {
+        val encoder = StackDictionaryStreamEncoder()
+        val frame = ManagedFrame("app", "Foo", "bar", "()V", 1L, ManagedFrameKind.JAVA)
+        encoder.enqueue(StackDefinition(StackTraceId(10L), listOf(frame), StackCaptureQuality.COMPLETE))
+
+        val batch = requireNotNull(encoder.prepareBatch())
+        assertFailsWith<IllegalStateException> { encoder.prepareBatch() }
+        encoder.rollback(batch)
     }
 }

@@ -5,6 +5,18 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 
+/** A prepared dictionary payload whose queue ownership is settled by commit or rollback. */
+public class EncodedDictionaryBatch internal constructor(
+    bytes: ByteArray,
+    definitions: List<StackDefinition>,
+    public val proposedWatermark: Long,
+) {
+    private val encodedBytes: ByteArray = bytes.copyOf()
+    public val bytes: ByteArray
+        get() = encodedBytes.copyOf()
+    public val definitions: List<StackDefinition> = java.util.List.copyOf(definitions)
+}
+
 /**
  * Bounded streaming encoder for [StackDefinition] records.
  *
@@ -17,15 +29,24 @@ public class StackDictionaryStreamEncoder(
     private val pending = ArrayDeque<StackDefinition>()
     private var watermarkedId: Long = 0L
     private var droppedEntries: Long = 0L
+    private var inFlight: EncodedDictionaryBatch? = null
 
+    @get:Synchronized
     public val pendingCount: Int
         get() = pending.size
 
+    @get:Synchronized
     public val watermark: Long
         get() = watermarkedId
 
+    @get:Synchronized
     public val droppedCount: Long
         get() = droppedEntries
+
+    /** True when a prepared batch must be committed or rolled back before another is prepared. */
+    @get:Synchronized
+    public val hasInFlightBatch: Boolean
+        get() = inFlight != null
 
     /**
      * Enqueues a stack definition for streaming.
@@ -33,35 +54,77 @@ public class StackDictionaryStreamEncoder(
      * If the pending queue reaches [maxPendingEntries], the oldest un-emitted definition
      * is dropped to keep memory strictly bounded, and [droppedCount] is incremented.
      */
+    @Synchronized
     public fun enqueue(definition: StackDefinition) {
         if (definition.stackTraceId.value <= watermarkedId) {
             return
         }
         if (pending.size >= maxPendingEntries) {
-            pending.removeFirst()
+            val protectedCount = inFlight?.definitions?.size ?: 0
+            if (pending.size == protectedCount) {
+                droppedEntries++
+                return
+            }
+            val retained = pending.toMutableList()
+            retained.removeAt(protectedCount)
+            pending.clear()
+            pending.addAll(retained)
             droppedEntries++
         }
         pending.addLast(definition)
     }
 
     /**
+     * Prepares an ordered batch without removing it from the pending queue.
+     *
+     * The caller must call [commit] after successful sink delivery or [rollback] after failure.
+     * Only one batch may be outstanding at a time.
+     */
+    @Synchronized
+    public fun prepareBatch(maxCount: Int = Int.MAX_VALUE): EncodedDictionaryBatch? {
+        if (maxCount <= 0 || pending.isEmpty()) return null
+        check(inFlight == null) { "a dictionary batch is already in flight" }
+        val definitions = pending.take(maxCount)
+        val batch = EncodedDictionaryBatch(
+            bytes = definitions
+                .fold(ByteArrayOutputStream()) { out, definition ->
+                out.write(encodeStackDefinition(definition))
+                out
+            }.toByteArray(),
+            definitions = definitions,
+            proposedWatermark = maxOf(watermarkedId, definitions.maxOf { it.stackTraceId.value }),
+        )
+        inFlight = batch
+        return batch
+    }
+
+    /** Commits a successfully delivered batch and advances the watermark. */
+    @Synchronized
+    public fun commit(batch: EncodedDictionaryBatch) {
+        check(inFlight === batch) { "dictionary batch is not the current in-flight batch" }
+        batch.definitions.forEach { expected ->
+            check(pending.removeFirst() == expected) { "dictionary queue changed while batch was in flight" }
+        }
+        watermarkedId = batch.proposedWatermark
+        inFlight = null
+    }
+
+    /** Rolls back a failed delivery while preserving the batch and watermark for retry. */
+    @Synchronized
+    public fun rollback(batch: EncodedDictionaryBatch) {
+        check(inFlight === batch) { "dictionary batch is not the current in-flight batch" }
+        inFlight = null
+    }
+
+    /**
      * Drains up to [maxCount] definitions and serializes them into wire-compatible binary records.
      * Updates [watermark] to the highest successfully encoded stack trace ID.
      */
+    @Synchronized
     public fun drainEncoded(maxCount: Int = Int.MAX_VALUE): ByteArray {
-        if (pending.isEmpty() || maxCount <= 0) return ByteArray(0)
-        val out = ByteArrayOutputStream()
-        var count = 0
-        while (pending.isNotEmpty() && count < maxCount) {
-            val def = pending.removeFirst()
-            val encodedRecord = encodeStackDefinition(def)
-            out.write(encodedRecord)
-            if (def.stackTraceId.value > watermarkedId) {
-                watermarkedId = def.stackTraceId.value
-            }
-            count++
-        }
-        return out.toByteArray()
+        val batch = prepareBatch(maxCount) ?: return ByteArray(0)
+        commit(batch)
+        return batch.bytes
     }
 
     public companion object {
