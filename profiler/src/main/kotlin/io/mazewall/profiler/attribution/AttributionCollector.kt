@@ -127,11 +127,8 @@ public class AttributionCollector(
     private val stacks = mutableMapOf<StackTraceId, StackDefinition>()
     private val invocations = mutableMapOf<InvocationId, InvocationDefinition>()
     private val pendingByInvocation = mutableMapOf<InvocationId, MutableList<SyscallAttribution>>()
-    private val emittedCoverageEdges = mutableSetOf<CoverageEdge>()
-    private var losses: Long = 0
-    private var failures: Long = 0
-    private var virtualPinnedScopes: Long = 0
-    private var virtualPinnedNanos: Long = 0
+    private val integrityAccumulator = TierEIntegrityAccumulator()
+    private val uniqueEdgeGate = UniqueEdgeGate()
     private var pendingCount: Int = 0
 
     init {
@@ -139,14 +136,7 @@ public class AttributionCollector(
     }
 
     public val integrity: SessionIntegrity
-        get() = SessionIntegrity(
-            observedLosses = losses,
-            attributionFailures = failures,
-            emissionMode = emissionMode,
-            virtualPinnedScopes = virtualPinnedScopes,
-            virtualPinnedNanos = virtualPinnedNanos,
-            captureDomain = captureDomain,
-        )
+        get() = integrityAccumulator.snapshot(emissionMode, captureDomain)
 
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
         val existing = stacks.putIfAbsent(definition.stackTraceId, definition)
@@ -168,7 +158,7 @@ public class AttributionCollector(
 
     public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
         if (observation.attributionStatus != AttributionStatus.PENDING_DICTIONARY) {
-            failures = Math.addExact(failures, 1)
+            integrityAccumulator.recordAttributionFailure()
             return listOf(
                 ResolvedSyscall(
                     observation,
@@ -197,7 +187,7 @@ public class AttributionCollector(
 
     public fun recordLoss(count: Long = 1) {
         require(count > 0) { "loss count must be positive" }
-        losses = Math.addExact(losses, count)
+        integrityAccumulator.recordLoss(count)
     }
 
     /**
@@ -209,7 +199,7 @@ public class AttributionCollector(
      */
     public fun recordDictionaryDrops(count: Long) {
         require(count > 0) { "dictionary drop count must be positive" }
-        losses = Math.addExact(losses, count)
+        integrityAccumulator.recordLoss(count)
     }
 
     /** Adds terminal agent telemetry; it is diagnostic and never repairs attribution completeness. */
@@ -218,8 +208,7 @@ public class AttributionCollector(
         nanos: Long,
     ) {
         require(scopes >= 0 && nanos >= 0) { "virtual pin telemetry must be non-negative" }
-        virtualPinnedScopes = Math.addExact(virtualPinnedScopes, scopes)
-        virtualPinnedNanos = Math.addExact(virtualPinnedNanos, nanos)
+        integrityAccumulator.recordVirtualPinnedIntervals(scopes, nanos)
     }
 
     /**
@@ -231,8 +220,8 @@ public class AttributionCollector(
     public fun acknowledgeEmission(resolved: ResolvedSyscall) {
         if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL || resolved.resolutionStatus != ResolutionStatus.RESOLVED) return
         val stack = resolved.stackDefinition ?: return
-        emittedCoverageEdges.add(
-            CoverageEdge(stack.stackTraceId, resolved.observation.syscallNumber, resolved.observation.captureFlags),
+        uniqueEdgeGate.acknowledge(
+            UniqueEdgeGate.Edge(stack.stackTraceId, resolved.observation.syscallNumber, resolved.observation.captureFlags),
         )
     }
 
@@ -243,7 +232,7 @@ public class AttributionCollector(
             .flatMap { (invocationId, observations) ->
             val invocation = invocations[invocationId]
             val status = if (invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
-            failures = Math.addExact(failures, observations.size.toLong())
+            integrityAccumulator.recordAttributionFailure(observations.size.toLong())
             observations.map { ResolvedSyscall(it, null, status) }
         }.also {
             pendingByInvocation.clear()
@@ -257,7 +246,7 @@ public class AttributionCollector(
         if (invocation.captureFailure != null) {
             pendingByInvocation.remove(invocationId)
             pendingCount -= pending.size
-            failures = Math.addExact(failures, pending.size.toLong())
+            integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             return pending.map { ResolvedSyscall(it, null, ResolutionStatus.CAPTURE_FAILED) }
         }
         val stack = invocation.stackTraceId?.let(stacks::get)
@@ -265,7 +254,7 @@ public class AttributionCollector(
         pendingByInvocation.remove(invocationId)
         pendingCount -= pending.size
         var status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
-            failures = Math.addExact(failures, pending.size.toLong())
+            integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             ResolutionStatus.TRUNCATED_STACK
         } else {
             ResolutionStatus.RESOLVED
@@ -275,14 +264,14 @@ public class AttributionCollector(
             invocation.executionContext == null &&
             pending.any { it.captureFlags and VIRTUAL_THREAD_CAPTURE_FLAG != 0 }
         ) {
-            failures = Math.addExact(failures, pending.size.toLong())
+            integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             status = ResolutionStatus.EXECUTION_IDENTITY_UNRESOLVED
         }
         return pending.mapNotNull { observation ->
             if (
                 status == ResolutionStatus.RESOLVED &&
                 emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL &&
-                CoverageEdge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags) in emittedCoverageEdges
+                !uniqueEdgeGate.canEmit(UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags))
             ) {
                 null
             } else {
@@ -290,12 +279,6 @@ public class AttributionCollector(
             }
         }
     }
-
-    private data class CoverageEdge(
-        val stackTraceId: StackTraceId,
-        val syscallNumber: Int,
-        val captureFlags: Int,
-    )
 
     private companion object {
         const val VIRTUAL_THREAD_CAPTURE_FLAG = 1
