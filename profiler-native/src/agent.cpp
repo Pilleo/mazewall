@@ -38,6 +38,7 @@ std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
+std::atomic<std::uint64_t> redefinition_epoch{1};
 std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
@@ -59,6 +60,7 @@ struct LogicalStack final {
     std::uint32_t id = 0;
     std::vector<LogicalFrame> frames;
     bool truncated = false;
+    std::uint64_t symbol_epoch = 1;
 };
 
 struct InvocationDefinition final {
@@ -106,6 +108,7 @@ struct RawFrame final {
 struct RawStack final {
     std::vector<RawFrame> frames;
     std::uint32_t flags = 0;
+    std::uint64_t symbol_epoch = 1;
 
     bool operator==(const RawStack&) const = default;
 };
@@ -113,6 +116,7 @@ struct RawStack final {
 struct RawStackHash final {
     std::size_t operator()(const RawStack& stack) const noexcept {
         std::size_t hash = stack.flags;
+        hash ^= std::hash<std::uint64_t>{}(stack.symbol_epoch) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         for (const auto& frame : stack.frames) {
             hash ^= std::hash<std::uintptr_t>{}(frame.method) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
             hash ^= std::hash<std::int64_t>{}(frame.location) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
@@ -184,14 +188,14 @@ bool resolve_frame(JNIEnv* env, const jvmtiFrameInfo& raw, LogicalFrame& result,
     return ok;
 }
 
-std::uint32_t intern_stack(std::vector<LogicalFrame> frames, bool truncated) {
+std::uint32_t intern_stack(std::vector<LogicalFrame> frames, bool truncated, std::uint64_t symbol_epoch) {
     std::lock_guard lock(definitions_mutex);
     for (const auto& stack : logical_stacks) {
-        if (stack.truncated == truncated && stack.frames == frames) return stack.id;
+        if (stack.truncated == truncated && stack.symbol_epoch == symbol_epoch && stack.frames == frames) return stack.id;
     }
     const auto id = static_cast<std::uint32_t>(logical_stacks.size() + 1);
     if (id == 0) return 0;
-    logical_stacks.push_back(LogicalStack{id, std::move(frames), truncated});
+    logical_stacks.push_back(LogicalStack{id, std::move(frames), truncated, symbol_epoch});
     return id;
 }
 
@@ -441,6 +445,7 @@ private:
         const auto retained = truncated ? frames.size() - 1 : static_cast<std::size_t>(frame_count);
         RawStack raw;
         raw.flags = flags_;
+        raw.symbol_epoch = redefinition_epoch.load(std::memory_order_acquire);
         raw.frames.reserve(retained);
         for (std::size_t index = 0; index < retained; ++index) {
             raw.frames.push_back(RawFrame{reinterpret_cast<std::uintptr_t>(frames[index].method), static_cast<std::int64_t>(frames[index].location)});
@@ -470,7 +475,7 @@ private:
             logical.push_back(std::move(frame));
         }
         env->DeleteLocalRef(current_thread);
-        const auto stack_id = intern_stack(std::move(logical), truncated);
+        const auto stack_id = intern_stack(std::move(logical), truncated, raw.symbol_epoch);
         if (stack_id == 0) {
             release_guards(env, class_guards);
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
@@ -622,23 +627,43 @@ void JNICALL on_native_method_bind(
     env->DeleteLocalRef(owner);
 }
 
+void JNICALL on_class_file_load(
+    jvmtiEnv*,
+    JNIEnv*,
+    jclass,
+    jobject,
+    const char*,
+    jobject,
+    jint,
+    const unsigned char*,
+    jint*,
+    unsigned char**) noexcept {
+    // Class loading, retransformation, and redefinition all establish a new
+    // symbolization epoch. The epoch is cache identity only; it is not added
+    // to the existing definition wire format.
+    redefinition_epoch.fetch_add(1, std::memory_order_acq_rel);
+}
+
 bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     jvmtiCapabilities capabilities{};
     capabilities.can_generate_native_method_bind_events = 1;
     capabilities.can_tag_objects = 1;
     capabilities.can_support_virtual_threads = 1;
+    capabilities.can_generate_all_class_hook_events = 1;
     if (jvmti->AddCapabilities(&capabilities) != JVMTI_ERROR_NONE) {
         return false;
     }
 
     jvmtiEventCallbacks callbacks{};
     callbacks.NativeMethodBind = on_native_method_bind;
+    callbacks.ClassFileLoadHook = on_class_file_load;
     callbacks.VirtualThreadEnd = on_virtual_thread_end;
     if (jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
         return false;
     }
 
-    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE &&
+    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr) == JVMTI_ERROR_NONE &&
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VIRTUAL_THREAD_END, nullptr) == JVMTI_ERROR_NONE;
 }
 

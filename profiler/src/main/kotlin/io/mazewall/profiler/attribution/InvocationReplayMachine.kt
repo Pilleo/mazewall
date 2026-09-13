@@ -12,6 +12,12 @@ public value class TaskLifetimeId(
     public val value: Long,
 )
 
+/** Typed profile-session epoch used to separate successive process lifetimes. */
+@JvmInline
+public value class SessionEpoch(
+    public val value: Long,
+)
+
 /** Identifies one Linux task for one lifetime within a profiled process. */
 public data class TaskIdentity(
     val processEpoch: Long,
@@ -23,6 +29,14 @@ public data class TaskIdentity(
 
     public val taskLifetime: TaskLifetimeId
         get() = TaskLifetimeId(taskEpoch)
+
+    public companion object {
+        public fun from(
+            process: ProcessIncarnationId,
+            tid: Int,
+            lifetime: TaskLifetimeId,
+        ): TaskIdentity = TaskIdentity(process.value, tid, lifetime.value)
+    }
 }
 
 /** A session-local native-invocation identity; zero is deliberately invalid. */
@@ -59,6 +73,7 @@ public enum class AttributionStatus {
     ACTIVATION_MISMATCH,
     KERNEL_CAPTURE_FAILED,
     CAUSAL_UNCERTAIN,
+    STALE_LIFECYCLE_IDENTITY,
 }
 
 /** A raw syscall plus the invocation identity that was valid at its ordered capture point. */
@@ -126,6 +141,13 @@ public sealed interface InvocationEvent {
         val restoredInvocationId: InvocationId?,
     ) : InvocationEvent
 
+    /** Explicitly invalidates all exact attribution for this task. */
+    public data class Invalidate(
+        override val task: TaskIdentity,
+        override val sequence: Long,
+        val reason: StateInvalidationReason,
+    ) : InvocationEvent
+
     public class Syscall(
         override val task: TaskIdentity,
         override val sequence: Long,
@@ -151,6 +173,10 @@ public data class StateInvalidated(
 public enum class StateInvalidationReason {
     SEQUENCE_GAP,
     ACTIVATION_MISMATCH,
+    DETACH,
+    CALLBACK_SUPPRESSION,
+    EXEC_TRANSITION,
+    TERMINAL_SESSION,
 }
 
 /** Result of applying one ordered event. */
@@ -206,6 +232,7 @@ public class InvocationReplayMachine {
             }
 
             is InvocationEvent.EndRestore -> endRestore(event, sequencedState, invalidated)
+            is InvocationEvent.Invalidate -> invalidate(event, sequencedState, invalidated)
             is InvocationEvent.Syscall -> syscall(event, sequencedState, invalidated)
         }
     }
@@ -227,6 +254,23 @@ public class InvocationReplayMachine {
     public fun processIncarnationFor(task: TaskIdentity): ProcessIncarnation = ProcessIncarnation(states[task]?.processIncarnation?.value ?: task.processIncarnation.value)
 
     public fun reentrantStateFor(task: TaskIdentity): ReentrantBoundaryState = states[task]?.let { ReentrantBoundaryState(depth = it.reentrantDepth) } ?: ReentrantBoundaryState()
+
+    /** Invalidates every active task at terminal session shutdown. */
+    public fun terminate() {
+        states.clear()
+        latestTaskByTid.clear()
+    }
+
+    private fun invalidate(
+        event: InvocationEvent.Invalidate,
+        state: TaskState,
+        invalidated: StateInvalidated?,
+    ): ReplayResult {
+        states[event.task] = state.copy(activeInvocationId = null, reentrantDepth = 0, valid = false)
+        return ReplayResult.StateChanged(
+            invalidated ?: StateInvalidated(event.task, event.sequence, event.sequence, event.reason),
+        )
+    }
 
     private fun endRestore(
         event: InvocationEvent.EndRestore,
@@ -260,6 +304,7 @@ public class InvocationReplayMachine {
         states[event.task] = state
         val status = when {
             invalidated != null -> AttributionStatus.SEQUENCE_GAP
+            !state.valid -> AttributionStatus.CAUSAL_UNCERTAIN
             state.activeInvocationId == null -> AttributionStatus.NO_ACTIVE_INVOCATION
             state.reentrantDepth > 1 -> AttributionStatus.CAUSAL_UNCERTAIN
             else -> AttributionStatus.PENDING_DICTIONARY

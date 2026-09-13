@@ -2,6 +2,7 @@ package io.mazewall.profiler.attribution
 
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class AttributionCollectorTest {
     @Test
@@ -261,6 +262,51 @@ class AttributionCollectorTest {
 
         // Integrity: no failures from dedup suppression (it is by design, not a failure)
         assertEquals(0L, collector.integrity.attributionFailures)
+    }
+
+    @Test
+    fun `emission acknowledgement requires the exact outstanding token`() {
+        val collector = AttributionCollector(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
+        val invocationId = InvocationId(300)
+        val stack = StackDefinition(StackTraceId(3L), listOf(frame()), StackCaptureQuality.COMPLETE)
+        collector.accept(stack)
+        collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
+        val candidate = collector.accept(pendingObservation(invocationId)).single()
+        val token = requireNotNull(collector.emissionToken(candidate))
+
+        collector.acknowledgeEmission(token)
+        assertFailsWith<IllegalArgumentException> { collector.acknowledgeEmission(token) }
+        assertFailsWith<IllegalArgumentException> {
+            collector.acknowledgeEmission(candidate.copy())
+        }
+        assertFailsWith<IllegalArgumentException> {
+            collector.acknowledgeEmission(EmissionToken(999L))
+        }
+    }
+
+    @Test
+    fun `stale process incarnation is rejected before dictionary joining`() {
+        val collector = AttributionCollector(expectedProcessIncarnation = ProcessIncarnationId(2L))
+        val stale = pendingObservation(InvocationId(301)).copy(
+            task = TaskIdentity(processEpoch = 1L, tid = 42, taskEpoch = 1L),
+        )
+
+        val result = collector.accept(stale).single()
+        assertEquals(ResolutionStatus.STALE_LIFECYCLE_IDENTITY, result.resolutionStatus)
+        assertEquals(null, result.observation.invocationId)
+        assertEquals(1L, collector.integrity.lifecycleInvalidations)
+        assertEquals(false, collector.integrity.verdictDimensions.lifecycleValid)
+    }
+
+    @Test
+    fun `capture domain attempt missed is a limitation and never an exact event`() {
+        val collector = AttributionCollector()
+        collector.recordCaptureDomainEvent(CaptureDomainEvent(CaptureDomainClassification.OBSERVED_SYS_ENTER))
+        collector.recordCaptureDomainEvent(CaptureDomainEvent(CaptureDomainClassification.ATTEMPT_MISSED))
+
+        assertEquals(1L, collector.integrity.outOfDomainAttempts)
+        assertEquals(CaptureGuarantee.INCOMPLETE, collector.integrity.guarantee)
+        assertEquals(false, collector.integrity.verdictDimensions.captureDomainValid)
     }
 
     private fun causalUncertainObservation(): SyscallAttribution =

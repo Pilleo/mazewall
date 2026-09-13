@@ -76,6 +76,7 @@ public class TierEProfilerSession internal constructor(
     private val processEpoch: Long,
     private val options: TierEOptions = TierEOptions(),
     private val definitionReader: (Path) -> AgentDefinitionFile.Contents = AgentDefinitionFile::read,
+    private val dictionarySink: DictionaryBatchSink? = null,
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -83,7 +84,25 @@ public class TierEProfilerSession internal constructor(
         options: TierEOptions = TierEOptions(),
     ) : this(NativeTierEEventSource(engine), processEpoch, options)
 
-    private val collector = AttributionCollector(options.emissionMode, options.maxPendingRecords)
+    public constructor(
+        engine: TierEbpfEngine,
+        processEpoch: Long,
+        options: TierEOptions,
+        dictionarySink: DictionaryBatchSink,
+    ) : this(NativeTierEEventSource(engine), processEpoch, options, AgentDefinitionFile::read, dictionarySink)
+
+    private val sessionEpoch = SessionEpoch(processEpoch)
+    private val collector = AttributionCollector(
+        options.emissionMode,
+        options.maxPendingRecords,
+        expectedProcessIncarnation = ProcessIncarnationId(sessionEpoch.value),
+    )
+    private val dictionaryEncoder = dictionarySink?.let { StackDictionaryStreamEncoder(options.maxPendingRecords) }
+    private val dictionaryPublisher = dictionarySink?.let { sink ->
+        DictionaryBatchPublisher(requireNotNull(dictionaryEncoder), sink) { batch ->
+            batch.definitions.forEach { definition -> retain(collector.accept(definition)) }
+        }
+    }
     private val resolved = mutableListOf<ResolvedSyscall>()
     private var reportedKernelLosses = 0L
     private var reportedMarkerFailures = 0L
@@ -132,6 +151,13 @@ public class TierEProfilerSession internal constructor(
         return source.readLastMarkerPidTgid()
     }
 
+    /** Records an upstream capture-domain limitation without fabricating a syscall event. */
+    @Synchronized
+    public fun recordCaptureDomainEvent(event: CaptureDomainEvent) {
+        requireCollecting()
+        collector.recordCaptureDomainEvent(event)
+    }
+
     @Synchronized
     override fun close() {
         if (state == TierESessionState.Closed) return
@@ -144,7 +170,16 @@ public class TierEProfilerSession internal constructor(
         val definitions = definitionReader(definitionFile)
         if (definitions.agentLosses > 0) collector.recordLoss(definitions.agentLosses)
         collector.recordVirtualPinnedIntervals(definitions.virtualPinnedScopes, definitions.virtualPinnedNanos)
-        definitions.stacks.forEach { retain(collector.accept(it)) }
+        if (dictionaryPublisher == null) {
+            definitions.stacks.forEach { retain(collector.accept(it)) }
+        } else {
+            definitions.stacks.forEach { requireNotNull(dictionaryEncoder).enqueue(it) }
+            while (requireNotNull(dictionaryEncoder).pendingCount > 0) {
+                if (dictionaryPublisher.publishAvailable(options.maxPendingRecords) != DictionaryPublicationStatus.COMMITTED) break
+            }
+            dictionaryPublisher.terminate()
+            collector.recordDictionaryTransport(dictionaryPublisher.transportEvidence)
+        }
         definitions.invocations.forEach { retain(collector.accept(it)) }
         retain(collector.finish())
         val profile = TierEProfile(resolved, collector.integrity)
@@ -195,7 +230,11 @@ public class TierEProfilerSession internal constructor(
             else -> AttributionStatus.PENDING_DICTIONARY
         }
         return SyscallAttribution(
-            task = TaskIdentity(processEpoch, tid.toInt(), 0),
+            task = TaskIdentity.from(
+                process = ProcessIncarnationId(sessionEpoch.value),
+                tid = tid.toInt(),
+                lifetime = TaskLifetimeId(0),
+            ),
             taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
             syscallNumber = syscallNr,
             args = args.map(ULong::toLong),

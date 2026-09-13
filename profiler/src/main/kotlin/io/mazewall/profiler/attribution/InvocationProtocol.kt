@@ -81,6 +81,7 @@ public object InvocationProtocol {
         is InvocationEvent.Activate -> ACTIVATE
         is InvocationEvent.EndRestore -> END_RESTORE
         is InvocationEvent.Syscall -> SYSCALL
+        is InvocationEvent.Invalidate -> throw IllegalArgumentException("lifecycle invalidation is a replay control event, not a wire event")
     }
 
     private fun InvocationEvent.payloadSize(): Int =
@@ -88,6 +89,7 @@ public object InvocationProtocol {
         is InvocationEvent.Activate -> ACTIVATE_SIZE
         is InvocationEvent.EndRestore -> END_RESTORE_SIZE
         is InvocationEvent.Syscall -> SYSCALL_SIZE
+        is InvocationEvent.Invalidate -> throw IllegalArgumentException("lifecycle invalidation is a replay control event, not a wire event")
     }
 
     private fun ByteBuffer.putPayload(event: InvocationEvent) {
@@ -105,6 +107,8 @@ public object InvocationProtocol {
                 putInt(event.syscallNumber)
                 event.args.forEach(::putLong)
             }
+
+            is InvocationEvent.Invalidate -> throw IllegalArgumentException("lifecycle invalidation is a replay control event, not a wire event")
         }
     }
 

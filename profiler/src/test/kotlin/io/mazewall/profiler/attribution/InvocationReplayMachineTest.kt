@@ -207,6 +207,28 @@ class InvocationReplayMachineTest {
     }
 
     @Test
+    fun `detach and exec invalidation require validated re-entry before exact attribution`() {
+        val task = TaskIdentity(processEpoch = 1, tid = 42, taskEpoch = 1)
+        val machine = InvocationReplayMachine()
+
+        machine.accept(InvocationEvent.Activate(task, 1, InvocationId(101)))
+        val detach = machine.accept(InvocationEvent.Invalidate(task, 2, StateInvalidationReason.DETACH))
+        val afterDetach = machine.accept(InvocationEvent.Syscall(task, 3, 0, List(6) { 0 })) as ReplayResult.Syscall
+        assertEquals(StateInvalidated(task, 2, 2, StateInvalidationReason.DETACH), detach.invalidated)
+        assertEquals(AttributionStatus.CAUSAL_UNCERTAIN, afterDetach.observation.attributionStatus)
+        assertEquals(null, afterDetach.observation.invocationId)
+
+        machine.accept(InvocationEvent.Activate(task, 4, InvocationId(202)))
+        val exact = machine.accept(InvocationEvent.Syscall(task, 5, 1, List(6) { 0 })) as ReplayResult.Syscall
+        assertEquals(InvocationId(202), exact.observation.invocationId)
+
+        machine.accept(InvocationEvent.Invalidate(task, 6, StateInvalidationReason.EXEC_TRANSITION))
+        machine.terminate()
+        val afterTerminal = machine.accept(InvocationEvent.Syscall(task, 7, 2, List(6) { 0 })) as ReplayResult.Syscall
+        assertEquals(AttributionStatus.NO_ACTIVE_INVOCATION, afterTerminal.observation.attributionStatus)
+    }
+
+    @Test
     fun `pid reuse with new process epoch evicts stale state and resets attribution`() {
         val tid = 42
         val oldTask = TaskIdentity(processEpoch = 1, tid = tid, taskEpoch = 1)

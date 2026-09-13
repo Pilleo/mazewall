@@ -71,6 +71,7 @@ public enum class ResolutionStatus {
     TRUNCATED_STACK,
     EXECUTION_IDENTITY_UNRESOLVED,
     CAUSAL_UNCERTAIN,
+    STALE_LIFECYCLE_IDENTITY,
 }
 
 /** A syscall after its invocation and stack references have been resolved, or explicitly failed. */
@@ -87,11 +88,14 @@ public data class SessionIntegrity(
     val attributionFailures: Long = 0,
     /** Syscall attempts known to fall outside the selected observation path. */
     val outOfDomainAttempts: Long = 0,
+    val lifecycleInvalidations: Long = 0,
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     /** Native proxy intervals entered by virtual threads; these pin the carrier by JVM contract. */
     val virtualPinnedScopes: Long = 0,
     /** Sum of measured virtual native-proxy duration, for operational overhead reporting. */
     val virtualPinnedNanos: Long = 0,
+    /** Transactional dictionary delivery evidence. */
+    val dictionaryTransport: DictionaryTransportEvidence = DictionaryTransportEvidence(),
     /**
      * Kernel observation boundary used to capture syscall events for this session.
      * [ObservationScope.SYS_ENTER_TRACEPOINT] means only post-seccomp dispatched syscalls
@@ -101,7 +105,7 @@ public data class SessionIntegrity(
 ) {
     public val guarantee: CaptureGuarantee
         get() = when {
-            observedLosses != 0L || attributionFailures != 0L || outOfDomainAttempts != 0L -> CaptureGuarantee.INCOMPLETE
+            observedLosses != 0L || attributionFailures != 0L || outOfDomainAttempts != 0L || lifecycleInvalidations != 0L || !dictionaryTransport.complete -> CaptureGuarantee.INCOMPLETE
             emissionMode == TierEEmissionMode.FULL_STREAM -> CaptureGuarantee.FULL_STREAM
             else -> CaptureGuarantee.UNIQUE_EDGES
         }
@@ -113,7 +117,25 @@ public data class SessionIntegrity(
     /** True when the selected stream/coverage contract completed without failure. */
     public val coverageComplete: Boolean
         get() = guarantee != CaptureGuarantee.INCOMPLETE
+
+    /** Independent machine-readable verdict dimensions for post-run diagnostics. */
+    public val verdictDimensions: TierEVerdictDimensions
+        get() = TierEVerdictDimensions(
+            captureDomainValid = captureDomain == ObservationScope.SYS_ENTER_TRACEPOINT && outOfDomainAttempts == 0L,
+            transportComplete = dictionaryTransport.complete,
+            attributionCoverageValid = observedLosses == 0L && attributionFailures == 0L,
+            dictionaryIntegrityValid = dictionaryTransport.complete,
+            lifecycleValid = lifecycleInvalidations == 0L,
+        )
 }
+
+public data class TierEVerdictDimensions(
+    public val captureDomainValid: Boolean,
+    public val transportComplete: Boolean,
+    public val attributionCoverageValid: Boolean,
+    public val dictionaryIntegrityValid: Boolean,
+    public val lifecycleValid: Boolean,
+)
 
 /**
  * Joins kernel syscall observations with delayed agent definitions without timestamp matching.
@@ -125,10 +147,15 @@ public class AttributionCollector(
     private val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     private val maxPendingRecords: Int = TierEOptions.DEFAULT_RECORD_LIMIT,
     private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
+    private val expectedProcessIncarnation: ProcessIncarnationId? = null,
 ) {
     private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
+    private val tokensByResult = java.util.IdentityHashMap<ResolvedSyscall, EmissionToken>()
+    private val edgesByToken = java.util.IdentityHashMap<EmissionToken, UniqueEdgeGate.Edge>()
+    private var nextCandidateId: Long = 1
+    private var finished = false
     private var pendingCount: Int = 0
 
     init {
@@ -149,6 +176,17 @@ public class AttributionCollector(
     }
 
     public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
+        if (expectedProcessIncarnation != null && observation.task.processIncarnation != expectedProcessIncarnation) {
+            integrityAccumulator.recordLifecycleInvalidation()
+            integrityAccumulator.recordAttributionFailure()
+            return listOf(
+                ResolvedSyscall(
+                    observation.copy(invocationId = null, attributionStatus = AttributionStatus.STALE_LIFECYCLE_IDENTITY),
+                    null,
+                    ResolutionStatus.STALE_LIFECYCLE_IDENTITY,
+                ),
+            )
+        }
         if (observation.attributionStatus != AttributionStatus.PENDING_DICTIONARY) {
             integrityAccumulator.recordAttributionFailure()
             return listOf(
@@ -158,6 +196,7 @@ public class AttributionCollector(
                     when (observation.attributionStatus) {
                         AttributionStatus.NO_ACTIVE_INVOCATION -> ResolutionStatus.NO_ACTIVE_INVOCATION
                         AttributionStatus.CAUSAL_UNCERTAIN -> ResolutionStatus.CAUSAL_UNCERTAIN
+                        AttributionStatus.STALE_LIFECYCLE_IDENTITY -> ResolutionStatus.STALE_LIFECYCLE_IDENTITY
                         AttributionStatus.SEQUENCE_GAP,
                         AttributionStatus.ACTIVATION_MISMATCH,
                         AttributionStatus.KERNEL_CAPTURE_FAILED,
@@ -183,6 +222,18 @@ public class AttributionCollector(
     /** Records an attempt outside the selected capture path; it is never an exact event. */
     public fun recordOutOfDomainAttempt(count: Long = 1) {
         integrityAccumulator.recordOutOfDomainAttempt(count)
+    }
+
+    public fun recordCaptureDomainEvent(event: CaptureDomainEvent) {
+        when (event.classification) {
+            CaptureDomainClassification.OBSERVED_SYS_ENTER -> Unit
+            CaptureDomainClassification.ATTEMPT_MISSED -> recordOutOfDomainAttempt(event.count)
+        }
+    }
+
+    /** Records terminal dictionary transport evidence without repairing incomplete attribution. */
+    public fun recordDictionaryTransport(evidence: DictionaryTransportEvidence) {
+        integrityAccumulator.recordDictionaryTransport(evidence)
     }
 
     /**
@@ -214,25 +265,40 @@ public class AttributionCollector(
      */
     public fun acknowledgeEmission(resolved: ResolvedSyscall) {
         if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL || resolved.resolutionStatus != ResolutionStatus.RESOLVED) return
-        val stack = resolved.stackDefinition ?: return
-        uniqueEdgeGate.acknowledge(
-            UniqueEdgeGate.Edge(stack.stackTraceId, resolved.observation.syscallNumber, resolved.observation.captureFlags),
-        )
+        val token = tokensByResult[resolved]
+            ?: throw IllegalArgumentException("resolved syscall was not returned by this collector")
+        acknowledgeEmission(token)
+    }
+
+    /** Returns the exact token associated with a collector-returned candidate. */
+    public fun emissionToken(resolved: ResolvedSyscall): EmissionToken? = tokensByResult[resolved]
+
+    /** Acknowledges only the exact outstanding candidate represented by [token]. */
+    public fun acknowledgeEmission(token: EmissionToken) {
+        if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL) return
+        val edge = edgesByToken.remove(token)
+            ?: throw IllegalArgumentException("emission token is stale, duplicated, or foreign")
+        tokensByResult.entries.removeIf { it.value === token }
+        uniqueEdgeGate.acknowledge(edge)
     }
 
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
-    public fun finish(): List<ResolvedSyscall> =
-        java.util.List.copyOf(
+    public fun finish(): List<ResolvedSyscall> {
+        finished = true
+        tokensByResult.clear()
+        edgesByToken.clear()
+        return java.util.List.copyOf(
             dictionaryJoiner
                 .pendingEntries()
             .flatMap { pending ->
-            val status = if (pending.invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
-            integrityAccumulator.recordAttributionFailure(pending.observations.size.toLong())
-            pending.observations.map { ResolvedSyscall(it, null, status) }
-        }.also {
-            dictionaryJoiner.clearPending()
-        },
+                val status = if (pending.invocation?.captureFailure != null) ResolutionStatus.CAPTURE_FAILED else ResolutionStatus.DICTIONARY_UNRESOLVED
+                integrityAccumulator.recordAttributionFailure(pending.observations.size.toLong())
+                pending.observations.map { ResolvedSyscall(it, null, status) }
+            }.also {
+                dictionaryJoiner.clearPending()
+            },
         )
+    }
 
     private fun resolveReady(invocationId: InvocationId): List<ResolvedSyscall> {
         val ready = dictionaryJoiner.takeReady(invocationId) ?: return emptyList()
@@ -265,7 +331,15 @@ public class AttributionCollector(
             ) {
                 null
             } else {
-                ResolvedSyscall(observation, stack, status, invocation.executionContext)
+                ResolvedSyscall(observation, stack, status, invocation.executionContext).also { resolved ->
+                    if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !finished) {
+                        val candidateId = nextCandidateId++
+                        val token = EmissionToken(candidateId)
+                        val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
+                        tokensByResult[resolved] = token
+                        edgesByToken[token] = edge
+                    }
+                }
             }
         }
     }

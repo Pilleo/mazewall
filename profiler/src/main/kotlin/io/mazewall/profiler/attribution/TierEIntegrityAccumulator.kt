@@ -7,6 +7,8 @@ internal class TierEIntegrityAccumulator {
     private var outOfDomainAttempts: Long = 0L
     private var virtualPinnedScopes: Long = 0L
     private var virtualPinnedNanos: Long = 0L
+    private var lifecycleInvalidations: Long = 0L
+    private var dictionaryTransport = DictionaryTransportEvidence()
 
     fun recordLoss(count: Long) {
         require(count > 0) { "loss count must be positive" }
@@ -23,6 +25,11 @@ internal class TierEIntegrityAccumulator {
         outOfDomainAttempts = Math.addExact(outOfDomainAttempts, count)
     }
 
+    fun recordLifecycleInvalidation(count: Long = 1L) {
+        require(count > 0) { "lifecycle invalidation count must be positive" }
+        lifecycleInvalidations = Math.addExact(lifecycleInvalidations, count)
+    }
+
     fun recordVirtualPinnedIntervals(
         scopes: Long,
         nanos: Long,
@@ -30,6 +37,10 @@ internal class TierEIntegrityAccumulator {
         require(scopes >= 0 && nanos >= 0) { "virtual pin telemetry must be non-negative" }
         virtualPinnedScopes = Math.addExact(virtualPinnedScopes, scopes)
         virtualPinnedNanos = Math.addExact(virtualPinnedNanos, nanos)
+    }
+
+    fun recordDictionaryTransport(evidence: DictionaryTransportEvidence) {
+        dictionaryTransport = evidence
     }
 
     fun snapshot(
@@ -40,9 +51,11 @@ internal class TierEIntegrityAccumulator {
             observedLosses = observedLosses,
             attributionFailures = attributionFailures,
             outOfDomainAttempts = outOfDomainAttempts,
+            lifecycleInvalidations = lifecycleInvalidations,
             emissionMode = emissionMode,
             virtualPinnedScopes = virtualPinnedScopes,
             virtualPinnedNanos = virtualPinnedNanos,
             captureDomain = captureDomain,
+            dictionaryTransport = dictionaryTransport,
         )
 }
