@@ -104,3 +104,7 @@ boundary limitation when an upstream component reports one.
 
 ---
 <!-- id: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid  file: issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md -->
+
+## Rootful gate evidence linkage (2026-09-13)
+
+The authoritative Docker gate is retained in [tier-e-rootful-gate-20260913.md](/home/leanid/Documents/code/java/jseccomp/docs/internals/evidence/tier-e-rootful-gate-20260913.md), tied to commit `d0a5f6d3631f84744fef6ec9417565168f005f90`. It records the exact gate command, immutable raw artifacts, native CTest `10/10`, executed native-backed Tier E end-to-end coverage, benchmark medians, and machine-readable verdict dimensions. Rootless Podman remains `INCOMPLETE`. This linkage does not close or change the status of this open umbrella record.
