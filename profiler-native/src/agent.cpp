@@ -34,6 +34,13 @@ std::atomic<std::uint64_t> stack_capture_failures{0};
 std::atomic<std::uint64_t> scope_failures{0};
 std::atomic<std::uint64_t> virtual_pinned_scopes{0};
 std::atomic<std::uint64_t> virtual_pinned_nanos{0};
+std::atomic<std::uint64_t> benchmark_get_stack_trace_nanos{0};
+std::atomic<std::uint64_t> benchmark_raw_key_nanos{0};
+std::atomic<std::uint64_t> benchmark_logical_metadata_nanos{0};
+std::atomic<std::uint64_t> benchmark_cache_hits{0};
+std::atomic<std::uint64_t> benchmark_cache_misses{0};
+std::atomic<std::uint64_t> benchmark_metadata_cache_hits{0};
+std::atomic<std::uint64_t> benchmark_metadata_cache_misses{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::uint32_t session_tag = 1;
@@ -138,6 +145,14 @@ std::unordered_map<jlong, ExecutionEntry> executions_by_java_thread_id;
 std::atomic<std::uint64_t> next_execution_id{1};
 std::unordered_map<RawStack, CanonicalContext, RawStackHash> canonical_contexts;
 EmissionMode emission_mode = EmissionMode::full_stream;
+bool benchmark_phases = false;
+constexpr std::size_t MAX_METADATA_CACHE_ENTRIES = 4096;
+
+std::uint64_t elapsed_nanos(std::chrono::steady_clock::time_point started) noexcept {
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
+    return static_cast<std::uint64_t>(nanos > 0 ? nanos : 0);
+}
 
 void deallocate(char* value) noexcept {
     if (value != nullptr) global_jvmti->Deallocate(reinterpret_cast<unsigned char*>(value));
@@ -186,6 +201,75 @@ bool resolve_frame(JNIEnv* env, const jvmtiFrameInfo& raw, LogicalFrame& result,
     deallocate(name);
     if (owner != nullptr) env->DeleteLocalRef(owner);
     return ok;
+}
+
+struct FrameMetadataKey final {
+    std::uintptr_t method = 0;
+    std::uint64_t symbol_epoch = 1;
+
+    bool operator==(const FrameMetadataKey&) const = default;
+};
+
+struct FrameMetadataKeyHash final {
+    std::size_t operator()(const FrameMetadataKey& key) const noexcept {
+        auto hash = std::hash<std::uintptr_t>{}(key.method);
+        hash ^= std::hash<std::uint64_t>{}(key.symbol_epoch) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+struct CachedFrameMetadata final {
+    LogicalFrame frame;
+    jweak class_guard = nullptr;
+};
+
+std::mutex metadata_cache_mutex;
+std::unordered_map<FrameMetadataKey, CachedFrameMetadata, FrameMetadataKeyHash> metadata_cache;
+
+bool resolve_frame_cached(
+    JNIEnv* env,
+    const jvmtiFrameInfo& raw,
+    std::uint64_t symbol_epoch,
+    LogicalFrame& result,
+    jweak* class_guard = nullptr) {
+    const FrameMetadataKey key{reinterpret_cast<std::uintptr_t>(raw.method), symbol_epoch};
+    {
+        std::lock_guard lock(metadata_cache_mutex);
+        const auto found = metadata_cache.find(key);
+        if (found != metadata_cache.end()) {
+            if (env->IsSameObject(found->second.class_guard, nullptr) == JNI_TRUE) {
+                env->DeleteWeakGlobalRef(found->second.class_guard);
+                metadata_cache.erase(found);
+            } else {
+                result = found->second.frame;
+                result.location = static_cast<std::int64_t>(raw.location);
+                if (class_guard != nullptr) *class_guard = env->NewWeakGlobalRef(found->second.class_guard);
+                if (benchmark_phases) benchmark_metadata_cache_hits.fetch_add(1, std::memory_order_relaxed);
+                return class_guard == nullptr || *class_guard != nullptr;
+            }
+        }
+    }
+
+    if (benchmark_phases) benchmark_metadata_cache_misses.fetch_add(1, std::memory_order_relaxed);
+    LogicalFrame resolved;
+    jweak cache_guard = nullptr;
+    if (!resolve_frame(env, raw, resolved, &cache_guard)) return false;
+    {
+        std::lock_guard lock(metadata_cache_mutex);
+        if (metadata_cache.size() >= MAX_METADATA_CACHE_ENTRIES) {
+            const auto evicted = metadata_cache.begin();
+            env->DeleteWeakGlobalRef(evicted->second.class_guard);
+            metadata_cache.erase(evicted);
+        }
+        const auto [inserted, was_inserted] = metadata_cache.emplace(key, CachedFrameMetadata{resolved, cache_guard});
+        if (!was_inserted) {
+            env->DeleteWeakGlobalRef(cache_guard);
+        }
+        result = inserted->second.frame;
+        result.location = static_cast<std::int64_t>(raw.location);
+        if (class_guard != nullptr) *class_guard = env->NewWeakGlobalRef(inserted->second.class_guard);
+        return class_guard == nullptr || *class_guard != nullptr;
+    }
 }
 
 std::uint32_t intern_stack(std::vector<LogicalFrame> frames, bool truncated, std::uint64_t symbol_epoch) {
@@ -282,6 +366,20 @@ void remember_canonical_context(JNIEnv* env, const RawStack& stack, std::uint32_
         return;
     }
     canonical_contexts.emplace(stack, CanonicalContext{stack_id, std::move(guards)});
+}
+
+void clear_symbolization_caches(JNIEnv* env) noexcept {
+    if (env == nullptr) return;
+    {
+        std::lock_guard lock(metadata_cache_mutex);
+        for (const auto& entry : metadata_cache) env->DeleteWeakGlobalRef(entry.second.class_guard);
+        metadata_cache.clear();
+    }
+    {
+        std::lock_guard lock(definitions_mutex);
+        for (const auto& entry : canonical_contexts) release_guards(env, entry.second.class_guards);
+        canonical_contexts.clear();
+    }
 }
 
 using UnixOpen0 = jint(JNICALL*)(JNIEnv*, jclass, jlong, jint, jint);
@@ -426,12 +524,14 @@ private:
 
         std::array<jvmtiFrameInfo, 129> frames{};
         jint frame_count = 0;
+        const auto stack_trace_started = std::chrono::steady_clock::now();
         const auto result = global_jvmti->GetStackTrace(
             current_thread,
             0,
             static_cast<jint>(frames.size()),
             frames.data(),
             &frame_count);
+        if (benchmark_phases) benchmark_get_stack_trace_nanos.fetch_add(elapsed_nanos(stack_trace_started), std::memory_order_relaxed);
         if (result != JVMTI_ERROR_NONE || frame_count <= 0) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             env->DeleteLocalRef(current_thread);
@@ -443,6 +543,7 @@ private:
         // happened to reference it before shutdown.
         if (truncated) stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
         const auto retained = truncated ? frames.size() - 1 : static_cast<std::size_t>(frame_count);
+        const auto raw_key_started = std::chrono::steady_clock::now();
         RawStack raw;
         raw.flags = flags_;
         raw.symbol_epoch = redefinition_epoch.load(std::memory_order_acquire);
@@ -452,21 +553,29 @@ private:
         }
         if (!truncated && emission_mode == EmissionMode::unique_stack_syscall) {
             if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
+                if (benchmark_phases) {
+                    benchmark_cache_hits.fetch_add(1, std::memory_order_relaxed);
+                    benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
+                }
                 env->DeleteLocalRef(current_thread);
                 stack_capture_count.fetch_add(1, std::memory_order_relaxed);
                 return Capture{existing, 0, proposed_context_id, true};
             }
+            if (benchmark_phases) benchmark_cache_misses.fetch_add(1, std::memory_order_relaxed);
         }
+        if (benchmark_phases) benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
         std::vector<LogicalFrame> logical;
         std::vector<jweak> class_guards;
         logical.reserve(retained);
         if (emission_mode == EmissionMode::unique_stack_syscall) class_guards.reserve(retained);
+        const auto logical_metadata_started = std::chrono::steady_clock::now();
         for (std::size_t index = 0; index < retained; ++index) {
             LogicalFrame frame;
             jweak guard = nullptr;
-            if (!resolve_frame(env, frames[index], frame,
+            if (!resolve_frame_cached(env, frames[index], raw.symbol_epoch, frame,
                     emission_mode == EmissionMode::unique_stack_syscall ? &guard : nullptr)) {
                 release_guards(env, class_guards);
+                if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
                 stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
                 env->DeleteLocalRef(current_thread);
                 return {};
@@ -474,6 +583,7 @@ private:
             if (guard != nullptr) class_guards.push_back(guard);
             logical.push_back(std::move(frame));
         }
+        if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
         env->DeleteLocalRef(current_thread);
         const auto stack_id = intern_stack(std::move(logical), truncated, raw.symbol_epoch);
         if (stack_id == 0) {
@@ -764,6 +874,8 @@ bool parse_options(const char* options) {
             emission_mode = EmissionMode::full_stream;
         } else if (option == "mode=unique-stack-syscall") {
             emission_mode = EmissionMode::unique_stack_syscall;
+        } else if (option == "benchmark-phases") {
+            benchmark_phases = true;
         } else {
             return false;
         }
@@ -789,7 +901,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
     return configure_native_bind_events(jvmti) ? JNI_OK : JNI_ERR;
 }
 
-extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM*) {
+extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     const bool definitions_written = write_definitions();
     std::fprintf(
         stderr,
@@ -800,4 +912,20 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM*) {
         static_cast<unsigned long long>(stack_capture_failures.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(scope_failures.load(std::memory_order_relaxed)),
         definitions_written ? "written" : "failed");
+    if (benchmark_phases) {
+        std::fprintf(
+            stderr,
+            "tier-e-benchmark: get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
+            static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_logical_metadata_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_cache_hits.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_cache_misses.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_metadata_cache_hits.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_metadata_cache_misses.load(std::memory_order_relaxed)));
+    }
+    JNIEnv* env = nullptr;
+    if (vm != nullptr && vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_8) == JNI_OK) {
+        clear_symbolization_caches(env);
+    }
 }

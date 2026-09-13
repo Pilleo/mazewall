@@ -29,6 +29,10 @@ target_compile_options(marker_export_test PRIVATE -Wall -Wextra -Werror -UNDEBUG
 target_link_libraries(marker_export_test PRIVATE ${CMAKE_DL_LIBS})
 add_test(NAME marker_export_test COMMAND marker_export_test $<TARGET_FILE:mazewall_stack_agent>)
 
+add_executable(seccomp_boundary_fixture tests/seccomp_boundary_fixture.cpp)
+target_compile_options(seccomp_boundary_fixture PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME seccomp_boundary_fixture COMMAND seccomp_boundary_fixture)
+
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
     OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class"
@@ -37,7 +41,19 @@ add_custom_command(
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java"
     VERBATIM
 )
-add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class")
+add_custom_command(
+    OUTPUT "${AGENT_TEST_CLASSES}/RedefinitionWorkload.class" "${AGENT_TEST_CLASSES}/RedefinitionAgent.class"
+    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/RedefinitionWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/RedefinitionAgent.java"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/RedefinitionWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/RedefinitionAgent.java"
+    VERBATIM
+)
+add_custom_command(
+    OUTPUT "${AGENT_TEST_CLASSES}/redefinition-agent.jar"
+    COMMAND "${Java_JAR_EXECUTABLE}" cfm "${AGENT_TEST_CLASSES}/redefinition-agent.jar" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf" -C "${AGENT_TEST_CLASSES}" RedefinitionAgent.class
+    DEPENDS "${AGENT_TEST_CLASSES}/RedefinitionAgent.class" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf"
+    VERBATIM
+)
+add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
 add_test(
     NAME agent_smoke_test
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" AgentWorkload
@@ -46,6 +62,24 @@ set_tests_properties(
     agent_smoke_test
     PROPERTIES PASS_REGULAR_EXPRESSION "proxied-binds=[1-9][0-9]* stack-captures=[1-9][0-9]*"
 )
+
+add_test(
+    NAME agent_phase_benchmark_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_unique PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+
+add_test(
+    NAME agent_redefinition_smoke_test
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-javaagent:${AGENT_TEST_CLASSES}/redefinition-agent.jar" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" RedefinitionWorkload
+)
+set_tests_properties(agent_redefinition_smoke_test PROPERTIES PASS_REGULAR_EXPRESSION "redefinition-fixture: status=PASS")
 
 add_test(
     NAME agent_virtual_smoke_test
