@@ -1,6 +1,6 @@
 # Tier E — eBPF Semantic Enrichment: Technical Design Document
 
-**Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend, 2026-09-12)
+**Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend and correctness hardening, 2026-09-13)
 **Component:** `:platform`, `:profiler`, `profiler-native/`
 **Related:** [profiler-design.md](profiler-design.md) (Tiers P/S/A), [security-considerations.md](../core/security-considerations.md) (Shared-Memory ACE threat model)
 **Work packages:** [docs/internals/backlog/implementation/issue-20260825-*tier-e*.md](../../backlog/implementation/)
@@ -114,11 +114,11 @@ References: [JVM TI stack-frame specification](https://docs.oracle.com/en/java/j
 [StackWalker API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/StackWalker.html),
 and [OpenJDK asynchronous stack-walker RFC](https://www.mail-archive.com/serviceability-dev@openjdk.org/msg26652.html).
 
-Definitions are currently persisted when the target JVM unloads the agent. This keeps dictionary
+Definitions are persisted when the target JVM unloads the agent by default. This keeps dictionary
 I/O off attributed target threads and permits delayed resolution, but a crash leaves IDs unresolved
-and therefore makes the run incomplete. A production Kubescape integration should replace the file
-transport with a bounded asynchronous channel while preserving the same binary records and
-fail-incomplete semantics.
+and therefore makes the run incomplete. `TierEProfilerSession` also supports an opt-in
+`DictionaryBatchSink` for bounded asynchronous publication while preserving the same binary records
+and fail-incomplete semantics; the file artifact remains the compatibility and recovery boundary.
 
 The optional `DictionaryBatchSink` is that bounded asynchronous-channel boundary. The encoder keeps
 definitions in its bounded queue until a sink returns `Committed`; `RetryableFailure` rolls back the
@@ -159,24 +159,25 @@ WP-12 is still required before making service-level throughput or latency claims
 The following order preserves Tier E's core guarantee: no observation may be assigned a stack
 unless that exact logical stack has been proven at the corresponding native boundary.
 
-1. **Reuse exact raw-stack keys in full-stream mode.** After every synchronous `GetStackTrace`, a
+1. **[Implemented] Reuse exact raw-stack keys in full-stream mode.** After every synchronous `GetStackTrace`, a
    stable `(jmethodID, BCI)[]` key can reuse an existing `StackTraceId` while the session still
    allocates a fresh `InvocationId` and emits every syscall. This removes repeated method-name,
    descriptor, and class-signature resolution without changing full-stream cardinality. Cache
    entries must retain weak class guards and be invalidated after class unloading.
-2. **Make the unavoidable capture path allocation-free.** Reuse native frame and raw-key buffers
-   per thread. This may reduce agent-side allocation, hashing, and locking, but cannot remove the
-   HotSpot logical stack walk that proves the key.
-3. **Offer an explicit reduced-payload coverage mode.** A coverage-only report may request only a
+2. **[Implemented baseline] Make the unavoidable capture path cheaper.** Reuse native frame and
+   raw-key buffers per thread where the current proxy path permits. This reduces agent-side
+   allocation, hashing, and locking, but cannot remove the HotSpot logical stack walk that proves
+   the key. Allocation-free warmed hits and broader scratch-buffer reuse remain measured targets.
+3. **[Required hardening] Offer an explicit reduced-payload coverage mode.** A coverage-only report may request only a
    syscall number and canonical stack edge, avoiding six-register argument capture where callers
    do not need representative arguments. It must not claim a full stream. Unknown/unmarked
    activity must remain visible as an integrity failure, either as events or as a clearly reported
    aggregate counter.
-4. **Evaluate a lower-cost marker transport.** A USDT marker or another verified lower-overhead
+4. **[Required hardening] Evaluate a lower-cost marker transport.** A USDT marker or another verified lower-overhead
    transport can reduce the four current marker transitions around each native scope. It must
    retain the same per-thread state transitions and binary/attachment verification as the uprobe
    path.
-5. **Evaluate scoped tracepoint attachment for node scale.** Per-platform-TID perf tracepoints
+5. **[Required hardening] Evaluate scoped tracepoint attachment for node scale.** Per-platform-TID perf tracepoints
    could avoid running the system-wide raw-tracepoint filter for unrelated host processes. This is
    an operational-cost optimization only; it must correctly track JVM thread lifecycle and carrier
    threads before it can replace the current global attachment.
@@ -239,6 +240,19 @@ source tree:
 - `BpfRingBufferReader` maps only the metadata page as `PROT_READ|PROT_WRITE` and
   maps the data alias as `PROT_READ`. Its regression tests exercise BUSY, DISCARD,
   wraparound, acquire/release cursor movement, and concurrent reservations.
+- `TierEProfilerSession` routes an opt-in `DictionaryBatchSink` through
+  `prepareBatch()`, sink delivery, and commit/rollback; `drainEncoded()` remains
+  the immediate-commit compatibility adapter. `DictionaryBatchPublisherTest`
+  covers retry, reconnect, terminal failure, daemon crash, abandoned batches,
+  and opaque batch identity.
+- `TierEEndToEndIntegrationTest` runs the native agent and real session together
+  and verifies a failed dictionary write is retried with identical bytes before
+  terminal finish. `TierEDaemonNativeWorkflowIntegrationTest` covers rootful
+  daemon attach, status, detach, and shutdown around an agent-loaded workload.
+- `lifecycle_identity_stress_fixture` repeats fork/exec identity transitions;
+  Kotlin `InvocationReplayMachineTest` covers detach, exec, PID reuse, sequence
+  gaps, callback suppression, and validated re-entry. These fixtures reject stale
+  identities before replay restoration.
 
 ## 2.4 Performance and lifetime evidence
 
@@ -268,9 +282,10 @@ Any future wire-visible change must update these fixtures in the same change.
 The native CTest suite includes the seccomp denied-attempt boundary fixture, which
 reports `attempt_missed=1 observed_sys_enter=0 verdict=INCOMPLETE`. This is deliberately
 not an exact Tier E observation: attempts denied before the selected `sys_enter` path
-are outside the capture domain. Rootful CI is authoritative for privileged BPF,
-seccomp, and runtime fixtures. Rootless Podman remains an environment limitation and
-must be recorded as `INCOMPLETE`, never converted into a passing kernel claim.
+are outside the capture domain. Rootful Docker is authoritative for local privileged
+BPF, seccomp, and runtime fixtures; CI retention is a separate delivery concern.
+Rootless Podman remains an environment limitation and must be recorded as `INCOMPLETE`,
+never converted into a passing kernel claim.
 
 ### 2.1 Optional unique-edge emission
 
@@ -344,6 +359,21 @@ RUNNING_SESSION
 (`causal-uncertain` when classification is inherited from in-flight unsupported transition).
 `INACTIVE_FOR_CALLBACK` is entered before any callback-driven JVM work and must not restore a prior exact
 invocation until a validated re-entry boundary is observed.
+
+## 2.7 Retained implementation evidence
+
+> **Status: Historical evidence.**
+
+The current hardening evidence is indexed by
+[`tier-e-architecture-hardening-20260913.json`](../../evidence/tier-e-architecture-hardening-20260913.json).
+The final local privileged run is retained in
+[`tier-e-rootful-final-gate-20260913.json`](../../evidence/tier-e-rootful-final-gate-20260913.json)
+and records commit `50e148591179f94e58012c8a714e05057342068f`, the supported kernel and
+container image, both native-backed integration reports, benchmark gating, and all six
+verdict dimensions. The lifecycle stress fixture and transport fault-injection details are
+retained in [`tier-e-lifecycle-identity-stress-20260913.json`](../../evidence/tier-e-lifecycle-identity-stress-20260913.json)
+and [`tier-e-transport-fault-injection-20260913.json`](../../evidence/tier-e-transport-fault-injection-20260913.json).
+Rootless Podman remains explicitly `INCOMPLETE` and is not used to support a privileged claim.
 
 ## 3. Invariants (non-negotiable, enforced by review and where possible by types)
 
@@ -890,9 +920,10 @@ TGID guard.
 
 ### D.1 Live dictionary publication
 
-> **Status: Required hardening.** The current implementation provides opt-in live
-> publication and transactional dictionary batches. The stronger closure and coherence
-> rules below are the normative target for treating a live snapshot as terminal evidence.
+> **Status: Implemented contract.** The current implementation provides opt-in live
+> publication, the MZSE envelope, and transactional dictionary batches. The dependency
+> completeness and durability rules below define the conditions for treating a live snapshot
+> as terminal evidence; any property not covered by retained evidence remains required hardening.
 
 Live publication is opt-in. It has four distinct guarantees:
 
@@ -933,8 +964,9 @@ ambiguous delivery never advances the watermark.
 
 ### D.2 Symbol lifetime and epochs
 
-> **Status: Required hardening.** The existing monotonic epoch and weak-guard checks are
-> necessary but do not, by themselves, prove that replacement installation has completed.
+> **Status: Implemented contract.** `SymbolizationGeneration` brackets supported replacement,
+> rejects unproven external replacement, and revalidates capture leases. Additional JVM-specific
+> lifecycle coverage remains required hardening.
 
 `SymbolizationGeneration` denotes a stable installed-definition interval. A capture is admitted
 only while its generation is stable, and the lease is revalidated after stack capture, raw-key
@@ -970,8 +1002,8 @@ new generation and an explicit re-entry event.
 
 ### D.3 Control protocol and receive boundaries
 
-> **Status: Required hardening.** Version-1 replies are already frozen by fixtures; this
-> section makes the framing and timeout contract precise.
+> **Status: Implemented contract.** Version-1 replies are frozen by fixtures and this section
+> defines the framing and timeout contract precisely.
 
 The control protocol is not an unframed line stream. Version 1 uses a two-byte unsigned
 big-endian length prefix followed by Java modified-UTF bytes, as emitted by
@@ -1036,8 +1068,9 @@ native boundary
 
 ## Resource ownership and bounded admission
 
-> **Status: Required hardening.** The current ring reader already returns copied payloads;
-> this section makes the ownership rule explicit for all future delayed paths.
+> **Status: Required hardening.** Ring records, transactional batches, and pending observations
+> now have explicit ownership and bounded local budgets. A single cross-component budget covering
+> every cache and snapshot buffer remains the next hardening step.
 
 Before the consumer position advances, every record retained asynchronously is copied into
 collector-owned storage. Delayed dictionary joins never retain a view into reusable mapped
@@ -1075,8 +1108,8 @@ mapped record
 
 ## Native-call preservation contract
 
-> **Status: Required hardening.** This contract applies to every native-method proxy and its
-> failure-injection tests.
+> **Status: Implemented contract for current proxy cleanup paths.** This contract applies to
+> every native-method proxy; future binding additions require the same failure-injection tests.
 
 Profiler instrumentation is observational around the original operation. It must preserve:
 
@@ -1093,8 +1126,8 @@ original operation. Profiler-worker syscalls do not inherit application attribut
 
 ## Performance targets and evidence contract
 
-> **Status: Required hardening.** These are measurable acceptance targets, not claims about
-> every host or JDK.
+> **Status: Implemented measurement contract; optimization targets remain required hardening.**
+> These are measurable acceptance targets, not claims about every host or JDK.
 
 Warmed exact-cache hits should perform no profiler-owned heap allocation, string formatting,
 or file I/O. Scratch storage is depth-aware for nested native calls, and virtual-thread
@@ -1125,17 +1158,17 @@ failure-path clearing transitions are not accepted optimizations.
 > **Status: Implemented contract.** The matrix is the audit index; a `planned` row is not
 > represented as an implemented guarantee.
 
-| Contract | Design section | Current implementation or fixture | Required evidence | Verdict dimension |
-|---|---|---|---|---|
-| Capture-domain boundary | 2.2, Contract status | `CaptureDomain`, seccomp boundary fixture | observed `sys_enter` versus `attempt_missed` artifact | `capture_domain_validity` |
-| Stable installed symbolization generation | D.2 | native agent generation state, redefinition fixture | paused replacement and unload/redefinition artifact | `lifecycle_validity`, `attribution_coverage` |
-| Strong metadata lifetime | D.2 | native metadata resolver and weak cache guards | unload race with no invalid method dereference | `dictionary_integrity` |
-| Coherent live snapshot and terminal closure | D.1 | live definition publication | MZSE bytes, watermark, publication ID, closure acknowledgement | `transport_completeness`, `dictionary_integrity` |
-| Non-blocking bounded admission | Resource ownership | encoder, publisher, retained-result limits | stopped-consumer overload artifact and memory high-water mark | `transport_completeness` |
-| Owned ring records | Resource ownership | `BpfRingBufferReader`, event decoder | delayed join across ring wraparound | `attribution_coverage`, `dictionary_integrity` |
-| Native outcome preservation | Native-call contract | invocation proxy and cleanup path | return, exception, `errno`, and re-entry fixture | `lifecycle_validity` |
-| Version-1 framing | D.3 | `ControlProtocol`, client session, golden transcripts | partial-frame, deadline, and hard-error transcript | `transport_completeness`, `lifecycle_validity` |
-| Exact-stack performance | Performance targets | native phase benchmark and baseline | raw samples, phase medians, stack-byte comparison | `runtime_overhead` |
+| Contract | Status | Design section | Current implementation or fixture | Required evidence | Evidence artifact | Verdict dimension |
+|---|---|---|---|---|---|---|
+| Capture-domain boundary | implemented | 2.2, Contract status | `CaptureDomain`, seccomp boundary fixture | observed `sys_enter` versus `attempt_missed` artifact | `tier-e-rootful-final-gate-20260913.json` | `capture_domain_validity` |
+| Stable installed symbolization generation | implemented | D.2 | native `SymbolizationGeneration`, redefinition fixture, lifecycle stress fixture | replacement, unload/redefinition, and stale-identity rejection | `tier-e-lifecycle-identity-stress-20260913.json` | `lifecycle_validity`, `attribution_coverage` |
+| Strong metadata lifetime | implemented baseline | D.2 | native metadata resolver and weak cache guards | unload race with no invalid method dereference | `tier-e-rootful-final-gate-20260913.json` | `dictionary_integrity` |
+| Coherent live snapshot and terminal closure | implemented baseline | D.1 | `AgentDefinitionFile`, live definition publication, `TierEEndToEndIntegrationTest` | MZSE bytes, watermark, publication ID, closure acknowledgement | `tier-e-rootful-final-gate-20260913.json` | `transport_completeness`, `dictionary_integrity` |
+| Non-blocking bounded admission | implemented baseline | Resource ownership | encoder, `DictionaryBatchPublisher`, retained-result limits | stopped-consumer overload, retry, terminal, and abandoned-batch evidence | `tier-e-transport-fault-injection-20260913.json` | `transport_completeness` |
+| Owned ring records | implemented | Resource ownership | `BpfRingBufferReader`, event decoder | delayed join across ring wraparound | `tier-e-rootful-final-gate-20260913.json` | `attribution_coverage`, `dictionary_integrity` |
+| Native outcome preservation | planned for full binding audit | Native-call contract | invocation proxy and cleanup path | return, exception, `errno`, and re-entry fixture for every binding | not yet retained | `lifecycle_validity` |
+| Version-1 framing | implemented | D.3 | `ControlProtocol`, `TierEClientSession`, golden transcripts | partial-frame, deadline, and hard-error transcript | `tier-e-rootful-final-gate-20260913.json` | `transport_completeness`, `lifecycle_validity` |
+| Exact-stack performance | implemented measurement gate | Performance targets | native phase benchmark, baseline, 25% threshold checker | raw samples, phase medians, stack-byte comparison | `tier-e-rootful-final-gate-20260913.json` | `runtime_overhead` |
 
 Each evidence artifact records the source commit, command, environment, raw output location,
 fixture result, and the six machine-readable dimensions:
