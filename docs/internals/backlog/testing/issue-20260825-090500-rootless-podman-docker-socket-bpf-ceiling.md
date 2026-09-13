@@ -7,7 +7,8 @@ component: "ebpf-prototype"
 target_modules:
   - "ebpf-prototype"
 target_files:
-  - "ebpf-prototype/scripts/run_collector.sh"
+  - "scripts/run_tier_e_rootful_gate.sh"
+  - "docs/internals/designs/profiler/tier-e-design.md"
 effort: "small"
 autonomy: "supervised"
 open_questions: true
@@ -32,8 +33,8 @@ Discovered while executing Tier E WP-02's kernel phase (2026-08-25).
 
 **Needed:**
 
-1. Keep using `ebpf-prototype/scripts/run_collector.sh`, which now auto-detects the situation
-   (probes container `uid_map`; rootless ⇒ falls back to one `sudo podman run`).
+1. Use `scripts/run_tier_e_rootful_gate.sh` for the current authoritative privileged workflow;
+   do not rely on the removed `ebpf-prototype` collector path.
 2. Decide the durable workflow (operator):
    * passwordless sudo rule for the specific runner command, or
    * execute Tier E kernel phases only in CI runners with genuine rootful runtimes.

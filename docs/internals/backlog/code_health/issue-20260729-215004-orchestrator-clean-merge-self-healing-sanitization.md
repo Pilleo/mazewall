@@ -8,14 +8,14 @@ component: "orchestrator"
 target_modules:
   - ":tools:orchestrator"
 target_files:
-  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BranchRebaser.kt"
+  - "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/GitHubCli.kt"
 effort: "medium"
 autonomy: "autonomous"
 paperclip_issue_id: "5ec18eb4-a6a0-469e-875c-7ee376df5437"
 paperclip_identifier: "MAZ-1081"
 ---
 
-# 🔴 [Severity: HIGH]: Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser
+# 🔴 [Severity: HIGH]: Implement Self-Healing Working Tree Sanitization on Successful Merge Paths
 
 **Context:**
 The orchestrator's `BranchRebaser` is responsible for merging master into PR branches. If a merge fails, the rebaser enters a "rescue" path (`handleRescue`) where it checkouts only the allowed target files and discards all other modifications.

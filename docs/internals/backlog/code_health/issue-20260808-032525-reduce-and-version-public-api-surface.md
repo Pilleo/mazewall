@@ -8,10 +8,11 @@ component: "enforcer"
 target_modules:
   - ":enforcer"
   - ":profiler"
+  - ":platform"
 target_files:
   - "enforcer/build.gradle.kts"
   - "profiler/build.gradle.kts"
-  - "enforcer/src/main/kotlin/io/mazewall/LinuxNative.kt"
+  - "platform/src/main/kotlin/io/mazewall/LinuxNative.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt"
 effort: "huge"
 autonomy: "supervised"

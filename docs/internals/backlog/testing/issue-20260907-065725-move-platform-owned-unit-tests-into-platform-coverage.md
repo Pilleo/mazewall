@@ -10,13 +10,13 @@ target_modules:
   - ":enforcer"
 target_files:
   - "platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine.kt"
-  - "enforcer/src/test/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngineTest.kt"
-  - "enforcer/src/test/kotlin/io/mazewall/SyscallResultTest.kt"
-  - "enforcer/src/test/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtilsTest.kt"
+  - "platform/src/test/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngineTest.kt"
+  - "platform/src/test/kotlin/io/mazewall/SyscallResultTest.kt"
+  - "platform/src/test/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtilsTest.kt"
 target_symbols:
   - "SeccompDaemonEngine"
 verify_cheap:
-  - "./gradlew :enforcer:test --tests io.mazewall.platform.seccomp.daemon.SeccompDaemonEngineTest"
+  - "./gradlew :platform:test --tests io.mazewall.platform.seccomp.daemon.SeccompDaemonEngineTest"
 needs_kernel: true
 core_lock: false
 effort: "medium"

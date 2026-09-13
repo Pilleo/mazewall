@@ -8,10 +8,11 @@ component: profiler
 target_modules:
 - :profiler
 target_files:
-- profiler/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt
-- profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt
 - profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt
+- profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemonEngine.kt
 - profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerSessionHandler.kt
+- profiler/src/test/kotlin/io/mazewall/profiler/engine/ProfilerDaemonTest.kt
+- profiler/src/test/kotlin/io/mazewall/profiler/engine/ProfilerDaemonStateTest.kt
 effort: large
 autonomy: supervised
 paperclip_issue_id: 8335dcb9-1cce-4001-894d-f3587e2d554f
@@ -23,14 +24,12 @@ paperclip_identifier: MAZ-760
 **Context:** The `:profiler` module's coverage is currently at ~73%. The remaining untested code resides in highly complex, OS-integrated classes such as `IterativeProfiler`, `Profiler`, `ProfilerDaemon`, and `ProfilerSessionHandler`. These classes tightly couple JVM logic with Linux processes (via `ProcessBuilder` or direct NativeEngine invocations) and daemon orchestration, making them extremely difficult to test cleanly with standard JVM unit tests without relying on heavy mocking frameworks or flaky environment setups (e.g. timeout issues, unexpected JVM interrupts). Because the repository discourages mock-heavy testing (as per KDocs and `AGENTS.md`), these classes need structural refactoring to improve their inherent testability.
 
 **Needed:**
-1. Apply dependency injection (DI) patterns to extract process spawning, I/O logic, and global static dependencies (like `ProfilerDaemonManager.getInstance()`) from `Profiler` and `IterativeProfiler`.
-2. Extract the socket handling and main loop from `ProfilerDaemon` into a testable interface that can run independently of `System.in`/`exitProcess`.
-3. Separate the Seccomp protocol handling logic in `ProfilerSessionHandler` from the direct FFM interactions, allowing deterministic verification of the ACK loop protocol.
-4. Implement the unit and integration tests necessary to increase the `:profiler` module coverage strictly above 80%, using parameterized tests and testing shared logic without mocking where possible.
+1. Extract socket acceptance, shutdown, and client-session scheduling from `ProfilerDaemon`/`ProfilerDaemonEngine` behind deterministic seams; keep production ownership and fail-closed cleanup unchanged.
+2. Separate `ProfilerSessionHandler` protocol transitions from direct FFM operations so ACK-loop behavior can be tested without native fixtures.
+3. Add focused tests for idle clients, shutdown races, transport failures, and session retirement; do not duplicate the completed Tier E attribution seams.
+4. Raise profiler coverage above 80% only through behaviorally meaningful tests, not broad exclusions or mock-heavy replacements.
 
-**Progress (2026-08-23):** Partially delivered:
-- `IterativeProfiler` extracted into pure state-machine + pluggable `IterativeTaskExecutor`
-  (DI seam for process spawning/installation); unit-tested without mocks for the state layer.
-- DiagnosticTriageRunner external-process capture is timeout-bounded and injectable-free.
-Remaining: `ProfilerDaemon` socket/main-loop extraction and
-`SupervisorDaemonManager.getInstance()` decoupling inside MazewallProfiler paths.
+**Progress (2026-08-23 and subsequent Tier E refactoring):** `IterativeProfiler` and Tier E
+attribution components already have testable state/transport seams. The remaining scope is the
+production profiler daemon and session handler only; iterative-profiler extraction is complete
+and no longer belongs in this issue.

@@ -1,7 +1,7 @@
 ---
 title: "MAZ-18 Backlog Review - Open Questions Identification"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "backlog-review"
 target_modules:
@@ -177,6 +177,13 @@ However, they remain flagged because they indicate areas where future decisions 
 2. **MAZ-765 (Rootless Podman) - HIGH PRIORITY:** Blocking local Tier E development. Simple binary choice between two clear options.
 
 3. **MAZ-712 (Java Agent Dependencies) - MEDIUM PRIORITY:** Dependency approval needed. The hard process rules already state "New external dependencies require explicit operator approval per PR" — this is a known process question.
+
+## Resolution
+
+This historical review is resolved as a snapshot. Its actionable questions are tracked by the
+current backlog records, and its Tier E references have been superseded by the resolved Tier E
+correctness, transport, and evidence records. New operator decisions should be filed as focused
+issues rather than reopening this historical inventory.
 
 The remaining questions (MAZ-709, MAZ-714, MAZ-716) can have temporary answers or workarounds and should not block overall progress.
 

@@ -10,7 +10,7 @@ target_modules:
 target_files:
   - "tools/orchestrator/AGENTS.md"
   - "tools/orchestrator/README.md"
-  - "plan.md"
+  - "docs/plans/remediation-plan.md"
 effort: "small"
 autonomy: "autonomous"
 open_questions: false
@@ -25,7 +25,7 @@ Paperclip heartbeats wake an adapter and record runs. They do not poll GitHub PR
 
 **Needed:**
 1. Add an invariant to `tools/orchestrator/AGENTS.md`: do not remove GitHub issue/PR/CI/review/merge/generation states unless a replacement dispatcher has tests covering the same transitions (PR appears, CI fail comments once per SHA, review verdict, merge, conflict → new generation).
-2. Correct `plan.md` Phase 3–4: Paperclip is board + multi-adapter wakeup; GitHub/CI/merge stays in `:tools:orchestrator` (or a future dedicated dispatcher module), not in `paperclip_telegram_bridge.py`.
+2. Correct the current remediation plan's Phase 3–4 guidance: Paperclip is board + multi-adapter wakeup; GitHub/CI/merge stays in `:tools:orchestrator` (or a future dedicated dispatcher module), not in a board notification script.
 3. README: one sentence that Jules is *an* adapter, not the control plane, and that CI/merge remains orchestrator-owned.
 4. No functional state-machine rewrite in this issue.
 

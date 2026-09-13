@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 77 | *Total Resolved Issues:* 572
+*Total Active Issues:* 67 | *Total Resolved Issues:* 590
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,8 +30,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid](issue-20260910-225629-741-record-review-hardening-liveness-and-boundary-evid.md) | Record review hardening liveness and boundary evidence | high | core |
-| [issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps](issue-20260912-000001-close-remaining-tier-e-attribution-and-lifecycle-correctness-gaps.md) | Close remaining Tier E attribution and lifecycle correctness gaps | high | profiler |
 | [issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit](issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md) | Restore accept peer address writes through identity-bound authority | high | enforcer |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines](code_health/issue-193-review-orchestrator-prompts-jules-quality-safety-guidelines.md) | Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety | high | orchestrator |
@@ -62,9 +60,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260823-181022-diff-escape-pauses-sibling-slots](code_health/issue-20260823-181022-diff-escape-pauses-sibling-slots.md) | Pause sibling slots when a PR diff escapes declared target_files | high | orchestrator |
 | [issue-20260823-181023-keep-module-level-exclusive-scheduling](code_health/issue-20260823-181023-keep-module-level-exclusive-scheduling.md) | Keep module-level exclusive scheduling; CORE file locks only, no intra-module parallel | high | orchestrator |
 | [issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness](code_health/issue-20260825-071117-paperclip-core-upstream-asks-blocking-hybrid-loop-robustness.md) | Paperclip core upstream asks blocking hybrid-loop robustness | high | orchestrator |
-| [issue-20260825-195000-tier-e-nice-to-have-1](code_health/issue-20260825-195000-tier-e-nice-to-have-1.md) | Extract probe harness modes from TierEDaemon.kt main() | low | tier-e |
-| [issue-20260825-195000-tier-e-nice-to-have-2](code_health/issue-20260825-195000-tier-e-nice-to-have-2.md) | Add SO_RCVTIMEO to daemon session socket (bounded recv blocking) | low | tier-e |
-| [issue-20260825-195000-tier-e-nice-to-have-3](code_health/issue-20260825-195000-tier-e-nice-to-have-3.md) | Add per-context event count metrics to daemon | low | tier-e |
 | [issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor](code_health/issue-20260827-104508-add-target-based-conflict-checking-to-hybridsupervisor.md) | Add target-based conflict checking to HybridSupervisor | high | orchestrator |
 | [issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli](code_health/issue-20260827-104830-precompile-new-backlog-issue-into-standalone-jvm-cli.md) | Precompile new_backlog_issue into standalone JVM CLI | medium | orchestrator |
 | [issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant](code_health/issue-20260827-110130-wire-codanna-into-symbollocator-as-an-optional-accelerant.md) | Wire Codanna into SymbolLocator as an optional accelerant | medium | orchestrator |
@@ -89,21 +84,16 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260907-232023-285-encode-legal-portal-state-effect-pairs-without-int](issue-20260907-232023-285-encode-legal-portal-state-effect-pairs-without-int.md) | Encode legal portal state-effect pairs without interpreter casts | high | core |
 | [issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-](issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-.md) | Preload HotSpot clock wrappers before restrictive iterative profiling | high | profiler |
 | [issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des](issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md) | Correct secure exec cleanup of injected tracee descriptors | medium | enforcer |
-| [issue-20260906-221244-reduce-tier-e-per-boundary-jvmti-stack-capture-cost](performance/issue-20260906-221244-reduce-tier-e-per-boundary-jvmti-stack-capture-cost.md) | Reduce Tier E per-boundary JVMTI stack capture cost | high | profiler |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](security/issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
 | [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
-| [issue-20260808-032520-owned-contained-executor-lifecycle](security/issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](testing/issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
 | [issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk](testing/issue-013-manual-ffm-layout-maintenance-and-abi-drift-risk.md) | Manual FFM Layout Maintenance and ABI Drift Risk | low | enforcer |
 | [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |
 | [issue-030-architectural-dip-dependency-inversion-violations-in-native-](testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md) | Architectural DIP (Dependency Inversion) Violations in Native Scopes | low | enforcer |
 | [issue-043-phantom-types-for-context-aware-capability-tokens](testing/issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
-| [issue-061-manual-ffm-layout-maintenance-and-drift-risk](testing/issue-061-manual-ffm-layout-maintenance-and-drift-risk.md) | Manual FFM Layout Maintenance and Drift Risk | medium | enforcer |
 | [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |
 | [issue-20260726-0135-refactor-profiler-classes-for-testability](testing/issue-20260726-0135-refactor-profiler-classes-for-testability.md) | Refactor Profiler core classes for testability and test them | high | profiler |
 | [issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling](testing/issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md) | Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root | medium | ebpf-prototype |
-| [issue-20260825-191000-ringbuf-rw-data-mapping-eperm](testing/issue-20260825-191000-ringbuf-rw-data-mapping-eperm.md) | BPF ringbuf data area cannot be mapped writable on current kernels | medium | tier-e |
-| [issue-20260825-193000-tier-e-r3-golden-protocol-conformance](testing/issue-20260825-193000-tier-e-r3-golden-protocol-conformance.md) | Tier E R3: golden-file protocol conformance suite | medium | tier-e |
 | [issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage](testing/issue-20260907-065725-move-platform-owned-unit-tests-into-platform-coverage.md) | Move platform-owned unit tests into platform coverage | high | platform |
 | [issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines](testing/issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines.md) | Forbid silent else on sealed lifecycle and security machines | high | testing |
