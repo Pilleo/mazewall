@@ -89,6 +89,11 @@ open until these outputs are retained as durable rootful-CI artifacts for every 
 
 ### Durable verification evidence
 
+The rootful Docker execution and native fixture summary is committed at
+[`tier-e-rootful-docker-20260913.md`](../evidence/tier-e-rootful-docker-20260913.md).
+It supplements the focused JVM tests with privileged integration, seccomp-boundary,
+phase-benchmark, and retransformation outputs.
+
 | Dimension | Evidence | Result |
 |---|---|---|
 | Capture-domain validity | `AttributionCollectorTest.capture domain attempt missed is a limitation and never an exact event` | `PASS` for classification; denied-before-`sys_enter` remains an explicit boundary limitation |

@@ -64,6 +64,11 @@ and lifecycle validity. This does not claim that the kernel can observe attempts
 
 ### Current Tier E completion evidence
 
+The rootful Docker execution record is committed at
+[`tier-e-rootful-docker-20260913.md`](../evidence/tier-e-rootful-docker-20260913.md).
+It provides the privileged integration result, native fixture outputs, and
+machine-readable verdict dimensions.
+
 The active implementation paths are `profiler/src/main/kotlin/io/mazewall/profiler/tierE/**`
 and `profiler-native/**`; the historical `tier-e-proto` and `ebpf-prototype` paths are not
 modules in this checkout. Current focused evidence covers the committed protocol transcripts,
