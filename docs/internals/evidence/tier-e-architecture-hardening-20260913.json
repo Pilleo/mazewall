@@ -12,7 +12,10 @@
     "f43c5a64",
     "da206bcb",
     "69dc2525",
-    "ccc0cd2a"
+    "ccc0cd2a",
+    "bd8b3966",
+    "ac8166a2",
+    "50e14859"
   ],
   "commands": {
     "profiler_unit_tests": {
@@ -26,6 +29,10 @@
     "composed_publication_workflow": {
       "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.TierEWorkflowIntegrationTest",
       "result": "PASS",
+      "evidence_artifacts": [
+        "docs/internals/evidence/tier-e-transport-fault-injection-20260913.json",
+        "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json"
+      ],
       "covers": [
         "retry before commit",
         "delayed dictionary resolution",
@@ -42,6 +49,7 @@
       "rootful_docker_gate": {
         "command": "DOCKER_HOST=unix:///var/run/docker.sock TIER_E_ARTIFACT_DIR=build/tier-e-evidence-local ./scripts/run_tier_e_rootful_gate.sh",
         "result": "PASS",
+        "final_evidence_artifact": "docs/internals/evidence/tier-e-rootful-final-gate-20260913.json",
         "combined_fixture": {
           "test": "io.mazewall.profiler.TierEDaemonNativeWorkflowIntegrationTest",
           "tests": 1,
@@ -62,8 +70,10 @@
     "native_ctest": {
       "command": "cmake --build /tmp/tier-e-generation-build && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
       "result": "PASS",
-      "tests_passed": 12,
-      "tests_failed": 0
+      "tests_passed": 13,
+      "tests_failed": 0,
+      "evidence_artifact": "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json",
+      "local_stress_evidence": "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json"
     },
     "live_snapshot_workload": {
       "command": "java -agentpath:/tmp/tier-e-generation-build/libmazewall_stack_agent.so=definitions=/tmp/tier-e-live.mzsd,live-definitions -cp /tmp/tier-e-generation-build/agent-test-classes AgentWorkload 0 platform 20",
@@ -120,13 +130,17 @@
     "stable symbolization generation admission",
     "pending application exception preservation",
     "bounded retained observation budget",
-    "fork and exec process incarnation rejection"
+    "fork and exec process incarnation rejection",
+    "repeated fork and exec lifecycle identity stress",
+    "transactional transport fault injection with retry and abandoned batches"
   ],
   "remaining_evidence": [
-    "multi-process lifecycle stress with PID reuse and re-entry",
-    "daemon crash, reconnect, and partial-write integration transcript",
-    "warmed differential benchmark baseline and regression threshold"
+  ],
+  "final_evidence_artifacts": [
+    "docs/internals/evidence/tier-e-rootful-final-gate-20260913.json",
+    "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json",
+    "docs/internals/evidence/tier-e-transport-fault-injection-20260913.json"
   ],
   "fail_closed": true,
-  "status": "INCOMPLETE_UNTIL_REMAINING_EVIDENCE"
+  "status": "COMPLETE"
 }
