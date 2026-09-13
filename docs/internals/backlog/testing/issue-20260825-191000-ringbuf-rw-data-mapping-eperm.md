@@ -5,9 +5,10 @@ status: "open"
 priority: medium
 component: "tier-e"
 target_modules:
-  - "tier-e-proto"
+  - "profiler"
 target_files:
-  - "tier-e-proto/src/main/kotlin/io/mazewall/tierE/ringbuf/RingbufReader.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/ringbuf/BpfRingBufferReader.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/ringbuf/BpfRingBufferReaderTest.kt"
 effort: "small"
 autonomy: "supervised"
 open_questions: false
@@ -38,7 +39,7 @@ version luck, never as contract.
 
 **Needed:**
 1. Keep `RingbufReader` on the two-mapping scheme; add a regression test asserting the
-   RO-data read path under concurrent producer load (WP-05 stress covers this).
+   RO-data read path under concurrent producer load in the current profiler reader.
 2. When WP-14 lands the pure-syscall loader, preserve identical mapping semantics and add
    an explicit comment cross-linking this issue.
 3. If a future kernel relaxes write-mapping permissions, do NOT switch back silently:

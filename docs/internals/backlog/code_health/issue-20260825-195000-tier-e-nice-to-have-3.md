@@ -5,9 +5,10 @@ status: "open"
 priority: low
 component: "tier-e"
 target_modules:
-  - "tier-e-proto"
+  - "profiler"
 target_files:
-  - "daemon/tier_e_bpf_shim.c"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
 effort: "small"
 autonomy: "supervised"
 open_questions: false
@@ -21,6 +22,7 @@ paperclip_identifier: "MAZ-1388"
 **Context:** The daemon tracks total events but not per-context-id distribution.
 Useful for verifying that attribution is balanced across scopes during stress runs.
 
-**Needed:** Add a percpu LRU hash map keyed by context_id in the BPF program;
-increment on each attributed event; expose via a shim function callable from Kotlin.
-Report in session DEAD summary line.
+**Needed:** Add a bounded LRU hash map keyed by `context_id` in the BPF program;
+increment on each attributed event; expose it through `TierEbpfEngine` and report
+the deterministic summary in daemon status output. Metrics are diagnostic only and
+cannot affect attribution.

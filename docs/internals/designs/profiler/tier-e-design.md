@@ -209,6 +209,55 @@ openat("/tmp/in.pdf")             sys_enter raw tracepoint
 Tier E does not replace policy-grade Tier S. It is a profiling/attribution backend: exact logical
 stacks for covered native bindings, with explicit UNKNOWN/incomplete results outside that coverage.
 
+## 2.3 Current implementation contracts (2026-09-13)
+
+The current Tier E implementation is in `:profiler` under
+`io.mazewall.profiler.tierE`; the historical `tier-e-proto` and `ebpf-prototype`
+paths are not active modules. The following contracts are executable in the current
+source tree:
+
+- `TierEClientSession` applies a 30-second receive deadline after `accept()`. A
+  `SocketTimeoutException` is an idle event that rechecks shutdown state; hard I/O
+  errors still end the client session.
+- `ProbeMain` owns `--probe`, `--probe-stdin`, and `--probe-cmdfile`. The production
+  `TierEKotlinDaemon` entry point has no probe-only command modes.
+- `TierEBpfProgramBuilder` reserves map slot 5 for a bounded LRU context metric map.
+  Context counts are diagnostic snapshots exposed by `TierEbpfEngine` and formatted
+  in deterministic context-id order; they never authorize or suppress attribution.
+- `BpfRingBufferReader` maps only the metadata page as `PROT_READ|PROT_WRITE` and
+  maps the data alias as `PROT_READ`. Its regression tests exercise BUSY, DISCARD,
+  wraparound, acquire/release cursor movement, and concurrent reservations.
+
+## 2.4 Performance and lifetime evidence
+
+The native agent's exact stack path is measured in three phases: `GetStackTrace`,
+raw-key validation/cache lookup, and logical-frame metadata resolution. The optional
+`benchmark-phases` agent option emits phase totals and cache hit/miss counts without
+changing definitions. Logical metadata is immutable after insertion and keyed by
+method identity plus symbolization epoch; every value carries a weak declaring-class
+guard and is rejected when the class is unloaded. The cache is bounded at 4096 entries.
+Class load, retransformation, and redefinition advance the epoch, preventing cross-version
+method collapse. A live Java retransformation fixture and full-stream/unique-edge
+warmed benchmark fixtures run in `profiler-native` CTest.
+
+## 2.5 Protocol fixture contract
+
+The committed JSON transcripts under `profiler/src/test/resources/protocol/` are the
+wire compatibility boundary for the current framed control daemon. They replay through
+`ControlProtocol` and `ControlSessionMachine` and compare the exact rendered reply bytes.
+The fixtures cover successful attach/status/detach/shutdown, `BUSY`, `ALREADY_BOUND`,
+`MARKER_BUILD_ID_UNREADABLE`, `NOT_MAPPED_IN_TARGET`, and terminal `STATE` failures.
+Any future wire-visible change must update these fixtures in the same change.
+
+## 2.6 Privileged fixture boundary
+
+The native CTest suite includes the seccomp denied-attempt boundary fixture, which
+reports `attempt_missed=1 observed_sys_enter=0 verdict=INCOMPLETE`. This is deliberately
+not an exact Tier E observation: attempts denied before the selected `sys_enter` path
+are outside the capture domain. Rootful CI is authoritative for privileged BPF,
+seccomp, and runtime fixtures. Rootless Podman remains an environment limitation and
+must be recorded as `INCOMPLETE`, never converted into a passing kernel claim.
+
 ### 2.1 Optional unique-edge emission
 
 `TierEEmissionMode.FULL_STREAM` is the default.  The opt-in

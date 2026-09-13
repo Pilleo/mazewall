@@ -51,7 +51,7 @@ Open and map the remaining Tier E correctness matrix to close this item:
 | 3 mid-scope detach while session alive | `InvocationReplayMachineTest.detach and exec invalidation require validated re-entry before exact attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `ff58ffff`) |
 | 4 seccomp-denied attempt + active session | `AttributionCollectorTest.capture domain attempt missed is a limitation and never an exact event` (focused PASS; reports boundary limitation, not kernel-denied observation) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `ff58ffff`) |
 | 5 PID reuse/exec transition stress | `InvocationReplayMachineTest.pid reuse with new process epoch evicts stale state and resets attribution` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest` (commit `57c42afa`) |
-| 6 method unload/redefine races | native symbolization epoch + weak class-guard implementation; native fixture compile and smoke PASS (no class-redefinition fixture in this environment) | `cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug && cmake --build /tmp/jseccomp-profiler-native-build -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-build --output-on-failure` (commit `ff58ffff`) |
+| 6 method unload/redefine races | native symbolization epoch + weak class-guard implementation; live retransformation fixture PASS | `cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug && cmake --build /tmp/jseccomp-profiler-native-build -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-build -V` (`agent_redefinition_smoke_test`, commit `0b9bf45b`) |
 | 7 first unique-edge emit fails then repeats | `AttributionCollectorTest.unique edge deduplication retries after failed emit and suppresses after acknowledgement`; `AttributionCollectorTest.emission acknowledgement requires the exact outstanding token` (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.AttributionCollectorTest` (commit `ff58ffff`) |
 | 8 dictionary pressure with long-running workload | `DictionaryBatchPublisherTest.retry keeps the exact batch and watermark unchanged until commit`; `DictionaryBatchPublisherTest.termination records an abandoned prepared batch without committing it`; terminal-failure test (focused PASS) | `./gradlew :profiler:test --tests io.mazewall.profiler.attribution.DictionaryBatchPublisherTest` (commit `ff58ffff`) |
 
@@ -61,6 +61,39 @@ The capture-domain contract is also implemented in the collector: `recordCapture
 exposes the independent verdict dimensions for capture domain, transport, attribution, dictionary,
 and lifecycle validity. This does not claim that the kernel can observe attempts denied before
 `sys_enter`; it records the boundary limitation when an upstream component reports one.
+
+### Current Tier E completion evidence
+
+The active implementation paths are `profiler/src/main/kotlin/io/mazewall/profiler/tierE/**`
+and `profiler-native/**`; the historical `tier-e-proto` and `ebpf-prototype` paths are not
+modules in this checkout. Current focused evidence covers the committed protocol transcripts,
+terminal-state rejection, actual mapped-reader BUSY/DISCARD/wraparound behavior, bounded
+concurrent reservations, the live retransformation fixture, the seccomp boundary fixture,
+and warmed full-stream/unique-edge phase benchmarks.
+
+| Dimension | Current artifact | Verdict |
+|---|---|---|
+| Capture-domain validity | `seccomp_boundary_fixture`: `attempt_missed=1 observed_sys_enter=0 verdict=INCOMPLETE` | `PASS` for explicit boundary reporting; denied-before-`sys_enter` remains out of domain |
+| Transport completeness | `DictionaryBatchPublisherTest` retry, terminal, and abandoned-tail cases | `PASS` |
+| Attribution coverage | callback, capture failure, detach/exec invalidation, and opaque token tests | `PASS` |
+| Dictionary integrity | immutable epoch-keyed metadata cache, weak unload guards, `agent_redefinition_smoke_test` | `PASS` |
+| Lifecycle validity | terminal command rejection and typed process/session identity tests | `PASS` |
+| Runtime overhead | `agent_phase_benchmark_full`, `agent_phase_benchmark_unique` phase totals | `PASS` artifact; compare against the recorded baseline before rollout |
+
+Exact current commands:
+
+```text
+./gradlew :profiler:test
+./gradlew :profiler:test --tests io.mazewall.profiler.tierE.daemon.ControlProtocolFixtureTest --tests io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReaderTest
+cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/jseccomp-profiler-native-build -j2
+ctest --test-dir /tmp/jseccomp-profiler-native-build -V
+./scripts/adkw check-backlog
+```
+
+The umbrella issue remains `open` until these outputs are retained as durable CI artifacts
+for all eight matrix rows. Rootless Podman cannot provide authoritative privileged BPF
+evidence; that limitation is `INCOMPLETE`, not a weakened policy or a passing result.
 This does not claim that the kernel can observe attempts denied before `sys_enter`; it records the
 boundary limitation when an upstream component reports one.
 

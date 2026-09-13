@@ -19,13 +19,11 @@ dependencies:
   - "issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md"
 target_modules:
   - "profiler"
-  - "tier-e-proto"
-  - "ebpf-prototype"
 target_files:
   - "docs/internals/designs/profiler/tier-e-design.md"
   - "profiler/src/main/kotlin/io/mazewall/profiler/**"
   - "profiler/src/test/kotlin/io/mazewall/profiler/**"
-  - "ebpf-prototype/**"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/**"
 open_questions: false
 ---
 
@@ -84,9 +82,10 @@ integrity/edge components (`954d2ccc`), immutable replay state with typed lifecy
 the publisher preserve definitions and watermarks across retry, opaque emission tokens prevent
 foreign acknowledgements, typed process/session identities reject stale observations, explicit
 replay invalidations fail closed, and the native symbolization cache is versioned by redefinition
-epoch. The umbrella remains open because the environment has no dedicated class-redefinition or
-seccomp-denied-attempt fixture; those constraints are recorded rather than treated as exact-event
-evidence.
+epoch. Follow-up commit `4d820021` adds the current protocol, terminal-state, ring-buffer,
+timeout, metrics, and probe-boundary contracts; native fixture commit `0b9bf45b` adds the
+live retransformation, seccomp boundary, and full/unique phase benchmarks. The umbrella remains
+open until these outputs are retained as durable rootful-CI artifacts for every matrix row.
 
 ### Durable verification evidence
 
@@ -95,7 +94,7 @@ evidence.
 | Capture-domain validity | `AttributionCollectorTest.capture domain attempt missed is a limitation and never an exact event` | `PASS` for classification; denied-before-`sys_enter` remains an explicit boundary limitation |
 | Transport completeness | `DictionaryBatchPublisherTest.retry keeps the exact batch and watermark unchanged until commit`; terminal and abandoned-tail tests | `PASS` for transactional behavior; incomplete tails remain fail-closed |
 | Attribution coverage | callback, inner capture failure, stale identity, and token-ownership tests in `AttributionCollectorTest`/`InvocationReplayMachineTest` | `PASS` |
-| Dictionary integrity | native symbolization epoch plus weak unload guards; native build and six CTest fixtures | `PASS` for compiled/smoke coverage; `INCOMPLETE` for missing live redefine fixture |
+| Dictionary integrity | native symbolization epoch plus weak unload guards; `agent_redefinition_smoke_test` | `PASS` (`0b9bf45b`) |
 | Lifecycle validity | `InvocationReplayMachineTest.detach and exec invalidation require validated re-entry before exact attribution`; PID-reuse test | `PASS` |
 
 Exact commands:
@@ -104,8 +103,23 @@ Exact commands:
 ./gradlew :profiler:test
 cmake -S profiler-native -B /tmp/jseccomp-profiler-native-build -DCMAKE_BUILD_TYPE=Debug
 cmake --build /tmp/jseccomp-profiler-native-build -j2
-ctest --test-dir /tmp/jseccomp-profiler-native-build --output-on-failure
+ctest --test-dir /tmp/jseccomp-profiler-native-build -V
 ```
+
+### Follow-up integration evidence
+
+Current profiler-native CTest adds `agent_redefinition_smoke_test`,
+`agent_phase_benchmark_full`, `agent_phase_benchmark_unique`, and
+`seccomp_boundary_fixture`. The profiler test suite adds committed protocol transcripts,
+terminal-state rejection, actual mapped-reader BUSY/DISCARD/wraparound coverage, and
+bounded concurrent cursor reservation coverage. These artifacts are authoritative when
+run in rootful CI; local rootless Podman remains a documented `INCOMPLETE` environment
+constraint for privileged BPF fixtures.
+
+The stale `tier-e-proto` and `ebpf-prototype` target paths in the original review have
+been normalized to the active `profiler` and `profiler-native` implementation paths.
+Resolved Tier E and retention/lifecycle issues remain unchanged. This issue remains
+`open` until the eight-row matrix has durable CI artifacts and commit linkage.
 
 ### Pass/Fail matrix (to be populated by implementation PR(s))
 

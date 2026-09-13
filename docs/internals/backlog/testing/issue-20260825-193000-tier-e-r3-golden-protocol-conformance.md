@@ -5,9 +5,11 @@ status: "open"
 priority: medium
 component: "tier-e"
 target_modules:
-  - "tier-e-proto"
+  - "profiler"
 target_files:
-  - "tier-e-proto/src/test/kotlin/io/mazewall/tierE/daemon/"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/ControlProtocol.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/ControlSessionMachine.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/daemon/ControlProtocolFixtureTest.kt"
 effort: "small"
 autonomy: "supervised"
 open_questions: false
@@ -29,13 +31,13 @@ enrichment fields.
 **Needed:**
 
 1. Record transcripts (command→reply sequences, including failure paths: BUSY,
-   ALREADY_BOUND, MARKER_BUILD_ID_UNREADABLE, NOT_MAPPED_IN_TARGET, STATE) from a live
-   daemon into committed JSON fixtures under `tier-e-proto/src/test/resources/protocol/`.
-2. Unit test replays each transcript through `ControlProtocol` + `SessionEngine` (fake
-   shim) asserting byte-identical replies.
+   ALREADY_BOUND, MARKER_BUILD_ID_UNREADABLE, NOT_MAPPED_IN_TARGET, STATE) into committed
+   JSON fixtures under `profiler/src/test/resources/protocol/`.
+2. Unit test replays each transcript through `ControlProtocol` + `ControlSessionMachine`
+   asserting byte-identical replies.
 3. Any wire-visible change requires regenerating fixtures IN THE SAME PR with rationale —
    review diff becomes the protocol-change review.
 4. When Kubescape enrichment fields arrive (WP-15), they extend fixtures here first.
 
-**Acceptance:** fixture replay test wired into `:tier-e-proto:check`; docs pointer from
+**Acceptance:** fixture replay test wired into `:profiler:test`; docs pointer from
 design doc §4 wire contract.
