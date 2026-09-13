@@ -21,6 +21,16 @@
       "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.DictionaryBatchPublisherTest --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest --tests io.mazewall.profiler.attribution.AttributionCollectorTest --tests io.mazewall.profiler.tierE.daemon.TierEFrameDecoderTest",
       "result": "PASS"
     },
+    "composed_publication_workflow": {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.TierEWorkflowIntegrationTest",
+      "result": "PASS",
+      "covers": [
+        "retry before commit",
+        "delayed dictionary resolution",
+        "exact unique-edge acknowledgement",
+        "terminal transport incompleteness"
+      ]
+    },
     "native_ctest": {
       "command": "cmake --build /tmp/tier-e-generation-build && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
       "result": "PASS",
