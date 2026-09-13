@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "artifact": "tier-e-architecture-hardening",
+  "recorded_at": "2026-09-13",
+  "branch": "fast-master",
+  "commits": [
+    "79a1091b",
+    "d90c5ffb",
+    "dab331f5",
+    "e40ea251",
+    "5fd4ce2c",
+    "f43c5a64",
+    "da206bcb"
+  ],
+  "commands": {
+    "profiler_unit_tests": {
+      "command": "./gradlew :profiler:test",
+      "result": "PASS"
+    },
+    "focused_hardening_tests": {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.DictionaryBatchPublisherTest --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest --tests io.mazewall.profiler.attribution.AttributionCollectorTest --tests io.mazewall.profiler.tierE.daemon.TierEFrameDecoderTest",
+      "result": "PASS"
+    },
+    "native_ctest": {
+      "command": "cmake --build /tmp/tier-e-generation-build && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
+      "result": "PASS",
+      "tests_passed": 12,
+      "tests_failed": 0
+    },
+    "live_snapshot_workload": {
+      "command": "java -agentpath:/tmp/tier-e-generation-build/libmazewall_stack_agent.so=definitions=/tmp/tier-e-live.mzsd,live-definitions -cp /tmp/tier-e-generation-build/agent-test-classes AgentWorkload 0 platform 20",
+      "result": "PASS",
+      "observed": [
+        "captured stack events",
+        "MZSE envelope",
+        "closed publication flag",
+        "non-zero publication watermark"
+      ]
+    }
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PARTIAL",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PARTIAL",
+    "runtime_overhead": "INCOMPLETE"
+  },
+  "verified_scope": [
+    "transactional dictionary retry and abandoned batch behavior",
+    "opaque unique-edge acknowledgement behavior",
+    "framed protocol idle and partial-frame deadlines",
+    "stable symbolization generation admission",
+    "pending application exception preservation",
+    "bounded retained observation budget",
+    "fork and exec process incarnation rejection"
+  ],
+  "remaining_evidence": [
+    "true daemon-to-native attach/capture/detach workflow artifact",
+    "multi-process lifecycle stress with PID reuse and re-entry",
+    "daemon crash, reconnect, and partial-write integration transcript",
+    "warmed differential benchmark baseline and regression threshold"
+  ],
+  "fail_closed": true,
+  "status": "INCOMPLETE_UNTIL_REMAINING_EVIDENCE"
+}
