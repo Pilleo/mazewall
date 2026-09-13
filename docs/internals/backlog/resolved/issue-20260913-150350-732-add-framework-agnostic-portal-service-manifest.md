@@ -1,7 +1,7 @@
 ---
 title: "Add framework-agnostic portal service manifest"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"

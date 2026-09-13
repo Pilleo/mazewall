@@ -1,7 +1,7 @@
 ---
 title: "GitHub CLI Authentication Resilience and Fallback for Invalid GITHUB_TOKEN"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20260727-021301"

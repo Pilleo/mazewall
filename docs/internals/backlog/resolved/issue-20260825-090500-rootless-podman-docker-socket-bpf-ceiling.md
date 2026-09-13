@@ -1,7 +1,7 @@
 ---
 title: "Dev-host container daemon is rootless podman; Tier E kernel phases need init-userns root"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 component: "ebpf-prototype"
 target_modules:

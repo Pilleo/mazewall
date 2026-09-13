@@ -1,7 +1,7 @@
 ---
 title: "Move platform-owned unit tests into platform coverage"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "platform"

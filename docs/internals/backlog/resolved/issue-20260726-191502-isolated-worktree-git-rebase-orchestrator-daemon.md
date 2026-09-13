@@ -2,7 +2,7 @@
 title: Isolate Orchestrator Git Operations from Main Working Directory using Temporary
   Worktrees
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 component: orchestrator

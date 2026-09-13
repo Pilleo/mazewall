@@ -1,7 +1,7 @@
 ---
 title: Automated FFM layout ABI validation across supported architectures
 severity: HIGH
-status: open
+status: resolved
 priority: low
 dependencies: []
 target_files:

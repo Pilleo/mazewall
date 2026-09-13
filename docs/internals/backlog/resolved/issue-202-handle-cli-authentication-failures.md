@@ -1,7 +1,7 @@
 ---
 title: Detect and Handle CLI Authentication Failures with Actionable Login Alerts
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:

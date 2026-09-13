@@ -1,7 +1,7 @@
 ---
 title: "Replace orchestrator module identity String with sealed type"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"

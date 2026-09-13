@@ -15,8 +15,8 @@ core_lock: false
 effort: "medium"
 autonomy: "supervised"
 open_questions: false
-paperclip_issue_id: e6f421c7-f298-49ab-a87a-32dad25621e7
-paperclip_identifier: MAZ-692
+paperclip_issue_id: "d91b2c9d-27d5-49d8-a60d-fe0a5365c962"
+paperclip_identifier: "MAZ-1476"
 ---
 
 # 🟢 [Severity: LOW]: Wire Codanna into SymbolLocator as an optional accelerant

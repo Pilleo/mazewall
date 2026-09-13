@@ -1,7 +1,7 @@
 ---
 title: "Detect Closed Pull Requests and Suppress Conflict Alarm Spam in Orchestrator"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"

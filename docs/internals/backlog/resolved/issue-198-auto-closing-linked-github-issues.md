@@ -1,7 +1,7 @@
 ---
-title: Graceful Fallback for AI Agent Failures
+title: Auto-Closing Linked GitHub Issues
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:
@@ -14,21 +14,24 @@ autonomy: supervised
 solution_approved: false
 blast_radius: medium
 reversible: true
-paperclip_issue_id: 6048f9a5-efa8-483e-bcf3-1af30e4598cf
-paperclip_identifier: MAZ-633
+paperclip_issue_id: 623a486d-ebea-412e-8115-0cb8a6c8450e
+paperclip_identifier: MAZ-634
 ---
 
-# 🔴 [Severity: HIGH]: Graceful Fallback for AI Agent Failures
+# 🔴 [Severity: HIGH]: Auto-Closing Linked GitHub Issues
 
 **Context:**
 **Context:**
-If `agy` / Antigravity execution fails (due to token exhaustion, network errors, rate limits, etc.), the daemon may crash, stall, or misbehave, halting the pipeline.
+The orchestrator moves the local backlog file to `resolved/` when completed, but leaves the corresponding GitHub issue open if the PR doesn't explicitly contain the `fixes #` keyword.
 
 **Needed:**
-Wrap the Antigravity execution block in `OrchestratorDaemon.kt` in a `try-catch` block. If an exception occurs:
-1. Log the failure.
-2. Send a Telegram notification: `"⚠️ Automated review failed (Token limit or error). Defaulting to manual human review for PR #$finalPrNumber"`.
-3. Bypass the automated reviewer approval/rejection logic and immediately enter the manual review waiting loop.
+Right after detecting that the PR is merged (`GitHubCli.isPrMerged(finalPrNumber) == true`) in `OrchestratorDaemon.kt`, check and close the corresponding GitHub issue:
+```kotlin
+println("Closing GitHub issue #$finalIssueNumber...")
+executeCmd("gh", "issue", "close", finalIssueNumber)
+bot?.sendMessage("✅ GitHub issue #$finalIssueNumber automatically closed.")
+```
+Ensure this is done reliably and handle any potential exceptions during CLI execution.
 
 **Needed:**
 1. Implement a fix based on the issue description.

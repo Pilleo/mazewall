@@ -1,7 +1,7 @@
 ---
 title: "Encode legal portal state-effect pairs without interpreter casts"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"

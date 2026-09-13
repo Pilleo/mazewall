@@ -17,8 +17,8 @@ autonomy: "supervised"
 open_questions: false
 review_verdict: approved
 has_side_effects: true
-paperclip_issue_id: 3e7d4466-653e-4bfa-84a5-f91d220cb727
-paperclip_identifier: MAZ-695
+paperclip_issue_id: "de9e316c-d6ba-4a92-86e1-e8cae6349b4c"
+paperclip_identifier: "MAZ-1478"
 ---
 
 # 🟢 [Severity: LOW]: Add capability-based routing for kernel and offline tasks in ComponentRouter

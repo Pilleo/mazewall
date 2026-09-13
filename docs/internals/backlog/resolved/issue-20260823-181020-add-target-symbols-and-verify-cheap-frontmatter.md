@@ -28,7 +28,7 @@ Scheduler and Paperclip ingest only see `target_files` / `target_modules`. Plann
 1. Parse optional YAML lists: `target_symbols`, `verify_cheap` (or nested `verify.cheap` if the parser can read nested maps without breaking current frontmatter). Prefer flat `verify_cheap: ["./gradlew :enforcer:test --tests …"]` and `needs_kernel: false` to avoid YAML map complexity in the current parser.
 2. Expose them on `BacklogIssue`. Empty lists are valid.
 3. Validator: do not require `target_symbols`. If present, each entry must be non-blank. `needs_kernel` if present must be `true`/`false`.
-4. Update `.agents/skills/create_backlog_issue/SKILL.md` template with the new optional fields and a one-line comment that they are scheduler/worker contract, filled by humans or by `issue-20260823-181021`.
+4. Update `../../../../.agents/skills/create_backlog_issue/SKILL.md` template with the new optional fields and a one-line comment that they are scheduler/worker contract, filled by humans or by `issue-20260823-181021`.
 5. Tests in `BacklogParserEnhancedTest` for presence, absence, and quoted Gradle command strings.
 6. Do not change `selectAndStartTasks` conflict logic in this issue.
 
