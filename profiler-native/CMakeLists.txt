@@ -38,6 +38,10 @@ target_include_directories(symbolization_generation_test PRIVATE include)
 target_compile_options(symbolization_generation_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME symbolization_generation_test COMMAND symbolization_generation_test)
 
+add_executable(lifecycle_identity_fixture tests/lifecycle_identity_fixture.cpp)
+target_compile_options(lifecycle_identity_fixture PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME lifecycle_identity_fixture COMMAND lifecycle_identity_fixture)
+
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
     OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class"
