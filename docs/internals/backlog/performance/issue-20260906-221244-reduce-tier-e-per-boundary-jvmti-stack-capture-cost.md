@@ -3,7 +3,8 @@ title: "Reduce Tier E per-boundary JVMTI stack capture cost"
 severity: "MEDIUM"
 status: "open"
 priority: high
-dependencies: []
+dependencies:
+  - "issue-20260912-224648-231-decouple-dictionary-frame-interning-from-streaming.md"
 component: "profiler"
 target_modules:
   - ":profiler"

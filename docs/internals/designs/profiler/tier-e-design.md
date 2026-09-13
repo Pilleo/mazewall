@@ -1,6 +1,6 @@
 # Tier E — eBPF Semantic Enrichment: Technical Design Document
 
-**Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend, 2026-09-06)
+**Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend, 2026-09-12)
 **Component:** `:platform`, `:profiler`, `profiler-native/`
 **Related:** [profiler-design.md](profiler-design.md) (Tiers P/S/A), [security-considerations.md](../core/security-considerations.md) (Shared-Memory ACE threat model)
 **Work packages:** [docs/internals/backlog/implementation/issue-20260825-*tier-e*.md](../../backlog/implementation/)
@@ -216,6 +216,41 @@ observation, event counts are unavailable, and it must not claim `FULL_STREAM` c
 Unmarked syscalls, failed stack capture, argument-read failures, and ring loss remain explicit
 incomplete evidence.  It is never an enforcement or policy-generation input.
 
+The userspace collector treats a resolved unique edge as an **emission candidate**, not as an
+already emitted record. The candidate has three legal states: `CANDIDATE` (eligible for output),
+`RETRYABLE` (the downstream sink rejected or did not retain it), and `ACKNOWLEDGED` (the sink
+confirmed retention). Only `ACKNOWLEDGED` edges enter the deduplication set; a failed first emit
+therefore leaves a later identical observation eligible for retry. The Tier E session acknowledges
+records only after retaining them in its immutable result, while direct collector integrations must
+call the acknowledgement boundary after their sink succeeds.
+
+### 2.2 Capture-domain and attribution state machine
+
+Tier E is a **capture-domain contract**, not an all-syscall attempt oracle.
+
+- Capture input: records that reach the selected kernel path `raw_tp/sys_enter` while the session is
+  RUNNING and TGID-aliased to the target process.
+- Explicit blind spots: any syscall-attempt that never reaches this path (including blocked seccomp
+  attempts in `RAW_ADVISING`/seccomp-denied windows) is not recorded as an exact attributed event.
+  These attempts must emit boundary-limitation metadata (`attempt_missed`) rather than pretend coverage.
+- Session boundary states are explicit and terminally safe:
+
+```text
+RUNNING_SESSION
+  ├─ marker_enter (supported path)            ──► EXACT_ACTIVE
+  ├─ unsupported wrapper→java callback start     ──► INACTIVE_FOR_CALLBACK
+  ├─ callback→java→supported re-entry validation  ──► EXACT_REENTRY
+  ├─ marker_exit / detach / callback end          ──► RUNNING_SESSION
+  ├─ supported capture failure                    ──► INACTIVE_FOR_CALLBACK
+  ├─ detach while callback active                  ──► INACTIVE_FOR_CALLBACK (clear state)
+  └─ session TERMINATED                            ──► DEAD
+```
+
+`INACTIVE_FOR_CALLBACK` suppresses exact attribution and marks evidence as `UNKNOWN`
+(`causal-uncertain` when classification is inherited from in-flight unsupported transition).
+`INACTIVE_FOR_CALLBACK` is entered before any callback-driven JVM work and must not restore a prior exact
+invocation until a validated re-entry boundary is observed.
+
 ## 3. Invariants (non-negotiable, enforced by review and where possible by types)
 
 1. **Profiling/enrichment/detection hints only.** Never an enforcement input.
@@ -223,8 +258,8 @@ incomplete evidence.  It is never an enforcement or policy-generation input.
 2. **Stack metadata is tracee-controlled and therefore forgeable.** Invocation and dictionary
    records are `UNTRUSTED ATTRIBUTION METADATA` and are never policy inputs.
 3. **Fail UNKNOWN, never guess.** Missing registration, storage-create failure, ring-buffer
-   drop, pre-attach window, post-detach residue — every uncertain case yields `UNKNOWN`,
-   never "nearest context" or timestamp inference.
+   drop, pre-attach window, or detach/invalid-context transition — every uncertain case
+   yields `UNKNOWN`, never "nearest context" or timestamp inference.
 4. **Virtual-thread ownership is explicit.** A resolved Tier E event carries an opaque logical
    execution identity separate from its carrier task. A mismatch fails unknown; no seccomp filter
    is installed on a carrier.
@@ -240,13 +275,18 @@ incomplete evidence.  It is never an enforcement or policy-generation input.
    themselves") already encodes this.
 9. **Ring-buffer loss marks observations incomplete.** A per-syscall drop counter is
    mandatory; any drop ⇒ `drainComplete = false` in the collector drain.
+10. **Capture-domain separation.** Syscall-attempt coverage is explicit to the `sys_enter` observed
+    path; denied attempts can only be surfaced as boundary limitation metadata, not exact events.
+11. **Attribution lifecycle safety.** Once boundary state leaves exact attribution (`INACTIVE_FOR_CALLBACK`
+    or `DEAD`), exact attribution must not resume via cache reuse, stale context memory, or process-identity
+    overlap.
 
 ## 4. Architecture
 
-> The ContextId/USDT material below records the earlier Tier E design. For the implemented stack
+> The ContextId/USDT material below records earlier design iterations. For the implemented stack
 > backend, substitute `InvocationId` for `ContextId`, `mazewall_stack_marker` for the context probe,
 > and the native JVMTI dictionary described in §1.1. The current implementation uses a plain symbol
-> uprobe because its dependency-free Kotlin loader resolves the ELF dynamic symbol directly.
+> uprobe by default because its dependency-free Kotlin loader resolves the ELF dynamic symbol directly.
 
 ### 4.1 The handoff primitive
 
@@ -254,7 +294,7 @@ The context transition itself is made observable to eBPF via a synchronous nativ
 
 ```text
 libmazewall_context.so
-    void mazewall_context_marker(uint32_t context_id) { /* intentionally empty */ }
+    void mazewall_context_marker(uint64_t invocation_id) { /* intentionally empty */ }
 ```
 
 * Java calls it through an FFM downcall from inside `MazewallContext.withContext { }`
@@ -271,19 +311,19 @@ any instant, the write and all subsequent reads are serialized by construction. 
 userspace/kernel memory-ordering proof to make — this is the property that eliminated the
 previous mmap-slot design (§6).
 
-### 4.1.1 Marker ABI: Mazewall USDT probe (production) vs plain uprobe (bring-up)
+### 4.1.1 Marker ABI: Plain uprobe (implemented) vs Mazewall USDT probe (planned)
 
-> **Decision (2026-08-25):** Tier E context transitions **SHOULD** be exposed as a Mazewall
-> **USDT probe** rather than treating an ordinary native function symbol as the long-term
-> tracing ABI. The underlying attribution mechanism remains uprobe → BPF task storage.
+> **Decision (2026-08-25):** Tier E context transitions are designed to move to a Mazewall
+> **USDT probe** long-term, with the underlying attribution mechanism remaining uprobe → BPF task
+> storage. The current shipped implementation is still **uprobe-first**.
 
-Production-facing interface:
+Planned production-facing interface:
 
 ```text
-Provider: mazewall          Probe: context_switch(uint32 context_id)
+Provider: mazewall          Probe: context_switch(uint64_t invocation_id)
 
-void mazewall_context_marker(uint32_t context_id) {
-    DTRACE_PROBE1(mazewall, context_switch, context_id);   /* sys/sdt.h */
+void mazewall_context_marker(uint64_t invocation_id) {
+    DTRACE_PROBE1(mazewall, context_switch, invocation_id);   /* sys/sdt.h */
 }
 ```
 
@@ -297,7 +337,7 @@ Rationale (full review in Appendix A):
 * **Argument portability:** `bpf_usdt_readarg()` resolves argument location per arch/ABI,
   eliminating hand-written register access (§11 risk 7) in the USDT variant.
 * **Single-probe semantics:** one `context_switch` probe carries full state
-  (`task_storage[current] = context_id`). Java nesting logic already knows restore values;
+  (`task_storage[current] = invocation_id`). Java nesting logic already knows restore values;
   BPF needs no stack. Enter/exit probe pairs are explicitly rejected.
 * **Extension vocabulary:** later probes (`async_submit(operationId, contextId, …)`) give
   the future async/io_uring extension a request-keyed storage shape without inventing a new
@@ -321,7 +361,7 @@ justify a plain-uprobe fallback with recorded parity evidence before shipping wi
 
 ### 4.2 Data model
 
-A context is a fixed unsigned 32-bit integer (`io.mazewall.core.ContextId`):
+A context is a positive 64-bit session-local identity (`io.mazewall.profiler.attribution.InvocationId`):
 
 ```text
 0x00000000        UNKNOWN (fail-unknown sentinel)
@@ -332,7 +372,8 @@ Attribution provenance is recorded separately as `AttributionKind`:
 `NONE | EXPLICIT_CONTEXT | AGENT_CONTEXT | USER_NOTIF_ORACLE`.
 
 Wire form everywhere (BTF struct fields, ring buffer records, future control protocol):
-exactly 4 bytes, big-endian, no varint, no nullable representation.
+encoded as 8-byte little-endian values, plus explicit zero handling for inactive invocation state,
+no varint, no nullable representation.
 
 ### 4.3 Kernel-side sketch
 
@@ -342,20 +383,20 @@ struct context_event {
     __u32 tgid;
     __u32 tid;
     __s32 syscall_nr;
-    __u32 context_id;      /* ContextId wire form */
+    __u64 invocation_id;      /* InvocationId wire form */
 };
 
 struct {
     __uint(type, BPF_MAP_TYPE_TASK_STORAGE);
     __uint(map_flags, BPF_F_NO_PREALLOC);
     __type(key, int);
-    __type(value, __u32);
+__type(value, __u64);
 } context_storage SEC(".maps");
 
 SEC("uprobe")                     /* attach: marker symbol offset */
-int BPF_UPROBE(on_marker, __u32 ctx_id)
+int BPF_UPROBE(on_marker, __u64 invocation_id)
 {
-    __u32 v = ctx_id;
+    __u64 v = invocation_id;
     bpf_task_storage_get(&context_storage,
                          (struct task_struct *)bpf_get_current_task_btf(),
                          &v, BPF_LOCAL_STORAGE_GET_F_CREATE);
@@ -366,9 +407,9 @@ SEC("raw_tp/sys_enter")
 int BPF_PROG(on_sys_enter, struct pt_regs *regs, long id)
 {
     /* TGID/cgroup filter first; then: */
-    __u32 *ctx = bpf_task_storage_get(&context_storage,
-                         (struct task_struct *)bpf_get_current_task_btf(),
-                         NULL, 0);
+    __u64 *ctx = bpf_task_storage_get(&context_storage,
+                             (struct task_struct *)bpf_get_current_task_btf(),
+                             NULL, 0);
     if (!ctx || *ctx == 0) { unknown_counter(id); return 0; }   /* invariant 3 */
     reserve ringbuf … commit;
 }
@@ -388,7 +429,7 @@ ebpf-prototype/                 unwired until Gate G2 passes
 ├── daemon/                     privileged C sidecar: load, attach, session control
 └── client/                     throwaway test client (pre-FFM)
 
-:platform                       io.mazewall.core: ContextId, AttributionKind
+:platform                       io.mazewall.profiler.attribution.InvocationId, AttributionKind
                                 ffi additions (later PRs): marker downcall bind,
                                 ringbuf mmap reader, bpf()/perf_event_open downcalls
 
@@ -428,10 +469,9 @@ is a loud attach failure (benign direction: without attachment every event is UN
   restored; markers become inert plain calls. Storage entries persist until task exit but
   belong to a dead map object and are unreachable. Post-death events do not exist; the
   consumer sees session DEAD (invariant 7).
-* **Stale-positive residue within a live session:** detach mid-scope leaves storage set
-  until the next transition or task exit. Events emitted during that window carry the last
-  declared context — accepted and documented because the reader contract requires an
-  explicit RUNNING session epoch covering them.
+* **Detach while live:** callback-induced detach clears attribution state immediately; the collector
+  emits `UNKNOWN` until a validated re-entry boundary occurs, preventing stale resume within the
+  same callback window.
 
 ## 6. Rejected Alternative: mmap'd Context Slots ("Tier E Fast")
 
@@ -530,7 +570,7 @@ Non-refactor rule: leave the `TraceEvent` / `SyscallEvent` / `ProfileObservation
 |---|---|---|---|
 | 1 | Marker latency: classic x86 uprobe ≈ trap + out-of-line step (µs-class), fires once per transition | measurable | G1 microbenchmark; optional skip-if-unchanged guard (ThreadLocal compare before downcall — semantics-preserving). If unacceptable ⇒ evidence for Tier E Fast, not for keeping two backends alive |
 | 2 | Pre-attach window: scopes entered before attach emit UNKNOWN | fail-unknown | documented accepted behavior |
-| 3 | Stale-positive after detach mid-scope (see §5) | bounded | session-epoch reader contract; per-map scoping kills cross-epoch leakage |
+| 3 | Mid-scope detach can leave stale invocation state (see §5) | bounded/invalid-state control | session-epoch boundary transitions clear attribution state on callback path |
 | 4 | Wrong-binary misfire (probing stale `.so` copy) | benign (silent UNKNOWN) but confusing | `/proc/<pid>/maps` inode + build-id verification, loud failure |
 | 5 | Virtual threads: carrier-local nesting is observed with a different logical execution | unacceptable | clear the marker and registry; count a scope failure; never restore the prior invocation |
 | 6 | Task-storage creation failure under pressure | fail-unknown | count and emit nothing |
@@ -584,7 +624,7 @@ The synchronous tier keys context by task; asynchronous work (io_uring et al.) m
 request identity. USDT gives us the emission side without new machinery:
 
 ```text
-mazewall:async_submit(u64 operation_id, u32 context_id)
+mazewall:async_submit(u64 operation_id, u64 invocation_id)
     → BPF: async_context[operation_id] = context_id
 io_uring submit/complete tracepoints
     → recover request → context mapping at completion time

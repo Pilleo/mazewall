@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: large
-paperclip_issue_id: "1ff7340c-148d-4c11-a08f-7bfb1c72ccdb"
-paperclip_identifier: "MAZ-1347"
+paperclip_issue_id: "bbdf1e56-bf51-4f5b-9f6f-6278a5f27834"
+paperclip_identifier: "MAZ-1402"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Phantom Types for Context-Aware Capability Tokens

@@ -13,8 +13,8 @@ effort: "large"
 autonomy: "supervised"
 open_questions: false
 dependencies: []
-paperclip_issue_id: "54010952-147a-418e-bef8-fd9969b01a72"
-paperclip_identifier: "MAZ-1339"
+paperclip_issue_id: "c90ff9ba-77dc-4576-b30e-94179a3c8525"
+paperclip_identifier: "MAZ-1396"
 ---
 
 # 🟡 [Severity: LOW]: Additional Architecture Coverage (s390x, ppc64le, riscv64)

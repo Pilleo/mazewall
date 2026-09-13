@@ -11,6 +11,9 @@ target_files:
 target_symbols:
   - "TraceeAuthorityExecution"
 open_questions: false
+
+paperclip_issue_id: "e190a15c-f08c-4a64-a4b1-fc9a2a0b9f3f"
+paperclip_identifier: "MAZ-1394"
 ---
 
 # 🟡 [Severity: HIGH]: Restore accept peer address writes through identity-bound authority
