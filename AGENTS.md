@@ -20,7 +20,7 @@ Read the nearest module instructions before changing code:
 - [platform/AGENTS.md](platform/AGENTS.md): FFM layouts, syscall metadata, native-engine isolation.
 - [enforcer/AGENTS.md](enforcer/AGENTS.md): containment, JVM floor, Loom, Landlock, and native safety.
 - [profiler/AGENTS.md](profiler/AGENTS.md): USER_NOTIF, ptrace/Yama, and profiler protocol.
-- [portal/AGENTS.md](portal/AGENTS.md), [portal-codegen/AGENTS.md](portal-codegen/AGENTS.md), and [portal-worker/AGENTS.md](portal-worker/AGENTS.md): broker/worker process isolation.
+- [portal/AGENTS.md](portal/AGENTS.md), [portals/codegen/AGENTS.md](portals/codegen/AGENTS.md), and [portals/worker/AGENTS.md](portals/worker/AGENTS.md): broker/worker process isolation.
 - [tools/orchestrator/AGENTS.md](tools/orchestrator/AGENTS.md): orchestration and backlog tooling.
 
 Skills live in `.agents/skills/` and are loaded by their trigger; do not inline their procedures here. Follow `.agents/CODE_QUALITY.md` for design and code-quality standards.

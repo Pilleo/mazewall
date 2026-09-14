@@ -8,7 +8,7 @@ kotlin {
 }
 
 val portalCodegenKotlin = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
-val portalCodegenPortalJar = project(":portal").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+val portalCodegenPortalJar = project(":portals:runtime").tasks.named<Jar>("jar").flatMap { it.archiveFile }
 val portalCodegenPlatformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
 portalCodegenKotlin.target.compilations.matching { it.name == "test" }.configureEach {
     compileTaskProvider.configure {
@@ -28,8 +28,8 @@ dependencies {
     implementation(libs.kotlinGradlePlugin)
     compileOnly(kotlin("reflect"))
     implementation(libs.kotlinpoet)
-    implementation(project(":portal"))
-    implementation(project(":portal-worker"))
+    implementation(project(":portals:runtime"))
+    implementation(project(":portals:worker"))
     testImplementation(gradleTestKit())
     testImplementation(kotlin("test"))
     testImplementation(kotlin("reflect"))
@@ -56,10 +56,10 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
-    dependsOn(":portal:jar", ":platform:jar", ":enforcer:jar")
+    dependsOn(":portals:runtime:jar", ":platform:jar", ":enforcer:jar")
     systemProperty(
         "portal.codegen.portalJar",
-        project(":portal")
+        project(":portals:runtime")
             .tasks
             .named<Jar>("jar")
             .flatMap { it.archiveFile }

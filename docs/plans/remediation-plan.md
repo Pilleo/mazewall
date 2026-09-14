@@ -1,6 +1,6 @@
 # mazewall Codebase Improvement & Remediation Plan
 
-This plan consolidates verified findings and actionable remediation items across all core modules (`:platform`, `:enforcer`, `:profiler`, `:portal`, `:portal-codegen`, and `:portal-worker`).
+This plan consolidates verified findings and actionable remediation items across all core modules (`:platform`, `:enforcer`, `:profiler`, `:portals:runtime`, `:portals:codegen`, and `:portals:worker`).
 
 ## Review reconciliation (2026-09-12)
 
@@ -64,9 +64,9 @@ graph TD
     Platform[":platform<br/>FFM Layouts, Syscalls, FileDescriptor, FdEpoch, Off-heap Arenas"]
     Enforcer[":enforcer<br/>Seccomp-BPF, Landlock, PureJavaBpfEngine, Supervisors"]
     Profiler[":profiler<br/>eBPF, USER_NOTIF Tracing, SBoB, ProfilerSession"]
-    Portal[":portal<br/>ProcessBroker, PortalChannel, SCM_RIGHTS, Capability"]
-    PortalCodegen[":portal-codegen<br/>Gradle Plugin, Stubs, Dispatchers, BoundaryTypes"]
-    PortalWorker[":portal-worker<br/>Sandboxed Worker Loop, Driver, Dispatcher Table"]
+    Portal[":portals:runtime<br/>ProcessBroker, PortalChannel, SCM_RIGHTS, Capability"]
+    PortalCodegen[":portals:codegen<br/>Gradle Plugin, Stubs, Dispatchers, BoundaryTypes"]
+    PortalWorker[":portals:worker<br/>Sandboxed Worker Loop, Driver, Dispatcher Table"]
 
     Platform --> Enforcer
     Platform --> Profiler
@@ -99,7 +99,7 @@ graph TD
 
 ### 1.3 Remove / Gate Test Passwd Probe in Production Dispatcher
 - **File**:
-  - [`portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt#L44-L47)
+  - [`portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt#L44-L47)
 - **Tasks**:
   - [ ] Decouple `PortalMethod.TryOpenHostPasswd` from production default dispatch tables; register only in integration test environments.
 
@@ -129,7 +129,7 @@ graph TD
 
 ### 2.4 Fix Premature Interruption & Zombie Processes in `ProcessBroker`
 - **File**:
-  - [`portal/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt#L251-L259)
+  - [`portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt#L251-L259)
 - **Tasks**:
   - [ ] Clear thread interruption status before calling `destroySlot(slot)`.
   - [ ] Restore thread interruption flag inside a `finally` block *after* `slot.process.waitFor` and `slot.pump.thread.join` complete.
@@ -166,22 +166,22 @@ graph TD
 
 ### 3.3 Support / Reject Nullable Components in DTOs
 - **Files**:
-  - [`portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/BoundaryTypes.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/BoundaryTypes.kt#L128-L171)
-  - [`portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt#L281-L289)
+  - [`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/BoundaryTypes.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/BoundaryTypes.kt#L128-L171)
+  - [`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt#L281-L289)
 - **Tasks**:
   - [ ] Track nullability in `describeStructured` for record components / getters.
   - [ ] Implement wire nullability encoding or reject nullable nested DTO fields at compile time with a descriptive error.
 
 ### 3.4 Cycle-Safe Exception Unwrapping in Worker Driver
 - **File**:
-  - [`portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt#L129-L134)
+  - [`portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt#L129-L134)
 - **Tasks**:
   - [ ] Add recursion depth limit / visited identity set to `unwrapInvocation` to eliminate infinite loops on cyclic exception causes.
 
 ### 3.5 Method ID Cross-Interface Collision Detection
 - **Files**:
-  - [`portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt#L50-L56)
-  - [`portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalCodegenPlugin.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalCodegenPlugin.kt#L64)
+  - [`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt#L50-L56)
+  - [`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalCodegenPlugin.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalCodegenPlugin.kt#L64)
 - **Tasks**:
   - [ ] Maintain a unified `seenIds` map across all compiled interfaces in `GeneratePortalStubsTask`.
   - [ ] Fail the Gradle build with a clear collision diagnostic when two service methods generate identical IDs.
@@ -210,13 +210,13 @@ graph TD
 
 ### 4.2 Bulk Memory Copies in Worker Checksum
 - **File**:
-  - [`portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt#L60-L64)
+  - [`portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt#L60-L64)
 - **Tasks**:
   - [ ] Replace byte-by-byte off-heap loop with bulk segment copy (`MemorySegment.copy`).
 
 ### 4.3 Replace Reflection Dispatch with Direct Handler or MethodHandle
 - **File**:
-  - [`portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherRegistry.kt`](file:///home/leanid/Documents/code/java/jseccomp/portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherRegistry.kt#L142-L147)
+  - [`portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherRegistry.kt`](file:///home/leanid/Documents/code/java/jseccomp/portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherRegistry.kt#L142-L147)
 - **Tasks**:
   - [ ] Have generated dispatchers implement a typed interface (e.g. `PortalDispatcherHandler`) to eliminate `Method.invoke` boxing and reflection in worker hot paths.
 
@@ -224,10 +224,10 @@ graph TD
 
 ## Phase 5: Cross-Module Duplication & Cleanups
 
-### 5.1 Centralize Shared Constants in `:platform` & `:portal`
+### 5.1 Centralize Shared Constants in `:platform` & `:portals:runtime`
 - [ ] Add `POLLOUT: Short = 4` to [`NativeConstants.kt`](file:///home/leanid/Documents/code/java/jseccomp/platform/src/main/kotlin/io/mazewall/ffi/NativeConstants.kt).
 - [ ] Remove duplicate `F_GETFL`, `F_SETFL`, `O_NONBLOCK`, `POLLOUT` declarations in `PortalIo.kt` and `SeccompInstallTransport.kt`.
-- [ ] Move `"MAZEWALL_PORTAL_WORKER_READY"` and `"META-INF/mazewall/portal/"` to shared constants in `:portal`.
+- [ ] Move `"MAZEWALL_PORTAL_WORKER_READY"` and `"META-INF/mazewall/portal/"` to shared constants in `:portals:runtime`.
 
 ### 5.2 Consolidate SBoB JSON Parsing
 - [ ] Unify `BillOfBehavior.fromJson` in `:profiler` and `BobDeserializer.kt` in `:enforcer` into a shared parser.

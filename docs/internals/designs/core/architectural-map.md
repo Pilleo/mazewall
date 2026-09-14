@@ -20,7 +20,7 @@ entry point for deadlines, admission, helper cancellation, listener health and o
 | **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Per-connection sessions; remains available for permanent filters in pass-through mode. |
 | **Trace Listener** | Captures stack/evidence through its session's injected TID resolver. | Target JVM (Dedicated Thread) | Bound to one profiler session. |
 | **BobCompiler** | Generates `BillOfBehavior` JSON from trace events. | Target JVM (Tooling) | Static/Post-process. |
-| **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Implemented (`:portal`, `:portal-worker`). Workers use a curated classpath; guest types are not on the broker runtime. Distinct from the syscall supervisor. |
+| **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Implemented (`:portals:runtime`, `:portals:worker`). Workers use a curated classpath; guest types are not on the broker runtime. Distinct from the syscall supervisor. |
 | **Portal Dispatcher Table** | Immutable method-to-handler authority, strictly validated at worker startup. | Worker JVM | Built once before serving requests; no mutation through the legacy registry after publication. |
 
 ## 2. The Profiler-Enforcer ACK Loop (The "Deadlock Zone")
@@ -110,7 +110,7 @@ graph TD
         J[ProfilerTraceListener.kt]
     end
 
-    subgraph portal [":portal + :portal-worker"]
+    subgraph portal [":portals:runtime + :portals:worker"]
         BROKER[ProcessBroker] --> WORKER[PortalWorkerMain]
         WORKER --> TABLE[PortalDispatcherTable]
         WORKER --> D

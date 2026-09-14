@@ -1,0 +1,3 @@
+portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalBuiltinDispatch.kt|<error severity="warning" message="io.mazewall.platform.fd.* is a wildcard import. Replace it with fully qualified imports." source="detekt.WildcardImport" />
+portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherRegistry.kt|<error severity="warning" message="io.mazewall.platform.fd.* is a wildcard import. Replace it with fully qualified imports." source="detekt.WildcardImport" />
+portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherTable.kt|<error severity="warning" message="io.mazewall.platform.fd.* is a wildcard import. Replace it with fully qualified imports." source="detekt.WildcardImport" />

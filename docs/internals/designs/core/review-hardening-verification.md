@@ -77,8 +77,8 @@ recorded; cached task outcomes are never upgraded to fresh evidence.
 |---|---|---|
 | `:platform:test` | receive EINTR repoll, deadline expiry, one-reply lease, cleanup suppression and liveness metrics | pending implementation |
 | `:enforcer:test` + fresh JVM | strict pointer authority, listener death, admission limits and exact descriptor closure | pending implementation |
-| `:portal:test` + integration | shared close failure, capability retention, interruption and worker non-reuse | pending implementation |
-| `:portal-codegen:test` + `:portal-worker:test` | nested/nullable/hostile-name compilation and worker classpath isolation | pending implementation |
+| `:portals:runtime:test` + integration | shared close failure, capability retention, interruption and worker non-reuse | pending implementation |
+| `:portals:codegen:test` + `:portals:worker:test` | nested/nullable/hostile-name compilation and worker classpath isolation | pending implementation |
 | `:profiler:test` + fresh JVM | OPENAT2 evidence, reactor failure matrix, ACK and injectable preparation | pending implementation |
 | demo suites | bounded process ownership, authenticated outcomes, web artifact isolation | pending implementation |
 | `-p buildSrc check` | invocation-fresh health records, aborted containers and incremental contract checks | pending implementation |

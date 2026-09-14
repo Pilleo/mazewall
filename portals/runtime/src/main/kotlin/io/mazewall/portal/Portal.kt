@@ -17,7 +17,7 @@ internal object Portal {
             } catch (e: ClassNotFoundException) {
                 throw PortalCallException(
                     "Missing generated portal stub $stubName for ${type.name}. " +
-                        "Generate it with :portal-codegen. Guest implementations are never loaded in the broker.",
+                        "Generate it with :portals:codegen. Guest implementations are never loaded in the broker.",
                     cause = e,
                 )
             }

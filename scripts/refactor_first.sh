@@ -9,9 +9,9 @@ readonly SCOPED_SOURCE_ROOTS=(
     "platform/src/main"
     "enforcer/src/main"
     "profiler/src/main"
-    "portal/src/main"
-    "portal-codegen/src/main"
-    "portal-worker/src/main"
+    "portals/runtime/src/main"
+    "portals/codegen/src/main"
+    "portals/worker/src/main"
 )
 
 usage() {

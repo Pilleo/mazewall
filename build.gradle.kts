@@ -263,7 +263,7 @@ dependencies {
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // Aggregate architecture verification only; production module dependencies remain unchanged.
-    listOf("enforcer", "platform", "profiler", "portal", "portal-worker", "portal-codegen").forEach { module ->
+    listOf("enforcer", "platform", "profiler", "portals:runtime", "portals:worker", "portals:codegen").forEach { module ->
         testRuntimeOnly(project(":$module"))
     }
 }
@@ -305,6 +305,10 @@ detekt {
 }
 
 subprojects {
+    // :portals is a non-published lifecycle aggregate, not a production source module.
+    if (project.path == ":portals") {
+        return@subprojects
+    }
     if (project.path.startsWith(":demos")) {
         return@subprojects
     }
@@ -764,21 +768,29 @@ tasks.register("updateClassDiagrams") {
  * The reviewed warning inventory is a ceiling, rather than permission for new warning-level
  * debt. Adjusting a budget is an intentional, reviewable quality decision.
  */
-val detektWarningModules = listOf("enforcer", "platform", "portal-codegen", "portal-worker", "portal", "profiler")
+val detektWarningModules =
+    mapOf(
+        "enforcer" to ":enforcer",
+        "platform" to ":platform",
+        "portals-codegen" to ":portals:codegen",
+        "portals-worker" to ":portals:worker",
+        "portals-runtime" to ":portals:runtime",
+        "profiler" to ":profiler",
+    )
 
 tasks.register("detektWarningRatchet") {
     group = "verification"
     description = "Fails when a production module adds Detekt warning-level debt"
-    dependsOn(detektWarningModules.map { module -> ":$module:detektMain" })
+    dependsOn(detektWarningModules.values.map { path -> "$path:detektMain" })
     val reports =
-        detektWarningModules.associateWith { module ->
-            project(":$module")
+        detektWarningModules.mapValues { (_, path) ->
+            project(path)
                 .layout.buildDirectory
                 .file("reports/detekt/main.xml")
                 .get()
                 .asFile
         }
-    val inventories = detektWarningModules.associateWith { module -> file("config/detekt/warnings/$module.txt") }
+    val inventories = detektWarningModules.mapValues { (inventory, _) -> file("config/detekt/warnings/$inventory.txt") }
     inputs.files(reports.values, inventories.values)
     doLast(io.mazewall.build.DetektWarningRatchetAction(reports, inventories))
 }
@@ -854,8 +866,9 @@ val verifyPackageTopology by tasks.registering {
             "platform/src/main/kotlin",
             "enforcer/src/main/kotlin",
             "profiler/src/main/kotlin",
-            "portal/src/main/kotlin",
-            "portal-worker/src/main/kotlin",
+            "portals/runtime/src/main/kotlin",
+            "portals/codegen/src/main/kotlin",
+            "portals/worker/src/main/kotlin",
         ).map(::file)
     val repositoryRoot = layout.projectDirectory.asFile
     val retiredPackages =
@@ -906,9 +919,9 @@ val refactorFirstSourceRoots =
         "platform/src/main",
         "enforcer/src/main",
         "profiler/src/main",
-        "portal/src/main",
-        "portal-codegen/src/main",
-        "portal-worker/src/main",
+        "portals/runtime/src/main",
+        "portals/codegen/src/main",
+        "portals/worker/src/main",
     )
 val refactorFirstRunner = layout.projectDirectory.file("scripts/refactor_first.sh")
 val refactorFirstOutput = layout.buildDirectory.file("reports/refactorFirst/refactor-first-report.html")

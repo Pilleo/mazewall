@@ -3,15 +3,15 @@ title: "Portal Architecture Overview"
 scope: "portal"
 critical_syscalls: ["execve", "clone", "sendmsg", "recvmsg", "openat2"]
 target_files:
-  - "portal/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt"
-  - "portal/src/main/kotlin/io/mazewall/portal/Portal.kt"
-  - "portal/src/main/kotlin/io/mazewall/portal/PortalChannel.kt"
-  - "portal/src/main/kotlin/io/mazewall/portal/PortalBrokerCallMachine.kt"
-  - "portal/src/main/kotlin/io/mazewall/portal/PortalWorkerOutput.kt"
-  - "portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
-  - "portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt"
-  - "portal-worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherTable.kt"
-  - "portal-codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/Portal.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/PortalChannel.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/PortalBrokerCallMachine.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/PortalWorkerOutput.kt"
+  - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
+  - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt"
+  - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalDispatcherTable.kt"
+  - "portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt"
 keywords: ["process portal", "broker", "worker", "SCM_RIGHTS", "pool", "codegen"]
 ---
 
@@ -24,10 +24,10 @@ risky subsystem in a separate JVM process while preserving typed call semantics.
 
 Portal calls are not in-process RPCs. A portal is a broker/worker pair:
 
-- `:portal` provides the in-process call façade, the Unix socket transport, capability
+- `:portals:runtime` provides the in-process call façade, the Unix socket transport, capability
   tokens, and worker lifecycle orchestration.
-- `:portal-worker` hosts the sandboxed execution side.
-- `:portal-codegen` generates type-safe adapters so call sites stay ergonomic.
+- `:portals:worker` hosts the sandboxed execution side.
+- `:portals:codegen` generates type-safe adapters so call sites stay ergonomic.
 
 The objective is to prevent risky code from executing with the broker JVM authority.
 Everything in the worker process is contained by process-wide policy and may only use
@@ -129,9 +129,9 @@ is propagated immediately; pool replenishment happens independently.
 
 | Module | Primary responsibility |
 | --- | --- |
-| `:portal` | Runtime contract, pooling, framed transport, capability semantics |
-| `:portal-worker` | Sandbox process entrypoint, dispatcher validation, method execution |
-| `:portal-codegen` | Stub/dispatcher code generation and source artifact production |
+| `:portals:runtime` | Runtime contract, pooling, framed transport, capability semantics |
+| `:portals:worker` | Sandbox process entrypoint, dispatcher validation, method execution |
+| `:portals:codegen` | Stub/dispatcher code generation and source artifact production |
 
 ## Relationship to other designs
 

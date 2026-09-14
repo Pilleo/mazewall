@@ -65,7 +65,7 @@ def decompose(title, symbols, explicit_files=None):
         if f.startswith("enforcer/"): modules_affected.add(":enforcer")
         elif f.startswith("platform/"): modules_affected.add(":platform")
         elif f.startswith("profiler/"): modules_affected.add(":profiler")
-        elif f.startswith("portal/"): modules_affected.add(":portal")
+        elif f.startswith("portal/"): modules_affected.add(":portals:runtime")
         elif f.startswith("demos/"): modules_affected.add(":demos")
 
     print(f"\n==================================================")

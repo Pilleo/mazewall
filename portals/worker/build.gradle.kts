@@ -9,7 +9,7 @@ kotlin {
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
 val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
-val portalJar = project(":portal").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+val portalJar = project(":portals:runtime").tasks.named<Jar>("jar").flatMap { it.archiveFile }
 kotlinCompilations.matching { it.name in setOf("main", "test") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(platformJar, portalJar)
@@ -25,7 +25,7 @@ kotlinCompilations.matching { it.name in setOf("main", "test") }.configureEach {
 }
 
 dependencies {
-    api(project(":portal"))
+    api(project(":portals:runtime"))
     implementation(project(":platform"))
     implementation(project(":enforcer"))
     testImplementation(kotlin("test"))

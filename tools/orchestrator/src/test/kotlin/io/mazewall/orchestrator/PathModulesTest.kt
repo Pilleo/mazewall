@@ -35,9 +35,9 @@ class PathModulesTest {
 
     @Test
     fun `identity owns Gradle path and component`() {
-        val portal = requireNotNull(PathModules.identityFor("portal/src/main/kotlin/Portal.kt"))
+        val portal = requireNotNull(PathModules.identityFor("portals/runtime/src/main/kotlin/Portal.kt"))
 
-        assertEquals(":portal", portal.gradlePath)
+        assertEquals(":portals:runtime", portal.gradlePath)
         assertEquals("docs", portal.component)
     }
 }

@@ -6,4 +6,4 @@ The portal is the broker/worker process split. It is distinct from the in-proces
 - Read `docs/internals/designs/enforcer/process-portal-design.md` before changing protocol, lifecycle, or capability transfer behavior.
 - Keep portal behavior process-scoped. Do not import thread-scoped seccomp-supervisor assumptions into this module.
 
-Verification: `./gradlew :portal:test`
+Verification: `./gradlew :portals:runtime:test`

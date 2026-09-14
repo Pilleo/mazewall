@@ -68,17 +68,17 @@ fi
 # Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
 # leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
 
-# Portal tests are part of the commit gate when :portal participates in the build.
+# Portal tests are part of the commit gate when :portals:runtime participates in the build.
 # Inclusion is read directly from settings.gradle.kts: probing via './gradlew projects'
 # would cost two full Gradle configuration passes per commit for statically known facts.
 TEST_TASKS=("test")
-if grep -Eq '^[[:space:]]*include\(":portal"\)' settings.gradle.kts; then
-  TEST_TASKS+=(":portal:integrationTest" ":portal:test")
+if grep -Eq '^[[:space:]]*include\(":portals:runtime"\)' settings.gradle.kts; then
+  TEST_TASKS+=(":portals:runtime:integrationTest" ":portals:runtime:test")
 else
   # Explicit operator exclusion (like :tools:orchestrator) must stay visible,
   # never silent: skipping the gate segment without notice is a bypass.
-  echo "!!! GATE DEGRADED: ':portal' is not included in settings.gradle.kts."
-  echo "!!! Committing WITHOUT :portal integration tests. Re-include before merging."
+  echo "!!! GATE DEGRADED: ':portals:runtime' is not included in settings.gradle.kts."
+  echo "!!! Committing WITHOUT :portals:runtime integration tests. Re-include before merging."
 fi
 
 echo "==> Running host unit tests and portal integration tests..."

@@ -13,7 +13,7 @@ keywords: ["process-portal", "broker", "worker", "SCM_RIGHTS", "codegen"]
 
 # Process Portal: Broker/Worker Isolation
 
-> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Hand-written `:portal` runtime (`ProcessBroker` pool + Unix RPC + broker→worker FDs) exists. `:portal-worker` module contains guest implementations. `:portal-codegen` KotlinPoet plugin generates host stubs and worker dispatchers; `Portal.create` fails closed if the stub is missing.
+> **Status:** Designed. Platform spawn/`SCM_RIGHTS` extract exists. Hand-written `:portals:runtime` runtime (`ProcessBroker` pool + Unix RPC + broker→worker FDs) exists. `:portals:worker` module contains guest implementations. `:portals:codegen` KotlinPoet plugin generates host stubs and worker dispatchers; `Portal.create` fails closed if the stub is missing.
 >
 > This is an **application** portal (Chrome renderer model). It is not the **syscall** supervisor in [supervisor-proxy-design.md](supervisor-proxy-design.md) (`USER_NOTIF` + `SECCOMP_IOCTL_NOTIF_ADDFD`).
 
@@ -181,9 +181,9 @@ Do **not** overload `SandboxDispatcher` (in-process thread pools). New type, e.g
 |---|---|
 | `:platform` | Spawn, Unix endpoint, typed `SCM_RIGHTS` (done) |
 | `:enforcer` | Worker `installOnProcess` + presets |
-| `:portal` | Pool, RPC framing, capability tokens, broker stubs |
-| `:portal-worker` | Guest implementations, worker dispatcher |
-| `:portal-codegen` | KotlinPoet host stub + worker dispatcher plugin |
+| `:portals:runtime` | Pool, RPC framing, capability tokens, broker stubs |
+| `:portals:worker` | Guest implementations, worker dispatcher |
+| `:portals:codegen` | KotlinPoet host stub + worker dispatcher plugin |
 
 KotlinPoet is a **plugin** dependency. Ask before adding it; do not put it on `:enforcer`.
 
@@ -244,8 +244,8 @@ Phase 2 (plugins): guest classes never load in the broker; worker classpath is c
 
 1. **Platform extract (landed):** `Granted`, typed recv, `JvmChildProcess`, `PrivateUnixEndpoint`; supervisor/profiler/tester switched.
 2. **This document** + cross-links.
-3. **`:portal` runtime:** pool, framed RPC, `Capability.ReadFd`, worker install-after-connect. Hand-written stub + integration test.
-4. **`:portal-codegen`:** KotlinPoet plugin. Runtime remains the source of truth.
+3. **`:portals:runtime` runtime:** pool, framed RPC, `Capability.ReadFd`, worker install-after-connect. Hand-written stub + integration test.
+4. **`:portals:codegen`:** KotlinPoet plugin. Runtime remains the source of truth.
 
 ## Open questions
 
@@ -253,7 +253,7 @@ Phase 2 (plugins): guest classes never load in the broker; worker classpath is c
 
 ## Resolved questions
 
-1. **Plugin classpath isolation (was: open question #2):** Use a **separate Gradle module** (`:portal-worker`), not a `workerMain` source set. The broker depends on `:portal` only. `:portal` resolves `:portal-worker` into a detached `portalWorkerClasspath` configuration (not `runtimeOnly`) and passes it as `JvmChildSpec.classpath`. `PortalRuntimeClasspathTest` asserts `PortalBuiltinDispatch` / `PortalWorkerMain` are absent from the broker test runtime.
+1. **Plugin classpath isolation (was: open question #2):** Use a **separate Gradle module** (`:portals:worker`), not a `workerMain` source set. The broker depends on `:portals:runtime` only. `:portals:runtime` resolves `:portals:worker` into a detached `portalWorkerClasspath` configuration (not `runtimeOnly`) and passes it as `JvmChildSpec.classpath`. `PortalRuntimeClasspathTest` asserts `PortalBuiltinDispatch` / `PortalWorkerMain` are absent from the broker test runtime.
 
 ## Phase 2: Plugin Classpath Layout
 
@@ -261,9 +261,9 @@ Module structure for plugin support:
 
 | Module | Contains | Depends on | Visible to Broker? |
 |---|---|---|---|
-| `:portal` | Stubs, `ProcessBroker`, `Portal`, capability tokens | `:platform`, `:enforcer` | Yes |
-| `:portal-codegen` | KotlinPoet plugin (generates stubs/dispatchers) | `:portal` | Build-time only |
-| `:portal-worker` (new) | Guest implementations, worker dispatcher | `:portal` | **No** |
-| Plugin module (e.g., `:plugin-foo`) | Plugin impl + its deps | `:portal-worker` | **No** |
+| `:portals:runtime` | Stubs, `ProcessBroker`, `Portal`, capability tokens | `:platform`, `:enforcer` | Yes |
+| `:portals:codegen` | KotlinPoet plugin (generates stubs/dispatchers) | `:portals:runtime` | Build-time only |
+| `:portals:worker` (new) | Guest implementations, worker dispatcher | `:portals:runtime` | **No** |
+| Plugin module (e.g., `:plugin-foo`) | Plugin impl + its deps | `:portals:worker` | **No** |
 
-Broker apps depend only on `:portal`. Worker JVMs are spawned with the `:portal-worker` + plugin modules on their classpath. The codegen plugin generates stubs into `:portal` and dispatchers into `:portal-worker`, ensuring the broker never loads guest code.
+Broker apps depend only on `:portals:runtime`. Worker JVMs are spawned with the `:portals:worker` + plugin modules on their classpath. The codegen plugin generates stubs into `:portals:runtime` and dispatchers into `:portals:worker`, ensuring the broker never loads guest code.

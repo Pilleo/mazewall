@@ -9,7 +9,7 @@ framework, a remote-execution protocol, or a dependency-injection framework.
 
 Spring integration is explicitly out of scope for this release. A later
 integration may consume the same manifest, but it must not add Spring
-dependencies to `:portal` or alter the runtime contract defined here.
+dependencies to `:portals:runtime` or alter the runtime contract defined here.
 
 The generated boundary currently supports copied primitive values, strings,
 byte arrays, `UUID`, `Instant`, `BigDecimal`, enums by constant name, and

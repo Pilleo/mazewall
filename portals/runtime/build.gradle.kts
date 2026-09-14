@@ -27,11 +27,11 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-evaluationDependsOn(":portal-worker")
+evaluationDependsOn(":portals:worker")
 
 /**
  * Full runtime classpath for spawned portal workers (issue: worker JVM must load
- * PortalWorkerMain + :portal/:platform/:enforcer). Referencing the FileCollection directly
+ * PortalWorkerMain + :portals:runtime/:platform/:enforcer). Referencing the FileCollection directly
  * gives tasks automatic build dependencies on the producer classes; converting it to a String
  * inside a systemProperty MUST stay lazy (providers.provider) — eager resolution at
  * configuration time is forbidden by Gradle 9 and produced empty paths (CNFE in workers).
@@ -87,7 +87,7 @@ val integrationTest =
         // Worker classpath resolution happens at EXECUTION time (Gradle 9 forbids eager
         // configuration-time resolution), so the producer must be built explicitly or the
         // resolved path is missing worker classes -> ClassNotFoundException in the worker JVM.
-        dependsOn(":portal-worker:jar")
+        dependsOn(":portals:worker:jar")
         jvmArgumentProviders.add(portalWorkerCpArgProvider)
     }
 
@@ -99,14 +99,14 @@ tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m")
     systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
-    dependsOn(":portal-worker:jar")
+    dependsOn(":portals:worker:jar")
     jvmArgumentProviders.add(portalWorkerCpArgProvider)
 }
 
 dependencies {
     api(project(":platform"))
     implementation(project(":enforcer"))
-    portalWorkerClasspath(project(":portal-worker"))
+    portalWorkerClasspath(project(":portals:worker"))
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
