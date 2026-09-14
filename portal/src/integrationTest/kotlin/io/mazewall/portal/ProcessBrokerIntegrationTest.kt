@@ -1,7 +1,7 @@
 package io.mazewall.portal
 
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.RealProcessLauncher
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -33,25 +33,26 @@ class ProcessBrokerIntegrationTest {
         val cleanup = java.io.IOException("listener cleanup failed")
         val failClose = java.util.concurrent.atomic
             .AtomicBoolean(false)
-        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
-            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+        val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
+            override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
                 if (failClose.compareAndSet(true, false)) throw cleanup
-                io.mazewall.core.RealSocketManager
+                io.mazewall.platform.socket.RealSocketManager
                     .close(fd)
             }
         }
         val broker = ProcessBroker(launcher = launcher, sockets = sockets)
         broker.start()
         val child = children.single()
-        val runtime = io.mazewall.LinuxNative.snapshot()
+        val runtime = io.mazewall.platform.native.LinuxNative
+            .snapshot()
         val fatal = AssertionError("fatal request write")
-        io.mazewall.LinuxNative.setEngine(object : io.mazewall.NativeEngine by runtime {
-            override val memory = object : io.mazewall.NativeMemory by runtime.memory {
+        io.mazewall.platform.native.LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by runtime {
+            override val memory = object : io.mazewall.platform.native.NativeMemory by runtime.memory {
                 override fun write(
-                    fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership>,
+                    fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
                     buf: io.mazewall.ffi.memory.ManagedSegment,
                     count: Long,
-                ): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> = throw fatal
+                ): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> = throw fatal
             }
         })
         try {
@@ -60,7 +61,8 @@ class ProcessBrokerIntegrationTest {
             assertFalse(child.isAlive, "fatal return must not leave checked-out process alive")
             assertTrue(fatal.suppressed.contains(cleanup), "channel cleanup must preserve fatal identity")
         } finally {
-            io.mazewall.LinuxNative.resetToDefault()
+            io.mazewall.platform.native.LinuxNative
+                .resetToDefault()
             broker.close()
         }
     }
@@ -151,14 +153,14 @@ class ProcessBrokerIntegrationTest {
         val releaseClose = CountDownLatch(1)
         val fatal = AssertionError("fatal pre-native close")
         val attempts = AtomicInteger()
-        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
-            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+        val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
+            override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
                 if (attempts.incrementAndGet() == 1) {
                     closeEntered.countDown()
                     assertTrue(releaseClose.await(5, TimeUnit.SECONDS))
                     throw fatal
                 }
-                io.mazewall.core.RealSocketManager
+                io.mazewall.platform.socket.RealSocketManager
                     .close(fd)
             }
         }
@@ -229,10 +231,10 @@ class ProcessBrokerIntegrationTest {
             }
         }
         val closes = AtomicInteger()
-        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
-            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+        val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
+            override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
                 if (closes.incrementAndGet() == 1) throw java.io.IOException("pre-native channel close")
-                io.mazewall.core.RealSocketManager
+                io.mazewall.platform.socket.RealSocketManager
                     .close(fd)
             }
         }
@@ -263,10 +265,10 @@ class ProcessBrokerIntegrationTest {
         }
         val fatal = AssertionError("fatal provisional listener close")
         val closes = AtomicInteger()
-        val sockets = object : io.mazewall.core.SocketManager by io.mazewall.core.RealSocketManager {
-            override fun close(fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+        val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
+            override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
                 if (closes.incrementAndGet() == 1) throw fatal
-                io.mazewall.core.RealSocketManager
+                io.mazewall.platform.socket.RealSocketManager
                     .close(fd)
             }
         }

@@ -1,7 +1,15 @@
 package io.mazewall.landlock
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.Policy
-import io.mazewall.core.Syscall
+
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.system.exitProcess

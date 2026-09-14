@@ -1,15 +1,22 @@
 package io.mazewall.enforcer
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.compile
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
@@ -103,7 +110,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                     Policy
                         .builder()
                         .allowFsRead(
-                        io.mazewall.core.SandboxedPath
+                        io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp", true),
                     ).build(),
                 )
@@ -111,7 +118,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                     Policy
                         .builder()
                         .allowFsRead(
-                        io.mazewall.core.SandboxedPath
+                        io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp/foo", true),
                     ).build(),
                 )
@@ -153,7 +160,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                     Policy
                         .builder()
                         .allowFsRead(
-                        io.mazewall.core.SandboxedPath
+                        io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp", true),
                     ).build(),
                 )
@@ -161,7 +168,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                     Policy
                         .builder()
                         .allowFsRead(
-                        io.mazewall.core.SandboxedPath
+                        io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp-foo", true),
                     ).build(),
                 )
@@ -281,23 +288,23 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val features = Platform.featureMatrix
         if (features.landlockTsyncSupported) {
             try {
-                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
             } catch (e: Exception) {
                 val strerror13 = io.mazewall.ffi.memory
                     .getSystemStrerror(13)
                 val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
-                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.enforcer.api.UnsupportedKernelFeatureException) {
                     throw e
                 }
             }
         } else {
             val ex = assertFailsWith<UnsupportedOperationException> {
-                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
             }
             assertTrue(
                 ex.message!!.contains("Process-wide Landlock") ||
                 ex.message!!.contains("does not support Landlock") ||
-                ex is io.mazewall.UnsupportedKernelFeatureException,
+                ex is io.mazewall.enforcer.api.UnsupportedKernelFeatureException,
             )
         }
     }
@@ -329,20 +336,20 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
     @Test
     fun `installOnCurrentThread accepts both process-wide and thread-local policies`() {
-        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.Compiled> = Policy
+        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Compiled> = Policy
             .builder()
             .allowFsRead("/tmp")
             .build()
             .compile(
-                io.mazewall.core.Arch
+                io.mazewall.platform.syscall.Arch
                 .current(),
             )
-        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.Compiled> = Policy.builder().build().compile(
-            io.mazewall.core.Arch
+        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Compiled> = Policy.builder().build().compile(
+            io.mazewall.platform.syscall.Arch
             .current(),
         )
 
-        val list = listOf<Policy<*, io.mazewall.Compiled>>(threadLocalPolicy, processWidePolicy)
+        val list = listOf<Policy<*, io.mazewall.enforcer.api.Compiled>>(threadLocalPolicy, processWidePolicy)
         assertEquals(2, list.size)
     }
 }

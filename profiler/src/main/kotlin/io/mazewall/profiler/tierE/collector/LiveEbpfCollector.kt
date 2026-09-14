@@ -1,7 +1,7 @@
 package io.mazewall.profiler.tierE.collector
 
 /** Raw Tier E ring-buffer retention; it does not create profile observations. */
-public class TierERingBufferCollector {
+internal class TierERingBufferCollector {
     private val events = mutableListOf<AttributedEvent>()
 
     public var droppedCount: Int = 0
@@ -35,7 +35,7 @@ public class TierERingBufferCollector {
     @Synchronized
     public fun clear() = events.clear()
 
-    public class Snapshot(
+    internal class Snapshot(
         events: List<AttributedEvent>,
         public val droppedCount: Int,
         public val drainComplete: Boolean,
@@ -47,7 +47,7 @@ public class TierERingBufferCollector {
         override fun hashCode(): Int = listOf(events, droppedCount, drainComplete).hashCode()
     }
 
-    public data class AttributedEvent(
+    internal data class AttributedEvent(
         public val tid: Long,
         public val syscallNr: Int,
         public val contextId: UInt,
@@ -57,7 +57,7 @@ public class TierERingBufferCollector {
 
 /** Compatibility shim; use [TierERingBufferCollector] for raw records. */
 @Deprecated("Use TierERingBufferCollector")
-public class LiveEbpfCollector {
+internal class LiveEbpfCollector {
     private val delegate = TierERingBufferCollector()
     public val droppedCount: Int get() = delegate.droppedCount
     public val drainComplete: Boolean get() = delegate.drainComplete

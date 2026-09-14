@@ -1,21 +1,21 @@
 package io.mazewall.profiler.compiler
 
-import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.FsEffect
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.OpenFlagsEvidence
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.UringOp
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.FsEffect
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.api.UringOp
 import java.util.*
 
 /**
  * BobCompiler parses semantic trace events produced by the Profiler session
  * and aggregates them into a [BillOfBehavior].
  */
-object BobCompiler {
+internal object BobCompiler {
     private const val O_WRONLY = 1L
     private const val O_RDWR = 2L
     private const val O_CREAT = 64L

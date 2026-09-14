@@ -14,7 +14,7 @@ import java.util.concurrent.TimeoutException
  * It focuses on extracting JVM thread coordination state and Linux kernel security logs
  * without using external SaaS tools, heavy frameworks, or custom serialization.
  */
-object DiagnosticTriageRunner {
+internal object DiagnosticTriageRunner {
     @JvmStatic
     fun main(args: Array<String>) {
         println("==> Initiating mazewall local diagnostic triage...")

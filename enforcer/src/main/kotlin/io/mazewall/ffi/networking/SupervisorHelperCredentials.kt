@@ -1,14 +1,15 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.NativeEngine
-import io.mazewall.core.Arch
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.NativeArg
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeInt
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 
 /** Linux SO_PEERCRED is three 32-bit ints, not JVM longs. Verify the actual process launched by this owner. */
 internal object SupervisorHelperCredentials {

@@ -1,8 +1,8 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.PathResolution
-import io.mazewall.profiler.engine.PathResolutionCause
-import io.mazewall.profiler.engine.PathResolutionFailure
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionCause
+import io.mazewall.profiler.api.PathResolutionFailure
 import java.io.DataInputStream
 import java.io.DataOutputStream
 

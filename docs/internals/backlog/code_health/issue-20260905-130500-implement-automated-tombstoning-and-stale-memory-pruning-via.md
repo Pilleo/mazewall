@@ -2,7 +2,7 @@
 title: "Implement automated tombstoning and stale memory pruning via Codanna AST verification"
 severity: "MEDIUM"
 status: "open"
-priority: medium
+priority: low
 dependencies: []
 component: "testing"
 target_modules:

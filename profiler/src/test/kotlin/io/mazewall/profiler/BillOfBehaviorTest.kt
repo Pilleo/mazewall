@@ -1,11 +1,15 @@
-package io.mazewall.profiler
-
-import io.mazewall.core.Pid
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
+package io.mazewall.profiler.api
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -180,29 +184,29 @@ class BillOfBehaviorTest {
             )
 
         // Deny-list mode base policy (blocks OPEN, so should unblock it)
-        val denyPolicy = io.mazewall.Policy.PURE_COMPUTE_UNSAFE
+        val denyPolicy = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE
         val compiledDeny = bob.toPolicy(denyPolicy, allowIncomplete = true)
         assertEquals(setOf("/read"), compiledDeny.allowedFsReadPaths.map { it.value }.toSet())
         assertEquals(setOf("/write"), compiledDeny.allowedFsWritePaths.map { it.value }.toSet())
 
         // Allow-list mode base policy
         val policy = bob.toPolicy(
-            io.mazewall.Policy
+            io.mazewall.enforcer.api.Policy
                 .builder()
                 .defaultAction(
-                    io.mazewall.core.SeccompAction
+                    io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).build(),
             allowIncomplete = true,
         )
         assertEquals(
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO(),
                 policy.defaultAction,
         )
 
         val policyDenyList = bob.toPolicy(allowIncomplete = true)
-        assertEquals(io.mazewall.core.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
+        assertEquals(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.OPEN))
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.CONNECT))
     }
@@ -217,7 +221,7 @@ class BillOfBehaviorTest {
             )
 
         // Deny-list base DSL
-        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
         assertTrue(dslDeny.contains("Policy.threadLocalBuilder()"))
         assertTrue(dslDeny.contains(".base(Policy.PURE_COMPUTE_UNSAFE)"))
         assertTrue(dslDeny.contains("Syscall.OPEN"))
@@ -226,10 +230,10 @@ class BillOfBehaviorTest {
 
         // Allow-list base DSL
         val allowBase =
-            io.mazewall.Policy
+            io.mazewall.enforcer.api.Policy
                 .builder()
                 .defaultAction(
-                    io.mazewall.core.SeccompAction
+                    io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).build()
         val dslAllow = bob.toDsl(
@@ -258,7 +262,7 @@ class BillOfBehaviorTest {
                 ),
             )
 
-        val policy = bob.toPolicy(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicy(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
 
         // Verifying the compiled policy allowed paths are pruned to keep the most generic parent (covers all children)!
         assertEquals(setOf("/home", "/tmp"), policy.allowedFsReadPaths.map { it.value }.toSet())

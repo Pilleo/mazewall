@@ -1,9 +1,10 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import kotlin.test.Test
@@ -24,7 +25,7 @@ class PortalDispatcherRegistryTest {
             impl: EchoService,
             method: PortalMethod.Generated,
             payload: ByteArray,
-            granted: List<Capability.ReadFd>,
+            granted: List<*>,
         ): ByteArray =
             when (method.wire) {
             1000 -> ((impl as EchoServiceImpl).tag + ":" + payload.decodeToString()).toByteArray()
@@ -39,7 +40,7 @@ class PortalDispatcherRegistryTest {
             impl: EchoService,
             method: PortalMethod.Generated,
             payload: ByteArray,
-            granted: List<Capability.ReadFd>,
+            granted: List<*>,
         ): ByteArray = "replacement".toByteArray()
     }
 
@@ -162,7 +163,7 @@ public object LegacyOuter_ServicePortalDispatcher {
         impl: LegacyOuter.Service,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<Capability.ReadFd>,
+        granted: List<*>,
     ): ByteArray = "legacy:${payload.decodeToString()}".toByteArray()
 }
 
@@ -179,7 +180,7 @@ public object AmbiguousOuter_ServicePortalDispatcher {
         impl: AmbiguousOuter.Service,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<Capability.ReadFd>,
+        granted: List<*>,
     ): ByteArray = payload
 }
 
@@ -190,6 +191,6 @@ public object Nested_14_AmbiguousOuter_7_ServicePortalDispatcher {
         impl: AmbiguousOuter.Service,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<Capability.ReadFd>,
+        granted: List<*>,
     ): ByteArray = payload
 }

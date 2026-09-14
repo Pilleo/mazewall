@@ -5,7 +5,7 @@ package io.mazewall.seccomp
  * This represents the final state of an instruction before serialization
  * into the kernel's `struct sock_filter` format.
  */
-public sealed class BpfInstruction {
+internal sealed class BpfInstruction {
     public abstract val code: Short
     public abstract val jt: Short
     public abstract val jf: Short
@@ -16,7 +16,7 @@ public sealed class BpfInstruction {
         private const val HEX_RADIX = 16
     }
 
-    public data class Ld(
+    data class Ld(
         override val code: Short,
         override val k: Int,
     ) : BpfInstruction() {
@@ -24,7 +24,7 @@ public sealed class BpfInstruction {
         override val jf: Short = 0
     }
 
-    public data class Jmp(
+    data class Jmp(
         override val code: Short,
         override val jt: Short,
         override val jf: Short,
@@ -36,7 +36,7 @@ public sealed class BpfInstruction {
         }
     }
 
-    public data class Ret(
+    data class Ret(
         override val code: Short,
         override val k: Int,
     ) : BpfInstruction() {
@@ -44,7 +44,7 @@ public sealed class BpfInstruction {
         override val jf: Short = 0
     }
 
-    public data class Alu(
+    data class Alu(
         override val code: Short,
         override val k: Int,
     ) : BpfInstruction() {

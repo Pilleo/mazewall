@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * to the caller. Closing either pool with outstanding leases fails without changing its state.
  * Overflow allocations are retained: [poolSize] is a preallocation count, not a retention limit.
  */
-public class SegmentPool private constructor(
+internal class SegmentPool private constructor(
     private val layout: MemoryLayout?,
     public val byteSize: Long,
     private val poolSize: Int,

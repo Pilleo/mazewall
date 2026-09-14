@@ -1,6 +1,6 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
-import io.mazewall.NeedsFreshJvm
+import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
@@ -28,7 +28,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
             java,
             "-cp",
             System.getProperty("java.class.path"),
-            "io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt",
+            "io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonMain",
         ).redirectErrorStream(true).start()
         val transcript = StringBuilder()
         val daemonReader = daemon.inputStream.bufferedReader()

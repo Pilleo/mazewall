@@ -1,15 +1,15 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.engine.ObservedSyscall
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ObservedSyscall
+import io.mazewall.profiler.api.ProfileObservation
 
 /** Converts live Tier E records into strategy-neutral profile observations. */
-public class ProfileObservationEbpfCollector(
+internal class ProfileObservationEbpfCollector(
     private val arch: Arch = Arch.current(),
 ) : ProfileCollector {
     override val source: ObservationSource = ObservationSource.EBPF
@@ -107,7 +107,7 @@ public class ProfileObservationEbpfCollector(
  * [io.mazewall.profiler.tierE.collector.TierERingBufferCollector].
  */
 @Deprecated("Use ProfileObservationEbpfCollector")
-public class LiveEbpfCollector(
+internal class LiveEbpfCollector(
     arch: Arch = Arch.current(),
 ) : ProfileCollector {
     private val delegate = ProfileObservationEbpfCollector(arch)

@@ -1,6 +1,10 @@
 package io.mazewall.profiler.tierE.daemon
-
-import io.mazewall.profiler.attribution.TierEEmissionMode
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -73,7 +77,7 @@ class ControlProtocolTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("simpleCommands")
-    fun `simple control commands parse despite surrounding whitespace`(
+    internal fun `simple control commands parse despite surrounding whitespace`(
         name: String,
         wire: String,
         expected: ControlCommand,

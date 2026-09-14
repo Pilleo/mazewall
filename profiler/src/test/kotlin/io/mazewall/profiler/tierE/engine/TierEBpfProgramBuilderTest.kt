@@ -1,7 +1,11 @@
 package io.mazewall.profiler.tierE.engine
-
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

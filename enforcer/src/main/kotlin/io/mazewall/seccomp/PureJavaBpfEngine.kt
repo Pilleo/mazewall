@@ -1,23 +1,23 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfNativeCache
+import io.mazewall.enforcer.api.BpfNativeCache
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
 
-import io.mazewall.LinuxNative
-import io.mazewall.Platform
-import io.mazewall.PolicyDefinition
-import io.mazewall.CompiledSandbox
-import io.mazewall.UnsupportedKernelFeatureException
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.CompiledSandbox
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
-import io.mazewall.core.PrctlCommand
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.platform.syscall.PrctlCommand
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.ffi.NativeConstants
@@ -204,9 +204,9 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         while (true) {
             val result = LinuxNative.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(prog),
+                io.mazewall.platform.syscall.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                io.mazewall.platform.syscall.NativeArg.LongArg(flags),
+                io.mazewall.platform.syscall.NativeArg.MemoryArg(prog),
             )
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
@@ -232,7 +232,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             val result = LinuxNative.process.prctl(
                     PrctlCommand.SetSeccomp(
                         NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                        io.mazewall.core.NativeArg.MemoryArg(prog)
+                        io.mazewall.platform.syscall.NativeArg.MemoryArg(prog)
                     )
                 )
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) continue

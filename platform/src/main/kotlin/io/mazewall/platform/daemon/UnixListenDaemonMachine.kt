@@ -1,9 +1,10 @@
 package io.mazewall.platform.daemon
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -12,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference
  * [ShuttingDown] does not retain [serverFd]; [UnixListenDaemonEvent.AcceptLoopFinished] carries
  * the accept-loop descriptor so teardown still closes it.
  */
-public sealed interface UnixListenDaemonState {
+internal sealed interface UnixListenDaemonState {
     public object Uninitialized : UnixListenDaemonState {
         public fun listening(
             serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,

@@ -1,5 +1,6 @@
 package demo.vulnapp.config
 
+import io.mazewall.profiler.api.BillOfBehavior
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
@@ -13,7 +14,11 @@ class EnforcementEvidenceTest {
     @Test
     fun `enforcement rejects incomplete mounted generation`() {
         val target = root.resolve("sbob.json")
-        ProfileArtifactPublisher.publish(target, io.mazewall.profiler.BillOfBehavior(), ExecutorDrain.Incomplete.Interrupted)
+        ProfileArtifactPublisher.publish(
+            target,
+            BillOfBehavior(),
+            ExecutorDrain.Incomplete.Interrupted,
+        )
         val previous = System.getProperty("mazewall.sbob.path")
         System.setProperty("mazewall.sbob.path", target.toString())
         val owner = ServiceExecutorOwner(java.time.Duration.ofSeconds(1))

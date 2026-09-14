@@ -1,14 +1,14 @@
 package io.mazewall.profiler.compiler
 
-import io.mazewall.core.Tid
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.OpenFlagsEvidence
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.engine.PathResolutionFailure
-import io.mazewall.profiler.engine.combinePathResolution
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.combinePathResolution
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
@@ -17,7 +17,7 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 
 /** Converts completed `strace -f` records into immutable observations. */
-public object StraceLogParser {
+internal object StraceLogParser {
     private const val HEX_RADIX = 16
     private const val OCTAL_RADIX = 8
     private const val ASCII_BELL = 0x07

@@ -1,14 +1,8 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockSocketManager
-import io.mazewall.core.Arch
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.SocketManager
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockSocketManager
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -22,6 +16,19 @@ import io.mazewall.ffi.memory.readLong
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Assertions.assertFalse
 import java.util.concurrent.CopyOnWriteArrayList
@@ -151,7 +158,7 @@ internal class SupervisorBoundaryFixture {
             listener,
             engine,
         object : SocketManager by sockets {
-            override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>) {
+            override fun close(fd: FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
                 try {
                     sockets.close(fd)
                 } finally {
@@ -226,7 +233,16 @@ internal class SupervisorBoundaryFixture {
         val address = byteArrayOf(2, 0, 0, 80, 127, 0, 0, 1)
         return SupervisorRouteContext(
             JvmVerdictRequest(42, NotifHeader(nr, Tid(1), Arch.AMD64, Arch.AMD64.audit, 0, LongArray(6)), path, address),
-            SyscallArguments(path, address, openHow = OpenHow(io.mazewall.core.OpenFlags(0), 0, 0)),
+            SyscallArguments(
+                path,
+                address,
+                openHow = OpenHow(
+                    io.mazewall.platform.lifecycle
+                .OpenFlags(0),
+                    0,
+                    0,
+                ),
+            ),
             arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
         )
     }

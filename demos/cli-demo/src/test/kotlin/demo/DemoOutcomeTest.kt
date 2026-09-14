@@ -3,7 +3,7 @@ package demo
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.nio.file.Files
-import io.mazewall.core.Syscall
+import io.mazewall.platform.syscall.Syscall
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

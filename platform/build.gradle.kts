@@ -7,6 +7,7 @@ plugins {
 
 kotlin {
     jvmToolchain(25)
+    explicitApi()
     @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
     abiValidation()
 }
@@ -91,22 +92,14 @@ dependencies {
     testRuntimeOnly(libs.slf4j.nop)
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-        }
-    }
-}
-
 pitest {
     junit5PluginVersion.set("1.2.1")
     targetClasses.set(
         setOf(
-            "io.mazewall.core.SeccompAction*",
+            "io.mazewall.platform.syscall.SeccompAction*",
             "io.mazewall.platform.daemon.UnixListenDaemonMachine*",
             "io.mazewall.ffi.networking.SeccompConnectionMachine*",
-            "io.mazewall.core.PrctlCommand*",
+            "io.mazewall.platform.syscall.PrctlCommand*",
             "io.mazewall.core.NetworkSyscallMapper*",
         ),
     )
@@ -119,10 +112,10 @@ pitest {
     )
     targetTests.set(
         setOf(
-            "io.mazewall.core.SeccompActionTest",
+            "io.mazewall.platform.syscall.SeccompActionTest",
             "io.mazewall.platform.daemon.UnixListenDaemonMachineTest",
             "io.mazewall.ffi.networking.SeccompConnectionMachineTest",
-            "io.mazewall.core.PrctlCommandTest",
+            "io.mazewall.platform.syscall.PrctlCommandTest",
             "io.mazewall.core.NetworkSyscallMapperTest",
         ),
     )

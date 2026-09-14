@@ -1,17 +1,18 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
 
 /** Private installation IPC only: no imported tracee open-file description is modified. */
 internal class SeccompInstallTransport(

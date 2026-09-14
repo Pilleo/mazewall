@@ -1,8 +1,17 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockProcess
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.RuntimeSnapshot
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -11,7 +20,7 @@ class DaemonPtracerTest {
     @Test
     fun `runtime snapshots coordinate the same native process authority`() {
         val engine = MockNativeEngine()
-        val snapshot = io.mazewall.RuntimeSnapshot(engine)
+        val snapshot = RuntimeSnapshot(engine)
         val first = MockProcess(101L)
         val second = MockProcess(202L)
         val attempts = mutableListOf<Long>()

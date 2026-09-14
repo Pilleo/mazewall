@@ -1,18 +1,9 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeFileSystem
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeNetworking
-import io.mazewall.MockNativeProcess
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.Tid
+package io.mazewall.profiler.internal.engine
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeFileSystem
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeNetworking
+import io.mazewall.enforcer.api.MockNativeProcess
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -20,8 +11,22 @@ import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeShort
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
@@ -31,6 +36,7 @@ import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
 import io.mazewall.profiler.ffi.TransportNativeEngine
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -47,7 +53,7 @@ import java.lang.foreign.ValueLayout
 import java.nio.channels.ClosedByInterruptException
 
 @Isolated
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class ProfilerDaemonTest {
     @Test
     fun `stalled preparation expires in reactor and late evidence cannot publish or reply`() {
@@ -181,7 +187,7 @@ class ProfilerDaemonTest {
                         allocate(Layouts.SECCOMP_NOTIF_RESP),
                         listener,
                         socket,
-                        io.mazewall.core.Deadline
+                        io.mazewall.platform.lifecycle.Deadline
                         .afterMillis(30_000),
                     ).use {
                         block(handler, it)
@@ -232,7 +238,7 @@ class ProfilerDaemonTest {
                         response,
                         listener,
                         socket,
-                        io.mazewall.core.Deadline
+                        io.mazewall.platform.lifecycle.Deadline
                         .afterMillis(30_000),
                     ).use { work ->
                         val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
@@ -273,7 +279,7 @@ class ProfilerDaemonTest {
                     arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
                     listener,
                     socket,
-                    io.mazewall.core.Deadline
+                    io.mazewall.platform.lifecycle.Deadline
                     .afterMillis(30_000),
                 ).use { work ->
                     repeat(2) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
@@ -389,7 +395,7 @@ class ProfilerDaemonTest {
             return LinuxNative.SyscallResult.Success(0L)
         }
 
-        override val raw = object : io.mazewall.RawSyscallOperations {
+        override val raw = object : io.mazewall.platform.native.RawSyscallOperations {
             override fun poll(
                 fds: ManagedSegment,
                 nfds: Long,
@@ -503,7 +509,7 @@ class ProfilerDaemonTest {
         val realNative = LinuxNative.snapshot()
         val socket = io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val number = realNative.fileSystem
-                .open(arena.allocateFrom("/dev/null"), io.mazewall.core.OpenFlags.RDONLY)
+                .open(arena.allocateFrom("/dev/null"), io.mazewall.platform.lifecycle.OpenFlags.RDONLY)
                 .getOrThrow("open owned profiler fixture")
             TestFileDescriptors
                 .adopt(number.toInt(), FileDescriptorRole.UnixSocket)

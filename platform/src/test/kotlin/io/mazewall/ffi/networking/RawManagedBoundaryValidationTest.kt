@@ -1,11 +1,19 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.core.Arch
-import io.mazewall.core.NativeArg
-import io.mazewall.core.OpenFlags
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

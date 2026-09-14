@@ -1,8 +1,8 @@
 package io.mazewall.ffi.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ErrnoSegment
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LinuxNative
 import java.lang.foreign.MemorySegment
 import java.lang.invoke.MethodHandle
 

@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import java.io.ByteArrayInputStream
 import java.io.InputStream

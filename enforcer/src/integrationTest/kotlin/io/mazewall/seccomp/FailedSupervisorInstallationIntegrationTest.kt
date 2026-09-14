@@ -1,12 +1,19 @@
 package io.mazewall.seccomp
 
 import io.mazewall.*
-import io.mazewall.core.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.PartialInstallationException
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.internal.supervisor.*
 import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.supervisor.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -57,7 +64,9 @@ class FailedSupervisorInstallationIntegrationTest : BaseIntegrationTest() {
             }
         })
         val scoping = object : StacktraceScopingPolicy {
-            override val handlers = mapOf<Syscall, ScopingHandler>(Syscall.CONNECT to { _, _, _ -> true })
+            override val handlers = mapOf<Syscall, (Tid, List<Any>, List<StackTraceElement>) -> Boolean>(
+                Syscall.CONNECT to { _, _, _ -> true },
+            )
         }
         val executed = AtomicInteger()
         try {

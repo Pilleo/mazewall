@@ -1,10 +1,10 @@
 package io.mazewall.profiler.tierE.stress
 
-import io.mazewall.profiler.Profiler
+import io.mazewall.profiler.api.Profiler
 import java.nio.file.Files
 
 /** Controlled slow-oracle check for the equivalent file workload. */
-public object UserNotifOracleSmoke {
+internal object UserNotifOracleSmoke {
     @JvmStatic
     public fun main(args: Array<String>) {
         val iterations = args.singleOrNull()?.toInt() ?: 1

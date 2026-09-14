@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import org.junit.jupiter.api.Test
 import java.nio.file.Files

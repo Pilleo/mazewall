@@ -1,14 +1,21 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.io.IOException
 import java.nio.channels.Selector
@@ -217,19 +224,19 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             // On modern kernels, this should at least pass our internal guard
             // (might still fail with EACCES if sibling threads aren't ready, but that's a different error)
             try {
-                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
             } catch (e: Exception) {
                 // EACCES is acceptable in this test context as it proves we bypassed the version guard
                 val strerror13 = io.mazewall.ffi.memory
                     .getSystemStrerror(13)
                 val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
-                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.UnsupportedKernelFeatureException) {
+                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.enforcer.api.UnsupportedKernelFeatureException) {
                     throw e
                 }
             }
         } else {
-            org.junit.jupiter.api.assertThrows<io.mazewall.UnsupportedKernelFeatureException> {
-                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.Uncompiled>)
+            org.junit.jupiter.api.assertThrows<io.mazewall.enforcer.api.UnsupportedKernelFeatureException> {
+                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
             }
         }
     }

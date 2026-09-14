@@ -1,10 +1,17 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readString
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import io.mazewall.testing.getOrFail
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf

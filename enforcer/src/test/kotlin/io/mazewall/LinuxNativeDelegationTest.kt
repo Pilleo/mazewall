@@ -1,11 +1,18 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ForeignFdGuard
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.ForeignFdGuard
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -35,13 +42,13 @@ class LinuxNativeDelegationTest {
 
         val res = LinuxNative.raw.syscall4(
             1,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
             .IntArg(2),
-                io.mazewall.core.NativeArg
+                io.mazewall.platform.syscall.NativeArg
                 .IntArg(3),
-                    io.mazewall.core.NativeArg
+                    io.mazewall.platform.syscall.NativeArg
                     .IntArg(4),
-                        io.mazewall.core.NativeArg
+                        io.mazewall.platform.syscall.NativeArg
                         .IntArg(5),
         )
         assertEquals(444L, res.getOrThrow("test"))
@@ -50,7 +57,7 @@ class LinuxNativeDelegationTest {
     @Test
     fun `raw syscall delegates null and memory arguments to configured engine`() =
         nativeScope {
-        val observed = mutableListOf<io.mazewall.core.NativeArg>()
+        val observed = mutableListOf<io.mazewall.platform.syscall.NativeArg>()
         val mock = MockNativeEngine().apply {
             onSyscall = { _, a1, a2, _, _, _, _ ->
                 observed += a1
@@ -63,23 +70,23 @@ class LinuxNativeDelegationTest {
         val segment = allocate(8)
         val result = LinuxNative.raw.syscall(
             123,
-            io.mazewall.core.NativeArg.NullArg,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg.NullArg,
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(segment),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(1),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(2),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(3),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(4),
         )
 
         assertEquals(17L, result.getOrThrow("delegated syscall"))
-        assertEquals(io.mazewall.core.NativeArg.NullArg, observed[0])
+        assertEquals(io.mazewall.platform.syscall.NativeArg.NullArg, observed[0])
         assertEquals(
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
             .MemoryArg(segment),
                 observed[1],
         )

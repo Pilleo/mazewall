@@ -2,7 +2,7 @@
 title: "Add capability-based routing for kernel and offline tasks in ComponentRouter"
 severity: "LOW"
 status: "open"
-priority: medium
+priority: low
 dependencies: []
 component: "orchestrator"
 target_modules:

@@ -3,20 +3,20 @@ package demo
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
 import org.junit.jupiter.api.condition.OS
-import io.mazewall.IsolatedProcessTester
+import io.mazewall.enforcer.api.IsolatedProcessTester
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.ProfilingResult
-import io.mazewall.profiler.IncompleteProfileException
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.ProfilingResult
+import io.mazewall.profiler.api.IncompleteProfileException
 
 class ProfileAndEnforceDemoTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     fun `compiled file profile preserves the positive operation without stack supervision`() {
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
         IsolatedProcessTester.runIsolatedMethod(javaClass.name, "compiledFileBody")
     }
 
@@ -25,7 +25,7 @@ class ProfileAndEnforceDemoTest {
         DemoFixture.create().use { fixture ->
             val file = fixture.root.resolve("config").toFile().apply { writeText("before") }
             val workload = ProfiledFileWorkload(file)
-            val result = io.mazewall.profiler.Profiler.profile { workload.readConfiguration() }
+            val result = io.mazewall.profiler.api.Profiler.profile { workload.readConfiguration() }
             val policy = compileProfileForDemo(result)
             file.writeText("after")
             java.util.concurrent.Executors.newSingleThreadExecutor().use { executor ->
@@ -63,7 +63,7 @@ class ProfileAndEnforceDemoTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     fun `profile demo does not claim success from inferred containment`() {
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         IsolatedProcessTester.runIsolatedMethod(javaClass.name, "profileBody")
     }
@@ -73,7 +73,9 @@ class ProfileAndEnforceDemoTest {
         val report = runProfileAndEnforce()
         assertTrue(report.results.single { it.name == "contained legitimate workload" }.passed, report.summary())
         val attacks = report.results.filter { it.expected == ExpectedResult.DENIED }
-        assertEquals(3, attacks.size)
+        // The public-facade demo keeps the synchronous path probe. Stack-scoped
+        // and raw-native probes were deliberately removed with their unsupported APIs.
+        assertEquals(1, attacks.size)
         attacks.forEach { result ->
             when (val outcome = result.outcome) {
                 is ScenarioOutcome.Completed -> kotlin.test.fail(report.summary())

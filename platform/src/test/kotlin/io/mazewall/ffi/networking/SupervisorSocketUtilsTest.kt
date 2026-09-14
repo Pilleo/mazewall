@@ -1,18 +1,27 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeNetworking
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.testAcquisition
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.native
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -20,6 +29,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.lang.reflect.InvocationTargetException
 import java.nio.charset.StandardCharsets
 
 class SupervisorSocketUtilsTest {
@@ -183,6 +193,40 @@ class SupervisorSocketUtilsTest {
     }
 
     @Test
+    fun `recvDescriptor uses the supplied native runtime`() {
+        var receiveCalls = 0
+        val suppliedRuntime = MockNativeEngine(
+            networking = object : MockNativeNetworking() {
+                override fun recvmsg(
+                    sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    msg: ManagedSegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    receiveCalls++
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EACCES, -1L)
+                }
+            },
+        )
+        val overload = SupervisorSocketUtils::class.java.declaredMethods.singleOrNull { method ->
+            method.name == "recvDescriptor" &&
+                method.parameterTypes.size == 4 &&
+                method.parameterTypes[2] == NativeEngine::class.java
+        }
+
+        assertTrue(overload != null, "descriptor receive must accept an explicitly captured NativeEngine")
+        val result = overload!!.invoke(
+            SupervisorSocketUtils,
+            TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10),
+            FileDescriptorRole.SeccompNotif,
+            suppliedRuntime,
+            null,
+        )
+
+        assertNull(result)
+        assertEquals(1, receiveCalls)
+    }
+
+    @Test
     fun `recvDescriptor returns null after a successful message without SCM_RIGHTS`() {
         var callCount = 0
         val mockNetworking = object : MockNativeNetworking() {
@@ -230,6 +274,42 @@ class SupervisorSocketUtilsTest {
     }
 
     @Test
+    fun `connectDescriptorWithRetry uses the supplied native runtime`() {
+        var socketCalls = 0
+        val suppliedRuntime = MockNativeEngine(
+            networking = object : MockNativeNetworking() {
+                override fun socket(
+                    domain: Int,
+                    type: Int,
+                    protocol: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    socketCalls++
+                    return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EACCES, -1L)
+                }
+            },
+        )
+        val overload = SupervisorSocketUtils::class.java.declaredMethods.singleOrNull { method ->
+            method.name == "connectDescriptorWithRetry" &&
+                method.parameterTypes.contentEquals(
+                    arrayOf(
+                        String::class.java,
+                        NativeEngine::class.java,
+                        Int::class.javaPrimitiveType,
+                        Long::class.javaPrimitiveType,
+                    ),
+                )
+        }
+
+        assertTrue(overload != null, "socket connection must accept an explicitly captured NativeEngine")
+        val failure = assertThrows<InvocationTargetException> {
+            overload!!.invoke(SupervisorSocketUtils, "/tmp/test.sock", suppliedRuntime, 1, 0L)
+        }
+
+        assertTrue(failure.cause is IllegalStateException)
+        assertEquals(1, socketCalls)
+    }
+
+    @Test
     fun `RealSocketManager createUnixServer specifies SOCK_CLOEXEC`() {
         var socketTypeArg = 0
         val mockNetworking = object : MockNativeNetworking() {
@@ -247,12 +327,46 @@ class SupervisorSocketUtilsTest {
         LinuxNative.setEngine(mockEngine)
 
         assertThrows<IllegalStateException> {
-            io.mazewall.core.RealSocketManager
+            io.mazewall.platform.socket.RealSocketManager
                 .createUnixServer("/tmp/test_server.sock")
         }
 
         val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
         assertEquals(expectedType, socketTypeArg)
+    }
+
+    @Test
+    fun `UnixServerSocket uses the supplied native runtime`() {
+        val suppliedRuntime = MockNativeEngine(
+            networking = object : MockNativeNetworking() {
+                override fun socket(
+                    domain: Int,
+                    type: Int,
+                    protocol: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(123L).testAcquisition()
+
+                override fun bind(
+                    sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    addr: ManagedSegment,
+                    addrlen: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+                override fun listen(
+                    sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    backlog: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+            },
+        )
+        val overload = UnixServerSocket::class.java.declaredMethods.singleOrNull { method ->
+            method.name == "open" &&
+                method.parameterTypes.contentEquals(arrayOf(String::class.java, NativeEngine::class.java))
+        }
+
+        assertTrue(overload != null, "UNIX server creation must accept an explicitly captured NativeEngine")
+        val socket = overload!!.invoke(UnixServerSocket, "/tmp/test.sock", suppliedRuntime)
+
+        assertEquals(123, (socket as FileDescriptor<*, *, *>).value)
     }
 
     @Test
@@ -275,7 +389,7 @@ class SupervisorSocketUtilsTest {
 
         val serverFd = TestFileDescriptors
             .replace<FileDescriptorRole.UnixSocket>(10)
-        val clientFd = io.mazewall.core.RealSocketManager
+        val clientFd = io.mazewall.platform.socket.RealSocketManager
             .accept(serverFd)
 
         assertEquals(99, clientFd.value)

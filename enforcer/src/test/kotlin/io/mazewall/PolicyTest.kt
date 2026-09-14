@@ -1,9 +1,16 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.Arch
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File

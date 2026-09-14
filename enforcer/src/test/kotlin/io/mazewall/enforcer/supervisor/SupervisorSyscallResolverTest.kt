@@ -1,7 +1,14 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs

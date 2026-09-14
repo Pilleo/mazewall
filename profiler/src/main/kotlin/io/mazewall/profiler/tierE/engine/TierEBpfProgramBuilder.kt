@@ -1,7 +1,7 @@
 package io.mazewall.profiler.tierE.engine
 
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine.Insn
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 
@@ -11,7 +11,7 @@ import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
  * Extracted from [TierEbpfEngine] to allow unit testing and isolated verification of bytecode
  * generation without requiring root privileges or bpf(2) syscall execution.
  */
-public object TierEBpfProgramBuilder {
+internal object TierEBpfProgramBuilder {
     // eBPF helper IDs (uapi/linux/bpf.h)
     private const val H_LOOKUP: Int = 1
     private const val H_UPDATE: Int = 2

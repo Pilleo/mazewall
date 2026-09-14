@@ -1,6 +1,10 @@
 package io.mazewall.profiler.strace
-
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 
 class StraceProfilerTest {
@@ -12,9 +16,9 @@ class StraceProfilerTest {
             rootDir = rootDir.parentFile
         }
 
-        val profilerFile = java.io.File(rootDir, "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt")
+        val profilerFile = java.io.File(rootDir, "profiler/src/main/kotlin/io/mazewall/profiler/api/Profiler.kt")
         val straceProfilerFile = java.io.File(rootDir, "profiler/src/main/kotlin/io/mazewall/profiler/strace/StraceProfiler.kt")
-        val profilerDaemonFile = java.io.File(rootDir, "profiler/src/main/kotlin/io/mazewall/profiler/engine/ProfilerDaemon.kt")
+        val profilerDaemonFile = java.io.File(rootDir, "profiler/src/main/kotlin/io/mazewall/profiler/internal/engine/ProfilerDaemon.kt")
 
         org.junit.jupiter.api.Assertions
             .assertTrue(profilerFile.exists(), "Profiler.kt should be found at ${profilerFile.absolutePath}")

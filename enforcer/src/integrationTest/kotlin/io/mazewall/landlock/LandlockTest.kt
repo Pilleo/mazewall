@@ -1,17 +1,24 @@
 package io.mazewall.landlock
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.Syscall
-import io.mazewall.core.testAcquisition
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
@@ -176,7 +183,7 @@ class LandlockTest : BaseIntegrationTest() {
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsWrite(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of(file, true),
             ).build()
         val executor = Executors.newSingleThreadExecutor()
@@ -504,12 +511,12 @@ class LandlockTest : BaseIntegrationTest() {
         val mockEngine = object : MockNativeEngine() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
@@ -539,12 +546,12 @@ class LandlockTest : BaseIntegrationTest() {
         val mockEngine = object : MockNativeEngine() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION

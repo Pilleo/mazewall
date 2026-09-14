@@ -1,32 +1,37 @@
-package io.mazewall.profiler
-
+package io.mazewall.profiler.api
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
-import io.mazewall.LinuxNative
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeShort
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.seccomp.daemon.LoopAction
-import io.mazewall.profiler.engine.ProfilerMemoryReader
-import io.mazewall.profiler.engine.ProfilerSessionHandler
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.profiler.internal.engine.ProfilerMemoryReader
+import io.mazewall.profiler.internal.engine.ProfilerSessionHandler
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -64,7 +69,7 @@ class ProfilerDesignSpec :
             val nextNotifArgs = LongArray(6)
             var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
 
-            override val raw = object : io.mazewall.RawSyscallOperations {
+            override val raw = object : io.mazewall.platform.native.RawSyscallOperations {
                 override fun poll(
                     fds: ManagedSegment,
                     nfds: Long,

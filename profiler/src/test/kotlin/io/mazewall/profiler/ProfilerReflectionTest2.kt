@@ -1,11 +1,15 @@
-package io.mazewall.profiler
-
-import io.mazewall.core.Tid
-import io.mazewall.profiler.engine.MmapFileDescriptor
-import io.mazewall.profiler.engine.MmapFlags
-import io.mazewall.profiler.engine.MmapProtection
-import io.mazewall.profiler.engine.SessionEvent
-import io.mazewall.profiler.engine.TraceEvent
+package io.mazewall.profiler.api
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.MmapFileDescriptor
+import io.mazewall.profiler.api.MmapFlags
+import io.mazewall.profiler.api.MmapProtection
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.SessionEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.File

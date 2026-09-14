@@ -1,15 +1,15 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative.SyscallHandledState.Unhandled
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.MazewallInternal
+import io.mazewall.platform.lifecycle.MazewallInternal
+import io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled
+import io.mazewall.platform.native.LinuxNative.SyscallResult
 
 /**
  * Serializes an irreversible seccomp installation with its owner's close decision.
  * Only the native install operation belongs inside [commit]; allocation and handshake waits do not.
  */
 @MazewallInternal
-public fun interface SeccompInstallationGate {
+internal fun interface SeccompInstallationGate {
     public fun commit(operation: () -> SyscallResult<Long, Unhandled>): SyscallResult<Long, Unhandled>
 
     public companion object {

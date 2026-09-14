@@ -1,15 +1,5 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeCloseFailure
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -19,8 +9,19 @@ import io.mazewall.ffi.memory.SeccompSessionBuffers
 import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.readLong
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.seccomp.UserNotifReply
 import io.mazewall.platform.seccomp.UserNotifReplyResult
+import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 
 /**
  * Unified reactor handler for active seccomp user notifications and UNIX domain control sockets.
@@ -30,7 +31,7 @@ import io.mazewall.platform.seccomp.UserNotifReplyResult
  * a reported pre-retirement failure requires retaining this handler for cleanup retry.
  */
 @Suppress("UseCheckOrError")
-public class SeccompSessionHandler(
+internal class SeccompSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val notifHandler: SeccompNotifHandler,
@@ -86,7 +87,7 @@ public class SeccompSessionHandler(
         }
     }
 
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     @Synchronized
     public fun closeWithResult(): SeccompCleanupOutcome = closeWithResult { }
 

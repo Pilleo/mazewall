@@ -1,15 +1,19 @@
-package io.mazewall.profiler
-
-import io.mazewall.MockNativeEngine
-import io.mazewall.PolicyPresets
-import io.mazewall.core.Tid
-import io.mazewall.profiler.engine.PathResolution
-import io.mazewall.profiler.engine.PathResolutionFailure
-import io.mazewall.profiler.engine.RealProfilerInstaller
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
-import io.mazewall.profiler.engine.TraceEvent
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.PolicyPresets
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.internal.DaemonContext
+import io.mazewall.profiler.internal.engine.RealProfilerInstaller
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.util.concurrent.Executors
@@ -22,7 +26,7 @@ class ProfilerExecutorSnapshotTest {
     @Test
     fun `failed collector installation is never mistaken for an unused wrapper`() {
         val session = session()
-        assertFailsWith<io.mazewall.UnsupportedKernelFeatureException> { session.installOnCurrentThread() }
+        assertFailsWith<io.mazewall.enforcer.api.UnsupportedKernelFeatureException> { session.installOnCurrentThread() }
         session.close()
         assertFalse(session.result(Unit).coverage.complete)
     }

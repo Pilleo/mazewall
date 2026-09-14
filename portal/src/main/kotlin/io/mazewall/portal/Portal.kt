@@ -4,7 +4,7 @@ package io.mazewall.portal
  * Loads a KotlinPoet-generated host stub. Never instantiates a guest `Impl`
  * in the broker; missing stubs fail closed.
  */
-public object Portal {
+internal object Portal {
     @JvmStatic
     public fun <T : Any> create(
         type: Class<T>,

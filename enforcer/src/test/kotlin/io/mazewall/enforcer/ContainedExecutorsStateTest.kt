@@ -1,9 +1,18 @@
 package io.mazewall.enforcer
 
 import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -31,8 +40,8 @@ class ContainedExecutorsStateTest {
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
-            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-                io.mazewall.LinuxNative.SyscallResult
+            override fun checkSeccompSanity(): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.platform.native.LinuxNative.SyscallResult
                 .Error(22, -1)
         }
         Platform.setProvider(mockProvider)
@@ -59,8 +68,8 @@ class ContainedExecutorsStateTest {
 
             override fun hasKernelSeccompSupport(): Boolean = seccompSupported
 
-            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-                io.mazewall.LinuxNative.SyscallResult
+            override fun checkSeccompSanity(): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.platform.native.LinuxNative.SyscallResult
                 .Error(22, -1)
         }
         Platform.setProvider(mockProvider)
@@ -123,8 +132,8 @@ class ContainedExecutorsStateTest {
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
-            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-                io.mazewall.LinuxNative.SyscallResult
+            override fun checkSeccompSanity(): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.platform.native.LinuxNative.SyscallResult
                 .Error(22, -1)
         }
         Platform.setProvider(mockProvider)

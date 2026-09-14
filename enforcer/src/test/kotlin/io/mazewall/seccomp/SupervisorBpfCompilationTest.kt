@@ -1,11 +1,19 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -40,8 +48,8 @@ class SupervisorBpfCompilationTest {
     fun `policy builder with supervise produces notify action in bpf filter`() {
         val policy = Policy
             .builder()
-            .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
-            .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.CONNECT)
+            .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
+            .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.CONNECT)
             .build()
 
         assertTrue(policy.definition.hasSupervisedSyscalls)

@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import java.io.File
 import java.time.Duration
@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
  * This is required for tests that install irreversible seccomp or Landlock filters,
  * preventing them from "poisoning" the shared Gradle test worker thread/process.
  *
- * Do not use [io.mazewall.core.JvmChildProcess] here. Daemon children use a different
+ * Do not use [io.mazewall.platform.process.JvmChildProcess] here. Daemon children use a different
  * argv. Isolated children also drop inherited JAVA_TOOL_OPTIONS so GraalVM JVMCI
  * is not enabled (C1 mmap PROT_EXEC EPERM / exit 1).
  *
@@ -156,7 +156,7 @@ object IsolatedProcessTester {
         val builder = ProcessBuilder(command)
         // Parent Gradle/Graal workers inject EnableJVMCIProduct via these.
         // Isolated children inherit them and then crash in C1 mmap(PROT_EXEC).
-        io.mazewall.core.JvmChildProcess
+        io.mazewall.platform.process.JvmChildProcess
             .stripInheritedJvmOptions(builder.environment())
         builder.inheritIO()
         val process = builder.start()

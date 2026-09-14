@@ -1,8 +1,17 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
-import io.mazewall.enforcer.supervisor.ScopingHandler
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy
+import io.mazewall.enforcer.api.ScopingHandler
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

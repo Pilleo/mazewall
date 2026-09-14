@@ -3,7 +3,7 @@ package io.mazewall.ffi
 /**
  * Centralized registry for all Linux kernel constants and system call numbers.
  */
-object NativeConstants {
+internal object NativeConstants {
     // Poll events
     const val POLLIN: Short = 1
     const val POLLOUT: Short = 4

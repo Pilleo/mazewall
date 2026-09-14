@@ -1,9 +1,12 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.FdOwnership
 import io.mazewall.ffi.memory.nativeScope
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue

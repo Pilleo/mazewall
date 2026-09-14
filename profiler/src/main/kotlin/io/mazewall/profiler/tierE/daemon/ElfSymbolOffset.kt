@@ -6,7 +6,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /** Dependency-free ELF64 dynamic-symbol to file-offset resolver for uprobes. */
-public object ElfSymbolOffset {
+internal object ElfSymbolOffset {
     public fun resolve(
         path: Path,
         symbol: String,

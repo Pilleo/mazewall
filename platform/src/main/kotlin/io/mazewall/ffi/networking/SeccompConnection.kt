@@ -1,27 +1,28 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeCloseFailure
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.CancellationException
 
 /**
  * Represents the lifecycle of a connection between a seccomp daemon and the tracee JVM.
  */
-public sealed class SeccompConnection(
+internal sealed class SeccompConnection(
     protected val socketClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
     protected val listenerClosedFlag: java.util.concurrent.atomic.AtomicBoolean,
 ) : AutoCloseable {
     /** Failed pre-dispatch closes remain owned; native close results are terminal even on error. */
-    public sealed interface CloseResult {
+    sealed interface CloseResult {
         public data object Closed : CloseResult
 
-        public data class Failed(
+        data class Failed(
             public val failures: List<Exception>,
         ) : CloseResult
     }
@@ -103,7 +104,7 @@ public sealed class SeccompConnection(
     }
 
     /** Initial state: Connection accepted, waiting to receive the seccomp listener FD. */
-    public data class Accepted(
+    data class Accepted(
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
             .AtomicBoolean(false),
@@ -117,7 +118,7 @@ public sealed class SeccompConnection(
     }
 
     /** Intermediate state: Listener FD received, waiting to send the 0xAC ACK byte. */
-    public data class FdAttached(
+    data class FdAttached(
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic
@@ -132,7 +133,7 @@ public sealed class SeccompConnection(
     }
 
     /** Established state: Handshake complete, session is now active and polling. */
-    public data class Active(
+    data class Active(
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         private val sharedSocketClosedFlag: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic

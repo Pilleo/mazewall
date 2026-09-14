@@ -1,22 +1,29 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.NativeArg
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-import io.mazewall.enforcer.supervisor.SupervisorDescriptorResult
-import io.mazewall.enforcer.supervisor.SupervisorOwnedFd
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ScopingHandler
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult
+import io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.writeInt
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.net.Socket
@@ -29,7 +36,7 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
     companion object {
         @org.junit.jupiter.api.AfterAll @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+            io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .stop()
         }

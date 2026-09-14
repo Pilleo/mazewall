@@ -1,17 +1,24 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeProcess
-import io.mazewall.Policy
-import io.mazewall.compile
-import io.mazewall.core.Arch
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -24,7 +31,8 @@ class PureJavaBpfEngineReproductionTest {
     fun tearDown() {
         LinuxNative.resetToDefault()
         PureJavaBpfEngine.clearCache()
-        io.mazewall.PolicyCompilationCache.clear()
+        io.mazewall.enforcer.api.PolicyCompilationCache
+            .clear()
     }
 
     @Test

@@ -1,10 +1,14 @@
 package io.mazewall.profiler.tierE.engine
-
-import io.mazewall.LinuxNative.SyscallHandledState
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.RawSyscallOperations
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative.SyscallHandledState
+import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import java.lang.reflect.Proxy
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -29,7 +33,7 @@ class BpfProgLoadLayoutTest {
                             else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1)
                         }
                         3L -> {
-                            closed += (args[1] as io.mazewall.core.NativeArg.LongArg).value
+                            closed += (args[1] as io.mazewall.platform.syscall.NativeArg.LongArg).value
                             SyscallResult.Success<Long, SyscallHandledState.Unhandled>(0L)
                         }
                         else -> error("unexpected syscall $number")

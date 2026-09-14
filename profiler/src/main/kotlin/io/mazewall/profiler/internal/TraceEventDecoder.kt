@@ -1,9 +1,9 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.core.Tid
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
+import io.mazewall.profiler.api.TraceEvent
 import java.io.DataInputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets

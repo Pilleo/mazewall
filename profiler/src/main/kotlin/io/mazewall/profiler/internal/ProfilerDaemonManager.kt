@@ -1,18 +1,18 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.core.ChildProcessResources
-import io.mazewall.core.ChildStartupTransaction
-import io.mazewall.core.DaemonPtracer
-import io.mazewall.core.JavaAgentSelection
-import io.mazewall.core.JvmChildProcess
-import io.mazewall.core.JvmChildSpec
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.RealProcessLauncher
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.process.ChildProcessResources
+import io.mazewall.platform.process.ChildStartupTransaction
+import io.mazewall.platform.process.DaemonPtracer
+import io.mazewall.platform.process.JavaAgentSelection
+import io.mazewall.platform.process.JvmChildProcess
+import io.mazewall.platform.process.JvmChildSpec
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import java.nio.file.Path
 import java.util.logging.Logger
@@ -117,7 +117,7 @@ internal class ProfilerDaemonManager(
 
         val spec =
             JvmChildSpec(
-                mainClass = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name,
+                mainClass = io.mazewall.profiler.internal.engine.ProfilerDaemon::class.java.name,
                 mainArgs = listOf(socketPath),
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.JacocoOnly,
@@ -130,7 +130,7 @@ internal class ProfilerDaemonManager(
         DaemonPtracer.authorize(engine, daemonProcess)
 
         startup.startOutputPump(
-                sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL,
+                sentinel = io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL,
                 onLine = { line ->
                     // Child diagnostics may include arbitrary tracee input. Readiness is
                     // consumed by the resource owner; ordinary output exposes only a size.

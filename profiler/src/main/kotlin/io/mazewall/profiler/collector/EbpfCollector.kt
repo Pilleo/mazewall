@@ -1,13 +1,13 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.profiler.EbpfLoad
-import io.mazewall.profiler.IncompleteProfileException
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileEnvironment
-import io.mazewall.profiler.ProfileStrategy
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.StackAttribution
+import io.mazewall.profiler.api.EbpfLoad
+import io.mazewall.profiler.api.IncompleteProfileException
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -17,7 +17,7 @@ import java.nio.file.Path
  * Live attach is not implemented (would need a privileged sidecar). A recorded
  * event log captured on a rootful host can be compiled anywhere.
  */
-public class EbpfCollector(
+internal class EbpfCollector(
     private val load: EbpfLoad,
     private val recordedLog: Path? = null,
     private val liveAttach: Boolean = false,
@@ -42,7 +42,7 @@ public class EbpfCollector(
         check(started) { "EbpfCollector.start() was not called" }
         val log = requireNotNull(recordedLog) { "EbpfCollector requires a recorded event log" }
         val parsed = EbpfEventParser.parse(Files.readString(log))
-        val ioUring = if (parsed.observations.any { it is io.mazewall.profiler.ProfileObservation.IoUring }) {
+        val ioUring = if (parsed.observations.any { it is io.mazewall.profiler.api.ProfileObservation.IoUring }) {
             IoUringVisibility.OBSERVED
         } else {
             IoUringVisibility.UNSEEN

@@ -1,14 +1,15 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeMemory
-import io.mazewall.core.ErrnoMapping
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeMemory
+import io.mazewall.platform.syscall.ErrnoMapping
 import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
@@ -18,7 +19,7 @@ import java.io.InterruptedIOException
  * The public primary constructor captures the current native memory dependency once;
  * the additive constructor captures an explicitly supplied dependency instead.
  */
-public open class NativeDescriptorInputStream(
+internal open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
     private val description: String = "native descriptor",

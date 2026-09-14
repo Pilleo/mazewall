@@ -1,8 +1,8 @@
 package demo.vulnapp.config
 
 import demo.vulnapp.service.*
-import io.mazewall.Policy
-import io.mazewall.profiler.Profiler
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.profiler.api.Profiler
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

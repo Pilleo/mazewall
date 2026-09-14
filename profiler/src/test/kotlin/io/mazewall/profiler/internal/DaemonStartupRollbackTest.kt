@@ -1,13 +1,16 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeProcess
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.core.PrctlCommand
-import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.PrctlCommand
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.IOException
@@ -164,7 +167,7 @@ class DaemonStartupRollbackTest {
 
     @Test
     fun `failed dead-profiler retirement remains owned until retry succeeds`() {
-        val sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL
+        val sentinel = io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL
         val first = MockProcess(123, "$sentinel\n")
         val second = MockProcess(124, "$sentinel\n")
         var starts = 0
@@ -198,9 +201,9 @@ class DaemonStartupRollbackTest {
         for (supervisor in listOf(false, true)) {
             for (stage in listOf("ptracer", "hook", "readiness")) {
                 val sentinel = if (supervisor) {
-                    io.mazewall.enforcer.supervisor.SupervisorDaemon.DAEMON_READY_SENTINEL
+                    supervisorReadySentinel()
                 } else {
-                    io.mazewall.profiler.engine.DAEMON_READY_SENTINEL
+                    io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL
                 }
                 val process = MockProcess(123, if (stage == "readiness") "not ready\n" else "$sentinel\n")
                 val deleted = mutableListOf<Path>()
@@ -227,7 +230,7 @@ class DaemonStartupRollbackTest {
 
     @Test
     fun `dead profiler resources retire before replacement launch`() {
-        val sentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL
+        val sentinel = io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL
         val first = MockProcess(123, "$sentinel\n")
         val second = MockProcess(124, "$sentinel\n")
         val deleted = mutableListOf<Path>()
@@ -299,11 +302,7 @@ class DaemonStartupRollbackTest {
         launcher: MockProcessLauncher,
     ): Driver =
         if (supervisor) {
-            val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
-            val start: () -> Unit = {
-                manager.getOrSpawnSharedDaemon()
-            }
-            Driver(start, manager::stop)
+            supervisorDriver(engine, launcher)
         } else {
             val manager = ProfilerDaemonManager(engine, MockSocketManager(), launcher)
             val start: () -> Unit = {
@@ -311,4 +310,43 @@ class DaemonStartupRollbackTest {
             }
             Driver(start, manager::stop)
         }
+
+    /**
+     * The supervisor daemon is an enforcer implementation detail.  This cross-module
+     * regression test intentionally uses reflection so it can exercise rollback behavior
+     * without widening the published enforcer API solely for test access.
+     */
+    private fun supervisorDriver(
+        engine: MockNativeEngine,
+        launcher: MockProcessLauncher,
+    ): Driver {
+        val managerClass = Class.forName("io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager")
+        val manager = managerClass.declaredConstructors
+            .single { constructor ->
+            constructor.parameterTypes.size == 3
+        }.newInstance(engine, MockSocketManager(), launcher)
+        val start = managerClass.getDeclaredMethod("getOrSpawnSharedDaemon")
+        val stop = managerClass.getDeclaredMethod("stop")
+        return Driver(
+            start = { invokeInternal(start, manager) },
+            stop = { invokeInternal(stop, manager) },
+        )
+    }
+
+    private fun supervisorReadySentinel(): String =
+        Class
+            .forName("io.mazewall.enforcer.internal.supervisor.SupervisorDaemon")
+            .getDeclaredField("DAEMON_READY_SENTINEL")
+            .get(null) as String
+
+    private fun invokeInternal(
+        method: java.lang.reflect.Method,
+        receiver: Any,
+    ) {
+        try {
+            method.invoke(receiver)
+        } catch (failure: java.lang.reflect.InvocationTargetException) {
+            throw checkNotNull(failure.cause)
+        }
+    }
 }

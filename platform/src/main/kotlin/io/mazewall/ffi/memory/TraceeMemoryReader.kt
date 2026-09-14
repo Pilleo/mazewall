@@ -1,15 +1,16 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeMemory
-import io.mazewall.core.Deadline
-import io.mazewall.core.Pid
-import io.mazewall.core.Tid
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.map
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.NativeMemory
+import io.mazewall.platform.native.map
+import io.mazewall.platform.native.onFailure
+import io.mazewall.platform.native.onSuccess
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -25,7 +26,7 @@ private const val PROCESS_VM_READ_MAX_ATTEMPTS = 8
 /**
  * Shared utility for reading memory and resolving paths from remote processes/threads using process_vm_readv and readlink.
  */
-public interface TraceeMemoryReader {
+internal interface TraceeMemoryReader {
     /** Typed diagnostic; the original IllegalStateException entry-point contract is preserved. */
     public class TruncatedStringException(
         public val bytesRead: Int,
@@ -66,7 +67,7 @@ public interface TraceeMemoryReader {
 
     private class InjectedReal(
         private val memory: NativeMemory,
-        private val fileSystem: io.mazewall.NativeFileSystem,
+        private val fileSystem: NativeFileSystem,
     ) : TraceeMemoryReader {
         context(arena: NativeArena) override fun readString(
             tid: Tid,

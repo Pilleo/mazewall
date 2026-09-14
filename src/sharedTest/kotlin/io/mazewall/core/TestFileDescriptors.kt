@@ -1,13 +1,15 @@
 @file:Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
 
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
 
 /** Test-only native acquisition simulation. Never shipped in the production platform artifact. */
-object TestFileDescriptors {
+internal object TestFileDescriptors {
     fun <R : FileDescriptorRole> adopt(
         value: Int,
         role: R,
@@ -21,13 +23,13 @@ object TestFileDescriptors {
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned> = FileDescriptor.acquired(value, FileDescriptorRole.Generic, arena) as FileDescriptor<R, FdState.Open, FdOwnership.Owned>
 }
 
-fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.testAcquisition(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+internal fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.testAcquisition(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
     when (this) {
         is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(value).recordDescriptorAcquisition()
         is LinuxNative.SyscallResult.Error -> this
     }
 
-fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.testSyscallAcquisition(
+internal fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>.testSyscallAcquisition(
     nr: Long,
     a1: NativeArg,
     a2: NativeArg,

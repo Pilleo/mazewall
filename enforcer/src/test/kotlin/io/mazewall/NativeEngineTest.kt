@@ -1,13 +1,20 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ForeignFdGuard
-import io.mazewall.core.close
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.typed
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.close
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.ForeignFdGuard
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -20,7 +27,8 @@ import org.junit.jupiter.params.provider.MethodSource
 class NativeEngineTest {
     companion object {
         @JvmStatic
-        fun ioctlCommands() =
+        @JvmName("ioctlCommands")
+        internal fun ioctlCommands() =
             listOf(
             IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV,
             IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND,
@@ -36,7 +44,7 @@ class NativeEngineTest {
 
     @ParameterizedTest
     @MethodSource("ioctlCommands")
-    fun `strongly typed ioctl signature delegates correctly and integrates with MockNativeEngine`(command: IoctlCommand<*, *>) {
+    internal fun `strongly typed ioctl signature delegates correctly and integrates with MockNativeEngine`(command: IoctlCommand<*, *>) {
         val mock = MockNativeEngine()
         var lastCommandCode = -1L
         mock.onIoctl = { _, request, _ ->
@@ -62,7 +70,7 @@ class NativeEngineTest {
         LinuxNative.setEngine(mock)
 
         val result = LinuxNative.process.prctl(
-            io.mazewall.core.PrctlCommand
+            io.mazewall.platform.syscall.PrctlCommand
             .SetNoNewPrivs(true),
         )
         assertEquals(42L, result.getOrThrow("test"))

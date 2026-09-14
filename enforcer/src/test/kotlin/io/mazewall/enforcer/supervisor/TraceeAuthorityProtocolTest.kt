@@ -1,8 +1,15 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Deadline
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.SeccompNotification
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
@@ -78,16 +85,26 @@ class TraceeAuthorityProtocolTest {
     fun `terminal effects transfer one descriptor only for descriptor carrying variants`() {
         val fixture = SupervisorBoundaryFixture()
         val descriptor = SupervisorOwnedFd(
-            io.mazewall.core.TestFileDescriptors
-            .replace<io.mazewall.core.FileDescriptorRole.Generic>(52921),
+            io.mazewall.platform.lifecycle.TestFileDescriptors
+            .replace<io.mazewall.platform.fd.FileDescriptorRole.Generic>(52921),
                 fixture.engine.fileSystem,
         )
-        val exec = SecureExecRequest(io.mazewall.core.Tid(123), 12, 13, Arch.AMD64.execveat.toLong())
+        val exec = SecureExecRequest(
+            io.mazewall.platform.lifecycle
+            .Tid(123),
+                12,
+            13,
+            Arch.AMD64.execveat.toLong(),
+        )
         val effects = listOf(
             SupervisorReplyEffect.Continue,
             SupervisorReplyEffect.Error(13),
             SupervisorReplyEffect.Value(7),
-            SupervisorReplyEffect.AddFdAndReply(descriptor, io.mazewall.core.NewFdFlags(524288)),
+            SupervisorReplyEffect.AddFdAndReply(
+                descriptor,
+                io.mazewall.platform.lifecycle
+                .NewFdFlags(524288),
+            ),
             SupervisorReplyEffect.SecureExecAndReply(exec, SupervisorDescriptorResult.Opened(descriptor), 1234),
             SupervisorReplyEffect.SecureExecAndReply(exec, SupervisorDescriptorResult.Denied(1), 0),
             SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory),

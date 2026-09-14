@@ -1,11 +1,5 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeNetworking
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.CmsghdrSegment
@@ -14,7 +8,16 @@ import io.mazewall.ffi.memory.IovecSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
 import io.mazewall.ffi.memory.unwrap
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.NativeNetworking
+import io.mazewall.platform.native.getFdOrThrow
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -23,7 +26,7 @@ import java.nio.charset.StandardCharsets
 /**
  * Shared utilities for SCM_RIGHTS descriptor passing and AF_UNIX socket connections.
  */
-public object SupervisorSocketUtils {
+internal object SupervisorSocketUtils {
     public const val AF_UNIX: Int = 1
     public const val SOCK_STREAM: Int = 1
     public const val BACKLOG_SIZE: Int = 128
@@ -68,13 +71,24 @@ public object SupervisorSocketUtils {
         socketPath: String,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = connectDescriptorWithRetry(socketPath, LinuxNative.snapshot(), maxRetries, delayMs)
+
+    /**
+     * Connects with native authority captured by the caller, so retries never observe a
+     * mutable process-global runtime half way through a socket handshake.
+     */
+    public fun connectDescriptorWithRetry(
+        socketPath: String,
+        native: NativeEngine,
+        maxRetries: Int = 500,
+        delayMs: Long = 10L,
     ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
             val sockaddrUn = setupSockAddrUn(arena, socketPath)
 
             var lastErrno = 0
             for (retry in 0 until maxRetries) {
-                val fdRes = LinuxNative.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
+                val fdRes = native.networking.socket(AF_UNIX, SOCK_STREAM or NativeConstants.SOCK_CLOEXEC, 0)
                 when (fdRes) {
                     is LinuxNative.SyscallResult.Success -> Unit
                     is LinuxNative.SyscallResult.Error -> {
@@ -89,12 +103,12 @@ public object SupervisorSocketUtils {
                     }
                 }
                 val fd = fdRes.getFdOrThrow("socket", FileDescriptorRole.UnixSocket)
-                val connRes = LinuxNative.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
+                val connRes = native.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
                 if (connRes is LinuxNative.SyscallResult.Success) {
                     return fd
                 }
                 lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                LinuxNative.fileSystem.close(fd)
+                native.fileSystem.close(fd)
 
                 try {
                     Thread.sleep(delayMs)
@@ -115,7 +129,7 @@ public object SupervisorSocketUtils {
     ): Boolean = sendDescriptor(socketFd, fdToSend, LinuxNative.snapshot().networking)
 
     /** Descriptor transfer using the caller's captured native transport. */
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     public fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
@@ -166,8 +180,15 @@ public object SupervisorSocketUtils {
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
         role: R,
         beforeAttempt: (() -> Unit)? = null,
+    ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? = recvDescriptor(socketFd, role, LinuxNative.snapshot(), beforeAttempt)
+
+    /** Receives a descriptor with native authority captured by the caller. */
+    public fun <R : FileDescriptorRole> recvDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        role: R,
+        native: NativeEngine,
+        beforeAttempt: (() -> Unit)? = null,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
-        val runtime = LinuxNative.snapshot()
         Arena.ofConfined().use { arena ->
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
@@ -189,14 +210,14 @@ public object SupervisorSocketUtils {
                 controlBuf.fill(0)
                 msg.setMsgControllen(MSG_CONTROL_BUF_SIZE)
                 msg.setMsgFlags(0)
-                val res = runtime.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC or if (beforeAttempt == null) 0 else 0x40)
+                val res = native.networking.recvmsg(socketFd, ConfinedSegment(msg.segment), NativeConstants.MSG_CMSG_CLOEXEC or if (beforeAttempt == null) 0 else 0x40)
                 if (res is LinuxNative.SyscallResult.Success) {
                     return validateReceivedDescriptor(
                         bytesReceived = res.value,
                         message = msg,
                         control = controlBuf,
                         role = role,
-                        fileSystem = runtime.fileSystem,
+                        fileSystem = native.fileSystem,
                     )
                 } else {
                     val errno = (res as LinuxNative.SyscallResult.Error).errno
@@ -214,7 +235,7 @@ public object SupervisorSocketUtils {
         message: MsghdrSegment,
         control: MemorySegment,
         role: R,
-        fileSystem: io.mazewall.NativeFileSystem,
+        fileSystem: NativeFileSystem,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
         val cmsg = CmsghdrSegment(control)
         val controlLength = message.getMsgControllen()
@@ -251,7 +272,7 @@ public object SupervisorSocketUtils {
     private fun closeRejectedDescriptors(
         descriptors: List<Int>,
         role: FileDescriptorRole,
-        fileSystem: io.mazewall.NativeFileSystem,
+        fileSystem: NativeFileSystem,
     ) {
         var cleanupFailure: Throwable? = null
         descriptors.forEach { received ->

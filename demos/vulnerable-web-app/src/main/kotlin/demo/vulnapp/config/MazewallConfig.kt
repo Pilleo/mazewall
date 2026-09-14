@@ -1,11 +1,11 @@
 package demo.vulnapp.config
 
 import demo.vulnapp.service.*
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.SbobParser
-import io.mazewall.Uncompiled
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.SbobParser
+import io.mazewall.enforcer.api.Uncompiled
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

@@ -3,4 +3,4 @@ package io.mazewall.platform.seccomp.daemon
 import io.mazewall.platform.daemon.UnixListenDaemonState
 
 /** Shared listen-loop state; name retained for existing seccomp callers. */
-public typealias SeccompDaemonState = UnixListenDaemonState
+internal typealias SeccompDaemonState = UnixListenDaemonState

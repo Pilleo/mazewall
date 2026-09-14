@@ -1,8 +1,9 @@
 package io.mazewall;
 
-import io.mazewall.core.SandboxedPath;
-import io.mazewall.core.SeccompAction;
-import io.mazewall.core.Syscall;
+import io.mazewall.enforcer.api.*;
+import io.mazewall.platform.lifecycle.SandboxedPath;
+import io.mazewall.platform.syscall.SeccompAction;
+import io.mazewall.platform.syscall.Syscall;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -167,7 +168,7 @@ class MazewallJavaApiTest {
     void testInstallationReceiptAccessors() {
         InstallationReceipt receipt = new InstallationReceipt(
                 true,
-                io.mazewall.PolicyPresets.INSTANCE.NO_EXEC,
+                io.mazewall.enforcer.api.PolicyPresets.INSTANCE.NO_EXEC,
                 null,
                 12345L,
                 true,

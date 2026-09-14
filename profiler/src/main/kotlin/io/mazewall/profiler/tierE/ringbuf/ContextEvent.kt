@@ -20,7 +20,7 @@ import java.lang.foreign.ValueLayout
  * side. When the BPF struct changes, change [LAYOUT] (and the C struct) in
  * exactly one place each — never hand-parse offsets at call sites.
  */
-public data class ContextEvent(
+internal data class ContextEvent(
     public val ktimeNs: ULong,
     public val tgid: UInt,
     public val tid: UInt,

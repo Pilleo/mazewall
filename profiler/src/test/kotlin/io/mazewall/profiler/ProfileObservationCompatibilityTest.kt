@@ -1,12 +1,12 @@
-package io.mazewall.profiler
-
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.core.Tid
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.collector.CollectorDrain
 import io.mazewall.profiler.collector.ObservationMerger
 import io.mazewall.profiler.compiler.StraceLogParser
-import io.mazewall.profiler.engine.PathResolution
-import io.mazewall.profiler.engine.PathResolutionFailure
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import kotlin.reflect.KClass
 import kotlin.test.assertEquals

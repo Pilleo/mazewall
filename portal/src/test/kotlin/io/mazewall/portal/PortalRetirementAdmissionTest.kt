@@ -1,14 +1,20 @@
 package io.mazewall.portal
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.NativeFileSystem
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.*
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir

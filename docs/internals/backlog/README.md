@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 14 | *Total Resolved Issues:* 630
+*Total Active Issues:* 12 | *Total Resolved Issues:* 632
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -31,16 +31,14 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Issue | Title | Priority | Component |
 |---|---|---|---|
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
-| [issue-20260808-032525-reduce-and-version-public-api-surface](code_health/issue-20260808-032525-reduce-and-version-public-api-surface.md) | Reduce and Version the Supported Public API Surface | high | enforcer |
-| [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](code_health/issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | medium | orchestrator |
-| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | medium | testing |
+| [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](code_health/issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | low | orchestrator |
+| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | low | testing |
 | [issue-20260823-172004-additional-architecture-coverage](implementation/issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](security/issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |
-| [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | medium | enforcer |
+| [issue-20260807-210802-aot-thread-containment-eligibility-assessment](security/issue-20260807-210802-aot-thread-containment-eligibility-assessment.md) | Add AOT Reachability Assessment for Thread-Containment Eligibility | low | enforcer |
 | [issue-20260808-032520-owned-contained-executor-lifecycle](security/issue-20260808-032520-owned-contained-executor-lifecycle.md) | Make Contained Executors Own Dedicated Worker Threads | low | enforcer |
 | [issue-012-algebraic-policy-composition-semigroupmonoid](testing/issue-012-algebraic-policy-composition-semigroupmonoid.md) | Algebraic Policy Composition (Semigroup/Monoid) | low | enforcer |
 | [issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo](testing/issue-028-phantom-types-for-thread-pool-containment-constraints-sandbo.md) | Phantom Types for Thread Pool Containment Constraints (`SandboxedExecutor`) | low | enforcer |
-| [issue-030-architectural-dip-dependency-inversion-violations-in-native-](testing/issue-030-architectural-dip-dependency-inversion-violations-in-native-.md) | Architectural DIP (Dependency Inversion) Violations in Native Scopes | low | enforcer |
 | [issue-043-phantom-types-for-context-aware-capability-tokens](testing/issue-043-phantom-types-for-context-aware-capability-tokens.md) | Phantom Types for Context-Aware Capability Tokens | low | enforcer |
 | [issue-071-introduce-context-parameters-for-memory-and-engine-scopes](testing/issue-071-introduce-context-parameters-for-memory-and-engine-scopes.md) | Introduce Context Parameters for Memory and Engine Scopes | low | enforcer |

@@ -1,6 +1,6 @@
 package io.mazewall.portal.codegen
 
-import io.mazewall.core.RealSocketManager
+import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalCodec
 import io.mazewall.portal.PortalFrame

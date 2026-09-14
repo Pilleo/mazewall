@@ -9,6 +9,7 @@ plugins {
 
 kotlin {
     jvmToolchain(25)
+    explicitApi()
     @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
     abiValidation()
 }
@@ -27,6 +28,13 @@ sourceSets {
 // Associate integration tests with main and test to allow accessing internal members and test utilities
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
+val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(platformJar)
+        compilerOptions.freeCompilerArgs.addAll(platformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") })
+    }
+}
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))
@@ -161,7 +169,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
-    api(project(":platform"))
+    implementation(project(":platform"))
     compileOnly(libs.kotlinxCoroutines)
     implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))
@@ -210,7 +218,7 @@ pitest {
             "io.mazewall.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
-            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachine*",
+            "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine*",
             "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
     )
@@ -234,7 +242,7 @@ pitest {
             "io.mazewall.seccomp.BpfFilterTest",
             "io.mazewall.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
-            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachineTest",
+            "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachineTest",
             "io.mazewall.enforcer.ContainmentStateRegistryTest",
         ),
     )
@@ -268,8 +276,8 @@ classDiagrams {
         exclude(methods().withName("combine") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(classes().withNameLike("*\\$*"))
         // Exclude constant/data-heavy/mapper noise
-        exclude(classes().withName("io.mazewall.core.Arch"))
-        exclude(classes().withName("io.mazewall.core.Syscall"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
         exclude(classes().withNameLike("io.mazewall.core.*Mapper"))
         exclude(classes().withName("io.mazewall.ffi.NativeConstants"))
         exclude(classes().withName("io.mazewall.ffi.Layouts"))

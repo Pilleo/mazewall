@@ -1,7 +1,7 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.core.Tid
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.platform.lifecycle.Tid
 
 /**
  * Shared utility for reading memory from remote processes/threads using process_vm_readv.

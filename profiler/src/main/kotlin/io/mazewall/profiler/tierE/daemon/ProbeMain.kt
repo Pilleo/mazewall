@@ -5,7 +5,7 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Probe-only command harness; production daemon startup exposes no probe modes. */
-public object ProbeMain {
+internal object ProbeMain {
     @JvmStatic
     public fun main(args: Array<String>) {
         require(args.isNotEmpty()) { "usage: --probe <command> | --probe-stdin | --probe-cmdfile <file>" }

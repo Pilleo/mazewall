@@ -1,9 +1,9 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.ProcessPolicies
-import io.mazewall.RuntimeProfile
-import io.mazewall.core.RealSocketManager
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.ProcessPolicies
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalFrame

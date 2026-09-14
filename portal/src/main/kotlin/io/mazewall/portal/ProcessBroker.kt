@@ -1,18 +1,19 @@
 package io.mazewall.portal
 
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.JavaAgentSelection
-import io.mazewall.core.JvmChildProcess
-import io.mazewall.core.JvmChildSpec
-import io.mazewall.core.PrivateUnixEndpoint
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.RealProcessLauncher
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.process.JavaAgentSelection
+import io.mazewall.platform.process.JvmChildProcess
+import io.mazewall.platform.process.JvmChildSpec
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
+import io.mazewall.platform.socket.PrivateUnixEndpoint
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CompletableFuture
@@ -34,7 +35,7 @@ import java.util.logging.Logger
  * Closing stops admission and drains those owners. Failed cleanup is reported and remains
  * retryable; a caller must retain the broker until close succeeds.
  */
-public class ProcessBroker(
+public class ProcessBroker internal constructor(
     private val poolSize: Int = 1,
     private val callTimeoutMs: Long = 30_000L,
     private val sockets: SocketManager = RealSocketManager,
@@ -679,7 +680,7 @@ public class ProcessBroker(
                     try {
                         slot.channel.close()
                         slot.channelRetired = true
-                    } catch (terminal: io.mazewall.core.NativeCloseFailure) {
+                    } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
                         slot.channelRetired = true
                         raiseBrokerFailure(terminal)
                     }
@@ -690,7 +691,7 @@ public class ProcessBroker(
                     try {
                         sockets.close(slot.server)
                         slot.serverRetired = true
-                    } catch (terminal: io.mazewall.core.NativeCloseFailure) {
+                    } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
                         slot.serverRetired = true
                         raiseBrokerFailure(terminal)
                     }
@@ -923,7 +924,7 @@ public class ProcessBroker(
             try {
                 action()
                 retired()
-            } catch (terminal: io.mazewall.core.NativeCloseFailure) {
+            } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
                 retired()
                 raiseBrokerFailure(terminal)
             }
@@ -966,13 +967,13 @@ public class ProcessBroker(
  * [ProcessBroker.close] could not prove that every process, channel, endpoint, and maintenance
  * action reached a terminal state. Individual resource failures are retained for diagnostics.
  */
-public class IncompleteBrokerCleanupException(
+internal class IncompleteBrokerCleanupException(
     message: String,
     public val failures: List<BrokerCleanupFailure>,
 ) : IllegalStateException(message)
 
 /** A named resource cleanup failure retained by [IncompleteBrokerCleanupException]. */
-public data class BrokerCleanupFailure(
+internal data class BrokerCleanupFailure(
     val resource: String,
     val cause: Throwable,
 )

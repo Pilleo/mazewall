@@ -1,9 +1,16 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
@@ -58,12 +65,12 @@ class SocketHelperCancellationTest {
         val release = CountDownLatch(1)
         val source = SupervisorOwnedFd(
             TestFileDescriptors
-            .replace<io.mazewall.core.FileDescriptorRole.Generic>(52200),
+            .replace<io.mazewall.platform.fd.FileDescriptorRole.Generic>(52200),
                 fixture.engine.fileSystem,
         )
         val accepted = SupervisorOwnedFd(
             TestFileDescriptors
-            .replace<io.mazewall.core.FileDescriptorRole.Generic>(52201),
+            .replace<io.mazewall.platform.fd.FileDescriptorRole.Generic>(52201),
                 fixture.engine.fileSystem,
         )
         SocketHelperPool(1, 1) {

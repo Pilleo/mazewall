@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import java.nio.file.Files
 import java.nio.file.Path

@@ -11,7 +11,7 @@ import io.mazewall.ffi.NativeConstants
  *
  * Implemented iteratively using a stack on the heap to avoid [StackOverflowError] risks.
  */
-public object BpfStaticVerifier {
+internal object BpfStaticVerifier {
     /**
      * Statically verifies a BpfProgram, transitioning its state to [BpfStatus.Verified].
      * Throws an [IllegalArgumentException] if any validation rule or control-flow invariant is violated.

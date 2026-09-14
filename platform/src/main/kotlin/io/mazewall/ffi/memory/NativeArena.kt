@@ -1,5 +1,6 @@
 package io.mazewall.ffi.memory
 
+import io.mazewall.platform.lifecycle.OpenFlags
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -7,7 +8,7 @@ import java.lang.foreign.MemorySegment
 /**
  * An opaque wrapper for [java.lang.foreign.Arena] to isolate FFM from domain logic.
  */
-public class NativeArena internal constructor(
+internal class NativeArena internal constructor(
     internal val arena: Arena,
     internal val isShared: Boolean,
 ) : AutoCloseable {
@@ -39,16 +40,16 @@ public class NativeArena internal constructor(
     }
 }
 
-context(arena: NativeArena) public fun openPath(
+context(arena: NativeArena) internal fun openPath(
     path: String,
-    flags: io.mazewall.core.OpenFlags,
-): io.mazewall.LinuxNative.SyscallResult<Long, *> {
+    flags: io.mazewall.platform.lifecycle.OpenFlags,
+): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, *> {
     val segment = arena.allocateFrom(path)
-    return io.mazewall.LinuxNative.fileSystem
+    return io.mazewall.platform.native.LinuxNative.fileSystem
         .open(segment, flags)
 }
 
-context(arena: NativeArena) public fun allocateBpfProgram(filters: List<io.mazewall.seccomp.BpfInstruction>): ManagedSegment {
-    return io.mazewall.LinuxNative.memory
+context(arena: NativeArena) internal fun allocateBpfProgram(filters: List<io.mazewall.seccomp.BpfInstruction>): ManagedSegment {
+    return io.mazewall.platform.native.LinuxNative.memory
         .newSockFProg(filters)
 }

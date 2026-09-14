@@ -1,15 +1,22 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyState
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyState
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.assertThrows
@@ -96,12 +103,14 @@ class InstallationReceiptMatrixTest {
             System.setProperty("io.mazewall.fallback", scenario.fallback)
         }
 
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
-            override fun getLandlockCapability(): io.mazewall.KernelCapability<Int> = io.mazewall.KernelCapability.Available(5)
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -112,13 +121,13 @@ class InstallationReceiptMatrixTest {
         val mockEngine = MockNativeEngine()
         mockEngine.process.onPrctl = { command ->
             if (scenario.seccompError != null) {
-                if (command is io.mazewall.core.PrctlCommand.SetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.SetSeccomp) {
                     LinuxNative.SyscallResult.Error(scenario.seccompError, -1L)
                 } else {
                     LinuxNative.SyscallResult.Success(0L)
                 }
             } else {
-                if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.GetSeccomp) {
                     LinuxNative.SyscallResult.Success(2L)
                 } else {
                     LinuxNative.SyscallResult.Success(0L)
@@ -127,7 +136,7 @@ class InstallationReceiptMatrixTest {
         }
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
             if (scenario.seccompError != null &&
-                nr == io.mazewall.core.Arch
+                nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()

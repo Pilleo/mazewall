@@ -1,21 +1,22 @@
 package io.mazewall.landlock
 
-import io.mazewall.LinuxNative
-import io.mazewall.Platform
-import io.mazewall.PolicyDefinition
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.close
-import io.mazewall.core.use
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.close
+import io.mazewall.platform.fd.use
+import io.mazewall.platform.native.LinuxNative
 
 /**
  * States representing the configuration and application of a Landlock ruleset.
@@ -199,7 +200,7 @@ internal object LandlockInstall {
 /**
  * Marker interfaces representing compile-time mutability states of a Landlock ruleset.
  */
-public sealed interface RulesetState {
+internal sealed interface RulesetState {
     public interface Building : RulesetState
 
     public interface Sealed : RulesetState
@@ -209,7 +210,7 @@ public sealed interface RulesetState {
  * A type-safe wrapper for a Landlock ruleset file descriptor, parameterized
  * by its mutability state [S] to prevent post-enforcement rule modifications.
  */
-public class LandlockRuleset<out S : RulesetState> internal constructor(
+internal class LandlockRuleset<out S : RulesetState> internal constructor(
     public val fd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
 )
 

@@ -1,6 +1,6 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.Policy
 import java.util.concurrent.Callable
 
 /**

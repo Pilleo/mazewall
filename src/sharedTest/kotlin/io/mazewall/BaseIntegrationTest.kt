@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.BeforeEach
@@ -25,15 +25,14 @@ abstract class BaseIntegrationTest {
     }
 
     protected fun assumeLandlockAbiAtLeast(version: Int) {
+        val landlockAbi = Platform.featureMatrix.landlockAbiVersion
         Assumptions.assumeTrue(
-            io.mazewall.landlock.Landlock
-                .isSupported(),
+            landlockAbi >= 1,
             "Landlock not supported",
         )
         Assumptions.assumeTrue(
-            io.mazewall.landlock.Landlock
-                .getAbiVersion() >= version,
-            "Landlock ABI version must be at least $version (current: ${io.mazewall.landlock.Landlock.getAbiVersion()})",
+            landlockAbi >= version,
+            "Landlock ABI version must be at least $version (current: $landlockAbi)",
         )
     }
 }

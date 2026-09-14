@@ -1,15 +1,22 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -32,12 +39,14 @@ class ContainedExecutorWrapperStateTest {
     fun `successful two tasks same policy same worker - depth does not increase`() {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
-            override fun getLandlockCapability(): io.mazewall.KernelCapability<Int> = io.mazewall.KernelCapability.Available(5)
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -48,7 +57,7 @@ class ContainedExecutorWrapperStateTest {
 
         val mockEngine = MockNativeEngine()
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -105,12 +114,14 @@ class ContainedExecutorWrapperStateTest {
     fun `successful install is not rewound`() {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
-            override fun getLandlockCapability(): io.mazewall.KernelCapability<Int> = io.mazewall.KernelCapability.Available(5)
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -144,12 +155,14 @@ class ContainedExecutorWrapperStateTest {
 
     @Test
     fun `failed install before receipt still rewinds`() {
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
-            override fun getLandlockCapability(): io.mazewall.KernelCapability<Int> = io.mazewall.KernelCapability.Available(5)
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -161,7 +174,7 @@ class ContainedExecutorWrapperStateTest {
         val mockEngine = MockNativeEngine()
         // Mock seccomp syscall to fail with EINVAL (22)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()

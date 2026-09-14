@@ -1,9 +1,9 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.TraceableWorkload
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.TraceableWorkload
 import io.mazewall.profiler.compiler.StraceLogParser
 import java.nio.file.Files
 import java.nio.file.Path

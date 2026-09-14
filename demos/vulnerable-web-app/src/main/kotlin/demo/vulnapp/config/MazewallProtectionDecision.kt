@@ -1,7 +1,7 @@
 package demo.vulnapp.config
 
-import io.mazewall.Policy
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent
 import org.springframework.context.ApplicationListener
 import org.springframework.core.env.ConfigurableEnvironment

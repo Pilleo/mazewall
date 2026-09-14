@@ -1,10 +1,14 @@
 package io.mazewall.profiler.iterative
-
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -287,7 +291,10 @@ class IterativeProfilerTest {
     @Test
     fun `test IterativeProfiler resolves simple AccessDeniedException`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             val testRunnable = object : Runnable {
                 var attempt = 0
@@ -300,7 +307,7 @@ class IterativeProfilerTest {
                 }
             }
 
-            val finalPolicy = IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+            val finalPolicy = IterativeProfiler.profile(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
 
             assertTrue(finalPolicy.allowedFsReadPaths.any { it.value == "/tmp/iterative-test" })
         }
@@ -309,7 +316,10 @@ class IterativeProfilerTest {
     @Test
     fun `test IterativeProfiler fails if max retries exceeded`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             val testRunnable = object : Runnable {
                 override fun run() {
@@ -318,7 +328,7 @@ class IterativeProfilerTest {
             }
 
             try {
-                IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+                IterativeProfiler.profile(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
             } catch (e: Exception) {
                 assertTrue(e is java.nio.file.AccessDeniedException)
             }
@@ -328,13 +338,16 @@ class IterativeProfilerTest {
     @Test
     fun `test iterative profiling path matching avoids naive prefix collision`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             // Start with a policy that allows reading "/tmp/prefix" (so "/tmp/prefix" is in allowedFsReadPaths)
             val initialPolicy = Policy
                 .builder()
                 .allowFsRead(
-                    io.mazewall.core.SandboxedPath
+                    io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp/prefix", allowNonExistent = true),
                 ).unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                 .build()

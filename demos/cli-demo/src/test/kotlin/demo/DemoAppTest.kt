@@ -1,6 +1,6 @@
 package demo
 
-import io.mazewall.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
@@ -32,7 +32,7 @@ class DemoAppTest {
     @Test
     @EnabledIfLinuxAndSupported
     fun `network control reaches loopback uncontained and is blocked with NO_NETWORK`() {
-        io.mazewall.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "networkBody")
+        io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "networkBody")
     }
 
     @Suppress("unused")

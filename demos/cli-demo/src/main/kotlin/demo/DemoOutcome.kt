@@ -1,6 +1,5 @@
 package demo
 
-import io.mazewall.ffi.NativeConstants
 import java.io.IOException
 
 internal enum class ExpectedResult {
@@ -58,8 +57,8 @@ internal fun observeScenario(name: String, expected: ExpectedResult, action: () 
 
 internal fun authenticateNativeDenial(errno: Int): ScenarioOutcome =
     when (errno) {
-        NativeConstants.EPERM,
-        NativeConstants.EACCES,
+        1, // EPERM
+        13, // EACCES
         -> ScenarioOutcome.Denied("native errno=$errno")
         else -> ScenarioOutcome.InfrastructureFailure(IOException("native protection probe failed with errno=$errno"))
     }

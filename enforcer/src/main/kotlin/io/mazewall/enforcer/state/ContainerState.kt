@@ -1,15 +1,15 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.PolicyDefinition
-import io.mazewall.core.Arch
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**

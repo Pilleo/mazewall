@@ -1,9 +1,17 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.core.Tid
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.testing.withNativeEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -17,7 +25,7 @@ class TraceeMemoryReaderTest {
         var attempts = 0
         val memory = object : MockNativeMemory() {
             override fun processVmReadv(
-                pid: io.mazewall.core.Pid,
+                pid: io.mazewall.platform.lifecycle.Pid,
                 localIov: ManagedSegment,
                 liovcnt: Long,
                 remoteIov: ManagedSegment,
@@ -49,7 +57,7 @@ class TraceeMemoryReaderTest {
         var attempts = 0
         val memory = object : MockNativeMemory() {
             override fun processVmReadv(
-                pid: io.mazewall.core.Pid,
+                pid: io.mazewall.platform.lifecycle.Pid,
                 localIov: ManagedSegment,
                 liovcnt: Long,
                 remoteIov: ManagedSegment,
@@ -78,7 +86,7 @@ class TraceeMemoryReaderTest {
         var attempts = 0
         val memory = object : MockNativeMemory() {
             override fun processVmReadv(
-                pid: io.mazewall.core.Pid,
+                pid: io.mazewall.platform.lifecycle.Pid,
                 localIov: ManagedSegment,
                 liovcnt: Long,
                 remoteIov: ManagedSegment,

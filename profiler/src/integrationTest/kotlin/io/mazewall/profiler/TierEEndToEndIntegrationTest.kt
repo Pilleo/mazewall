@@ -1,12 +1,12 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
-import io.mazewall.NeedsFreshJvm
+import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.ffi.internal.RealNativeEngine
-import io.mazewall.profiler.attribution.DictionaryBatchSink
-import io.mazewall.profiler.attribution.DictionarySinkResult
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
-import io.mazewall.profiler.attribution.TierEProfilerSession
+import io.mazewall.profiler.internal.attribution.DictionaryBatchSink
+import io.mazewall.profiler.internal.attribution.DictionarySinkResult
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEProfilerSession
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import org.junit.jupiter.api.Assumptions.assumeTrue

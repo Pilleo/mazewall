@@ -1,18 +1,21 @@
 package io.mazewall.ffi.internal
 
-import io.mazewall.*
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.claimDupIfNeeded
-import io.mazewall.core.ebadfUnlessDirfd
-import io.mazewall.core.ebadfUnlessLive
-import io.mazewall.core.ebadfUnlessMmapBacking
-import io.mazewall.core.recordDescriptorAcquisition
 import io.mazewall.ffi.LayoutValidator
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.claimDupIfNeeded
+import io.mazewall.platform.fd.ebadfUnlessDirfd
+import io.mazewall.platform.fd.ebadfUnlessLive
+import io.mazewall.platform.fd.ebadfUnlessMmapBacking
+import io.mazewall.platform.fd.recordDescriptorAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -31,7 +34,7 @@ import java.lang.invoke.MethodHandles
  * Captured error states are optimized using thread-local segments via [ErrnoSegment].
  */
 
-public object RealNativeEngine : NativeEngine, RawSyscallOperations {
+internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
     override val process: NativeProcess = RealNativeProcess
@@ -104,16 +107,16 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
 
     override fun syscall(
         nr: Long,
-        a1: io.mazewall.core.NativeArg,
-        a2: io.mazewall.core.NativeArg,
-        a3: io.mazewall.core.NativeArg,
-        a4: io.mazewall.core.NativeArg,
-        a5: io.mazewall.core.NativeArg,
-        a6: io.mazewall.core.NativeArg,
+        a1: io.mazewall.platform.syscall.NativeArg,
+        a2: io.mazewall.platform.syscall.NativeArg,
+        a3: io.mazewall.platform.syscall.NativeArg,
+        a4: io.mazewall.platform.syscall.NativeArg,
+        a5: io.mazewall.platform.syscall.NativeArg,
+        a6: io.mazewall.platform.syscall.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         ebadfUnlessLive(a1, a2, a3, a4, a5, a6)?.let { return it }
         RawNativeTransfer.validate(nr, arrayOf(a1, a2, a3, a4, a5, a6))
-        val arch = io.mazewall.core.Arch
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
         val result = SyscallInvoker.syscall(
             SYSCALL,
@@ -130,7 +133,7 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
     }
 
     private fun isDescriptorCreatingSyscall(
-        arch: io.mazewall.core.Arch,
+        arch: io.mazewall.platform.syscall.Arch,
         nr: Long,
         a1: Long,
         a2: Long,
@@ -149,10 +152,10 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
 
     override fun syscall4(
         nr: Long,
-        a1: io.mazewall.core.NativeArg,
-        a2: io.mazewall.core.NativeArg,
-        a3: io.mazewall.core.NativeArg,
-        a4: io.mazewall.core.NativeArg,
+        a1: io.mazewall.platform.syscall.NativeArg,
+        a2: io.mazewall.platform.syscall.NativeArg,
+        a3: io.mazewall.platform.syscall.NativeArg,
+        a4: io.mazewall.platform.syscall.NativeArg,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
         syscall(
         nr,
@@ -160,9 +163,9 @@ public object RealNativeEngine : NativeEngine, RawSyscallOperations {
             a2,
             a3,
             a4,
-        io.mazewall.core.NativeArg
+        io.mazewall.platform.syscall.NativeArg
         .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
             .LongArg(0L),
     )
 
@@ -259,7 +262,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
 
     override fun open(
         path: ManagedSegment,
-        flags: io.mazewall.core.OpenFlags,
+        flags: io.mazewall.platform.lifecycle.OpenFlags,
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         NativeTransfer.path(path)
@@ -269,7 +272,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
     override fun openat(
         dirfd: FileDescriptor<*, FdState.Open, FdOwnership>,
         path: ManagedSegment,
-        flags: io.mazewall.core.OpenFlags,
+        flags: io.mazewall.platform.lifecycle.OpenFlags,
         mode: Int,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         dirfd.ebadfUnlessDirfd()?.let { return it }
@@ -286,23 +289,23 @@ internal object RealNativeFileSystem : NativeFileSystem {
         NativeTransfer.path(path)
         NativeTransfer.bytes(how, size)
         dirfd.ebadfUnlessDirfd()?.let { return it }
-        val nr = io.mazewall.core.Arch
+        val nr = io.mazewall.platform.syscall.Arch
             .current()
             .openat2
             .toLong()
         return RealNativeEngine.syscall(
             nr,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(dirfd.value.toLong()),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(path.address()),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(how.address()),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(size),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
         )
     }
@@ -310,8 +313,8 @@ internal object RealNativeFileSystem : NativeFileSystem {
     override fun mmap(
         addr: Long,
         length: Long,
-        prot: io.mazewall.core.MmapProt,
-        flags: io.mazewall.core.MmapFlags,
+        prot: io.mazewall.platform.lifecycle.MmapProt,
+        flags: io.mazewall.platform.lifecycle.MmapFlags,
         fd: FileDescriptor<*, FdState.Open, FdOwnership>,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
@@ -450,9 +453,9 @@ internal object RealNativeNetworking : NativeNetworking {
         val result = SyscallInvoker.socketpair(SOCKETPAIR, domain, type, protocol, sv.native)
         if (result is LinuxNative.SyscallResult.Success) {
             result.descriptorReceipts = listOf(
-                io.mazewall.core.NativeDescriptorReceipt
+                io.mazewall.platform.fd.NativeDescriptorReceipt
                     .acquired(sv.readInt(0)),
-                io.mazewall.core.NativeDescriptorReceipt
+                io.mazewall.platform.fd.NativeDescriptorReceipt
                     .acquired(sv.readInt(Int.SIZE_BYTES.toLong())),
             )
         }
@@ -601,11 +604,11 @@ internal object RealNativeProcess : NativeProcess {
             Linker.Option.captureCallState("errno"),
         )
 
-    override fun gettid(): io.mazewall.core.Tid {
+    override fun gettid(): io.mazewall.platform.lifecycle.Tid {
         return SyscallInvoker.gettid(GETTID)
     }
 
-    override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    override fun prctl(command: io.mazewall.platform.syscall.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         return SyscallInvoker.prctl(
             PRCTL,
             command.option,
@@ -715,7 +718,7 @@ internal object RealNativeMemory : NativeMemory {
         )
 
     override fun processVmReadv(
-        pid: io.mazewall.core.Pid,
+        pid: io.mazewall.platform.lifecycle.Pid,
         localIov: ManagedSegment,
         liovcnt: Long,
         remoteIov: ManagedSegment,
@@ -736,7 +739,7 @@ internal object RealNativeMemory : NativeMemory {
     }
 
     override fun processVmWritev(
-        pid: io.mazewall.core.Pid,
+        pid: io.mazewall.platform.lifecycle.Pid,
         localIov: ManagedSegment,
         liovcnt: Long,
         remoteIov: ManagedSegment,
@@ -818,15 +821,15 @@ internal object RealNativeHelper {
         is Int -> value.toLong()
         is Short -> value.toLong()
         is Byte -> value.toLong()
-        is io.mazewall.core.OpenFlags -> value.value.toLong()
-        is io.mazewall.core.MmapProt -> value.value.toLong()
-        is io.mazewall.core.MmapFlags -> value.value.toLong()
-        is io.mazewall.core.CloneFlags -> value.value
-        is io.mazewall.core.Pid -> value.value.toLong()
-        is io.mazewall.core.Tid -> value.value.toLong()
-        is io.mazewall.core.Uid -> value.value.toLong()
-        is io.mazewall.core.MemoryAddress -> value.value
-        is io.mazewall.core.FileDescriptor<*, *, FdOwnership> -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.OpenFlags -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.MmapProt -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.MmapFlags -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.CloneFlags -> value.value
+        is io.mazewall.platform.lifecycle.Pid -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.Tid -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.Uid -> value.value.toLong()
+        is io.mazewall.platform.lifecycle.MemoryAddress -> value.value
+        is io.mazewall.platform.fd.FileDescriptor<*, *, FdOwnership> -> value.value.toLong()
         else -> throw IllegalArgumentException("Unsupported type for conversion to Long: ${value::class.simpleName}")
     }
 

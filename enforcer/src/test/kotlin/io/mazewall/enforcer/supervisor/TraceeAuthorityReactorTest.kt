@@ -1,12 +1,19 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Deadline
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.daemon.NotificationProgress
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
@@ -29,7 +36,11 @@ class TraceeAuthorityReactorTest {
                 override fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect {
                     started.countDown()
                     assertTrue(stopped.await(5, TimeUnit.SECONDS))
-                    return SupervisorReplyEffect.AddFdAndReply(opened, io.mazewall.core.NewFdFlags(0))
+                    return SupervisorReplyEffect.AddFdAndReply(
+                        opened,
+                        io.mazewall.platform.lifecycle
+                        .NewFdFlags(0),
+                    )
                 }
 
                 override fun close() {

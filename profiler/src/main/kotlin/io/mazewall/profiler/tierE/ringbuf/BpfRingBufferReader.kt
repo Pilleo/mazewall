@@ -1,8 +1,8 @@
 package io.mazewall.profiler.tierE.ringbuf
 
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.NativeArg
+import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.syscall.NativeArg
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout

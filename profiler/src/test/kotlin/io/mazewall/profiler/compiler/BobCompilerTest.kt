@@ -1,14 +1,18 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.OpenFlagsEvidence
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
@@ -368,29 +372,34 @@ val policy = Policy.builder()
 
     @Test
     fun `test mutating io_uring operations are classified as fsWritePaths`() {
-        val corr = io.mazewall.profiler.ObservationCorrelation(tgid = 1, tid = io.mazewall.core.Tid(1))
+        val corr = io.mazewall.profiler.api
+            .ObservationCorrelation(
+                tgid = 1,
+                tid = io.mazewall.platform.lifecycle
+                .Tid(1),
+            )
         val observations = listOf(
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_WRITE",
                 paths = listOf("/tmp/mutated.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_UNLINKAT",
                 paths = listOf("/tmp/deleted.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_RENAMEAT",
                 paths = listOf("/tmp/renamed.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_OPENAT",
                 paths = listOf("/tmp/opened.txt"),
             ),

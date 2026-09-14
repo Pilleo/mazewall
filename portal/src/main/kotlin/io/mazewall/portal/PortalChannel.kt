@@ -1,40 +1,41 @@
 package io.mazewall.portal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.CleanupFailures
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeCloseFailure
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeLong
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.CleanupFailures
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** Thrown when a portal read deadline expires. Distinct from fatal socket errors so idle
  *  workers can keep polling (issue: pooled-worker 30s self-exit). */
-public class PortalReadTimeoutException : java.io.IOException("portal read timed out")
+internal class PortalReadTimeoutException : java.io.IOException("portal read timed out")
 
-public class PortalIncompleteFrameException : java.io.IOException("portal frame incomplete at deadline")
+internal class PortalIncompleteFrameException : java.io.IOException("portal frame incomplete at deadline")
 
 /** Clean peer shutdown before receiving the first byte of a new frame. */
-public class PortalPeerClosedException : java.io.EOFException("portal peer closed between frames")
+internal class PortalPeerClosedException : java.io.EOFException("portal peer closed between frames")
 
 /**
  * Owns the supplied socket and descriptors received but not yet delivered to a caller.
  * Successful receive transfers capabilities to its caller; sending borrows capabilities only.
  * Close rejects new I/O, retires all retained owners, and permits retry after pre-native failure.
  */
-public class PortalChannel(
+internal class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
 ) : AutoCloseable {

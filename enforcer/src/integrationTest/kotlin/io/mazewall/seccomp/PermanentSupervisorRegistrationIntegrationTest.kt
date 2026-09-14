@@ -1,14 +1,21 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ScopingHandler
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.util.concurrent.Executors
@@ -69,7 +76,7 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
             }
         } finally {
             file.delete()
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+            io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .stop()
         }

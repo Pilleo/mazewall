@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
  *
  * Output: one line per declaration "CTX <ctxId> <expectedCount>" on stdout.
  */
-public fun main(args: Array<String>) {
+internal fun main(args: Array<String>) {
     var port = 0
     var workers = 8
     var batches = 200

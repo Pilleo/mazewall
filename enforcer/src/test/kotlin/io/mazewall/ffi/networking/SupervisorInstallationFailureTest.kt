@@ -1,8 +1,17 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
@@ -17,9 +26,9 @@ class SupervisorInstallationFailureTest {
                 native = native,
                 userNotifSupported = true,
                 socketPath = "/unused",
-                filter = io.mazewall.BpfFilter.build(
+                filter = io.mazewall.enforcer.internal.seccomp.BpfFilter.build(
                     Arch.current(),
-                    io.mazewall.Policy
+                    io.mazewall.enforcer.api.Policy
                     .builder()
                     .build()
                     .definition,

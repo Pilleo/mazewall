@@ -24,6 +24,7 @@ application {
 dependencies {
     implementation(project(":enforcer"))
     implementation(project(":profiler"))
+    implementation(project(":platform"))
 
     // LangChain4j dependencies
     implementation("dev.langchain4j:langchain4j:0.33.0")

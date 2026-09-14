@@ -1,20 +1,27 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeNetworking
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.SocketManager
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -262,7 +269,7 @@ class SupervisorDaemonEngineTest {
         assertEquals(0, engine.clientSockets.size, "Client socket should be removed from tracking list")
     }
 
-    open class TestSocketManager(
+    internal open class TestSocketManager(
         val serverFdVal: Int = 5,
     ) : SocketManager {
         val closedFds = CopyOnWriteArrayList<Int>()

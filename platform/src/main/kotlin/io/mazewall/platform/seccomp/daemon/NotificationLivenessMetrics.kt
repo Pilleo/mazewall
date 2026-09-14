@@ -1,12 +1,12 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.MazewallInternal
+import io.mazewall.platform.lifecycle.MazewallInternal
 import io.mazewall.platform.seccomp.UserNotifReplyResult
 import java.util.concurrent.atomic.AtomicReference
 
 /** Process-local cumulative counters. Values saturate at [Long.MAX_VALUE]; no identities are retained. */
 @MazewallInternal
-public data class NotificationLivenessSnapshot(
+internal data class NotificationLivenessSnapshot(
     public val started: Long = 0,
     public val deadlineExpiries: Long = 0,
     public val sent: Long = 0,
@@ -25,7 +25,7 @@ public data class NotificationLivenessSnapshot(
 
 /** Internal diagnostics for this daemon process; obtaining a snapshot never resets counters. */
 @MazewallInternal
-public object NotificationLivenessMetrics {
+internal object NotificationLivenessMetrics {
     internal val counters = NotificationLivenessCounters()
 
     public fun snapshot(): NotificationLivenessSnapshot = counters.snapshot()

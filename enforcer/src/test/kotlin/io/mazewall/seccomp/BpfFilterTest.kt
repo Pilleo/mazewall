@@ -1,11 +1,19 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -59,7 +67,7 @@ class BpfFilterTest {
         val policy = Policy
             .builder()
             .defaultAction(
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO(),
         ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -74,7 +82,7 @@ class BpfFilterTest {
             Policy
                 .builder()
                 .defaultAction(
-                    io.mazewall.core.SeccompAction
+                    io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).allow(Syscall.READ)
                 .build()
@@ -100,7 +108,7 @@ class BpfFilterTest {
         val policy = Policy
             .builder()
             .defaultAction(
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO(),
         ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -420,7 +428,7 @@ class BpfFilterTest {
         // filter fall through into the next RET block for every syscall.
         val policy = Policy
             .builder()
-            .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
+            .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -570,14 +578,14 @@ class BpfFilterTest {
         // issue-20260821-113000: creat/truncate/ftruncate must be trapped so USER_NOTIF
         // profiling observes filesystem mutations. CREAT is x86_64-only (85); aarch64 uses
         // openat(O_CREAT), and BpfFilter filters unmapped NRs out of jump tables.
-        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
         assertEquals(
             NativeConstants.SECCOMP_RET_ERRNO or 1,
             evalBpf(amd64, Syscall.CREAT.numberFor(Arch.AMD64)),
             "creat(85) must be denied EPERM in PURE_COMPUTE_UNSAFE",
         )
 
-        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
         assertTrue(aarch64Program.none { it is BpfInstruction.Jmp && it.k == -1 }, "unmapped NRs must be filtered from jump tables")
     }
 

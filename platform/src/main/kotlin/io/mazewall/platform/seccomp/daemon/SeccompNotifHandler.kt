@@ -1,14 +1,15 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
 
-public enum class NotifResult {
+internal enum class NotifResult {
     HANDLED,
     TERMINATE,
     PASS_THROUGH,
@@ -17,8 +18,8 @@ public enum class NotifResult {
 /**
  * Strategy interface for processing seccomp user notifications inside [SeccompSessionHandler].
  */
-@io.mazewall.MazewallInternal
-public interface SeccompNotifHandler {
+@io.mazewall.platform.lifecycle.MazewallInternal
+internal interface SeccompNotifHandler {
     context(arena: NativeArena) public fun beginNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,

@@ -1,13 +1,4 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.Tid
+package io.mazewall.profiler.internal.engine
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -15,12 +6,27 @@ import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -29,7 +35,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class ProfilerDaemonBenchmarkTest {
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
@@ -41,7 +47,7 @@ class ProfilerDaemonBenchmarkTest {
         TraceEventPublisher,
         NativeIoOperations,
         SocketLifecycleManager {
-        override val raw = object : io.mazewall.RawSyscallOperations {
+        override val raw = object : io.mazewall.platform.native.RawSyscallOperations {
             override fun poll(
                 fds: ManagedSegment,
                 nfds: Long,

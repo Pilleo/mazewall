@@ -1,12 +1,11 @@
 package io.mazewall.profiler.tierE.engine
 
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.NativeArg
-import io.mazewall.core.NativeArg.MemoryArg
 import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
+import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import java.lang.foreign.Arena
@@ -22,7 +21,7 @@ import java.nio.file.Path
  * through bpf(2) syscalls via FFM downcalls. No libbpf, no C shim,
  * no marker library.
  */
-public class TierEbpfEngine(
+internal class TierEbpfEngine(
     private val native: RawSyscallOperations,
 ) : AutoCloseable {
     public companion object {
@@ -67,7 +66,7 @@ public class TierEbpfEngine(
     }
 
     /** One eBPF instruction. */
-    public data class Insn(
+    internal data class Insn(
         val code: Int,
         val dst: Int = 0,
         val src: Int = 0,
@@ -254,7 +253,7 @@ public class TierEbpfEngine(
                 val fd = native
                     .syscall(
                     SYS_PERF_EVENT_OPEN,
-                    MemoryArg(ConfinedSegment(attr)),
+                    NativeArg.MemoryArg(ConfinedSegment(attr)),
                     NativeArg.LongArg(-1),
                     NativeArg.LongArg(cpu.toLong()),
                     NativeArg.LongArg(-1),

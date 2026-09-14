@@ -15,7 +15,7 @@ package io.mazewall.enforcer
         "io.mazewall.enforcer.api.ContainmentViolationException",
     ),
 )
-open class ContainmentViolationException(
+public open class ContainmentViolationException(
     message: String,
     cause: Throwable? = null,
 ) : RuntimeException(message, cause)

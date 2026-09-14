@@ -5,7 +5,7 @@ import java.nio.file.Path
 import java.util.Locale
 
 /** Privileged acceptance gate comparing Tier E with the USER_NOTIF stack oracle. */
-public object TierEDifferentialSmoke {
+internal object TierEDifferentialSmoke {
     @JvmStatic
     public fun main(args: Array<String>) {
         require(args.size in 2..3) { "usage: <agent.so> <workload-classpath> [iterations]" }

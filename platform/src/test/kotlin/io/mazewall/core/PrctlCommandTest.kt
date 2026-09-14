@@ -1,13 +1,21 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
 
 class PrctlCommandTest {
-    data class PrctlTestCase(
+    internal data class PrctlTestCase(
         val name: String,
         val command: PrctlCommand,
         val expectedOption: Int,
@@ -21,7 +29,8 @@ class PrctlCommandTest {
 
     companion object {
         @JvmStatic
-        fun prctlTestCases(): Stream<PrctlTestCase> {
+        @JvmName("prctlTestCases")
+        internal fun prctlTestCases(): Stream<PrctlTestCase> {
             val memArg = NativeArg.MemoryArg(ManagedSegment.NULL)
             return Stream.of(
                 PrctlTestCase("SetNoNewPrivs(true)", PrctlCommand.SetNoNewPrivs(true), 38, NativeArg.LongArg(1L)),
@@ -41,7 +50,7 @@ class PrctlCommandTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("prctlTestCases")
-    fun `verify PrctlCommand option and arguments`(testCase: PrctlTestCase) {
+    internal fun `verify PrctlCommand option and arguments`(testCase: PrctlTestCase) {
         assertEquals(testCase.expectedOption, testCase.command.option, "option should match")
         assertEquals(testCase.expectedArg2, testCase.command.arg2, "arg2 should match")
         assertEquals(testCase.expectedArg3, testCase.command.arg3, "arg3 should match")

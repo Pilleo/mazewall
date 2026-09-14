@@ -6,7 +6,7 @@ package io.mazewall.profiler.tierE.ringbuf
  * It deliberately carries the explicit native-agent invocation id. Resolution to a Java stack
  * happens later through the matching invocation definition; no timestamp correlation is valid.
  */
-public class SyscallInvocationEvent(
+internal class SyscallInvocationEvent(
     public val ktimeNs: ULong,
     public val tgid: UInt,
     public val tid: UInt,

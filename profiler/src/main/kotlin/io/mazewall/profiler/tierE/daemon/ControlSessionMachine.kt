@@ -1,13 +1,13 @@
 package io.mazewall.profiler.tierE.daemon
 
-public data class AttachedSessionInfo(
+internal data class AttachedSessionInfo(
     public val pid: Int,
     public val sessionTag: Int,
     /** Process incarnation epoch to detect PID reuse across exec/exit transitions. */
     public val processIncarnation: Long = 0L,
 )
 
-public sealed interface ControlSessionState {
+internal sealed interface ControlSessionState {
     public data object Idle : ControlSessionState
 
     public data class Attaching(
@@ -21,7 +21,7 @@ public sealed interface ControlSessionState {
     public data object Terminated : ControlSessionState
 }
 
-public sealed interface ControlSessionEvent {
+internal sealed interface ControlSessionEvent {
     public data class CommandReceived(
         public val command: ControlCommand,
     ) : ControlSessionEvent
@@ -39,7 +39,7 @@ public sealed interface ControlSessionEvent {
     ) : ControlSessionEvent
 }
 
-public sealed interface ControlSessionEffect {
+internal sealed interface ControlSessionEffect {
     public data class SendReply(
         public val reply: ControlReply,
     ) : ControlSessionEffect
@@ -63,12 +63,12 @@ public sealed interface ControlSessionEffect {
     ) : ControlSessionEffect
 }
 
-public data class ControlSessionTransition(
+internal data class ControlSessionTransition(
     public val state: ControlSessionState,
     public val effect: ControlSessionEffect,
 )
 
-public object ControlSessionMachine {
+internal object ControlSessionMachine {
     public fun evaluate(
         state: ControlSessionState,
         event: ControlSessionEvent,

@@ -1,17 +1,24 @@
 package io.mazewall.enforcer
 
-import io.mazewall.KernelCapability
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.PlatformProvider
-import io.mazewall.Policy
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.KernelCapability
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PlatformProvider
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
@@ -45,9 +52,9 @@ class FilterInstallationFailureTest {
         Platform.setProvider(mockPlatform)
 
         val mockEngine = MockNativeEngine(
-            process = io.mazewall.MockNativeProcess().apply {
+            process = io.mazewall.enforcer.api.MockNativeProcess().apply {
             onPrctl = { command ->
-                if (command is io.mazewall.core.PrctlCommand.SetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.SetSeccomp) {
                     LinuxNative.SyscallResult.Error(22, -1L)
                 } else {
                     LinuxNative.SyscallResult.Success(0L)
@@ -61,7 +68,7 @@ class FilterInstallationFailureTest {
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -110,7 +117,7 @@ class FilterInstallationFailureTest {
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -157,7 +164,7 @@ class FilterInstallationFailureTest {
         val policy = Policy.builder().allowFsRead("/tmp").build()
 
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()

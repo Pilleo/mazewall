@@ -1,9 +1,9 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.Uncompiled
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.Uncompiled
 import java.util.concurrent.ExecutorService
 
 /**

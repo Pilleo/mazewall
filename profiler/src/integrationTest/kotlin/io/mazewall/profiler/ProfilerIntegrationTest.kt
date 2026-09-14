@@ -1,15 +1,15 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.asFd
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.TraceEvent
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
@@ -132,7 +132,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         // The compiled policy should allow reading from /etc/hostname
         assertTrue(
             compiledPolicy.allowedFsReadPaths.contains(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of("/etc/hostname"),
             ),
             "Should contain read-path for /etc/hostname",
@@ -197,17 +197,21 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
                             val openRes =
-                            LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), io.mazewall.core.OpenFlags(0))
+                            LinuxNative.fileSystem.open(
+                                ConfinedSegment(pathSeg),
+                                io.mazewall.platform.lifecycle
+                                .OpenFlags(0),
+                            )
 
                             if (openRes is LinuxNative.SyscallResult.Success) {
-                                val fd = openRes.asFd()
+                                val fd = openRes.getFdOrThrow("open profiler integration fixture")
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
 LinuxNative.raw.syscall(
     fchmodNr,
-    io.mazewall.core.NativeArg
+    io.mazewall.platform.syscall.NativeArg
         .FdArg(fd),
-    io.mazewall.core.NativeArg
+    io.mazewall.platform.syscall.NativeArg
         .IntArg(0x1FF),
 )
                                 }

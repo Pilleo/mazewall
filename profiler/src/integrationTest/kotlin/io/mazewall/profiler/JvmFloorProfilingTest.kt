@@ -1,6 +1,6 @@
-package io.mazewall.profiler
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.engine.JvmFloorWorkload
 import io.mazewall.profiler.internal.DescendantStrace
 import org.junit.jupiter.api.Test

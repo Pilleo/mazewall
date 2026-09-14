@@ -1,7 +1,14 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.SandboxDispatcher
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Callable
@@ -52,7 +59,7 @@ class SandboxDispatcherCacheTest {
                 Policy
                     .builder()
                     .defaultAction(
-                        io.mazewall.core.SeccompAction
+                        io.mazewall.platform.syscall.SeccompAction
                         .ACT_TRACE(index + 1),
                     ).build()
                     .definition,

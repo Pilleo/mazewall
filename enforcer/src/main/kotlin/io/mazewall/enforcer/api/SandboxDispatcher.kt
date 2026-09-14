@@ -1,9 +1,9 @@
 package io.mazewall.enforcer.api
 
-import io.mazewall.Policy
-import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
@@ -21,7 +21,7 @@ import java.util.concurrent.Executors
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
-object SandboxDispatcher {
+public object SandboxDispatcher {
     internal const val MAX_CACHED_POOLS: Int = 32
 
     /**
@@ -33,18 +33,18 @@ object SandboxDispatcher {
      * the initial Landlock paths on subsequent tasks.
      */
     private data class CacheKey(
-        val defaultAction: io.mazewall.core.SeccompAction,
-        val syscallActions: Map<io.mazewall.core.Syscall, io.mazewall.core.SeccompAction>,
+        val defaultAction: io.mazewall.platform.syscall.SeccompAction,
+        val syscallActions: Map<io.mazewall.platform.syscall.Syscall, io.mazewall.platform.syscall.SeccompAction>,
         val allowMmapExec: Boolean,
         val allowNonThreadClone: Boolean,
         val allowUnsafePrctl: Boolean,
         val lockIntelCet: Boolean,
-        val allowedFsReadPaths: Set<io.mazewall.core.SandboxedPath>,
-        val allowedFsWritePaths: Set<io.mazewall.core.SandboxedPath>,
+        val allowedFsReadPaths: Set<io.mazewall.platform.lifecycle.SandboxedPath>,
+        val allowedFsWritePaths: Set<io.mazewall.platform.lifecycle.SandboxedPath>,
         val enforceLandlock: Boolean,
-        val arch: io.mazewall.core.Arch,
+        val arch: io.mazewall.platform.syscall.Arch,
     ) {
-        constructor(definition: PolicyDefinition<*>, arch: io.mazewall.core.Arch) : this(
+        constructor(definition: PolicyDefinition<*>, arch: io.mazewall.platform.syscall.Arch) : this(
             definition.defaultAction,
             definition.syscallActions,
             definition.allowMmapExec,
@@ -80,7 +80,7 @@ object SandboxDispatcher {
      * This method is designed to be easily usable from both Java and Kotlin.
      */
     @JvmStatic
-    fun <T> execute(
+    public fun <T> execute(
         policy: Policy<*, *>,
         block: Callable<T>,
     ): T {
@@ -93,7 +93,7 @@ object SandboxDispatcher {
      * Executes the given Kotlin lambda [block] on a thread pool perfectly constrained by the [policy].
      * Blocks the calling thread until the execution completes.
      */
-    inline fun <T> executeBlock(
+    public inline fun <T> executeBlock(
         policy: Policy<*, *>,
         crossinline block: () -> T,
     ): T {
@@ -107,7 +107,7 @@ object SandboxDispatcher {
     internal fun getOrCreateElasticPool(definition: PolicyDefinition<*>): ExecutorService {
         val key = CacheKey(
             definition,
-            io.mazewall.core.Arch
+            io.mazewall.platform.syscall.Arch
             .current(),
         )
         synchronized(poolCache) {
@@ -144,7 +144,7 @@ object SandboxDispatcher {
      * Shuts down all cached executors. Useful for application graceful shutdown.
      */
     @JvmStatic
-    fun shutdownAll() {
+    public fun shutdownAll() {
         synchronized(poolCache) {
             poolCache.values.forEach { it.shutdown() }
             poolCache.clear()

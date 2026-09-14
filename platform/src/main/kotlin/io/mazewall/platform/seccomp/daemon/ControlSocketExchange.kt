@@ -1,20 +1,21 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.LinuxNative
-import io.mazewall.MazewallInternal
-import io.mazewall.NativeMemory
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.lifecycle.MazewallInternal
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeMemory
+import io.mazewall.platform.native.RawSyscallOperations
 
 @MazewallInternal
-public class ControlSocketFailure(
+internal class ControlSocketFailure(
     public val errno: Int,
 ) : java.io.IOException("Control socket exchange failed: errno=$errno")
 
@@ -24,7 +25,7 @@ public class ControlSocketFailure(
  * the reactor without renewing the notification deadline. Only heap bytes survive a poll.
  */
 @MazewallInternal
-public class ControlSocketExchange(
+internal class ControlSocketExchange(
     private val raw: RawSyscallOperations,
     private val memory: NativeMemory,
     private val socket: FileDescriptor<*, FdState.Open, FdOwnership>,

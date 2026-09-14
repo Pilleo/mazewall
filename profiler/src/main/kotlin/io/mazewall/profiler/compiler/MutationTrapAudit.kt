@@ -1,8 +1,8 @@
 package io.mazewall.profiler.compiler
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.BpfInstruction
 import io.mazewall.seccomp.BpfSimulator
 

@@ -1,6 +1,13 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -92,7 +99,7 @@ class InstallationAssessmentTest {
         val policy =
             Policy
                 .builder()
-                .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
+                .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
         assertTrue(assessment.userNotifRequired)
@@ -113,7 +120,7 @@ class InstallationAssessmentTest {
         val policy =
             Policy
                 .builder()
-                .addAction(io.mazewall.core.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
+                .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = true)
         assertTrue(assessment.userNotifRequired)

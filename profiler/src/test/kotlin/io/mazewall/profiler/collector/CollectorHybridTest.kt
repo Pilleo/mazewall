@@ -1,25 +1,29 @@
 package io.mazewall.profiler.collector
-
-import io.mazewall.core.Arch
-import io.mazewall.core.Tid
-import io.mazewall.profiler.EbpfLoad
-import io.mazewall.profiler.IncompleteProfileException
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.MazewallProfiler
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.OpenFlagsEvidence
-import io.mazewall.profiler.PathResolutionQuality
-import io.mazewall.profiler.ProfileEnvironment
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.ProfileOptions
-import io.mazewall.profiler.ProfileStrategy
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.StackAttribution
-import io.mazewall.profiler.engine.ObservedSyscall
-import io.mazewall.profiler.engine.PathResolution
-import io.mazewall.profiler.engine.PathResolutionFailure
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.EbpfLoad
+import io.mazewall.profiler.api.IncompleteProfileException
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.MazewallProfiler
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ObservedSyscall
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.PathResolutionQuality
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.ProfileOptions
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -30,7 +34,7 @@ class CollectorHybridTest {
     @Test
     fun `eBPF syscall mapping uses selected architecture and retains unknown numbers`() {
         assertEquals(
-            ObservedSyscall.Known(io.mazewall.core.Syscall.OPENAT),
+            ObservedSyscall.Known(io.mazewall.platform.syscall.Syscall.OPENAT),
             ProfileObservationEbpfCollector.syscallFor(Arch.AARCH64, Arch.AARCH64.openat),
         )
         assertEquals(

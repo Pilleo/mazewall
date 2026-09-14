@@ -48,12 +48,13 @@ plugins {
 
 kotlin {
     jvmToolchain(25)
+    explicitApi()
     @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
     abiValidation()
 }
 
 application {
-    mainClass.set("io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonKt")
+    mainClass.set("io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonMain")
     applicationName = "tier-e-daemon"
     applicationDefaultJvmArgs =
         listOf(
@@ -91,6 +92,21 @@ tasks.named("processResources") {
 // Associate integration tests with main and test to allow accessing internal members and test utilities
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
+val enforcerJar = project(":enforcer").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(enforcerJar, platformJar)
+        compilerOptions.freeCompilerArgs.addAll(
+            enforcerJar.zip(platformJar) { enforcer, platform ->
+                listOf(
+                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
+                    "-Xfriend-paths=${platform.asFile.absolutePath}",
+                )
+            },
+        )
+    }
+}
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))
@@ -157,7 +173,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
-    api(project(":platform"))
+    implementation(project(":platform"))
     implementation(project(":enforcer"))
     implementation(libs.kotlinxSerialization)
     implementation(libs.kotlinxCoroutines)

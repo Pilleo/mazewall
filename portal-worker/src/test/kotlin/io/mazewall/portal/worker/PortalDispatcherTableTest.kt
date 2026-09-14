@@ -1,9 +1,10 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import kotlin.test.Test
@@ -23,14 +24,14 @@ public object ClosingCapabilityPortalDispatcher {
         impl: PublishedTableEchoService,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<Capability.ReadFd>,
+        granted: List<*>,
     ): ByteArray =
-        granted.single().use { owner ->
+        (granted.single() as Capability.ReadFd).use { owner ->
             owner.borrow { fd ->
             io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
                 val buffer = arena.allocate(1)
                 check(
-                    io.mazewall.LinuxNative.memory
+                    io.mazewall.platform.native.LinuxNative.memory
                     .read(fd, buffer, 1)
                     .getOrThrow("guest read") == 1L,
                 )
@@ -47,7 +48,7 @@ public object PublishedTableEchoServicePortalDispatcher {
         impl: PublishedTableEchoService,
         method: PortalMethod.Generated,
         payload: ByteArray,
-        granted: List<Capability.ReadFd>,
+        granted: List<*>,
     ): ByteArray = payload
 }
 

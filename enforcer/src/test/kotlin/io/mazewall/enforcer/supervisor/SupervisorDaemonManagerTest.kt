@@ -1,19 +1,26 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.SocketManager
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.readByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.SeccompInstallationState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -37,12 +44,12 @@ class SupervisorDaemonManagerTest {
         val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
         var ptracer = 0L
         engine.process.onPrctl = { command ->
-            if (command is io.mazewall.core.PrctlCommand.SetPtracer) ptracer = command.tracerPid
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer) ptracer = command.tracerPid
             LinuxNative.SyscallResult.Success(0L)
         }
         try {
             val original = manager.getOrSpawnSharedDaemon()
-            io.mazewall.core.DaemonPtracer
+            io.mazewall.platform.process.DaemonPtracer
                 .authorize(engine, MockProcess(12345L))
             val reused = manager.getOrSpawnSharedDaemon()
             assertEquals(original, reused)
@@ -58,7 +65,7 @@ class SupervisorDaemonManagerTest {
         val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
         val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
         manager.getOrSpawnSharedDaemon()
-        io.mazewall.core.DaemonPtracer
+        io.mazewall.platform.process.DaemonPtracer
             .authorize(engine, MockProcess(12345L))
         engine.process.onPrctl = { LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L) }
         try {
@@ -116,7 +123,7 @@ class SupervisorDaemonManagerTest {
 
         var prctlCalled = false
         mockEngine.process.onPrctl = { command ->
-            if (command is io.mazewall.core.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
                 prctlCalled = true
             }
             LinuxNative.SyscallResult.Success(0L)

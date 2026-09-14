@@ -1,7 +1,7 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.core.Syscall
-import io.mazewall.core.threadLocal
+import io.mazewall.platform.lifecycle.threadLocal
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 import java.util.concurrent.atomic.AtomicReference
 

@@ -18,7 +18,7 @@ paperclip_identifier: MAZ-232
 # ✅ [RESOLVED]: Type-State for `FileDescriptor` Lifecycles (Compile-Time Use-After-Close Safety)
 
 **Status:** RESOLVED (August 2026)
-**Target:** `io.mazewall.core.FileDescriptor`
+**Target:** `io.mazewall.platform.fd.FileDescriptor`
 **Context:** FD safety previously relied on runtime validity checks. A closed token could still be passed as a raw syscall argument, and `close()` left the original Open-typed handle reporting `isValid == true`.
 **Fix:**
 - `FileDescriptor<Role, Open|Closed>` phantom types: `close()` and `use()` exist only on `FdState.Open` and return a `FdState.Closed` view.

@@ -1,11 +1,11 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.PolicyDefinition
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.state.ContainmentStateRegistry
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
@@ -43,14 +43,14 @@ import java.util.concurrent.TimeUnit
 internal class ContainedExecutorWrapper(
     private val delegate: ExecutorService,
     private val policy: PolicyDefinition<*>,
-    private val scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy,
+    private val scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy,
 ) : ExecutorService by delegate {
     private fun <T> wrapCallable(task: Callable<T>): Callable<T> = Callable { runContained(task::call) }
 
     private fun wrapRunnable(task: Runnable): Runnable = Runnable { runContained(task::run) }
 
     private fun <T> runContained(task: () -> T): T {
-        var receipt: io.mazewall.InstallationReceipt? = null
+        var receipt: io.mazewall.enforcer.api.InstallationReceipt? = null
         try {
             receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
             return runTask(task)

@@ -1,7 +1,7 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.MazewallInternal
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.lifecycle.MazewallInternal
 import io.mazewall.platform.seccomp.UserNotifReplyResult
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -12,14 +12,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * arranges disposal of late results; it must not wait for arbitrary code to finish.
  */
 @MazewallInternal
-public interface NotificationWork : AutoCloseable {
+internal interface NotificationWork : AutoCloseable {
     context(arena: NativeArena) public fun poll(): NotificationProgress
 
     override fun close() {}
 }
 
 @MazewallInternal
-public sealed interface NotificationProgress {
+internal sealed interface NotificationProgress {
     public data object Await : NotificationProgress
 
     /** Only the reactor invokes [reply], after claiming its single terminal lease. */

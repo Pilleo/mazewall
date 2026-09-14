@@ -1,14 +1,21 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.core.NativeArg
-import io.mazewall.core.PrctlCommand
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.platform.syscall.PrctlCommand
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertTrue
@@ -70,12 +77,30 @@ class BpfHardeningTest : BaseIntegrationTest() {
 
                     // 1. Calling mmap with PROT_EXEC (7) should be blocked (EPERM)
                     execResult.set(
-LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(7), io.mazewall.core.MmapFlags(0x22), io.mazewall.core.FileDescriptor.ANON, 0),
+LinuxNative.fileSystem.mmap(
+    0,
+    4096,
+    io.mazewall.platform.lifecycle
+    .MmapProt(7),
+        io.mazewall.platform.lifecycle
+        .MmapFlags(0x22),
+            io.mazewall.platform.fd.FileDescriptor.ANON,
+    0,
+),
                     )
 
                     // 2. Calling mmap with PROT_READ | PROT_WRITE (3) should succeed because MMAP is critical
                     readWriteResult.set(
-LinuxNative.fileSystem.mmap(0, 4096, io.mazewall.core.MmapProt(3), io.mazewall.core.MmapFlags(0x22), io.mazewall.core.FileDescriptor.ANON, 0),
+LinuxNative.fileSystem.mmap(
+    0,
+    4096,
+    io.mazewall.platform.lifecycle
+    .MmapProt(3),
+        io.mazewall.platform.lifecycle
+        .MmapFlags(0x22),
+            io.mazewall.platform.fd.FileDescriptor.ANON,
+    0,
+),
                     )
                 } catch (t: Throwable) {
                     error.set(t)

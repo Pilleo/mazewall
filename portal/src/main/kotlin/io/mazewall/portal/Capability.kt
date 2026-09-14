@@ -1,10 +1,11 @@
 package io.mazewall.portal
 
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -28,7 +29,7 @@ public class Capability private constructor() {
         internal val isRetired: Boolean get() = lock.withLock { retired }
 
         /** The descriptor must not escape this borrow. Close waits until the action returns. */
-        public fun <T> borrow(action: (FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>) -> T): T =
+        internal fun <T> borrow(action: (FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership>) -> T): T =
             lock.withLock {
             check(!closed) { "capability is closed" }
             action(fd)
@@ -53,7 +54,7 @@ public class Capability private constructor() {
             check(lock.holdCount == 1) { "cannot close capability from its active borrow" }
             if (!retired) {
                 closed = true
-                val result = io.mazewall.LinuxNative.fileSystem
+                val result = io.mazewall.platform.native.LinuxNative.fileSystem
                     .close(fd)
                 retired = true // Native result is terminal, even errno: its integer may already be reused.
                 result.getOrThrow("close portal capability")
@@ -83,15 +84,15 @@ public class Capability private constructor() {
         }
 
         /** Release every in-process owner, preserving fatal failures and avoiding skipped descriptors. */
-        @io.mazewall.MazewallInternal
+        @io.mazewall.platform.lifecycle.MazewallInternal
         @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // Cleanup must drain all owners and prefer fatal failures.
-        public fun closeAll(capabilities: List<ReadFd>) {
+        internal fun closeAll(capabilities: List<ReadFd>) {
             retireAll(capabilities).failureOrNull()?.let { throw it }
         }
 
         /** Adopt a granted FD received by the worker. Not a host `InputStream`. */
         @JvmStatic
-        public fun readFd(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>): ReadFd = ReadFd(fd)
+        internal fun readFd(fd: FileDescriptor<FileDescriptorRole.Granted, FdState.Open, FdOwnership.Owned>): ReadFd = ReadFd(fd)
     }
 }
 

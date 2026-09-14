@@ -1,10 +1,16 @@
 package io.mazewall.portal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -82,8 +88,8 @@ class PortalOwnershipDeadlineTest {
         val runtime = LinuxNative.snapshot()
         val failure = java.io.IOException("before native close")
         var attempts = 0
-        LinuxNative.setEngine(object : io.mazewall.NativeEngine by runtime {
-            override val fileSystem = object : io.mazewall.NativeFileSystem by runtime.fileSystem {
+        LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by runtime {
+            override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by runtime.fileSystem {
                 override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (++attempts == 1) throw failure
                     return runtime.fileSystem.close(fd)
@@ -111,8 +117,8 @@ class PortalOwnershipDeadlineTest {
         val runtime = LinuxNative.snapshot()
         val failure = java.io.IOException("before native close")
         var attempts = 0
-        LinuxNative.setEngine(object : io.mazewall.NativeEngine by runtime {
-            override val fileSystem = object : io.mazewall.NativeFileSystem by runtime.fileSystem {
+        LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by runtime {
+            override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by runtime.fileSystem {
                 override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (++attempts == 1) throw failure
                     return runtime.fileSystem.close(fd)

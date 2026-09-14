@@ -1,22 +1,22 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import java.util.function.Consumer
 import java.util.function.Function
 
 /**
  * Represents the verification status of a BPF program.
  */
-public sealed interface BpfStatus {
+internal sealed interface BpfStatus {
     /** The program has been built but not yet verified by the kernel. */
     public data object Unverified : BpfStatus
 
@@ -29,7 +29,7 @@ public sealed interface BpfStatus {
  * Equality is builder-identity plus serial, so two builders that pick the same debug name
  * cannot satisfy each other's jumps.
  */
-public class BpfLabel private constructor(
+internal class BpfLabel private constructor(
     public val name: String,
     private val owner: Any,
     private val serial: Int,
@@ -56,7 +56,7 @@ public class BpfLabel private constructor(
  *
  * @param S The [BpfStatus] of the program.
  */
-public class BpfProgram<out S : BpfStatus>(
+internal class BpfProgram<out S : BpfStatus>(
     public val instructions: List<BpfInstruction>,
 ) {
     /**
@@ -130,7 +130,7 @@ private fun Short.relativeOffset(): String = if (this >= 0) "+$this" else toStri
 /**
  * Represents the type-safe compile-time states of a [BpfBuilder].
  */
-public sealed interface BpfState {
+internal sealed interface BpfState {
     /** Initial state: Only allows architecture verification. */
     public interface Uninitialized : BpfState
 
@@ -150,7 +150,7 @@ public sealed interface BpfState {
  *
  * @param S The current compile-time [BpfState] of the builder.
  */
-public class BpfBuilder<out S : BpfState> internal constructor(
+internal class BpfBuilder<out S : BpfState> internal constructor(
     internal val ops: MutableList<BpfMacro>,
     internal val labelCounter: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic
         .AtomicInteger(0),
@@ -180,7 +180,7 @@ public class BpfBuilder<out S : BpfState> internal constructor(
 /**
  * Emits code to verify the current architecture and transitions to [BpfState.ArchVerified].
  */
-public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<BpfState.ArchVerified> {
+internal fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<BpfState.ArchVerified> {
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_ARCH_OFFSET))
     val archOkLabel = nextLabel("arch_ok")
     ops.add(BpfMacro.JumpIfEqual(arch.audit, jt = archOkLabel))
@@ -192,28 +192,28 @@ public fun BpfBuilder<BpfState.Uninitialized>.checkArch(arch: Arch): BpfBuilder<
 /**
  * Emits code to load the syscall number and transitions to [BpfState.Active].
  */
-public fun BpfBuilder<BpfState.ArchVerified>.loadSyscallNr(): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.ArchVerified>.loadSyscallNr(): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.LoadAbsolute(BpfFilter.SECCOMP_DATA_NR_OFFSET))
     return continueAs()
 }
 
 /** Returns ACT_ALLOW immediately. */
-public fun BpfBuilder<BpfState.Active>.allow(): BpfBuilder<BpfState.Terminated> {
+internal fun BpfBuilder<BpfState.Active>.allow(): BpfBuilder<BpfState.Terminated> {
     return ret(SeccompAction.ACT_ALLOW.nativeCode)
 }
 
 /** Returns ACT_ERRNO with the given [errno]. */
-public fun BpfBuilder<BpfState.Active>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
+internal fun BpfBuilder<BpfState.Active>.deny(errno: Int): BpfBuilder<BpfState.Terminated> {
     return ret(NativeConstants.SECCOMP_RET_ERRNO or (errno and 0xFFFF))
 }
 
 /** Returns SECCOMP_RET_KILL_THREAD. */
-public fun BpfBuilder<BpfState.Active>.killThread(): BpfBuilder<BpfState.Terminated> {
+internal fun BpfBuilder<BpfState.Active>.killThread(): BpfBuilder<BpfState.Terminated> {
     return ret(NativeConstants.SECCOMP_RET_KILL_THREAD)
 }
 
 /** Returns SECCOMP_RET_USER_NOTIF (for profiling or complex rules). */
-public fun BpfBuilder<BpfState.Active>.notifyUser(): BpfBuilder<BpfState.Terminated> {
+internal fun BpfBuilder<BpfState.Active>.notifyUser(): BpfBuilder<BpfState.Terminated> {
     return ret(NativeConstants.SECCOMP_RET_USER_NOTIF)
 }
 
@@ -224,7 +224,7 @@ public fun BpfBuilder<BpfState.Active>.notifyUser(): BpfBuilder<BpfState.Termina
  * Note: The block itself may terminate, but the main sequence continues
  * after the block's end.
  */
-public fun BpfBuilder<BpfState.Active>.expect(
+internal fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
     block: BpfBuilder<BpfState.Active>.() -> Unit,
 ): BpfBuilder<BpfState.Active> {
@@ -236,7 +236,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 }
 
 /** Java-compatible version of [expect]. */
-public fun BpfBuilder<BpfState.Active>.expect(
+internal fun BpfBuilder<BpfState.Active>.expect(
     nr: Int,
     block: Consumer<BpfBuilder<BpfState.Active>>,
 ): BpfBuilder<BpfState.Active> {
@@ -248,7 +248,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 }
 
 /** Expects a specific [syscall] for the given [arch]. */
-public fun BpfBuilder<BpfState.Active>.expect(
+internal fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
     block: BpfBuilder<BpfState.Active>.() -> Unit,
@@ -259,7 +259,7 @@ public fun BpfBuilder<BpfState.Active>.expect(
 }
 
 /** Java-compatible version of [expect] using [Syscall]. */
-public fun BpfBuilder<BpfState.Active>.expect(
+internal fun BpfBuilder<BpfState.Active>.expect(
     syscall: Syscall,
     arch: Arch,
     block: Consumer<BpfBuilder<BpfState.Active>>,
@@ -269,12 +269,12 @@ public fun BpfBuilder<BpfState.Active>.expect(
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.loadAbsolute(offset: Int): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.loadAbsolute(offset: Int): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.LoadAbsolute(offset))
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
+internal fun BpfBuilder<BpfState.Active>.jumpIfEqual(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null,
@@ -285,7 +285,7 @@ public fun BpfBuilder<BpfState.Active>.jumpIfEqual(
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.jumpIfSet(
+internal fun BpfBuilder<BpfState.Active>.jumpIfSet(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null,
@@ -296,7 +296,7 @@ public fun BpfBuilder<BpfState.Active>.jumpIfSet(
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
+internal fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
     k: Int,
     jt: BpfLabel? = null,
     jf: BpfLabel? = null,
@@ -307,20 +307,20 @@ public fun BpfBuilder<BpfState.Active>.jumpIfGreaterThan(
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.and(k: Int): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.and(k: Int): BpfBuilder<BpfState.Active> {
     ops.add(BpfMacro.And(k))
     return this
 }
 
-public fun BpfBuilder<BpfState.Active>.jmp(label: BpfLabel): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.jmp(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jt = label, jf = label)
 }
 
-public fun BpfBuilder<BpfState.Active>.jmpIfTrue(label: BpfLabel): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.jmpIfTrue(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jf = label)
 }
 
-public fun BpfBuilder<BpfState.Active>.jmpIfFalse(label: BpfLabel): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.jmpIfFalse(label: BpfLabel): BpfBuilder<BpfState.Active> {
     return jumpIfEqual(0, jt = label)
 }
 
@@ -328,12 +328,12 @@ public fun BpfBuilder<BpfState.Active>.jmpIfFalse(label: BpfLabel): BpfBuilder<B
  * Ends the instruction sequence with a RET instruction.
  * Transitions the builder to the [BpfState.Terminated] state.
  */
-public fun BpfBuilder<BpfState.Active>.ret(action: Int): BpfBuilder<BpfState.Terminated> {
+internal fun BpfBuilder<BpfState.Active>.ret(action: Int): BpfBuilder<BpfState.Terminated> {
     ops.add(BpfMacro.Ret(action))
     return continueAs()
 }
 
-public fun BpfBuilder<BpfState.Active>.mark(label: BpfLabel): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.mark(label: BpfLabel): BpfBuilder<BpfState.Active> {
     requireIssued(label, "mark")
     ops.add(BpfMacro.Label(label))
     return this
@@ -342,7 +342,7 @@ public fun BpfBuilder<BpfState.Active>.mark(label: BpfLabel): BpfBuilder<BpfStat
 /**
  * Compiles the high-level instructions into raw seccomp-bpf opcodes.
  */
-public fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverified> {
+internal fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverified> {
     val labelPositions = mutableMapOf<BpfLabel, Int>()
     val filteredOps = mutableListOf<BpfMacro>()
 
@@ -389,7 +389,7 @@ public fun BpfBuilder<BpfState.Terminated>.build(): BpfProgram<BpfStatus.Unverif
  * only correct while both targets are identical. Note that classic BPF encodes the JA skip count
  * in [BpfInstruction.Jmp.k]; `jt`/`jf` must remain zero.
  */
-public fun BpfBuilder<BpfState.Active>.jumpUnconditional(label: BpfLabel): BpfBuilder<BpfState.Active> {
+internal fun BpfBuilder<BpfState.Active>.jumpUnconditional(label: BpfLabel): BpfBuilder<BpfState.Active> {
     requireIssued(label, "jumpUnconditional")
     ops.add(BpfMacro.JumpUnconditional(label))
     return this

@@ -1,13 +1,20 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Test
 import java.io.File

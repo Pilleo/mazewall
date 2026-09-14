@@ -1,11 +1,15 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import io.mazewall.seccomp.BpfSimulator
 import io.mazewall.seccomp.SyscallProbeMatrix
 import org.junit.jupiter.api.Test

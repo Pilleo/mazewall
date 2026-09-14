@@ -1,8 +1,8 @@
 package io.mazewall.seccomp
 
-import io.mazewall.core.Arch
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.syscall.Arch
 
 /**
  * Pure, bounded probe selection for post-install self-verification.

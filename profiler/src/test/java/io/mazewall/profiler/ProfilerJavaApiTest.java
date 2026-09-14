@@ -1,10 +1,7 @@
 package io.mazewall.profiler;
 
-import io.mazewall.Mazewall;
-import io.mazewall.EnabledIfLinuxAndSupported;
-import io.mazewall.Policy;
-import io.mazewall.PolicyScope;
-import io.mazewall.PolicyState;
+import io.mazewall.enforcer.api.*;
+import io.mazewall.profiler.api.*;
 import org.junit.jupiter.api.Test;
 import kotlin.jvm.JvmClassMappingKt;
 import kotlin.reflect.KVisibility;

@@ -1,9 +1,9 @@
 package io.mazewall.landlock
 
-import io.mazewall.KernelCapability
-import io.mazewall.LinuxNative
-import io.mazewall.core.NativeArg
+import io.mazewall.enforcer.api.KernelCapability
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.NativeArg
 
 /** Pure classification of the Landlock ABI probe; permission failure is never capability absence. */
 internal object LandlockCapabilityProbe {

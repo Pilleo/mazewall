@@ -1,11 +1,18 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -16,7 +23,7 @@ class LinuxNativeTest : BaseIntegrationTest() {
     fun testPrctlGetSeccomp() {
         val result =
         LinuxNative.process.prctl(
-            io.mazewall.core.PrctlCommand.GetSeccomp,
+            io.mazewall.platform.syscall.PrctlCommand.GetSeccomp,
         )
 
         // Usually returns 0 or 2, unless error
@@ -48,7 +55,11 @@ class LinuxNativeTest : BaseIntegrationTest() {
         val path = allocateFrom(tempFile.toString())
 
         val openResult =
-        LinuxNative.fileSystem.open(path, io.mazewall.core.OpenFlags(0)) // O_RDONLY
+        LinuxNative.fileSystem.open(
+            path,
+            io.mazewall.platform.lifecycle
+            .OpenFlags(0),
+        ) // O_RDONLY
 
         val fd = openResult.getFdOrThrow("open")
 
@@ -143,7 +154,8 @@ LinuxNative.networking.listen(fd, 5)
         val result =
 
 LinuxNative.memory.processVmReadv(
-    io.mazewall.core.Pid(ProcessHandle.current().pid().toInt()),
+    io.mazewall.platform.lifecycle
+        .Pid(ProcessHandle.current().pid().toInt()),
     localIovecManaged,
     1,
     remoteIovecManaged,
@@ -160,7 +172,11 @@ LinuxNative.memory.processVmReadv(
                     .createTempFile("fcntl-test", ".txt")
             val path = arena.allocateFrom(tempFile.toString())
             val openResult =
-            LinuxNative.fileSystem.open(path, io.mazewall.core.OpenFlags(0))
+            LinuxNative.fileSystem.open(
+                path,
+                io.mazewall.platform.lifecycle
+                .OpenFlags(0),
+            )
 
             val fd = openResult.getFdOrThrow("open")
 

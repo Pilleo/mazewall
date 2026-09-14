@@ -1,20 +1,11 @@
 package io.mazewall.landlock
 
-import io.mazewall.LinuxNative
-import io.mazewall.Platform
-import io.mazewall.PolicyDefinition
-import io.mazewall.PolicyPresets
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.PrctlCommand
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.Syscall
-import io.mazewall.core.use
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyPresets
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
@@ -26,10 +17,20 @@ import io.mazewall.ffi.memory.LandlockRulesetAttrSegment
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
-import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
-import io.mazewall.recover
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.use
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.onFailure
+import io.mazewall.platform.native.onSuccess
+import io.mazewall.platform.native.recover
+import io.mazewall.platform.syscall.PrctlCommand
+import io.mazewall.platform.syscall.Syscall
 import java.io.File
 import java.util.logging.Logger
 
@@ -85,12 +86,12 @@ import java.util.logging.Logger
  * retroactive process-wide restriction breaks sibling thread transparency in multi-threaded JVMs
  * (GC, JIT, and test runners), `mazewall` disables it by default in standard enforcement.
  *
- * @see io.mazewall.PolicyBuilder.allowFsRead
- * @see io.mazewall.PolicyBuilder.allowFsWrite
- * @see io.mazewall.PolicyBuilder.allowJvmClasspath
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsRead
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsWrite
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowJvmClasspath
  * @see io.mazewall.enforcer.ContainedExecutors.wrap
  */
-object Landlock {
+internal object Landlock {
     /** The kernel requires the request size to stop at fields supported by its ABI. */
     internal fun rulesetAttrSize(abi: Int): Long =
         when {
@@ -224,11 +225,11 @@ object Landlock {
         val result = LinuxNative.raw
             .syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
         )
         return when (val outcome = LandlockCapabilityProbe.classify(result)) {
@@ -371,7 +372,11 @@ object Landlock {
         path: String,
         allowedAccess: Long,
     ) {
-        val fdResult = openPath(path, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC))
+        val fdResult = openPath(
+            path,
+            io.mazewall.platform.lifecycle
+            .OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC),
+        )
 
         fdResult
             .onSuccess { value ->
@@ -407,7 +412,8 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val resolvedPath = path.value
-        val openFlags = io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW)
+        val openFlags = io.mazewall.platform.lifecycle
+            .OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW)
         val initialResult = openPath(resolvedPath, openFlags)
 
         val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess)
@@ -428,7 +434,7 @@ object Landlock {
     context(arena: NativeArena) private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
-        flags: io.mazewall.core.OpenFlags,
+        flags: io.mazewall.platform.lifecycle.OpenFlags,
         allowedAccess: Long,
     ): OpenResult {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
@@ -451,7 +457,8 @@ object Landlock {
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val fallbackFlags = io.mazewall.core.OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
+            val fallbackFlags = io.mazewall.platform.lifecycle
+                .OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
             val openResult = openPath(parentPath, fallbackFlags)
             return when (openResult) {
                 is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.getFdOrThrow("open path", FileDescriptorRole.OPath), true)
@@ -527,13 +534,13 @@ object Landlock {
         val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
         val restrictResult = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .FdArg(ruleset.fd),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(flags),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(0),
         )
         return when (restrictResult) {
@@ -653,11 +660,11 @@ object Landlock {
         val rulesetAttrManaged = rulesetAttr.managed
         val res = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(rulesetAttrManaged),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(size),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
         )
         return when (val created = mapCreateRuleset(res)) {
@@ -683,11 +690,11 @@ object Landlock {
         val size = rulesetAttrSize(abi)
         val res = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(rulesetAttr.managed),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(size),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
         )
         return mapCreateRuleset(res)
@@ -735,13 +742,13 @@ object Landlock {
         val pathAttrManaged = pathAttr.managed
         val res = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_ADD_RULE_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .FdArg(ruleset.fd),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(pathAttrManaged),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(0),
         )
         return when (res) {

@@ -1,18 +1,19 @@
 package io.mazewall.portal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.RealSocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.socket.RealSocketManager
 import java.io.IOException
 
 /** Exclusively owned portal sockets are nonblocking; readiness is advisory, never permission to block. */

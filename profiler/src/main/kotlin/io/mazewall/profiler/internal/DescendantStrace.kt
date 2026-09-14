@@ -1,19 +1,19 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.EbpfCapability
-import io.mazewall.profiler.ProfileEnvironment
-import io.mazewall.profiler.ProfileStrategy
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.ProfilingResult
-import io.mazewall.profiler.StackAttribution
-import io.mazewall.profiler.TraceableWorkload
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.EbpfCapability
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.ProfilingResult
+import io.mazewall.profiler.api.StackAttribution
+import io.mazewall.profiler.api.TraceableWorkload
 import io.mazewall.profiler.collector.StraceCollector
 import io.mazewall.profiler.compiler.BobCompiler
 
 /**
  * Lab/floor path: descendant `strace -f` of a fresh JVM.
- * Not operator API. Application profiling uses [io.mazewall.profiler.MazewallProfiler.profile].
+ * Not operator API. Application profiling uses [io.mazewall.profiler.api.MazewallProfiler.profile].
  */
 internal object DescendantStrace {
     fun profile(workloadClass: Class<out TraceableWorkload>): ProfilingResult<Unit> {

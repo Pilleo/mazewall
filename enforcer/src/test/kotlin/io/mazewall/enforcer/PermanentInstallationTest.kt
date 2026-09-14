@@ -1,11 +1,18 @@
 package io.mazewall.enforcer
 
 import io.mazewall.*
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
@@ -63,7 +70,7 @@ class PermanentInstallationTest {
         val engine = MockNativeEngine(
             process = MockNativeProcess().apply {
             onPrctl = { command ->
-                if (command is io.mazewall.core.PrctlCommand.SetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.SetSeccomp) {
                     LinuxNative.SyscallResult.Error(22, -1L)
                 } else {
                     LinuxNative.SyscallResult.Success(0L)
@@ -81,10 +88,10 @@ class PermanentInstallationTest {
                 ContainmentStateRegistry.processState = ContainerState().withNewSeccompPolicy(
                     otherPolicy,
                     mapOf(
-                        Syscall.EXECVE to io.mazewall.core.SeccompAction
+                        Syscall.EXECVE to io.mazewall.platform.syscall.SeccompAction
                         .ACT_ERRNO(),
                     ),
-                    io.mazewall.core.SeccompAction.ACT_ALLOW,
+                    io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW,
                 )
                 LinuxNative.SyscallResult.Error(22, -1L)
             } else {
@@ -132,7 +139,7 @@ class PermanentInstallationTest {
         Platform.setProvider(MockPlatformProvider())
         val engine = MockNativeEngine(
             process = MockNativeProcess().apply {
-            onPrctl = { command -> LinuxNative.SyscallResult.Success(if (command is io.mazewall.core.PrctlCommand.GetSeccomp) 2L else 0L) }
+            onPrctl = { command -> LinuxNative.SyscallResult.Success(if (command is io.mazewall.platform.syscall.PrctlCommand.GetSeccomp) 2L else 0L) }
         },
         )
         var installs = 0
@@ -154,7 +161,7 @@ class PermanentInstallationTest {
         val engine = MockNativeEngine(
             process = MockNativeProcess().apply {
             onPrctl = { command ->
-                if (command is io.mazewall.core.PrctlCommand.SetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.SetSeccomp) {
                     LinuxNative.SyscallResult.Error(22, -1L)
                 } else {
                     LinuxNative.SyscallResult.Success(0L)

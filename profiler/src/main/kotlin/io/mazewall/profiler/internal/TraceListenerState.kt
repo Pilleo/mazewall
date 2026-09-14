@@ -1,6 +1,6 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.api.TraceEvent
 
 /**
  * States representing the parser progress of a profiler trace listener reading from Unix socket.

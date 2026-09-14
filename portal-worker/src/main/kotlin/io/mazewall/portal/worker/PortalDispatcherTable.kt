@@ -1,14 +1,15 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalMethod
 import java.util.LinkedHashMap
 
-public typealias PortalDispatcherHandler =
+internal typealias PortalDispatcherHandler =
     (
         method: PortalMethod.Generated,
         payload: ByteArray,
@@ -16,7 +17,7 @@ public typealias PortalDispatcherHandler =
     ) -> ByteArray
 
 /** Immutable generated-method dispatch authority published after worker startup. */
-public class PortalDispatcherTable private constructor(
+internal class PortalDispatcherTable private constructor(
     private val handlers: Map<PortalMethod.Generated, PortalDispatcherHandler>,
 ) {
     /** Attempts generated dispatch; null when no handler claims [method]. */
@@ -27,7 +28,7 @@ public class PortalDispatcherTable private constructor(
     ): ByteArray? = handlers[method]?.invoke(method, payload, granted)
 
     /** Mutable startup-only collector. [build] permanently invalidates this builder. */
-    public class Builder {
+    class Builder {
         private val handlers = LinkedHashMap<PortalMethod.Generated, PortalDispatcherHandler>()
         private var published: Boolean = false
 

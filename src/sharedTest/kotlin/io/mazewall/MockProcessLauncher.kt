@@ -1,6 +1,6 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.ProcessLauncher
+import io.mazewall.platform.process.ProcessLauncher
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
 

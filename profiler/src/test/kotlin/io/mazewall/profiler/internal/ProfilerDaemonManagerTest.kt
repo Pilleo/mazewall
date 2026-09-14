@@ -1,15 +1,20 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.Platform
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.SocketManager
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -27,7 +32,7 @@ class ProfilerDaemonManagerTest {
     fun `test daemon spawn and stop with mocks`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
-        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL + "\n")
         val mockSocket = MockSocketManager()
 
         val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)
@@ -86,7 +91,7 @@ class ProfilerDaemonManagerTest {
                     .get("/tmp/fallback-mock-profiler-dir")
             }
         }
-        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL + "\n")
         val mockSocket = MockSocketManager()
 
         val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)

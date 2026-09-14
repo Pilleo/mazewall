@@ -1,8 +1,15 @@
 package io.mazewall.enforcer
 
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.SeccompInstallationState
 import io.mazewall.testing.awaitOrFail
 import io.mazewall.testing.getOrFail
@@ -223,23 +230,23 @@ internal class ContainmentStateRegistryTest {
             java.util.stream.Stream.of(
                 org.junit.jupiter.params.provider.Arguments.of(
                     null,
-                    setOf(io.mazewall.core.Syscall.READ, io.mazewall.core.Syscall.WRITE),
-                    setOf(io.mazewall.core.Syscall.READ, io.mazewall.core.Syscall.WRITE),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ, io.mazewall.platform.syscall.Syscall.WRITE),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ, io.mazewall.platform.syscall.Syscall.WRITE),
                 ),
                 org.junit.jupiter.params.provider.Arguments.of(
-                    setOf(io.mazewall.core.Syscall.READ, io.mazewall.core.Syscall.WRITE),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ, io.mazewall.platform.syscall.Syscall.WRITE),
                     null,
-                    setOf(io.mazewall.core.Syscall.READ, io.mazewall.core.Syscall.WRITE),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ, io.mazewall.platform.syscall.Syscall.WRITE),
                 ),
                 org.junit.jupiter.params.provider.Arguments.of(
-                    setOf(io.mazewall.core.Syscall.READ, io.mazewall.core.Syscall.WRITE, io.mazewall.core.Syscall.OPEN),
-                    setOf(io.mazewall.core.Syscall.WRITE, io.mazewall.core.Syscall.CLOSE),
-                    setOf(io.mazewall.core.Syscall.WRITE),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ, io.mazewall.platform.syscall.Syscall.WRITE, io.mazewall.platform.syscall.Syscall.OPEN),
+                    setOf(io.mazewall.platform.syscall.Syscall.WRITE, io.mazewall.platform.syscall.Syscall.CLOSE),
+                    setOf(io.mazewall.platform.syscall.Syscall.WRITE),
                 ),
                 org.junit.jupiter.params.provider.Arguments.of(
-                    setOf(io.mazewall.core.Syscall.READ),
-                    setOf(io.mazewall.core.Syscall.WRITE),
-                    emptySet<io.mazewall.core.Syscall>(),
+                    setOf(io.mazewall.platform.syscall.Syscall.READ),
+                    setOf(io.mazewall.platform.syscall.Syscall.WRITE),
+                    emptySet<io.mazewall.platform.syscall.Syscall>(),
                 ),
             )
     }
@@ -296,9 +303,9 @@ internal class ContainmentStateRegistryTest {
     @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> merged {2}")
     @org.junit.jupiter.params.provider.MethodSource("allowedSyscallsCombinations")
     fun `test composite allowedSyscalls set intersection`(
-        threadAllowed: Set<io.mazewall.core.Syscall>?,
-        processAllowed: Set<io.mazewall.core.Syscall>?,
-        expectedMerged: Set<io.mazewall.core.Syscall>?,
+        threadAllowed: Set<io.mazewall.platform.syscall.Syscall>?,
+        processAllowed: Set<io.mazewall.platform.syscall.Syscall>?,
+        expectedMerged: Set<io.mazewall.platform.syscall.Syscall>?,
     ) {
         ContainmentStateRegistry.threadState = ContainerState(allowedSyscalls = threadAllowed)
         ContainmentStateRegistry.processState = ContainerState(allowedSyscalls = processAllowed)
@@ -307,17 +314,17 @@ internal class ContainmentStateRegistryTest {
         assertEquals(expectedMerged, resolved.allowedSyscalls)
     }
 
-    private fun parseAction(name: String): io.mazewall.core.SeccompAction =
+    private fun parseAction(name: String): io.mazewall.platform.syscall.SeccompAction =
         when (name.trim()) {
-        "ACT_KILL_PROCESS" -> io.mazewall.core.SeccompAction.ACT_KILL_PROCESS
-        "ACT_KILL_THREAD" -> io.mazewall.core.SeccompAction.ACT_KILL_THREAD
-        "ACT_TRAP" -> io.mazewall.core.SeccompAction.ACT_TRAP
+        "ACT_KILL_PROCESS" -> io.mazewall.platform.syscall.SeccompAction.ACT_KILL_PROCESS
+        "ACT_KILL_THREAD" -> io.mazewall.platform.syscall.SeccompAction.ACT_KILL_THREAD
+        "ACT_TRAP" -> io.mazewall.platform.syscall.SeccompAction.ACT_TRAP
         "ACT_ERRNO" ->
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO()
-        "ACT_NOTIFY" -> io.mazewall.core.SeccompAction.ACT_NOTIFY
-        "ACT_LOG" -> io.mazewall.core.SeccompAction.ACT_LOG
-        else -> io.mazewall.core.SeccompAction.ACT_ALLOW
+        "ACT_NOTIFY" -> io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY
+        "ACT_LOG" -> io.mazewall.platform.syscall.SeccompAction.ACT_LOG
+        else -> io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW
     }
 
     @org.junit.jupiter.params.ParameterizedTest(name = "thread action {0} vs process action {1} -> merged {2}")
@@ -339,15 +346,15 @@ internal class ContainmentStateRegistryTest {
 
         ContainmentStateRegistry.threadState = ContainerState(
             defaultAction = threadAction,
-            syscallActions = mapOf(io.mazewall.core.Syscall.READ to threadAction),
+            syscallActions = mapOf(io.mazewall.platform.syscall.Syscall.READ to threadAction),
         )
         ContainmentStateRegistry.processState = ContainerState(
             defaultAction = processAction,
-            syscallActions = mapOf(io.mazewall.core.Syscall.READ to processAction),
+            syscallActions = mapOf(io.mazewall.platform.syscall.Syscall.READ to processAction),
         )
 
         val resolved = ContainmentStateRegistry.resolveCurrentState()
         assertEquals(expectedMergedAction, resolved.defaultAction)
-        assertEquals(expectedMergedAction, resolved.syscallActions[io.mazewall.core.Syscall.READ])
+        assertEquals(expectedMergedAction, resolved.syscallActions[io.mazewall.platform.syscall.Syscall.READ])
     }
 }

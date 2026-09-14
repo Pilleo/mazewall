@@ -1,13 +1,20 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ScopingHandler
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
 import java.io.File
@@ -23,7 +30,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+            io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .stop()
         }
@@ -123,13 +130,13 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             tempFile.delete()
             System.err.println("--- VALIDATION LOGS ---")
             while (true) {
-                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs
+                val log = io.mazewall.enforcer.internal.supervisor.ValidationLog.logs
                     .poll() ?: break
                 System.err.print(log)
             }
             System.err.println("-----------------------")
             System.err.println("--- DAEMON LOGS ---")
-            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.supervisor.SupervisorDaemonManager::class.java.classLoader}")
+            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager::class.java.classLoader}")
             try {
                 val logFile = java.io.File("/tmp/supervisor_daemon.log")
                 if (logFile.exists()) {
@@ -187,13 +194,13 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             rawExecutor.shutdown()
             System.err.println("--- VALIDATION LOGS ---")
             while (true) {
-                val log = io.mazewall.enforcer.supervisor.ValidationLog.logs
+                val log = io.mazewall.enforcer.internal.supervisor.ValidationLog.logs
                     .poll() ?: break
                 System.err.print(log)
             }
             System.err.println("-----------------------")
             System.err.println("--- DAEMON LOGS ---")
-            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.supervisor.SupervisorDaemonManager::class.java.classLoader}")
+            System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager::class.java.classLoader}")
             try {
                 val logFile = java.io.File("/tmp/supervisor_daemon.log")
                 if (logFile.exists()) {

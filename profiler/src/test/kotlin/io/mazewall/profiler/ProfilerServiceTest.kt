@@ -1,21 +1,26 @@
-package io.mazewall.profiler
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.NativeEngine
-import io.mazewall.NativeFileSystem
-import io.mazewall.NativeMemory
-import io.mazewall.PolicyDefinition
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.Tid
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.NativeMemory
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
-import io.mazewall.profiler.engine.ProfilerInstallerInterface
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerSocket
+import io.mazewall.profiler.internal.engine.ProfilerInstallerInterface
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.io.DataOutputStream
@@ -41,7 +46,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-@io.mazewall.EnabledIfLinuxAndSupported
+@io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 class ProfilerServiceTest {
     @Test
     @Timeout(20)
@@ -316,7 +321,7 @@ class ProfilerServiceTest {
             pathCache: MutableMap<String, Long>,
             processWide: Boolean,
             startTraceListener: (
-                io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                 MutableList<TraceEvent>,
                 MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                 MutableMap<String, Long>,

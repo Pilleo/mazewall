@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import com.tngtech.archunit.core.domain.JavaClass
 import com.tngtech.archunit.core.domain.JavaModifier
@@ -8,6 +8,9 @@ import com.tngtech.archunit.lang.ArchCondition
 import com.tngtech.archunit.lang.ConditionEvents
 import com.tngtech.archunit.lang.SimpleConditionEvent
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
+import io.mazewall.platform.native.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 
 fun singletonProviderRule() =
     classes().should(object : ArchCondition<JavaClass>("keep singleton provider seams immutable") {
@@ -25,10 +28,10 @@ fun singletonProviderRule() =
         } == true
 
         // Existing compatibility APIs; new fields/setters on these facades still fail.
-        val compatibleFields = setOf("io.mazewall.Platform.provider", "io.mazewall.LinuxNative.engine")
-        val compatibleSetters = setOf(
-            "io.mazewall.Platform.setProvider(io.mazewall.PlatformProvider)",
-            "io.mazewall.LinuxNative.setEngine(io.mazewall.NativeEngine)",
+        val compatibleFields = setOf("io.mazewall.enforcer.api.Platform.provider", "io.mazewall.platform.native.LinuxNative.engine")
+        val compatibleSetterPrefixes = setOf(
+            "io.mazewall.enforcer.api.Platform.setProvider",
+            "io.mazewall.platform.native.LinuxNative.setEngine",
         )
         item.fields
             .filter { field ->
@@ -41,7 +44,7 @@ fun singletonProviderRule() =
             (singleton || JavaModifier.STATIC in method.modifiers) &&
                 method.name.startsWith("set") &&
                 method.parameterTypes.any(::isProvider) &&
-                method.fullName !in compatibleSetters
+                compatibleSetterPrefixes.none(method.fullName::startsWith)
         }.forEach { method ->
             events.add(SimpleConditionEvent.violated(method, "Mutable singleton provider setter ${method.fullName}"))
         }

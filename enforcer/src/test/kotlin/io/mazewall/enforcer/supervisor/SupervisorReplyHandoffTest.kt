@@ -1,9 +1,16 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.NewFdFlags
-import io.mazewall.core.Tid
-import io.mazewall.core.testAcquisition
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.NewFdFlags
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows

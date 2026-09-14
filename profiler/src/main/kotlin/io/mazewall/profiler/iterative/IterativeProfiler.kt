@@ -1,9 +1,9 @@
 package io.mazewall.profiler.iterative
 
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.Uncompiled
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.landlock.Landlock
 import java.nio.file.AccessDeniedException
@@ -11,19 +11,19 @@ import java.nio.file.AccessDeniedException
 /**
  * Tier A Profiler: Unprivileged "Deny-and-Retry" loop.
  *
- * @deprecated Deny-and-retry is not a tracer. Prefer [io.mazewall.profiler.MazewallProfiler]
+ * @deprecated Deny-and-retry is not a tracer. Prefer [io.mazewall.profiler.api.MazewallProfiler]
  * with [ProfileStrategy.HYBRID_NO_URING] or a future eBPF collector. This API will be removed.
  */
 @Deprecated(
     message = "Deny-and-retry is not a tracer. Use MazewallProfiler (USER_NOTIF or HYBRID_NO_URING).",
     replaceWith = ReplaceWith(
         "MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HYBRID_NO_URING))",
-        "io.mazewall.profiler.MazewallProfiler",
-        "io.mazewall.profiler.ProfileOptions",
-        "io.mazewall.profiler.ProfileStrategy",
+        "io.mazewall.profiler.api.MazewallProfiler",
+        "io.mazewall.profiler.api.ProfileOptions",
+        "io.mazewall.profiler.api.ProfileStrategy",
     ),
 )
-object IterativeProfiler {
+internal object IterativeProfiler {
     public var taskExecutor: IterativeTaskExecutor = RealIterativeTaskExecutor()
 
     private val customPhrases = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -107,7 +107,7 @@ object IterativeProfiler {
             .toAbsolutePath()
             .normalize()
         val isCurrentlyReadAllowed = currentPolicy.allowedFsReadPaths.any {
-            io.mazewall.core.isUnder(
+            io.mazewall.platform.lifecycle.isUnder(
                 p,
                 java.nio.file.Paths
                 .get(it.value),
@@ -118,14 +118,14 @@ object IterativeProfiler {
         builder = if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
             builder.allowFsWrite(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of(path, allowNonExistent = true),
             )
         } else {
             // First attempt: grant read access only.
             // If it was a write attempt, the next run will hit the `isCurrentlyReadAllowed` branch and add write.
             builder.allowFsRead(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of(path, allowNonExistent = true),
             )
         }

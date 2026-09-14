@@ -1,14 +1,15 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.NativeFileSystem
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalIncompleteFrameException
@@ -77,7 +78,7 @@ class PortalWorkerDriverTest {
         LinuxNative.setEngine(object : NativeEngine by runtime {
             override val fileSystem = object : NativeFileSystem by runtime.fileSystem {
                 override fun close(
-                    fd: io.mazewall.core.FileDescriptor<*, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                    fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (fd.value == capabilityFd) throw capabilityCleanup
                     return runtime.fileSystem.close(fd)

@@ -1,6 +1,7 @@
 package io.mazewall.portal
 
-import io.mazewall.core.CleanupFailures
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.CleanupFailures
 
 /** Collects best-effort resource-release failures without skipping later owned resources. */
 internal class CleanupCollector {

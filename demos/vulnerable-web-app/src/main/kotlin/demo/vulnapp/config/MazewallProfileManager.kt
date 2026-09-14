@@ -1,9 +1,9 @@
 package demo.vulnapp.config
 
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.Profiler
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.ProfilingResult
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.Profiler
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.ProfilingResult
 import jakarta.annotation.PreDestroy
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component

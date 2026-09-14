@@ -1,17 +1,25 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.NativeEngine
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.close
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.close
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
 import org.junit.jupiter.api.condition.OS
@@ -24,7 +32,7 @@ import kotlin.test.assertTrue
 @EnabledOnOs(OS.LINUX)
 class NativeDescriptorInputStreamCompatibilityTest {
     @Test
-    fun `public primary reflection preserves exact schema and default description`() =
+    fun `internal primary reflection preserves exact schema and default description`() =
         withDescriptor { fd, arena ->
         val stream = NativeDescriptorConstructorContract.construct(mapOf("socketFd" to fd, "arena" to arena))
         Thread.currentThread().interrupt()

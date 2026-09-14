@@ -12,7 +12,7 @@ import kotlin.contracts.contract
  * preventing segments from being easily leaked outside the scope.
  */
 @OptIn(ExperimentalContracts::class)
-public inline fun <T> nativeScope(crossinline block: NativeArena.() -> T): T {
+internal inline fun <T> nativeScope(crossinline block: NativeArena.() -> T): T {
     contract {
         callsInPlace(block, InvocationKind.EXACTLY_ONCE)
     }

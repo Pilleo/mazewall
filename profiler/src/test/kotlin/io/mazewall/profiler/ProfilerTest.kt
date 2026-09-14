@@ -1,20 +1,25 @@
-package io.mazewall.profiler
-
-import io.mazewall.Policy
-import io.mazewall.PolicyDefinition
-import io.mazewall.Uncompiled
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.SocketManager
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.Tid
-import io.mazewall.profiler.engine.ProfilerInstallerInterface
-import io.mazewall.profiler.engine.TraceEvent
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.internal.DaemonContext
 import io.mazewall.profiler.internal.ProfilerDaemonManager
 import io.mazewall.profiler.internal.ProfilerTraceListener
+import io.mazewall.profiler.internal.engine.ProfilerInstallerInterface
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -29,7 +34,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class ProfilerTest {
     class MockProcess(
         private val pid: Long,
@@ -59,7 +64,7 @@ class ProfilerTest {
     class MockProcessLauncher : ProcessLauncher {
         var startProcessCalled = false
         var lastArgs: List<String>? = null
-        var mockProcess: Process = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        var mockProcess: Process = MockProcess(8888L, io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL + "\n")
         val shutdownHooks = mutableListOf<Thread>()
 
         override fun startProcess(
@@ -101,37 +106,37 @@ class ProfilerTest {
         override fun exists(path: Path): Boolean = true
     }
 
-    class MockSocketManager : SocketManager {
+    internal class MockSocketManager : SocketManager {
         var connectCalled = false
         var closeCalledCount = AtomicInteger(0)
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> =
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned> =
             TestFileDescriptors
                 .replace(20)
 
         override fun accept(
-            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned>,
-        ): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> =
+            serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned>,
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned> =
             TestFileDescriptors
             .replace(21)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership.Owned> {
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned> {
             connectCalled = true
             return TestFileDescriptors
                 .replace(22)
         }
 
-        override fun close(fd: FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership.Owned>) {
+        override fun close(fd: FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned>) {
             closeCalledCount.incrementAndGet()
         }
 
         override fun recvDescriptor(
-            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, io.mazewall.core.FdState.Open, FdOwnership.Owned>? = null
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership>,
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned>? = null
 
         override fun sendDescriptor(
-            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, FdOwnership>,
-            fdToSend: FileDescriptor<*, io.mazewall.core.FdState.Open, FdOwnership>,
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, FdOwnership>,
+            fdToSend: FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, FdOwnership>,
         ): Boolean = true
     }
 
@@ -139,7 +144,12 @@ class ProfilerTest {
     fun `test profile with mocked daemon and installer`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
+        val mockDaemonManager = ProfilerDaemonManager(
+            io.mazewall.enforcer.api
+            .MockNativeEngine(),
+                socket,
+            launcher,
+        )
 
         val mockInstaller = object : ProfilerInstallerInterface {
             var installCalled = false
@@ -152,7 +162,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                    io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
@@ -186,7 +196,12 @@ class ProfilerTest {
     fun `profile removes worker registration when workload fails`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val manager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
+        val manager = ProfilerDaemonManager(
+            io.mazewall.enforcer.api
+            .MockNativeEngine(),
+                socket,
+            launcher,
+        )
         val tid = Tid(4343)
         val installer = object : ProfilerInstallerInterface {
             override fun installProfilingFilterForThread(
@@ -197,7 +212,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                    io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
@@ -218,7 +233,12 @@ class ProfilerTest {
     fun `test wrap executor submissions with mocked providers`() {
         val launcher = MockProcessLauncher()
         val socket = MockSocketManager()
-        val mockDaemonManager = ProfilerDaemonManager(io.mazewall.MockNativeEngine(), socket, launcher)
+        val mockDaemonManager = ProfilerDaemonManager(
+            io.mazewall.enforcer.api
+            .MockNativeEngine(),
+                socket,
+            launcher,
+        )
 
         val mockInstaller = object : ProfilerInstallerInterface {
             var installCount = 0
@@ -231,7 +251,7 @@ class ProfilerTest {
                 pathCache: MutableMap<String, Long>,
                 processWide: Boolean,
                 startTraceListener: (
-                    io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.UnixSocket, io.mazewall.core.FdState.Open, io.mazewall.core.FdOwnership.Owned>,
+                    io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,

@@ -1,8 +1,16 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
@@ -25,7 +33,7 @@ class FileDescriptorReproductionTest {
     }
 
     @Test
-    fun `file descriptor is strictly immutable and returns closed type`() =
+    fun `file descriptor is strictly immutable and returns closed type`(): Unit =
         withArena {
         val fd = TestFileDescriptors
             .adopt(realFd(), FileDescriptorRole.Generic)
@@ -43,7 +51,7 @@ class FileDescriptorReproductionTest {
     }
 
     @Test
-    fun `leftover Open token cannot reach the kernel after close or reuse`() =
+    fun `leftover Open token cannot reach the kernel after close or reuse`(): Unit =
         withArena {
         val first = realFd()
         val leftover = TestFileDescriptors

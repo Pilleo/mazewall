@@ -19,7 +19,7 @@ plugins {
 
 allprojects {
     group = "io.mazewall"
-    version = "0.0.1-prealpha-SNAPSHOT"
+    version = "0.1.0-SNAPSHOT"
 
     repositories {
         mavenCentral()
@@ -173,7 +173,7 @@ allprojects {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
             freeCompilerArgs.add("-Xcontext-parameters")
-            freeCompilerArgs.add("-opt-in=io.mazewall.MazewallInternal")
+            freeCompilerArgs.add("-opt-in=io.mazewall.platform.lifecycle.MazewallInternal")
         }
     }
 
@@ -216,6 +216,27 @@ sourceSets {
     val sharedTest by creating {
         kotlin.srcDir("src/sharedTest/kotlin")
         resources.srcDir("src/sharedTest/resources")
+    }
+}
+
+// Shared test fixtures deliberately model native and platform failure paths.
+// They are repository-only test code, so grant them the same narrow access as
+// the direct implementation modules—never a published consumer.
+val rootKotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
+val rootKotlinCompilations = rootKotlinExtension.target.compilations
+val rootPlatformJar = project(":platform").layout.buildDirectory.file("libs/platform-${project(":platform").version}.jar")
+val rootEnforcerJar = project(":enforcer").layout.buildDirectory.file("libs/enforcer-${project(":enforcer").version}.jar")
+rootKotlinCompilations.matching { it.name == "sharedTest" }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(":platform:jar", ":enforcer:jar")
+        compilerOptions.freeCompilerArgs.addAll(
+            rootPlatformJar.zip(rootEnforcerJar) { platform, enforcer ->
+                listOf(
+                    "-Xfriend-paths=${platform.asFile.absolutePath}",
+                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
+                )
+            },
+        )
     }
 }
 
@@ -374,14 +395,14 @@ subprojects {
             "**/io/mazewall/RealNative*",
             "**/io/mazewall/RealTransactionManager*",
             "**/io/mazewall/enforcer/JvmFloorWorkload*",
-            "**/io/mazewall/enforcer/supervisor/JVMValidationListener*",
+            "**/io/mazewall/enforcer/internal/supervisor/JVMValidationListener*",
             "**/io/mazewall/ffi/networking/SupervisorSeccompNotifInstaller*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorSessionHandler*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorDaemonEngine*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorInstaller*",
-            "**/io/mazewall/enforcer/supervisor/SupervisorDaemon*",
-            "**/io/mazewall/profiler/engine/ProfilerDaemonEngine*",
-            "**/io/mazewall/profiler/engine/RealProfilerTransport*",
+            "**/io/mazewall/enforcer/internal/supervisor/SupervisorSessionHandler*",
+            "**/io/mazewall/enforcer/internal/supervisor/SupervisorDaemonEngine*",
+            "**/io/mazewall/enforcer/internal/supervisor/SupervisorInstaller*",
+            "**/io/mazewall/enforcer/internal/supervisor/SupervisorDaemon*",
+            "**/io/mazewall/profiler/internal/engine/ProfilerDaemonEngine*",
+            "**/io/mazewall/profiler/internal/engine/RealProfilerTransport*",
             "**/io/mazewall/profiler/internal/ProfilerTraceListener*",
             "**/io/mazewall/profiler/internal/ProfilerDaemonManager*",
             "**/io/mazewall/profiler/triage/DiagnosticTriageRunner*",
@@ -616,6 +637,21 @@ subprojects {
     }
 }
 
+// The root shared-test source set holds internal native test doubles. Module
+// test compilations consume it through a friend path; production compilations
+// and published consumers never receive this access.
+val sharedTestClasses = layout.buildDirectory.dir("classes/kotlin/sharedTest")
+subprojects {
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        if (name.contains("Test", ignoreCase = true)) {
+            dependsOn(":compileSharedTestKotlin")
+            compilerOptions.freeCompilerArgs.addAll(
+                sharedTestClasses.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
+            )
+        }
+    }
+}
+
 tasks.register("unitCheck") {
     group = "verification"
     description = "Runs every module's host-safe unit-quality gate."
@@ -749,6 +785,109 @@ tasks.register("detektWarningRatchet") {
 
 tasks.named("check") {
     dependsOn("detektWarningRatchet", "validateBacklogIndex")
+}
+
+/**
+ * The checked-in Kotlin ABI dumps are the release contract for the supported
+ * libraries. Keep implementation packages out of that contract even when a
+ * declaration is accidentally made public during a future refactor.
+ */
+val verifySupportedApiSurface by tasks.registering {
+    group = "verification"
+    description = "Rejects implementation packages and types from published Kotlin ABI snapshots"
+    dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
+    val snapshots =
+        mapOf(
+            file("enforcer/api/enforcer.api") to
+                listOf(
+                    "io/mazewall/enforcer/supervisor/",
+                    "io/mazewall/ffi/",
+                    "io/mazewall/landlock/",
+                    "io/mazewall/seccomp/",
+                    "io/mazewall/enforcer/engine/",
+                ),
+            file("profiler/api/profiler.api") to
+                listOf(
+                    "io/mazewall/profiler/engine/",
+                    "io/mazewall/profiler/collector/",
+                    "io/mazewall/profiler/compiler/",
+                    "io/mazewall/profiler/iterative/",
+                    "io/mazewall/profiler/strace/",
+                    "io/mazewall/profiler/triage/",
+                    "io/mazewall/profiler/tierE/",
+                    "io/mazewall/profiler/ffi/",
+                    "io/mazewall/ffi/",
+                    "io/mazewall/seccomp/",
+                ),
+        )
+    // Kotlin must emit a public JVM class for the internal Tier-E daemon main
+    // method. It is an executable entry point, not a callable Kotlin API.
+    val internalLauncher = "io/mazewall/profiler/tierE/daemon/TierEKotlinDaemonMain"
+    inputs.files(snapshots.keys)
+    doLast {
+        val violations =
+            snapshots.flatMap { (snapshot, forbiddenSymbols) ->
+                val content = snapshot.readText().replace(internalLauncher, "")
+                forbiddenSymbols.filter(content::contains).map { "$snapshot exposes $it" }
+            }
+        check(violations.isEmpty()) {
+            "Published API contains implementation declarations:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifySupportedApiSurface)
+    dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
+}
+
+/**
+ * Structural release gate for the 0.1.0 domain-first package cutover.  Kotlin
+ * does not require source directories to mirror packages, so check the parsed
+ * package declaration rather than relying on a directory layout convention.
+ */
+val verifyPackageTopology by tasks.registering {
+    group = "verification"
+    description = "Rejects retired flat production package namespaces"
+    val sourceRoots =
+        listOf(
+            "platform/src/main/kotlin",
+            "enforcer/src/main/kotlin",
+            "profiler/src/main/kotlin",
+            "portal/src/main/kotlin",
+            "portal-worker/src/main/kotlin",
+        ).map(::file)
+    val repositoryRoot = layout.projectDirectory.asFile
+    val retiredPackages =
+        setOf(
+            "io.mazewall",
+            "io.mazewall.core",
+            "io.mazewall.enforcer.supervisor",
+            "io.mazewall.profiler",
+            "io.mazewall.profiler.engine",
+            "io.mazewall.profiler.attribution",
+        )
+    inputs.files(sourceRoots)
+    doLast {
+        val packagePattern = Regex("(?m)^package\\s+([A-Za-z0-9_.]+)\\s*$")
+        val violations =
+            sourceRoots.flatMap { root ->
+                root
+                    .walkTopDown()
+                    .filter { it.isFile && it.extension == "kt" }
+                    .mapNotNull { source ->
+                        val packageName = packagePattern.find(source.readText())?.groupValues?.get(1)
+                        packageName?.takeIf(retiredPackages::contains)?.let { "${source.relativeTo(repositoryRoot)} declares retired package $it" }
+                    }.toList()
+            }
+        check(violations.isEmpty()) {
+            "Domain-first package topology violations:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyPackageTopology)
 }
 
 tasks.register("validateBacklogIndex") {

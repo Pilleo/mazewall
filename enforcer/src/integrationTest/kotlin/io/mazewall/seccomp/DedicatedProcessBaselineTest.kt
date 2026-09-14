@@ -1,9 +1,16 @@
 package io.mazewall.seccomp
 
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.ProcessPolicies
-import io.mazewall.RuntimeProfile
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.ProcessPolicies
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files

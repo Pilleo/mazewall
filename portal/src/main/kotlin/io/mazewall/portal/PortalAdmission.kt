@@ -1,6 +1,6 @@
 package io.mazewall.portal
 
-import io.mazewall.core.Deadline
+import io.mazewall.platform.lifecycle.Deadline
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock

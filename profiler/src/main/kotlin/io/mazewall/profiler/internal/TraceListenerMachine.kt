@@ -1,6 +1,6 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.api.TraceEvent
 
 /** Pure lifecycle reducer for trace-listener socket input. */
 internal sealed interface TraceListenerEvent {

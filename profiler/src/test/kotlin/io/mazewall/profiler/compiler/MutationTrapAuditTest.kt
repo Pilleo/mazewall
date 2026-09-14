@@ -1,8 +1,12 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -24,8 +28,8 @@ class MutationTrapAuditTest {
             arch,
             Policy
                 .builder()
-                .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
-                .block(io.mazewall.core.Syscall.CONNECT)
+                .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
+                .block(io.mazewall.platform.syscall.Syscall.CONNECT)
                 .build()
                 .definition,
         ).instructions

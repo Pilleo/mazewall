@@ -1,16 +1,17 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.MazewallInternal
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
 import io.mazewall.ffi.networking.SeccompConnection
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.MazewallInternal
 import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.CancellationException
 
 /** Cleanup status for daemon/session owners; retry uses the original connection. */
 @MazewallInternal
-public sealed interface SeccompCleanupOutcome {
+internal sealed interface SeccompCleanupOutcome {
     public data object Complete : SeccompCleanupOutcome
 
     public data class Incomplete(
@@ -21,7 +22,7 @@ public sealed interface SeccompCleanupOutcome {
 
 /** Interprets close results without discarding failed descriptor ownership. */
 @MazewallInternal
-public object SeccompCleanupInterpreter {
+internal object SeccompCleanupInterpreter {
     public fun close(connection: SeccompConnection): SeccompCleanupOutcome = close(connection) { }
 
     /** Publishes the outcome to its owner before cancellation propagates or interruption is restored. */

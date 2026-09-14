@@ -1,18 +1,18 @@
 package io.mazewall.profiler.iterative
 
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.landlock.Landlock
 
-public interface IterativeTaskExecutor {
+internal interface IterativeTaskExecutor {
     fun executeTask(
         currentPolicy: Policy<*, Uncompiled>,
         task: Runnable,
     ): Throwable?
 }
 
-public class RealIterativeTaskExecutor internal constructor(
+internal class RealIterativeTaskExecutor internal constructor(
     /**
      * Upper bound for one profiling iteration. A workload that deadlocks under containment must
      * not hang the profiler forever (issue-20260823-172000); the timeout surfaces as a distinct
@@ -29,7 +29,7 @@ public class RealIterativeTaskExecutor internal constructor(
         .AtomicLong()
 
     /** Thrown when a contained iteration exceeds [iterationTimeoutMs]. */
-    public class IterativeTaskTimeoutException(
+    class IterativeTaskTimeoutException(
         timeoutMs: Long,
     ) : IllegalStateException("Profiling iteration exceeded ${timeoutMs}ms and was interrupted")
 

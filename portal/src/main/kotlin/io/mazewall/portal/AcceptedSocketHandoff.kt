@@ -1,9 +1,10 @@
 package io.mazewall.portal
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 
 /** Owns an accepted descriptor until exactly one caller claims it or cancellation retires it. */
 internal class AcceptedSocketHandoff(
@@ -59,7 +60,7 @@ internal class AcceptedSocketHandoff(
         val failure = runCatching { retire(pending) }.exceptionOrNull()
         if (failure != null) {
             synchronized(this) {
-                if (failure is io.mazewall.core.NativeCloseFailure && descriptor === pending) descriptor = null
+                if (failure is io.mazewall.platform.socket.NativeCloseFailure && descriptor === pending) descriptor = null
                 retiring = false
             }
             throw failure

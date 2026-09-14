@@ -1,24 +1,29 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeFileSystem
-import io.mazewall.MockNativeMemory
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.TestFileDescriptors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeFileSystem
+import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.ffi.memory.*
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.profiler.EbpfLoad
-import io.mazewall.profiler.PathResolutionQuality
-import io.mazewall.profiler.ProfileEnvironment
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.ProfileStrategy
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.StackAttribution
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.EbpfLoad
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.PathResolutionQuality
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -96,11 +101,12 @@ class ProfilerTraceListenerTest {
             )
             val listener = ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), mutableMapOf(), mutableMapOf(), { throw original }, native)
             val event = TraceEvent.fromSyscallEvent(
-                io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
-                io.mazewall.core.Tid(7),
+                io.mazewall.profiler.api.SyscallEvent.fromResolution<io.mazewall.profiler.api.SyscallEventState.Resolved>(
+                io.mazewall.platform.lifecycle
+                    .Tid(7),
                     "GETPID",
                     emptyList(),
-                    io.mazewall.profiler.engine.PathResolution.NotApplicable,
+                    io.mazewall.profiler.api.PathResolution.NotApplicable,
             ),
             )
             val process = ProfilerTraceListener::class.java.getDeclaredMethod("processEvent", TraceEvent::class.java).apply { isAccessible = true }
@@ -125,11 +131,12 @@ class ProfilerTraceListenerTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `failed ACK closes endpoint before reading another event`(written: Long) {
         val frame = TraceEventEncoder.encode(
-            io.mazewall.profiler.engine.SyscallEvent.fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(
-                io.mazewall.core.Tid(7),
+            io.mazewall.profiler.api.SyscallEvent.fromResolution<io.mazewall.profiler.api.SyscallEventState.Resolved>(
+                io.mazewall.platform.lifecycle
+                    .Tid(7),
                 "GETPID",
                 emptyList(),
-                io.mazewall.profiler.engine.PathResolution.NotApplicable,
+                io.mazewall.profiler.api.PathResolution.NotApplicable,
             ),
         )
         val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte()) + frame + frame)
@@ -177,18 +184,18 @@ class ProfilerTraceListenerTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `duplicate paths preserve distinct failed operands and ACK every event`() {
         val resolutions = listOf(
-            io.mazewall.profiler.engine.PathResolution.Partial(
+            io.mazewall.profiler.api.PathResolution.Partial(
                 listOf("/tmp/a"),
                 listOf(
-                    io.mazewall.profiler.engine
-                    .PathResolutionFailure(1, io.mazewall.profiler.engine.PathResolutionFailure.Reason.VmReadDenied, "Yama denied"),
+                    io.mazewall.profiler.api
+                        .PathResolutionFailure(1, io.mazewall.profiler.api.PathResolutionFailure.Reason.VmReadDenied, "Yama denied"),
                 ),
             ),
-            io.mazewall.profiler.engine.PathResolution.Partial(
+            io.mazewall.profiler.api.PathResolution.Partial(
                 listOf("/tmp/a"),
                 listOf(
-                    io.mazewall.profiler.engine
-                    .PathResolutionFailure(0, io.mazewall.profiler.engine.PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes"),
+                    io.mazewall.profiler.api
+                        .PathResolutionFailure(0, io.mazewall.profiler.api.PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes"),
                 ),
             ),
         )
@@ -207,7 +214,7 @@ class ProfilerTraceListenerTest {
         val paths = listOf(listOf("/tmp/a", "/tmp/b"), listOf("/tmp/b", "/tmp/a"))
         val collected = collectPathEvidence(
             paths.map {
-            io.mazewall.profiler.engine.PathResolution
+            io.mazewall.profiler.api.PathResolution
             .Resolved(it)
         },
         )
@@ -221,14 +228,20 @@ class ProfilerTraceListenerTest {
         val acknowledgements: Int,
     )
 
-    private fun collectPathEvidence(resolutions: List<io.mazewall.profiler.engine.PathResolution>): CollectedPathEvidence {
+    private fun collectPathEvidence(resolutions: List<io.mazewall.profiler.api.PathResolution>): CollectedPathEvidence {
         val bytes = byteArrayOf(0xAC.toByte()) +
             resolutions
                 .flatMap { resolution ->
             TraceEventEncoder
                 .encode(
-                io.mazewall.profiler.engine.SyscallEvent
-                    .fromResolution<io.mazewall.profiler.engine.SyscallEventState.Resolved>(io.mazewall.core.Tid(7), "RENAME", listOf(100L, 200L), resolution),
+                io.mazewall.profiler.api.SyscallEvent
+                    .fromResolution<io.mazewall.profiler.api.SyscallEventState.Resolved>(
+                        io.mazewall.platform.lifecycle
+                        .Tid(7),
+                            "RENAME",
+                        listOf(100L, 200L),
+                        resolution,
+                    ),
             ).toList()
         }.toByteArray()
         val input = java.io.ByteArrayInputStream(bytes)

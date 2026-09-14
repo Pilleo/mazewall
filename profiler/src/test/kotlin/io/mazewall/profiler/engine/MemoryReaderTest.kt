@@ -1,11 +1,16 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeFileSystem
-import io.mazewall.core.Tid
+package io.mazewall.profiler.internal.engine
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeFileSystem
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import io.mazewall.testing.withNativeEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -38,9 +43,9 @@ class MemoryReaderTest {
     @ValueSource(ints = [1, 13])
     fun `permission failures retain denied inspection evidence`(errno: Int) {
         val engine = object : MockNativeEngine() {
-            override val memory = object : io.mazewall.MockNativeMemory() {
+            override val memory = object : io.mazewall.enforcer.api.MockNativeMemory() {
                 override fun processVmReadv(
-                    pid: io.mazewall.core.Pid,
+                    pid: io.mazewall.platform.lifecycle.Pid,
                     localIov: ManagedSegment,
                     liovcnt: Long,
                     remoteIov: ManagedSegment,
@@ -107,9 +112,9 @@ class MemoryReaderTest {
         val remoteAddr = 0x1000L
         val mockData = "unterminated string".toByteArray(StandardCharsets.UTF_8)
 
-        val mockMem = object : io.mazewall.MockNativeMemory() {
+        val mockMem = object : io.mazewall.enforcer.api.MockNativeMemory() {
             override fun processVmReadv(
-                pid: io.mazewall.core.Pid,
+                pid: io.mazewall.platform.lifecycle.Pid,
                 localIov: ManagedSegment,
                 liovcnt: Long,
                 remoteIov: ManagedSegment,

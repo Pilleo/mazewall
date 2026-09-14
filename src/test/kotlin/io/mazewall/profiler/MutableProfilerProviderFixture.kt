@@ -1,4 +1,4 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
 internal object MutableProfilerProviderFixture {
     var provider: (() -> Any)? = null

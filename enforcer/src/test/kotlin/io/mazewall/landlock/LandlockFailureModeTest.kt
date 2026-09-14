@@ -1,28 +1,35 @@
 package io.mazewall.landlock
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeFileSystem
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeNetworking
-import io.mazewall.MockNativeProcess
-import io.mazewall.MockPlatformProvider
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.TestFileDescriptors
-import io.mazewall.core.testAcquisition
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeFileSystem
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeNetworking
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.MockPlatformProvider
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.ffi.memory.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import kotlin.test.*
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class LandlockFailureModeTest {
     @AfterEach
     fun tearDown() {
@@ -39,15 +46,15 @@ class LandlockFailureModeTest {
     ) : MockNativeEngine(fileSystem, networking, process, memory) {
         override fun syscall(
             nr: Long,
-            a1: io.mazewall.core.NativeArg,
-            a2: io.mazewall.core.NativeArg,
-            a3: io.mazewall.core.NativeArg,
-            a4: io.mazewall.core.NativeArg,
-            a5: io.mazewall.core.NativeArg,
-            a6: io.mazewall.core.NativeArg,
+            a1: io.mazewall.platform.syscall.NativeArg,
+            a2: io.mazewall.platform.syscall.NativeArg,
+            a3: io.mazewall.platform.syscall.NativeArg,
+            a4: io.mazewall.platform.syscall.NativeArg,
+            a5: io.mazewall.platform.syscall.NativeArg,
+            a6: io.mazewall.platform.syscall.NativeArg,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
             if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                a3 is io.mazewall.core.NativeArg.LongArg &&
+                a3 is io.mazewall.platform.syscall.NativeArg.LongArg &&
                 a3.value == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
             ) {
                 return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5)
@@ -89,12 +96,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, -1) // EPERM
@@ -123,12 +130,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(1, -1) // EPERM
@@ -140,7 +147,10 @@ class LandlockFailureModeTest {
 
         val session = LandlockSession(Policy.builder().build().definition)
         org.junit.jupiter.api.Assumptions
-            .assumeTrue(io.mazewall.Platform.isSupported())
+            .assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
         assertFailsWith<IllegalStateException> {
             session.applyRuleset()
         }
@@ -180,15 +190,15 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
-                    restrictFlags += (a2 as io.mazewall.core.NativeArg.LongArg).value
+                    restrictFlags += (a2 as io.mazewall.platform.syscall.NativeArg.LongArg).value
                 }
                 return super.syscall(nr, a1, a2, a3, a4, a5, a6)
             }
@@ -237,7 +247,7 @@ class LandlockFailureModeTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: io.mazewall.core.OpenFlags,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val current = calls.incrementAndGet()
                     return if (current == 1) {
@@ -283,7 +293,7 @@ class LandlockFailureModeTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: io.mazewall.core.OpenFlags,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr.contains(" (deleted)")) {
@@ -298,7 +308,10 @@ class LandlockFailureModeTest {
 
         // Use allowFsWrite to check deleted check when fallback is possible
         org.junit.jupiter.api.Assumptions
-            .assumeTrue(io.mazewall.Platform.isSupported())
+            .assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
         val session = LandlockSession(
             Policy
             .builder()
@@ -356,7 +369,7 @@ class LandlockFailureModeTest {
         val policy = Policy
             .builder()
             .allowFsRead("/tmp")
-            .allow(io.mazewall.core.Syscall.RENAME)
+            .allow(io.mazewall.platform.syscall.Syscall.RENAME)
             .build()
         // Should run and bypass silently without warning or exception
         val accessMask = Landlock.getAccessMask(1, policy.definition)
@@ -393,15 +406,15 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1 is io.mazewall.platform.syscall.NativeArg.MemoryArg &&
                     a1.value != ManagedSegment.NULL
                 ) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
@@ -427,15 +440,15 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1 is io.mazewall.platform.syscall.NativeArg.MemoryArg &&
                     a1.value != ManagedSegment.NULL
                 ) {
                     return LinuxNative.SyscallResult.Error(95, -1) // EOPNOTSUPP
@@ -461,12 +474,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
@@ -492,12 +505,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1)
@@ -528,15 +541,15 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1 is io.mazewall.platform.syscall.NativeArg.MemoryArg &&
                     a1.value != ManagedSegment.NULL
                 ) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOPKG, -1)
@@ -562,12 +575,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EOPNOTSUPP, -1)
@@ -593,12 +606,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOPKG, -1)
@@ -624,12 +637,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EOPNOTSUPP, -1)
@@ -660,12 +673,12 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
                     return LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOPKG, -1)
@@ -698,7 +711,7 @@ class LandlockFailureModeTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: io.mazewall.core.OpenFlags,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr == "/nonexistent/file") {
@@ -750,7 +763,7 @@ class LandlockFailureModeTest {
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
-                    flags: io.mazewall.core.OpenFlags,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     val pathStr = path.readString(0L)
                     if (pathStr == "/nonexistent/file" || pathStr == "/nonexistent") {
@@ -783,7 +796,7 @@ class LandlockFailureModeTest {
     fun `test net access mask calculation for ABI versions`() {
         // ABI < 4
         assertEquals(0L, Landlock.getFullNetAccessMask(3))
-        val policyWithBlocks = Policy.builder().block(io.mazewall.core.Syscall.BIND, io.mazewall.core.Syscall.CONNECT).build()
+        val policyWithBlocks = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(0L, Landlock.getNetAccessMask(3, policyWithBlocks.definition))
 
         // ABI >= 4 (getFullNetAccessMask)
@@ -792,15 +805,15 @@ class LandlockFailureModeTest {
 
         // ABI >= 4 (getNetAccessMask)
         // Scenario A: blocks both BIND and CONNECT
-        val policyBlockBoth = Policy.builder().block(io.mazewall.core.Syscall.BIND, io.mazewall.core.Syscall.CONNECT).build()
+        val policyBlockBoth = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(fullNetMask, Landlock.getNetAccessMask(4, policyBlockBoth.definition))
 
         // Scenario B: blocks only BIND
-        val policyBlockBind = Policy.builder().block(io.mazewall.core.Syscall.BIND).build()
+        val policyBlockBind = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND).build()
         assertEquals(Landlock.LANDLOCK_ACCESS_NET_BIND_TCP, Landlock.getNetAccessMask(4, policyBlockBind.definition))
 
         // Scenario C: blocks only CONNECT
-        val policyBlockConnect = Policy.builder().block(io.mazewall.core.Syscall.CONNECT).build()
+        val policyBlockConnect = Policy.builder().block(io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, Landlock.getNetAccessMask(4, policyBlockConnect.definition))
 
         // Scenario D: blocks neither
@@ -816,17 +829,17 @@ class LandlockFailureModeTest {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
-                    a1 is io.mazewall.core.NativeArg.MemoryArg &&
+                    a1 is io.mazewall.platform.syscall.NativeArg.MemoryArg &&
                     a1.value != ManagedSegment.NULL &&
-                    a2 is io.mazewall.core.NativeArg.LongArg
+                    a2 is io.mazewall.platform.syscall.NativeArg.LongArg
                 ) {
                     observedSizes.add(a2.value)
                     val rulesetAttr = LandlockRulesetAttrSegment(a1.value.unwrap)

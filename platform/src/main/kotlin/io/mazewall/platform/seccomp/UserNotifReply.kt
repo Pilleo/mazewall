@@ -1,12 +1,5 @@
 package io.mazewall.platform.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MazewallInternal
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.Layouts
@@ -16,10 +9,18 @@ import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.MazewallInternal
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.RawSyscallOperations
 
 /** The terminal outcome of one SECCOMP_IOCTL_NOTIF_SEND attempt. */
 @MazewallInternal
-public sealed interface UserNotifReplyResult {
+internal sealed interface UserNotifReplyResult {
     public data object Sent : UserNotifReplyResult
 
     public data object NotificationGone : UserNotifReplyResult
@@ -31,7 +32,7 @@ public sealed interface UserNotifReplyResult {
 
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
 @MazewallInternal
-public object UserNotifReply {
+internal object UserNotifReply {
     public fun encodeContinue(
         resp: ManagedSegment,
         id: Long,

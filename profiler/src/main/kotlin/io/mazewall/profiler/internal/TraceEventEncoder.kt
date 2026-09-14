@@ -1,7 +1,7 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.SyscallEventState
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 

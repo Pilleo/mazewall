@@ -16,7 +16,7 @@ interface SampleGeom {
     fun magnitude(p: SamplePoint): Int
 }
 
-interface SampleFd {
+internal interface SampleFd {
     fun checksum(fd: Capability.ReadFd): Int
 }
 
@@ -111,15 +111,15 @@ interface NullableService {
     fun echo(value: String?): String?
 }
 
-interface ReturnedFdService {
+internal interface ReturnedFdService {
     fun acquire(): Capability.ReadFd
 }
 
-data class NestedFd(
+internal data class NestedFd(
     val fd: Capability.ReadFd,
 )
 
-interface NestedFdService {
+internal interface NestedFdService {
     fun consume(value: NestedFd): Int
 }
 

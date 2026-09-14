@@ -1,6 +1,11 @@
-package io.mazewall.profiler.engine
-
+package io.mazewall.profiler.internal.engine
+import io.mazewall.platform.native.*
 import io.mazewall.platform.seccomp.SeccompNotification
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
@@ -76,8 +81,9 @@ class ProfilerPreparationPoolTest {
                 ).path
             }.distinct()
             .joinToString(java.io.File.pathSeparator)
-        val command = io.mazewall.core.JvmChildProcess.commandLine(
-            io.mazewall.core.JvmChildSpec(ProfilerPreparationMain::class.java.name, classpath = classpath, javaAgents = io.mazewall.core.JavaAgentSelection.None),
+        val command = io.mazewall.platform.process.JvmChildProcess.commandLine(
+            io.mazewall.platform.process
+                .JvmChildSpec(ProfilerPreparationMain::class.java.name, classpath = classpath, javaAgents = io.mazewall.platform.process.JavaAgentSelection.None),
         )
         ProfilerPreparationPool(parallelism = 1, capacity = 1, launch = {
             launches.incrementAndGet()

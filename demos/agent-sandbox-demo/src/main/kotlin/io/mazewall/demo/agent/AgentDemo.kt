@@ -5,11 +5,11 @@ import dev.langchain4j.agent.tool.ToolSpecification
 import dev.langchain4j.data.message.AiMessage
 import dev.langchain4j.data.message.ToolExecutionResultMessage
 import dev.langchain4j.model.chat.ChatLanguageModel
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.Supervision
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
 import java.lang.reflect.Method
 import kotlin.system.exitProcess
 
@@ -74,9 +74,8 @@ private fun runAgentScenarioConfigured(
         // The demo supervises the parent-side vfork. Set this before ProcessImpl is initialized;
         // applicationDefaultJvmArgs provides the same value for normal Gradle runs.
         System.setProperty("jdk.lang.Process.launchMechanism", "vfork")
-        // USER_NOTIF's external supervisor must exist before any permanent process filter.
-        SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
-
+        // The public facade starts USER_NOTIF supervision before this permanent baseline applies.
+        Supervision.prepareSupervisor()
         // Tier 1: Process-Wide Baseline Constraint
         // We block highly sensitive system administration syscalls for the entire process,
         // ensuring that even if an attacker achieves Arbitrary Code Execution (ACE) on any thread, 

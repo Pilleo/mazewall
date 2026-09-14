@@ -1,4 +1,4 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
 import org.junit.jupiter.api.extension.AfterEachCallback
 import org.junit.jupiter.api.extension.BeforeEachCallback

@@ -7,7 +7,7 @@ package io.mazewall.ffi.memory
  * lease lifetime or race with [close]; native aliases cannot be revoked while the pool reuses
  * their allocation. Borrowed confined arenas retain their normal thread restrictions.
  */
-public class SegmentLease internal constructor(
+internal class SegmentLease internal constructor(
     internal val owner: SegmentPool,
     internal val generation: Long,
     internal val buffer: ManagedSegment,

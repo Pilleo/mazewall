@@ -2,9 +2,9 @@ package demo.vulnapp.config
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.ProfileEvidence
-import io.mazewall.profiler.ProfilingCoverage
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.ProfileEvidence
+import io.mazewall.profiler.api.ProfilingCoverage
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path

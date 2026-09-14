@@ -1,6 +1,6 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.core.Deadline
+import io.mazewall.platform.lifecycle.Deadline
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 

@@ -1,11 +1,11 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.Arch
-import io.mazewall.core.NativeArg
-import io.mazewall.core.SeccompAction
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.platform.syscall.SeccompAction
 import java.util.concurrent.ConcurrentHashMap
 
 /**

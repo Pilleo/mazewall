@@ -1,7 +1,7 @@
-package io.mazewall.profiler
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
 import java.io.File

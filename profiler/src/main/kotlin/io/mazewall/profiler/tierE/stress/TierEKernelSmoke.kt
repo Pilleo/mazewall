@@ -1,11 +1,11 @@
 package io.mazewall.profiler.tierE.stress
 
 import io.mazewall.ffi.internal.RealNativeEngine
-import io.mazewall.profiler.attribution.ExecutionKind
-import io.mazewall.profiler.attribution.ResolutionStatus
-import io.mazewall.profiler.attribution.TierEEmissionMode
-import io.mazewall.profiler.attribution.TierEOptions
-import io.mazewall.profiler.attribution.TierEProfilerSession
+import io.mazewall.profiler.internal.attribution.ExecutionKind
+import io.mazewall.profiler.internal.attribution.ResolutionStatus
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEProfilerSession
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import java.nio.file.Files
@@ -13,7 +13,7 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 /** Privileged end-to-end diagnostic used by the Docker kernel gate. */
-public object TierEKernelSmoke {
+internal object TierEKernelSmoke {
     @JvmStatic
     public fun main(args: Array<String>) {
         require(

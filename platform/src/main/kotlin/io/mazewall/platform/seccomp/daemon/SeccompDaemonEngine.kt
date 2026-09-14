@@ -1,16 +1,5 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeCloseFailure
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -22,14 +11,26 @@ import io.mazewall.ffi.networking.SeccompConnectionEffect
 import io.mazewall.ffi.networking.SeccompConnectionEvent
 import io.mazewall.ffi.networking.SeccompConnectionMachine
 import io.mazewall.ffi.networking.SeccompConnectionOutcome
-import io.mazewall.getFdOrThrow
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
 import io.mazewall.platform.daemon.UnixListenDaemonOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
-import io.mazewall.recover
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.recover
+import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.CancellationException
@@ -71,7 +72,7 @@ internal class HandshakeDeadlineRegistry {
  * Unified daemon engine for handling seccomp user notification UNIX server, client connections,
  * handshake protocol, and session reactors.
  */
-public class SeccompDaemonEngine(
+internal class SeccompDaemonEngine(
     private val socketPath: String,
     private val readySentinel: String = "MAZEWALL_DAEMON_READY",
     private val notifHandlerFactory: (
@@ -111,7 +112,7 @@ public class SeccompDaemonEngine(
     private val handshakeDeadlines = HandshakeDeadlineRegistry()
 
     /** Historical failures stay visible even if a later shutdown retry releases all descriptors. */
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     public val cleanupOutcome: SeccompCleanupOutcome
         get() = if (cleanupFailures.isEmpty() && incompleteConnections.isEmpty() && failedServerCloses.isEmpty()) {
             SeccompCleanupOutcome.Complete
@@ -329,7 +330,7 @@ public class SeccompDaemonEngine(
     }
 
     /** Retries only failed owned descriptors; prior failure diagnostics remain available. */
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     @Synchronized
     public fun retryCleanup(): SeccompCleanupOutcome {
         val connections = incompleteConnections.toMutableList()

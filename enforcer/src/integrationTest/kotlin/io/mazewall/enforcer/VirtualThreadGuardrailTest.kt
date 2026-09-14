@@ -1,10 +1,17 @@
 package io.mazewall.enforcer
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors

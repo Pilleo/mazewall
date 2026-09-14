@@ -1,6 +1,6 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
@@ -9,7 +9,14 @@ import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.daemon.LoopAction
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -28,7 +35,7 @@ class SupervisorSessionHandlerTest {
                     arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
                     fixture.listener,
                     fixture.socket,
-                    io.mazewall.core.Deadline
+                    io.mazewall.platform.lifecycle.Deadline
                         .afterMillis(30_000),
                 ).use { work ->
                     var progress: io.mazewall.platform.seccomp.daemon.NotificationProgress

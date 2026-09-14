@@ -1,7 +1,7 @@
 package demo.vulnapp.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import io.mazewall.profiler.BillOfBehavior
+import io.mazewall.profiler.api.BillOfBehavior
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files

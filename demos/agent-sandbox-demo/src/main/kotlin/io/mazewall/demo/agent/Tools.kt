@@ -1,22 +1,15 @@
 package io.mazewall.demo.agent
 
 import dev.langchain4j.agent.tool.Tool
-import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.NativeArena
-import io.mazewall.ffi.memory.openPath
-import io.mazewall.getFdOrThrow
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.ScopingHandler
 import java.io.File
 import java.io.IOException
 import java.net.URI
@@ -53,7 +46,7 @@ class AgentTools(
                 val address = args.firstOrNull() as? ByteArray
                 when (address?.let(NetworkAddressClassifier::classify) ?: AddressDecision.DENY) {
                     AddressDecision.DENY -> {
-                        AgentPolicyEvidence.record(tid, Syscall.CONNECT)
+                        AgentPolicyEvidence.record(Syscall.CONNECT)
                         println("[MAZEWALL] [BLOCKED] Local, private, metadata, malformed, or unsupported destination denied.")
                         false
                     }
@@ -114,7 +107,7 @@ class AgentTools(
             it.className == AgentTools::class.java.name && it.methodName == "executeAuthorizedAnalysis"
         }
         if (!isLegit) {
-            if (tid != null && syscall != null) AgentPolicyEvidence.record(tid, syscall)
+            if (tid != null && syscall != null) AgentPolicyEvidence.record(syscall)
             println("[MAZEWALL] [BLOCKED] Process spawn blocked! Execution stack did not originate from executeDataAnalysis!")
         } else {
             println("[MAZEWALL] [ALLOWED] Process spawn authorized for executeDataAnalysis.")
@@ -160,12 +153,19 @@ class AgentTools(
 
     @Tool("Analyze a user upload file within workspace")
     fun analyzeUserFile(filename: String): String {
+        val targetFile = File(workspaceDir, filename).canonicalFile
+        // Establish the fixture's ordinary filesystem access before entering the thread-local
+        // Landlock compartment. A subsequent denial in that compartment is attributable to the
+        // installed policy, not to a pre-existing host ACL failure.
+        verifyNativeRead(targetFile)
         return awaitOwned(fileExecutor.submit<String> {
             println("[TOOL] Analyzing file: $filename")
-            val targetFile = File(workspaceDir, filename).canonicalFile
             println("[TOOL] Resolved file path: ${targetFile.absolutePath}")
-            verifyNativeRead(targetFile)
-            targetFile.readText()
+            try {
+                targetFile.readText()
+            } catch (failure: IOException) {
+                throw authenticatedDenial(Syscall.OPEN, failure, EACCES)
+            }
         })
     }
 
@@ -233,43 +233,26 @@ class AgentTools(
         }
 
     private fun <T> withSupervisorDenialEvidence(action: () -> T): T {
-        val tid = LinuxNative.process.gettid()
-        AgentPolicyEvidence.clear(tid)
+        AgentPolicyEvidence.clear()
         return try {
             action()
         } catch (failure: Exception) {
-            val denied = AgentPolicyEvidence.consume(tid)
+            val denied = AgentPolicyEvidence.consume()
             if (denied == null) throw failure
             throw authenticatedDenial(denied.syscall, failure)
         } finally {
-            AgentPolicyEvidence.clear(tid)
+            AgentPolicyEvidence.clear()
         }
     }
 
     private fun verifyNativeRead(target: File) {
-        NativeArena.ofConfined().use { arena ->
-            val result = with(arena) {
-                openPath(target.absolutePath, OpenFlags(NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC))
-            }
-            when (result) {
-                is LinuxNative.SyscallResult.Success -> {
-                    val descriptor = result.getFdOrThrow("agent read probe")
-                    RealSocketManager.close(descriptor)
-                }
-                is LinuxNative.SyscallResult.Error -> {
-                    if (result.errno == NativeConstants.EPERM || result.errno == NativeConstants.EACCES) {
-                        throw authenticatedDenial(Syscall.OPEN, cause = null, errno = result.errno)
-                    }
-                    result.throwErrno("agent read probe")
-                }
-            }
-        }
+        target.inputStream().use { input -> input.read() }
     }
 
     private fun authenticatedDenial(
         syscall: Syscall,
         cause: Throwable?,
-        errno: Int = NativeConstants.EPERM,
+        errno: Int = EPERM,
     ): ContainmentViolationException =
         ContainmentViolationException(
             message = "Mazewall observed ${syscall.name} denial",
@@ -280,6 +263,8 @@ class AgentTools(
         )
 
     private companion object {
+        const val EACCES = 13
+        const val EPERM = 1
         val PROCESS_TIMEOUT: Duration = Duration.ofSeconds(30)
         val SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(5)
     }
@@ -288,18 +273,15 @@ class AgentTools(
 private object AgentPolicyEvidence {
     data class Denial(val syscall: Syscall)
 
-    private val denials = ConcurrentHashMap<Tid, Denial>()
+    private val denials = java.util.concurrent.ConcurrentLinkedQueue<Denial>()
 
-    fun record(
-        tid: Tid,
-        syscall: Syscall,
-    ) {
-        denials[tid] = Denial(syscall)
+    fun record(syscall: Syscall) {
+        denials.add(Denial(syscall))
     }
 
-    fun consume(tid: Tid): Denial? = denials.remove(tid)
+    fun consume(): Denial? = denials.poll()
 
-    fun clear(tid: Tid) {
-        denials.remove(tid)
+    fun clear() {
+        denials.clear()
     }
 }

@@ -1,16 +1,23 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.BpfFilter
-import io.mazewall.CompiledSandbox
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.compile
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.CompiledSandbox
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.net.Socket
 import kotlin.random.Random
@@ -26,7 +33,7 @@ import kotlin.test.assertTrue
  * Includes the post-install liveness assertion that would have caught issue-20260823-140500
  * deterministically.
  *
- * KILL_* verdicts are verified out-of-process via [io.mazewall.IsolatedProcessTester]
+ * KILL_* verdicts are verified out-of-process via [io.mazewall.enforcer.api.IsolatedProcessTester]
  * (issue-20260823-172000): this class is @NeedsFreshJvm because its in-JVM archetypes permanently
  * restrict worker threads.
  */
@@ -37,7 +44,7 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         System.setProperty("io.mazewall.selfVerify", "true")
     }
 
-    private val arch = io.mazewall.core.Arch
+    private val arch = io.mazewall.platform.syscall.Arch
         .current()
 
     private fun assertKernelVerdictMatchesSimulator(
@@ -74,22 +81,22 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         nr: Int,
         args: LongArray,
     ): Boolean {
-        val res = io.mazewall.LinuxNative.raw.syscall(
+        val res = io.mazewall.platform.native.LinuxNative.raw.syscall(
             nr.toLong(),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(0) { 0 }),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(1) { 0 }),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(2) { 0 }),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(3) { 0 }),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(4) { 0 }),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(args.getOrElse(5) { 0 }),
         )
-        return res is io.mazewall.LinuxNative.SyscallResult.Error &&
+        return res is io.mazewall.platform.native.LinuxNative.SyscallResult.Error &&
             res.errno == NativeConstants.EPERM
     }
 
@@ -293,7 +300,7 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
     /** Compiles the same program the kill-probe child installs, for oracle prediction. */
     private fun compiledProgramOf(victimNr: Int): List<BpfInstruction> {
-        val victim = io.mazewall.core.Syscall.entries
+        val victim = io.mazewall.platform.syscall.Syscall.entries
             .first { it.numberFor(arch) == victimNr }
         val policy = Policy
             .builder()

@@ -1,9 +1,10 @@
 package io.mazewall.portal.worker
 
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalGeneratedNames
 import io.mazewall.portal.PortalMethod
@@ -19,7 +20,7 @@ import io.mazewall.portal.PortalMethod
  * package and must expose `METHOD_IDS: IntArray` plus
  * `handle(impl, method, payload, granted): ByteArray`.
  */
-public object PortalDispatcherRegistry {
+internal object PortalDispatcherRegistry {
     public typealias Handler = PortalDispatcherHandler
 
     private var startupBuilder: PortalDispatcherTable.Builder? = PortalDispatcherTable.Builder()

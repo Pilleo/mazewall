@@ -1,8 +1,8 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.PolicyDefinition
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**

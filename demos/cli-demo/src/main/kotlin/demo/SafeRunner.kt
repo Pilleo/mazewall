@@ -1,6 +1,6 @@
 package demo
 
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import java.util.concurrent.ExecutionException

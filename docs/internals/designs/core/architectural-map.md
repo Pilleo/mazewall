@@ -191,6 +191,12 @@ Native calls return `errno` and raw values that are easily lost or misinterprete
 ### C. Pragmatic OOP & Strategy Pattern (Platform Abstraction)
 The Linux kernel cannot be mocked. We use OOP traits to decouple high-level security logic from low-level FFM implementations.
 - **Application:** `NativeEngine` and its sub-traits (`NativeFileSystem`, etc.) allow injecting `MockNativeEngine` for host-side unit testing without a Linux environment.
+- **Captured runtime rule:** a long-lived native operation receives one captured
+  `NativeEngine`; socket connection, descriptor receipt, UNIX server creation,
+  and supervised installation must not re-read mutable global runtime state while
+  the operation is in progress. Convenience overloads may capture the default
+  runtime once at the composition boundary. `ArchitectureTest` enforces this for
+  `SupervisorInstaller`.
 
 ### D. Domain-Driven Design (DDD) & Value Objects
 To avoid "Primitive Obsession" in a codebase full of pointers and integers, we use DDD principles to define a "Ubiquitous Language" for security.

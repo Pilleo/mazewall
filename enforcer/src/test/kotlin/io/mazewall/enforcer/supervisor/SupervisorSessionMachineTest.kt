@@ -1,5 +1,12 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -73,7 +80,7 @@ class SupervisorSessionMachineTest {
 
     @Test
     fun `JVM verdict resolver rejects a response for another notification`() {
-        val arch = io.mazewall.core.Arch
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
 
         assertEquals(
@@ -84,7 +91,7 @@ class SupervisorSessionMachineTest {
 
     @Test
     fun `JVM verdict resolver maps an allowed open response to descriptor injection`() {
-        val arch = io.mazewall.core.Arch
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
 
         assertEquals(

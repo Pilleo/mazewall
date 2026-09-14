@@ -1,12 +1,19 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.core.Arch
-import io.mazewall.core.Deadline
-import io.mazewall.core.JavaAgentSelection
-import io.mazewall.core.JvmChildProcess
-import io.mazewall.core.JvmChildSpec
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.process.JavaAgentSelection
+import io.mazewall.platform.process.JvmChildProcess
+import io.mazewall.platform.process.JvmChildSpec
 import io.mazewall.platform.seccomp.SeccompNotification
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test

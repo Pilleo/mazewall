@@ -2,15 +2,23 @@ package io.mazewall.ffi.memory
 
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.engine.FilterInstallationPlanner
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.ValueLayout
@@ -175,7 +183,8 @@ class ContainmentDesignSpec :
         "Sandbox Cleanliness (designs/enforcer/containment-design.md)" -
             {
             "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
-                val isSupported = io.mazewall.Platform.isSupported() &&
+                val isSupported = io.mazewall.enforcer.api.Platform
+                    .isSupported() &&
                     io.mazewall.landlock.Landlock
                         .isSupported() &&
                     try {

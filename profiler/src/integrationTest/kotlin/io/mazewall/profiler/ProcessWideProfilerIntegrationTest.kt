@@ -1,6 +1,6 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
-import io.mazewall.BaseIntegrationTest
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -19,9 +19,9 @@ class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
     fun `test processWide profiling captures background thread syscalls`() {
         val javaBin = System.getProperty("java.home") + "/bin/java"
         val classpath = System.getProperty("java.class.path")
-        val className = "io.mazewall.profiler.ProcessWideProfilerIntegrationTest\$SubprocessMain"
+        val className = "io.mazewall.profiler.api.ProcessWideProfilerIntegrationTest\$SubprocessMain"
 
-        val pb = ProcessBuilder(javaBin, "-cp", classpath, className)
+        val pb = ProcessBuilder(javaBin, "--enable-native-access=ALL-UNNAMED", "-cp", classpath, className)
         pb.inheritIO()
         val process = pb.start()
         val exitCode = process.waitFor()

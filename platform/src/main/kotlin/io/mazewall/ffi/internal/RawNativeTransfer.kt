@@ -1,11 +1,11 @@
 package io.mazewall.ffi.internal
 
-import io.mazewall.core.Arch
-import io.mazewall.core.NativeArg
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.native
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 import java.lang.foreign.ValueLayout
 
 /** Explicit top-level pointer schemas; unknown managed arguments never reach syscall(2). */

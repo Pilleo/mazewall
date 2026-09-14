@@ -1,6 +1,15 @@
 package io.mazewall.platform.seccomp
 
-import io.mazewall.core.Arch
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.SyscallNumber
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
@@ -50,6 +59,12 @@ internal class SupervisedKindTest {
         arch: Arch,
         expectedKind: SupervisedKind,
     ) {
-        assertEquals(expectedKind, SupervisedKind.classify(io.mazewall.core.SyscallNumber(nr), arch))
+        assertEquals(
+            expectedKind,
+            SupervisedKind.classify(
+                SyscallNumber(nr),
+                arch,
+            ),
+        )
     }
 }

@@ -1,7 +1,7 @@
 package io.mazewall.demo.agent
 
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.IsolatedProcessTester
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.IsolatedProcessTester
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue

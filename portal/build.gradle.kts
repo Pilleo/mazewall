@@ -15,6 +15,13 @@ sourceSets {
 
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
+val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(platformJar)
+        compilerOptions.freeCompilerArgs.addAll(platformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") })
+    }
+}
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))

@@ -7,7 +7,7 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 
 /** The strength of evidence behind a containment diagnostic. */
-enum class ContainmentViolationEvidence {
+public enum class ContainmentViolationEvidence {
     /** Mazewall observed the policy denial at its kernel-facing boundary. */
     OBSERVED_POLICY_DENIAL,
 
@@ -37,10 +37,10 @@ enum class ContainmentViolationEvidence {
  * @param evidence whether Mazewall observed the denial or only has incomplete provenance.
  */
 
-class ContainmentViolationException(
+public class ContainmentViolationException(
     message: String,
     cause: Throwable? = null,
-    val errno: Int? = null,
-    val syscallNr: Int? = null,
-    val evidence: ContainmentViolationEvidence = ContainmentViolationEvidence.UNKNOWN,
+    public val errno: Int? = null,
+    public val syscallNr: Int? = null,
+    public val evidence: ContainmentViolationEvidence = ContainmentViolationEvidence.UNKNOWN,
 ) : io.mazewall.enforcer.ContainmentViolationException(message, cause)

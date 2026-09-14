@@ -1,19 +1,12 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.core.Deadline
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.supervisor.JvmVerdict
+import io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine
 import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.supervisor.JvmVerdict
-import io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
@@ -21,6 +14,14 @@ import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.readByte
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException

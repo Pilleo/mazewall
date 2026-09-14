@@ -1,10 +1,17 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.core.OpenFlags
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test

@@ -1,11 +1,15 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.OpenFlagsEvidence
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.engine.PathResolution
-import io.mazewall.profiler.engine.PathResolutionFailure
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

@@ -1,9 +1,14 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
-import io.mazewall.core.TestFileDescriptors
+package io.mazewall.profiler.internal.engine
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
@@ -131,7 +136,7 @@ class ProfilerInstallerTest {
                     connectWithRetry = { _ ->
                         // Return a dummy FD that will fail sendDescriptor
                         TestFileDescriptors
-                            .replace<io.mazewall.core.FileDescriptorRole.UnixSocket>(999)
+                            .replace<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket>(999)
                     },
                     startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )

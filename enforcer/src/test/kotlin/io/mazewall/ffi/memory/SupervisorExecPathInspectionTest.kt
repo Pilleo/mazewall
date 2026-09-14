@@ -1,12 +1,19 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Tid
-import io.mazewall.enforcer.supervisor.SupervisorArgumentExtractor
-import io.mazewall.enforcer.supervisor.SupervisorRoute
-import io.mazewall.enforcer.supervisor.SupervisorRoutePreparation
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.internal.supervisor.SupervisorArgumentExtractor
+import io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+import io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
 import io.mazewall.ffi.Layouts
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.SeccompNotifications
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 

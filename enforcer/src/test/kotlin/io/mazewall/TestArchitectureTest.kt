@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import com.tngtech.archunit.core.domain.JavaClasses
 import com.tngtech.archunit.core.importer.ImportOption
@@ -9,7 +9,14 @@ import com.tngtech.archunit.lang.ConditionEvents
 import com.tngtech.archunit.lang.SimpleConditionEvent
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.PureJavaBpfEngine
 import org.junit.jupiter.api.Test
 
@@ -19,7 +26,7 @@ import org.junit.jupiter.api.Test
  *
  * Process-wide containment (ContainedExecutors.installOnProcess or PureJavaBpfEngine.installOnProcess)
  * is irreversible and will affect ALL subsequent tests in the same JVM.
- * Such tests MUST use [io.mazewall.IsolatedProcessTester] to run in a dedicated process.
+ * Such tests MUST use [io.mazewall.enforcer.api.IsolatedProcessTester] to run in a dedicated process.
  */
 @AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.OnlyIncludeTests::class])
 class TestArchitectureTest {
@@ -30,7 +37,7 @@ class TestArchitectureTest {
             .areAnnotatedWith(Test::class.java)
             .and()
             .areDeclaredInClassesThat()
-            .doNotHaveFullyQualifiedName("io.mazewall.IsolatedTestRunner")
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.IsolatedTestRunner")
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName(

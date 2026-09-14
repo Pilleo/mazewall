@@ -8,8 +8,8 @@ import java.nio.file.Path
  * `/proc/<pid>/cgroup` (cgroup v2 unified hierarchy). Returns null when
  * not containerized.
  */
-public object ContainerDetector {
-    public data class ContainerInfo(
+internal object ContainerDetector {
+    internal data class ContainerInfo(
         public val runtime: String,
         public val containerId: String,
     )

@@ -1,10 +1,10 @@
 package demo.vulnapp.config
 
-import io.mazewall.profiler.EbpfLoad
-import io.mazewall.profiler.ProfileEnvironment
-import io.mazewall.profiler.ProfileStrategy
-import io.mazewall.profiler.ProfilingCoverage
-import io.mazewall.profiler.StackAttribution
+import io.mazewall.profiler.api.EbpfLoad
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
 
 internal fun collectorCoverage(droppedEvents: Int = 0): ProfilingCoverage =
     ProfilingCoverage.infer(

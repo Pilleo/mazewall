@@ -1,24 +1,25 @@
 package io.mazewall.ffi.networking
 
-import io.mazewall.BpfNativeCache
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.Platform
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.Arch
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BpfNativeCache
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.getFdOrThrow
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.seccomp.*
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
@@ -31,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference
  * This implementation replicates the coordinator pattern from the original profiler
  * to prevent deadlocks when supervising critical JVM operations (like open/openat).
  */
-public object SupervisorSeccompNotifInstaller {
+internal object SupervisorSeccompNotifInstaller {
     private val defaultConnect: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = { SupervisorSocketUtils.connectDescriptorWithRetry(it) }
     private val defaultSend: (Int, Int) -> Boolean = { socket, listener -> SupervisorSocketUtils.sendDescriptor(socket, listener) }
 
@@ -217,7 +218,7 @@ public object SupervisorSeccompNotifInstaller {
      * Custom connect/send callbacks are fault-injection seams. Production uses the defaults,
      * whose nonblocking native I/O and readiness checks share the installation deadline.
      */
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     public fun installOwned(
         native: NativeEngine,
         userNotifSupported: Boolean,
@@ -244,7 +245,7 @@ public object SupervisorSeccompNotifInstaller {
     }
 
     /** Allocation and coordinator waits stay outside [installationGate]. */
-    @io.mazewall.MazewallInternal
+    @io.mazewall.platform.lifecycle.MazewallInternal
     // SUPPRESSION-RATIONALE: Platform support, irreversible installation and bounded handshake failures retain distinct throw sites and explicit partial-installation evidence.
     public fun installOwned(
         native: NativeEngine,
@@ -266,7 +267,7 @@ public object SupervisorSeccompNotifInstaller {
         // Mandatory for non-privileged seccomp
         native.process
             .prctl(
-                io.mazewall.core.PrctlCommand
+                io.mazewall.platform.syscall.PrctlCommand
                 .SetNoNewPrivs(true),
             ).getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
 

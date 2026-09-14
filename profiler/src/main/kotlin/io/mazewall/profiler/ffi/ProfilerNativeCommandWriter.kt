@@ -1,12 +1,13 @@
 package io.mazewall.profiler.ffi
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeMemory
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeMemory
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 

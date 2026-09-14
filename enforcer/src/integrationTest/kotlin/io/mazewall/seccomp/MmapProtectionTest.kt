@@ -1,13 +1,20 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -258,23 +265,23 @@ class MmapProtectionTest : BaseIntegrationTest() {
                         // 2. Try to make it executable using pkey_mprotect
                         // pkey_mprotect syscall takes (addr, len, prot, pkey)
                         // We map it manually since it's not in libc yet
-                        val arch = io.mazewall.core.Arch
+                        val arch = io.mazewall.platform.syscall.Arch
                             .current()
                         val nr = arch.pkeyMprotect
                         val res =
-                        io.mazewall.LinuxNative.raw.syscall(
+                        io.mazewall.platform.native.LinuxNative.raw.syscall(
                             nr.toLong(),
-                            io.mazewall.core.NativeArg
+                            io.mazewall.platform.syscall.NativeArg
                                 .MemoryArg(ConfinedSegment(addr.reinterpret(4096L))),
-                            io.mazewall.core.NativeArg
+                            io.mazewall.platform.syscall.NativeArg
                                 .LongArg(4096L),
-                            io.mazewall.core.NativeArg
+                            io.mazewall.platform.syscall.NativeArg
                                 .LongArg((PROT_READ or PROT_EXEC).toLong()),
-                            io.mazewall.core.NativeArg.NullArg,
+                            io.mazewall.platform.syscall.NativeArg.NullArg,
                         )
 
                         when (res) {
-                            is io.mazewall.LinuxNative.SyscallResult.Error -> {
+                            is io.mazewall.platform.native.LinuxNative.SyscallResult.Error -> {
                                 if (res.errno == 1) { // 1 is EPERM (seccomp block)
                                     // This proves seccomp blocked it.
                                     // To trigger ContainmentViolationException mapping, we throw an IOException
@@ -285,7 +292,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
                                 }
                             }
 
-                            is io.mazewall.LinuxNative.SyscallResult.Success -> {
+                            is io.mazewall.platform.native.LinuxNative.SyscallResult.Success -> {
                                 throw IllegalStateException("CRITICAL SECURITY BYPASS: pkey_mprotect reached kernel and succeeded!")
                             }
                         }

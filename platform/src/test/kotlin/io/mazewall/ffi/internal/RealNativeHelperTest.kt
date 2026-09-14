@@ -1,15 +1,23 @@
 package io.mazewall.ffi.internal
 
-import io.mazewall.core.CloneFlags
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.MemoryAddress
-import io.mazewall.core.MmapFlags
-import io.mazewall.core.MmapProt
-import io.mazewall.core.OpenFlags
-import io.mazewall.core.Pid
-import io.mazewall.core.Tid
-import io.mazewall.core.Uid
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.CloneFlags
+import io.mazewall.platform.lifecycle.MemoryAddress
+import io.mazewall.platform.lifecycle.MmapFlags
+import io.mazewall.platform.lifecycle.MmapProt
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.lifecycle.Uid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 

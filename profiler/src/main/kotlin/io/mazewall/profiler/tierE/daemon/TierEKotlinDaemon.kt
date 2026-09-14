@@ -1,7 +1,9 @@
+@file:JvmName("TierEKotlinDaemonMain")
+
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
-import io.mazewall.profiler.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -18,7 +20,7 @@ import kotlin.system.exitProcess
  *
  * The native JVMTI agent supplies the marker uprobe and logical stack dictionary.
  */
-public fun main() {
+internal fun main() {
     if (!runningAsRoot()) {
         System.err.println("[tier-e] refusing: requires root")
         exitProcess(1)

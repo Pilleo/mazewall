@@ -1,8 +1,15 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.SupervisedKind
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -47,7 +54,11 @@ internal class SupervisorNotificationMachineTest {
     @Test
     fun `custom supervised nr is denied before asking the JVM`() {
         val route = SupervisorNotificationMachine.evaluateFastPath(
-            SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(999_999), arch),
+            SupervisorNotificationMachine.classify(
+                io.mazewall.platform.lifecycle
+                .SyscallNumber(999_999),
+                    arch,
+            ),
             resolvedPath = null,
             rawPath = null,
         )

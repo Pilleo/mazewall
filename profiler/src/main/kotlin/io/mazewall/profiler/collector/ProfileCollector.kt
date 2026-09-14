@@ -1,13 +1,13 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.engine.PathResolution
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.ProfileObservation
 
 /** Drain of one collector. Sessions merge drains before [io.mazewall.profiler.compiler.BobCompiler]. */
-public class CollectorDrain(
+internal class CollectorDrain(
     observations: List<ProfileObservation>,
     public val droppedEvents: Int = 0,
     public val drainComplete: Boolean = true,
@@ -35,7 +35,7 @@ public class CollectorDrain(
 /**
  * Strategy-neutral collector. Implementations must not compile policies themselves.
  */
-public interface ProfileCollector : AutoCloseable {
+internal interface ProfileCollector : AutoCloseable {
     public val source: ObservationSource
 
     public fun start()
@@ -46,7 +46,7 @@ public interface ProfileCollector : AutoCloseable {
 }
 
 /** Merge collector drains. Later sources win on identical correlation+payload; dropped counts add. */
-public object ObservationMerger {
+internal object ObservationMerger {
     public fun merge(drains: List<CollectorDrain>): CollectorDrain {
         val seen = LinkedHashSet<ObservationKey>()
         val observations = mutableListOf<ProfileObservation>()

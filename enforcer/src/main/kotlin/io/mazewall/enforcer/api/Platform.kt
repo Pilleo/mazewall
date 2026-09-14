@@ -1,0 +1,350 @@
+package io.mazewall.enforcer.api
+
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.state.*
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.readLong
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.LinuxNative.SyscallHandledState
+import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.syscall.Arch
+import java.util.logging.Logger
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
+
+/**
+ * Platform checks and fallback configuration.
+ *
+ * ARCHITECTURAL INVARIANT: Kernel capability detection is handled via a cached,
+ * probe-based [KernelFeatureMatrix]. This ensures that `mazewall` remains resilient
+ * to kernel version drift (e.g., Landlock ABI additions) by dynamically querying
+ * capabilities at initialization rather than relying on static OS version strings.
+ */
+public object Platform {
+    private val logger = Logger.getLogger(Platform::class.java.name)
+
+    @Volatile
+    private var provider: PlatformProvider = RealPlatformProvider
+
+    @Volatile
+    private var cachedSnapshot: KernelFeatureSnapshot? = null
+
+    /** Bumps whenever the test/runtime provider changes; probe results never cross generations. */
+    @Volatile
+    private var providerGeneration: Long = 0
+
+    /**
+     * Immutable matrix of supported Linux kernel features.
+     */
+    @JvmStatic
+    public val featureMatrix: KernelFeatureMatrix
+        get() = featureSnapshot.matrix
+
+    internal val featureSnapshot: KernelFeatureSnapshot
+        get() {
+            val current = cachedSnapshot
+            if (current != null) return current
+            synchronized(this) {
+                val secondCheck = cachedSnapshot
+                if (secondCheck != null) return secondCheck
+                val capturedProvider = provider
+                val capturedGeneration = providerGeneration
+                val resolved = KernelFeatureSnapshot.resolve(capturedProvider)
+                if (providerGeneration != capturedGeneration || provider !== capturedProvider) {
+                    return featureSnapshot
+                }
+                cachedSnapshot = resolved
+                return resolved
+            }
+        }
+
+    /**
+     * Swaps the active platform provider. Used for testing and fault injection.
+     */
+    @JvmStatic
+    internal fun setProvider(newProvider: PlatformProvider) {
+        synchronized(this) {
+            provider = newProvider
+            providerGeneration++
+            cachedSnapshot = null
+            isCpuCetSupportedCached = null
+        }
+    }
+
+    /**
+     * Restores the default RealPlatformProvider.
+     */
+    @JvmStatic
+    public fun resetToDefault() {
+        synchronized(this) {
+            provider = RealPlatformProvider
+            providerGeneration++
+            cachedSnapshot = null
+            isCpuCetSupportedOverride = null
+            isCpuCetSupportedCached = null
+        }
+    }
+
+    /**
+     * Enum defining how the library behaves when run on an unsupported platform (e.g. macOS or Windows).
+     */
+    public enum class FallbackBehavior {
+        FAIL, // throw UnsupportedOperationException
+        WARN_AND_BYPASS, // log warning, run task uncontained
+        SILENT_BYPASS, // run task uncontained, no warning
+    }
+
+    /** True if the current operating system is Linux. */
+    @JvmStatic
+    public val isLinux: Boolean get() = provider.getOsName().equals("Linux", ignoreCase = true)
+
+    /**
+     * Validates that the current operating system is Linux.
+     *
+     * This function uses a Kotlin contract to formalize this invariant.
+     */
+    @JvmStatic
+    @OptIn(ExperimentalContracts::class)
+    public fun validateLinux() {
+        contract {
+            returns()
+        }
+        if (!isLinux) {
+            throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
+        }
+    }
+
+    /**
+     * Returns true if the current platform supports seccomp filters.
+     */
+    @JvmStatic
+    public fun isSupported(): Boolean =
+        isLinux &&
+            provider.hasKernelSeccompSupport() &&
+            isSeccompSanityCheckPassing() &&
+            isArchitectureSupported()
+
+    /**
+     * Validates that the current platform supports seccomp filters.
+     *
+     * This function uses a Kotlin contract to formalize this invariant.
+     */
+    @JvmStatic
+    @OptIn(ExperimentalContracts::class)
+    public fun validateSupported() {
+        contract {
+            returns()
+        }
+        if (!isSupported()) {
+            throw UnsupportedOperationException("Platform is not supported.")
+        }
+    }
+
+    private fun isSeccompSanityCheckPassing(): Boolean {
+        // Bogus Sanity Check: Ensure the kernel actively enforces seccomp.
+        // We call prctl(PR_SET_SECCOMP) with an invalid mode (-1).
+        // A healthy kernel should return -1 and set errno to EINVAL (22).
+        // Some container environments or broken kernels might silently return 0 or a different error.
+        val bogusCheck = provider.checkSeccompSanity()
+        val passed = bogusCheck is SyscallResult.Error && bogusCheck.errno == NativeConstants.EINVAL
+        if (!passed) {
+            val (ret, errno) =
+                when (bogusCheck) {
+                    is SyscallResult.Success -> bogusCheck.value to 0
+                    is SyscallResult.Error -> bogusCheck.rawValue to bogusCheck.errno
+                }
+            logger.warning(
+                "Seccomp sanity check failed. The kernel returned unexpected results (ret=$ret, errno=$errno). Seccomp may be stubbed or broken in this environment.",
+            )
+        }
+        return passed
+    }
+
+    internal fun isArchitectureSupported(): Boolean =
+        try {
+            Arch.current()
+            true
+        } catch (e: UnsupportedOperationException) {
+            logger.warning("Architecture not supported: ${e.message}")
+            false
+        }
+
+    /**
+     * Resolves the configured fallback behavior based on system properties or environment variables.
+     */
+    @JvmStatic
+    public fun configuredFallback(): FallbackBehavior {
+        val prop =
+            System.getProperty("io.mazewall.fallback")
+                ?: System.getenv("IO_MAZEWALL_FALLBACK")
+
+        if (prop != null) {
+            try {
+                return FallbackBehavior.valueOf(prop.uppercase())
+            } catch (e: IllegalArgumentException) {
+                logger.warning("Invalid fallback behavior '$prop' (${e.message}), defaulting to FAIL")
+            }
+        }
+        return FallbackBehavior.FAIL
+    }
+
+    /**
+     * True when the current OS/architecture is one where Intel CET arch_prctl operations are
+     * meaningful (Linux on x86_64). Single source of truth for the CET guard ladder.
+     */
+    internal val isCetPlatformEligible: Boolean
+        get() =
+            isLinux &&
+                try {
+                    io.mazewall.platform.syscall.Arch
+                        .current() == io.mazewall.platform.syscall.Arch.AMD64
+                } catch (e: UnsupportedOperationException) {
+                    unsupportedCetPlatform(e)
+                }
+
+    /**
+     * Probes ARCH_SHSTK_STATUS via arch_prctl. Returns the raw status bitmask, or null when the
+     * kernel rejects the probe (unsupported/disabled) or the platform cannot host CET.
+     */
+    private fun probeShstkStatus(): Long? {
+        if (!isCetPlatformEligible) return null
+        return try {
+            NativeArena.ofConfined().use { arena ->
+                val statusSeg = arena.allocate(8)
+                val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
+                if (res is SyscallResult.Success && res.value == 0L) {
+                    statusSeg.readLong(0)
+                } else {
+                    null
+                }
+            }
+        } catch (e: UnsupportedOperationException) {
+            unavailableShstkStatus(e)
+        } catch (e: IllegalStateException) {
+            unavailableShstkStatus(e)
+        }
+    }
+
+    private fun unsupportedCetPlatform(cause: UnsupportedOperationException): Boolean {
+        logger.log(java.util.logging.Level.FINE, "CET is unavailable because the architecture is unsupported", cause)
+        return false
+    }
+
+    private fun unavailableShstkStatus(cause: RuntimeException): Long? {
+        logger.log(java.util.logging.Level.FINE, "CET shadow-stack status probe is unavailable", cause)
+        return null
+    }
+
+    internal fun isKernelCetSupported(): Boolean = probeShstkStatus() != null
+
+    @Volatile
+    internal var isCpuCetSupportedOverride: Boolean? = null
+
+    @Volatile
+    private var isCpuCetSupportedCached: Boolean? = null
+
+    /**
+     * Checks if the CPU supports Intel CET Shadow Stack by delegating to the current
+     * PlatformProvider.probeCetSupported().
+     */
+    @JvmStatic
+    public fun isCpuCetSupported(): Boolean {
+        val override = isCpuCetSupportedOverride
+        if (override != null) return override
+
+        val cached = isCpuCetSupportedCached
+        if (cached != null) return cached
+
+        // Delegate to the current provider's probe
+        val capturedProvider = provider
+        val capturedGeneration = providerGeneration
+        val result = capturedProvider.probeCetSupported()
+        if (providerGeneration != capturedGeneration || provider !== capturedProvider) return isCpuCetSupported()
+        isCpuCetSupportedCached = result
+        return result
+    }
+
+    /**
+     * Queries the kernel for active Intel CET Shadow Stack status.
+     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.\
+     */
+    @JvmStatic
+    public fun queryIntelCetStatus(): Long {
+        if (!isCpuCetSupported()) return 0L
+
+        return probeShstkStatus() ?: 0L
+    }
+
+    /**
+     * Data class containing in-app diagnostics.
+     */
+    public data class Diagnostics(
+        val osName: String,
+        val osVersion: String,
+        val osArch: String,
+        val isLinux: Boolean,
+        val isArchitectureSupported: Boolean,
+        val isNoNewPrivsEnabled: Boolean,
+        val seccompMode: SeccompMode,
+        val yamaPtraceScope: YamaPtraceScope,
+        val features: KernelFeatureMatrix,
+        val isContainer: Boolean,
+    ) {
+        override fun toString(): String {
+            return """
+                === Mazewall Platform Diagnostics ===
+                OS Name: $osName ($osVersion)
+                Architecture: $osArch (Supported: $isArchitectureSupported)
+                Is Linux: $isLinux
+                no_new_privs Enabled: $isNoNewPrivsEnabled
+                Seccomp Mode: ${
+                when (seccompMode) {
+                    is SeccompMode.Disabled -> "Disabled (0)"
+                    is SeccompMode.Strict -> "Strict Mode (1)"
+                    is SeccompMode.Filter -> "Filter Mode (2)"
+                    is SeccompMode.Error -> "Error (${seccompMode.errno})"
+                }
+            }
+                Yama ptrace_scope: ${
+                when (yamaPtraceScope) {
+                    is YamaPtraceScope.Classic -> "Classic (0)"
+                    is YamaPtraceScope.Restricted -> "Restricted (1)"
+                    is YamaPtraceScope.AdminOnly -> "AdminOnly (2)"
+                    is YamaPtraceScope.Disabled -> "Disabled (3)"
+                    is YamaPtraceScope.Unknown -> "Unknown (${yamaPtraceScope.rawValue})"
+                    is YamaPtraceScope.Unavailable -> "Unavailable"
+                }
+            }
+                Kernel Features:
+                  - Seccomp: ${features.seccompSupported} (TSYNC: ${features.seccompTsyncSupported}, Notif: ${features.seccompUserNotifSupported})
+                  - Landlock: ${if (features.landlockSupported) "ABI v${features.landlockAbiVersion}" else "Unsupported"} (TSYNC: ${features.landlockTsyncSupported})
+                Container Detected: $isContainer
+                =====================================
+            """.trimIndent()
+        }
+    }
+
+    /**
+     * Run diagnostics to check system capabilities and privilege/sandboxing status.
+     */
+    @JvmStatic
+    public fun diagnose(): Diagnostics {
+        return Diagnostics(
+            osName = provider.getOsName(),
+            osVersion = provider.getOsVersion(),
+            osArch = provider.getOsArch(),
+            isLinux = isLinux,
+            isArchitectureSupported = isArchitectureSupported(),
+            isNoNewPrivsEnabled = provider.isNoNewPrivsEnabled(),
+            seccompMode = provider.getSeccompMode(),
+            yamaPtraceScope = provider.getYamaPtraceScope(),
+            features = featureMatrix,
+            isContainer = provider.isContainer(),
+        )
+    }
+}

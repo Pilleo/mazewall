@@ -7,6 +7,23 @@ kotlin {
     jvmToolchain(25)
 }
 
+val portalCodegenKotlin = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
+val portalCodegenPortalJar = project(":portal").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+val portalCodegenPlatformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+portalCodegenKotlin.target.compilations.matching { it.name == "test" }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(portalCodegenPortalJar, portalCodegenPlatformJar)
+        compilerOptions.freeCompilerArgs.addAll(
+            portalCodegenPortalJar.zip(portalCodegenPlatformJar) { portal, platform ->
+                listOf(
+                    "-Xfriend-paths=${portal.asFile.absolutePath}",
+                    "-Xfriend-paths=${platform.asFile.absolutePath}",
+                )
+            },
+        )
+    }
+}
+
 dependencies {
     implementation(libs.kotlinGradlePlugin)
     compileOnly(kotlin("reflect"))
