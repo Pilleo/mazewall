@@ -140,6 +140,7 @@ internal class JVMValidationListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val scopingPolicy: StacktraceScopingPolicy,
     private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
+    private val native: io.mazewall.NativeEngine = LinuxNative.snapshot(),
     private val onUnexpectedTermination: (Throwable) -> Unit = {},
     private val launch: (Thread) -> Unit = Thread::start,
 ) {
@@ -159,7 +160,7 @@ internal class JVMValidationListener(
     fun start(readyLatch: CountDownLatch) {
         var ownedChannel: SupervisorValidationChannel? = null
         try {
-            val channel = SupervisorValidationChannel(socketFd)
+            val channel = SupervisorValidationChannel(socketFd, native)
             ownedChannel = channel
             activeChannel.set(channel)
             if (closed.get()) channel.requestStop()
@@ -174,7 +175,7 @@ internal class JVMValidationListener(
             )
         } catch (failure: Throwable) {
             try {
-                if (ownedChannel == null) LinuxNative.fileSystem.close(socketFd).getOrThrow("close failed validation startup") else ownedChannel.close()
+                if (ownedChannel == null) native.fileSystem.close(socketFd).getOrThrow("close failed validation startup") else ownedChannel.close()
             } catch (cleanup: Throwable) {
                 if (cleanup !== failure) failure.addSuppressed(cleanup)
             }

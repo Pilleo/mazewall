@@ -324,7 +324,7 @@ class ProfilerServiceTest {
             ) -> Unit,
         ) {
             beforeInstall()
-            val fd = ProfilerSocket.connectDescriptorWithRetry(path.toString())
+            val fd = ProfilerSocket.connectDescriptorWithRetry(path.toString(), LinuxNative.snapshot())
             listenerFd = fd.value
             peer = server.accept()
             output = DataOutputStream(Channels.newOutputStream(peer))

@@ -33,3 +33,19 @@ This directory records the target public API for moving Mazewall from a proof of
 8. Profiling output is evidence with declared coverage, never an “exact” proof.
 9. Low-level FFM, BPF and daemon machinery is not part of the application API.
 10. Kotlin and Java must each have an intentional entry point.
+
+## Binary Compatibility Gate
+
+`:platform`, `:enforcer`, and `:profiler` keep Kotlin ABI signatures in their
+respective `api/*.api` files. `checkKotlinAbi` verifies that the compiled public
+binary contract still matches its reviewed signature; `updateKotlinAbi` is the
+explicit review action that changes the signature. The normal `check` lifecycle
+includes this verification.
+
+The supported contract consists of configuration, policies, contained-executor
+operations, installation assessments and receipts, diagnostics and violations,
+and profiler sessions and results. Types below `ffi`, daemon transport, native
+memory, and internal profiler packages are implementation details unless a
+separate published SPI names them. A native component receives a captured
+`NativeEngine` from its assembly boundary rather than taking a fresh global
+snapshot during an operation.

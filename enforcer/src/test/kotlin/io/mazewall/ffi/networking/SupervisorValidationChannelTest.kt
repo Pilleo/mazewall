@@ -3,6 +3,7 @@ package io.mazewall.ffi.networking
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
 import io.mazewall.MockNativeMemory
+import io.mazewall.NativeEngine
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
 import io.mazewall.core.FileDescriptor
@@ -23,9 +24,13 @@ import java.io.IOException
 class SupervisorValidationChannelTest {
     @AfterEach
     fun tearDown() {
-        LinuxNative.resetToDefault()
         System.clearProperty("mazewall.supervisor.installTimeoutMillis")
     }
+
+    private fun channel(
+        native: NativeEngine,
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = TestFileDescriptors.replace(7),
+    ): SupervisorValidationChannel = SupervisorValidationChannel(socketFd, native)
 
     @Test
     fun `validation socket is configured nonblocking before use`() {
@@ -40,9 +45,7 @@ class SupervisorValidationChannelTest {
                 return LinuxNative.SyscallResult.Success(0L)
             }
         }
-        LinuxNative.setEngine(engine)
-
-        SupervisorValidationChannel(TestFileDescriptors.replace(7)).close()
+        channel(engine).close()
 
         assertTrue((configuredFlags and NativeConstants.O_NONBLOCK) != 0L)
     }
@@ -61,8 +64,7 @@ class SupervisorValidationChannelTest {
                 }
             }
         }
-        LinuxNative.setEngine(engine)
-        val channel = SupervisorValidationChannel(TestFileDescriptors.replace(7))
+        val channel = channel(engine)
 
         val failure = assertThrows<java.io.IOException> { channel.inputStream.read() }
 
@@ -94,8 +96,7 @@ class SupervisorValidationChannelTest {
                 LinuxNative.SyscallResult.Success(1L)
             }
         }
-        LinuxNative.setEngine(engine)
-        val channel = SupervisorValidationChannel(TestFileDescriptors.replace(7))
+        val channel = channel(engine)
 
         val failure = assertThrows<IOException> { channel.inputStream.read() }
 
@@ -137,11 +138,9 @@ class SupervisorValidationChannelTest {
                 .setRevents(NativeConstants.POLLOUT)
             LinuxNative.SyscallResult.Success(1L)
         }
-        LinuxNative.setEngine(mockEngine)
-
         val socketFd = TestFileDescriptors
             .replace<FileDescriptorRole.UnixSocket>(42)
-        val channel = SupervisorValidationChannel(socketFd)
+        val channel = channel(mockEngine, socketFd)
 
         channel.sendResponse(1001L, 2.toByte(), 13, "/usr/bin/true")
 
@@ -175,20 +174,15 @@ class SupervisorValidationChannelTest {
                 return LinuxNative.SyscallResult.Success(count)
             }
         }
-        LinuxNative.setEngine(
-            object : MockNativeEngine(memory = mockMemory) {}.apply {
+        val engine = object : MockNativeEngine(memory = mockMemory) {}.apply {
             onPoll = { fds, _, _ ->
                 io.mazewall.ffi.memory.PollFdSegment
                     .of(fds)
                     .setRevents(NativeConstants.POLLOUT)
                 LinuxNative.SyscallResult.Success(1L)
             }
-        },
-        )
-        val channel = SupervisorValidationChannel(
-            TestFileDescriptors
-            .replace(7),
-        )
+        }
+        val channel = channel(engine)
         channel.sendExecRewriteAck(true)
         assertEquals(1L, writtenCount)
         assertEquals(1.toByte(), ack)
@@ -210,20 +204,15 @@ class SupervisorValidationChannelTest {
                 return LinuxNative.SyscallResult.Success(count)
             }
         }
-        LinuxNative.setEngine(
-            object : MockNativeEngine(memory = mockMemory) {}.apply {
+        val engine = object : MockNativeEngine(memory = mockMemory) {}.apply {
             onPoll = { fds, _, _ ->
                 io.mazewall.ffi.memory.PollFdSegment
                     .of(fds)
                     .setRevents(NativeConstants.POLLOUT)
                 LinuxNative.SyscallResult.Success(1L)
             }
-        },
-        )
-        val channel = SupervisorValidationChannel(
-            TestFileDescriptors
-            .replace(7),
-        )
+        }
+        val channel = channel(engine)
         channel.sendExecRewriteAck(false)
         assertEquals(1L, writtenCount)
         assertEquals(0.toByte(), ack)

@@ -20,7 +20,7 @@ import java.util.logging.Logger
 /**
  * Context for a running Profiler Daemon.
  */
-public data class DaemonContext(
+internal data class DaemonContext(
     val socketPath: String,
     val socketDir: Path,
     val daemonProcess: Process,
@@ -30,7 +30,7 @@ public data class DaemonContext(
 /**
  * Manages the lifecycle of the shared Profiler Daemon.
  */
-public class ProfilerDaemonManager(
+internal class ProfilerDaemonManager(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
     private val processLauncher: ProcessLauncher = RealProcessLauncher,

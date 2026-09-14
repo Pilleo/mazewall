@@ -16,7 +16,7 @@ import java.lang.foreign.ValueLayout
 /**
  * Shared utility for writing memory to remote processes/threads using process_vm_writev.
  */
-public object SupervisorProcessMemoryWriter {
+internal object SupervisorProcessMemoryWriter {
     context(arena: NativeArena) public fun writeBytes(
         tid: Tid,
         remoteAddr: Long,

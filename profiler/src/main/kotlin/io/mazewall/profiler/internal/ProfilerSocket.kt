@@ -14,12 +14,6 @@ import io.mazewall.getFdOrThrow
 internal object ProfilerSocket {
     fun connectDescriptorWithRetry(
         socketPath: String,
-        maxRetries: Int = 500,
-        delayMs: Long = 10L,
-    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = connectDescriptorWithRetry(socketPath, LinuxNative.snapshot(), maxRetries, delayMs)
-
-    fun connectDescriptorWithRetry(
-        socketPath: String,
         native: NativeEngine,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
@@ -66,11 +60,6 @@ internal object ProfilerSocket {
             )
         }
     }
-
-    fun sendDescriptor(
-        socketFd: Int,
-        fdToSend: Int,
-    ): Boolean = sendDescriptor(socketFd, fdToSend, LinuxNative.snapshot())
 
     fun sendDescriptor(
         socketFd: Int,

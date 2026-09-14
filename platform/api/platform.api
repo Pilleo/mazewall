@@ -9,6 +9,7 @@ public final class io/mazewall/LinuxNative : io/mazewall/NativeEngine {
 	public final fun isRealEngineActive ()Z
 	public final fun resetToDefault ()V
 	public final fun setEngine (Lio/mazewall/NativeEngine;)V
+	public final fun snapshot ()Lio/mazewall/RuntimeSnapshot;
 }
 
 public abstract interface class io/mazewall/LinuxNative$SyscallHandledState {
@@ -49,15 +50,20 @@ public final class io/mazewall/LinuxNative$SyscallResult$Error : io/mazewall/Lin
 }
 
 public final class io/mazewall/LinuxNative$SyscallResult$Success : io/mazewall/LinuxNative$SyscallResult {
-	public fun <init> (Ljava/lang/Object;)V
+	public fun <init> (Ljava/lang/Object;Ljava/util/List;I)V
+	public synthetic fun <init> (Ljava/lang/Object;Ljava/util/List;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/Object;
-	public final fun copy (Ljava/lang/Object;)Lio/mazewall/LinuxNative$SyscallResult$Success;
-	public static synthetic fun copy$default (Lio/mazewall/LinuxNative$SyscallResult$Success;Ljava/lang/Object;ILjava/lang/Object;)Lio/mazewall/LinuxNative$SyscallResult$Success;
+	public final fun copy (Ljava/lang/Object;Ljava/util/List;I)Lio/mazewall/LinuxNative$SyscallResult$Success;
+	public static synthetic fun copy$default (Lio/mazewall/LinuxNative$SyscallResult$Success;Ljava/lang/Object;Ljava/util/List;IILjava/lang/Object;)Lio/mazewall/LinuxNative$SyscallResult$Success;
 	public fun equals (Ljava/lang/Object;)Z
+	public final synthetic fun getDescriptorReceipts ()Ljava/util/List;
+	public final synthetic fun getNextDescriptorReceipt ()I
 	public fun getOrNull ()Ljava/lang/Object;
 	public fun getOrThrow (Ljava/lang/String;)Ljava/lang/Object;
 	public final fun getValue ()Ljava/lang/Object;
 	public fun hashCode ()I
+	public final synthetic fun setDescriptorReceipts (Ljava/util/List;)V
+	public final synthetic fun setNextDescriptorReceipt (I)V
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -67,6 +73,7 @@ public final class io/mazewall/LinuxNativeKt {
 	public static final fun asLong (Lio/mazewall/LinuxNative$SyscallResult$Success;)J
 	public static final fun flatMap (Lio/mazewall/LinuxNative$SyscallResult;Lkotlin/jvm/functions/Function1;)Lio/mazewall/LinuxNative$SyscallResult;
 	public static final fun getFdOrThrow (Lio/mazewall/LinuxNative$SyscallResult;Ljava/lang/String;)Lio/mazewall/core/FileDescriptor;
+	public static final fun getFdOrThrow (Lio/mazewall/LinuxNative$SyscallResult;Ljava/lang/String;Lio/mazewall/core/FileDescriptorRole;)Lio/mazewall/core/FileDescriptor;
 	public static final fun isFailure (Lio/mazewall/LinuxNative$SyscallResult;)Z
 	public static final fun isSuccess (Lio/mazewall/LinuxNative$SyscallResult;)Z
 	public static final fun map (Lio/mazewall/LinuxNative$SyscallResult;Lkotlin/jvm/functions/Function1;)Lio/mazewall/LinuxNative$SyscallResult;
@@ -149,6 +156,15 @@ public abstract interface class io/mazewall/RawSyscallOperations {
 public final class io/mazewall/RawSyscallOperations$DefaultImpls {
 	public static fun ioctl (Lio/mazewall/RawSyscallOperations;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/IoctlCommand;Ljava/lang/Object;)Lio/mazewall/LinuxNative$SyscallResult;
 	public static synthetic fun syscall$default (Lio/mazewall/RawSyscallOperations;JLio/mazewall/core/NativeArg;Lio/mazewall/core/NativeArg;Lio/mazewall/core/NativeArg;Lio/mazewall/core/NativeArg;Lio/mazewall/core/NativeArg;Lio/mazewall/core/NativeArg;ILjava/lang/Object;)Lio/mazewall/LinuxNative$SyscallResult;
+}
+
+public final class io/mazewall/RuntimeSnapshot : io/mazewall/NativeEngine {
+	public final fun getEngineIdentity ()Ljava/lang/Object;
+	public fun getFileSystem ()Lio/mazewall/NativeFileSystem;
+	public fun getMemory ()Lio/mazewall/NativeMemory;
+	public fun getNetworking ()Lio/mazewall/NativeNetworking;
+	public fun getProcess ()Lio/mazewall/NativeProcess;
+	public fun getRaw ()Lio/mazewall/RawSyscallOperations;
 }
 
 public final class io/mazewall/core/Arch {
@@ -407,17 +423,45 @@ public final class io/mazewall/core/AttributionKind : java/lang/Enum {
 	public static fun values ()[Lio/mazewall/core/AttributionKind;
 }
 
+public final class io/mazewall/core/ChildProcessResources : java/lang/AutoCloseable {
+	public fun close ()V
+	public final fun getEndpoint ()Lio/mazewall/core/PrivateUnixEndpoint;
+	public final fun getProcess ()Ljava/lang/Process;
+	public final fun getShutdownHook ()Ljava/lang/Thread;
+	public final fun isClosed ()Z
+}
+
+public final class io/mazewall/core/ChildStartupTransaction : java/lang/AutoCloseable {
+	public fun <init> (Lio/mazewall/core/ProcessLauncher;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun awaitReady (J)V
+	public fun close ()V
+	public final fun commit ()Lio/mazewall/core/ChildProcessResources;
+	public final fun getEndpoint ()Lio/mazewall/core/PrivateUnixEndpoint;
+	public final fun getShutdownHook ()Ljava/lang/Thread;
+	public final fun registerShutdownHook ()V
+	public final fun runStartup (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun start (Lio/mazewall/core/JvmChildSpec;)Ljava/lang/Process;
+	public final fun startOutputPump (Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;)V
+	public static synthetic fun startOutputPump$default (Lio/mazewall/core/ChildStartupTransaction;Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)V
+}
+
 public final class io/mazewall/core/ChildStdoutPump {
-	public fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;)V
+	public fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;)V
+	public synthetic fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/util/concurrent/CountDownLatch;
 	public final fun component2 ()Ljava/lang/Thread;
-	public final fun copy (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;)Lio/mazewall/core/ChildStdoutPump;
-	public static synthetic fun copy$default (Lio/mazewall/core/ChildStdoutPump;Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;ILjava/lang/Object;)Lio/mazewall/core/ChildStdoutPump;
+	public final fun copy (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;)Lio/mazewall/core/ChildStdoutPump;
+	public static synthetic fun copy$default (Lio/mazewall/core/ChildStdoutPump;Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;ILjava/lang/Object;)Lio/mazewall/core/ChildStdoutPump;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getReady ()Ljava/util/concurrent/CountDownLatch;
 	public final fun getThread ()Ljava/lang/Thread;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/core/CleanupFailures {
+	public static final field INSTANCE Lio/mazewall/core/CleanupFailures;
+	public final fun merge (Ljava/lang/Throwable;Ljava/lang/Throwable;)Ljava/lang/Throwable;
 }
 
 public final class io/mazewall/core/CloneFlags {
@@ -458,6 +502,12 @@ public final class io/mazewall/core/ContextId$Companion {
 	public final fun decodeFrom-mfrSHYE ([BI)I
 	public static synthetic fun decodeFrom-mfrSHYE$default (Lio/mazewall/core/ContextId$Companion;[BIILjava/lang/Object;)I
 	public final fun getUNKNOWN-4AcJh-w ()I
+}
+
+public final class io/mazewall/core/DaemonPtracer {
+	public static final field INSTANCE Lio/mazewall/core/DaemonPtracer;
+	public final fun authorize (Lio/mazewall/NativeEngine;Ljava/lang/Process;)V
+	public final fun retire (Lio/mazewall/NativeEngine;Ljava/lang/Process;)V
 }
 
 public final class io/mazewall/core/Deadline {
@@ -569,6 +619,7 @@ public final class io/mazewall/core/FileDescriptor$Companion {
 	public static synthetic fun unixSocket$default (Lio/mazewall/core/FileDescriptor$Companion;ILio/mazewall/ffi/memory/NativeArena;ILjava/lang/Object;)Lio/mazewall/core/FileDescriptor;
 	public final fun unsafe (ILio/mazewall/ffi/memory/NativeArena;)Lio/mazewall/core/FileDescriptor;
 	public static synthetic fun unsafe$default (Lio/mazewall/core/FileDescriptor$Companion;ILio/mazewall/ffi/memory/NativeArena;ILjava/lang/Object;)Lio/mazewall/core/FileDescriptor;
+	public final fun withRole (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;)Lio/mazewall/core/FileDescriptor;
 }
 
 public final class io/mazewall/core/FileDescriptorKt {
@@ -932,6 +983,12 @@ public final class io/mazewall/core/NativeArg$UidArg : io/mazewall/core/NativeAr
 	public final synthetic fun unbox-impl ()I
 }
 
+public final class io/mazewall/core/NativeCloseFailure : java/lang/IllegalStateException {
+}
+
+public final class io/mazewall/core/NativeDescriptorReceipt {
+}
+
 public final class io/mazewall/core/NewFdFlags {
 	public static final field Companion Lio/mazewall/core/NewFdFlags$Companion;
 	public static final synthetic fun box-impl (I)Lio/mazewall/core/NewFdFlags;
@@ -1151,7 +1208,6 @@ public final class io/mazewall/core/PrctlCommand$SetSeccomp : io/mazewall/core/P
 public final class io/mazewall/core/PrivateUnixEndpoint : java/lang/AutoCloseable {
 	public static final field Companion Lio/mazewall/core/PrivateUnixEndpoint$Companion;
 	public static final field MAX_SUN_PATH_BYTES I
-	public synthetic fun <init> (Ljava/nio/file/Path;Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	public final fun getDir ()Ljava/nio/file/Path;
 	public final fun getPath ()Ljava/lang/String;
@@ -1589,6 +1645,7 @@ public final class io/mazewall/ffi/Layouts {
 	public static final field CMSGHDR_DATA_OFFSET J
 	public static final field INSTANCE Lio/mazewall/ffi/Layouts;
 	public static final field LANDLOCK_RULESET_ATTR_V1_SIZE J
+	public static final field LANDLOCK_RULESET_ATTR_V4_SIZE J
 	public static final field OPEN_HOW_SIZE J
 	public static final field SOCKADDR_UN_PATH_SIZE J
 	public static final field SUPERVISOR_RESPONSE_DECISION_OFFSET J
@@ -1613,6 +1670,7 @@ public final class io/mazewall/ffi/Layouts {
 	public final fun getLANDLOCK_RULESET_ATTR ()Ljava/lang/foreign/StructLayout;
 	public final fun getLANDLOCK_RULESET_ATTR_FS_OFFSET ()J
 	public final fun getLANDLOCK_RULESET_ATTR_NET_OFFSET ()J
+	public final fun getLANDLOCK_RULESET_ATTR_SCOPED_OFFSET ()J
 	public final fun getLANDLOCK_RULESET_ATTR_SIZE ()J
 	public final fun getMSGHDR ()Ljava/lang/foreign/StructLayout;
 	public final fun getMSGHDR_CONTROLLEN_OFFSET ()J
@@ -1679,41 +1737,54 @@ public final class io/mazewall/ffi/NativeConstants {
 	public static final field ARCH_SHSTK_STATUS I
 	public static final field AT_EMPTY_PATH I
 	public static final field AT_FDCWD I
+	public static final field AT_SYMLINK_NOFOLLOW I
 	public static final field BPF_MAXINSNS I
 	public static final field EACCES I
+	public static final field EAGAIN I
 	public static final field EBADF I
 	public static final field EFAULT I
 	public static final field EINTR I
 	public static final field EINVAL I
 	public static final field EIO I
 	public static final field ELOOP I
+	public static final field ENAMETOOLONG I
 	public static final field ENOENT I
 	public static final field ENOPKG I
 	public static final field ENOSYS I
 	public static final field EOPNOTSUPP I
+	public static final field EOVERFLOW I
 	public static final field EPERM I
+	public static final field ESRCH I
 	public static final field ETIMEDOUT I
 	public static final field EXDEV I
 	public static final field FD_CLOEXEC I
 	public static final field F_DUPFD I
 	public static final field F_DUPFD_CLOEXEC I
 	public static final field F_GETFD I
+	public static final field F_GETFL I
 	public static final field F_SETFD I
+	public static final field F_SETFL I
 	public static final field INSTANCE Lio/mazewall/ffi/NativeConstants;
 	public static final field LANDLOCK_ADD_RULE_NR J
 	public static final field LANDLOCK_CREATE_RULESET_NR J
 	public static final field LANDLOCK_CREATE_RULESET_VERSION J
 	public static final field LANDLOCK_RESTRICT_SELF_NR J
 	public static final field LANDLOCK_RULE_PATH_BENEATH I
+	public static final field MSG_CMSG_CLOEXEC I
+	public static final field MSG_CTRUNC I
+	public static final field MSG_TRUNC I
 	public static final field O_CLOEXEC I
 	public static final field O_DIRECTORY I
 	public static final field O_NOFOLLOW I
+	public static final field O_NONBLOCK J
 	public static final field O_PATH I
 	public static final field O_RDONLY I
+	public static final field PIDFD_THREAD I
 	public static final field POLLERR S
 	public static final field POLLHUP S
 	public static final field POLLIN S
 	public static final field POLLNVAL S
+	public static final field POLLOUT S
 	public static final field PR_CAP_AMBIENT I
 	public static final field PR_CAP_AMBIENT_RAISE I
 	public static final field PR_GET_NAME I
@@ -1730,6 +1801,7 @@ public final class io/mazewall/ffi/NativeConstants {
 	public static final field PTRACE_GETREGS J
 	public static final field PTRACE_SETREGS J
 	public static final field RESOLVE_BENEATH J
+	public static final field RESOLVE_IN_ROOT J
 	public static final field SECCOMP_ADDFD_FLAG_SEND J
 	public static final field SECCOMP_ADDFD_FLAG_SETFD J
 	public static final field SECCOMP_FILTER_FLAG_NEW_LISTENER J
@@ -1861,6 +1933,7 @@ public final class io/mazewall/ffi/memory/ErrnoSegment {
 public final class io/mazewall/ffi/memory/ErrnoSegment$Companion {
 	public final fun allocate-DoDfLz4 (Ljava/lang/foreign/Arena;)Ljava/lang/foreign/MemorySegment;
 	public final fun getThreadLocal-hkBE8ak ()Ljava/lang/foreign/MemorySegment;
+	public final fun recycle-8T5ilY0 (Ljava/lang/foreign/MemorySegment;)V
 }
 
 public final class io/mazewall/ffi/memory/IovecSegment {
@@ -1923,11 +1996,13 @@ public final class io/mazewall/ffi/memory/LandlockRulesetAttrSegment {
 	public static final fun getHandledAccessFs-impl (Ljava/lang/foreign/MemorySegment;)J
 	public static final fun getHandledAccessNet-impl (Ljava/lang/foreign/MemorySegment;)J
 	public static final fun getManaged-impl (Ljava/lang/foreign/MemorySegment;)Lio/mazewall/ffi/memory/ManagedSegment;
+	public static final fun getScoped-impl (Ljava/lang/foreign/MemorySegment;)J
 	public final fun getSegment ()Ljava/lang/foreign/MemorySegment;
 	public fun hashCode ()I
 	public static fun hashCode-impl (Ljava/lang/foreign/MemorySegment;)I
 	public static final fun setHandledAccessFs-impl (Ljava/lang/foreign/MemorySegment;J)V
 	public static final fun setHandledAccessNet-impl (Ljava/lang/foreign/MemorySegment;J)V
+	public static final fun setScoped-impl (Ljava/lang/foreign/MemorySegment;J)V
 	public fun toString ()Ljava/lang/String;
 	public static fun toString-impl (Ljava/lang/foreign/MemorySegment;)Ljava/lang/String;
 	public final synthetic fun unbox-impl ()Ljava/lang/foreign/MemorySegment;
@@ -2111,20 +2186,29 @@ public final class io/mazewall/ffi/memory/SeccompNotifAddFdSegment$Companion {
 	public final fun of-e4W8AR8 (Lio/mazewall/ffi/memory/ManagedSegment;)Ljava/lang/foreign/MemorySegment;
 }
 
-public final class io/mazewall/ffi/memory/SegmentPool {
+public final class io/mazewall/ffi/memory/SegmentLease : java/lang/AutoCloseable {
+	public fun close ()V
+	public final fun getSegment ()Lio/mazewall/ffi/memory/ManagedSegment;
+}
+
+public final class io/mazewall/ffi/memory/SegmentPool : java/lang/AutoCloseable {
 	public static final field Companion Lio/mazewall/ffi/memory/SegmentPool$Companion;
-	public fun <init> (JILio/mazewall/ffi/memory/NativeArena;)V
-	public synthetic fun <init> (JILio/mazewall/ffi/memory/NativeArena;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public fun <init> (Ljava/lang/foreign/MemoryLayout;ILio/mazewall/ffi/memory/NativeArena;)V
-	public synthetic fun <init> (Ljava/lang/foreign/MemoryLayout;ILio/mazewall/ffi/memory/NativeArena;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
 	public final fun getByteSize ()J
-	public final fun release (Lio/mazewall/ffi/memory/ManagedSegment;)V
-	public final fun rent ()Lio/mazewall/ffi/memory/ManagedSegment;
+	public final fun rent ()Lio/mazewall/ffi/memory/SegmentLease;
 }
 
 public final class io/mazewall/ffi/memory/SegmentPool$Companion {
+	public final fun borrowed (JLio/mazewall/ffi/memory/NativeArena;I)Lio/mazewall/ffi/memory/SegmentPool;
+	public final fun borrowed (Ljava/lang/foreign/MemoryLayout;Lio/mazewall/ffi/memory/NativeArena;I)Lio/mazewall/ffi/memory/SegmentPool;
+	public static synthetic fun borrowed$default (Lio/mazewall/ffi/memory/SegmentPool$Companion;JLio/mazewall/ffi/memory/NativeArena;IILjava/lang/Object;)Lio/mazewall/ffi/memory/SegmentPool;
+	public static synthetic fun borrowed$default (Lio/mazewall/ffi/memory/SegmentPool$Companion;Ljava/lang/foreign/MemoryLayout;Lio/mazewall/ffi/memory/NativeArena;IILjava/lang/Object;)Lio/mazewall/ffi/memory/SegmentPool;
 	public final fun getSECCOMP_NOTIF_POOL ()Lio/mazewall/ffi/memory/SegmentPool;
 	public final fun getSECCOMP_NOTIF_RESP_POOL ()Lio/mazewall/ffi/memory/SegmentPool;
+	public final fun owned (JI)Lio/mazewall/ffi/memory/SegmentPool;
+	public final fun owned (Ljava/lang/foreign/MemoryLayout;I)Lio/mazewall/ffi/memory/SegmentPool;
+	public static synthetic fun owned$default (Lio/mazewall/ffi/memory/SegmentPool$Companion;JIILjava/lang/Object;)Lio/mazewall/ffi/memory/SegmentPool;
+	public static synthetic fun owned$default (Lio/mazewall/ffi/memory/SegmentPool$Companion;Ljava/lang/foreign/MemoryLayout;IILjava/lang/Object;)Lio/mazewall/ffi/memory/SegmentPool;
 }
 
 public final class io/mazewall/ffi/memory/SharedSegment : io/mazewall/ffi/memory/ManagedSegment {
@@ -2256,29 +2340,60 @@ public final class io/mazewall/ffi/memory/SupervisorResponseSegment$Companion {
 }
 
 public abstract interface class io/mazewall/ffi/memory/TraceeMemoryReader {
-	public static final field Real Lio/mazewall/ffi/memory/TraceeMemoryReader$Real;
+	public static final field Companion Lio/mazewall/ffi/memory/TraceeMemoryReader$Companion;
 	public abstract fun readBytes-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)[B
 	public abstract fun readString-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)Ljava/lang/String;
 	public static synthetic fun readString-gCIF07c$default (Lio/mazewall/ffi/memory/TraceeMemoryReader;Lio/mazewall/ffi/memory/NativeArena;IJIILjava/lang/Object;)Ljava/lang/String;
+	public static fun real ()Lio/mazewall/ffi/memory/TraceeMemoryReader;
 	public abstract fun resolveLink-4I0HFv8 (Lio/mazewall/ffi/memory/NativeArena;ILjava/lang/String;)Ljava/lang/String;
+}
+
+public final class io/mazewall/ffi/memory/TraceeMemoryReader$Companion {
+	public final fun real ()Lio/mazewall/ffi/memory/TraceeMemoryReader;
 }
 
 public final class io/mazewall/ffi/memory/TraceeMemoryReader$DefaultImpls {
 	public static synthetic fun readString-gCIF07c$default (Lio/mazewall/ffi/memory/TraceeMemoryReader;Lio/mazewall/ffi/memory/NativeArena;IJIILjava/lang/Object;)Ljava/lang/String;
 }
 
+public final class io/mazewall/ffi/memory/TraceeMemoryReader$ReadInterruptedException : java/lang/IllegalStateException {
+	public fun <init> (I)V
+	public final fun getAttempts ()I
+}
+
+public final class io/mazewall/ffi/memory/TraceeMemoryReader$ReadRetryExhaustedException : java/lang/IllegalStateException {
+	public fun <init> (IIZ)V
+	public final fun getAttempts ()I
+	public final fun getErrno ()I
+}
+
 public final class io/mazewall/ffi/memory/TraceeMemoryReader$Real : io/mazewall/ffi/memory/TraceeMemoryReader {
+	public static final field INSTANCE Lio/mazewall/ffi/memory/TraceeMemoryReader$Real;
 	public fun readBytes-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)[B
 	public fun readString-gCIF07c (Lio/mazewall/ffi/memory/NativeArena;IJI)Ljava/lang/String;
 	public fun resolveLink-4I0HFv8 (Lio/mazewall/ffi/memory/NativeArena;ILjava/lang/String;)Ljava/lang/String;
 }
 
+public final class io/mazewall/ffi/memory/TraceeMemoryReader$TruncatedStringException : java/lang/IllegalStateException {
+	public fun <init> (ILjava/lang/String;Ljava/lang/String;)V
+	public final fun getBytesRead ()I
+	public final fun getPreview ()Ljava/lang/String;
+}
+
+public class io/mazewall/ffi/networking/NativeDescriptorInputStream : java/io/InputStream {
+	public fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/NativeArena;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/NativeArena;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/NativeArena;Ljava/lang/String;Lio/mazewall/NativeMemory;)V
+	public fun close ()V
+	public fun read ()I
+	public fun read ([BII)I
+}
+
 public abstract class io/mazewall/ffi/networking/SeccompConnection : java/lang/AutoCloseable {
 	public synthetic fun <init> (Ljava/util/concurrent/atomic/AtomicBoolean;Ljava/util/concurrent/atomic/AtomicBoolean;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
-	protected final fun getListenerClosedFlag ()Ljava/util/concurrent/atomic/AtomicBoolean;
+	public final fun closeWithResult ()Lio/mazewall/ffi/networking/SeccompConnection$CloseResult;
 	public fun getListenerFd ()Lio/mazewall/core/FileDescriptor;
-	protected final fun getSocketClosedFlag ()Ljava/util/concurrent/atomic/AtomicBoolean;
 	public abstract fun getSocketFd ()Lio/mazewall/core/FileDescriptor;
 	public final fun getSocketManager ()Lio/mazewall/core/SocketManager;
 	public final fun markSocketClosed ()V
@@ -2312,6 +2427,27 @@ public final class io/mazewall/ffi/networking/SeccompConnection$Active : io/maze
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class io/mazewall/ffi/networking/SeccompConnection$CloseResult {
+}
+
+public final class io/mazewall/ffi/networking/SeccompConnection$CloseResult$Closed : io/mazewall/ffi/networking/SeccompConnection$CloseResult {
+	public static final field INSTANCE Lio/mazewall/ffi/networking/SeccompConnection$CloseResult$Closed;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/ffi/networking/SeccompConnection$CloseResult$Failed : io/mazewall/ffi/networking/SeccompConnection$CloseResult {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/mazewall/ffi/networking/SeccompConnection$CloseResult$Failed;
+	public static synthetic fun copy$default (Lio/mazewall/ffi/networking/SeccompConnection$CloseResult$Failed;Ljava/util/List;ILjava/lang/Object;)Lio/mazewall/ffi/networking/SeccompConnection$CloseResult$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailures ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/mazewall/ffi/networking/SeccompConnection$FdAttached : io/mazewall/ffi/networking/SeccompConnection {
 	public fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Ljava/util/concurrent/atomic/AtomicBoolean;Ljava/util/concurrent/atomic/AtomicBoolean;)V
 	public synthetic fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Ljava/util/concurrent/atomic/AtomicBoolean;Ljava/util/concurrent/atomic/AtomicBoolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -2337,11 +2473,16 @@ public final class io/mazewall/ffi/networking/SupervisorSocketUtils {
 	public static final field SOCKADDR_UN_SIZE I
 	public static final field SOCK_STREAM I
 	public static final field SOL_SOCKET I
+	public final fun connectDescriptorWithRetry (Ljava/lang/String;IJ)Lio/mazewall/core/FileDescriptor;
+	public static synthetic fun connectDescriptorWithRetry$default (Lio/mazewall/ffi/networking/SupervisorSocketUtils;Ljava/lang/String;IJILjava/lang/Object;)Lio/mazewall/core/FileDescriptor;
 	public final fun connectWithRetry (Ljava/lang/String;IJ)I
 	public static synthetic fun connectWithRetry$default (Lio/mazewall/ffi/networking/SupervisorSocketUtils;Ljava/lang/String;IJILjava/lang/Object;)I
 	public final fun recvDescriptor (Lio/mazewall/core/FileDescriptor;)Lio/mazewall/core/FileDescriptor;
-	public final fun recvDescriptor (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;)Lio/mazewall/core/FileDescriptor;
+	public final fun recvDescriptor (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;Lkotlin/jvm/functions/Function0;)Lio/mazewall/core/FileDescriptor;
+	public static synthetic fun recvDescriptor$default (Lio/mazewall/ffi/networking/SupervisorSocketUtils;Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptorRole;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/mazewall/core/FileDescriptor;
 	public final fun sendDescriptor (II)Z
+	public final fun sendDescriptor (IILio/mazewall/NativeNetworking;Lkotlin/jvm/functions/Function0;)Z
+	public static synthetic fun sendDescriptor$default (Lio/mazewall/ffi/networking/SupervisorSocketUtils;IILio/mazewall/NativeNetworking;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Z
 	public final fun setupSockAddrUn-PLQgl-A (Lio/mazewall/ffi/memory/NativeArena;Ljava/lang/String;)Ljava/lang/foreign/MemorySegment;
 }
 
@@ -2425,7 +2566,7 @@ public final class io/mazewall/platform/seccomp/SupervisedKind$Accept : io/mazew
 }
 
 public final class io/mazewall/platform/seccomp/SupervisedKind$Companion {
-	public final fun classify (ILio/mazewall/core/Arch;)Lio/mazewall/platform/seccomp/SupervisedKind;
+	public final fun classify-zHK97OA (ILio/mazewall/core/Arch;)Lio/mazewall/platform/seccomp/SupervisedKind;
 }
 
 public final class io/mazewall/platform/seccomp/SupervisedKind$Connect : io/mazewall/platform/seccomp/SupervisedKind {
@@ -2468,7 +2609,48 @@ public final class io/mazewall/platform/seccomp/UserNotifReply {
 	public final fun encodeContinue (Lio/mazewall/ffi/memory/ManagedSegment;J)V
 	public final fun encodeError (Lio/mazewall/ffi/memory/ManagedSegment;JI)V
 	public final fun encodeSuccess (Lio/mazewall/ffi/memory/ManagedSegment;JJ)V
-	public final fun send (Lio/mazewall/RawSyscallOperations;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/ManagedSegment;)Lio/mazewall/LinuxNative$SyscallResult;
+	public final fun send (Lio/mazewall/RawSyscallOperations;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/ManagedSegment;I)Lio/mazewall/platform/seccomp/UserNotifReplyResult;
+	public static synthetic fun send$default (Lio/mazewall/platform/seccomp/UserNotifReply;Lio/mazewall/RawSyscallOperations;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/ManagedSegment;IILjava/lang/Object;)Lio/mazewall/platform/seccomp/UserNotifReplyResult;
+}
+
+public abstract interface class io/mazewall/platform/seccomp/UserNotifReplyResult {
+}
+
+public final class io/mazewall/platform/seccomp/UserNotifReplyResult$Failed : io/mazewall/platform/seccomp/UserNotifReplyResult {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/mazewall/platform/seccomp/UserNotifReplyResult$Failed;
+	public static synthetic fun copy$default (Lio/mazewall/platform/seccomp/UserNotifReplyResult$Failed;IILjava/lang/Object;)Lio/mazewall/platform/seccomp/UserNotifReplyResult$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getErrno ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/UserNotifReplyResult$NotificationGone : io/mazewall/platform/seccomp/UserNotifReplyResult {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/UserNotifReplyResult$NotificationGone;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/UserNotifReplyResult$Sent : io/mazewall/platform/seccomp/UserNotifReplyResult {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/UserNotifReplyResult$Sent;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ControlSocketExchange {
+	public synthetic fun <init> (Lio/mazewall/RawSyscallOperations;Lio/mazewall/NativeMemory;Lio/mazewall/core/FileDescriptor;[BIJILkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (Lio/mazewall/RawSyscallOperations;Lio/mazewall/NativeMemory;Lio/mazewall/core/FileDescriptor;[BIJILkotlin/jvm/functions/Function0;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getRequestSent ()Z
+	public final fun poll (Lio/mazewall/ffi/memory/NativeArena;)[B
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ControlSocketFailure : java/io/IOException {
+	public fun <init> (I)V
+	public final fun getErrno ()I
 }
 
 public abstract class io/mazewall/platform/seccomp/daemon/LoopAction {
@@ -2495,16 +2677,160 @@ public final class io/mazewall/platform/seccomp/daemon/NotifResult : java/lang/E
 	public static fun values ()[Lio/mazewall/platform/seccomp/daemon/NotifResult;
 }
 
+public final class io/mazewall/platform/seccomp/daemon/NotificationLivenessMetrics {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/NotificationLivenessMetrics;
+	public final fun snapshot ()Lio/mazewall/platform/seccomp/daemon/NotificationLivenessSnapshot;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/NotificationLivenessSnapshot {
+	public fun <init> ()V
+	public fun <init> (JJJJJJJJJJJJJJ)V
+	public synthetic fun <init> (JJJJJJJJJJJJJJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component10 ()J
+	public final fun component11 ()J
+	public final fun component12 ()J
+	public final fun component13 ()J
+	public final fun component14 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()J
+	public final fun component6 ()J
+	public final fun component7 ()J
+	public final fun component8 ()J
+	public final fun component9 ()J
+	public final fun copy (JJJJJJJJJJJJJJ)Lio/mazewall/platform/seccomp/daemon/NotificationLivenessSnapshot;
+	public static synthetic fun copy$default (Lio/mazewall/platform/seccomp/daemon/NotificationLivenessSnapshot;JJJJJJJJJJJJJJILjava/lang/Object;)Lio/mazewall/platform/seccomp/daemon/NotificationLivenessSnapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeadlineExpiries ()J
+	public final fun getDeadlineNear ()J
+	public final fun getFailed ()J
+	public final fun getHelperSaturation ()J
+	public final fun getLateCompletions ()J
+	public final fun getMaxReplyLatencyNanos ()J
+	public final fun getNotificationGone ()J
+	public final fun getOldestPendingAgeNanos ()J
+	public final fun getPending ()J
+	public final fun getReactorPolls ()J
+	public final fun getReplyLatencyCount ()J
+	public final fun getReplyLatencyNanos ()J
+	public final fun getSent ()J
+	public final fun getStarted ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/mazewall/platform/seccomp/daemon/NotificationProgress {
+}
+
+public final class io/mazewall/platform/seccomp/daemon/NotificationProgress$Await : io/mazewall/platform/seccomp/daemon/NotificationProgress {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/NotificationProgress$Await;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/NotificationProgress$Ready : io/mazewall/platform/seccomp/daemon/NotificationProgress {
+	public fun <init> (Lkotlin/jvm/functions/Function0;Lio/mazewall/platform/seccomp/daemon/NotifResult;Lkotlin/jvm/functions/Function1;)V
+	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lio/mazewall/platform/seccomp/daemon/NotifResult;Lkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getOnReply ()Lkotlin/jvm/functions/Function1;
+	public final fun getReply ()Lkotlin/jvm/functions/Function0;
+	public final fun getResult ()Lio/mazewall/platform/seccomp/daemon/NotifResult;
+}
+
+public abstract interface class io/mazewall/platform/seccomp/daemon/NotificationWork : java/lang/AutoCloseable {
+	public fun close ()V
+	public abstract fun poll (Lio/mazewall/ffi/memory/NativeArena;)Lio/mazewall/platform/seccomp/daemon/NotificationProgress;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/NotificationWork$DefaultImpls {
+	public static fun close (Lio/mazewall/platform/seccomp/daemon/NotificationWork;)V
+}
+
+public abstract interface class io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ReceiveOutcome$Closed : io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$Closed;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ReceiveOutcome$Failed : io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$Failed;
+	public static synthetic fun copy$default (Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$Failed;IILjava/lang/Object;)Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getErrno ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ReceiveOutcome$NotReady : io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$NotReady;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ReceiveOutcome$Received : io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$Received;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/ReceiveOutcome$RetryAfterPoll : io/mazewall/platform/seccomp/daemon/ReceiveOutcome {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome$RetryAfterPoll;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/SeccompCleanupInterpreter {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/SeccompCleanupInterpreter;
+	public final fun close (Lio/mazewall/ffi/networking/SeccompConnection;)Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome;
+	public final fun close (Lio/mazewall/ffi/networking/SeccompConnection;Lkotlin/jvm/functions/Function1;)Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome;
+}
+
+public abstract interface class io/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome {
+}
+
+public final class io/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Complete : io/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Complete;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Incomplete : io/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome {
+	public fun <init> (Ljava/util/List;Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;Ljava/util/List;)Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Incomplete;
+	public static synthetic fun copy$default (Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Incomplete;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome$Incomplete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailures ()Ljava/util/List;
+	public final fun getRetryableOwnership ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine {
 	public static final field Companion Lio/mazewall/platform/seccomp/daemon/SeccompDaemonEngine$Companion;
 	public final field clientSockets Ljava/util/concurrent/CopyOnWriteArrayList;
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function2;BILio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lio/mazewall/RawSyscallOperations;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function1;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function2;BILio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lio/mazewall/RawSyscallOperations;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCleanupOutcome ()Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome;
 	public final fun getState ()Lio/mazewall/platform/daemon/UnixListenDaemonState;
 	public final fun handleConnection (Lio/mazewall/core/FileDescriptor;)V
 	public final fun handleNewConnection (Lio/mazewall/core/FileDescriptor;)V
 	public final fun isGlobalShutdown ()Z
 	public final fun processConnectionStep (Lio/mazewall/ffi/memory/NativeArena;Lio/mazewall/ffi/networking/SeccompConnection;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/ManagedSegment;)Lio/mazewall/ffi/networking/SeccompConnection;
+	public final fun retryCleanup ()Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome;
 	public final fun run ()V
 	public final fun triggerGlobalShutdown (Ljava/lang/String;)V
 	public static synthetic fun triggerGlobalShutdown$default (Lio/mazewall/platform/seccomp/daemon/SeccompDaemonEngine;Ljava/lang/String;ILjava/lang/Object;)V
@@ -2514,19 +2840,26 @@ public final class io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine$Compa
 }
 
 public abstract interface class io/mazewall/platform/seccomp/daemon/SeccompNotifHandler {
-	public abstract fun processNotification (Lio/mazewall/ffi/memory/NativeArena;Lio/mazewall/ffi/memory/ManagedSegment;Lio/mazewall/ffi/memory/ManagedSegment;Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;)Lio/mazewall/platform/seccomp/daemon/NotifResult;
+	public abstract fun beginNotification-m68-PXY (Lio/mazewall/ffi/memory/NativeArena;Lio/mazewall/ffi/memory/ManagedSegment;Lio/mazewall/ffi/memory/ManagedSegment;Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;J)Lio/mazewall/platform/seccomp/daemon/NotificationWork;
 }
 
 public final class io/mazewall/platform/seccomp/daemon/SeccompSessionHandler : java/lang/AutoCloseable {
 	public static final field Companion Lio/mazewall/platform/seccomp/daemon/SeccompSessionHandler$Companion;
-	public fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Lio/mazewall/platform/seccomp/daemon/SeccompNotifHandler;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;)V
-	public synthetic fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Lio/mazewall/platform/seccomp/daemon/SeccompNotifHandler;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Lio/mazewall/platform/seccomp/daemon/SeccompNotifHandler;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lkotlin/jvm/functions/Function0;)V
+	public synthetic fun <init> (Lio/mazewall/core/FileDescriptor;Lio/mazewall/core/FileDescriptor;Lio/mazewall/platform/seccomp/daemon/SeccompNotifHandler;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lio/mazewall/NativeEngine;Lio/mazewall/core/SocketManager;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
+	public final fun closeWithResult ()Lio/mazewall/platform/seccomp/daemon/SeccompCleanupOutcome;
 	public final fun handleActiveListener (Lio/mazewall/ffi/memory/NativeArena;Lio/mazewall/ffi/memory/ManagedSegment;)Lio/mazewall/platform/seccomp/daemon/LoopAction;
 	public final fun isTerminated ()Z
+	public final fun pollTimeoutMillis ()I
 }
 
 public final class io/mazewall/platform/seccomp/daemon/SeccompSessionHandler$Companion {
+}
+
+public final class io/mazewall/platform/seccomp/daemon/UserNotifReceive {
+	public static final field INSTANCE Lio/mazewall/platform/seccomp/daemon/UserNotifReceive;
+	public final fun receiveOne (Lio/mazewall/RawSyscallOperations;Lio/mazewall/core/FileDescriptor;Lio/mazewall/ffi/memory/ManagedSegment;)Lio/mazewall/platform/seccomp/daemon/ReceiveOutcome;
 }
 
 public abstract class io/mazewall/seccomp/BpfInstruction {

@@ -1,6 +1,7 @@
 package io.mazewall.ffi.networking
 
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.core.Deadline
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -28,13 +29,13 @@ import java.io.InterruptedIOException
  * Encapsulates the FFM/Arena details and response structures for the Supervisor JVM Validation process.
  * This class exposes a high-level safe interface to the enforcer packages, hiding MemorySegments and Arenas.
  */
-public class SupervisorValidationChannel(
+internal class SupervisorValidationChannel(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+    private val native: NativeEngine,
 ) : AutoCloseable {
     private val arena = NativeArena.ofShared()
     private val stopping = java.util.concurrent.atomic
         .AtomicBoolean(false)
-    private val native = LinuxNative.snapshot()
 
     init {
         configureSocketNonblocking()

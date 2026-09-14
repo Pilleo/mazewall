@@ -11,15 +11,25 @@ import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.testAcquisition
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerSocketTest {
-    @AfterEach
-    fun tearDown() {
-        LinuxNative.resetToDefault()
+    @Test
+    fun `socket operations require an explicit native engine`() {
+        val methods = ProfilerSocket::class.java.declaredMethods
+            .filterNot { it.name.endsWith("\$default") }
+
+        assertFalse(
+            methods.any { it.name == "connectDescriptorWithRetry" && it.parameterCount == 3 },
+            "connection setup must not snapshot the process-global native engine",
+        )
+        assertFalse(
+            methods.any { it.name == "sendDescriptor" && it.parameterCount == 2 },
+            "descriptor sending must not snapshot the process-global native engine",
+        )
     }
 
     @Test
@@ -48,9 +58,7 @@ class ProfilerSocketTest {
         }
 
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
-        LinuxNative.setEngine(mockEngine)
-
-        val fd = ProfilerSocket.connectDescriptorWithRetry("/tmp/test_profiler.sock", maxRetries = 1)
+        val fd = ProfilerSocket.connectDescriptorWithRetry("/tmp/test_profiler.sock", mockEngine, maxRetries = 1)
         assertEquals(99, fd.value)
         assertTrue(connectCalled)
 
@@ -73,9 +81,7 @@ class ProfilerSocketTest {
         }
 
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
-        LinuxNative.setEngine(mockEngine)
-
-        val success = ProfilerSocket.sendDescriptor(10, 11)
+        val success = ProfilerSocket.sendDescriptor(10, 11, mockEngine)
         assertTrue(success)
         assertTrue(sendmsgCalled)
     }

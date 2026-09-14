@@ -6,7 +6,7 @@ import io.mazewall.enforcer.api.ContainmentViolationException
 /**
  * Shared utility for reading memory from remote processes/threads using process_vm_readv.
  */
-public object SupervisorProcessMemoryReader : TraceeMemoryReader {
+internal object SupervisorProcessMemoryReader : TraceeMemoryReader {
     /** Resolve the native adapters at operation start so engine replacement cannot leave a stale delegate. */
     private fun reader(): TraceeMemoryReader = TraceeMemoryReader.real()
 
