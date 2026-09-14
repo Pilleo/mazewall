@@ -1,7 +1,7 @@
 ---
 title: 'Orchestrator: Structured CI Failure Comment with Diagnosis Guidance for Jules'
 severity: MEDIUM
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:

@@ -1,7 +1,7 @@
 ---
 title: "Implement Paperclip Issue Tree Holds for runtime resource conflict locking in HybridSupervisor"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"
@@ -29,14 +29,14 @@ Currently, tasks with overlapping target files or modules that lack a causal dep
 When `HybridSupervisor` dispatches an issue (e.g. `MAZ-101`), it can place conflicting candidate issues on an active Tree Hold with `reason: "Resource lock held on [target_files] by active run MAZ-101"`. This provides clear visibility on the Paperclip board UI while cleanly preventing conflicting concurrent dispatches. When `MAZ-101` reaches `done` or `cancelled`, the supervisor releases the hold.
 
 **Needed:**
-1. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/PaperclipClient.kt`:
+1. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/PaperclipClient.kt`:
    - Add `createTreeHold(issueId: String, reason: String, mode: String = "hold"): String` calling `POST /api/issues/:id/tree-holds`.
    - Add `releaseTreeHold(holdId: String, releaseReason: String): Boolean` calling `POST /api/issue-tree-holds/:id/release`.
    - Add `listActiveHolds(companyId: String): List<PaperclipHold>`.
-2. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/DispatchSelector.kt`:
+2. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/DispatchSelector.kt`:
    - Compute `activeResourceLocks` across all `in_progress` issues.
    - Filter out candidate issues whose targets intersect active locks.
-3. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/HybridSupervisor.kt`:
+3. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/HybridSupervisor.kt`:
    - On dispatch of issue $A$, acquire Tree Holds for any conflicting backlog issues.
    - In `resolver.resolveIfNeeded()` / tick cleanup, release Tree Holds when issue $A$ resolves.
 4. Add unit tests in `HybridSupervisorTest.kt` verifying Tree Hold creation on conflict and clean release on resolution.

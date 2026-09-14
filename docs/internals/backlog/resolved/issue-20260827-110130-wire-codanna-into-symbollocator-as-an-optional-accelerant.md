@@ -1,7 +1,7 @@
 ---
 title: "Wire Codanna into SymbolLocator as an optional accelerant"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"
@@ -22,14 +22,14 @@ paperclip_identifier: "MAZ-1476"
 # 🟢 [Severity: LOW]: Wire Codanna into SymbolLocator as an optional accelerant
 
 **Context:**
-`FilesystemSymbolLocator` currently traverses directory trees and executes regex searches across `.kt` files to map symbols to filenames and test suites. While simple, it lacks cross-file symbol indexing and call-graph awareness. The repository already includes `codanna` (`scripts/code_atlas.sh`), which maintains a fast SQLite symbol graph. Wiring Codanna into `SymbolLocator` as an optional backend will allow instant (<10ms) symbol declaration lookups and direct caller resolution without filesystem recursion.
+`FilesystemSymbolLocator` currently traverses directory trees and executes regex searches across `.kt` files to map symbols to filenames and test suites. While simple, it lacks cross-file symbol indexing and call-graph awareness. The repository already includes `codanna` (`../../../../scripts/code_atlas.sh`), which maintains a fast SQLite symbol graph. Wiring Codanna into `SymbolLocator` as an optional backend will allow instant (<10ms) symbol declaration lookups and direct caller resolution without filesystem recursion.
 
 **Needed:**
-1. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/FilesystemSymbolLocator.kt`:
+1. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/FilesystemSymbolLocator.kt`:
    - Create a `CodannaSymbolLocator` that checks for `codanna` on `PATH` (or `.codanna` index).
    - If available, query `codanna retrieve describe <Symbol>` / symbols API to locate declaring files and matching tests.
    - Fall back transparently to `FilesystemSymbolLocator` if Codanna is not installed or indexed.
-2. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/AstImpactScanner.kt`:
+2. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/AstImpactScanner.kt`:
    - Use `codanna retrieve callers <Symbol>` to discover external call sites across modules.
 3. Add unit tests for `CodannaSymbolLocator` with mock process outputs.
 4. Run `./gradlew :tools:orchestrator:test -PincludeOrchestrator=true`.

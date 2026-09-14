@@ -110,7 +110,7 @@ class TraceeAuthorityNativeContractTest {
             TraceeProcAuthority.capture(LinuxNative.process.gettid().value, LinuxNative).use { authority ->
                 val accept = TraceeAuthorityExecution(LinuxNative, authority, notification(Arch.current().accept4, longArrayOf(-1, 1, 0, 0, 0, 0)), emptyList())
                 accept.prepare()
-                assertEquals(SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory), accept.execute(TraceeAuthorityDecision(SupervisorRoute.InjectFd, null)))
+                assertEquals(SupervisorReplyEffect.Continue, accept.execute(TraceeAuthorityDecision(SupervisorRoute.InjectFd, null)))
                 val open = TraceeAuthorityExecution(LinuxNative, authority, notification(Arch.current().openat, longArrayOf(-100, 0, 0, 0, 0, 0)), emptyList())
                 assertInstanceOf(SupervisorRoute.Abort::class.java, open.prepare().route)
                 assertEquals(14, assertThrows(TraceeAuthorityFailure::class.java) { authority.readPath(1) }.errno)

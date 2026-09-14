@@ -1,7 +1,7 @@
 ---
 title: "Preload HotSpot clock wrappers before restrictive iterative profiling"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -31,6 +31,10 @@ JVM and calls both clocks under the real restrictive iterative policy. This is a
 test-setup mitigation, not a claim that arbitrary production first-use native wrappers are safe.
 The production investigation remains open until the original CodeHeap failure has a stable
 reproducer and the broader runtime limitation is addressed without relaxing containment.
+
+## Resolution (2026-09-14)
+
+`RealIterativeTaskExecutor` now preloads both clock wrappers before creating the restrictive worker. The ordering is covered by an injected preloader test and the fresh-process restrictive-policy regression.
 
 ---
 <!-- id: issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-  file: issue-20260909-060943-319-preload-hotspot-clock-wrappers-before-restrictive-.md -->

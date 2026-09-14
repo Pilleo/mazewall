@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -42,17 +43,25 @@ internal object RealPortalCgroupController : PortalCgroupController {
             profile.cpuLimit?.let { write(directory.resolve("cpu.max"), it.cpuMaxValue()) }
             write(directory.resolve("cgroup.procs"), pid.toString())
             return PortalCgroupHandle(directory)
-        } catch (failure: Throwable) {
-            runCatching { Files.deleteIfExists(directory) }
-            throw PortalCgroupUnavailableException("could not create or attach worker cgroup: ${failure.message}")
+        } catch (failure: IOException) {
+            val unavailable = PortalCgroupUnavailableException("could not create or attach worker cgroup: ${failure.message}")
+            unavailable.addSuppressed(failure)
+            try {
+                Files.deleteIfExists(directory)
+            } catch (cleanupFailure: IOException) {
+                unavailable.addSuppressed(cleanupFailure)
+            }
+            throw unavailable
         }
     }
 
     override fun release(handle: PortalCgroupHandle) {
         try {
             Files.deleteIfExists(handle.directory)
-        } catch (failure: Throwable) {
-            throw PortalCgroupUnavailableException("could not remove worker cgroup ${handle.directory.fileName}: ${failure.message}")
+        } catch (failure: IOException) {
+            val unavailable = PortalCgroupUnavailableException("could not remove worker cgroup ${handle.directory.fileName}: ${failure.message}")
+            unavailable.addSuppressed(failure)
+            throw unavailable
         }
     }
 

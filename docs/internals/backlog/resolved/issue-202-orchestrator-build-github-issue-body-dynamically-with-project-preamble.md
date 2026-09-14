@@ -1,7 +1,7 @@
 ---
 title: 'Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble'
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:
@@ -21,14 +21,14 @@ paperclip_identifier: MAZ-636
 # 🔴 [Severity: HIGH]: Orchestrator: Build GitHub Issue Body Dynamically with Project Preamble
 
 **Context:**
-`PENDING_APPROVAL` currently calls `env.createIssue(issueTitleForGit, File(context.currentIssueFile!!), "jules")`, passing the raw backlog markdown file directly as the GitHub issue body via `--body-file`. Jules therefore receives the YAML frontmatter (which is orchestrator metadata, not instructions), and body sections that may use non-canonical headers (`**Target Area:**`, `**Failure Hypothesis:**`) that `BacklogParser.extractSection` silently drops. Jules has no knowledge that this is a JVM security library, no hard rules about what not to do (`EPERM`, `Thread.sleep()`, `JAVA_LONG`), no reference to `AGENTS.md` or skills, and no definition of done.
+`PENDING_APPROVAL` currently calls `env.createIssue(issueTitleForGit, File(context.currentIssueFile!!), "jules")`, passing the raw backlog markdown file directly as the GitHub issue body via `--body-file`. Jules therefore receives the YAML frontmatter (which is orchestrator metadata, not instructions), and body sections that may use non-canonical headers (`**Target Area:**`, `**Failure Hypothesis:**`) that `BacklogParser.extractSection` silently drops. Jules has no knowledge that this is a JVM security library, no hard rules about what not to do (`EPERM`, `Thread.sleep()`, `JAVA_LONG`), no reference to `../../../../AGENTS.md` or skills, and no definition of done.
 
 **Needed:**
 1. Add a `buildIssueBody(issue: BacklogIssue): String` function to `OrchestratorEnvironment` (or a new `IssueBodyBuilder` object).
 2. The function must produce a two-part body:
    - **Part A — Static project preamble** (always injected): project description, hard rules list (EPERM/EACCES, JVM syscalls, JAVA_LONG, Thread.sleep, MemoryLayout, MockNativeEngine, FallbackBehavior.FAIL), reference documents (AGENTS.md, enforcer/AGENTS.md, .agents/CODE_QUALITY.md, docs/internals/containment_design.md), and definition of done (gradlew build, run_tests.sh, Jacoco thresholds, failing-test-first for bug fixes).
    - **Part B — Dynamic task content**: extracted from the parsed `BacklogIssue` — `issue.id`, `issue.title`, `issue.severity`, `issue.component`, `issue.effort`, `issue.context`, `issue.needed`, and optionally `implementationHints`, `acceptanceCriteria`, and `chosenSolution` if present.
-3. Write the constructed body to a temp file in `build/tmp/` and pass that temp file to `gh issue create --body-file`.
+3. Write the constructed body to a temp file in `../../../../build/tmp` and pass that temp file to `gh issue create --body-file`.
 4. The raw backlog file must never be passed directly as the issue body again.
 
 ## Solution Options

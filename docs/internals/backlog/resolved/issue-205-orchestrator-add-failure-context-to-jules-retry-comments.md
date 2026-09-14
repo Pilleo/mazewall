@@ -2,7 +2,7 @@
 title: 'Orchestrator: Add Failure Context to Jules Retry and Completed-Without-PR
   Comments'
 severity: MEDIUM
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:

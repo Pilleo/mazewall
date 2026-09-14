@@ -1,7 +1,7 @@
 ---
 title: Refactor Profiler core classes for testability and test them
 severity: MEDIUM
-status: open
+status: resolved
 priority: high
 dependencies: []
 component: profiler
@@ -33,3 +33,7 @@ paperclip_identifier: MAZ-760
 attribution components already have testable state/transport seams. The remaining scope is the
 production profiler daemon and session handler only; iterative-profiler extraction is complete
 and no longer belongs in this issue.
+
+## Resolution (2026-09-14)
+
+`ProfilerDaemonEngine` delegates acceptance, shutdown, and session scheduling through injectable transport seams. `ProfilerSessionHandler` receives protocol, responder, memory, and preparation dependencies directly; focused daemon tests cover stalled and idle work, malformed input, ACK transport failure, deferred shutdown, and session retirement.

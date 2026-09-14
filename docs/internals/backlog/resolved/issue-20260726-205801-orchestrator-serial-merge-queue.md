@@ -1,7 +1,7 @@
 ---
 title: Implement Serial PR Merge Queue in Orchestrator to Prevent Rebase Races
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 component: orchestrator

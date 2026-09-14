@@ -1,7 +1,7 @@
 ---
 title: "Restore accept peer address writes through identity-bound authority"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -23,6 +23,10 @@ The authority helper must preserve accept EFAULT semantics without risking a pro
 
 **Needed:**
 1. Design and verify a tracee-cooperative or kernel-supported identity-bound memory-write capability that preserves writable-page checks and accept errno, then replace the explicit unsupported result with tests for PID exit/reuse and read-only output pages.
+
+## Resolution (2026-09-14)
+
+Authorized `accept` now continues in the original tracee, including a forced injection route. The kernel therefore performs peer-address copying, identity checks, and writable-page/EFAULT handling without broker-side remote writes.
 
 ---
 <!-- id: issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit  file: issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md -->

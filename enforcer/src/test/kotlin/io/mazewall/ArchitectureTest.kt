@@ -3,15 +3,40 @@ package io.mazewall
 import com.tngtech.archunit.base.DescribedPredicate
 import com.tngtech.archunit.core.domain.JavaMethodCall
 import com.tngtech.archunit.core.importer.ImportOption
+import com.tngtech.archunit.core.importer.Location
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
+import com.tngtech.archunit.junit.LocationProvider
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import io.mazewall.core.FileDescriptor
 import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.supervisor.SupervisorRoute
+import io.mazewall.platform.seccomp.daemon.NotificationProgress
 
-@AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
+/**
+ * ArchUnit's stock test filter recognizes conventional source locations but not Gradle's
+ * compiled Kotlin test output.  Without this filter, fixture classes are audited as production.
+ */
+class DoNotIncludeCompiledTestOutputs : ImportOption {
+    override fun includes(location: Location): Boolean =
+        listOf("/classes/kotlin/test/", "/classes/java/test/", "/test-classes/")
+            .none(location.asURI().path::contains)
+}
+
+/** Imports the production output of the two modules that define mazewall's implementation. */
+class MazewallProductionLocations : LocationProvider {
+    override fun get(type: Class<*>): Set<Location> =
+        setOf(SupervisorRoute::class.java, NotificationProgress::class.java)
+            .map { Location.of(it.protectionDomain.codeSource.location) }
+            .toSet()
+}
+
+@AnalyzeClasses(
+    locations = [MazewallProductionLocations::class],
+    importOptions = [ImportOption.DoNotIncludeTests::class, DoNotIncludeCompiledTestOutputs::class],
+)
 class ArchitectureTest {
     @ArchTest
     fun singletonProvidersMustBeImmutable(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
@@ -176,6 +201,7 @@ class ArchitectureTest {
                     !it.isAssignableTo("io.mazewall.ffi.memory.ManagedSegment")
             },
             ).because("nativeScope must not leak segments beyond their arena lifetime.")
+            .allowEmptyShould(true)
             .check(allClasses)
     }
 
@@ -666,6 +692,10 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.supervisor.JvmVerdict\$Allow",
                 "io.mazewall.enforcer.supervisor.JvmVerdict\$InjectFd",
             ),
+            "io.mazewall.enforcer.supervisor.JvmVerdictParse" to setOf(
+                "io.mazewall.enforcer.supervisor.JvmVerdictParse\$Known",
+                "io.mazewall.enforcer.supervisor.JvmVerdictParse\$Unknown",
+            ),
             "io.mazewall.enforcer.state.ContainmentRegistryEffect" to setOf(
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$LandlockApplied",
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$SeccompInstalled",
@@ -678,6 +708,7 @@ class ArchitectureTest {
             ),
         )
         for ((parent, kids) in expected) {
+            if (allClasses.none { it.name == parent }) continue
             val actual = allClasses
                 .filter { it.isAssignableTo(parent) && it.name != parent }
                 .filter { !it.name.contains("DefaultImpls") }

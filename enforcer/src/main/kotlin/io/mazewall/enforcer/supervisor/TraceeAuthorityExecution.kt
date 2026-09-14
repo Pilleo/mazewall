@@ -82,7 +82,9 @@ internal class TraceeAuthorityExecution(
         is SupervisorRoute.Abort -> SupervisorReplyEffect.Error(route.errno)
         SupervisorRoute.Continue -> if (kind is SupervisedKind.Spawn) SupervisorReplyEffect.Continue else SupervisorReplyEffect.Error()
         SupervisorRoute.AskJvm -> SupervisorReplyEffect.Error()
-        SupervisorRoute.InjectFd -> inject()
+        // accept(2) must execute in the tracee so the kernel, under the original
+        // task identity, copies peer output and enforces writable-page semantics.
+        SupervisorRoute.InjectFd -> if (kind is SupervisedKind.Accept) SupervisorReplyEffect.Continue else inject()
         SupervisorRoute.SecureExec -> if (kind is SupervisedKind.Exec) secureExec(decision.path) else SupervisorReplyEffect.Error()
     }
 

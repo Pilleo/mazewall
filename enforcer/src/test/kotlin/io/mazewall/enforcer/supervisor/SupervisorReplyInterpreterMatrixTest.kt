@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.supervisor
 
+import io.mazewall.core.Deadline
 import io.mazewall.core.NewFdFlags
 import io.mazewall.core.Tid
 import io.mazewall.core.testAcquisition
@@ -13,6 +14,30 @@ import org.junit.jupiter.params.provider.ValueSource
 
 class SupervisorReplyInterpreterMatrixTest {
     @Test
+    fun `async secure exec denial never injects before its rewrite exchange completes`() {
+        val fixture = SupervisorBoundaryFixture()
+        val effect = SupervisorReplyEffect.SecureExecAndReply(
+            SecureExecRequest(Tid(1), 4096, 8192, 322),
+            SupervisorDescriptorResult.Opened(opened(fixture)),
+        )
+
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                interpreter(fixture)
+                    .prepareSecureExec(effect, SupervisorReplyContext(42, fixture.context(arena).response), Deadline.afterMillis(1_000))
+                    .use { work ->
+                        work.poll()
+                        val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                        ready.reply()
+                    }
+            }
+        }
+
+        assertEquals(0, fixture.injectionAttempts)
+        assertEquals(listOf(KernelReply(42, -1, 0, false)), fixture.replies)
+    }
+
+    @Test
     fun `helper overload error has only one interrupted terminal attempt`() {
         val fixture = SupervisorBoundaryFixture()
         fixture.replyResult = SupervisorBoundaryFixture.failure(4)
@@ -22,7 +47,7 @@ class SupervisorReplyInterpreterMatrixTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 1, 13])
-    fun `secure exec continues only after nonterminal injection and affirmative rewrite ACK`(replyErrno: Int) {
+    fun `secure exec denial never injects a tracee descriptor before the rewrite decision`(replyErrno: Int) {
         val fixture = SupervisorBoundaryFixture()
         fixture.engine.memory.onRead = { _, buffer, size ->
             assertEquals(1L, size)
@@ -32,14 +57,11 @@ class SupervisorReplyInterpreterMatrixTest {
         if (replyErrno != 0) fixture.replyResult = SupervisorBoundaryFixture.failure(replyErrno)
         val effect = SupervisorReplyEffect.SecureExecAndReply(SecureExecRequest(Tid(1), 4096, 8192, 322), SupervisorDescriptorResult.Opened(opened(fixture)))
         val result = execute(fixture, effect)
-        if (replyErrno == 0) {
-            assertEquals(ReplyExecutionResult.ReplySucceeded, result)
-        } else {
-            assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, result)
-        }
-        assertEquals(listOf(KernelReply(42, 0, 1, false)), fixture.replies)
+        if (replyErrno == 0) assertEquals(ReplyExecutionResult.ReplySucceeded, result) else assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, result)
+        assertEquals(listOf(KernelReply(42, -1, 0, false)), fixture.replies)
         assertEquals(listOf(51002), fixture.closed)
         assertEquals(1, fixture.writeCount)
+        assertEquals(0, fixture.injectionAttempts)
     }
 
     @ParameterizedTest

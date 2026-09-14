@@ -2,7 +2,7 @@
 title: Review and Enhance Orchestrator Prompts for Jules to Enforce Quality and Safety
   Guidelines
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies: []
 target_files:

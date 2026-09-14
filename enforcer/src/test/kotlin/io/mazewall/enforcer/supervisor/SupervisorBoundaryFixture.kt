@@ -65,6 +65,7 @@ internal class SupervisorBoundaryFixture {
     var pathLength: Int? = null
     var readCount = 0
     var writeCount = 0
+    var injectionAttempts = 0
 
     init {
         engine.pollResult = success(1)
@@ -113,6 +114,7 @@ internal class SupervisorBoundaryFixture {
                     replyResult
                 }
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_ADDFD.code -> {
+                    injectionAttempts++
                     if (buffer.readInt(8) and NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt() != 0) {
                         replyThread.set(Thread.currentThread())
                         replies += KernelReply(buffer.readLong(0), 0, 0, true)

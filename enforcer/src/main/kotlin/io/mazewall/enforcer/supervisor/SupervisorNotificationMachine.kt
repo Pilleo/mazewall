@@ -105,8 +105,11 @@ internal object SupervisorNotificationMachine {
             is JvmVerdict.InjectFd -> when (kind) {
                 is SupervisedKind.Open,
                 is SupervisedKind.Connect,
-                is SupervisedKind.Accept,
                 -> SupervisorRoute.InjectFd
+                // accept(2) writes its peer address into caller-owned memory.  The
+                // supervisor cannot reproduce that write safely because its pidfd
+                // identity proof does not authorize remote-memory mutation.
+                is SupervisedKind.Accept -> SupervisorRoute.Continue
                 is SupervisedKind.Exec,
                 is SupervisedKind.Spawn,
                 is SupervisedKind.Unknown,
@@ -115,8 +118,10 @@ internal object SupervisorNotificationMachine {
             is JvmVerdict.Allow -> when (kind) {
                 is SupervisedKind.Open,
                 is SupervisedKind.Connect,
-                is SupervisedKind.Accept,
                 -> SupervisorRoute.InjectFd
+                // Keep peer-address writes in the tracee's kernel-mediated accept
+                // path; this preserves sockaddr/addrlen and EFAULT semantics.
+                is SupervisedKind.Accept -> SupervisorRoute.Continue
                 is SupervisedKind.Exec -> SupervisorRoute.SecureExec
                 // The spawn authorization depends on register flags and parent identity,
                 // never on clone's child stack/TID pointer contents. CLONE_THREAD remains

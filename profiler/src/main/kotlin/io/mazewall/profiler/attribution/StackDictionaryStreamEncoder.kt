@@ -74,9 +74,10 @@ public class StackDictionaryStreamEncoder(
             return
         }
         val encodedSize = encodeStackDefinition(definition).size.toLong()
+        val budget = retainedBudget
         if (
-            retainedBudget != null &&
-            !retainedBudget!!.tryReserve(TierERetainedStateBudget.Category.DICTIONARY_STAGING, encodedSize)
+            budget != null &&
+            !budget.tryReserve(TierERetainedStateBudget.Category.DICTIONARY_STAGING, encodedSize)
         ) {
             droppedEntries++
             return

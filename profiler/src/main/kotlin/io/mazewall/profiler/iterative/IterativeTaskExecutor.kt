@@ -12,15 +12,18 @@ public interface IterativeTaskExecutor {
     ): Throwable?
 }
 
-public class RealIterativeTaskExecutor(
+public class RealIterativeTaskExecutor internal constructor(
     /**
      * Upper bound for one profiling iteration. A workload that deadlocks under containment must
      * not hang the profiler forever (issue-20260823-172000); the timeout surfaces as a distinct
      * [IterativeTaskTimeoutException].
      */
-    public val iterationTimeoutMs: Long = DEFAULT_ITERATION_TIMEOUT_MS,
+    public val iterationTimeoutMs: Long,
+    private val clockPreloader: () -> Unit,
 ) : IterativeTaskExecutor {
-    public constructor() : this(DEFAULT_ITERATION_TIMEOUT_MS)
+    public constructor() : this(DEFAULT_ITERATION_TIMEOUT_MS, ::preloadNativeClockWrappers)
+
+    public constructor(iterationTimeoutMs: Long) : this(iterationTimeoutMs, ::preloadNativeClockWrappers)
 
     private val taskCounter = java.util.concurrent.atomic
         .AtomicLong()
@@ -34,6 +37,9 @@ public class RealIterativeTaskExecutor(
         currentPolicy: Policy<*, Uncompiled>,
         task: Runnable,
     ): Throwable? {
+        // First-use HotSpot wrappers can allocate executable CodeHeap memory. Prime the
+        // clock wrappers before the fresh worker installs its restrictive policy.
+        clockPreloader()
         var error: Throwable? = null
         // NOTE: A fresh thread per iteration is REQUIRED, not incidental: seccomp filters are
         // permanent for the OS thread's lifetime, so a less-restrictive next iteration can never
@@ -70,5 +76,10 @@ public class RealIterativeTaskExecutor(
     public companion object {
         public const val DEFAULT_ITERATION_TIMEOUT_MS: Long = 120_000L
         private const val GRACE_PERIOD_MS: Long = 5_000L
+
+        private fun preloadNativeClockWrappers() {
+            System.currentTimeMillis()
+            System.nanoTime()
+        }
     }
 }

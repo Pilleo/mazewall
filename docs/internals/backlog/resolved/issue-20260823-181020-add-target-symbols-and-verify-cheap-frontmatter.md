@@ -1,7 +1,7 @@
 ---
 title: "Extend backlog frontmatter with target_symbols and verify.cheap"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"

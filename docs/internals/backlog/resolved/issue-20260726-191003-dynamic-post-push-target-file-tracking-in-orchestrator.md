@@ -1,7 +1,7 @@
 ---
 title: Dynamic Post-Push Target File Tracking in Orchestrator Active Slots
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies:
 - issue-20260726-191002

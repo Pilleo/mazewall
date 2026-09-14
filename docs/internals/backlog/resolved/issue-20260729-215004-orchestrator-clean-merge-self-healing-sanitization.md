@@ -1,7 +1,7 @@
 ---
 title: "Implement Self-Healing Working Tree Sanitization on Successful Merge Paths in BranchRebaser"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"
@@ -31,7 +31,7 @@ There is NO step in the clean-merge path to ensure that the working tree remains
 2. Retrieve all files modified/added between the merge-base with master and HEAD (or `origin/master...HEAD`).
 3. For each modified file, verify that it is either:
    - Explicitly listed in the task's `target_files` (performing a robust component-based or ends-with match).
-   - Located under the backlog directory (starts with `docs/internals/backlog/`).
+   - Located under the backlog directory (starts with `..`).
 4. If any file has been modified that does not meet these criteria, automatically self-heal the working tree:
    - Revert the extraneous modified file via `git checkout origin/master -- <file>`.
    - Automatically delete any extraneous untracked file.

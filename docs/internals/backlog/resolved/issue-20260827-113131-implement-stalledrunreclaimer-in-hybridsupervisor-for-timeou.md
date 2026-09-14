@@ -1,7 +1,7 @@
 ---
 title: "Implement StalledRunReclaimer in HybridSupervisor for timeout recovery"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"
@@ -26,10 +26,10 @@ paperclip_identifier: MAZ-694
 Currently, when `HybridSupervisor` dispatches an issue to an agent, the issue moves to `in_progress`. If an asynchronous cloud agent (such as Jules or a detached worker) crashes, hangs, or exceeds its SLA without creating a PR or updating its heartbeat/activity log for a long duration (e.g. >30m), the issue remains perpetually stranded in `in_progress`, blocking dependent tasks and tying up dispatch budget. A `StalledRunReclaimer` watchdog in the supervisor loop will inspect active in-progress issues, detect stalled runs without activity, post a diagnostic comment to the Paperclip board, and reset or reassign the issue cleanly.
 
 **Needed:**
-1. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/PaperclipClient.kt`:
+1. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/PaperclipClient.kt`:
    - Add helper methods to query active run metadata and last activity timestamp for an issue.
    - Add support for resetting an issue status to `todo` or transitioning to `needs_attention`.
-2. In `tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/HybridSupervisor.kt`:
+2. In `../../../../tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/HybridSupervisor.kt`:
    - Implement `reclaimStalledRuns(issues: List<PaperclipIssue>, timeout: Duration)` watchdog invoked during `tick()`.
    - Post an explanatory comment on the board when an issue is reclaimed.
 3. Add unit tests in `HybridSupervisorTest.kt` simulating stale in-progress runs and verifying clean reclamation and unassignment.

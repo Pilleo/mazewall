@@ -1,7 +1,7 @@
 ---
 title: "Align orchestrator backlog validation with active Tier-E metadata"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "orchestrator"

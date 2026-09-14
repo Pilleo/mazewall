@@ -1,7 +1,7 @@
 ---
 title: "Precompile new_backlog_issue into standalone JVM CLI"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"
@@ -25,8 +25,8 @@ paperclip_identifier: "MAZ-1473"
 Currently, invoking `./scripts/new_backlog_issue.sh` runs `./gradlew -q :tools:orchestrator:newBacklogIssue -PincludeOrchestrator=true`. This causes Gradle to perform a complete configuration evaluation across all root and subprojects (evaluating build scripts, plugins, and dependencies), taking 6–8 seconds per issue creation. Because issue scaffolding is purely an AST inspection, YAML templating, and filesystem operation, it does not need Gradle daemon overhead for every run.
 
 **Needed:**
-1. In `tools/orchestrator/build.gradle.kts`, provide a task to compile a lightweight fat jar or binary distribution (or run via precompiled classes).
-2. In `scripts/new_backlog_issue.sh`:
+1. In `../../../../tools/orchestrator/build.gradle.kts`, provide a task to compile a lightweight fat jar or binary distribution (or run via precompiled classes).
+2. In `../../../../scripts/new_backlog_issue.sh`:
    - Check if the compiled CLI jar / classes exist (under `tools/orchestrator/build/libs/` or `tools/orchestrator/build/classes/`).
    - If present, execute `java -jar ... io.mazewall.orchestrator.NewBacklogIssueKt "$@"` directly with JVM startup latency (<300ms).
    - If not compiled, fall back to Gradle invocation or trigger a one-time build.

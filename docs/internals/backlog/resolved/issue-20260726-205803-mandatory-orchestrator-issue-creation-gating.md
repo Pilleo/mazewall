@@ -2,7 +2,7 @@
 title: Enforce Mandatory Schema Gating and Skill Header Injection in Issue Creation
   API
 severity: HIGH
-status: open
+status: resolved
 priority: high
 dependencies:
 - issue-20260726-205802

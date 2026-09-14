@@ -1,7 +1,7 @@
 ---
 title: "Forbid silent else on sealed lifecycle and security machines"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"
@@ -50,6 +50,10 @@ Kotlin already makes a sealed `when` a compile error when a variant is added —
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
+
+## Resolution (2026-09-14)
+
+Wire decoding is explicitly represented as known or unknown, and unknown decisions fail closed with `EPERM`. The ArchitectureTest sealed-set guard now includes both `JvmVerdictParse` variants.
 
 <!-- id: issue-20260907-080201  file: issue-20260907-080201-forbid-silent-else-on-sealed-lifecycle-and-security-machines.md -->
 <!-- Agent: fill Context and Needed; add files/symbols if the impact walk missed them. Do not rename the file. -->

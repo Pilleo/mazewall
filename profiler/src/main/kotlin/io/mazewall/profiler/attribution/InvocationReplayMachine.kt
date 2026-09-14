@@ -328,7 +328,10 @@ public class InvocationReplayMachine {
     ): Boolean =
         when (event) {
             is InvocationEvent.Syscall -> event.sequence < lastSequence || event.sequence > lastSequence + 1
-            else -> event.sequence != lastSequence + 1
+            is InvocationEvent.Activate,
+            is InvocationEvent.EndRestore,
+            is InvocationEvent.Invalidate,
+            -> event.sequence != lastSequence + 1
         }
 
     private data class TaskState(

@@ -38,8 +38,8 @@ internal class SupervisorReplyInterpreter(
     private val engine: NativeEngine,
     private val listener: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
     private val rewrite: SupervisorExecRewriteExchange,
-    private val descriptors: TraceeDescriptorImporter,
-    private val readOnlyNul: (Tid) -> Long? = { tid -> NativeArena.ofConfined().use { arena -> with(arena) { TraceeReadOnlyNul.find(tid) } } },
+    @Suppress("UnusedPrivateProperty") private val descriptors: TraceeDescriptorImporter,
+    @Suppress("UnusedPrivateProperty") private val readOnlyNul: (Tid) -> Long? = { tid -> NativeArena.ofConfined().use { arena -> with(arena) { TraceeReadOnlyNul.find(tid) } } },
 ) {
     fun isNotificationValid(id: Long): Boolean =
         NativeArena.ofConfined().use { arena ->
@@ -60,32 +60,19 @@ internal class SupervisorReplyInterpreter(
         context: SupervisorReplyContext,
         deadline: Deadline,
     ): NotificationWork {
-        var descriptor = -1
-        var emptyPath = 0L
-        var errno = NativeConstants.EPERM
-        when (val target = effect.target) {
-            is SupervisorDescriptorResult.Denied -> errno = target.errno
-            is SupervisorDescriptorResult.Opened -> target.descriptor.use {
-                when (val injected = inject(context.id, it, NewFdFlags.forExec(), 0)) {
-                    is FdInjectionResult.Failed -> Unit
-                    is FdInjectionResult.Injected -> {
-                        descriptor = injected.fd
-                        emptyPath = effect.capturedEmptyPath ?: readOnlyNul(effect.request.tid) ?: 0L
-                    }
-                }
-            }
+        val errno = when (val target = effect.target) {
+            is SupervisorDescriptorResult.Denied -> target.errno
+            is SupervisorDescriptorResult.Opened -> target.descriptor.use { NativeConstants.EPERM }
         }
-        val exchange = rewrite.begin(effect.request, if (emptyPath == 0L) -1 else descriptor, emptyPath, deadline)
+        // Register rewriting is not implemented by the JVM peer.  Do not inject an
+        // executable into the tracee before the peer can consume that ownership: a
+        // negative rewrite request preserves protocol framing and fails closed.
+        val exchange = rewrite.begin(effect.request, -1, 0, deadline)
         return object : NotificationWork {
             context(arena: NativeArena) override fun poll(): NotificationProgress {
-                val ack = exchange.poll() ?: return NotificationProgress.Await
-                val allowed = descriptor >= 0 && emptyPath != 0L && ack.single() == 1.toByte()
+                exchange.poll() ?: return NotificationProgress.Await
                 return NotificationProgress.Ready({
-                    if (allowed) {
-                        UserNotifReply.encodeContinue(context.response, context.id)
-                    } else {
-                        UserNotifReply.encodeError(context.response, context.id, errno)
-                    }
+                    UserNotifReply.encodeError(context.response, context.id, errno)
                     UserNotifReply.send(engine.raw, listener, context.response)
                 })
             }
@@ -201,12 +188,7 @@ internal class SupervisorReplyInterpreter(
     ): ReplyExecutionResult =
         when (val target = effect.target) {
             is SupervisorDescriptorResult.Denied -> abortExec(effect.request, context, target.errno)
-            is SupervisorDescriptorResult.Opened -> target.descriptor.use {
-                when (val injected = inject(context.id, it, NewFdFlags.forExec(), 0)) {
-                    is FdInjectionResult.Failed -> abortExec(effect.request, context, NativeConstants.EPERM)
-                    is FdInjectionResult.Injected -> completeExec(effect.request, injected.fd, context)
-                }
-            }
+            is SupervisorDescriptorResult.Opened -> target.descriptor.use { abortExec(effect.request, context, NativeConstants.EPERM) }
         }
 
     context(arena: NativeArena) private fun abortExec(
@@ -216,22 +198,6 @@ internal class SupervisorReplyInterpreter(
     ): ReplyExecutionResult {
         rewrite.request(request, -1, 0)
         return sendError(context, errno)
-    }
-
-    context(arena: NativeArena) private fun completeExec(
-        request: SecureExecRequest,
-        injected: Int,
-        context: SupervisorReplyContext,
-    ): ReplyExecutionResult {
-        val nul = readOnlyNul(request.tid)
-        if (nul != null && rewrite.request(request, injected, nul)) return sendContinue(context)
-        // pidfd_getfd imports a LOCAL reference, never ownership of the remote table entry.
-        // Closing it does not close the tracee descriptor; that remains until tracee teardown.
-        when (val imported = descriptors.import(request.tid, injected)) {
-            is SupervisorDescriptorResult.Denied -> Unit
-            is SupervisorDescriptorResult.Opened -> imported.descriptor.close()
-        }
-        return sendError(context, NativeConstants.EPERM)
     }
 
     private companion object {
