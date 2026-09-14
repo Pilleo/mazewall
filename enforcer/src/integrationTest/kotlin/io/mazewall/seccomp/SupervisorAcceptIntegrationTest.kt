@@ -36,10 +36,10 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test @EnabledIfLinuxAndSupported
-    fun `supervised addressless accept injects a connected socket`() = exercise(peerMemory = false)
+    fun `supervised addressless accept is denied when no identity-bound authority is available`() = exercise(peerMemory = false)
 
     @Test @EnabledIfLinuxAndSupported
-    fun `supervised peer address output explicitly denies unsupported memory authority`() = exercise(peerMemory = true)
+    fun `supervised peer address output is denied when no identity-bound authority is available`() = exercise(peerMemory = true)
 
     private fun exercise(peerMemory: Boolean) {
         val authorized = AtomicInteger()
@@ -74,19 +74,8 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
                         LegitContext().run()
                     }
                     val result = future.get(20, TimeUnit.SECONDS)
-                    if (peerMemory) {
-                        assertEquals(1, assertInstanceOf(LinuxNative.SyscallResult.Error::class.java, result).errno)
-                    } else {
-                        val opened = assertInstanceOf(SupervisorDescriptorResult.Opened::class.java, SupervisorDescriptorResult.from(result, LinuxNative))
-                        opened.descriptor.use { accepted ->
-                            client.getOutputStream().write(42)
-                            NativeArena.ofConfined().use { arena ->
-                                val byte = arena.allocate(1L)
-                                assertEquals(1L, LinuxNative.memory.read(accepted.handle, byte, 1).getOrThrow("read accepted socket"))
-                                assertEquals(42.toByte(), byte.readByte(0))
-                            }
-                        }
-                    }
+                    val denied = assertInstanceOf(SupervisorDescriptorResult.Denied::class.java, SupervisorDescriptorResult.from(result, LinuxNative))
+                    assertEquals(1, denied.errno)
                     assertTrue(authorized.get() > 0, "JVM policy must authorize the request before helper execution")
                 }
             }

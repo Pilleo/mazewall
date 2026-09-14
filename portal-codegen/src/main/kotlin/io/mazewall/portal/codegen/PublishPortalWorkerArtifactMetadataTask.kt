@@ -9,18 +9,24 @@ import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import java.nio.file.Files
 
 /** Publishes host-side references to the verified bundle produced by this project. */
+@DisableCachingByDefault(because = "The published artifact metadata contains host-local artifact locations.")
 public abstract class PublishPortalWorkerArtifactMetadataTask : DefaultTask() {
     @get:Input
     public abstract val registrations: ListProperty<PortalServiceRegistration>
 
     @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
     public abstract val archiveFile: RegularFileProperty
 
     @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
     public abstract val digestFile: RegularFileProperty
 
     @get:OutputDirectory

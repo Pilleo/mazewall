@@ -1,7 +1,7 @@
 ---
 title: "Interface decoupling for ProcessBuilder execution in RealGitHubClient"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "orchestrator"

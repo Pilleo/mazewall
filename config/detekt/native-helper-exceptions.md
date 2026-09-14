@@ -16,6 +16,9 @@ bypasses the configured `ForbiddenSuppress` rule.
 | Enforcer `TraceeProcAuthority.readable`, `readOnlyNul` | Throw count; loop jumps | Independent overflow, range, permission and malformed-map guards protect proc-memory access. Native authority tests cover unreadable memory and bounded read-only NUL capture. |
 | Enforcer `SupervisorSeccompNotifInstaller.installOwned` | Throw count | Platform support, irreversible installation and handshake failures retain explicit partial-state failure boundaries. Installation handshake/deadline tests exercise these errors. |
 | Profiler `HandshakeSession.Active.performHandshake`, notification work `advance` | Return count | Terminal handshake, publication and ACK outcomes yield independently; failed replies cannot publish or trigger another response. Handshake and session liveness tests cover terminal outcomes. |
+| Portal `ProcessBroker` | Function count | Worker admission, asynchronous handoff, and reverse-order retirement remain separate ownership phases. Portal integration tests cover cancellation, failed handshakes, worker recycling, and terminal cleanup. |
+| Profiler `AgentDefinitionFile.decode` | Complexity; throw count | Every untrusted record field and identity collision is independently rejected before publication. Agent-definition decoder tests cover malformed headers, record lengths, duplicate identities, and unknown records. |
+| Profiler `TierEBpfProgramBuilder.buildSysEnterProgram` | Method length | eBPF instruction ordering and patched jump offsets must be reviewed as one contiguous verifier program. Tier E builder and kernel smoke tests validate the emitted program. |
 
 Compatibility shims use narrowly reviewed `UnusedParameter` annotations because removing the
 parameters would break linkage, while using them would fabricate descriptor ownership. Their

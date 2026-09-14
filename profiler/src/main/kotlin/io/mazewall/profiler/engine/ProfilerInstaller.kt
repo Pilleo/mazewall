@@ -2,9 +2,7 @@ package io.mazewall.profiler.engine
 
 import io.mazewall.core.FdOwnership
 import io.mazewall.BpfFilter
-import io.mazewall.LinuxNative
 import io.mazewall.NativeEngine
-import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
 import io.mazewall.core.Arch
@@ -23,32 +21,6 @@ import java.util.concurrent.CountDownLatch
  * Internal orchestrator for installing profiling filters and initializing the listener.
  */
 internal object ProfilerInstaller {
-    /**
-     * Installs a seccomp profiling filter (SECCOMP_RET_USER_NOTIF) for the current thread.
-     */
-    fun installProfilingFilterForThread(
-        socketPath: String,
-        policy: PolicyDefinition<*>,
-        accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
-        pathCache: MutableMap<String, Long>,
-        processWide: Boolean = false,
-        connectWithRetry: ((String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>)? = null,
-        startTraceListener: (
-            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-            MutableList<TraceEvent>,
-            MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
-            MutableMap<String, Long>,
-            CountDownLatch
-        ) -> Unit,
-    ) {
-        installProfilingFilterForThread(
-            ProfilerInstallationContext(LinuxNative.snapshot(), Platform.featureMatrix.seccompUserNotifSupported),
-            socketPath, policy, accumulatedLogs, stackTracesMap, pathCache, processWide,
-            connectWithRetry, startTraceListener = startTraceListener,
-        )
-    }
-
     fun installProfilingFilterForThread(
         context: ProfilerInstallationContext,
         socketPath: String,
@@ -99,25 +71,6 @@ internal class ProfilerInstallerSession(
     private val processWide: Boolean = false,
     private val context: ProfilerInstallationContext,
 ) {
-    constructor(
-        socketPath: String,
-        policy: PolicyDefinition<*>,
-        accumulatedLogs: MutableList<TraceEvent>,
-        stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
-        pathCache: MutableMap<String, Long>,
-        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-        startTraceListener: (
-            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-            MutableList<TraceEvent>,
-            MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
-            MutableMap<String, Long>,
-            CountDownLatch,
-        ) -> Unit,
-        processWide: Boolean = false,
-    ) : this(
-        socketPath, policy, accumulatedLogs, stackTracesMap, pathCache, connectWithRetry,
-        startTraceListener, processWide, ProfilerInstallationContext(LinuxNative.snapshot(), Platform.featureMatrix.seccompUserNotifSupported),
-    )
 
     fun install() = install(SeccompInstallationGate.Direct)
 

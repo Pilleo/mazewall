@@ -274,7 +274,8 @@ class NativeSocketInputStreamTest {
             val stream = NativeSocketInputStream(
                 TestFileDescriptors
                 .replace<FileDescriptorRole.Generic>(1),
-                    arena,
+                arena,
+                MockNativeMemory(),
             )
             val buffer = ByteArray(5)
             assertEquals(0, stream.read(buffer, 0, 0))

@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.BpfFilter
 import io.mazewall.LinuxNative
+import io.mazewall.NativeEngine
 import io.mazewall.Platform
 import io.mazewall.PolicyDefinition
 import io.mazewall.UnsupportedKernelFeatureException
@@ -69,6 +70,17 @@ public object SupervisorInstaller {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
         onFilterApplied: () -> Unit = {},
+    ): SupervisorSession = installSupervisedFilterForThread(policy, scopingPolicy, onFilterApplied, LinuxNative.snapshot())
+
+    /**
+     * Installs a supervised filter using native authority supplied by the caller.
+     * The three-argument overload remains the public convenience entry point.
+     */
+    public fun installSupervisedFilterForThread(
+        policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy,
+        onFilterApplied: () -> Unit,
+        native: NativeEngine,
     ): SupervisorSession {
         requireReusableInstallations()
         ValidationListenerPreload.ensureLoaded()
@@ -94,6 +106,8 @@ public object SupervisorInstaller {
             lifetime.start()
             runtime.register(tid)
             SupervisorSeccompNotifInstaller.installOwned(
+                native = native,
+                userNotifSupported = Platform.featureMatrix.seccompUserNotifSupported,
                 socketPath = context.socketPath,
                 filter = filter,
                 processWide = false,
@@ -106,6 +120,7 @@ public object SupervisorInstaller {
                     socketFd,
                     scopingPolicy,
                     runtime,
+                    native,
                     onUnexpectedTermination = { cause -> lifetime.fail(cause) },
                 )
                 lifetime.attach(AutoCloseable { listener.requestStop() })
@@ -140,7 +155,7 @@ internal class JVMValidationListener(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val scopingPolicy: StacktraceScopingPolicy,
     private val runtime: SupervisorRuntimeContext = SupervisorRuntimeContext(),
-    private val native: io.mazewall.NativeEngine = LinuxNative.snapshot(),
+    private val native: NativeEngine,
     private val onUnexpectedTermination: (Throwable) -> Unit = {},
     private val launch: (Thread) -> Unit = Thread::start,
 ) {

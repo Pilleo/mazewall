@@ -69,10 +69,10 @@ class SecureExecRouteExecutorTest {
             assertEquals(ReplyExecutionResult.ReplySucceeded, with(arena) { interpreter.execute(effect, SupervisorReplyContext(42, context.response)) })
         }
         assertEquals(listOf(KernelReply(42, -1, 0, false)), fixture.replies)
-        assertEquals(listOf(51005, 51006, 51002), fixture.closed)
+        assertEquals(listOf(51002), fixture.closed)
         val words = java.nio.ByteBuffer
             .wrap(writes.single())
             .order(java.nio.ByteOrder.BIG_ENDIAN)
-        assertEquals(listOf(61L, 12288L, 4096L, 8192L, 322L, 1L), List(6) { words.long })
+        assertEquals(listOf(-1L, 0L, 0L, 0L, 0L, 1L), List(6) { words.long })
     }
 }

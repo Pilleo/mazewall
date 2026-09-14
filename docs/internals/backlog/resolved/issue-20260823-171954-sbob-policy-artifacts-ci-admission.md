@@ -1,7 +1,7 @@
 ---
 title: "SBoB Policy Artifacts Workflow: Pinned, Signed, Versioned Policies for CI Admission"
 severity: "ENHANCEMENT"
-status: "open"
+status: "resolved"
 priority: medium
 component: "enforcer"
 target_modules:

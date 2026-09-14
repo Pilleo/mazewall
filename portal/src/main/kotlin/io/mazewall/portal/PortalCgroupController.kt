@@ -93,19 +93,21 @@ internal object RealPortalCgroupController : PortalCgroupController {
         profile: PortalWorkerProfile,
     ) {
         if (Files.isSymbolicLink(root) || !Files.isDirectory(root, NOFOLLOW_LINKS)) {
-            throw PortalCgroupUnavailableException("delegated root must be a real directory")
+            unavailable("delegated root must be a real directory")
         }
         val controllers =
             runCatching { Files.readString(root.resolve("cgroup.controllers"), StandardCharsets.UTF_8).trim().split(Regex("\\s+")) }
-                .getOrElse { throw PortalCgroupUnavailableException("delegated root has no readable cgroup.controllers") }
+                .getOrElse { unavailable("delegated root has no readable cgroup.controllers") }
                 .toSet()
         if (profile.memoryMaxBytes != null && "memory" !in controllers) {
-            throw PortalCgroupUnavailableException("delegated root does not provide the memory controller")
+            unavailable("delegated root does not provide the memory controller")
         }
         if (profile.cpuLimit != null && "cpu" !in controllers) {
-            throw PortalCgroupUnavailableException("delegated root does not provide the cpu controller")
+            unavailable("delegated root does not provide the cpu controller")
         }
     }
+
+    private fun unavailable(reason: String): Nothing = throw PortalCgroupUnavailableException(reason)
 
     private fun write(
         path: Path,

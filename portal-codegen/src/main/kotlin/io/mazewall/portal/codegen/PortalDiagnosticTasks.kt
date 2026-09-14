@@ -4,8 +4,10 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 
 /** Completion marker for portal generation and configured worker-artifact validation. */
+@DisableCachingByDefault(because = "The task is only a dependency-driven validation marker.")
 public open class PortalCheckTask : DefaultTask() {
     @TaskAction
     public fun verify() {
@@ -14,6 +16,7 @@ public open class PortalCheckTask : DefaultTask() {
 }
 
 /** Prints stable configured service metadata without executing worker code. */
+@DisableCachingByDefault(because = "The task writes diagnostic output rather than reusable artifacts.")
 public abstract class PortalDescribeTask : DefaultTask() {
     @get:Input
     public abstract val registrations: ListProperty<PortalServiceRegistration>

@@ -57,6 +57,13 @@ public class TierEbpfEngine(
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
+        private const val SESSION_TAG_OFFSET: Long = 0
+        private const val TARGET_TGID_OFFSET: Long = 4
+        private const val SESSION_RESERVED_OFFSET: Long = 8
+        private const val MARKER_FAILURE_COUNTER_INDEX = 3
+        private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
+        private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
+        private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
     }
 
     /** One eBPF instruction. */
@@ -137,9 +144,9 @@ public class TierEbpfEngine(
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
-            configuration.set(ValueLayout.JAVA_INT, 0, sessionTag)
-            configuration.set(ValueLayout.JAVA_INT, 4, targetTgid)
-            configuration.set(ValueLayout.JAVA_INT, 8, 0)
+            configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
+            configuration.set(ValueLayout.JAVA_INT, TARGET_TGID_OFFSET, targetTgid)
+            configuration.set(ValueLayout.JAVA_INT, SESSION_RESERVED_OFFSET, 0)
                 updateElem(arena, installed.sessionFd, intSeg(arena, 0), configuration)
             }
             installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd, installed.lossFd, installed.sessionFd), PROG_KPROBE, "tier_e_marker")
@@ -173,7 +180,7 @@ public class TierEbpfEngine(
 
     public fun readLastMarkerPidTgid(): Long = readCounter(2)
 
-    public fun readMarkerFailureCount(): Long = readCounter(3)
+    public fun readMarkerFailureCount(): Long = readCounter(MARKER_FAILURE_COUNTER_INDEX)
 
     /** Snapshot of bounded per-invocation event counts from the BPF metric map. */
     public fun readContextMetrics(): Map<Long, Long> =
@@ -186,9 +193,9 @@ public class TierEbpfEngine(
             var currentKey: MemorySegment? = null
             while (true) {
                 val nextAttr = arena.allocate(32)
-                nextAttr.set(ValueLayout.JAVA_INT, 0, installed.contextMetricFd)
-                nextAttr.set(ValueLayout.ADDRESS, 8, currentKey ?: MemorySegment.NULL)
-                nextAttr.set(ValueLayout.ADDRESS, 16, nextKey)
+                nextAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd)
+                nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, currentKey ?: MemorySegment.NULL)
+                nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, nextKey)
                 when (val result = bpfResult(BPF_MAP_GET_NEXT_KEY, nextAttr, 32)) {
                     is SyscallResult.Error -> {
                         if (result.errno == io.mazewall.ffi.NativeConstants.ENOENT) break
@@ -199,9 +206,9 @@ public class TierEbpfEngine(
                 val contextId = nextKey.get(ValueLayout.JAVA_LONG, 0)
                 key.set(ValueLayout.JAVA_LONG, 0, contextId)
                 val lookupAttr = arena.allocate(32)
-                lookupAttr.set(ValueLayout.JAVA_INT, 0, installed.contextMetricFd)
-                lookupAttr.set(ValueLayout.ADDRESS, 8, key)
-                lookupAttr.set(ValueLayout.ADDRESS, 16, value)
+                lookupAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd)
+                lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, key)
+                lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
                 when (val result = bpfResult(BPF_MAP_LOOKUP_ELEM, lookupAttr, 32)) {
                     is SyscallResult.Success -> metrics[contextId] = value.get(ValueLayout.JAVA_LONG, 0)
                     is SyscallResult.Error -> if (result.errno != io.mazewall.ffi.NativeConstants.ENOENT) result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM)")

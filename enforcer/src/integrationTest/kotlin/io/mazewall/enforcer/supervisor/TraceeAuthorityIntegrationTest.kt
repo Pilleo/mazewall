@@ -110,31 +110,6 @@ class TraceeAuthorityIntegrationTest {
     }
 
     @Test
-    fun `accept with peer memory returns explicit unsupported authority without importing a socket`() {
-        unsupportedAccept(8192)
-    }
-
-    @Test
-    fun `non-null accept address with null length does not silently become addressless`() {
-        unsupportedAccept(0)
-    }
-
-    private fun unsupportedAccept(length: Long) {
-        probe(directory, "unused").use { tracee ->
-            SocketHelperPool(1, 1, SocketHelperProcess::start).use { pool ->
-                pool.session().use { session ->
-                    val notification = SeccompNotification(45, tracee.tid, Arch.current().audit, Arch.current().accept, longArrayOf(-1, 4096, length, 0, 0, 0))
-                    val job = TraceeAuthorityJob(notification, Deadline.afterMillis(30000), emptyList())
-                    val result = session.submitAuthority(job)
-                    job.prepared.get(10, TimeUnit.SECONDS)
-                    job.decision.complete(TraceeAuthorityDecision(SupervisorRoute.InjectFd, null))
-                    assertEquals(SupervisorReplyEffect.UnsupportedAuthority(UnsupportedTraceeAuthority.AcceptPeerMemory), authority(result))
-                }
-            }
-        }
-    }
-
-    @Test
     fun `secure exec captures target and read-only NUL in the helper preserving vector registers`() {
         probe(directory, "/bin/true").use { tracee ->
             SocketHelperPool(1, 1, SocketHelperProcess::start).use { pool ->

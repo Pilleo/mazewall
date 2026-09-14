@@ -1165,6 +1165,7 @@ public final class io/mazewall/enforcer/supervisor/SupervisorDaemonManager$Compa
 public final class io/mazewall/enforcer/supervisor/SupervisorInstaller {
 	public static final field INSTANCE Lio/mazewall/enforcer/supervisor/SupervisorInstaller;
 	public final fun installSupervisedFilterForThread (Lio/mazewall/PolicyDefinition;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;Lkotlin/jvm/functions/Function0;)Lio/mazewall/enforcer/supervisor/SupervisorSession;
+	public final fun installSupervisedFilterForThread (Lio/mazewall/PolicyDefinition;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;Lkotlin/jvm/functions/Function0;Lio/mazewall/NativeEngine;)Lio/mazewall/enforcer/supervisor/SupervisorSession;
 	public static synthetic fun installSupervisedFilterForThread$default (Lio/mazewall/enforcer/supervisor/SupervisorInstaller;Lio/mazewall/PolicyDefinition;Lio/mazewall/enforcer/supervisor/StacktraceScopingPolicy;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/mazewall/enforcer/supervisor/SupervisorSession;
 }
 

@@ -2,6 +2,7 @@ package io.mazewall.enforcer.supervisor
 
 import io.mazewall.LinuxNative
 import io.mazewall.MockNativeEngine
+import io.mazewall.NativeEngine
 import io.mazewall.core.FileDescriptorRole
 import io.mazewall.core.TestFileDescriptors
 import io.mazewall.ffi.memory.writeByte
@@ -11,6 +12,15 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class SupervisorListenerHealthTest {
+    @Test fun `supervisor installer accepts an explicit native engine`() {
+        assertTrue(
+            SupervisorInstaller::class.java.declaredMethods
+                .filter { it.name == "installSupervisedFilterForThread" }
+                .any { NativeEngine::class.java in it.parameterTypes },
+            "Supervisor installation must not resolve native authority from a mutable global",
+        )
+    }
+
     @Test fun `failed thread start closes its accepted socket`() {
         var closes = 0
         val native = MockNativeEngine().apply {
@@ -23,7 +33,7 @@ class SupervisorListenerHealthTest {
         val rejected = IllegalStateException("cannot launch listener")
         LinuxNative.setEngine(native)
         try {
-            val listener = JVMValidationListener(socket, DefaultStacktraceScopingPolicy, launch = { throw rejected })
+            val listener = JVMValidationListener(socket, DefaultStacktraceScopingPolicy, native = native, launch = { throw rejected })
             assertSame(rejected, assertFailsWith<IllegalStateException> { listener.start(CountDownLatch(1)) })
             assertEquals(1, closes)
         } finally {
@@ -49,6 +59,7 @@ class SupervisorListenerHealthTest {
             JVMValidationListener(
                 TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(62006),
                 DefaultStacktraceScopingPolicy,
+                native = native,
                 onUnexpectedTermination = {
                     enteredFailure.countDown()
                     releaseFailure.await()
@@ -83,6 +94,7 @@ class SupervisorListenerHealthTest {
                 TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(62004),
                 DefaultStacktraceScopingPolicy,
                 runtime,
+                native,
                 onUnexpectedTermination = {
                     lifetime.fail(it)
                     reported.countDown()

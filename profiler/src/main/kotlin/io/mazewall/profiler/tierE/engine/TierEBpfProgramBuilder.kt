@@ -104,7 +104,6 @@ public object TierEBpfProgramBuilder {
 
         // Default to an explicit un-attributed observation. A missing marker is
         // evidence, not permission to hide the target syscall.
-        val defaultObservation = p.size
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))

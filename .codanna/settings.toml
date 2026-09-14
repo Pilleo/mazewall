@@ -261,9 +261,6 @@ threshold = 0.6
 # API key: set CODANNA_EMBED_API_KEY environment variable (not stored in config)
 # Override any field with env vars: CODANNA_EMBED_URL, CODANNA_EMBED_MODEL, CODANNA_EMBED_DIM
 embedding_threads = 3
-remote_url = "https://proxy.gonkabroker.com/v1"
-remote_model = "BAAI/bge-m3"
-remote_dim = 1024
 
 
 [file_watch]

@@ -431,4 +431,12 @@ class ProfilerRuntimeTest {
         ),
         )
     }
+
+    @Test
+    fun `native socket reader requires an explicit memory dependency`() {
+        assertTrue(
+            NativeSocketInputStream::class.java.declaredConstructors.none { it.parameterCount == 2 },
+            "A native socket reader must not resolve memory from the mutable LinuxNative singleton",
+        )
+    }
 }

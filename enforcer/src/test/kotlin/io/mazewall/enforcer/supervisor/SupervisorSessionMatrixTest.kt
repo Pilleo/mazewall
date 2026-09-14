@@ -32,23 +32,11 @@ class SupervisorSessionMatrixTest {
             Case("openat", Arch.AMD64.openat, expectedError = -1),
             Case("openat2", Arch.AMD64.openat2, expectedError = -1),
             Case("connect", Arch.AMD64.connect),
-            Case("accept", Arch.AMD64.accept, expectedInjection = true),
+            Case("accept", Arch.AMD64.accept),
             Case("secure exec without path", Arch.AMD64.execve, expectedError = -1),
-            Case("async failure", Arch.AMD64.accept, { it.engine.networking.acceptResult = SupervisorBoundaryFixture.failure(13) }, expectedError = -13),
             Case("id mismatch", configure = { it.responseId = 99 }, expectedError = -1, expectedHandled = false),
             Case("reply failure", configure = { it.replyResult = SupervisorBoundaryFixture.failure(13) }, expectedHandled = false),
             Case("injection failure", Arch.AMD64.open, { it.injectionResult = SupervisorBoundaryFixture.failure(1) }, expectedError = -1),
-            Case("async injection failure", Arch.AMD64.accept, { it.injectionResult = SupervisorBoundaryFixture.failure(13) }, expectedInjection = true, expectedHandled = false),
-            Case("async denial send failure", Arch.AMD64.accept, {
-                it.engine.networking.acceptResult = SupervisorBoundaryFixture.failure(13)
-                it.replyResult = SupervisorBoundaryFixture.failure(13)
-            }, expectedError = -13, expectedHandled = false),
-            Case("async post-reply cleanup failure", Arch.AMD64.accept, { fixture ->
-                fixture.engine.fileSystem.onClose = { fd ->
-                    fixture.closed += fd.value
-                    if (fd.value == 51004) SupervisorBoundaryFixture.failure(5) else SupervisorBoundaryFixture.success(0)
-                }
-            }, expectedInjection = true, expectedHandled = false),
             Case("protocol violation", expectedReplies = 0, expectedHandled = false, invalidState = SupervisorSessionState.ResolvingPath),
         ).map { case ->
             DynamicTest.dynamicTest(case.name) {
@@ -62,8 +50,7 @@ class SupervisorSessionMatrixTest {
                         with(arena) { handler.readAndHandleJvmResponse(fixture.context(arena, case.nr), case.invalidState) }
                     }
                     if (case.expectedReplies != 0) fixture.awaitTerminalProcessing()
-                    // Pending acceptance is not a terminal outcome; the worker barrier above is.
-                    if (case.nr != Arch.AMD64.accept) assertEquals(case.expectedHandled, handled, "synchronous terminal result")
+                    assertEquals(case.expectedHandled, handled, "terminal result")
                     val finalAction = with(arena) {
                         handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP))
                     }

@@ -81,45 +81,6 @@ class SupervisorTerminalFailureTest {
             }
         }
 
-    @Test
-    fun `fatal async failure terminates the owning session without a denial reply`() {
-        val fixture = SupervisorBoundaryFixture()
-        val fatal = LinkageError("fatal accept initialization")
-        val entered = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val uncaught = CountDownLatch(1)
-        val observed = AtomicReference<Throwable>()
-        fixture.engine.networking.onAccept4 = { _, _, _, _ ->
-            Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, failure ->
-                observed.set(failure)
-                uncaught.countDown()
-            }
-            entered.countDown()
-            release.awaitOrFail("allow fatal accept failure")
-            throw fatal
-        }
-        val handler = fixture.handler()
-        NativeArena.ofConfined().use { arena ->
-            try {
-                assertTrue(handler.processNotification(fixture.notification(arena, Arch.AMD64.accept), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
-                entered.awaitOrFail("accept worker entered")
-            } finally {
-                release.countDown()
-            }
-            uncaught.awaitOrFail("fatal worker exit")
-            assertSame(fatal, observed.get())
-            assertEquals(
-                LoopAction.Break,
-                with(arena) { handler.handleActiveListener(arena.allocate(Layouts.POLLFD, 2), arena.allocate(Layouts.SECCOMP_NOTIF), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)) },
-            )
-            assertFalse(handler.processNotification(fixture.notification(arena, Arch.AMD64.clone), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)))
-        }
-        assertEquals(1, fixture.sockets.closeCalledCount.get())
-        assertEquals(1, fixture.writeCount)
-        assertEquals(listOf(51005, 51006), fixture.closed)
-        assertEquals(0, fixture.replies.size)
-    }
-
     private class ThrowingCloser(
         delegate: SocketManager,
     ) : SocketManager by delegate {

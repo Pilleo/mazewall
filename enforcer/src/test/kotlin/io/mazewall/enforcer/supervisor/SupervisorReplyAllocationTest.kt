@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference
 class SupervisorReplyAllocationTest {
     @TestFactory
     fun `reply preparation failure disposes unconsumed effects and terminates`(): List<DynamicTest> =
-        listOf(false, true).flatMap { async ->
+        listOf(false).flatMap { async ->
             listOf(false, true).flatMap { failCreation ->
                 listOf(false, true).map { fatal ->
                     DynamicTest.dynamicTest("${if (async) "async accept" else "sync open"} ${if (failCreation) "arena" else "buffer"} ${if (fatal) "fatal" else "ordinary"}") {

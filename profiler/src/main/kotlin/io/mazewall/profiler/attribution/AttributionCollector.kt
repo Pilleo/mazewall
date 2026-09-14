@@ -220,20 +220,21 @@ public class AttributionCollector(
     }
 
     public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
-        if (expectedProcessIncarnation != null && observation.task.processIncarnation != expectedProcessIncarnation) {
-            integrityAccumulator.recordLifecycleInvalidation()
-            integrityAccumulator.recordAttributionFailure()
-            return listOf(
+        return when {
+            expectedProcessIncarnation != null && observation.task.processIncarnation != expectedProcessIncarnation -> {
+                integrityAccumulator.recordLifecycleInvalidation()
+                integrityAccumulator.recordAttributionFailure()
+                listOf(
                 ResolvedSyscall(
                     observation.copy(invocationId = null, attributionStatus = AttributionStatus.STALE_LIFECYCLE_IDENTITY),
                     null,
                     ResolutionStatus.STALE_LIFECYCLE_IDENTITY,
                 ),
             )
-        }
-        if (observation.attributionStatus != AttributionStatus.PENDING_DICTIONARY) {
-            integrityAccumulator.recordAttributionFailure()
-            return listOf(
+            }
+            observation.attributionStatus != AttributionStatus.PENDING_DICTIONARY -> {
+                integrityAccumulator.recordAttributionFailure()
+                listOf(
                 ResolvedSyscall(
                     observation,
                     null,
@@ -249,28 +250,31 @@ public class AttributionCollector(
                     },
                 ),
             )
-        }
-        if (!attributionLifecycleValid) {
-            integrityAccumulator.recordAttributionFailure()
-            return listOf(
+            }
+            !attributionLifecycleValid -> {
+                integrityAccumulator.recordAttributionFailure()
+                listOf(
                 ResolvedSyscall(
                     observation.copy(invocationId = null, attributionStatus = AttributionStatus.CAUSAL_UNCERTAIN),
                     null,
                     ResolutionStatus.CAUSAL_UNCERTAIN,
                 ),
             )
+            }
+            !retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES) -> {
+                recordLoss()
+                emptyList()
+            }
+            !dictionaryJoiner.enqueue(observation) -> {
+                retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
+                recordLoss()
+                emptyList()
+            }
+            else -> {
+                val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
+                resolveReady(invocationId)
+            }
         }
-        val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
-        if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)) {
-            recordLoss()
-            return emptyList()
-        }
-        if (!dictionaryJoiner.enqueue(observation)) {
-            retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
-            recordLoss()
-            return emptyList()
-        }
-        return resolveReady(invocationId)
     }
 
     public fun recordLoss(count: Long = 1) {

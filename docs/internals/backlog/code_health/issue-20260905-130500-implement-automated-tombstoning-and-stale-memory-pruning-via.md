@@ -17,8 +17,8 @@ open_questions: false
 review_verdict: skipped
 has_side_effects: true
 
-paperclip_issue_id: "66975a69-6190-48d3-ba1e-5b195b23ae07"
-paperclip_identifier: "MAZ-1050"
+paperclip_issue_id: "1bfc0377-5c27-47df-91b5-8a3177cc7e5a"
+paperclip_identifier: "MAZ-1488"
 ---
 
 # 🟡 [Severity: MEDIUM]: Implement automated tombstoning and stale memory pruning via Codanna AST verification

@@ -45,11 +45,15 @@ public data class PortalCpuLimit(
     init {
         require(!quota.isZero && !quota.isNegative) { "portal worker CPU quota must be positive" }
         require(!period.isZero && !period.isNegative) { "portal worker CPU period must be positive" }
-        require(quota.toNanos() % 1_000L == 0L) { "portal worker CPU quota must be whole microseconds" }
-        require(period.toNanos() % 1_000L == 0L) { "portal worker CPU period must be whole microseconds" }
+        require(quota.toNanos() % NANOS_PER_MICROSECOND == 0L) { "portal worker CPU quota must be whole microseconds" }
+        require(period.toNanos() % NANOS_PER_MICROSECOND == 0L) { "portal worker CPU period must be whole microseconds" }
     }
 
-    internal fun cpuMaxValue(): String = "${quota.toNanos() / 1_000L} ${period.toNanos() / 1_000L}"
+    internal fun cpuMaxValue(): String = "${quota.toNanos() / NANOS_PER_MICROSECOND} ${period.toNanos() / NANOS_PER_MICROSECOND}"
+
+    private companion object {
+        const val NANOS_PER_MICROSECOND = 1_000L
+    }
 }
 
 public class PortalWorkerProfileUnavailableException(

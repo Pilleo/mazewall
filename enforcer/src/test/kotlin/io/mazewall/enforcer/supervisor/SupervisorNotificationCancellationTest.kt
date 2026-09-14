@@ -41,7 +41,7 @@ class SupervisorNotificationCancellationTest {
                 NativeArena.ofConfined().use { arena ->
                     with(arena) {
                         val work = handler.beginNotification(
-                            fixture.notification(arena, Arch.AMD64.accept),
+                            fixture.notification(arena, Arch.AMD64.connect),
                             arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
                             fixture.listener,
                             fixture.socket,

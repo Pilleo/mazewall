@@ -19,6 +19,16 @@ class ProfilerInstallerTest {
     }
 
     @Test
+    fun `installer accepts only an explicitly captured native context`() {
+        assertTrue(
+            ProfilerInstaller::class.java.declaredMethods
+                .filter { it.name == "installProfilingFilterForThread" }
+                .all { it.parameterTypes.firstOrNull() == ProfilerInstallationContext::class.java },
+            "ProfilerInstaller must not resolve a mutable LinuxNative singleton during installation",
+        )
+    }
+
+    @Test
     fun `test coordinator thread handles connection retry failure`() {
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()

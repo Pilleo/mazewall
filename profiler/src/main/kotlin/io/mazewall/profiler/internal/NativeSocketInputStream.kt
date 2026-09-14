@@ -1,6 +1,5 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
 import io.mazewall.NativeMemory
 import io.mazewall.core.FdOwnership
 import io.mazewall.core.FdState
@@ -12,9 +11,4 @@ internal class NativeSocketInputStream(
     socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     arena: NativeArena,
     memory: NativeMemory,
-) : NativeDescriptorInputStream(socketFd, arena, "native socket", memory) {
-    constructor(
-        socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
-        arena: NativeArena,
-    ) : this(socketFd, arena, LinuxNative.snapshot().memory)
-}
+) : NativeDescriptorInputStream(socketFd, arena, "native socket", memory)

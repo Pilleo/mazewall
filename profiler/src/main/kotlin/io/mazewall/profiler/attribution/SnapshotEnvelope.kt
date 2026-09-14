@@ -26,6 +26,8 @@ public object SnapshotEnvelope {
     private const val CLOSED_FLAG: Short = 1
     private const val HEADER_SIZE_V1 = 32
     private const val HEADER_SIZE_V2 = 40
+    private const val REMAINING_HEADER_BYTES_V1 = 24
+    private const val REMAINING_HEADER_BYTES_V2 = 32
 
     public class Decoded(
         public val publication: SnapshotPublication,
@@ -70,7 +72,7 @@ public object SnapshotEnvelope {
         require(magic.contentEquals(MAGIC)) { "invalid snapshot envelope magic" }
         val version = input.short
         require(version == VERSION_1 || version == VERSION_2) { "unsupported snapshot envelope version" }
-        require(input.remaining() >= if (version == VERSION_2) 32 else 24) {
+        require(input.remaining() >= if (version == VERSION_2) REMAINING_HEADER_BYTES_V2 else REMAINING_HEADER_BYTES_V1) {
             "snapshot envelope is shorter than its header"
         }
         val flags = input.short.toInt() and 0xffff
