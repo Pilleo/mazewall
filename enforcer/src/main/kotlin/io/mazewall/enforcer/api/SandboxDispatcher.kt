@@ -11,6 +11,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * A functional router that executes blocks of code inside policy-specific sandboxes.
@@ -21,7 +22,7 @@ import java.util.concurrent.Executors
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
-public object SandboxDispatcher {
+public object SandboxDispatcher : AutoCloseable {
     internal const val MAX_CACHED_POOLS: Int = 32
 
     /**
@@ -145,9 +146,24 @@ public object SandboxDispatcher {
      */
     @JvmStatic
     public fun shutdownAll() {
-        synchronized(poolCache) {
-            poolCache.values.forEach { it.shutdown() }
-            poolCache.clear()
+        val pools = synchronized(poolCache) {
+            poolCache.values.toList().also { poolCache.clear() }
         }
+        pools.forEach { it.shutdown() }
+        pools.forEach { pool ->
+            try {
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pool.shutdownNow()
+                    pool.awaitTermination(1, TimeUnit.SECONDS)
+                }
+            } catch (_: InterruptedException) {
+                pool.shutdownNow()
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    override fun close() {
+        shutdownAll()
     }
 }

@@ -12,34 +12,40 @@ class DefaultFileService : FileService {
             destDir.mkdirs()
         }
 
-        val zipIn = ZipInputStream(file.inputStream)
-        var entry = zipIn.getNextEntry()
-        val filesExtracted = mutableListOf<String>()
+        ZipInputStream(file.inputStream).use { zipIn ->
+            var entry = zipIn.getNextEntry()
+            val filesExtracted = mutableListOf<String>()
 
-        while (entry != null) {
-            // Zip Slip Vulnerability: path is resolved directly without validating against destDir escape!
-            val filePath = File(destDir, entry.name).canonicalFile
+            while (entry != null) {
+                // Zip Slip Vulnerability: path is resolved directly without validating against destDir escape!
+                val filePath = File(destDir, entry.name).canonicalFile
 
-            // If it is a directory, create it
-            if (entry.isDirectory) {
-                filePath.mkdirs()
-            } else {
-                // Ensure the parent directories exist
-                filePath.parentFile?.mkdirs()
-                FileOutputStream(filePath).use { fos ->
-                    zipIn.transferTo(fos)
+                // If it is a directory, create it
+                if (entry.isDirectory) {
+                    filePath.mkdirs()
+                } else {
+                    // Ensure the parent directories exist
+                    filePath.parentFile?.mkdirs()
+                    FileOutputStream(filePath).use { fos ->
+                        zipIn.transferTo(fos)
+                    }
+                    filesExtracted.add(filePath.name)
                 }
-                filesExtracted.add(filePath.name)
+                zipIn.closeEntry()
+                entry = zipIn.getNextEntry()
             }
-            zipIn.closeEntry()
-            entry = zipIn.getNextEntry()
+            return "Extracted zip entries: ${filesExtracted.joinToString()}"
         }
-        return "Extracted zip entries: ${filesExtracted.joinToString()}"
     }
 
     override fun runCommand(cmd: String): String {
         val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-        process.waitFor()
-        return "Executed: $cmd"
+        try {
+            process.waitFor()
+            return "Executed: $cmd"
+        } finally {
+            process.descendants().use { children -> children.forEach { it.destroyForcibly() } }
+            process.destroyForcibly()
+        }
     }
 }

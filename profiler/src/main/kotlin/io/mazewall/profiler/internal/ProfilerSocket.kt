@@ -41,18 +41,25 @@ internal object ProfilerSocket {
                     }
                 }
                 val fd = fdRes.getFdOrThrow("socket", FileDescriptorRole.UnixSocket)
-                val connRes =
-                native.networking.connect(
-                    fd,
-                    ConfinedSegment(sockaddrUn.segment),
-                    SupervisorSocketUtils.SOCKADDR_UN_SIZE,
-                )
+                var transferred = false
+                try {
+                    val connRes =
+                    native.networking.connect(
+                        fd,
+                        ConfinedSegment(sockaddrUn.segment),
+                        SupervisorSocketUtils.SOCKADDR_UN_SIZE,
+                    )
 
-                if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fd
+                    if (connRes is LinuxNative.SyscallResult.Success) {
+                        transferred = true
+                        return fd
+                    }
+                    lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
+                } finally {
+                    if (!transferred) {
+                        native.fileSystem.close(fd).getOrThrow("close failed profiler connection")
+                    }
                 }
-                lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                native.fileSystem.close(fd).getOrThrow("close failed profiler connection")
 
                 Thread.sleep(delayMs)
             }

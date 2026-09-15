@@ -103,9 +103,23 @@ private class StressRpc private constructor(
     }
 
     override fun close() {
-        output.close()
-        input.close()
-        socket.close()
+        var failure: Throwable? = null
+        try {
+            output.close()
+        } catch (closeFailure: Throwable) {
+            failure = closeFailure
+        }
+        try {
+            input.close()
+        } catch (closeFailure: Throwable) {
+            failure?.addSuppressed(closeFailure) ?: run { failure = closeFailure }
+        }
+        try {
+            socket.close()
+        } catch (closeFailure: Throwable) {
+            failure?.addSuppressed(closeFailure) ?: run { failure = closeFailure }
+        }
+        failure?.let { throw it }
     }
 
     companion object {

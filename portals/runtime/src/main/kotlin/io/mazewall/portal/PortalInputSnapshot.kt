@@ -10,10 +10,15 @@ public class PortalInputSnapshot private constructor(
     private val spill: Path?,
     public val size: Int,
 ) : AutoCloseable {
-    /** Returns a fresh worker-local view; this never exposes or closes the caller stream. */
+    /**
+     * Returns a fresh worker-local view; this never exposes or closes the caller stream.
+     * The caller owns the returned stream and must close it, or use [useStream].
+     */
     public fun openStream(): InputStream = contents?.inputStream() ?: Files.newInputStream(requireNotNull(spill))
 
-    public fun bytes(): ByteArray = openStream().use(InputStream::readBytes)
+    public inline fun <T> useStream(block: (InputStream) -> T): T = openStream().use(block)
+
+    public fun bytes(): ByteArray = useStream(InputStream::readBytes)
 
     override fun close() {
         spill?.let(Files::deleteIfExists)

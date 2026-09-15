@@ -1,8 +1,6 @@
 package io.mazewall.profiler.tierE.ringbuf
 
-import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.native.RawSyscallOperations
-import io.mazewall.platform.syscall.NativeArg
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -25,14 +23,32 @@ internal class BpfRingBufferReader(
     private val pageSize = linuxPageSize()
     private val arena = Arena.ofShared()
     private val producerMappingSize = pageSize + validatedCapacity * 2
-    private val mappings = mapBoth(mapFd)
-    private val consumerAddress = mappings.first
-    private val producerAddress = mappings.second
-    private val consumer = MemorySegment.ofAddress(consumerAddress).reinterpret(pageSize, arena, null)
-    private val producer = MemorySegment.ofAddress(producerAddress).reinterpret(producerMappingSize, arena, null)
-    private var producerMapped = true
-    private var consumerMapped = true
+    private val consumerMapping: NativeMapping
+    private val producerMapping: NativeMapping
+    private val consumer: MemorySegment
+    private val producer: MemorySegment
+    private var producerMapped = false
+    private var consumerMapped = false
     private var arenaClosed = false
+
+    init {
+        val acquired = mapBoth(mapFd)
+        consumerMapping = acquired.first
+        producerMapping = acquired.second
+        consumerMapped = true
+        producerMapped = true
+        try {
+            consumer = MemorySegment.ofAddress(consumerMapping.address).reinterpret(pageSize, arena, null)
+            producer = MemorySegment.ofAddress(producerMapping.address).reinterpret(producerMappingSize, arena, null)
+        } catch (failure: Throwable) {
+            try {
+                close()
+            } catch (cleanup: Throwable) {
+                failure.addSuppressed(cleanup)
+            }
+            throw failure
+        }
+    }
 
     /** Returns all records committed at the instant the producer position is acquired. */
     fun drain(): List<ByteArray> {
@@ -60,7 +76,7 @@ internal class BpfRingBufferReader(
         var failure: Throwable? = null
         if (producerMapped) {
             try {
-                unmap(producerAddress, producerMappingSize)
+                producerMapping.close()
                 producerMapped = false
             } catch (unmapFailure: Throwable) {
                 failure = unmapFailure
@@ -68,7 +84,7 @@ internal class BpfRingBufferReader(
         }
         if (consumerMapped) {
             try {
-                unmap(consumerAddress, pageSize)
+                consumerMapping.close()
                 consumerMapped = false
             } catch (unmapFailure: Throwable) {
                 failure?.addSuppressed(unmapFailure) ?: run { failure = unmapFailure }
@@ -85,58 +101,29 @@ internal class BpfRingBufferReader(
         failure?.let { throw it }
     }
 
-    private fun map(
-        fd: Int,
-        length: Long,
-        protection: Int,
-        offset: Long,
-    ): Long {
-        val result = native.syscall(
-            SYS_MMAP,
-            NativeArg.LongArg(0),
-            NativeArg.LongArg(length),
-            NativeArg.LongArg(protection.toLong()),
-            NativeArg.LongArg(MAP_SHARED.toLong()),
-            NativeArg.LongArg(fd.toLong()),
-            NativeArg.LongArg(offset),
-        )
-        return when (result) {
-            is SyscallResult.Success -> result.value.also { check(it != 0L) { "mmap returned NULL" } }
-            is SyscallResult.Error -> result.throwErrno("mmap(BPF ring buffer)")
-        }
-    }
-
-    private fun mapBoth(fd: Int): Pair<Long, Long> {
-        val consumerMapping = map(fd, pageSize, METADATA_MAPPING_PROTECTION, 0)
+    private fun mapBoth(fd: Int): Pair<NativeMapping, NativeMapping> {
+        val consumer = NativeMapping.map(native, fd, pageSize, METADATA_MAPPING_PROTECTION, 0)
         return try {
-            consumerMapping to map(fd, producerMappingSize, DATA_MAPPING_PROTECTION, pageSize)
+            consumer to NativeMapping.map(native, fd, producerMappingSize, DATA_MAPPING_PROTECTION, pageSize)
         } catch (expectedMappingFailure: Throwable) {
             try {
-                unmap(consumerMapping, pageSize)
+                consumer.close()
             } catch (expectedCleanupFailure: Throwable) {
                 expectedMappingFailure.addSuppressed(expectedCleanupFailure)
             }
-            arena.close()
+            try {
+                arena.close()
+                arenaClosed = true
+            } catch (arenaFailure: Throwable) {
+                expectedMappingFailure.addSuppressed(arenaFailure)
+            }
             throw expectedMappingFailure
         }
     }
 
-    private fun unmap(
-        address: Long,
-        length: Long,
-    ) {
-        when (val result = native.syscall(SYS_MUNMAP, NativeArg.LongArg(address), NativeArg.LongArg(length))) {
-            is SyscallResult.Success -> Unit
-            is SyscallResult.Error -> result.throwErrno("munmap(BPF ring buffer)")
-        }
-    }
-
     internal companion object {
-        private const val SYS_MMAP = 9L
-        private const val SYS_MUNMAP = 11L
         private const val PROT_READ = 1
         private const val PROT_WRITE = 2
-        private const val MAP_SHARED = 1
         private const val HEADER_SIZE = 8L
         internal const val BUSY_BIT = Int.MIN_VALUE
         internal const val DISCARD_BIT = 1 shl 30

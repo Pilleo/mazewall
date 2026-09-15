@@ -103,12 +103,19 @@ internal object SupervisorSocketUtils {
                     }
                 }
                 val fd = fdRes.getFdOrThrow("socket", FileDescriptorRole.UnixSocket)
-                val connRes = native.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
-                if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fd
+                var transferred = false
+                try {
+                    val connRes = native.networking.connect(fd, ConfinedSegment(sockaddrUn.segment), SOCKADDR_UN_SIZE)
+                    if (connRes is LinuxNative.SyscallResult.Success) {
+                        transferred = true
+                        return fd
+                    }
+                    lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
+                } finally {
+                    if (!transferred) {
+                        native.fileSystem.close(fd)
+                    }
                 }
-                lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                native.fileSystem.close(fd)
 
                 try {
                     Thread.sleep(delayMs)

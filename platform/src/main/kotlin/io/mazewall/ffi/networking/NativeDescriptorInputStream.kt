@@ -18,6 +18,10 @@ import java.io.InterruptedIOException
  * EINTR-safe reader over an externally owned descriptor and caller-owned confined arena.
  * The public primary constructor captures the current native memory dependency once;
  * the additive constructor captures an explicitly supplied dependency instead.
+ *
+ * [close] does not release [socketFd] or [arena]; those stay with the caller so
+ * [java.io.InputStream.use] is safe. Closing the stream after the arena is already
+ * dead is a no-op, not a second owner.
  */
 internal open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,

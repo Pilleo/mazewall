@@ -84,29 +84,39 @@ private fun runAgentScenarioConfigured(
             .allowMmapExec()
             .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT)
             .build()
-        ContainedExecutors.installOnProcess(processBaseline)
-        println("[MAZEWALL] Tier 1 Process-wide containment applied (blocked PTRACE, MOUNT, UNSHARE, CHROOT).")
+        ContainedExecutors.installOnProcess(processBaseline).use {
+            println("[MAZEWALL] Tier 1 Process-wide containment applied (blocked PTRACE, MOUNT, UNSHARE, CHROOT).")
+            return runAgentScenario(useMazewall, scenario, expected)
+        }
     }
+    return runAgentScenario(useMazewall, scenario, expected)
+}
 
+private fun runAgentScenario(
+    useMazewall: Boolean,
+    scenario: String,
+    expected: ExpectedAgentResult,
+): AgentScenarioResult {
     AgentDemoFixture.create().use { fixture ->
-        val tools = AgentTools(useMazewall, fixture.workspace)
-        val model: ChatLanguageModel = MockAttackLlm(scenario)
-        val outcome = runScenarioBoundary(
-            action = {
-                println("[AGENT] Prompting LLM...")
-                val response = model.generate(emptyList())
-                val aiMessage = response.content()
-                if (aiMessage.hasToolExecutionRequests()) {
-                    val toolRequest = aiMessage.toolExecutionRequests().single()
-                    println("[AGENT] LLM requested tool execution: ${toolRequest.name()} with args ${toolRequest.arguments()}")
-                    classifyToolOutcome(captureRecoverable { invokeTool(tools, toolRequest) })
-                } else {
-                    AgentOutcome.InfrastructureFailure(IllegalStateException("scenario produced no tool request"))
-                }
-            },
-            cleanup = tools::shutdown,
-        )
-        return AgentScenarioResult(scenario, expected, outcome)
+        AgentTools(useMazewall, fixture.workspace).use { tools ->
+            val model: ChatLanguageModel = MockAttackLlm(scenario)
+            val outcome = runScenarioBoundary(
+                action = {
+                    println("[AGENT] Prompting LLM...")
+                    val response = model.generate(emptyList())
+                    val aiMessage = response.content()
+                    if (aiMessage.hasToolExecutionRequests()) {
+                        val toolRequest = aiMessage.toolExecutionRequests().single()
+                        println("[AGENT] LLM requested tool execution: ${toolRequest.name()} with args ${toolRequest.arguments()}")
+                        classifyToolOutcome(captureRecoverable { invokeTool(tools, toolRequest) })
+                    } else {
+                        AgentOutcome.InfrastructureFailure(IllegalStateException("scenario produced no tool request"))
+                    }
+                },
+                cleanup = tools::close,
+            )
+            return AgentScenarioResult(scenario, expected, outcome)
+        }
     }
 }
 

@@ -31,28 +31,30 @@ internal fun main() {
 
     val stopRequested = AtomicBoolean(false)
     val daemon = TierEDaemonService(stopRequested)
+    ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+        Runtime.getRuntime().addShutdownHook(
+            Thread {
+                stopRequested.set(true)
+                runCatching { server.close() }
+                runCatching { daemon.shutdown() }
+                runCatching { Files.deleteIfExists(Path.of(socketPath)) }
+            },
+        )
 
-    Runtime.getRuntime().addShutdownHook(
-        Thread {
-            runCatching { daemon.shutdown() }
-            runCatching { Files.deleteIfExists(Path.of(socketPath)) }
-        },
-    )
+        // Bind abstract unix socket via sun.nio? For now use TCP loopback for prototype simplicity.
+        // TODO replace with AF_UNIX once available.
 
-    val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
-    // Bind abstract unix socket via sun.nio? For now use TCP loopback for prototype simplicity.
-    // TODO replace with AF_UNIX once available.
+        System.out.println("[tier-e] listening port=${server.localPort}")
 
-    System.out.println("[tier-e] listening port=${server.localPort}")
-
-    while (!stopRequested.get()) {
-        val client = runCatching { server.accept() }.getOrNull() ?: break
-        thread(name = "tier-e-client") {
-            try {
-                TierEClientSession.run(client, stopRequested, daemon::executeCommand)
-            } catch (expectedClientDisconnect: Exception) {
-                // Hard socket errors still end the session; idle timeouts are
-                // handled inside TierEClientSession and continue polling.
+        while (!stopRequested.get()) {
+            val client = runCatching { server.accept() }.getOrNull() ?: break
+            thread(name = "tier-e-client") {
+                try {
+                    TierEClientSession.run(client, stopRequested, daemon::executeCommand)
+                } catch (expectedClientDisconnect: Exception) {
+                    // Hard socket errors still end the session; idle timeouts are
+                    // handled inside TierEClientSession and continue polling.
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package io.mazewall.profiler.collector
 
+import io.mazewall.platform.process.snapshotDescendants
 import io.mazewall.profiler.api.IoUringVisibility
 import io.mazewall.profiler.api.ObservationSource
 import io.mazewall.profiler.api.ProfileObservation
@@ -137,12 +138,7 @@ internal object StraceProcessTree {
 
     fun terminate(process: Process) {
         val interruption = CleanupInterruption(Thread.interrupted())
-        val handles = process
-            .toHandle()
-            .descendants()
-            .toList()
-            .asReversed() +
-            process.toHandle()
+        val handles = process.toHandle().snapshotDescendants().asReversed() + process.toHandle()
 
         handles.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy)
         awaitEach(handles, reapTimeout, interruption)
@@ -154,11 +150,7 @@ internal object StraceProcessTree {
 
         // Descendants can fork while the first wave is being reaped. Rescan
         // once after forcible termination so grandchildren are not orphaned.
-        val lateDescendants = process
-            .toHandle()
-            .descendants()
-            .toList()
-            .asReversed()
+        val lateDescendants = process.toHandle().snapshotDescendants().asReversed()
         lateDescendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
         awaitEach(lateDescendants, reapTimeout, interruption)
 

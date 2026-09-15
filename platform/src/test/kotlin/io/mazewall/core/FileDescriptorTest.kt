@@ -190,6 +190,41 @@ class FileDescriptorTest {
     }
 
     @Test
+    fun `use retains the block failure when close also fails`(): Unit =
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            val real = LinuxNative.snapshot()
+            val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    throw IllegalStateException("injected close failure")
+                }
+            }
+            LinuxNative.setEngine(
+                object : NativeEngine by real {
+                    override val fileSystem = fileSystem
+                },
+            )
+            try {
+                val failure = org.junit.jupiter.api.assertThrows<RuntimeException> {
+                    fd.use { throw RuntimeException("block failed") }
+                }
+                assertEquals("block failed", failure.message)
+                assertTrue(failure.suppressed.any { it.message == "injected close failure" })
+            } finally {
+                LinuxNative.resetToDefault()
+            }
+        }
+
+    @Test
+    fun `asAutoCloseable closes the owned descriptor`() {
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            fd.asAutoCloseable().use { }
+            assertFalse(fd.isLiveForIo())
+        }
+    }
+
+    @Test
     fun `reclaiming the same integer after close is a new generation`(): Unit =
         withArena {
         // Close the lowest-open first; the next open reclaims the same integer.

@@ -212,7 +212,13 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
         FdEpoch.retire(value, lifecycle.generation)
     }
 
-    /** Atomically retires exactly one native close attempt, including failed close(2). */
+    /**
+     * Atomically retires exactly one native close attempt, including failed close(2).
+     *
+     * Linux `close(2)` that returns `EINTR` still closes the integer; retrying it can
+     * close a reused descriptor. Native dispatch therefore retires the token even when
+     * the syscall result is an error. Callers must not retry the same generation.
+     */
     internal fun claimForClose(): Boolean {
         val claimed = FdEpoch.retire(value, generation)
         if (claimed) lifecycle.closed = true
@@ -484,10 +490,22 @@ internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdO
  * Executes the given [block] with this file descriptor and then closes it correctly,
  * even if an exception is thrown.
  */
-internal inline fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
+internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
+    var blockFailure: Throwable? = null
     try {
         return block(this)
+    } catch (failure: Throwable) {
+        blockFailure = failure
+        throw failure
     } finally {
-        this.close()
+        try {
+            close()
+        } catch (closeFailure: Throwable) {
+            val prior = blockFailure
+            if (prior != null) prior.addSuppressed(closeFailure) else throw closeFailure
+        }
     }
 }
+
+/** Java try-with-resources adapter for an owned open descriptor. */
+internal fun FileDescriptor<*, FdState.Open, FdOwnership.Owned>.asAutoCloseable(): AutoCloseable = AutoCloseable { close() }

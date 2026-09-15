@@ -292,6 +292,11 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.ResourceRetirement\$Companion")
+            // FileDescriptor.use always closes and suppresses close failures onto the block
+            // failure; it does not swallow containment errors.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.FileDescriptorKt")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
