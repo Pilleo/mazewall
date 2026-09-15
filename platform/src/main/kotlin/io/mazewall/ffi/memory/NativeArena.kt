@@ -13,6 +13,7 @@ internal class NativeArena internal constructor(
     internal val isShared: Boolean,
 ) : AutoCloseable {
     override fun close() {
+        if (!arena.scope().isAlive) return
         arena.close()
     }
 

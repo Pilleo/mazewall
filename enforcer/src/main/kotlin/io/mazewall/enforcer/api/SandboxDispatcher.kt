@@ -64,15 +64,7 @@ public object SandboxDispatcher : AutoCloseable {
      * Executor threads are permanently contained and therefore pooled forever by design;
      * eviction only happens under cap pressure or shutdownAll().
      */
-    private val poolCache = object : java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ExecutorService>): Boolean {
-            if (size > MAX_CACHED_POOLS) {
-                eldest.value.shutdown()
-                return true
-            }
-            return false
-        }
-    }
+    private val poolCache = java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true)
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -111,7 +103,8 @@ public object SandboxDispatcher : AutoCloseable {
             io.mazewall.platform.syscall.Arch
             .current(),
         )
-        synchronized(poolCache) {
+        var evicted: ExecutorService? = null
+        val wrapped = synchronized(poolCache) {
             val existing = poolCache[key]
             if (existing != null) return existing
 
@@ -127,11 +120,17 @@ public object SandboxDispatcher : AutoCloseable {
             // Wrap the raw pool to ensure the policy is applied to every thread created by it.
             // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
             // We use the internal installOnCurrentThread to wrap execution directly.
-            val wrapped = io.mazewall.enforcer.internal
+            val created = io.mazewall.enforcer.internal
                 .ContainedExecutorWrapper(rawPool, definition)
-            poolCache[key] = wrapped
-            return wrapped
+            poolCache[key] = created
+            if (poolCache.size > MAX_CACHED_POOLS) {
+                val eldestKey = poolCache.keys.first()
+                evicted = poolCache.remove(eldestKey)
+            }
+            created
         }
+        evicted?.let(::retirePool)
+        return wrapped
     }
 
     /**
@@ -149,17 +148,19 @@ public object SandboxDispatcher : AutoCloseable {
         val pools = synchronized(poolCache) {
             poolCache.values.toList().also { poolCache.clear() }
         }
-        pools.forEach { it.shutdown() }
-        pools.forEach { pool ->
-            try {
-                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
-                    pool.shutdownNow()
-                    pool.awaitTermination(1, TimeUnit.SECONDS)
-                }
-            } catch (_: InterruptedException) {
+        pools.forEach(::retirePool)
+    }
+
+    private fun retirePool(pool: ExecutorService) {
+        pool.shutdown()
+        try {
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
                 pool.shutdownNow()
-                Thread.currentThread().interrupt()
+                pool.awaitTermination(1, TimeUnit.SECONDS)
             }
+        } catch (_: InterruptedException) {
+            pool.shutdownNow()
+            Thread.currentThread().interrupt()
         }
     }
 

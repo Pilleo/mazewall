@@ -76,6 +76,7 @@ class SandboxDispatcherCacheTest {
 
         assertEquals(SandboxDispatcher.MAX_CACHED_POOLS, SandboxDispatcher.cachedPoolsForTest().size)
         assertTrue(firstPool.isShutdown, "the least recently used pool must be shut down before eviction")
+        assertTrue(firstPool.isTerminated, "evicted pools must finish terminating")
     }
 
     @Test

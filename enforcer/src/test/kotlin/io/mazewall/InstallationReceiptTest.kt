@@ -44,4 +44,22 @@ class InstallationReceiptTest {
         assertEquals(false, receipt.installed)
         assertEquals(true, receipt.landlockApplied)
     }
+
+    @Test
+    fun `unsupervised receipts can be released by fire-and-forget install APIs`() {
+        val receipt = InstallationReceipt(false, Policy.builder().build().definition)
+        receipt.releaseIfUnsupervised()
+    }
+
+    @Test
+    fun `supervised receipts cannot be dropped by fire-and-forget install APIs`() {
+        val receipt =
+            InstallationReceipt.withSupervisorRegistration(
+                false,
+                Policy.builder().build().definition,
+                AutoCloseable { },
+            )
+        kotlin.test.assertFailsWith<IllegalStateException> { receipt.releaseIfUnsupervised() }
+        receipt.close()
+    }
 }

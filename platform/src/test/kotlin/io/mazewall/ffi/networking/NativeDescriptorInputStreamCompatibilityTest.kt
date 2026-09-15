@@ -27,6 +27,7 @@ import java.io.InterruptedIOException
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @EnabledOnOs(OS.LINUX)
@@ -96,6 +97,22 @@ class NativeDescriptorInputStreamCompatibilityTest {
         defaultStream.close()
         assertTrue(fd.isLiveForIo())
     }
+
+    @Test
+    fun `owned stream close retires the descriptor and arena`() =
+        withDescriptor { fd, arena ->
+            val stream =
+                NativeDescriptorInputStream(
+                    socketFd = fd,
+                    arena = arena,
+                    description = "owned",
+                    memory = LinuxNative.snapshot().memory,
+                    ownership = NativeStreamOwnership.OwnsDescriptorAndArena,
+                )
+            stream.close()
+            assertTrue(fd.isInvalid)
+            assertFalse(arena.isAlive)
+        }
 
     private fun markerMemory(
         expectedFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,

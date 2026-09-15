@@ -21,6 +21,7 @@ public object ContainedExecutors {
     public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
         io.mazewall.enforcer.api.ContainedExecutors
             .installOnCurrentThread(*policies)
+            .releaseIfUnsupervised()
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread")
@@ -30,12 +31,14 @@ public object ContainedExecutors {
     ) {
         io.mazewall.enforcer.api.ContainedExecutors
             .installOnCurrentThread(policy, scopingPolicy)
+            .releaseIfUnsupervised()
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnProcess")
     public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
         io.mazewall.enforcer.api.ContainedExecutors
             .installOnProcess(*policies)
+            .releaseIfUnsupervised()
     }
 
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.wrap")

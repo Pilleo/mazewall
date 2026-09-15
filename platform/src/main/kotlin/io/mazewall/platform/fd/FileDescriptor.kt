@@ -225,6 +225,13 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
         return claimed
     }
 
+    /**
+     * Dispatches close(2) and then forgets this generation.
+     *
+     * Linux still releases the integer when close(2) returns `EINTR`, so a later
+     * retry can close a reused fd. The token is retired even if the syscall result
+     * is an error; see docs/internals/designs/core/fd-token-ownership.md.
+     */
     internal fun closeResource() {
         synchronized(lifecycle) {
             if (value < 0 || isClosedType() || !isLiveForIo()) return

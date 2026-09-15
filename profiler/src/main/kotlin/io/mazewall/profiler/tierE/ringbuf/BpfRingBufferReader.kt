@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.ringbuf
 
+import io.mazewall.platform.native.NativeMapping
 import io.mazewall.platform.native.RawSyscallOperations
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment

@@ -118,10 +118,10 @@ class BpfRingBufferReaderTest {
         ) { _, method, args ->
             check(method.name == "syscall")
             when (args[0] as Long) {
-                9L -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(
+                Syscall.MMAP.numberFor(Arch.current()).toLong() -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(
                     if (mappings++ == 0) consumer.address() else producer.address(),
                 )
-                11L -> {
+                Syscall.MUNMAP.numberFor(Arch.current()).toLong() -> {
                     val address = (args[1] as NativeArg.LongArg).value
                     unmappedAddresses += address
                     if (failFirstProducerUnmap && address == producer.address()) {

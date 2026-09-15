@@ -18,7 +18,6 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.platform.native.NativeNetworking
 import io.mazewall.platform.native.getFdOrThrow
-import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
@@ -143,7 +142,8 @@ internal object SupervisorSocketUtils {
         networking: NativeNetworking,
         beforeAttempt: (() -> Unit)? = null,
     ): Boolean {
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { nativeArena ->
+            val arena = nativeArena.arena
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             dummyByte.set(ValueLayout.JAVA_BYTE, 0L, 0.toByte())
 
@@ -196,7 +196,8 @@ internal object SupervisorSocketUtils {
         native: NativeEngine,
         beforeAttempt: (() -> Unit)? = null,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
-        Arena.ofConfined().use { arena ->
+        io.mazewall.ffi.memory.NativeArena.ofConfined().use { nativeArena ->
+            val arena = nativeArena.arena
             val dummyByte = arena.allocate(ValueLayout.JAVA_BYTE)
             val controlBuf = arena.allocate(MSG_CONTROL_BUF_SIZE)
             controlBuf.fill(0)

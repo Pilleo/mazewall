@@ -54,7 +54,7 @@ internal class SeccompSessionBuffers private constructor(
             notifPool: SegmentPool = SegmentPool.SECCOMP_NOTIF_POOL,
             respPool: SegmentPool = SegmentPool.SECCOMP_NOTIF_RESP_POOL,
         ): SeccompSessionBuffers {
-            val arena = NativeArena.ofConfined()
+            val arena = NativeArena.ofShared()
             var notif: SegmentLease? = null
             var transferred = false
             try {

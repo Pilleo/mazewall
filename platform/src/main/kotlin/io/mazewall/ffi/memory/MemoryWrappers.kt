@@ -211,8 +211,8 @@ internal value class ErrnoSegment(
             if (!Thread.currentThread().isVirtual) {
                 return block(ErrnoSegment(checkNotNull(carrierPool.get())))
             }
-            return Arena.ofConfined().use { arena ->
-                block(ErrnoSegment(arena.allocate(Layouts.ERRNO)))
+            return NativeArena.ofConfined().use { arena ->
+                block(ErrnoSegment(arena.arena.allocate(Layouts.ERRNO)))
             }
         }
 
