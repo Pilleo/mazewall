@@ -8,7 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
-import kotlin.concurrent.thread
+import java.util.concurrent.TimeUnit
 
 /**
  * Pure-Kotlin stress driver.
@@ -46,51 +46,72 @@ internal fun main(args: Array<String>) {
     }
 
     val self = ProcessHandle.current().pid().toInt()
-    val sock = Socket(InetAddress.getLoopbackAddress(), port)
-    val input = DataInputStream(sock.getInputStream())
-    val out = DataOutputStream(sock.getOutputStream())
+    StressRpc.connect(port).use { rpc ->
+        check(rpc.call("ATTACH $self").startsWith("OK")) { "attach failed" }
+        println("[stress] attached tgid=$self")
+        runWorkers(rpc, workers, batches, syscallsPerBatch)
+    }
+}
 
-    fun rpc(cmd: String): String {
-        out.writeUTF(cmd)
-        out.flush()
+private fun runWorkers(
+    rpc: StressRpc,
+    workers: Int,
+    batches: Int,
+    syscallsPerBatch: Int,
+) {
+    val pool = Executors.newFixedThreadPool(workers)
+    try {
+        val done = CountDownLatch(workers)
+        val decls = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Long>>())
+        repeat(workers) { worker ->
+            pool.submit {
+                try {
+                    val contextId = 1000 + worker
+                    val tid = ProcessHandle.current().pid().toInt() // placeholder; real TID from native
+                    repeat(batches) {
+                        rpc.call("SET_CTX $tid $contextId")
+                        repeat(syscallsPerBatch) { Files.readAllBytes(Path.of("/proc/self/stat")) }
+                        rpc.call("SET_CTX $tid 0")
+                    }
+                    decls.add(contextId to (batches.toLong() * syscallsPerBatch))
+                } finally {
+                    done.countDown()
+                }
+            }
+        }
+        done.await()
+        println("[stress] all workers done")
+        decls.sortedBy { it.first }.forEach { (contextId, expected) -> println("CTX $contextId $expected") }
+    } finally {
+        pool.shutdownNow()
+        val terminated = pool.awaitTermination(5, TimeUnit.SECONDS)
+        runCatching { rpc.call("DETACH") }
+        check(terminated) { "stress workers did not terminate" }
+    }
+}
+
+private class StressRpc private constructor(
+    private val socket: Socket,
+    private val input: DataInputStream,
+    private val output: DataOutputStream,
+) : AutoCloseable {
+    @Synchronized
+    fun call(command: String): String {
+        output.writeUTF(command)
+        output.flush()
         return input.readUTF()
     }
 
-    check(rpc("ATTACH $self").startsWith("OK")) { "attach failed" }
-    println("[stress] attached tgid=$self")
+    override fun close() {
+        output.close()
+        input.close()
+        socket.close()
+    }
 
-    val pool = Executors.newFixedThreadPool(workers)
-    val done = CountDownLatch(workers)
-    val decls = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Long>>())
-
-    repeat(workers) { w ->
-        pool.submit {
-            try {
-                val ctxId = 1000 + w
-                val tid = ProcessHandle.current().pid().toInt() // placeholder; real TID from native
-                // Each batch: set ctx, do N syscalls, clear ctx.
-                repeat(batches) {
-                    rpc("SET_CTX $tid $ctxId")
-                    repeat(syscallsPerBatch) {
-                        Files.readAllBytes(Path.of("/proc/self/stat"))
-                    }
-                    rpc("SET_CTX $tid 0")
-                }
-                decls.add(ctxId to (batches.toLong() * syscallsPerBatch))
-            } finally {
-                done.countDown()
-            }
+    companion object {
+        fun connect(port: Int): StressRpc {
+            val socket = Socket(InetAddress.getLoopbackAddress(), port)
+            return StressRpc(socket, DataInputStream(socket.getInputStream()), DataOutputStream(socket.getOutputStream()))
         }
     }
-
-    done.await()
-    pool.shutdown()
-    println("[stress] all workers done")
-
-    for ((ctx, expected) in decls.sortedBy { it.first }) {
-        println("CTX $ctx $expected")
-    }
-
-    runCatching { rpc("DETACH") }
-    sock.close()
 }

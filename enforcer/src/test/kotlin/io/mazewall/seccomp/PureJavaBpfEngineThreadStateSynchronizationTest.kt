@@ -31,7 +31,6 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
     }
@@ -42,7 +41,6 @@ class PureJavaBpfEngineThreadStateSynchronizationTest {
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.resetToDefault()
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
     }

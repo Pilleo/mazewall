@@ -30,14 +30,12 @@ class PureJavaBpfEngineReproductionTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
     }
 
     @Test
     fun `reproduce no_new_privs being set before filter building failure`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val prctlCommands = mutableListOf<PrctlCommand>()
         mockProcess.onPrctl = { command ->
@@ -66,7 +64,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test error propagation and state logging on JVM Error`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val mockMemory = object : MockNativeMemory() {
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
@@ -91,7 +88,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test seccomp installation retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.GetSeccomp) {
@@ -126,7 +122,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test fallback prctl retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
@@ -162,7 +157,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test setNoNewPrivs retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
@@ -194,7 +188,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test verifyInstallation retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0

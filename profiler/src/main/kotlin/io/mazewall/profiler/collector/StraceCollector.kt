@@ -65,19 +65,22 @@ internal class StraceCollector(
 
     @Suppress("ThrowingExceptionFromFinally", "TooGenericExceptionCaught")
     private fun spawnAndRead(workloadClass: Class<out TraceableWorkload>): String {
-        val tempLog = Files.createTempFile("strace_prof_", ".log")
-        val tempOut = Files.createTempFile("strace_prof_", ".out")
-        val tempErr = Files.createTempFile("strace_prof_", ".err")
+        var tempLog: Path? = null
+        var tempOut: Path? = null
+        var tempErr: Path? = null
         var process: Process? = null
         var primary: Throwable? = null
         try {
+            tempLog = Files.createTempFile("strace_prof_", ".log")
+            tempOut = Files.createTempFile("strace_prof_", ".out")
+            tempErr = Files.createTempFile("strace_prof_", ".err")
             val cmd = listOf(
                 "strace",
                 "-f",
                 "-e",
                 "trace=file,network",
                 "-o",
-                tempLog.toAbsolutePath().toString(),
+                checkNotNull(tempLog).toAbsolutePath().toString(),
                 System.getProperty("java.home") + "/bin/java",
                 "-cp",
                 System.getProperty("java.class.path"),
@@ -85,24 +88,24 @@ internal class StraceCollector(
                 workloadClass.name,
             )
             process = ProcessBuilder(cmd)
-                .redirectOutput(tempOut.toFile())
-                .redirectError(tempErr.toFile())
+                .redirectOutput(checkNotNull(tempOut).toFile())
+                .redirectError(checkNotNull(tempErr).toFile())
                 .start()
             StraceProcessTree.await(process, workloadTimeout, "child strace process")
             val exitCode = process.exitValue()
             if (exitCode != 0) {
                 throw IllegalStateException(
-                    "Child JVM failed with exit code $exitCode. Stdout: ${Files.readString(tempOut)}, Stderr: ${Files.readString(tempErr)}",
+                    "Child JVM failed with exit code $exitCode. Stdout: ${Files.readString(checkNotNull(tempOut))}, Stderr: ${Files.readString(checkNotNull(tempErr))}",
                 )
             }
-            return if (Files.exists(tempLog)) Files.readString(tempLog) else ""
+            return checkNotNull(tempLog).let { log -> if (Files.exists(log)) Files.readString(log) else "" }
         } catch (failure: Throwable) {
             primary = failure
             throw failure
         } finally {
             runCatching { process?.takeIf(Process::isAlive)?.let(StraceProcessTree::terminate) }
                 .onFailure { cleanup -> primary?.addSuppressed(cleanup) ?: throw cleanup }
-            listOf(tempLog, tempOut, tempErr).forEach { file ->
+            listOfNotNull(tempLog, tempOut, tempErr).forEach { file ->
                 runCatching { Files.deleteIfExists(file) }
                     .onFailure { cleanup -> primary?.addSuppressed(cleanup) ?: throw cleanup }
             }

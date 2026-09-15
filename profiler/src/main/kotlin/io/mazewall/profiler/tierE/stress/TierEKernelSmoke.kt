@@ -8,8 +8,10 @@ import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
+import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.system.exitProcess
 
 /** Privileged end-to-end diagnostic used by the Docker kernel gate. */
@@ -46,17 +48,14 @@ internal object TierEKernelSmoke {
             args.getOrElse(4) { "platform" },
             args.getOrElse(5) { "1" },
         )
-        val process = ProcessBuilder(command).inheritIO().start()
+        val child = ManagedProcessCapture.start(ProcessBuilder(command).inheritIO())
+        val process = child.process
         val processEpoch = processEpoch(process.pid())
         val session = TierEProfilerSession(TierEbpfEngine(RealNativeEngine), processEpoch, TierEOptions(emissionMode))
         try {
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset)
             args.getOrNull(6)?.toInt()?.let { cpu ->
-                val affinity = ProcessBuilder("taskset", "-pc", cpu.toString(), process.pid().toString())
-                    .redirectErrorStream(true)
-                    .start()
-                val output = affinity.inputStream.bufferedReader().readText()
-                check(affinity.waitFor() == 0) { "failed to pin target to CPU $cpu: $output" }
+                pinTargetToCpu(cpu, process.pid())
             }
             val workloadStarted = System.nanoTime()
             Files.writeString(gate, "go")
@@ -113,6 +112,7 @@ internal object TierEKernelSmoke {
             exitProcess(1)
         } finally {
             session.close()
+            child.close()
             Files.deleteIfExists(gate)
         }
     }
@@ -122,5 +122,20 @@ internal object TierEKernelSmoke {
         return stat.substringAfterLast(") ").split(' ')[19].toLong()
     }
 
+    private fun pinTargetToCpu(
+        cpu: Int,
+        pid: Long,
+    ) {
+        ManagedProcessCapture
+            .start(ProcessBuilder("taskset", "-pc", cpu.toString(), pid.toString()).redirectErrorStream(true))
+            .use { affinity ->
+                val output = affinity.readStdout(Duration.ofSeconds(AFFINITY_TIMEOUT_SECONDS))
+                check(affinity.awaitExit(Duration.ofSeconds(AFFINITY_TIMEOUT_SECONDS)) == 0) {
+                    "failed to pin target to CPU $cpu: $output"
+                }
+            }
+    }
+
+    private const val AFFINITY_TIMEOUT_SECONDS = 10L
     private const val SYS_UNLINK: Int = 87
 }

@@ -49,6 +49,31 @@ class BpfProgLoadLayoutTest {
     }
 
     @Test
+    fun `failed install preserves a descriptor cleanup failure`() {
+        var bpfCalls = 0
+        val native = Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(RawSyscallOperations::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "syscall" -> when (args[0] as Long) {
+                    321L -> when (++bpfCalls) {
+                        1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
+                        else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
+                    }
+                    3L -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
+                    else -> error("unexpected syscall ${args[0]}")
+                }
+                else -> error("unexpected raw operation ${method.name}")
+            }
+        } as RawSyscallOperations
+
+        val failure = assertFailsWith<IllegalStateException> { TierEbpfEngine(native).install(42) }
+
+        assertEquals(1, failure.suppressed.size)
+    }
+
+    @Test
     fun `uses the linux bpf prog load attribute offsets`() {
         assertEquals(16L, BpfProgLoadLayout.LICENSE)
         assertEquals(24L, BpfProgLoadLayout.LOG_LEVEL)

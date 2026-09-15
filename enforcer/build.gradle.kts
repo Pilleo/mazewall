@@ -151,6 +151,10 @@ val integrationTestFreshJvm =
     tasks.register<Test>("integrationTestFreshJvm") {
         configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
+        // Both kernel suites install restrictive filters. Running their worker processes concurrently
+        // can deny HotSpot's post-install native-memory commits, so preserve fresh-JVM isolation
+        // across the complete check graph as well as within this task.
+        mustRunAfter(integrationTest)
         useJUnitPlatform {
             includeTags("needs-fresh-jvm")
         }

@@ -39,7 +39,6 @@ class HighConcurrencyInstallationTest {
         Platform.setProvider(MockPlatformProvider())
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
-        PureJavaBpfEngine.clearCache()
     }
 
     @AfterEach
@@ -48,7 +47,6 @@ class HighConcurrencyInstallationTest {
         Platform.resetToDefault()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
-        PureJavaBpfEngine.clearCache()
     }
 
     @Test

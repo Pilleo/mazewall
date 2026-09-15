@@ -9,35 +9,19 @@ import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class InstallationReceiptTest {
     @Test
-    fun `receipt data operations retain installation status`() {
+    fun `closing a receipt retires its supervisor registration once`() {
         val policy = Policy.builder().build().definition
-        val session = AutoCloseable {}
-        val receipt =
-            InstallationReceipt(
-                processWide = false,
-                requestedPolicy = policy,
-                supervisorSession = session,
-                timestampMillis = 123L,
-                installed = false,
-            )
+        var closes = 0
+        val receipt = InstallationReceipt.withSupervisorRegistration(false, policy, AutoCloseable { closes++ })
 
-        assertEquals(false, receipt.component1())
-        assertSame(policy, receipt.component2())
-        assertSame(session, receipt.component3())
-        assertEquals(123L, receipt.component4())
-        assertEquals(false, receipt.component5())
+        receipt.use { assertTrue(it.installed) }
+        receipt.close()
 
-        val copy = receipt.copy()
-        assertEquals(receipt, copy)
-        assertEquals(receipt.hashCode(), copy.hashCode())
-        assertTrue(copy.toString().contains("installed=false"))
-        assertNotEquals(receipt, receipt.copy(installed = true))
+        assertEquals(1, closes)
     }
 
     @Test
@@ -59,26 +43,5 @@ class InstallationReceiptTest {
             )
         assertEquals(false, receipt.installed)
         assertEquals(true, receipt.landlockApplied)
-    }
-
-    @Test
-    fun `receipt retains the pre-outcome JVM constructor`() {
-        val constructor =
-            InstallationReceipt::class.java.getConstructor(
-                Boolean::class.javaPrimitiveType,
-                PolicyDefinition::class.java,
-                AutoCloseable::class.java,
-                Long::class.javaPrimitiveType,
-            )
-
-        val receipt =
-            constructor.newInstance(
-                false,
-                Policy.builder().build().definition,
-                null,
-                123L,
-            )
-
-        assertTrue(receipt.installed)
     }
 }

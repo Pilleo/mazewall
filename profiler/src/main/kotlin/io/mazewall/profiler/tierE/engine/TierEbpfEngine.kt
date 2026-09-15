@@ -272,8 +272,11 @@ internal class TierEbpfEngine(
     public fun detachMarker() {
         val installed = requireInstalled()
         setMarkerAttached(installed, false)
-        installed.markerPerfFds.toList().forEach(::closeIfOpen)
+        // A failed close has an indeterminate descriptor state: do not retry a
+        // numeric descriptor that the kernel may already have reused.
+        val markerPerfFds = installed.markerPerfFds.toList()
         installed.markerPerfFds.clear()
+        markerPerfFds.forEach(::closeIfOpen)
     }
 
     /** Drains committed syscall records without waiting or timestamp correlation. */
@@ -285,14 +288,33 @@ internal class TierEbpfEngine(
         return reader.drain().map(SyscallInvocationEvent::fromBytes)
     }
 
+    @Suppress("TooGenericExceptionCaught") // Cleanup must preserve every native failure, including errors surfaced by an injected syscall seam.
     override fun close() {
         val installed = synchronized(lifecycleLock) {
             if (lifecycle == Lifecycle.CLOSED || lifecycle == Lifecycle.DETACHED) return
             lifecycle = Lifecycle.CLOSING
-            resources.also { resources = null }
+            requireNotNull(resources)
         }
-        installed?.let(::closeResources)
-        synchronized(lifecycleLock) { lifecycle = Lifecycle.CLOSED }
+        try {
+            closeResources(installed)
+        } catch (failure: Throwable) {
+            synchronized(lifecycleLock) {
+                // BPF mappings remain owned until their unmap succeeds, so a
+                // later close may safely retry only that mapping cleanup.
+                if (installed.ringReader != null) {
+                    resources = installed
+                    lifecycle = Lifecycle.CLOSING
+                } else {
+                    resources = null
+                    lifecycle = Lifecycle.CLOSED
+                }
+            }
+            throw failure
+        }
+        synchronized(lifecycleLock) {
+            resources = null
+            lifecycle = Lifecycle.CLOSED
+        }
     }
 
     private fun requireInstalled(): Resources =
@@ -325,32 +347,38 @@ internal class TierEbpfEngine(
         var cleanupFailure: Throwable? = null
         try {
             installed.ringReader?.close()
+            installed.ringReader = null
         } catch (failure: Throwable) {
             cleanupFailure = failure
         }
-        installed.ringReader = null
 
-        fun close(fd: Int) {
+        fun close(
+            fd: Int,
+            clear: () -> Unit,
+        ) {
             try {
                 closeIfOpen(fd)
             } catch (failure: Throwable) {
                 cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
+            } finally {
+                // Never retry close(2): on Linux an error may still mean the
+                // descriptor was released and subsequently reused.
+                clear()
             }
         }
-        installed.markerPerfFds.asReversed().forEach(::close)
+        val markerPerfFds = installed.markerPerfFds.toList()
         installed.markerPerfFds.clear()
-        listOf(
-            installed.linkFd,
-            installed.progFd,
-            installed.markerProgFd,
-            installed.ringFd,
-            installed.lossFd,
-            installed.contextMetricFd,
-            installed.sessionFd,
-            installed.coverageEdgeFd,
-            installed.invocationStorageFd,
-            installed.invocationBtfFd,
-        ).forEach(::close)
+        markerPerfFds.asReversed().forEach { close(it) {} }
+        close(installed.linkFd) { installed.linkFd = -1 }
+        close(installed.progFd) { installed.progFd = -1 }
+        close(installed.markerProgFd) { installed.markerProgFd = -1 }
+        close(installed.ringFd) { installed.ringFd = -1 }
+        close(installed.lossFd) { installed.lossFd = -1 }
+        close(installed.contextMetricFd) { installed.contextMetricFd = -1 }
+        close(installed.sessionFd) { installed.sessionFd = -1 }
+        close(installed.coverageEdgeFd) { installed.coverageEdgeFd = -1 }
+        close(installed.invocationStorageFd) { installed.invocationStorageFd = -1 }
+        close(installed.invocationBtfFd) { installed.invocationBtfFd = -1 }
         cleanupFailure?.let { throw it }
     }
 
@@ -492,7 +520,11 @@ internal class TierEbpfEngine(
     }
 
     private fun closeIfOpen(fd: Int) {
-        if (fd >= 0) native.syscall(SYS_CLOSE, NativeArg.LongArg(fd.toLong()))
+        if (fd < 0) return
+        when (val result = native.syscall(SYS_CLOSE, NativeArg.LongArg(fd.toLong()))) {
+            is SyscallResult.Success -> Unit
+            is SyscallResult.Error -> result.throwErrno("close(Tier E resource fd=$fd)")
+        }
     }
 
     private fun onlineCpus(): List<Int> =

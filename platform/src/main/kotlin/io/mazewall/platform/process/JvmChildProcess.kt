@@ -47,7 +47,7 @@ public data class ChildStdoutPump(
  * Shared `java` command-line construction for mazewall child JVMs.
  */
 @MazewallInternal
-public object JvmChildProcess {
+internal object JvmChildProcess {
     public fun commandLine(spec: JvmChildSpec): List<String> {
         val javaBin = System.getProperty("java.home") + "/bin/java"
         val classpath = spec.classpath ?: System.getProperty("java.class.path")

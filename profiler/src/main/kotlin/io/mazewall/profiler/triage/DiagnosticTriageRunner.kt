@@ -1,13 +1,9 @@
 package io.mazewall.profiler.triage
 
 import java.io.File
-import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import java.time.Duration
 
 /**
  * DiagnosticTriageRunner collects local, domain-specific telemetry for mazewall failures.
@@ -59,29 +55,19 @@ internal object DiagnosticTriageRunner {
      * Gradle daemon) can block indefinitely; a timed-out capture degrades to a diagnostic string
      * instead of hanging report generation.
      */
-    private fun readProcessOutputBounded(process: Process): String {
-        val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "triage-capture").apply { isDaemon = true } }
-        return try {
-            val future = executor.submit(Callable { process.inputStream.bufferedReader().readText() })
-            try {
-                future.get(CAPTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            } catch (_: TimeoutException) {
-                future.cancel(true)
-                process.destroyForcibly()
-                "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s."
-            }
-        } finally {
-            executor.shutdownNow()
-        }
-    }
+    private fun readProcessOutputBounded(capture: ManagedProcessCapture): String =
+        runCatching { capture.readStdout(Duration.ofSeconds(CAPTURE_TIMEOUT_SECONDS)) }
+            .getOrElse { "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s." }
 
     private fun captureDmesg(): String {
         return captureOptional(
             onFailure = { "Unable to capture dmesg: ${it.message}" },
         ) {
-            val process = ProcessBuilder("dmesg").start()
-            readProcessOutputBounded(process)
-                .lineSequence()
+            ManagedProcessCapture
+                .start(ProcessBuilder("dmesg"))
+                .use { capture ->
+                readProcessOutputBounded(capture)
+            }.lineSequence()
                 .filter { line ->
                     line.contains("seccomp", ignoreCase = true) ||
                         line.contains("landlock", ignoreCase = true) ||
@@ -112,8 +98,9 @@ internal object DiagnosticTriageRunner {
                 captureOptional(
                     onFailure = { "Failed to capture thread dump for PID $pid: ${it.message}\n" },
                 ) {
-                val process = ProcessBuilder("jcmd", pid.toString(), "Thread.print").start()
-                    readProcessOutputBounded(process)
+                ManagedProcessCapture.start(ProcessBuilder("jcmd", pid.toString(), "Thread.print")).use { capture ->
+                    readProcessOutputBounded(capture)
+                }
                 },
             )
             sb.append("\n")

@@ -36,7 +36,6 @@ class PureJavaBpfEngineX86DowncallTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
         // Restore the original os.arch property

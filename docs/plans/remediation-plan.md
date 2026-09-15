@@ -107,12 +107,11 @@ graph TD
 
 ## Phase 2: Memory, Off-Heap & Resource Leak Elimination
 
-### 2.1 Bound Off-Heap `BpfNativeCache`
+### 2.1 Retire Off-Heap Native BPF Caching
 - **File**:
-  - [`enforcer/src/main/kotlin/io/mazewall/BpfNativeCache.kt`](file:///home/leanid/Documents/code/java/jseccomp/enforcer/src/main/kotlin/io/mazewall/BpfNativeCache.kt#L22-L50)
+  - [`enforcer/src/main/kotlin/io/mazewall/enforcer/api/ScopedBpfProgram.kt`](file:///home/leanid/Documents/code/java/jseccomp/enforcer/src/main/kotlin/io/mazewall/enforcer/api/ScopedBpfProgram.kt)
 - **Tasks**:
-  - [ ] Replace unbounded `ConcurrentHashMap<NativeCacheKey, ManagedSegment>` with a bounded LRU cache (e.g. `MAX_ENTRIES = 256`, matching `PolicyCompilationCache`).
-  - [ ] Ensure evicted `ManagedSegment`s close their native allocations.
+  - [x] Delete the native cache and allocate `sock_fprog` in a confined lexical scope around each synchronous Seccomp installation.
 
 ### 2.2 Fix `FdEpoch.table` Leak on Unowned Descriptors
 - **File**:
@@ -125,7 +124,7 @@ graph TD
 - **File**:
   - [`platform/src/main/kotlin/io/mazewall/ffi/memory/MemoryWrappers.kt`](file:///home/leanid/Documents/code/java/jseccomp/platform/src/main/kotlin/io/mazewall/ffi/memory/MemoryWrappers.kt#L195)
 - **Tasks**:
-  - [ ] Replace `Arena.global().allocate(Layouts.ERRNO)` with a carrier-confined segment pool or bounded thread-local carrier cache to prevent unbounded off-heap growth with Loom virtual threads.
+  - [x] Keep carrier-thread capture state process-lifetime and scope virtual-thread capture state to a confined callback arena.
 
 ### 2.4 Fix Premature Interruption & Zombie Processes in `ProcessBroker`
 - **File**:

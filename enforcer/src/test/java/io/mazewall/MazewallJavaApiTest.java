@@ -169,7 +169,6 @@ class MazewallJavaApiTest {
         InstallationReceipt receipt = new InstallationReceipt(
                 true,
                 io.mazewall.enforcer.api.PolicyPresets.INSTANCE.NO_EXEC,
-                null,
                 12345L,
                 true,
                 Platform.configuredFallback(),

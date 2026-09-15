@@ -2,13 +2,13 @@ package io.mazewall.ffi.networking
 
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.api.BpfNativeCache
 import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.ScopedBpfProgram
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
@@ -42,14 +42,15 @@ internal object SupervisorSeccompNotifInstaller {
         dummyBpf: List<BpfInstruction>,
         installationGate: SeccompInstallationGate,
     ) {
-        val dummyProg = BpfNativeCache.getOrCompute(dummyBpf, native)
-        val tsyncRes = installationGate.commit {
-            native.raw.syscall(
-                arch.seccompSyscallNumber.toLong(),
-                NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
-                NativeArg.MemoryArg(dummyProg),
-            )
+        val tsyncRes = ScopedBpfProgram.withProgram(dummyBpf, native) { dummyProg ->
+            installationGate.commit {
+                native.raw.syscall(
+                    arch.seccompSyscallNumber.toLong(),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong()),
+                    NativeArg.MemoryArg(dummyProg),
+                )
+            }
         }
         when (tsyncRes) {
             is LinuxNative.SyscallResult.Error ->
@@ -282,7 +283,6 @@ internal object SupervisorSeccompNotifInstaller {
             null
         }
 
-        val prog = BpfNativeCache.getOrCompute(filter.instructions, native)
         val handshake = SeccompInstallHandshake(onFilterApplied)
         val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?> =
             AtomicReference(null)
@@ -303,13 +303,15 @@ internal object SupervisorSeccompNotifInstaller {
             handshake.checkActive()
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = installationGate.commit {
-                native.raw.syscall(
-                    arch.seccompSyscallNumber.toLong(),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                    NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
-                    NativeArg.MemoryArg(prog),
-                )
+            val r = ScopedBpfProgram.withProgram(filter.instructions, native) { prog ->
+                installationGate.commit {
+                    native.raw.syscall(
+                        arch.seccompSyscallNumber.toLong(),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                        NativeArg.LongArg(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER.toLong()),
+                        NativeArg.MemoryArg(prog),
+                    )
+                }
             }
 
             when (r) {

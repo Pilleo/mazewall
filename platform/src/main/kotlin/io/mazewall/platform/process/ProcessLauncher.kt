@@ -8,36 +8,36 @@ import java.nio.file.attribute.FileAttribute
  * Interface for OS process and filesystem operations.
  * Decoupling this allows for mocking process spawning and file operations in tests.
  */
-public interface ProcessLauncher {
-    public fun startProcess(
+internal interface ProcessLauncher {
+    fun startProcess(
         args: List<String>,
         redirectErrorStream: Boolean = true,
     ): Process
 
-    public fun addShutdownHook(hook: Thread)
+    fun addShutdownHook(hook: Thread)
 
-    public fun removeShutdownHook(hook: Thread)
+    fun removeShutdownHook(hook: Thread)
 
-    public fun createTempDirectory(
+    fun createTempDirectory(
         prefix: String,
         vararg attrs: FileAttribute<*>,
     ): Path
 
-    public fun createTempDirectory(
+    fun createTempDirectory(
         dir: Path,
         prefix: String,
         vararg attrs: FileAttribute<*>,
     ): Path
 
-    public fun deleteIfExists(path: Path): Boolean
+    fun deleteIfExists(path: Path): Boolean
 
-    public fun exists(path: Path): Boolean
+    fun exists(path: Path): Boolean
 }
 
 /**
  * Real implementation of [ProcessLauncher] using standard Java APIs.
  */
-public object RealProcessLauncher : ProcessLauncher {
+internal object RealProcessLauncher : ProcessLauncher {
     override fun startProcess(
         args: List<String>,
         redirectErrorStream: Boolean,

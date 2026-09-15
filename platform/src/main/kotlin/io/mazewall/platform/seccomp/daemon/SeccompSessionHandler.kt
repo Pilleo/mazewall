@@ -49,8 +49,8 @@ internal class SeccompSessionHandler(
     }
 
     private val ackBuf: ManagedSegment get() = buffers.ack
-    private val notif: ManagedSegment get() = buffers.notifLease.segment
-    private val resp: ManagedSegment get() = buffers.respLease.segment
+    private val notif: ManagedSegment get() = buffers.notif
+    private val resp: ManagedSegment get() = buffers.resp
 
     private var isPassThrough = false
     private var pending: PendingNotification? = null
@@ -71,10 +71,6 @@ internal class SeccompSessionHandler(
 
     public var isTerminated: Boolean = false
         private set
-
-    private var notifReleased = false
-    private var respReleased = false
-    private var arenaClosed = false
 
     override fun close() {
         when (val outcome = closeWithResult()) {
@@ -100,24 +96,7 @@ internal class SeccompSessionHandler(
             val current = pending
             if (current != null) denyAndTerminate(current)
         },
-        {
-            if (!notifReleased) {
-                buffers.notifLease.close()
-                notifReleased = true
-            }
-        },
-        {
-            if (!respReleased) {
-                buffers.respLease.close()
-                respReleased = true
-            }
-        },
-        {
-            if (!arenaClosed) {
-                buffers.arena.close()
-                arenaClosed = true
-            }
-        },
+        { buffers.close() },
         ),
         recordOutcome,
     )

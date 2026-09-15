@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class BpfRingBufferReaderTest {
@@ -82,12 +83,35 @@ class BpfRingBufferReaderTest {
         }
     }
 
-    private class FakeMappings : AutoCloseable {
+    @Test
+    fun `close retains only a failed mapping for a later retry`() {
+        val mappings = FakeMappings(failFirstProducerUnmap = true)
+        val reader = BpfRingBufferReader(mappings.native, 7, CAPACITY, PAYLOAD_SIZE)
+        try {
+            assertFailsWith<IllegalStateException> { reader.close() }
+
+            reader.close()
+
+            assertEquals(
+                listOf(mappings.producerAddress, mappings.consumerAddress, mappings.producerAddress),
+                mappings.unmappedAddresses,
+            )
+        } finally {
+            mappings.close()
+        }
+    }
+
+    private class FakeMappings(
+        private var failFirstProducerUnmap: Boolean = false,
+    ) : AutoCloseable {
         private val consumerArena = Arena.ofShared()
         private val producerArena = Arena.ofShared()
         private val consumer = consumerArena.allocate(PAGE_SIZE, 8)
         private val producer = producerArena.allocate(PAGE_SIZE + CAPACITY * 2, 8)
         private var mappings = 0
+        val unmappedAddresses = mutableListOf<Long>()
+        val consumerAddress: Long get() = consumer.address()
+        val producerAddress: Long get() = producer.address()
         val native: RawSyscallOperations = Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(RawSyscallOperations::class.java),
@@ -97,7 +121,16 @@ class BpfRingBufferReaderTest {
                 9L -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(
                     if (mappings++ == 0) consumer.address() else producer.address(),
                 )
-                11L -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(0L)
+                11L -> {
+                    val address = (args[1] as NativeArg.LongArg).value
+                    unmappedAddresses += address
+                    if (failFirstProducerUnmap && address == producer.address()) {
+                        failFirstProducerUnmap = false
+                        SyscallResult.Error<SyscallHandledState.Unhandled>(22, -1L)
+                    } else {
+                        SyscallResult.Success<Long, SyscallHandledState.Unhandled>(0L)
+                    }
+                }
                 else -> error("unexpected syscall ${args[0]}")
             }
         } as RawSyscallOperations

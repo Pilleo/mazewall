@@ -25,7 +25,6 @@ class PureJavaBpfEngineCascadingFailureTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         io.mazewall.enforcer.api.PolicyCompilationCache
             .clear()
         ContainmentStateRegistry.threadState = ContainerState()

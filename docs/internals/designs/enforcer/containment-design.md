@@ -778,9 +778,9 @@ joins each installing platform thread, without finalizer/cleaner inference. Reti
 requests stop, and the listener completes socket and arena cleanup in its own reactor.
 
 Migration: callers that manually invoked `SupervisorInstaller.registerThread` or
-`unregisterThread` must acquire/release the `InstallationReceipt.supervisorSession`
-lease instead; the unrelated compatibility registry has been removed. Do not close
-an installation listener at task exit. Wrapped executors manage these task leases.
+`unregisterThread` must scope the `InstallationReceipt` itself with `use`; closing
+the receipt releases only its private registration lease. It never closes an
+installation listener or reverses containment. Wrapped executors manage receipts.
 
 **Related issues:**
 - WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)

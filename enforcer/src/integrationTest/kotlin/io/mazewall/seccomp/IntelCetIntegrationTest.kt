@@ -38,7 +38,7 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
             val status = Platform.queryIntelCetStatus()
             assertTrue((status and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L, "Expected ARCH_SHSTK_SHSTK to be active")
         } finally {
-            receipt.supervisorSession?.close()
+            receipt.close()
         }
     }
 

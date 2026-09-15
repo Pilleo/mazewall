@@ -1,7 +1,9 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.util.Locale
 
 /** Privileged acceptance gate comparing Tier E with the USER_NOTIF stack oracle. */
@@ -56,11 +58,12 @@ internal object TierEDifferentialSmoke {
             mainClass,
         ) +
             arguments
-        val process = ProcessBuilder(command).redirectErrorStream(true).start()
-        val output = process.inputStream.bufferedReader().readText()
-        check(process.waitFor() == 0) { "$mainClass failed:\n$output" }
-        print(output)
-        return output
+        return ManagedProcessCapture.start(ProcessBuilder(command).redirectErrorStream(true)).use { capture ->
+            val output = capture.readStdout(Duration.ofMinutes(PROCESS_TIMEOUT_MINUTES))
+            check(capture.awaitExit(Duration.ofMinutes(PROCESS_TIMEOUT_MINUTES)) == 0) { "$mainClass failed:\n$output" }
+            print(output)
+            output
+        }
     }
 
     private fun metric(
@@ -78,4 +81,5 @@ internal object TierEDifferentialSmoke {
         }
 
     private const val MIN_RESOLVED_PER_ITERATION = 5
+    private const val PROCESS_TIMEOUT_MINUTES = 5L
 }

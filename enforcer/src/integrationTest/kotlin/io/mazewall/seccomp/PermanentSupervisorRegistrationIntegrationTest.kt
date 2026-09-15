@@ -52,7 +52,7 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
                 val depth = wrapped
                     .submit<Int> {
                     val nested = ContainedExecutors.installOnCurrentThread(policy, scoping)
-                    val lease = checkNotNull(nested.supervisorSession)
+                    val lease = nested
                     lease.close()
                     lease.close()
                     assertEquals("registered", file.readText())

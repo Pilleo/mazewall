@@ -192,10 +192,6 @@ internal value class ErrnoSegment(
     public fun getErrno(): Int = segment.get(JAVA_INT_NATIVE, Layouts.ERRNO_OFFSET)
 
     public companion object {
-        private const val POOL_CAPACITY = 64
-        private val segmentPool = java.util.concurrent.ConcurrentLinkedQueue<MemorySegment>()
-        private val poolSize = java.util.concurrent.atomic
-            .AtomicInteger(0)
         private val carrierPool = ThreadLocal.withInitial {
             if (Thread.currentThread().isVirtual) {
                 null
@@ -205,30 +201,18 @@ internal value class ErrnoSegment(
         }
 
         /**
-         * Returns a thread-safe [ErrnoSegment] used to capture native call errors.
-         * For carrier/platform threads, uses carrier-confined segment allocation without pool overhead.
-         * For virtual threads (Loom), acquires from a bounded pool or allocates a short-lived segment
-         * to avoid unbounded off-heap native memory leakage.
+         * Runs [block] with native errno capture state whose lifetime cannot escape the call.
+         *
+         * Carrier threads reuse a process-lifetime global segment. Virtual threads receive a
+         * confined segment backed by a lexical arena because a confined segment cannot safely be
+         * pooled or transferred between virtual-thread executions.
          */
-        public fun getThreadLocal(): ErrnoSegment {
+        internal inline fun <T> withCapturedState(block: (ErrnoSegment) -> T): T {
             if (!Thread.currentThread().isVirtual) {
-                carrierPool.get()?.let { return ErrnoSegment(it) }
+                return block(ErrnoSegment(checkNotNull(carrierPool.get())))
             }
-            val pooled = segmentPool.poll()
-            if (pooled != null) {
-                poolSize.decrementAndGet()
-                return ErrnoSegment(pooled)
-            }
-            return ErrnoSegment(Arena.ofConfined().allocate(Layouts.ERRNO))
-        }
-
-        public fun recycle(segment: ErrnoSegment) {
-            if (!Thread.currentThread().isVirtual && segment.segment == carrierPool.get()) {
-                return
-            }
-            if (poolSize.get() < POOL_CAPACITY) {
-                segmentPool.offer(segment.segment)
-                poolSize.incrementAndGet()
+            return Arena.ofConfined().use { arena ->
+                block(ErrnoSegment(arena.allocate(Layouts.ERRNO)))
             }
         }
 

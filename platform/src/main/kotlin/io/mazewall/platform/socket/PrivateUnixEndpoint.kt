@@ -14,7 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions
  * deletion after the child no longer needs the path; [close] is a convenience.
  */
 @MazewallInternal
-public class PrivateUnixEndpoint private constructor(
+internal class PrivateUnixEndpoint private constructor(
     public val dir: Path,
     public val socketFileName: String,
     public val path: String,

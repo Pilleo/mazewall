@@ -1,7 +1,7 @@
 package io.mazewall.seccomp
 
-import io.mazewall.enforcer.api.BpfNativeCache
 import io.mazewall.enforcer.api.*
+import io.mazewall.ffi.ScopedBpfProgram
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
@@ -31,13 +31,6 @@ import java.util.logging.Level
 // @ref: docs/internals/designs/enforcer/containment-design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     private val logger = Logger.getLogger(PureJavaBpfEngine::class.java.name)
-
-    /**
-     * Clears the native filter cache. Used for testing.
-     */
-    internal fun clearCache() {
-        BpfNativeCache.clear()
-    }
 
     override val state: EngineState
         get() = when (ContainerState.resolveCurrentState().engineState) {
@@ -93,23 +86,22 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         SeccompInstallationState.Verified.toString()
         SeccompInstallationState.FilterBuilt::class.java.name
         SeccompInstallationState.Failed::class.java.name
-        BpfNativeCache.toString()
 
         updateState(SeccompInstallationState.Uninitialized, useTsync)
         try {
             val arch = Arch.current()
             val filters = policy.compiledFilters
-            val cachedProg = BpfNativeCache.getOrCompute(filters)
-
-            val built = SeccompInstallationState.FilterBuilt(cachedProg)
-            updateState(built, useTsync)
-            val locked = built.lockPrivileges()
-            updateState(locked, useTsync)
-            val applied = locked.applyFilter(arch, useTsync)
-            onApplied()
-            updateState(applied, useTsync)
-            val verified = applied.verify(policy.definition)
-            updateState(verified, useTsync)
+            ScopedBpfProgram.withProgram(filters, LinuxNative) { program ->
+                val built = SeccompInstallationState.FilterBuilt(program)
+                updateState(built, useTsync)
+                val locked = built.lockPrivileges()
+                updateState(locked, useTsync)
+                val applied = locked.applyFilter(arch, useTsync)
+                onApplied()
+                updateState(applied, useTsync)
+                val verified = applied.verify(policy.definition)
+                updateState(verified, useTsync)
+            }
         } catch (expectedInstallFailure: Exception) {
             val stepName = getStepName()
             val errno = getErrno(expectedInstallFailure)

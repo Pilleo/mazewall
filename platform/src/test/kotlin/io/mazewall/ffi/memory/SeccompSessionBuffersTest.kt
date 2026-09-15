@@ -28,11 +28,9 @@ class SeccompSessionBuffersTest {
     fun `session releases both rentals and its confined arena`() {
         SegmentPool.owned(80L).use { notif ->
             SegmentPool.owned(24L).use { resp ->
-                val buffers = SeccompSessionBuffers.acquire(notif, resp)
-                buffers.notifLease.close()
-                buffers.respLease.close()
-                buffers.arena.close()
-                assertFalse(buffers.arena.isAlive)
+                SeccompSessionBuffers.acquire(notif, resp).use { buffers ->
+                    assertFalse(buffers.isClosed)
+                }
                 notif.close()
                 resp.close()
             }

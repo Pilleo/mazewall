@@ -258,28 +258,6 @@ public final class io/mazewall/platform/lifecycle/Uid {
 	public final synthetic fun unbox-impl ()I
 }
 
-public final class io/mazewall/platform/process/ChildProcessResources : java/lang/AutoCloseable {
-	public fun close ()V
-	public final fun getEndpoint ()Lio/mazewall/platform/socket/PrivateUnixEndpoint;
-	public final fun getProcess ()Ljava/lang/Process;
-	public final fun getShutdownHook ()Ljava/lang/Thread;
-	public final fun isClosed ()Z
-}
-
-public final class io/mazewall/platform/process/ChildStartupTransaction : java/lang/AutoCloseable {
-	public fun <init> (Lio/mazewall/platform/process/ProcessLauncher;Ljava/lang/String;Ljava/lang/String;)V
-	public final fun awaitReady (J)V
-	public fun close ()V
-	public final fun commit ()Lio/mazewall/platform/process/ChildProcessResources;
-	public final fun getEndpoint ()Lio/mazewall/platform/socket/PrivateUnixEndpoint;
-	public final fun getShutdownHook ()Ljava/lang/Thread;
-	public final fun registerShutdownHook ()V
-	public final fun runStartup (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
-	public final fun start (Lio/mazewall/platform/process/JvmChildSpec;)Ljava/lang/Process;
-	public final fun startOutputPump (Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;)V
-	public static synthetic fun startOutputPump$default (Lio/mazewall/platform/process/ChildStartupTransaction;Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)V
-}
-
 public final class io/mazewall/platform/process/ChildStdoutPump {
 	public fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;)V
 	public synthetic fun <init> (Ljava/util/concurrent/CountDownLatch;Ljava/lang/Thread;Ljava/util/concurrent/atomic/AtomicBoolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -318,17 +296,6 @@ public final class io/mazewall/platform/process/JavaAgentSelection$None : io/maz
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class io/mazewall/platform/process/JvmChildProcess {
-	public static final field INSTANCE Lio/mazewall/platform/process/JvmChildProcess;
-	public final fun awaitReady (Lio/mazewall/platform/process/ChildStdoutPump;J)Z
-	public final fun commandLine (Lio/mazewall/platform/process/JvmChildSpec;)Ljava/util/List;
-	public final fun start (Lio/mazewall/platform/process/ProcessLauncher;Lio/mazewall/platform/process/JvmChildSpec;Z)Ljava/lang/Process;
-	public static synthetic fun start$default (Lio/mazewall/platform/process/JvmChildProcess;Lio/mazewall/platform/process/ProcessLauncher;Lio/mazewall/platform/process/JvmChildSpec;ZILjava/lang/Object;)Ljava/lang/Process;
-	public final fun startStdoutPump (Ljava/lang/Process;Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;)Lio/mazewall/platform/process/ChildStdoutPump;
-	public static synthetic fun startStdoutPump$default (Lio/mazewall/platform/process/JvmChildProcess;Ljava/lang/Process;Ljava/lang/String;Lkotlin/jvm/functions/Function1;Ljava/lang/String;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/mazewall/platform/process/ChildStdoutPump;
-	public final fun stripInheritedJvmOptions (Ljava/util/Map;)V
-}
-
 public final class io/mazewall/platform/process/JvmChildSpec {
 	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/mazewall/platform/process/JavaAgentSelection;ZZLjava/lang/String;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/mazewall/platform/process/JavaAgentSelection;ZZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -353,46 +320,6 @@ public final class io/mazewall/platform/process/JvmChildSpec {
 	public final fun getMaxHeap ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
-}
-
-public abstract interface class io/mazewall/platform/process/ProcessLauncher {
-	public abstract fun addShutdownHook (Ljava/lang/Thread;)V
-	public abstract fun createTempDirectory (Ljava/lang/String;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/file/Path;
-	public abstract fun createTempDirectory (Ljava/nio/file/Path;Ljava/lang/String;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/file/Path;
-	public abstract fun deleteIfExists (Ljava/nio/file/Path;)Z
-	public abstract fun exists (Ljava/nio/file/Path;)Z
-	public abstract fun removeShutdownHook (Ljava/lang/Thread;)V
-	public abstract fun startProcess (Ljava/util/List;Z)Ljava/lang/Process;
-	public static synthetic fun startProcess$default (Lio/mazewall/platform/process/ProcessLauncher;Ljava/util/List;ZILjava/lang/Object;)Ljava/lang/Process;
-}
-
-public final class io/mazewall/platform/process/ProcessLauncher$DefaultImpls {
-	public static synthetic fun startProcess$default (Lio/mazewall/platform/process/ProcessLauncher;Ljava/util/List;ZILjava/lang/Object;)Ljava/lang/Process;
-}
-
-public final class io/mazewall/platform/process/RealProcessLauncher : io/mazewall/platform/process/ProcessLauncher {
-	public static final field INSTANCE Lio/mazewall/platform/process/RealProcessLauncher;
-	public fun addShutdownHook (Ljava/lang/Thread;)V
-	public fun createTempDirectory (Ljava/lang/String;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/file/Path;
-	public fun createTempDirectory (Ljava/nio/file/Path;Ljava/lang/String;[Ljava/nio/file/attribute/FileAttribute;)Ljava/nio/file/Path;
-	public fun deleteIfExists (Ljava/nio/file/Path;)Z
-	public fun exists (Ljava/nio/file/Path;)Z
-	public fun removeShutdownHook (Ljava/lang/Thread;)V
-	public fun startProcess (Ljava/util/List;Z)Ljava/lang/Process;
-}
-
-public final class io/mazewall/platform/socket/PrivateUnixEndpoint : java/lang/AutoCloseable {
-	public static final field Companion Lio/mazewall/platform/socket/PrivateUnixEndpoint$Companion;
-	public static final field MAX_SUN_PATH_BYTES I
-	public fun close ()V
-	public final fun getDir ()Ljava/nio/file/Path;
-	public final fun getPath ()Ljava/lang/String;
-	public final fun getSocketFileName ()Ljava/lang/String;
-	public final fun socketFile ()Ljava/nio/file/Path;
-}
-
-public final class io/mazewall/platform/socket/PrivateUnixEndpoint$Companion {
-	public final fun create (Lio/mazewall/platform/process/ProcessLauncher;Ljava/lang/String;Ljava/lang/String;)Lio/mazewall/platform/socket/PrivateUnixEndpoint;
 }
 
 public final class io/mazewall/platform/syscall/Arch {

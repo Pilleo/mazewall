@@ -1,7 +1,6 @@
 package io.mazewall.testing
 
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.api.BpfNativeCache
 import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.PolicyCompilationCache
 import io.mazewall.enforcer.diagnostics.MazewallEvents
@@ -18,7 +17,6 @@ import io.mazewall.seccomp.InstallSelfVerifier
 internal object GlobalTestState {
     fun resetAll() {
         InstallSelfVerifier.reset()
-        BpfNativeCache.clear()
         PolicyCompilationCache.clear()
         MazewallEvents.clear()
         MazewallEvents.failOnListenerError = false

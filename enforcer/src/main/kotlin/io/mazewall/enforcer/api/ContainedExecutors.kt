@@ -455,7 +455,6 @@ public object ContainedExecutors {
             return io.mazewall.enforcer.api.InstallationReceipt(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
-                supervisorSession = null,
                 landlockApplied = landlockApplied,
             )
         }
@@ -475,17 +474,17 @@ public object ContainedExecutors {
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
                 if (session is io.mazewall.enforcer.internal.supervisor.SupervisorSession) {
-                    return io.mazewall.enforcer.api.InstallationReceipt(
+                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
-                        supervisorSession = session,
+                        supervisorRegistration = session,
                         landlockApplied = landlockApplied,
                     )
                 } else {
-                    return io.mazewall.enforcer.api.InstallationReceipt(
+                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
-                        supervisorSession = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                        supervisorRegistration = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
                             .acquireTaskSession(scopingPolicy),
                         landlockApplied = landlockApplied,
                     )
@@ -494,7 +493,6 @@ public object ContainedExecutors {
             return io.mazewall.enforcer.api.InstallationReceipt(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
-                supervisorSession = null,
                 landlockApplied = landlockApplied,
             )
         }

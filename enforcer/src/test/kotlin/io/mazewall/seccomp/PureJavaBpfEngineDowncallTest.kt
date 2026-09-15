@@ -27,7 +27,6 @@ class PureJavaBpfEngineDowncallTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
     }
 
     @Test

@@ -37,7 +37,7 @@ If adoption of an existing executor remains supported, the operation must be nam
 
 ### Irreversible Installation
 
-`Policy.install()` currently returns `AutoCloseable`, which makes containment appear reversible through `use {}`. Closing may release supervisor resources but cannot remove kernel restrictions. Installation should instead return a non-closeable `InstallationReceipt`. Any closeable supervisor resource must have a separate, precise type.
+`Policy.install()` returns an `InstallationReceipt` that is `AutoCloseable` solely to own any supervisor-registration lease. `receipt.use { ... }` releases that registration deterministically; it never removes Seccomp or Landlock restrictions. The receipt does not expose the underlying lease, so callers cannot accidentally retain or duplicate it.
 
 ### Runtime-Compatible Process Baselines
 

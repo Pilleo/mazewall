@@ -22,7 +22,7 @@ import io.mazewall.seccomp.PureJavaBpfEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class InstallationReceiptSupervisorSessionTest {
     @BeforeEach
@@ -30,7 +30,6 @@ class InstallationReceiptSupervisorSessionTest {
         ContainmentStateRegistry.processState = ContainerState()
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.setProvider(MockPlatformProvider())
-        PureJavaBpfEngine.clearCache()
         PolicyCompilationCache.clear()
 
         val process = MockNativeProcess().apply {
@@ -55,7 +54,6 @@ class InstallationReceiptSupervisorSessionTest {
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.resetToDefault()
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         PolicyCompilationCache.clear()
     }
 
@@ -63,6 +61,6 @@ class InstallationReceiptSupervisorSessionTest {
     fun `unsupervised filter installation does not report a supervisor session`() {
         val receipt = ContainedExecutors.installOnCurrentThread(Policy.NO_NETWORK.definition)
 
-        assertNull(receipt.supervisorSession)
+        receipt.use { assertTrue(it.installed) }
     }
 }

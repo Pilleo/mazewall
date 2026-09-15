@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** Acquires one child JVM's resources; ownership transfers only after readiness is verified. */
 @MazewallInternal
-public class ChildStartupTransaction(
+internal class ChildStartupTransaction(
     launcher: ProcessLauncher,
     directoryPrefix: String,
     socketName: String,
@@ -86,7 +86,7 @@ public class ChildStartupTransaction(
  * after successful retirement. Managers retain their independent lifecycle policies.
  */
 @MazewallInternal
-public class ChildProcessResources internal constructor(
+internal class ChildProcessResources internal constructor(
     internal val launcher: ProcessLauncher,
     public val endpoint: PrivateUnixEndpoint,
 ) : AutoCloseable {

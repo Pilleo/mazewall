@@ -55,7 +55,7 @@ internal class ContainedExecutorWrapper(
             receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
             return runTask(task)
         } finally {
-            receipt?.supervisorSession?.close()
+            receipt?.close()
         }
     }
 

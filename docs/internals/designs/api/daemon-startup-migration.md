@@ -25,5 +25,10 @@ reachable and retry `close()` on `stop()` or before any replacement launch. Clea
 owner only after successful retirement. The caller remains responsible for its distinct daemon
 lifecycle and authority policy.
 
+`ProcessLauncher`, `RealProcessLauncher`, `JvmChildProcess`, and `PrivateUnixEndpoint` are
+internal implementation seams. They intentionally do not provide a supported raw `Process`
+API: repository consumers receive ownership through their manager or startup transaction, and
+published consumers must not launch or retire Mazewall helper JVMs directly.
+
 Profiler's native transport and reply-result types remain module-internal. Native syscall
 signatures, layouts, notification encoding, and portal wire formats are unchanged.

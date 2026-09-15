@@ -30,6 +30,9 @@ internal class BpfRingBufferReader(
     private val producerAddress = mappings.second
     private val consumer = MemorySegment.ofAddress(consumerAddress).reinterpret(pageSize, arena, null)
     private val producer = MemorySegment.ofAddress(producerAddress).reinterpret(producerMappingSize, arena, null)
+    private var producerMapped = true
+    private var consumerMapped = true
+    private var arenaClosed = false
 
     /** Returns all records committed at the instant the producer position is acquired. */
     fun drain(): List<ByteArray> {
@@ -51,16 +54,35 @@ internal class BpfRingBufferReader(
         return records
     }
 
+    @Suppress("TooGenericExceptionCaught") // Each independent native mapping must be attempted and failed ownership retained for retry.
+    @Synchronized
     override fun close() {
-        try {
-            unmap(producerAddress, producerMappingSize)
-        } finally {
+        var failure: Throwable? = null
+        if (producerMapped) {
             try {
-                unmap(consumerAddress, pageSize)
-            } finally {
-                arena.close()
+                unmap(producerAddress, producerMappingSize)
+                producerMapped = false
+            } catch (unmapFailure: Throwable) {
+                failure = unmapFailure
             }
         }
+        if (consumerMapped) {
+            try {
+                unmap(consumerAddress, pageSize)
+                consumerMapped = false
+            } catch (unmapFailure: Throwable) {
+                failure?.addSuppressed(unmapFailure) ?: run { failure = unmapFailure }
+            }
+        }
+        if (!producerMapped && !consumerMapped && !arenaClosed) {
+            try {
+                arena.close()
+                arenaClosed = true
+            } catch (arenaFailure: Throwable) {
+                failure?.addSuppressed(arenaFailure) ?: run { failure = arenaFailure }
+            }
+        }
+        failure?.let { throw it }
     }
 
     private fun map(
