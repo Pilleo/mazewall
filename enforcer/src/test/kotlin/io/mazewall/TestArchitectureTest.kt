@@ -56,7 +56,7 @@ class TestArchitectureTest {
                                     (
                                         call.targetOwner.isAssignableTo(ContainedExecutors::class.java) ||
                                             call.targetOwner.isAssignableTo(PureJavaBpfEngine::class.java) ||
-                                            call.targetOwner.name == "io.mazewall.enforcer.ContainedExecutors"
+                                            call.targetOwner.name == "io.mazewall.enforcer.api.ContainedExecutors"
                                         )
                             }.forEach { call ->
                                 events.add(

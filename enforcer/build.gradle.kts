@@ -279,8 +279,6 @@ classDiagrams {
         exclude(methods().withName("combine") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(classes().withNameLike("*\\$*"))
         exclude(classes().withNameLike("*Kt"))
-        exclude(classes().withName("io.mazewall.enforcer.ContainedExecutors"))
-        exclude(classes().withName("io.mazewall.enforcer.SandboxDispatcher"))
         exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
         exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
         exclude(classes().withNameLike("io.mazewall.core.*Mapper"))

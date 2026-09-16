@@ -59,7 +59,7 @@ import java.util.logging.Logger
  * ### Stacking & thread-pool interaction
  * Landlock rulesets are permanent and additive-intersective for the lifetime of the OS thread.
  * In a recycled thread pool, every task execution that calls [applyRuleset] pushes a new
- * layer. After ~16 layers the kernel returns `E2BIG`. Callers (i.e. [io.mazewall.enforcer.ContainedExecutors])
+ * layer. After ~16 layers the kernel returns `E2BIG`. Callers (i.e. [io.mazewall.enforcer.api.ContainedExecutors])
  * must track whether a thread has already been restricted and skip re-application.
  *
  * ### ABI versioning
@@ -89,7 +89,7 @@ import java.util.logging.Logger
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsRead
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsWrite
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowJvmClasspath
- * @see io.mazewall.enforcer.ContainedExecutors.wrap
+ * @see io.mazewall.enforcer.api.ContainedExecutors.wrap
  */
 internal object Landlock {
     /** The kernel requires the request size to stop at fields supported by its ABI. */

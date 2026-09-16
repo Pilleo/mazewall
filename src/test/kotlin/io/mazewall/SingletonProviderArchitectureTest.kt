@@ -20,7 +20,7 @@ class SingletonProviderArchitectureTest {
     @ArchTest
     fun singletonScanIncludesEveryProductionModule(allClasses: JavaClasses) {
         val representatives = mapOf(
-            "enforcer" to "io.mazewall.enforcer.ContainedExecutors",
+            "enforcer" to "io.mazewall.enforcer.api.ContainedExecutors",
             "platform" to "io.mazewall.platform.native.LinuxNative",
             "profiler" to "io.mazewall.profiler.api.Profiler",
             "portal" to "io.mazewall.portal.ProcessBroker",

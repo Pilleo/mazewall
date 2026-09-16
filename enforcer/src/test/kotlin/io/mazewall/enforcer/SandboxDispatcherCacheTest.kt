@@ -78,16 +78,4 @@ class SandboxDispatcherCacheTest {
         assertTrue(firstPool.isShutdown, "the least recently used pool must be shut down before eviction")
         assertTrue(firstPool.isTerminated, "evicted pools must finish terminating")
     }
-
-    @Test
-    @Suppress("DEPRECATION_ERROR")
-    fun `legacy package SandboxDispatcher forwards execute and shutdownAll`() {
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val policy = Policy.builder().build()
-        val result = io.mazewall.enforcer.SandboxDispatcher
-            .execute(policy, Callable { "legacy" })
-        assertEquals("legacy", result)
-        io.mazewall.enforcer.SandboxDispatcher
-            .shutdownAll()
-    }
 }
