@@ -279,7 +279,9 @@ classDiagrams {
         exclude(methods().withName("combineProcessWide") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(methods().withName("combine") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(classes().withNameLike("*\\$*"))
-        // Exclude constant/data-heavy/mapper noise
+        exclude(classes().withNameLike("*Kt"))
+        exclude(classes().withName("io.mazewall.enforcer.ContainedExecutors"))
+        exclude(classes().withName("io.mazewall.enforcer.SandboxDispatcher"))
         exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
         exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
         exclude(classes().withNameLike("io.mazewall.core.*Mapper"))
@@ -289,7 +291,9 @@ classDiagrams {
 
     diagram {
         name("Enforcer Class Diagram")
-        include(packages().withName("io.mazewall"))
+        include(packages().withName("io.mazewall.enforcer"))
+        include(packages().withName("io.mazewall.seccomp"))
+        include(packages().withName("io.mazewall.landlock"))
         writeTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.puml"))
         renderTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.svg"))
     }

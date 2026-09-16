@@ -54,26 +54,3 @@ internal class TierERingBufferCollector {
         public val ktimeNs: Long,
     )
 }
-
-/** Compatibility shim; use [TierERingBufferCollector] for raw records. */
-@Deprecated("Use TierERingBufferCollector")
-internal class LiveEbpfCollector {
-    private val delegate = TierERingBufferCollector()
-    public val droppedCount: Int get() = delegate.droppedCount
-    public val drainComplete: Boolean get() = delegate.drainComplete
-
-    public fun record(
-        tid: Long,
-        syscallNr: Int,
-        contextId: UInt,
-        ktimeNs: Long,
-    ): Unit = delegate.record(tid, syscallNr, contextId, ktimeNs)
-
-    public fun recordDrop(): Unit = delegate.recordDrop()
-
-    public fun drain(): List<TierERingBufferCollector.AttributedEvent> = delegate.drain()
-
-    public fun snapshot(): TierERingBufferCollector.Snapshot = delegate.snapshot()
-
-    public fun clear(): Unit = delegate.clear()
-}

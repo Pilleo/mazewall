@@ -9,9 +9,9 @@ import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * High-level API for system call profiling and Bill of Behavior (SBoB) generation.
+ * USER_NOTIF (Tier S) session installer and daemon client. Application lambdas use [MazewallProfiler].
  *
- * Tier S Profiler: Uses seccomp USER_NOTIF to trap system calls and notify a background daemon,
+ * Traps system calls and notifies a background daemon,
  * which resolves arguments (like paths) using `process_vm_readv` before allowing the syscall to continue.
  *
  * ### ⚠️ Security Warning & TOCTOU Limitations:

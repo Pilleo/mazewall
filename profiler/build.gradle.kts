@@ -258,8 +258,13 @@ classDiagrams {
         exclude(methods().withName("toPolicy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(methods().withName("toDsl") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(classes().withNameLike("*\\$*"))
-        // Exclude constant/data-heavy/mapper noise
+        exclude(classes().withNameLike("*Kt"))
         exclude(classes().withName("io.mazewall.profiler.engine.ProfilerConstantsKt"))
+        exclude(classes().withName("io.mazewall.profiler.tierE.collector.LiveEbpfCollector"))
+        exclude(classes().withName("io.mazewall.profiler.collector.LiveEbpfCollector"))
+        exclude(classes().withName("io.mazewall.profiler.strace.StraceProfiler"))
+        exclude(classes().withNameLike("io.mazewall.profiler.tierE.engine.Bpf*Layout"))
+        exclude(classes().withNameLike("io.mazewall.profiler.tierE.ringbuf.*"))
     }
 
     diagram {

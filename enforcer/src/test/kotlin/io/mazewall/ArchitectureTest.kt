@@ -54,6 +54,26 @@ class ArchitectureTest {
     }
 
     @ArchTest
+    fun productionMustNotUseDeprecatedEnforcerFacades(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .resideOutsideOfPackage("io.mazewall.enforcer")
+            .should()
+            .dependOnClassesThat()
+            .haveFullyQualifiedName("io.mazewall.enforcer.ContainedExecutors")
+            .because("use io.mazewall.enforcer.api.ContainedExecutors")
+            .check(allClasses)
+        noClasses()
+            .that()
+            .resideOutsideOfPackage("io.mazewall.enforcer")
+            .should()
+            .dependOnClassesThat()
+            .haveFullyQualifiedName("io.mazewall.enforcer.SandboxDispatcher")
+            .because("use io.mazewall.enforcer.api.SandboxDispatcher")
+            .check(allClasses)
+    }
+
+    @ArchTest
     fun enforcerShouldNotDependOnProfiler(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
@@ -79,6 +99,7 @@ class ArchitectureTest {
                             "getProcess",
                             "getMemory",
                             "getRaw",
+                            "getBpf",
                         "isRealEngineActive", // metadata-only probe (issue-20260823-172003), not an I/O bypass
                     )
                 }

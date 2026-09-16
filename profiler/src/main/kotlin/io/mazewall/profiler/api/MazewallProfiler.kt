@@ -20,8 +20,9 @@ public data class ProfileOptions(
 )
 
 /**
- * Owned profiling session. The operator API is [profile] with a lambda.
- * [Profiler.profile] is a facade over one session. eBPF live attach fails closed.
+ * Application profiler: lambda workloads and strategy selection.
+ * USER_NOTIF daemon sessions use [Profiler]. [Profiler.profile] is a facade over one session.
+ * eBPF live attach fails closed.
  */
 public class MazewallProfiler private constructor(
     private val options: ProfileOptions,

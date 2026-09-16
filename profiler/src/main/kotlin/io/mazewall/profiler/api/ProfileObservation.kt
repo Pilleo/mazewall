@@ -47,8 +47,10 @@ public sealed interface OpenFlagsEvidence {
 }
 
 /**
- * Strategy-neutral kernel observation. [TraceEvent] remains the USER_NOTIF wire shape;
- * collectors translate into this type before [io.mazewall.profiler.compiler.BobCompiler].
+ * Operator-facing syscall evidence for a Bill of Behavior. Not a ringbuf record
+ * ([io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent]).
+ * [TraceEvent] remains the USER_NOTIF wire shape; collectors translate into this type
+ * before [io.mazewall.profiler.compiler.BobCompiler].
  *
  * The original data-class constructors and generated copies retain caller-supplied lists.
  * Event factories and [ProfilingResult] publish immutable snapshots. Generated copies preserve

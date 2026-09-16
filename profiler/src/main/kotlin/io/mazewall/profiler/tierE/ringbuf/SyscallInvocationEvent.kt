@@ -1,10 +1,8 @@
 package io.mazewall.profiler.tierE.ringbuf
 
 /**
- * Fixed little-endian syscall record emitted by the invocation-aware Tier E program.
- *
- * It deliberately carries the explicit native-agent invocation id. Resolution to a Java stack
- * happens later through the matching invocation definition; no timestamp correlation is valid.
+ * Ringbuf record from the invocation-aware Tier E program. Not Bill-of-Behavior evidence.
+ * Join to a Java stack by [invocationId] only; timestamp correlation is invalid.
  */
 internal class SyscallInvocationEvent(
     public val ktimeNs: ULong,

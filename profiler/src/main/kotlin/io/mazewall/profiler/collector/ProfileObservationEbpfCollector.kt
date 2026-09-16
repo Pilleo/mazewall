@@ -100,36 +100,3 @@ internal class ProfileObservationEbpfCollector(
             }
     }
 }
-
-/**
- * Compatibility name for the observation-producing Tier E adapter.
- * @deprecated Use [ProfileObservationEbpfCollector]; the raw ring collector is
- * [io.mazewall.profiler.tierE.collector.TierERingBufferCollector].
- */
-@Deprecated("Use ProfileObservationEbpfCollector")
-internal class LiveEbpfCollector(
-    arch: Arch = Arch.current(),
-) : ProfileCollector {
-    private val delegate = ProfileObservationEbpfCollector(arch)
-    override val source: ObservationSource get() = delegate.source
-
-    public fun onEvent(
-        tgid: Int,
-        tid: Int,
-        syscallNr: Int,
-        contextId: Long,
-        ktimeNs: Long,
-    ): Unit = delegate.onEvent(tgid, tid, syscallNr, contextId, ktimeNs)
-
-    public fun onDrop(): Unit = delegate.onDrop()
-
-    override fun start(): Unit = delegate.start()
-
-    override fun drain(): CollectorDrain = delegate.drain()
-
-    override fun close(): Unit = delegate.close()
-
-    public companion object {
-        public fun syscallName(nr: Int): String = ProfileObservationEbpfCollector.syscallName(nr)
-    }
-}
