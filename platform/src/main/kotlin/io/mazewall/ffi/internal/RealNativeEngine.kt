@@ -14,6 +14,7 @@ import io.mazewall.platform.fd.ebadfUnlessLive
 import io.mazewall.platform.fd.ebadfUnlessMmapBacking
 import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.*
+import io.mazewall.platform.native.isBpfFdReturningCommand
 import io.mazewall.platform.process.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
@@ -140,6 +141,7 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
         a3: Long,
     ): Boolean {
         if (arch.isSimpleDescriptorCreatingSyscall(nr)) return true
+        if (nr == arch.bpf.toLong()) return isBpfFdReturningCommand(a1)
 
         val isDup = nr == arch.fcntl.toLong() && (a2 == NativeConstants.F_DUPFD.toLong() || a2 == NativeConstants.F_DUPFD_CLOEXEC.toLong())
         val isLandlockRuleset = nr == NativeConstants.LANDLOCK_CREATE_RULESET_NR && a3 == 0L

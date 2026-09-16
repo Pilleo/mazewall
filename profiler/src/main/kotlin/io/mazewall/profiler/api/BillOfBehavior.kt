@@ -87,7 +87,21 @@ public class BillOfBehavior(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
         coverage: ProfilingCoverage? = null,
-        allowIncomplete: Boolean = false,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = compilePolicy(base, baseCwd, coverage, allowIncomplete = false)
+
+    /** Test/demo seam. Production compilers must not use this. */
+    @JvmName("toPolicyAllowingIncomplete")
+    internal fun toPolicyAllowingIncomplete(
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage? = null,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = compilePolicy(base, baseCwd, coverage, allowIncomplete = true)
+
+    private fun compilePolicy(
+        base: Policy<*, Uncompiled>,
+        baseCwd: Path?,
+        coverage: ProfilingCoverage?,
+        allowIncomplete: Boolean,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val evidence = coverage ?: ProfilingCoverage.absent()
         if (connects.isNotEmpty()) {
@@ -165,7 +179,22 @@ public class BillOfBehavior(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: Path? = null,
         coverage: ProfilingCoverage = ProfilingCoverage.absent(),
-        allowIncomplete: Boolean = false,
+    ): String = compileDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete = false)
+
+    @JvmName("toDslAllowingIncomplete")
+    internal fun toDslAllowingIncomplete(
+        basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage = ProfilingCoverage.absent(),
+    ): String = compileDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete = true)
+
+    private fun compileDsl(
+        basePolicyName: String,
+        base: Policy<*, Uncompiled>,
+        baseCwd: Path?,
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
     ): String {
         requireComplete(coverage, allowIncomplete)
         if (connects.isNotEmpty() && !allowIncomplete) {

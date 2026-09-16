@@ -52,7 +52,7 @@ class BobCompilerTest {
         val bob = BobCompiler.compile(events)
 
         // Transpile to Policy
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
 
         // Verify unrestricted syscalls
         // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unrestricted now.
@@ -66,7 +66,7 @@ class BobCompilerTest {
         assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/new-dir" }, "Should contain write path")
 
         // Compile to DSL
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         println("Generated DSL:\n$dsl")
 
         val expectedDsl =
@@ -91,7 +91,7 @@ val policy = Policy.threadLocalBuilder()
     @Test
     fun `test empty events returns unmodified base policy`() {
         val bob = BobCompiler.compile(emptyList())
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
 
         assertFalse(policy.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(policy.isSyscallAllowed(Syscall.MKDIR))
@@ -99,7 +99,7 @@ val policy = Policy.threadLocalBuilder()
         assertTrue(policy.allowedFsReadPaths.isEmpty())
         assertTrue(policy.allowedFsWritePaths.isEmpty())
 
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
 val policy = Policy.builder()
@@ -122,7 +122,7 @@ val policy = Policy.builder()
         val bob = BobCompiler.compile(events)
 
         // Generate DSL - GETPID should not be listed as unrestricted since PURE_COMPUTE does not block it.
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
 val policy = Policy.builder()
@@ -364,7 +364,7 @@ val policy = Policy.builder()
         assertFalse(bob.fsWritePaths.contains("/secret/open-path"), "O_PATH observation must not be added to fsWritePaths")
         assertTrue(bob.opens.contains("/readable/path"), "O_RDONLY must be added to opens")
 
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
         assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/path" })
         assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/open-path" })
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/readable/path" })

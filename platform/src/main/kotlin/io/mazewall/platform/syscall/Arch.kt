@@ -38,6 +38,7 @@ public data class Arch(
     public val ioUringSetup: Int,
     public val ioUringEnter: Int,
     public val bpf: Int,
+    public val perfEventOpen: Int,
     public val processVmWritev: Int,
     public val processVmReadv: Int,
     public val userfaultfd: Int,
@@ -158,6 +159,7 @@ public data class Arch(
                 ioUringSetup = 425,
                 ioUringEnter = 426,
                 bpf = 321,
+                perfEventOpen = 298,
                 processVmWritev = 311,
                 processVmReadv = 310,
                 userfaultfd = 323,
@@ -275,6 +277,7 @@ public data class Arch(
                 ioUringSetup = 425,
                 ioUringEnter = 426,
                 bpf = 280,
+                perfEventOpen = 241,
                 processVmWritev = 271,
                 processVmReadv = 270,
                 userfaultfd = 282,
@@ -380,7 +383,7 @@ public data class Arch(
             num == accept ||
             num == accept4 ||
             num == userfaultfd ||
-            num == bpf ||
-            num == ioUringSetup
+            num == ioUringSetup ||
+            num == perfEventOpen
     }
 }

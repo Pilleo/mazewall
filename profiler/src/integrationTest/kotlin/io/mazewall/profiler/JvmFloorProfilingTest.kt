@@ -31,11 +31,10 @@ class JvmFloorProfilingTest : BaseIntegrationTest() {
 
         println("\n=== GENERATED JVM FLOOR BILL OF BEHAVIOR ===")
         println(
-            bob.toDsl(
+            bob.toDslAllowingIncomplete(
                 baseCwd = java.nio.file.Paths
             .get("")
             .toAbsolutePath(),
-                allowIncomplete = true,
             ),
         )
         println("============================================")

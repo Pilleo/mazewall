@@ -13,7 +13,9 @@ import io.mazewall.portal.PortalReadTimeoutException
 import kotlin.system.exitProcess
 
 /**
- * Worker entry: connect, install process-wide policy, then serve RPC.
+ * Placement worker: process-wide policy then RPC. Not USER_NOTIF.
+ * Default install is the static fail-closed trio. After a **complete** profile,
+ * operators may instead `installOnDedicatedProcess(*result.toDedicatedWorkerPolicies())`.
  * Guest impl is never loaded in the broker process.
  */
 public object PortalWorkerMain {

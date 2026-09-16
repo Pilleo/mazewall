@@ -28,11 +28,11 @@ class BpfProgLoadLayoutTest {
                 "syscall" -> {
                     val number = args[0] as Long
                     when (number) {
-                        321L -> when (++bpfCalls) {
+                        Syscall.BPF.numberFor(Arch.current()).toLong() -> when (++bpfCalls) {
                             1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
                             else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1)
                         }
-                        3L -> {
+                        Arch.current().close.toLong() -> {
                             closed += (args[1] as io.mazewall.platform.syscall.NativeArg.LongArg).value
                             SyscallResult.Success<Long, SyscallHandledState.Unhandled>(0L)
                         }
@@ -57,11 +57,11 @@ class BpfProgLoadLayoutTest {
         ) { _, method, args ->
             when (method.name) {
                 "syscall" -> when (args[0] as Long) {
-                    321L -> when (++bpfCalls) {
+                    Syscall.BPF.numberFor(Arch.current()).toLong() -> when (++bpfCalls) {
                         1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
                         else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
                     }
-                    3L -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
+                    Arch.current().close.toLong() -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
                     else -> error("unexpected syscall ${args[0]}")
                 }
                 else -> error("unexpected raw operation ${method.name}")

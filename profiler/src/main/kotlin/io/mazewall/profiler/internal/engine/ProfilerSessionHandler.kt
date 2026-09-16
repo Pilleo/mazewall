@@ -48,7 +48,7 @@ import io.mazewall.profiler.ffi.controlMemory
 import java.io.IOException
 
 /**
- * Internal logic for handling active seccomp listeners and shutdown requests.
+ * Profiler session: copies syscall evidence and ACKs 0xAC. It does not EPERM.
  */
 internal class ProfilerSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,

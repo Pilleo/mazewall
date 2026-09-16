@@ -99,7 +99,7 @@ class ProfilerJavaApiTest {
         assertEquals("result-from-callable", result.getValue());
         assertNotNull(result.getBehavior());
 
-        String dsl = result.toDsl("Policy.PURE_COMPUTE", Mazewall.pureComputeUnsafe(), null, true);
+        String dsl = result.toDslAllowingIncomplete("Policy.PURE_COMPUTE", Mazewall.pureComputeUnsafe(), null);
         assertNotNull(dsl);
     }
 
@@ -111,10 +111,10 @@ class ProfilerJavaApiTest {
 
         // Test toPolicy overloads with allowIncomplete=true for raw BoB
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy1 =
-                bob.toPolicy(Mazewall.pureComputeUnsafe(), Path.of("."), null, true);
+                bob.toPolicyAllowingIncomplete(Mazewall.pureComputeUnsafe(), Path.of("."), null);
         assertNotNull(policy1);
 
-        String dslWithBase = bob.toDsl("Policy.PURE_COMPUTE", Mazewall.pureComputeUnsafe(), Path.of("."), ProfilingCoverage.absent(), true);
+        String dslWithBase = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE", Mazewall.pureComputeUnsafe(), Path.of("."), ProfilingCoverage.absent());
         assertNotNull(dslWithBase);
     }
 

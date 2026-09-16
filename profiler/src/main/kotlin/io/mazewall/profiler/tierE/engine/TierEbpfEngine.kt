@@ -8,7 +8,10 @@ import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.native.asBpf
+import io.mazewall.platform.native.bpf
 import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.openDescriptor
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -31,10 +34,18 @@ internal class TierEbpfEngine(
     private val native: RawSyscallOperations,
 ) : AutoCloseable {
     public companion object {
-        private const val SYS_BPF: Long = 321
-        private const val SYS_CLOSE: Long = 3
-        private const val SYS_IOCTL: Long = 16
-        private const val SYS_PERF_EVENT_OPEN: Long = 298
+        private val SYS_CLOSE: Long get() = io.mazewall.platform.syscall.Arch
+            .current()
+            .close
+            .toLong()
+        private val SYS_IOCTL: Long get() = io.mazewall.platform.syscall.Arch
+            .current()
+            .ioctl
+            .toLong()
+        private val SYS_PERF_EVENT_OPEN: Long get() = io.mazewall.platform.syscall.Arch
+            .current()
+            .perfEventOpen
+            .toLong()
         private const val PERF_FLAG_FD_CLOEXEC: Long = 8
         private const val PERF_EVENT_IOC_ENABLE: Long = 0x2400
         private const val PERF_EVENT_IOC_SET_BPF: Long = 0x40042408
@@ -423,12 +434,7 @@ internal class TierEbpfEngine(
         cmd: Long,
         attr: MemorySegment,
         size: Long,
-    ) = native.syscall(
-        SYS_BPF,
-        NativeArg.LongArg(cmd),
-        NativeArg.MemoryArg(ConfinedSegment(attr)),
-        NativeArg.LongArg(size),
-    )
+    ) = native.bpf(cmd, ConfinedSegment(attr), size)
 
     private fun createMap(
         type: Int,
@@ -450,9 +456,7 @@ internal class TierEbpfEngine(
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_FD, btfFd)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_KEY_TYPE_ID, btfKeyTypeId)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_VALUE_TYPE_ID, btfValueTypeId)
-            bpfResult(BPF_MAP_CREATE, attr, 72)
-                .recordDescriptorAcquisition()
-                .getFdOrThrow("bpf(BPF_MAP_CREATE)", FileDescriptorRole.Bpf)
+            native.asBpf().openDescriptor(BPF_MAP_CREATE, ConfinedSegment(attr), 72, "bpf(BPF_MAP_CREATE)")
         }
 
     private fun loadBtf(bytes: ByteArray): BpfFd =
@@ -512,9 +516,12 @@ internal class TierEbpfEngine(
             val attr = it.allocate(BpfRawTracepointOpenLayout.SIZE)
             attr.set(ValueLayout.ADDRESS, BpfRawTracepointOpenLayout.NAME, strSeg(it, name, 64))
             attr.set(ValueLayout.JAVA_INT, BpfRawTracepointOpenLayout.PROGRAM_FD, progFd)
-            bpfResult(BPF_RAW_TRACEPOINT_OPEN, attr, BpfRawTracepointOpenLayout.SIZE)
-                .recordDescriptorAcquisition()
-                .getFdOrThrow("bpf(BPF_RAW_TRACEPOINT_OPEN)", FileDescriptorRole.Bpf)
+            native.asBpf().openDescriptor(
+                BPF_RAW_TRACEPOINT_OPEN,
+                ConfinedSegment(attr),
+                BpfRawTracepointOpenLayout.SIZE,
+                "bpf(BPF_RAW_TRACEPOINT_OPEN)",
+            )
         }
 
     // ── helpers ─────────────────────────────────────────────────────────────

@@ -115,8 +115,8 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         val bob = result.behavior
 
         // Let's compile!
-        val compiledPolicy = result.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
-        val dsl = result.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val compiledPolicy = result.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
+        val dsl = result.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         println("Profiler compiled DSL:\n$dsl")
 
         // The compiled policy should have the open variant unblocked!

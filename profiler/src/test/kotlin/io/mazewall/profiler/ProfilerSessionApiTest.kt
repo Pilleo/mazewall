@@ -485,7 +485,7 @@ class ProfilerSessionApiTest {
         assertFailsWith<IncompleteProfileException> {
             bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage)
         }
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage)
         assertTrue(policy.isSyscallAllowed(Syscall.IO_URING_ENTER))
     }
 

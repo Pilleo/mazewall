@@ -59,26 +59,38 @@ public class ProfilingResult<T>(
     public fun toPolicy(
         base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: java.nio.file.Path? = null,
-        allowIncomplete: Boolean = false,
-    ): io.mazewall.enforcer.api.Policy<io.mazewall.enforcer.api.PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Uncompiled> = behavior.toPolicy(base, baseCwd, coverage, allowIncomplete)
+    ): io.mazewall.enforcer.api.Policy<io.mazewall.enforcer.api.PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Uncompiled> = behavior.toPolicy(base, baseCwd, coverage)
+
+    @JvmName("toPolicyAllowingIncomplete")
+    internal fun toPolicyAllowingIncomplete(
+        base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: java.nio.file.Path? = null,
+    ): io.mazewall.enforcer.api.Policy<io.mazewall.enforcer.api.PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Uncompiled> = behavior.toPolicyAllowingIncomplete(base, baseCwd, coverage)
 
     @JvmOverloads
     public fun toDsl(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
         base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
         baseCwd: java.nio.file.Path? = null,
-        allowIncomplete: Boolean = false,
-    ): String = behavior.toDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete)
+    ): String = behavior.toDsl(basePolicyName, base, baseCwd, coverage)
+
+    @JvmName("toDslAllowingIncomplete")
+    internal fun toDslAllowingIncomplete(
+        basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
+        base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: java.nio.file.Path? = null,
+    ): String = behavior.toDslAllowingIncomplete(basePolicyName, base, baseCwd, coverage)
 
     /**
      * Compiles this profile into policies for [io.mazewall.enforcer.api.ContainedExecutors.installOnDedicatedProcess].
      * Incomplete coverage fails closed; it never produces a worker allow-list.
+     * Use this **or** the worker's static fail-closed trio — never `allowIncomplete`.
      */
     @JvmOverloads
     public fun toDedicatedWorkerPolicies(
         runtime: io.mazewall.enforcer.api.RuntimeProfile = io.mazewall.enforcer.api.RuntimeProfile.HOTSPOT_JIT,
     ): Array<io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled>> {
-        val bob = toPolicy(allowIncomplete = false)
+        val bob = toPolicy()
         return arrayOf(
             io.mazewall.enforcer.api.ProcessPolicies
                 .workerFilesystem(runtime),

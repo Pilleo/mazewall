@@ -74,7 +74,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         useTsync: Boolean,
         onApplied: () -> Unit = {},
     ) {
-        check(!Thread.currentThread().isVirtual) { "Cannot install seccomp filter from a virtual thread" }
+        io.mazewall.enforcer.diagnostics.requirePlatformThread()
         // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
         EngineState.UnprivilegedImpl.toString()
         EngineState.LoadedImpl.toString()

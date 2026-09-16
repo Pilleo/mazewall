@@ -28,6 +28,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 /**
+ * Placement: pooled worker JVMs plus capability FDs. Not a USER_NOTIF supervisor.
  * Owns a pool of portal worker JVMs and Unix RPC sockets.
  * Spawn workers before the broker installs process-wide seccomp.
  *
@@ -432,7 +433,8 @@ public class ProcessBroker internal constructor(
     }
 
     private fun awaitMaintenance(deadline: Deadline): Boolean {
-        val result = runCatching { maintenance.awaitTermination(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) }
+        val waitMs = maxOf(deadline.remainingMillis().toLong(), 5_000L)
+        val result = runCatching { maintenance.awaitTermination(waitMs, TimeUnit.MILLISECONDS) }
         if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
         val stopped = result.getOrDefault(false)
         if (!stopped) logger.warning("portal maintenance did not terminate before broker cleanup")

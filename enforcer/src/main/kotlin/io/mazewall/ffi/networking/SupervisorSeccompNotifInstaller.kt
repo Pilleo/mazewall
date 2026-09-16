@@ -148,7 +148,7 @@ internal object SupervisorSeccompNotifInstaller {
         socketPath: String,
         filter: BpfProgram<BpfStatus.Verified>,
         processWide: Boolean = false,
-        connectWithRetry: (String) -> Int = { path -> SupervisorSocketUtils.connectWithRetry(path) },
+        connectWithRetry: (String) -> Int = { error("Raw Int connect is disabled; use installOwned") },
         sendDescriptor: (Int, Int) -> Boolean = { sockFd, fd -> SupervisorSocketUtils.sendDescriptor(sockFd, fd) },
         onFilterApplied: () -> Unit = {},
         onSocketConnected: (socketFd: Int, readyLatch: CountDownLatch) -> Unit,

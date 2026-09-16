@@ -340,6 +340,8 @@ public object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy,
     ): io.mazewall.enforcer.api.InstallationReceipt {
+        io.mazewall.enforcer.diagnostics
+            .requirePlatformThread()
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()

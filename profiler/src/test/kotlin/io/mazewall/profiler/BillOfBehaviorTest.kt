@@ -119,7 +119,7 @@ class BillOfBehaviorTest {
         assertTrue(behavior.fsWritePaths.isEmpty())
         assertFalse(coverage.complete)
         assertFailsWith<IncompleteProfileException> { behavior.toPolicy(coverage = coverage) }
-        assertNotNull(behavior.toPolicy(coverage = coverage, allowIncomplete = true))
+        assertNotNull(behavior.toPolicyAllowingIncomplete(coverage = coverage))
     }
 
     @Test
@@ -185,19 +185,18 @@ class BillOfBehaviorTest {
 
         // Deny-list mode base policy (blocks OPEN, so should unblock it)
         val denyPolicy = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE
-        val compiledDeny = bob.toPolicy(denyPolicy, allowIncomplete = true)
+        val compiledDeny = bob.toPolicyAllowingIncomplete(denyPolicy)
         assertEquals(setOf("/read"), compiledDeny.allowedFsReadPaths.map { it.value }.toSet())
         assertEquals(setOf("/write"), compiledDeny.allowedFsWritePaths.map { it.value }.toSet())
 
         // Allow-list mode base policy
-        val policy = bob.toPolicy(
+        val policy = bob.toPolicyAllowingIncomplete(
             io.mazewall.enforcer.api.Policy
                 .builder()
                 .defaultAction(
                     io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).build(),
-            allowIncomplete = true,
         )
         assertEquals(
             io.mazewall.platform.syscall.SeccompAction
@@ -205,7 +204,7 @@ class BillOfBehaviorTest {
                 policy.defaultAction,
         )
 
-        val policyDenyList = bob.toPolicy(allowIncomplete = true)
+        val policyDenyList = bob.toPolicyAllowingIncomplete()
         assertEquals(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW, policyDenyList.defaultAction)
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.OPEN))
         assertTrue(policyDenyList.isSyscallAllowed(Syscall.CONNECT))
@@ -221,7 +220,7 @@ class BillOfBehaviorTest {
             )
 
         // Deny-list base DSL
-        val dslDeny = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dslDeny = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE)
         assertTrue(dslDeny.contains("Policy.threadLocalBuilder()"))
         assertTrue(dslDeny.contains(".base(Policy.PURE_COMPUTE_UNSAFE)"))
         assertTrue(dslDeny.contains("Syscall.OPEN"))
@@ -236,10 +235,9 @@ class BillOfBehaviorTest {
                     io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).build()
-        val dslAllow = bob.toDsl(
+        val dslAllow = bob.toDslAllowingIncomplete(
             "Policy.builder().defaultAction(SeccompAction.ACT_ERRNO()).build()",
             allowBase,
-            allowIncomplete = true,
         )
         assertTrue(dslAllow.contains(".allow("))
         assertTrue(dslAllow.contains("Syscall.OPEN"))
@@ -262,14 +260,14 @@ class BillOfBehaviorTest {
                 ),
             )
 
-        val policy = bob.toPolicy(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE)
 
         // Verifying the compiled policy allowed paths are pruned to keep the most generic parent (covers all children)!
         assertEquals(setOf("/home", "/tmp"), policy.allowedFsReadPaths.map { it.value }.toSet())
         assertEquals(setOf("/var/log"), policy.allowedFsWritePaths.map { it.value }.toSet())
 
         // Verifying the generated DSL is also pruned!
-        val dsl = bob.toDsl(allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete()
         assertTrue(dsl.contains(".allowFsRead(\"/home\")"))
         assertTrue(dsl.contains(".allowFsRead(\"/tmp\")"))
         assertFalse(dsl.contains(".allowFsRead(\"/home/leanid/.sdkman\")"))
@@ -434,7 +432,7 @@ class BillOfBehaviorTest {
     fun `toPolicy should resolve relative paths against baseCwd`() {
         val bob = BillOfBehavior(opens = setOf("config/settings.json"))
         val baseCwd = Paths.get("/opt/app")
-        val policy = bob.toPolicy(baseCwd = baseCwd, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(baseCwd = baseCwd)
 
         assertEquals(setOf("/opt/app/config/settings.json"), policy.allowedFsReadPaths.map { it.value }.toSet())
     }
@@ -452,7 +450,7 @@ class BillOfBehaviorTest {
         val bob = BillOfBehavior(opens = setOf("config/settings.json"))
 
         assertFailsWith<IllegalArgumentException> {
-            bob.toPolicy(allowIncomplete = true)
+            bob.toPolicyAllowingIncomplete()
         }
     }
 
@@ -489,7 +487,7 @@ class BillOfBehaviorTest {
             result.toDsl()
         }
 
-        val dsl = result.toDsl(allowIncomplete = true)
+        val dsl = result.toDslAllowingIncomplete()
         assertTrue(dsl.contains(".allowFsRead(\"/tmp/a\")"))
     }
 
@@ -512,7 +510,7 @@ class BillOfBehaviorTest {
     @Test
     fun `toDsl should emit destinations not enforced comment when allowIncomplete is true`() {
         val bob = BillOfBehavior(execs = setOf("/usr/bin/bash"))
-        val dsl = bob.toDsl(allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete()
         assertTrue(dsl.contains("// WARNING: destinations not enforced - exec"))
     }
 
@@ -577,11 +575,11 @@ class BillOfBehaviorTest {
         assertTrue(coverage.warnings.any { it.contains("unmapped syscall") && it.contains("RECVMSG") })
 
         assertFailsWith<IncompleteProfileException> {
-            bob.toPolicy(coverage = coverage, allowIncomplete = false)
+            bob.toPolicy(coverage = coverage)
         }
 
         // With allowIncomplete = true, it compiles cleanly
-        val policy = bob.toPolicy(coverage = coverage, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(coverage = coverage)
         assertTrue(policy.isSyscallAllowed(Syscall.READ))
     }
 }

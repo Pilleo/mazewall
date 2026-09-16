@@ -29,12 +29,23 @@ public fun validateNotVirtual() {
     contract {
         returns()
     }
-    if (isVirtualOrCarrierThread()) {
+    requirePlatformThread()
+}
+
+/**
+ * Seccomp is bound to the OS thread. Installing from a virtual thread contaminates its
+ * carrier for every later virtual task on that carrier.
+ */
+@OptIn(ExperimentalContracts::class)
+public fun requirePlatformThread(thread: Thread = Thread.currentThread()) {
+    contract {
+        returns()
+    }
+    if (isVirtualOrCarrierThread(thread)) {
         throw IllegalStateException(
-            "Attempted to apply thread-scoped seccomp containment inside a virtual thread. " +
-                "Seccomp filters are per-thread and would contaminate the carrier thread, " +
-                "affecting other unrelated virtual threads. " +
-                "Use process-wide containment (installOnProcess) or ContainedExecutors.wrap(executorService).",
+            "Cannot install seccomp from a virtual thread: the filter would permanently contaminate " +
+                "its carrier and affect unrelated virtual tasks. Use a platform thread, " +
+                "ContainedExecutors.wrap(executor), installOnProcess, or a portal worker.",
         )
     }
 }

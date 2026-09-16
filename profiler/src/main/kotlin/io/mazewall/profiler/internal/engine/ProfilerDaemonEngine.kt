@@ -27,7 +27,7 @@ import io.mazewall.profiler.ffi.TraceEventPublisher
 import io.mazewall.profiler.ffi.TransportNativeEngine
 
 /**
- * Standalone Profiler Daemon Engine.
+ * Standalone profiler daemon: observes syscalls and ACKs 0xAC. It does not choose EPERM.
  *
  * Communicates with the parent JVM via a [ProfilerTransport], sending binary [SyscallEvent]
  * structures and resolving memory using [ProfilerMemoryReader].

@@ -205,6 +205,15 @@ class PortalRetirementAdmissionTest {
         }
     }
 
+    @Test
+    fun `send rejects frames that carry file descriptors`() {
+        withPair { channel, _, _ ->
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+                channel.send(PortalFrame(PortalKind.Request, 1, PortalMethod.Echo, PortalPayload(ByteArray(0)), 1))
+            }
+        }
+    }
+
     private fun withPair(
         sockets: SocketManager = RealSocketManager,
         action: (PortalChannel, FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) -> Unit,

@@ -89,6 +89,25 @@ class ResourceOwnershipConventionsTest {
         )
     }
 
+    @Test
+    fun `production bpf syscall numbers go through NativeBpf`() {
+        val allow = setOf("NativeBpf.kt", "Arch.kt", "SyscallNumberResolver.kt", "RawNativeTransfer.kt")
+        val violations = scanMainSources { path, source ->
+            if (allow.any { path.toString().endsWith(it) }) return@scanMainSources emptyList()
+            HARDCODED_BPF
+                .findAll(source)
+                .map { match ->
+                val line = source.take(match.range.first).count { it == '\n' } + 1
+                "$path:$line"
+            }.toList()
+        }
+        assertTrue(
+            violations.isEmpty(),
+            "Use NativeEngine.bpf / Syscall.BPF.numberFor instead of a hardcoded bpf number:\n" +
+                violations.joinToString("\n"),
+        )
+    }
+
     private fun scanMainSources(inspect: (Path, String) -> List<String>): List<String> {
         val root = Path.of("").toAbsolutePath()
         val modules = listOf("platform", "enforcer", "profiler", "portals", "demos")
@@ -117,6 +136,7 @@ class ResourceOwnershipConventionsTest {
         val ARENA_OF_CONFINED = Regex("""(?<!Native)Arena\.ofConfined\s*\(""")
         val OF_CONFINED_WITHOUT_USE = Regex("""\.ofConfined\s*\(\s*\)\s*(?!\s*\.use)""")
         val GET_FD_OR_THROW = Regex("""getFdOrThrow\s*\(""")
+        val HARDCODED_BPF = Regex("""SYS_BPF\s*=\s*321|syscall\(\s*321L""")
         val OWNED_FD_TRANSFER = Regex("""return |\.use\b|owned\s*=|Opened\(|listenerFdVal\.set|Capability\.ReadFd|clientFd\s*=""")
     }
 }

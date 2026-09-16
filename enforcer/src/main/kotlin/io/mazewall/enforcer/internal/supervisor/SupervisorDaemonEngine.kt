@@ -11,6 +11,7 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 import io.mazewall.platform.socket.SocketManager
 
+/** Sidecar that CONTINUEs or EPERMs live syscalls for a sandboxed JVM. Not a profiler. */
 internal class SupervisorDaemonEngine(
     private val socketPath: String,
     private val engine: NativeEngine = LinuxNative,

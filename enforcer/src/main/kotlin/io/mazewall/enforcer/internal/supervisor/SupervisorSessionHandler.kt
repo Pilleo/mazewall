@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
 
-/** Coordinates one reducer/effect lifecycle per notification, including deferred socket replies. */
+/** Per-connection USER_NOTIF handler: issues kernel CONTINUE/EPERM/ADDFD verdicts. Coordinates one reducer/effect lifecycle per notification, including deferred socket replies. */
 internal class SupervisorSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,

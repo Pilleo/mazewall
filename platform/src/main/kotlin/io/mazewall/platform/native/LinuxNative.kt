@@ -65,6 +65,7 @@ internal object LinuxNative : NativeEngine {
     override val process: NativeProcess get() = engine.process
     override val memory: NativeMemory get() = engine.memory
     override val raw: RawSyscallOperations get() = engine.raw
+    override val bpf: NativeBpf get() = engine.bpf
 
     /** Kernel-backed liveness probe kept behind the native facade. */
     internal fun isDescriptorLive(fd: Int): Boolean =

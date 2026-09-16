@@ -33,6 +33,7 @@ internal interface NativeEngine {
     public val process: NativeProcess
     public val memory: NativeMemory
     public val raw: RawSyscallOperations
+    public val bpf: NativeBpf get() = raw.asBpf()
 }
 
 /**
