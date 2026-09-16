@@ -12,6 +12,7 @@ import java.util.concurrent.Callable
         "io.mazewall.enforcer.api.SandboxDispatcher",
         "io.mazewall.enforcer.api.SandboxDispatcher",
     ),
+    level = DeprecationLevel.ERROR,
 )
 public object SandboxDispatcher {
     @Deprecated("Use io.mazewall.enforcer.api.SandboxDispatcher.execute")

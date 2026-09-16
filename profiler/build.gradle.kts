@@ -246,7 +246,6 @@ classDiagrams {
     renderClasspath(plantumlConfig)
     defaults {
         style {
-            hidePackages()
             theme("spacelab")
             hide("empty members")
         }
@@ -288,6 +287,7 @@ tasks.named("generateClassDiagrams") {
                 content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
                 // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
                 content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+                content = content.replace("set separator none\n", "")
                 // Fix PlantUML SVG XML parsing error (duplicate data attribute in <g class="entity">)
                 content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
                 file.writeText(content)

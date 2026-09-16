@@ -1,0 +1,1263 @@
+@startuml Platform Class Diagram
+!pragma useIntermediatePackages false
+!theme spacelab
+hide empty members
+
+class "IoctlCommand" as io.mazewall.ffi.IoctlCommand<Req, Res> {
+  + {static}Companion Companion
+  __
+  +long getCode()
+}
+interface "IoctlPayload" as io.mazewall.ffi.IoctlPayload {
+}
+class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
+  + {static}LayoutValidator INSTANCE
+  __
+  +void validate()
+  +void validateLayout(StructLayout, long, long, Function1<? super LayoutValidationScope, Unit>)
+}
+class "TypedSegment" as io.mazewall.ffi.TypedSegment<P extends IoctlPayload> {
+  +ManagedSegment getSegment()
+  + {static}String toString-impl(ManagedSegment)
+  + {static}int hashCode-impl(ManagedSegment)
+  + {static}boolean equals-impl(ManagedSegment, Object)
+  + {static}ManagedSegment constructor-impl(ManagedSegment)
+  + {static}boolean equals-impl0(ManagedSegment, ManagedSegment)
+}
+class "NativeTransfer" as io.mazewall.ffi.internal.NativeTransfer {
+  + {static}NativeTransfer INSTANCE
+  __
+  +void ioctl(long, ManagedSegment)
+  +void bytes(ManagedSegment, long, boolean)
+  +void elements(ManagedSegment, long, long, boolean)
+  +void path(ManagedSegment)
+  +void socketAddress(ManagedSegment, ManagedSegment)
+}
+class "RawNativeTransfer" as io.mazewall.ffi.internal.RawNativeTransfer {
+  + {static}RawNativeTransfer INSTANCE
+  __
+  +void validate(long, NativeArg[])
+}
+class "RealNativeEngine" as io.mazewall.ffi.internal.RealNativeEngine {
+  + {static}RealNativeEngine INSTANCE
+  __
+  +NativeFileSystem getFileSystem()
+  +NativeNetworking getNetworking()
+  +NativeProcess getProcess()
+  +NativeMemory getMemory()
+  +RawSyscallOperations getRaw()
+  +SyscallResult syscall(long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
+  +SyscallResult syscall4(long, NativeArg, NativeArg, NativeArg, NativeArg)
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, ManagedSegment)
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, long)
+  +SyscallResult fcntl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, long)
+  +SyscallResult poll(ManagedSegment, long, int)
+  +NativeBpf getBpf()
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, IoctlCommand<Req, Res>, Req)
+}
+class "RealNativeFileSystem" as io.mazewall.ffi.internal.RealNativeFileSystem {
+  + {static}RealNativeFileSystem INSTANCE
+  __
+  +SyscallResult open(ManagedSegment, int, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int, int)
+  +SyscallResult openat2(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, long)
+  +SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long)
+  +SyscallResult close(FileDescriptor<?, ? extends Open, Owned>)
+  +SyscallResult readlink(ManagedSegment, ManagedSegment, long)
+  +SyscallResult open(ManagedSegment, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+}
+class "RealNativeHelper" as io.mazewall.ffi.internal.RealNativeHelper {
+  + {static}RealNativeHelper INSTANCE
+  __
+  +SyscallResult result(long, int)
+  +long toLong(Object)
+  +MethodHandle downcall(String, FunctionDescriptor, Option[])
+}
+class "RealNativeMemory" as io.mazewall.ffi.internal.RealNativeMemory {
+  + {static}RealNativeMemory INSTANCE
+  __
+  +SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
+  +SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
+  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  +ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
+}
+class "RealNativeNetworking" as io.mazewall.ffi.internal.RealNativeNetworking {
+  + {static}RealNativeNetworking INSTANCE
+  __
+  +SyscallResult socketpair(int, int, int, ManagedSegment)
+  +SyscallResult accept4(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, int)
+  +SyscallResult socket(int, int, int)
+  +SyscallResult bind(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  +SyscallResult listen(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int)
+  +SyscallResult accept(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment)
+  +SyscallResult connect(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  +SyscallResult sendmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  +SyscallResult recvmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  +SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, int)
+}
+class "RealNativeProcess" as io.mazewall.ffi.internal.RealNativeProcess {
+  + {static}RealNativeProcess INSTANCE
+  __
+  +int gettid()
+  +SyscallResult prctl(PrctlCommand)
+  +SyscallResult pidfdOpen(int, int)
+  +SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, int)
+  +SyscallResult archPrctl(int, long)
+  +SyscallResult archPrctl(int, ManagedSegment)
+}
+class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
+  + {static}SyscallInvoker INSTANCE
+  __
+  +SyscallResult syscall(MethodHandle, long, long, long, long, long, long, long)
+  +SyscallResult ioctlAddr(MethodHandle, int, long, MemorySegment)
+  +SyscallResult ioctlLong(MethodHandle, int, long, long)
+  +SyscallResult fcntl(MethodHandle, int, int, long)
+  +SyscallResult poll(MethodHandle, MemorySegment, long, int)
+  +SyscallResult open(MethodHandle, MemorySegment, int, int)
+  +SyscallResult openat(MethodHandle, int, MemorySegment, int, int)
+  +SyscallResult mmap(MethodHandle, MemorySegment, long, int, int, int, long)
+  +SyscallResult close(MethodHandle, int)
+  +SyscallResult readlink(MethodHandle, MemorySegment, MemorySegment, long)
+  +SyscallResult socketpair(MethodHandle, int, int, int, MemorySegment)
+  +SyscallResult accept4(MethodHandle, int, MemorySegment, MemorySegment, int)
+  +SyscallResult socket(MethodHandle, int, int, int)
+  +SyscallResult bind(MethodHandle, int, MemorySegment, int)
+  +SyscallResult listen(MethodHandle, int, int)
+  +SyscallResult accept(MethodHandle, int, MemorySegment, MemorySegment)
+  +SyscallResult connect(MethodHandle, int, MemorySegment, int)
+  +SyscallResult sendmsg(MethodHandle, int, MemorySegment, int)
+  +SyscallResult recvmsg(MethodHandle, int, MemorySegment, int)
+  +SyscallResult recv(MethodHandle, int, MemorySegment, long, int)
+  +int gettid(MethodHandle)
+  +SyscallResult prctl(MethodHandle, int, long, long, long, long)
+  +SyscallResult pidfdOpen(MethodHandle, int, int)
+  +SyscallResult pidfdGetFd(MethodHandle, int, int, int)
+  +SyscallResult processVmReadv(MethodHandle, int, MemorySegment, long, MemorySegment, long, long)
+  +SyscallResult processVmWritev(MethodHandle, int, MemorySegment, long, MemorySegment, long, long)
+  +SyscallResult read(MethodHandle, int, MemorySegment, long)
+  +SyscallResult write(MethodHandle, int, MemorySegment, long)
+  +SyscallResult archPrctlLong(MethodHandle, int, long)
+  +SyscallResult archPrctlAddr(MethodHandle, int, MemorySegment)
+}
+class "CmsghdrSegment" as io.mazewall.ffi.memory.CmsghdrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}long getCmsgLen-impl(MemorySegment)
+  + {static}void setCmsgLen-impl(MemorySegment, long)
+  + {static}int getCmsgLevel-impl(MemorySegment)
+  + {static}void setCmsgLevel-impl(MemorySegment, int)
+  + {static}int getCmsgType-impl(MemorySegment)
+  + {static}void setCmsgType-impl(MemorySegment, int)
+  + {static}int getDataFd-impl(MemorySegment)
+  + {static}void setDataFd-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "ConfinedSegment" as io.mazewall.ffi.memory.ConfinedSegment {
+  + {static}long address-impl(MemorySegment)
+  +long address()
+  + {static}long byteSize-impl(MemorySegment)
+  +long byteSize()
+  + {static}MemorySegment asSlice(MemorySegment, long, long)
+  +MemorySegment asSlice(long, long)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "ErrnoSegment" as io.mazewall.ffi.memory.ErrnoSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}int getErrno-impl(MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "IovecSegment" as io.mazewall.ffi.memory.IovecSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}MemorySegment getIovBase-impl(MemorySegment)
+  + {static}void setIovBase-impl(MemorySegment, MemorySegment)
+  + {static}long getIovLen-impl(MemorySegment)
+  + {static}void setIovLen-impl(MemorySegment, long)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "LandlockPathBeneathAttrSegment" as io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}long getAllowedAccess-impl(MemorySegment)
+  + {static}void setAllowedAccess-impl(MemorySegment, long)
+  + {static}int getParentFd-impl(MemorySegment)
+  + {static}void setParentFd-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "LandlockRulesetAttrSegment" as io.mazewall.ffi.memory.LandlockRulesetAttrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}long getHandledAccessFs-impl(MemorySegment)
+  + {static}void setHandledAccessFs-impl(MemorySegment, long)
+  + {static}long getHandledAccessNet-impl(MemorySegment)
+  + {static}void setHandledAccessNet-impl(MemorySegment, long)
+  + {static}long getScoped-impl(MemorySegment)
+  + {static}void setScoped-impl(MemorySegment, long)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+interface "ManagedSegment" as io.mazewall.ffi.memory.ManagedSegment {
+  + {static}Companion Companion
+  __
+  + {abstract}long address()
+  + {abstract}long byteSize()
+  + {abstract}ManagedSegment asSlice(long, long)
+}
+class "MsghdrSegment" as io.mazewall.ffi.memory.MsghdrSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}MemorySegment getMsgName-impl(MemorySegment)
+  + {static}void setMsgName-impl(MemorySegment, MemorySegment)
+  + {static}int getMsgNamelen-impl(MemorySegment)
+  + {static}void setMsgNamelen-impl(MemorySegment, int)
+  + {static}MemorySegment getMsgIov-impl(MemorySegment)
+  + {static}void setMsgIov-impl(MemorySegment, MemorySegment)
+  + {static}long getMsgIovlen-impl(MemorySegment)
+  + {static}void setMsgIovlen-impl(MemorySegment, long)
+  + {static}MemorySegment getMsgControl-impl(MemorySegment)
+  + {static}void setMsgControl-impl(MemorySegment, MemorySegment)
+  + {static}long getMsgControllen-impl(MemorySegment)
+  + {static}void setMsgControllen-impl(MemorySegment, long)
+  + {static}int getMsgFlags-impl(MemorySegment)
+  + {static}void setMsgFlags-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "NativeArena" as io.mazewall.ffi.memory.NativeArena {
+  + {static}Companion Companion
+  __
+  +Arena getArena()
+  +boolean isShared()
+  +void close()
+  +boolean isAlive()
+  +ManagedSegment allocate(long)
+  +ManagedSegment allocate(MemoryLayout)
+  +ManagedSegment allocate(MemoryLayout, long)
+  +ManagedSegment allocateFrom(String)
+}
+class "PollFdSegment" as io.mazewall.ffi.memory.PollFdSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}int getFd-impl(MemorySegment)
+  + {static}void setFd-impl(MemorySegment, int)
+  + {static}short getEvents-impl(MemorySegment)
+  + {static}void setEvents-impl(MemorySegment, short)
+  + {static}short getRevents-impl(MemorySegment)
+  + {static}void setRevents-impl(MemorySegment, short)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SeccompNotifAddFdSegment" as io.mazewall.ffi.memory.SeccompNotifAddFdSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}long getId-impl(MemorySegment)
+  + {static}void setId-impl(MemorySegment, long)
+  + {static}int getFlags-impl(MemorySegment)
+  + {static}void setFlags-impl(MemorySegment, int)
+  + {static}int getSrcfd-impl(MemorySegment)
+  + {static}void setSrcfd-impl(MemorySegment, int)
+  + {static}int getNewfd-impl(MemorySegment)
+  + {static}void setNewfd-impl(MemorySegment, int)
+  + {static}int getNewfdFlags-impl(MemorySegment)
+  + {static}void setNewfdFlags-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SeccompSessionBuffers" as io.mazewall.ffi.memory.SeccompSessionBuffers {
+  + {static}Companion Companion
+  __
+  +ManagedSegment getAck()
+  +ManagedSegment getNotif()
+  +ManagedSegment getResp()
+  +boolean isClosed()
+  +void close()
+}
+class "SegmentLease" as io.mazewall.ffi.memory.SegmentLease {
+  +SegmentPool getOwner()
+  +long getGeneration()
+  +ManagedSegment getBuffer()
+  +ManagedSegment getSegment()
+  +void close()
+}
+class "SegmentPool" as io.mazewall.ffi.memory.SegmentPool {
+  + {static}Companion Companion
+  __
+  +long getByteSize()
+  +SegmentLease rent()
+  +ManagedSegment checkedSegment(SegmentLease)
+  +void returnLease(SegmentLease)
+  +void close()
+}
+class "SharedSegment" as io.mazewall.ffi.memory.SharedSegment {
+  + {static}long address-impl(MemorySegment)
+  +long address()
+  + {static}long byteSize-impl(MemorySegment)
+  +long byteSize()
+  + {static}MemorySegment asSlice(MemorySegment, long, long)
+  +MemorySegment asSlice(long, long)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockFilterSegment" as io.mazewall.ffi.memory.SockFilterSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}short getCode-impl(MemorySegment)
+  + {static}void setCode-impl(MemorySegment, short)
+  + {static}byte getJt-impl(MemorySegment)
+  + {static}void setJt-impl(MemorySegment, byte)
+  + {static}byte getJf-impl(MemorySegment)
+  + {static}void setJf-impl(MemorySegment, byte)
+  + {static}int getK-impl(MemorySegment)
+  + {static}void setK-impl(MemorySegment, int)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockFprogSegment" as io.mazewall.ffi.memory.SockFprogSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}ManagedSegment getManagedFilter-impl(MemorySegment)
+  + {static}short getLen-impl(MemorySegment)
+  + {static}void setLen-impl(MemorySegment, short)
+  + {static}MemorySegment getFilter-impl(MemorySegment)
+  + {static}void setFilter-impl(MemorySegment, MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}short getSunFamily-impl(MemorySegment)
+  + {static}void setSunFamily-impl(MemorySegment, short)
+  + {static}MemorySegment getSunPath-impl(MemorySegment)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
+  + {static}Companion Companion
+  __
+  +MemorySegment getSegment()
+  + {static}ManagedSegment getManaged-impl(MemorySegment)
+  + {static}long getId-impl(MemorySegment)
+  + {static}void setId-impl(MemorySegment, long)
+  + {static}byte getDecision-impl(MemorySegment)
+  + {static}void setDecision-impl(MemorySegment, byte)
+  + {static}int getErrorNr-impl(MemorySegment)
+  + {static}void setErrorNr-impl(MemorySegment, int)
+  + {static}String getPath-impl(MemorySegment)
+  + {static}void setPath-impl(MemorySegment, String)
+  + {static}String toString-impl(MemorySegment)
+  + {static}int hashCode-impl(MemorySegment)
+  + {static}boolean equals-impl(MemorySegment, Object)
+  + {static}MemorySegment constructor-impl(MemorySegment)
+  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
+}
+interface "TraceeMemoryReader" as io.mazewall.ffi.memory.TraceeMemoryReader {
+  + {static}Companion Companion
+  __
+  + {abstract}String readString(NativeArena, int, long, int)
+  + {abstract}byte[] readBytes(NativeArena, int, long, int)
+  + {abstract}String resolveLink(NativeArena, int, String)
+  + {static}TraceeMemoryReader real()
+}
+class "NativeDescriptorInputStream" as io.mazewall.ffi.networking.NativeDescriptorInputStream {
+  + {static}int BUFFER_SIZE
+  + {static}int BYTE_MASK
+  + {static}int EINTR
+  + {static}int FIRST_RETRY
+  + {static}int YIELD_RETRIES
+  + {static}long BACKOFF_MILLIS
+  __
+  +int read()
+  +int read(byte[], int, int)
+  +void close()
+}
+enum "NativeStreamOwnership" as io.mazewall.ffi.networking.NativeStreamOwnership {
+  Borrowed
+  OwnsArena
+  OwnsDescriptorAndArena
+  __
+  + {static}EnumEntries<NativeStreamOwnership> getEntries()
+}
+abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnection {
+  + {abstract}FileDescriptor<UnixSocket, Open, Owned> getSocketFd()
+  +FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
+  +SocketManager getSocketManager()
+  +void setSocketManager(SocketManager)
+  +CloseResult closeWithResult()
+  +CloseResult closeWithResult(Function1<? super CloseResult, Unit>)
+  +List<FileDescriptor<?, Open, Owned>> retryableOwnership()
+  +void close()
+  +void markSocketClosed()
+}
+interface "SeccompConnectionEffect" as io.mazewall.ffi.networking.SeccompConnectionEffect {
+}
+interface "SeccompConnectionEvent" as io.mazewall.ffi.networking.SeccompConnectionEvent {
+}
+class "SeccompConnectionMachine" as io.mazewall.ffi.networking.SeccompConnectionMachine {
+  ..
+  + {static}SeccompConnectionMachine INSTANCE
+  __
+  +SeccompConnectionTransition evaluate(SeccompConnection, SeccompConnectionEvent)
+}
+interface "SeccompConnectionOutcome" as io.mazewall.ffi.networking.SeccompConnectionOutcome {
+}
+class "SeccompConnectionTransition" as io.mazewall.ffi.networking.SeccompConnectionTransition {
+  +SeccompConnection getConnection()
+  +List<SeccompConnectionEffect> getEffects()
+  +SeccompConnectionOutcome getOutcome()
+}
+class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtils {
+  + {static}SupervisorSocketUtils INSTANCE
+  + {static}int AF_UNIX
+  + {static}int SOCK_STREAM
+  + {static}int BACKLOG_SIZE
+  + {static}int SOCKADDR_UN_SIZE
+  + {static}long CMSG_RIGHTS_LEN
+  + {static}long MSG_CONTROL_BUF_SIZE
+  + {static}int SOL_SOCKET
+  + {static}int SCM_RIGHTS
+  __
+  +MemorySegment setupSockAddrUn(NativeArena, String)
+  +int connectWithRetry(String, int, long)
+  +FileDescriptor<UnixSocket, Open, Owned> connectDescriptorWithRetry(String, int, long)
+  +FileDescriptor<UnixSocket, Open, Owned> connectDescriptorWithRetry(String, NativeEngine, int, long)
+  +boolean sendDescriptor(int, int)
+  +boolean sendDescriptor(int, int, NativeNetworking, Function0<Unit>)
+  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R, Function0<Unit>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R, NativeEngine, Function0<Unit>)
+}
+class "UnixServerSocket" as io.mazewall.ffi.networking.UnixServerSocket {
+  + {static}UnixServerSocket INSTANCE
+  __
+  +FileDescriptor<UnixSocket, Open, Owned> open(String)
+  +FileDescriptor<UnixSocket, Open, Owned> open(String, NativeEngine)
+}
+interface "UnixListenDaemonEffect" as io.mazewall.platform.daemon.UnixListenDaemonEffect {
+}
+interface "UnixListenDaemonEvent" as io.mazewall.platform.daemon.UnixListenDaemonEvent {
+}
+class "UnixListenDaemonMachine" as io.mazewall.platform.daemon.UnixListenDaemonMachine {
+  + {static}UnixListenDaemonMachine INSTANCE
+  __
+  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
+  +UnixListenDaemonTransition apply(AtomicReference<UnixListenDaemonState>, UnixListenDaemonEvent, Function1<? super List<? extends UnixListenDaemonEffect>, Unit>)
+}
+interface "UnixListenDaemonOutcome" as io.mazewall.platform.daemon.UnixListenDaemonOutcome {
+}
+interface "UnixListenDaemonState" as io.mazewall.platform.daemon.UnixListenDaemonState {
+}
+class "UnixListenDaemonTransition" as io.mazewall.platform.daemon.UnixListenDaemonTransition {
+  +UnixListenDaemonState getState()
+  +List<UnixListenDaemonEffect> getEffects()
+  +UnixListenDaemonOutcome getOutcome()
+}
+class "CleanupFailures" as io.mazewall.platform.fd.CleanupFailures {
+  + {static}CleanupFailures INSTANCE
+  __
+  +Throwable merge(Throwable, Throwable)
+}
+class "FdEpoch" as io.mazewall.platform.fd.FdEpoch {
+  + {static}FdEpoch INSTANCE
+  __
+  +long claimOpen(int)
+  +long borrowLiveGeneration(int)
+  +long adoptKernelReuse(int)
+  +boolean retire(int, long)
+  +boolean isLive(int, long)
+  +boolean isRetired(int)
+  +boolean isOwnedThroughEpoch(int, long)
+  +boolean verifyKernelLiveness(int)
+  +boolean auditClose(int, long)
+}
+class "FdLifecycle" as io.mazewall.platform.fd.FdLifecycle {
+  +int getValue()
+  +NativeArena getArena()
+  +long getGeneration()
+  +FileDescriptorRole getRole()
+  +FdOwnership getOwnership()
+  +boolean getClosed()
+  +void setClosed(boolean)
+}
+interface "FdOwnership" as io.mazewall.platform.fd.FdOwnership {
+}
+interface "FdState" as io.mazewall.platform.fd.FdState {
+}
+class "FileDescriptor" as io.mazewall.platform.fd.FileDescriptor<R extends FileDescriptorRole, S extends FdState, O extends FdOwnership> {
+  + {static}Companion Companion
+  __
+  +int getValue()
+  +NativeArena getArena()
+  +long getGeneration()
+  +FileDescriptorRole getRole()
+  +FdOwnership getOwnership()
+  +boolean isValid()
+  +boolean isInvalid()
+  +boolean isLiveForIo()
+  +boolean isUsableAsDirfd()
+  +boolean isUsableAsMmapBacking()
+  +boolean isClosedType()
+  +void markClosed()
+  +void retireForClose()
+  +boolean claimForClose()
+  +void closeResource()
+}
+interface "FileDescriptorRole" as io.mazewall.platform.fd.FileDescriptorRole {
+}
+class "NativeDescriptorReceipt" as io.mazewall.platform.fd.NativeDescriptorReceipt {
+  + {static}Companion Companion
+}
+class "ResourceRetirement" as io.mazewall.platform.fd.ResourceRetirement {
+  + {static}Companion Companion
+  __
+  +void attempt(Function0<Unit>)
+  +void finish()
+}
+enum "AttributionKind" as io.mazewall.platform.lifecycle.AttributionKind {
+  NONE
+  EXPLICIT_CONTEXT
+  AGENT_CONTEXT
+  USER_NOTIF_ORACLE
+  __
+  + {static}EnumEntries<AttributionKind> getEntries()
+}
+class "CloneFlags" as io.mazewall.platform.lifecycle.CloneFlags {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "ContextId" as io.mazewall.platform.lifecycle.ContextId {
+  ..
+  + {static}Companion Companion
+  + {static}int WIRE_SIZE_BYTES
+  __
+  +int getValue()
+  + {static}boolean isUnknown-impl(int)
+  + {static}byte[] encode-impl(int)
+  + {static}void encodeInto-impl(int, byte[], int)
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "Deadline" as io.mazewall.platform.lifecycle.Deadline {
+  + {static}Companion Companion
+  __
+  +long getNanoTime()
+  + {static}int remainingMillis-impl(long, long)
+  + {static}boolean isExpired-impl(long, long)
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "Errno" as io.mazewall.platform.lifecycle.Errno {
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "MazewallContext" as io.mazewall.platform.lifecycle.MazewallContext {
+  + {static}MazewallContext INSTANCE
+  __
+  +int current()
+  +T withContext(int, Function0<? extends T>)
+}
+annotation "MazewallInternal" as io.mazewall.platform.lifecycle.MazewallInternal {
+}
+class "MemoryAddress" as io.mazewall.platform.lifecycle.MemoryAddress {
+  +long getValue()
+  + {static}long toLong-impl(long)
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "MmapFlags" as io.mazewall.platform.lifecycle.MmapFlags {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "MmapProt" as io.mazewall.platform.lifecycle.MmapProt {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "NewFdFlags" as io.mazewall.platform.lifecycle.NewFdFlags {
+  + {static}Companion Companion
+  __
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "OpenFlags" as io.mazewall.platform.lifecycle.OpenFlags {
+  + {static}Companion Companion
+  __
+  +int getValue()
+  + {static}boolean has-impl(int, int)
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "Pid" as io.mazewall.platform.lifecycle.Pid {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "SandboxedPath" as io.mazewall.platform.lifecycle.SandboxedPath {
+  + {static}Companion Companion
+  __
+  +String getValue()
+  + {static}String toString-impl(String)
+  + {static}int hashCode-impl(String)
+  + {static}boolean equals-impl(String, Object)
+  + {static}boolean equals-impl0(String, String)
+  + {static}String of(String, boolean)
+  + {static}String of(String)
+}
+class "SyscallNumber" as io.mazewall.platform.lifecycle.SyscallNumber {
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "ThreadLocalDelegate" as io.mazewall.platform.lifecycle.ThreadLocalDelegate<T> {
+  +T getValue(Object, KProperty<?>)
+  +void setValue(Object, KProperty<?>, T)
+}
+class "Tid" as io.mazewall.platform.lifecycle.Tid {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "Uid" as io.mazewall.platform.lifecycle.Uid {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "LinuxNative" as io.mazewall.platform.native.LinuxNative {
+  + {static}LinuxNative INSTANCE
+  __
+  +Object getEngineIdentity()
+  +RuntimeSnapshot snapshot()
+  +boolean isRealEngineActive()
+  +void setEngine(NativeEngine)
+  +void resetToDefault()
+  +NativeFileSystem getFileSystem()
+  +NativeNetworking getNetworking()
+  +NativeProcess getProcess()
+  +NativeMemory getMemory()
+  +RawSyscallOperations getRaw()
+  +NativeBpf getBpf()
+  +boolean isDescriptorLive(int)
+}
+interface "NativeBpf" as io.mazewall.platform.native.NativeBpf {
+  + {abstract}SyscallResult command(long, ManagedSegment, long)
+}
+interface "NativeEngine" as io.mazewall.platform.native.NativeEngine {
+  + {abstract}NativeFileSystem getFileSystem()
+  + {abstract}NativeNetworking getNetworking()
+  + {abstract}NativeProcess getProcess()
+  + {abstract}NativeMemory getMemory()
+  + {abstract}RawSyscallOperations getRaw()
+  +NativeBpf getBpf()
+}
+interface "NativeFileSystem" as io.mazewall.platform.native.NativeFileSystem {
+  +SyscallResult open(ManagedSegment, int)
+  + {abstract}SyscallResult open(ManagedSegment, int, int)
+  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  + {abstract}SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int, int)
+  +SyscallResult openat2(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, long)
+  + {abstract}SyscallResult readlink(ManagedSegment, ManagedSegment, long)
+  + {abstract}SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long)
+  + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open, Owned>)
+}
+class "NativeMapping" as io.mazewall.platform.native.NativeMapping {
+  + {static}Companion Companion
+  __
+  +long getAddress()
+  +long getLength()
+  +void close()
+}
+interface "NativeMemory" as io.mazewall.platform.native.NativeMemory {
+  + {abstract}SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
+  + {abstract}SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
+  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  + {abstract}ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
+}
+interface "NativeNetworking" as io.mazewall.platform.native.NativeNetworking {
+  + {abstract}SyscallResult socketpair(int, int, int, ManagedSegment)
+  + {abstract}SyscallResult socket(int, int, int)
+  + {abstract}SyscallResult bind(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  + {abstract}SyscallResult listen(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int)
+  + {abstract}SyscallResult accept(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment)
+  + {abstract}SyscallResult accept4(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, int)
+  + {abstract}SyscallResult connect(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  + {abstract}SyscallResult sendmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  + {abstract}SyscallResult recvmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, int)
+}
+interface "NativeProcess" as io.mazewall.platform.native.NativeProcess {
+  + {abstract}int gettid()
+  + {abstract}SyscallResult prctl(PrctlCommand)
+  + {abstract}SyscallResult pidfdOpen(int, int)
+  + {abstract}SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, int)
+  + {abstract}SyscallResult archPrctl(int, long)
+  + {abstract}SyscallResult archPrctl(int, ManagedSegment)
+}
+class "RawBackedBpf" as io.mazewall.platform.native.RawBackedBpf {
+  +SyscallResult command(long, ManagedSegment, long)
+}
+interface "RawSyscallOperations" as io.mazewall.platform.native.RawSyscallOperations {
+  + {abstract}SyscallResult syscall(long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
+  + {abstract}SyscallResult syscall4(long, NativeArg, NativeArg, NativeArg, NativeArg)
+  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, IoctlCommand<Req, Res>, Req)
+  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, ManagedSegment)
+  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, long)
+  + {abstract}SyscallResult fcntl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, long)
+  + {abstract}SyscallResult poll(ManagedSegment, long, int)
+}
+class "RuntimeSnapshot" as io.mazewall.platform.native.RuntimeSnapshot {
+  +Object getEngineIdentity()
+  +NativeFileSystem getFileSystem()
+  +NativeNetworking getNetworking()
+  +NativeProcess getProcess()
+  +NativeMemory getMemory()
+  +RawSyscallOperations getRaw()
+  +NativeBpf getBpf()
+}
+class "ChildProcessResources" as io.mazewall.platform.process.ChildProcessResources {
+  + {static}long PUMP_JOIN_TIMEOUT_MS
+  __
+  +ProcessLauncher getLauncher()
+  +PrivateUnixEndpoint getEndpoint()
+  +Process getChild()
+  +void setChild(Process)
+  +ChildStdoutPump getPump()
+  +void setPump(ChildStdoutPump)
+  +Thread getHook()
+  +void setHook(Thread)
+  +boolean isClosed()
+  +Process getProcess()
+  +Thread getShutdownHook()
+  +void close()
+}
+class "ChildStartupTransaction" as io.mazewall.platform.process.ChildStartupTransaction {
+  +PrivateUnixEndpoint getEndpoint()
+  +Thread getShutdownHook()
+  +T runStartup(Function1<? super ChildStartupTransaction, ? extends T>)
+  +Process start(JvmChildSpec)
+  +void startOutputPump(String, Function1<? super String, Unit>, String, Function0<Unit>)
+  +void registerShutdownHook()
+  +void awaitReady(long)
+  +ChildProcessResources commit()
+  +void close()
+}
+class "ChildStdoutPump" as io.mazewall.platform.process.ChildStdoutPump {
+  +CountDownLatch getReady()
+  +Thread getThread()
+  +AtomicBoolean getReadinessObserved()
+}
+class "DaemonPtracer" as io.mazewall.platform.process.DaemonPtracer {
+  + {static}DaemonPtracer INSTANCE
+  __
+  +void authorize(NativeEngine, Process)
+  +void retire(NativeEngine, Process)
+}
+interface "JavaAgentSelection" as io.mazewall.platform.process.JavaAgentSelection {
+}
+class "JvmChildProcess" as io.mazewall.platform.process.JvmChildProcess {
+  + {static}JvmChildProcess INSTANCE
+  __
+  +List<String> commandLine(JvmChildSpec)
+  +Process start(ProcessLauncher, JvmChildSpec, boolean)
+  +ChildStdoutPump startStdoutPump(Process, String, Function1<? super String, Unit>, String, Function0<Unit>)
+  +boolean awaitReady(ChildStdoutPump, long)
+  +void stripInheritedJvmOptions(Map<String, String>)
+  +List<String> selectedJavaAgents(JavaAgentSelection)
+}
+class "JvmChildSpec" as io.mazewall.platform.process.JvmChildSpec {
+  +String getMainClass()
+  +List<String> getMainArgs()
+  +String getMaxHeap()
+  +List<String> getExtraJvmArgs()
+  +JavaAgentSelection getJavaAgents()
+  +boolean getEnableNativeAccess()
+  +boolean getDisableJvmci()
+  +String getClasspath()
+}
+interface "ProcessLauncher" as io.mazewall.platform.process.ProcessLauncher {
+  + {abstract}Process startProcess(List<String>, boolean)
+  + {abstract}void addShutdownHook(Thread)
+  + {abstract}void removeShutdownHook(Thread)
+  + {abstract}Path createTempDirectory(String, FileAttribute<?>[])
+  + {abstract}Path createTempDirectory(Path, String, FileAttribute<?>[])
+  + {abstract}boolean deleteIfExists(Path)
+  + {abstract}boolean exists(Path)
+}
+class "RealProcessLauncher" as io.mazewall.platform.process.RealProcessLauncher {
+  + {static}RealProcessLauncher INSTANCE
+  __
+  +Process startProcess(List<String>, boolean)
+  +void addShutdownHook(Thread)
+  +void removeShutdownHook(Thread)
+  +Path createTempDirectory(String, FileAttribute<?>[])
+  +Path createTempDirectory(Path, String, FileAttribute<?>[])
+  +boolean deleteIfExists(Path)
+  +boolean exists(Path)
+}
+class "SeccompNotification" as io.mazewall.platform.seccomp.SeccompNotification {
+  +long getId()
+  +int getPid()
+  +int getArch()
+  +int getNr()
+  +long[] getArgs()
+}
+class "SeccompNotifications" as io.mazewall.platform.seccomp.SeccompNotifications {
+  + {static}SeccompNotifications INSTANCE
+  + {static}int ARG_COUNT
+  __
+  +SeccompNotification read(ManagedSegment)
+}
+interface "SupervisedKind" as io.mazewall.platform.seccomp.SupervisedKind {
+  + {static}Companion Companion
+}
+class "UserNotifReply" as io.mazewall.platform.seccomp.UserNotifReply {
+  + {static}UserNotifReply INSTANCE
+  __
+  +void encodeContinue(ManagedSegment, long)
+  +void encodeError(ManagedSegment, long, int)
+  +void encodeSuccess(ManagedSegment, long, long)
+  +UserNotifReplyResult send(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
+}
+interface "UserNotifReplyResult" as io.mazewall.platform.seccomp.UserNotifReplyResult {
+}
+class "CleanupCollector" as io.mazewall.platform.seccomp.daemon.CleanupCollector {
+  +void attempt(Function0<Unit>)
+  +void throwIfFailed()
+}
+class "ControlSocketExchange" as io.mazewall.platform.seccomp.daemon.ControlSocketExchange {
+  +boolean getRequestSent()
+  +byte[] poll(NativeArena)
+}
+class "ControlSocketFailure" as io.mazewall.platform.seccomp.daemon.ControlSocketFailure {
+  +int getErrno()
+}
+class "HandshakeDeadlineRegistry" as io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry {
+  +long getOrCreate(SeccompConnection, Function0<Deadline>)
+  +Deadline remove(SeccompConnection)
+  +int getSize()
+}
+interface "HandshakeWriteOutcome" as io.mazewall.platform.seccomp.daemon.HandshakeWriteOutcome {
+}
+abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
+}
+enum "NotifResult" as io.mazewall.platform.seccomp.daemon.NotifResult {
+  HANDLED
+  TERMINATE
+  PASS_THROUGH
+  __
+  + {static}EnumEntries<NotifResult> getEntries()
+}
+class "NotificationLivenessCounters" as io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters {
+  +NotificationLivenessSnapshot snapshot()
+  +void started()
+  +void finished()
+  +void reactorPoll()
+  +void observePending(long, boolean)
+  +void replyLatency(long)
+  +void helperSaturated()
+  +void expired(boolean)
+  +void reply(UserNotifReplyResult)
+  +void replyThrew()
+}
+class "NotificationLivenessMetrics" as io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics {
+  ..
+  + {static}NotificationLivenessMetrics INSTANCE
+  __
+  +NotificationLivenessCounters getCounters()
+  +NotificationLivenessSnapshot snapshot()
+}
+class "NotificationLivenessSnapshot" as io.mazewall.platform.seccomp.daemon.NotificationLivenessSnapshot {
+  +long getStarted()
+  +long getDeadlineExpiries()
+  +long getSent()
+  +long getNotificationGone()
+  +long getFailed()
+  +long getLateCompletions()
+  +long getPending()
+  +long getOldestPendingAgeNanos()
+  +long getDeadlineNear()
+  +long getReplyLatencyCount()
+  +long getReplyLatencyNanos()
+  +long getMaxReplyLatencyNanos()
+  +long getReactorPolls()
+  +long getHelperSaturation()
+}
+interface "NotificationProgress" as io.mazewall.platform.seccomp.daemon.NotificationProgress {
+}
+class "NotificationReplyLease" as io.mazewall.platform.seccomp.daemon.NotificationReplyLease {
+  +boolean claim()
+}
+interface "NotificationWork" as io.mazewall.platform.seccomp.daemon.NotificationWork {
+  + {abstract}NotificationProgress poll(NativeArena)
+  +void close()
+}
+interface "ReceiveOutcome" as io.mazewall.platform.seccomp.daemon.ReceiveOutcome {
+}
+class "SeccompCleanupInterpreter" as io.mazewall.platform.seccomp.daemon.SeccompCleanupInterpreter {
+  + {static}SeccompCleanupInterpreter INSTANCE
+  __
+  +SeccompCleanupOutcome close(SeccompConnection)
+  +SeccompCleanupOutcome close(SeccompConnection, Function1<? super SeccompCleanupOutcome, Unit>)
+  +SeccompCleanupOutcome closeResources(Function0<Unit>[])
+  +SeccompCleanupOutcome closeResources(Iterable<? extends Function0<Unit>>, Function1<? super SeccompCleanupOutcome, Unit>)
+}
+interface "SeccompCleanupOutcome" as io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome {
+}
+class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine {
+  + {static}Companion Companion
+  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
+  __
+  +SeccompCleanupOutcome getCleanupOutcome()
+  +UnixListenDaemonState getState()
+  +void run()
+  +void triggerGlobalShutdown(String)
+  +UnixListenDaemonTransition applyEvent(UnixListenDaemonEvent)
+  +boolean isGlobalShutdown()
+  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +SeccompCleanupOutcome retryCleanup()
+  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
+  +HandshakeWriteOutcome writeHandshakeAck(FileDescriptor<?, ? extends Open, Owned>, ManagedSegment, long)
+}
+interface "SeccompNotifHandler" as io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
+  + {abstract}NotificationWork beginNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>, long)
+}
+class "SeccompSessionHandler" as io.mazewall.platform.seccomp.daemon.SeccompSessionHandler {
+  + {static}Companion Companion
+  __
+  +int pollTimeoutMillis()
+  +boolean isTerminated()
+  +void close()
+  +SeccompCleanupOutcome closeWithResult()
+  +SeccompCleanupOutcome closeWithResult(Function1<? super SeccompCleanupOutcome, Unit>)
+  +LoopAction handleActiveListener(NativeArena, ManagedSegment)
+}
+class "UserNotifReceive" as io.mazewall.platform.seccomp.daemon.UserNotifReceive {
+  + {static}UserNotifReceive INSTANCE
+  __
+  +ReceiveOutcome receiveOne(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open, Owned>, ManagedSegment)
+}
+class "NativeCloseFailure" as io.mazewall.platform.socket.NativeCloseFailure {
+}
+class "PrivateUnixEndpoint" as io.mazewall.platform.socket.PrivateUnixEndpoint {
+  + {static}Companion Companion
+  + {static}int MAX_SUN_PATH_BYTES
+  __
+  +Path getDir()
+  +String getSocketFileName()
+  +String getPath()
+  +Path socketFile()
+  +void close()
+}
+class "RealSocketManager" as io.mazewall.platform.socket.RealSocketManager {
+  + {static}RealSocketManager INSTANCE
+  __
+  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
+  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
+  +void close(FileDescriptor<?, ? extends Open, Owned>)
+  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
+  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
+}
+class "SocketIo" as io.mazewall.platform.socket.SocketIo {
+  + {static}SocketIo INSTANCE
+  __
+  +SyscallResult writeFully(NativeMemory, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
+  +SyscallResult readFully(NativeMemory, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, long, SocketPoll)
+}
+interface "SocketManager" as io.mazewall.platform.socket.SocketManager {
+  + {abstract}FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
+  + {abstract}FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  + {abstract}FileDescriptor<UnixSocket, Open, Owned> connect(String)
+  + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
+  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
+  + {abstract}boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
+}
+interface "SocketPoll" as io.mazewall.platform.socket.SocketPoll {
+  + {abstract}SyscallResult poll(int)
+}
+class "ErrnoMapping" as io.mazewall.platform.syscall.ErrnoMapping {
+  + {static}ErrnoMapping INSTANCE
+  __
+  +String getSymbolicName(int)
+}
+class "FsSyscallMapper" as io.mazewall.platform.syscall.FsSyscallMapper {
+  + {static}FsSyscallMapper INSTANCE
+  __
+  +int numberForBasic(Syscall, Arch)
+  +int numberForAttr(Syscall, Arch)
+  +int numberForOps(Syscall, Arch)
+}
+class "MemorySyscallMapper" as io.mazewall.platform.syscall.MemorySyscallMapper {
+  + {static}MemorySyscallMapper INSTANCE
+  __
+  +int numberFor(Syscall, Arch)
+}
+interface "NativeArg" as io.mazewall.platform.syscall.NativeArg {
+  + {abstract}long getAsLong()
+}
+class "NetworkSyscallMapper" as io.mazewall.platform.syscall.NetworkSyscallMapper {
+  + {static}NetworkSyscallMapper INSTANCE
+  __
+  +int numberFor(Syscall, Arch)
+}
+class "OtherSyscallMapper" as io.mazewall.platform.syscall.OtherSyscallMapper {
+  + {static}OtherSyscallMapper INSTANCE
+  __
+  +int numberFor(Syscall, Arch)
+}
+abstract class "PrctlCommand" as io.mazewall.platform.syscall.PrctlCommand {
+  +int getOption()
+  + {abstract}NativeArg getArg2()
+  + {abstract}NativeArg getArg3()
+  + {abstract}NativeArg getArg4()
+  + {abstract}NativeArg getArg5()
+}
+class "ProcessSyscallMapper" as io.mazewall.platform.syscall.ProcessSyscallMapper {
+  + {static}ProcessSyscallMapper INSTANCE
+  __
+  +int numberFor(Syscall, Arch)
+}
+interface "SeccompAction" as io.mazewall.platform.syscall.SeccompAction {
+  + {static}Companion Companion
+  __
+  + {abstract}int getPriority()
+  + {abstract}int getNativeCode()
+  +int restrictivenessRank()
+  +SeccompAction stricter(SeccompAction)
+  +int toKernelReturnCode()
+}
+class "SyscallNumberResolver" as io.mazewall.platform.syscall.SyscallNumberResolver {
+  + {static}SyscallNumberResolver INSTANCE
+  __
+  +int numberFor(Syscall, Arch)
+}
+io.mazewall.ffi.IoctlCommand <--> io.mazewall.ffi.IoctlCommand
+io.mazewall.ffi.IoctlCommand --> io.mazewall.ffi.TypedSegment
+io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
+io.mazewall.ffi.TypedSegment --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.internal.NativeTransfer --> io.mazewall.ffi.internal.NativeTransfer
+io.mazewall.ffi.internal.RawNativeTransfer --> io.mazewall.ffi.internal.RawNativeTransfer
+io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.platform.native.NativeEngine
+io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeMemory
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeProcess
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.ffi.internal.RealNativeEngine
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeNetworking
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeFileSystem
+io.mazewall.ffi.internal.RealNativeFileSystem .u.|> io.mazewall.platform.native.NativeFileSystem
+io.mazewall.ffi.internal.RealNativeFileSystem --> io.mazewall.ffi.internal.RealNativeFileSystem
+io.mazewall.ffi.internal.RealNativeHelper --> io.mazewall.ffi.internal.RealNativeHelper
+io.mazewall.ffi.internal.RealNativeMemory .u.|> io.mazewall.platform.native.NativeMemory
+io.mazewall.ffi.internal.RealNativeMemory --> io.mazewall.ffi.internal.RealNativeMemory
+io.mazewall.ffi.internal.RealNativeNetworking .u.|> io.mazewall.platform.native.NativeNetworking
+io.mazewall.ffi.internal.RealNativeNetworking --> io.mazewall.ffi.internal.RealNativeNetworking
+io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.platform.native.NativeProcess
+io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
+io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
+io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SeccompSessionBuffers --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.ffi.memory.SeccompSessionBuffers --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SeccompSessionBuffers --> io.mazewall.ffi.memory.SegmentLease
+io.mazewall.ffi.memory.SegmentLease <--> io.mazewall.ffi.memory.SegmentPool
+io.mazewall.ffi.memory.SegmentLease --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.ffi.memory.SegmentPool <--> io.mazewall.ffi.memory.SegmentPool
+io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.platform.native.NativeMemory
+io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.ffi.networking.NativeStreamOwnership
+io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.networking.SeccompConnection --> io.mazewall.platform.socket.SocketManager
+io.mazewall.ffi.networking.SeccompConnectionMachine --> io.mazewall.ffi.networking.SeccompConnectionMachine
+io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnectionOutcome
+io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnectionEffect
+io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnection
+io.mazewall.ffi.networking.SupervisorSocketUtils --> io.mazewall.ffi.networking.SupervisorSocketUtils
+io.mazewall.ffi.networking.UnixServerSocket --> io.mazewall.ffi.networking.UnixServerSocket
+io.mazewall.platform.daemon.UnixListenDaemonMachine --> io.mazewall.platform.daemon.UnixListenDaemonMachine
+io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonState
+io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonOutcome
+io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonEffect
+io.mazewall.platform.fd.CleanupFailures --> io.mazewall.platform.fd.CleanupFailures
+io.mazewall.platform.fd.FdEpoch --> io.mazewall.platform.fd.FdEpoch
+io.mazewall.platform.fd.FdLifecycle --> io.mazewall.platform.fd.FdOwnership
+io.mazewall.platform.fd.FdLifecycle --> io.mazewall.platform.fd.FileDescriptorRole
+io.mazewall.platform.fd.FdLifecycle --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.platform.fd.FileDescriptor --> io.mazewall.platform.fd.FileDescriptorRole
+io.mazewall.platform.fd.FileDescriptor --> io.mazewall.platform.fd.FdLifecycle
+io.mazewall.platform.fd.FileDescriptor <--> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.fd.NativeDescriptorReceipt --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.lifecycle.MazewallContext --> io.mazewall.platform.lifecycle.ContextId
+io.mazewall.platform.lifecycle.MazewallContext --> io.mazewall.platform.lifecycle.MazewallContext
+io.mazewall.platform.native.LinuxNative .u.|> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.native.LinuxNative --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.native.LinuxNative --> io.mazewall.platform.native.LinuxNative
+io.mazewall.platform.native.NativeMapping --> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.platform.native.RawBackedBpf .u.|> io.mazewall.platform.native.NativeBpf
+io.mazewall.platform.native.RawBackedBpf --> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.platform.native.RuntimeSnapshot .u.|> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.native.RuntimeSnapshot --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.process.ProcessLauncher
+io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.process.ChildStdoutPump
+io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.socket.PrivateUnixEndpoint
+io.mazewall.platform.process.ChildStartupTransaction --> io.mazewall.platform.process.ChildProcessResources
+io.mazewall.platform.process.DaemonPtracer --> io.mazewall.platform.native.NativeProcess
+io.mazewall.platform.process.DaemonPtracer --> io.mazewall.platform.process.DaemonPtracer
+io.mazewall.platform.process.JvmChildProcess --> io.mazewall.platform.process.JvmChildProcess
+io.mazewall.platform.process.JvmChildSpec --> io.mazewall.platform.process.JavaAgentSelection
+io.mazewall.platform.process.RealProcessLauncher .u.|> io.mazewall.platform.process.ProcessLauncher
+io.mazewall.platform.process.RealProcessLauncher --> io.mazewall.platform.process.RealProcessLauncher
+io.mazewall.platform.seccomp.SeccompNotifications --> io.mazewall.platform.seccomp.SeccompNotifications
+io.mazewall.platform.seccomp.UserNotifReply --> io.mazewall.platform.seccomp.UserNotifReply
+io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.fd.FdOwnership
+io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.native.NativeMemory
+io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry --> io.mazewall.platform.lifecycle.Deadline
+io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry --> io.mazewall.ffi.networking.SeccompConnection
+io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters --> io.mazewall.platform.seccomp.daemon.NotificationLivenessSnapshot
+io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics --> io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics
+io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics --> io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters
+io.mazewall.platform.seccomp.daemon.SeccompCleanupInterpreter --> io.mazewall.platform.seccomp.daemon.SeccompCleanupInterpreter
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.daemon.UnixListenDaemonState
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.networking.SeccompConnection
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.SeccompSessionBuffers
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+io.mazewall.platform.seccomp.daemon.UserNotifReceive --> io.mazewall.platform.seccomp.daemon.UserNotifReceive
+io.mazewall.platform.socket.PrivateUnixEndpoint --> io.mazewall.platform.process.ProcessLauncher
+io.mazewall.platform.socket.RealSocketManager .u.|> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.socket.RealSocketManager --> io.mazewall.platform.socket.RealSocketManager
+io.mazewall.platform.socket.SocketIo --> io.mazewall.platform.socket.SocketIo
+io.mazewall.platform.syscall.ErrnoMapping --> io.mazewall.platform.syscall.ErrnoMapping
+io.mazewall.platform.syscall.FsSyscallMapper --> io.mazewall.platform.syscall.FsSyscallMapper
+io.mazewall.platform.syscall.MemorySyscallMapper --> io.mazewall.platform.syscall.MemorySyscallMapper
+io.mazewall.platform.syscall.NetworkSyscallMapper --> io.mazewall.platform.syscall.NetworkSyscallMapper
+io.mazewall.platform.syscall.OtherSyscallMapper --> io.mazewall.platform.syscall.OtherSyscallMapper
+io.mazewall.platform.syscall.ProcessSyscallMapper --> io.mazewall.platform.syscall.ProcessSyscallMapper
+io.mazewall.platform.syscall.SyscallNumberResolver --> io.mazewall.platform.syscall.SyscallNumberResolver
+@enduml

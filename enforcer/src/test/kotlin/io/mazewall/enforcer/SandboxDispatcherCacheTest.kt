@@ -80,6 +80,7 @@ class SandboxDispatcherCacheTest {
     }
 
     @Test
+    @Suppress("DEPRECATION_ERROR")
     fun `legacy package SandboxDispatcher forwards execute and shutdownAll`() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
         val policy = Policy.builder().build()

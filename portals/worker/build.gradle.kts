@@ -28,6 +28,7 @@ dependencies {
     api(project(":portals:runtime"))
     implementation(project(":platform"))
     implementation(project(":enforcer"))
+    implementation(project(":profiler"))
     testImplementation(kotlin("test"))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter.api)

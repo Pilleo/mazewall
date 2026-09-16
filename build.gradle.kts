@@ -760,8 +760,8 @@ tasks.named("check") {
  */
 tasks.register("updateClassDiagrams") {
     group = "documentation"
-    description = "Regenerates the checked-in enforcer and profiler class diagrams"
-    dependsOn(":enforcer:generateClassDiagrams", ":profiler:generateClassDiagrams")
+    description = "Regenerates the checked-in enforcer, profiler, and platform class diagrams"
+    dependsOn(":enforcer:generateClassDiagrams", ":profiler:generateClassDiagrams", ":platform:generateClassDiagrams")
 }
 
 /**

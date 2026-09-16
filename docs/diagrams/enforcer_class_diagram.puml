@@ -1,7 +1,6 @@
 @startuml Enforcer Class Diagram
 !pragma useIntermediatePackages false
 !theme spacelab
-set separator none
 hide empty members
 
 class "ContainmentViolationException" as io.mazewall.enforcer.ContainmentViolationException {

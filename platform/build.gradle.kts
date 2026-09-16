@@ -3,6 +3,7 @@ import java.math.BigDecimal
 plugins {
     kotlin("jvm")
     id("info.solidsoft.pitest")
+    alias(libs.plugins.plantuml)
 }
 
 kotlin {
@@ -79,7 +80,10 @@ tasks.test {
     dependsOn(compileCAbiOracle)
 }
 
+val plantumlConfig by configurations.creating
+
 dependencies {
+    plantumlConfig(libs.plantuml.core)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
@@ -128,4 +132,49 @@ pitest {
     coverageThreshold.set(97)
     mutationThreshold.set(61)
     testStrengthThreshold.set(98)
+}
+
+classDiagrams {
+    plantumlServer = null
+    renderClasspath(plantumlConfig)
+    defaults {
+        style {
+            theme("spacelab")
+            hide("empty members")
+        }
+        exclude(methods().withNameLike("component*") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("copy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(classes().withNameLike("*\\\$*"))
+        exclude(classes().withNameLike("*Kt"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
+        exclude(classes().withName("io.mazewall.ffi.NativeConstants"))
+        exclude(classes().withName("io.mazewall.ffi.Layouts"))
+    }
+
+    diagram {
+        name("Platform Class Diagram")
+        include(packages().withName("io.mazewall.platform"))
+        include(packages().withName("io.mazewall.ffi"))
+        writeTo(file("$rootDir/docs/diagrams/platform_class_diagram.puml"))
+        renderTo(file("$rootDir/docs/diagrams/platform_class_diagram.svg"))
+    }
+}
+
+tasks.named("generateClassDiagrams") {
+    val pumlFile = file("$rootDir/docs/diagrams/platform_class_diagram.puml")
+    val svgFile = file("$rootDir/docs/diagrams/platform_class_diagram.svg")
+    doLast {
+        fun cleanup(file: File) {
+            if (!file.exists()) return
+            var content = file.readText()
+            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
+            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+            content = content.replace("set separator none\n", "")
+            content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
+            file.writeText(content)
+        }
+        cleanup(pumlFile)
+        cleanup(svgFile)
+    }
 }

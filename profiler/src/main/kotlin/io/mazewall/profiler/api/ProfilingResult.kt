@@ -101,4 +101,32 @@ public class ProfilingResult<T>(
             bob,
         )
     }
+
+    public companion object {
+        /**
+         * Portal worker opt-in: BoB JSON must contain `"mazewallComplete": true`.
+         * Missing attestation is incomplete and never becomes a worker allow-list.
+         */
+        @JvmStatic
+        public fun dedicatedWorkerPoliciesFromDocument(json: String): Array<io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled>> {
+            if (!MAZEWALL_COMPLETE.containsMatchIn(json)) {
+                throw IncompleteProfileException(ProfilingCoverage.absent())
+            }
+            val bob = BillOfBehavior.fromJson(json)
+            val coverage =
+                ProfilingCoverage.infer(
+                    strategy = ProfileStrategy.USER_NOTIF,
+                    strategyReason = "portal worker --complete-profile",
+                    processWide = true,
+                    observations = emptyList(),
+                    stacks = StackAttribution.SKIPPED,
+                    droppedEvents = 0,
+                    drainComplete = true,
+                    environment = ProfileEnvironment("portal-worker", EbpfLoad.Denied("not required for attested complete BoB")),
+                )
+            return ProfilingResult(Unit, bob, emptyMap(), coverage).toDedicatedWorkerPolicies()
+        }
+
+        private val MAZEWALL_COMPLETE = Regex("\"mazewallComplete\"\\s*:\\s*true")
+    }
 }

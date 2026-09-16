@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService
         "io.mazewall.enforcer.api.ContainedExecutors",
         "io.mazewall.enforcer.api.ContainedExecutors",
     ),
+    level = DeprecationLevel.ERROR,
 )
 public object ContainedExecutors {
     @Deprecated("Use io.mazewall.enforcer.api.ContainedExecutors.installOnCurrentThread")

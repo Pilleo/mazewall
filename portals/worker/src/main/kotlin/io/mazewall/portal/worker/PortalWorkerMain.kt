@@ -14,8 +14,9 @@ import kotlin.system.exitProcess
 
 /**
  * Placement worker: process-wide policy then RPC. Not USER_NOTIF.
- * Default install is the static fail-closed trio. After a **complete** profile,
- * operators may instead `installOnDedicatedProcess(*result.toDedicatedWorkerPolicies())`.
+ * Default install is the static fail-closed trio.
+ * Pass `--complete-profile <bob.json>` with `"mazewallComplete": true` to install
+ * [io.mazewall.profiler.api.ProfilingResult.dedicatedWorkerPoliciesFromDocument] instead.
  * Guest impl is never loaded in the broker process.
  */
 public object PortalWorkerMain {
@@ -25,7 +26,7 @@ public object PortalWorkerMain {
     @Suppress("TooGenericExceptionCaught") // Socket acquisition owns cleanup if channel construction fails, including fatal errors.
     public fun main(args: Array<String>) {
         if (args.isEmpty()) {
-            System.err.println("Usage: PortalWorkerMain <socket_path>")
+            System.err.println("Usage: PortalWorkerMain <socket_path> [--complete-profile <bob.json>]")
             exitProcess(1)
         }
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
@@ -48,13 +49,7 @@ public object PortalWorkerMain {
         val transport = ChannelWorkerTransport(channel, idleTimeoutMs)
         runWorker(
             transport,
-            installContainment = {
-                ContainedExecutors.installOnDedicatedProcess(
-                    ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
-                    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
-                    ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
-                )
-            },
+            installContainment = { installWorkerContainment(args) },
             createDispatcher = {
                 val builder = PortalDispatcherTable.Builder()
                 bootstrapWorkerDispatchers(
@@ -103,6 +98,32 @@ public object PortalWorkerMain {
     }
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)
+
+    internal fun installWorkerContainment(args: Array<String>) {
+        val profile = completeProfilePath(args)
+        if (profile == null) {
+            ContainedExecutors.installOnDedicatedProcess(
+                ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
+                ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+                ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
+            )
+            return
+        }
+        val json = java.nio.file.Files
+            .readString(profile)
+        ContainedExecutors.installOnDedicatedProcess(
+            *io.mazewall.profiler.api.ProfilingResult
+                .dedicatedWorkerPoliciesFromDocument(json),
+        )
+    }
+
+    internal fun completeProfilePath(args: Array<String>): java.nio.file.Path? {
+        val index = args.indexOf("--complete-profile")
+        if (index < 0) return null
+        require(index + 1 < args.size) { "Usage: PortalWorkerMain <socket_path> [--complete-profile <bob.json>]" }
+        return java.nio.file.Path
+            .of(args[index + 1])
+    }
 }
 
 private class ChannelWorkerTransport(

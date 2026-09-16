@@ -137,6 +137,7 @@ For detailed class diagrams and relationship maps of the individual modules:
 - See the [Enforcer Architecture Document](../enforcer/enforcer-architecture.md) for the `:enforcer` module.
 - See the [Profiler Design Document](../profiler/profiler-design.md) for the `:profiler` module.
 - See the [Process Portal Design](../enforcer/process-portal-design.md) for the broker/worker boundary.
+- See [platform_class_diagram.puml](../../../diagrams/platform_class_diagram.puml) for NativeEngine, FileDescriptor, and NativeBpf.
 
 `architectural-map.md` is the canonical cross-module knowledge map. The module design documents
 above are the canonical locations for their generated PlantUML/SVG class diagrams; do not rely on

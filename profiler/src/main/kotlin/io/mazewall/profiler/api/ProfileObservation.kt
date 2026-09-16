@@ -285,10 +285,6 @@ public sealed interface ProfileObservation {
 private class ObservationPaths(
     val operation: String,
     val resolution: PathResolution,
-) : java.util.AbstractList<String>() {
-    override val size: Int get() = resolution.paths.size
-
-    override fun get(index: Int): String = resolution.paths[index]
-}
+) : List<String> by java.util.List.copyOf(resolution.paths)
 
 private fun List<String>.resolutionFor(operation: String): PathResolution? = (this as? ObservationPaths)?.takeIf { it.operation == operation }?.resolution

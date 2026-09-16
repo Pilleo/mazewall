@@ -1,7 +1,6 @@
 @startuml Profiler Class Diagram
 !pragma useIntermediatePackages false
 !theme spacelab
-set separator none
 hide empty members
 
 interface "AddressFamily" as io.mazewall.profiler.api.AddressFamily {
@@ -127,19 +126,39 @@ class "ObservationCorrelation" as io.mazewall.profiler.api.ObservationCorrelatio
 class "ObservationPaths" as io.mazewall.profiler.api.ObservationPaths {
   +String getOperation()
   +PathResolution getResolution()
-  +int getSize()
-  +String get(int)
-  +int size()
-  +boolean remove(String)
-  +boolean remove(Object)
-  +int indexOf(String)
-  +int indexOf(Object)
-  +int lastIndexOf(String)
-  +int lastIndexOf(Object)
+  +boolean isEmpty()
   +boolean contains(String)
-  +boolean contains(Object)
-  +String removeAt(int)
+  +Iterator<String> iterator()
+  +boolean containsAll(Collection<?>)
+  +String get(int)
+  +int indexOf(String)
+  +int lastIndexOf(String)
+  +ListIterator<String> listIterator()
+  +ListIterator<String> listIterator(int)
+  +List<String> subList(int, int)
+  +int getSize()
+  +boolean add(String)
+  +void add(int, String)
+  +boolean remove(Object)
+  +boolean addAll(Collection<? extends String>)
+  +boolean addAll(int, Collection<? extends String>)
+  +boolean removeAll(Collection<?>)
+  +boolean retainAll(Collection<?>)
+  +void clear()
+  +String set(int, String)
   +String remove(int)
+  +void replaceAll(UnaryOperator<String>)
+  +void sort(Comparator<? super String>)
+  +void addFirst(String)
+  +void addLast(String)
+  +String removeFirst()
+  +String removeLast()
+  +boolean contains(Object)
+  +int indexOf(Object)
+  +int lastIndexOf(Object)
+  +int size()
+  +T[] toArray(T[])
+  +Object[] toArray()
 }
 enum "ObservationSource" as io.mazewall.profiler.api.ObservationSource {
   USER_NOTIF
@@ -302,6 +321,8 @@ class "ProfilingCoverage" as io.mazewall.profiler.api.ProfilingCoverage {
   + {static}ProfilingCoverage absent()
 }
 class "ProfilingResult" as io.mazewall.profiler.api.ProfilingResult<T> {
+  + {static}Companion Companion
+  __
   +T getValue()
   +BillOfBehavior getBehavior()
   +ProfilingCoverage getCoverage()
@@ -311,6 +332,7 @@ class "ProfilingResult" as io.mazewall.profiler.api.ProfilingResult<T> {
   +String toDslAllowingIncomplete(String, Policy<?, ? extends Uncompiled>, Path)
   +Policy<?, Uncompiled>[] toDedicatedWorkerPolicies(RuntimeProfile)
   +Policy<?, Uncompiled>[] toDedicatedWorkerPolicies()
+  + {static}Policy<?, Uncompiled>[] dedicatedWorkerPoliciesFromDocument(String)
 }
 class "SocketType" as io.mazewall.profiler.api.SocketType {
   +int getRaw()

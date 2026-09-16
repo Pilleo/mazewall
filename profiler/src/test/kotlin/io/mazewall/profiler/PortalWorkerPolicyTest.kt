@@ -1,6 +1,5 @@
 package io.mazewall.profiler.api
 
-import io.mazewall.enforcer.api.ProcessPolicies
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.platform.syscall.Syscall
 import kotlin.test.Test
@@ -17,22 +16,42 @@ class PortalWorkerPolicyTest {
 
     @Test
     fun `complete coverage compiles worker deny-exec deny-uring and deny-network policies`() {
-        val coverage = ProfilingCoverage.infer(
-            strategy = ProfileStrategy.USER_NOTIF,
-            strategyReason = "test",
-            processWide = true,
-            observations = emptyList(),
-            stacks = StackAttribution.SKIPPED,
-            droppedEvents = 0,
-            drainComplete = true,
-            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
-        )
+        val coverage =
+            ProfilingCoverage.infer(
+                strategy = ProfileStrategy.USER_NOTIF,
+                strategyReason = "test",
+                processWide = true,
+                observations = emptyList(),
+                stacks = StackAttribution.SKIPPED,
+                droppedEvents = 0,
+                drainComplete = true,
+                environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+            )
         assertTrue(coverage.complete)
         val policies = ProfilingResult(Unit, BillOfBehavior(), emptyMap(), coverage).toDedicatedWorkerPolicies()
-        val denyCreation = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
         assertTrue(policies.any { policy -> !policy.isSyscallAllowed(Syscall.EXECVE) })
         assertTrue(policies.any { policy -> !policy.isSyscallAllowed(Syscall.IO_URING_SETUP) })
         assertTrue(policies.any { policy -> !policy.isSyscallAllowed(Syscall.CONNECT) })
-        assertFalse(denyCreation.isSyscallAllowed(Syscall.IO_URING_ENTER))
+        assertFalse(
+            io.mazewall.enforcer.api.ProcessPolicies
+                .denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+                .isSyscallAllowed(Syscall.IO_URING_ENTER),
+        )
+    }
+
+    @Test
+    fun `profile document without mazewallComplete is incomplete`() {
+        assertFailsWith<IncompleteProfileException> {
+            ProfilingResult.dedicatedWorkerPoliciesFromDocument("""{"syscalls":[]}""")
+        }
+    }
+
+    @Test
+    fun `attested complete document compiles dedicated worker policies`() {
+        val policies =
+            ProfilingResult.dedicatedWorkerPoliciesFromDocument(
+                """{"mazewallComplete": true, "syscalls": []}""",
+            )
+        assertTrue(policies.any { policy -> !policy.isSyscallAllowed(Syscall.EXECVE) })
     }
 }
