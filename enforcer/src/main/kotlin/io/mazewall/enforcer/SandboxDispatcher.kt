@@ -37,4 +37,11 @@ public object SandboxDispatcher {
         io.mazewall.enforcer.api.SandboxDispatcher
             .shutdownAll()
     }
+
+    @Deprecated("Use io.mazewall.enforcer.api.SandboxDispatcher.close")
+    @JvmStatic
+    public fun close() {
+        io.mazewall.enforcer.api.SandboxDispatcher
+            .close()
+    }
 }

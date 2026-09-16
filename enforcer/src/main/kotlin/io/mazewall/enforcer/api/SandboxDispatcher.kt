@@ -11,6 +11,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * A functional router that executes blocks of code inside policy-specific sandboxes.
@@ -21,7 +22,7 @@ import java.util.concurrent.Executors
  * For coroutine support (e.g., `executeSuspend`), ensure `kotlinx-coroutines-core`
  * is on your classpath and use the extensions in `io.mazewall.enforcer.SandboxDispatcherCoroutines`.
  */
-public object SandboxDispatcher {
+public object SandboxDispatcher : AutoCloseable {
     internal const val MAX_CACHED_POOLS: Int = 32
 
     /**
@@ -63,15 +64,7 @@ public object SandboxDispatcher {
      * Executor threads are permanently contained and therefore pooled forever by design;
      * eviction only happens under cap pressure or shutdownAll().
      */
-    private val poolCache = object : java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ExecutorService>): Boolean {
-            if (size > MAX_CACHED_POOLS) {
-                eldest.value.shutdown()
-                return true
-            }
-            return false
-        }
-    }
+    private val poolCache = java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true)
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -110,7 +103,8 @@ public object SandboxDispatcher {
             io.mazewall.platform.syscall.Arch
             .current(),
         )
-        synchronized(poolCache) {
+        var evicted: ExecutorService? = null
+        val wrapped = synchronized(poolCache) {
             val existing = poolCache[key]
             if (existing != null) return existing
 
@@ -126,11 +120,17 @@ public object SandboxDispatcher {
             // Wrap the raw pool to ensure the policy is applied to every thread created by it.
             // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
             // We use the internal installOnCurrentThread to wrap execution directly.
-            val wrapped = io.mazewall.enforcer.internal
+            val created = io.mazewall.enforcer.internal
                 .ContainedExecutorWrapper(rawPool, definition)
-            poolCache[key] = wrapped
-            return wrapped
+            poolCache[key] = created
+            if (poolCache.size > MAX_CACHED_POOLS) {
+                val eldestKey = poolCache.keys.first()
+                evicted = poolCache.remove(eldestKey)
+            }
+            created
         }
+        evicted?.let(::retirePool)
+        return wrapped
     }
 
     /**
@@ -145,9 +145,26 @@ public object SandboxDispatcher {
      */
     @JvmStatic
     public fun shutdownAll() {
-        synchronized(poolCache) {
-            poolCache.values.forEach { it.shutdown() }
-            poolCache.clear()
+        val pools = synchronized(poolCache) {
+            poolCache.values.toList().also { poolCache.clear() }
         }
+        pools.forEach(::retirePool)
+    }
+
+    private fun retirePool(pool: ExecutorService) {
+        pool.shutdown()
+        try {
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                pool.shutdownNow()
+                pool.awaitTermination(1, TimeUnit.SECONDS)
+            }
+        } catch (_: InterruptedException) {
+            pool.shutdownNow()
+            Thread.currentThread().interrupt()
+        }
+    }
+
+    override fun close() {
+        shutdownAll()
     }
 }

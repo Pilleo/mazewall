@@ -11,6 +11,7 @@ import io.mazewall.platform.process.JvmChildProcess
 import io.mazewall.platform.process.JvmChildSpec
 import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
+import io.mazewall.platform.process.destroyForciblyWithDescendants
 import io.mazewall.platform.socket.PrivateUnixEndpoint
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
@@ -590,52 +591,48 @@ public class ProcessBroker internal constructor(
         deadline: Deadline,
         active: () -> Boolean,
     ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
-        val executor = Executors.newVirtualThreadPerTaskExecutor()
-        val handoff = AcceptedSocketHandoff(sockets::close)
-        acceptedHandoffs.add(handoff)
-        val accepted = executor.submit {
-            try {
-                handoff.publish(sockets.accept(listener))
-            } finally {
-                handoff.completeProducer()
+        Executors.newVirtualThreadPerTaskExecutor().use { executor ->
+            val handoff = AcceptedSocketHandoff(sockets::close)
+            acceptedHandoffs.add(handoff)
+            val accepted = executor.submit {
+                try {
+                    handoff.publish(sockets.accept(listener))
+                } finally {
+                    handoff.completeProducer()
+                }
             }
-        }
-        var claimed: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
-        try {
-            while (claimed == null) {
-                check(active()) { "portal worker connection cancelled" }
-                claimed = handoff.claim()
-                if (claimed == null) {
-                    check(process.isAlive) { "portal worker exited before connecting" }
-                    val remaining = deadline.remainingMillis()
-                    check(remaining > 0) { "portal worker connection timed out" }
-                    try {
-                        accepted.get(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
-                    } catch (_: TimeoutException) {
-                        continue
-                    } catch (failed: ExecutionException) {
-                        throw (failed.cause ?: failed)
+            var claimed: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+            try {
+                while (claimed == null) {
+                    check(active()) { "portal worker connection cancelled" }
+                    claimed = handoff.claim()
+                    if (claimed == null) {
+                        check(process.isAlive) { "portal worker exited before connecting" }
+                        val remaining = deadline.remainingMillis()
+                        check(remaining > 0) { "portal worker connection timed out" }
+                        try {
+                            accepted.get(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
+                        } catch (_: TimeoutException) {
+                            continue
+                        } catch (failed: ExecutionException) {
+                            throw (failed.cause ?: failed)
+                        }
                     }
                 }
-            }
-            acceptedHandoffs.remove(handoff)
-            return checkNotNull(claimed)
-        } finally {
-            if (claimed == null) {
-                runCatching { handoff.cancel() }
-                process.descendants().forEach { it.destroyForcibly() }
-                process.destroyForcibly()
-                runCatching {
-                    java.nio.channels.SocketChannel
-                        .open(java.net.UnixDomainSocketAddress.of(socketPath))
-                        .use { }
+                acceptedHandoffs.remove(handoff)
+                return checkNotNull(claimed)
+            } finally {
+                if (claimed == null) {
+                    runCatching { handoff.cancel() }
+                    process.destroyForciblyWithDescendants()
+                    runCatching {
+                        java.nio.channels.SocketChannel
+                            .open(java.net.UnixDomainSocketAddress.of(socketPath))
+                            .use { }
+                    }
+                    accepted.cancel(true)
+                    closeRetirement.retireHandoff(handoff)
                 }
-                accepted.cancel(true)
-                executor.shutdownNow()
-                runCatching { executor.awaitTermination(2, TimeUnit.SECONDS) }
-                closeRetirement.retireHandoff(handoff)
-            } else {
-                executor.shutdown()
             }
         }
     }
@@ -699,8 +696,7 @@ public class ProcessBroker internal constructor(
             }
             if (!slot.processDestroyed) {
                 cleanup.attempt("worker process") {
-                    slot.process.descendants().forEach { it.destroyForcibly() }
-                    slot.process.destroyForcibly()
+                    slot.process.destroyForciblyWithDescendants()
                     slot.processDestroyed = true
                 }
             }
@@ -837,8 +833,7 @@ public class ProcessBroker internal constructor(
                     attempt.processReaped = true
                 } else if (process != null) {
                     cleanup.attempt("provisional worker process") {
-                        process.descendants().forEach { it.destroyForcibly() }
-                        process.destroyForcibly()
+                        process.destroyForciblyWithDescendants()
                         attempt.processDestroyed = true
                     }
                 }

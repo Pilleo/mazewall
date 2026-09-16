@@ -50,6 +50,20 @@ public class InstallationReceipt(
 
     public fun isLandlockApplied(): Boolean = landlockApplied
 
+    internal val ownsSupervisorLease: Boolean
+        @Synchronized get() = supervisorRegistration != null
+
+    /**
+     * For fire-and-forget install APIs that cannot keep a receipt.
+     * Supervised installs must retain the receipt until the task ends.
+     */
+    internal fun releaseIfUnsupervised() {
+        check(!ownsSupervisorLease) {
+            "Supervised containment requires keeping InstallationReceipt open until the task ends"
+        }
+        close()
+    }
+
     internal companion object {
         fun withSupervisorRegistration(
             processWide: Boolean,

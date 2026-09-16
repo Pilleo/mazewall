@@ -44,6 +44,9 @@ internal sealed interface FileDescriptorRole {
      * (broker → worker). Not a seccomp listener.
      */
     public data object Granted : FileDescriptorRole
+
+    /** A bpf(2) map, program, BTF, link, or related perf event. */
+    public data object Bpf : FileDescriptorRole
 }
 
 /**
@@ -212,13 +215,26 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
         FdEpoch.retire(value, lifecycle.generation)
     }
 
-    /** Atomically retires exactly one native close attempt, including failed close(2). */
+    /**
+     * Atomically retires exactly one native close attempt, including failed close(2).
+     *
+     * Linux `close(2)` that returns `EINTR` still closes the integer; retrying it can
+     * close a reused descriptor. Native dispatch therefore retires the token even when
+     * the syscall result is an error. Callers must not retry the same generation.
+     */
     internal fun claimForClose(): Boolean {
         val claimed = FdEpoch.retire(value, generation)
         if (claimed) lifecycle.closed = true
         return claimed
     }
 
+    /**
+     * Dispatches close(2) and then forgets this generation.
+     *
+     * Linux still releases the integer when close(2) returns `EINTR`, so a later
+     * retry can close a reused fd. The token is retired even if the syscall result
+     * is an error; see docs/internals/designs/core/fd-token-ownership.md.
+     */
     internal fun closeResource() {
         synchronized(lifecycle) {
             if (value < 0 || isClosedType() || !isLiveForIo()) return
@@ -484,10 +500,22 @@ internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdO
  * Executes the given [block] with this file descriptor and then closes it correctly,
  * even if an exception is thrown.
  */
-internal inline fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
+internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
+    var blockFailure: Throwable? = null
     try {
         return block(this)
+    } catch (failure: Throwable) {
+        blockFailure = failure
+        throw failure
     } finally {
-        this.close()
+        try {
+            close()
+        } catch (closeFailure: Throwable) {
+            val prior = blockFailure
+            if (prior != null) prior.addSuppressed(closeFailure) else throw closeFailure
+        }
     }
 }
+
+/** Java try-with-resources adapter for an owned open descriptor. */
+internal fun FileDescriptor<*, FdState.Open, FdOwnership.Owned>.asAutoCloseable(): AutoCloseable = AutoCloseable { close() }

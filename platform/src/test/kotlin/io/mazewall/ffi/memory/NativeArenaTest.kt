@@ -27,6 +27,8 @@ class NativeArenaTest {
 
         arena.close()
         assertFalse(arena.isAlive)
+        arena.close()
+        assertFalse(arena.isAlive)
     }
 
     @Test

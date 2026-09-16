@@ -65,7 +65,7 @@ internal class ProfilerSessionHandler(
     SeccompNotifHandler {
     val ledger = SessionEventLedger()
 
-    private val sessionArena = NativeArena.ofConfined()
+    private val sessionArena = NativeArena.ofShared()
     val ackBuf: ManagedSegment = sessionArena.allocate(ACK_BUF_SIZE)
     val socketPollFd: ManagedSegment = sessionArena.allocate(Layouts.POLLFD)
 

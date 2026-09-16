@@ -132,7 +132,7 @@ public object ContainedExecutors {
     )
     public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installOnCurrentThread(combined)
+        installOnCurrentThread(combined).releaseIfUnsupervised()
     }
 
     /**
@@ -156,7 +156,7 @@ public object ContainedExecutors {
         policy: Policy<*, Uncompiled>,
         scopingPolicy: StacktraceScopingPolicy,
     ) {
-        installOnCurrentThread(policy.definition, scopingPolicy)
+        installOnCurrentThread(policy.definition, scopingPolicy).releaseIfUnsupervised()
     }
 
     public fun installOnCurrentThread(
@@ -196,7 +196,7 @@ public object ContainedExecutors {
     )
     public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installInternal(true, combined)
+        installInternal(true, combined).releaseIfUnsupervised()
     }
 
     /**

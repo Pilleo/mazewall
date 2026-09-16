@@ -160,7 +160,6 @@ internal class ProfilerTraceListener(
                     closeSocketOnce()
                 }
                 arena.close()
-                inputStream.close()
                 workerTerminatedLatch.countDown()
             }
         }.apply {

@@ -49,6 +49,7 @@ class FileDescriptorTest {
                 Arguments.of("seccomp notification", FileDescriptorRole.SeccompNotif),
                 Arguments.of("pid", FileDescriptorRole.Pid),
                 Arguments.of("granted", FileDescriptorRole.Granted),
+                Arguments.of("bpf", FileDescriptorRole.Bpf),
             )
     }
 
@@ -187,6 +188,41 @@ class FileDescriptorTest {
             "some-result"
         }
         assertEquals("some-result", result)
+    }
+
+    @Test
+    fun `use retains the block failure when close also fails`(): Unit =
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            val real = LinuxNative.snapshot()
+            val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    throw IllegalStateException("injected close failure")
+                }
+            }
+            LinuxNative.setEngine(
+                object : NativeEngine by real {
+                    override val fileSystem = fileSystem
+                },
+            )
+            try {
+                val failure = org.junit.jupiter.api.assertThrows<RuntimeException> {
+                    fd.use { throw RuntimeException("block failed") }
+                }
+                assertEquals("block failed", failure.message)
+                assertTrue(failure.suppressed.any { it.message == "injected close failure" })
+            } finally {
+                LinuxNative.resetToDefault()
+            }
+        }
+
+    @Test
+    fun `asAutoCloseable closes the owned descriptor`() {
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            fd.asAutoCloseable().use { }
+            assertFalse(fd.isLiveForIo())
+        }
     }
 
     @Test
@@ -470,6 +506,9 @@ class FileDescriptorTest {
                 FileDescriptorRole.Granted ->
                     TestFileDescriptors
                     .adopt(realFd(), FileDescriptorRole.Granted)
+                FileDescriptorRole.Bpf ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Bpf)
             }
             assertTrue(fd.isValid, roleName)
             assertFalse(fd.isInvalid, roleName)

@@ -7,6 +7,7 @@ import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.close
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeMemory
 import io.mazewall.platform.syscall.ErrnoMapping
@@ -18,7 +19,17 @@ import java.io.InterruptedIOException
  * EINTR-safe reader over an externally owned descriptor and caller-owned confined arena.
  * The public primary constructor captures the current native memory dependency once;
  * the additive constructor captures an explicitly supplied dependency instead.
+ *
+ * [NativeStreamOwnership.Borrowed] (the default) does not release [socketFd] or [arena]
+ * on [close], so [java.io.InputStream.use] is safe. [NativeStreamOwnership.OwnsArena]
+ * and [NativeStreamOwnership.OwnsDescriptorAndArena] close those owners from [close].
  */
+internal enum class NativeStreamOwnership {
+    Borrowed,
+    OwnsArena,
+    OwnsDescriptorAndArena,
+}
+
 internal open class NativeDescriptorInputStream(
     private val socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     private val arena: NativeArena,
@@ -26,14 +37,17 @@ internal open class NativeDescriptorInputStream(
 ) : InputStream() {
     // Assigned only during construction: an extra primary parameter would break Kotlin metadata.
     private var memory: NativeMemory = LinuxNative.snapshot().memory
+    private var ownership: NativeStreamOwnership = NativeStreamOwnership.Borrowed
 
     public constructor(
         socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
         arena: NativeArena,
         description: String,
         memory: NativeMemory,
+        ownership: NativeStreamOwnership = NativeStreamOwnership.Borrowed,
     ) : this(socketFd, arena, description) {
         this.memory = memory
+        this.ownership = ownership
     }
 
     private val readBuf = arena.allocate(1)
@@ -116,7 +130,19 @@ internal open class NativeDescriptorInputStream(
         }
     }
 
-    override fun close() = Unit
+    override fun close() {
+        when (ownership) {
+            NativeStreamOwnership.Borrowed -> Unit
+            NativeStreamOwnership.OwnsArena -> if (arena.isAlive) arena.close()
+            NativeStreamOwnership.OwnsDescriptorAndArena -> {
+                try {
+                    if (socketFd.isLiveForIo()) socketFd.close()
+                } finally {
+                    if (arena.isAlive) arena.close()
+                }
+            }
+        }
+    }
 
     private companion object {
         const val BUFFER_SIZE = 8192

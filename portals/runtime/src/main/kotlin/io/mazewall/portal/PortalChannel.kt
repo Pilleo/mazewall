@@ -50,15 +50,19 @@ internal class PortalChannel(
     private val received = ArrayList<Capability.ReadFd>(PortalFrame.MAX_FDS)
     private val io = PortalIo(socket) { closed.get() }
 
+    /**
+     * Sends a frame without `SCM_RIGHTS`. Worker replies use this path.
+     * Capability grants go through [sendCapabilities] (broker → worker only).
+     */
     fun send(
         frame: PortalFrame,
-        fds: List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> = emptyList(),
         deadline: Deadline = Deadline.afterMillis(DEFAULT_TIMEOUT_MS),
     ) {
-        require(fds.size == frame.fdCount) { "fd list ${fds.size} != header ${frame.fdCount}" }
+        require(frame.fdCount == 0) {
+            "portal frames with file descriptors must use sendCapabilities (broker → worker only)"
+        }
         terminalOnFailure(deadline) {
             writeFrame(frame, deadline)
-            for (fd in fds) io.sendDescriptor(fd, deadline)
         }
     }
 

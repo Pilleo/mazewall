@@ -69,4 +69,24 @@ public class ProfilingResult<T>(
         baseCwd: java.nio.file.Path? = null,
         allowIncomplete: Boolean = false,
     ): String = behavior.toDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete)
+
+    /**
+     * Compiles this profile into policies for [io.mazewall.enforcer.api.ContainedExecutors.installOnDedicatedProcess].
+     * Incomplete coverage fails closed; it never produces a worker allow-list.
+     */
+    @JvmOverloads
+    public fun toDedicatedWorkerPolicies(
+        runtime: io.mazewall.enforcer.api.RuntimeProfile = io.mazewall.enforcer.api.RuntimeProfile.HOTSPOT_JIT,
+    ): Array<io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled>> {
+        val bob = toPolicy(allowIncomplete = false)
+        return arrayOf(
+            io.mazewall.enforcer.api.ProcessPolicies
+                .workerFilesystem(runtime),
+            io.mazewall.enforcer.api.ProcessPolicies
+                .denyProcessCreation(runtime),
+            io.mazewall.enforcer.api.ProcessPolicies
+                .denyNetwork(runtime),
+            bob,
+        )
+    }
 }

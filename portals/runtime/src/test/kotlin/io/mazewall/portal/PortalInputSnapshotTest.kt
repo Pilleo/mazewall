@@ -43,7 +43,7 @@ class PortalInputSnapshotTest {
                 PortalInputSnapshot.Options(maximumBytes = 5, inMemoryThreshold = 2, spillDirectory = spillDirectory),
             )
 
-        assertEquals("hello", snapshot.openStream().readBytes().decodeToString())
+        assertEquals("hello", snapshot.useStream { it.readBytes().decodeToString() })
         assertEquals(1, Files.list(spillDirectory).use { it.count() })
 
         snapshot.close()

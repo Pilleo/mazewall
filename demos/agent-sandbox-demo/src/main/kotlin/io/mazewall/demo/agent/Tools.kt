@@ -28,7 +28,7 @@ import java.util.concurrent.TimeoutException
 class AgentTools(
     private val useMazewall: Boolean,
     private val workspaceDir: File
-) {
+) : AutoCloseable {
     // Thread pools representing separate agent compartments (Thread-Level Compartmentalization)
     private val webRawExecutor = Executors.newSingleThreadExecutor()
     private val fileRawExecutor = Executors.newSingleThreadExecutor()
@@ -180,6 +180,10 @@ class AgentTools(
         return withSupervisorDenialEvidence {
             requireCompleted(OwnedProcessRunner.run(listOf("sh", "-c", script), PROCESS_TIMEOUT))
         }
+    }
+
+    override fun close() {
+        shutdown()
     }
 
     fun shutdown() {

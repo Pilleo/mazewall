@@ -118,6 +118,9 @@ Daemon and session owners interpret `SeccompCleanupInterpreter.close(connection)
 closes are all attempted. A failure before native dispatch stays on the original
 connection for retry. A native close error is observable but terminal: Linux may
 already have released the integer, so its ownership is retired even on error.
+`FileDescriptor.closeResource` follows the same rule: do not retry `close(2)` on
+`EINTR`/`EIO` for a retired generation, because the kernel can already have reused
+the integer.
 `RealSocketManager` reports these errors distinctly, preserving `FdEpoch` retirement
 before native close; no generation is revived. Retrying the connection
 does not close descriptors already released by an earlier attempt or by the reactor.
