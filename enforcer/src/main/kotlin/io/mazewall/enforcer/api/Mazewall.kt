@@ -49,9 +49,13 @@ import java.util.function.Supplier
  * // Contained execution with automatic cleanup
  * String result = Mazewall.runContained(Mazewall.pureComputeUnsafe(), () -> "Hello, Sandbox!");
  *
- * // Wrap an existing executor
- * ExecutorService executor = Mazewall.newContainedFixedThreadPool(4, Mazewall.pureComputeUnsafe());
+ * // Wrap an existing executor (thread-local only — not an ACE boundary)
+ * ContainedExecutor&lt;PolicyScope.ThreadLocalOnly&gt; executor =
+ *     Mazewall.wrap(Executors.newCachedThreadPool(), Mazewall.pureCompute());
  * }</pre>
+ *
+ * Untrusted Java code needs [installOnProcess] or a portal worker. [wrap] only
+ * filters the pool's own threads; sibling JVM threads remain unrestricted.
  */
 
 @JvmField
@@ -314,14 +318,17 @@ public fun runContained(
  * installation failures remain distinct. A task that handles an error internally has no failure
  * to report through its future.
  *
+ * Thread-local only: sibling threads and {@code CompletableFuture} hops are unfiltered.
+ * Untrusted Java needs {@code installOnProcess} or a portal worker.
+ *
  * @param delegate The underlying executor service to wrap
  * @param policy The policy to apply to all tasks
- * @return A new ExecutorService that enforces the policy on all submitted tasks
+ * @return A thread-scoped contained executor (not a process sandbox)
  */
 public fun wrapContainedExecutor(
     delegate: ExecutorService,
     policy: Policy<*, Uncompiled>,
-): ExecutorService = wrapExecutor(delegate, policy)
+): ContainedExecutor<PolicyScope.ThreadLocalOnly> = wrapExecutor(delegate, policy)
 
 /**
  * Wraps an existing executor service with multiple policies.
@@ -331,26 +338,28 @@ public fun wrapContainedExecutor(
  *
  * @param delegate The underlying executor service to wrap
  * @param policies The policies to combine and apply to all tasks
- * @return A new ExecutorService that enforces the combined policy on all submitted tasks
+ * @return A thread-scoped contained executor (not a process sandbox)
  */
 public fun wrapExecutor(
     delegate: ExecutorService,
     vararg policies: Policy<*, Uncompiled>,
-): ExecutorService {
+): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
     return ContainedExecutors.wrap(delegate, *policies)
 }
 
 /**
  * Alias for [wrapExecutor].
  *
+ * Thread-local only. Untrusted Java needs [installOnProcess] or a portal worker.
+ *
  * @param delegate The underlying executor service to wrap
  * @param policies The policies to combine and apply to all tasks
- * @return A new ExecutorService that enforces the combined policy on all submitted tasks
+ * @return A thread-scoped contained executor (not a process sandbox)
  */
 public fun wrap(
     delegate: ExecutorService,
     vararg policies: Policy<*, Uncompiled>,
-): ExecutorService {
+): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
     return ContainedExecutors.wrap(delegate, *policies)
 }
 

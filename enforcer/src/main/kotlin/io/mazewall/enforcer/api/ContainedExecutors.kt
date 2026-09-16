@@ -229,20 +229,22 @@ public object ContainedExecutors {
     }
 
     /**
-     * Wraps an [java.util.concurrent.ExecutorService] so that any task submitted to it will have the given
-     * [policies] applied before execution.
+     * Wraps an [java.util.concurrent.ExecutorService] so each submitted task installs
+     * [policies] on **that worker thread** before it runs.
+     *
+     * This is thread-scoped containment for trusted code handling untrusted data.
+     * It is not an ACE boundary: sibling threads and `CompletableFuture` hops are
+     * unfiltered. Untrusted Java belongs in [installOnProcess] or a portal worker.
      *
      * The caller still owns [delegate]. Filters stay on each worker after a task returns.
-     * Do not reuse the raw delegate for unrestricted work. An owned
-     * `ContainedExecutorService` is **not** planned (issue 032520 is deferred: high
-     * maintenance risk around thread lifecycle vs irreversible seccomp).
+     * Do not reuse the raw delegate for unrestricted work.
      */
     public fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
-    ): ExecutorService {
+    ): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
         val combinedPolicy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        return ContainedExecutorWrapper(delegate, combinedPolicy)
+        return ContainedExecutorView(ContainedExecutorWrapper(delegate, combinedPolicy), combinedPolicy.asThreadLocalPolicy())
     }
 
     /**
@@ -252,7 +254,10 @@ public object ContainedExecutors {
     public fun <S : PolicyScope> wrapTyped(
         delegate: ExecutorService,
         policy: Policy<S, Uncompiled>,
-    ): ContainedExecutor<S> = ContainedExecutorView(wrap(delegate, policy), policy)
+    ): ContainedExecutor<S> = ContainedExecutorView(ContainedExecutorWrapper(delegate, policy.definition), policy)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun PolicyDefinition<*>.asThreadLocalPolicy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = Policy(this as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
 
     private fun containedThreadFactory(
         tag: String,
@@ -298,8 +303,11 @@ public object ContainedExecutors {
         delegate: ExecutorService,
         policy: Policy<*, Uncompiled>,
         scopingPolicy: StacktraceScopingPolicy,
-    ): ExecutorService {
-        return ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy)
+    ): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
+        return ContainedExecutorView(
+            ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy),
+            policy.definition.asThreadLocalPolicy(),
+        )
     }
 
     /**

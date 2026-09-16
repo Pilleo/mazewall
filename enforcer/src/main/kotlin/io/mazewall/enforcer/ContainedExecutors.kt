@@ -45,7 +45,7 @@ public object ContainedExecutors {
     public fun wrap(
         delegate: ExecutorService,
         vararg policies: Policy<*, Uncompiled>,
-    ): ExecutorService {
+    ): io.mazewall.enforcer.api.ContainedExecutor<PolicyScope.ThreadLocalOnly> {
         return io.mazewall.enforcer.api.ContainedExecutors
             .wrap(delegate, *policies)
     }
@@ -55,7 +55,7 @@ public object ContainedExecutors {
         delegate: ExecutorService,
         policy: Policy<*, Uncompiled>,
         scopingPolicy: StacktraceScopingPolicy,
-    ): ExecutorService {
+    ): io.mazewall.enforcer.api.ContainedExecutor<PolicyScope.ThreadLocalOnly> {
         return io.mazewall.enforcer.api.ContainedExecutors
             .wrap(delegate, policy, scopingPolicy)
     }
