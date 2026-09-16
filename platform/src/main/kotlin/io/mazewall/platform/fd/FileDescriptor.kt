@@ -44,6 +44,9 @@ internal sealed interface FileDescriptorRole {
      * (broker → worker). Not a seccomp listener.
      */
     public data object Granted : FileDescriptorRole
+
+    /** A bpf(2) map, program, BTF, link, or related perf event. */
+    public data object Bpf : FileDescriptorRole
 }
 
 /**

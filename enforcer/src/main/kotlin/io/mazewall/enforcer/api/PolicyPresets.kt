@@ -31,7 +31,7 @@ public object PolicyPresets {
             .build()
 
     /**
-     * Blocks `execve` / `execveat` / `memfd_create`.
+     * Blocks `execve` / `execveat` / `memfd_create` / `io_uring_setup` / `io_uring_enter`.
      *
      * **Not JIT-safe process-wide.** [PolicyBuilder] defaults `allowMmapExec` to false, so this
      * preset also emits `mmap`/`mprotect` `PROT_EXEC` denies. [installOnProcess][io.mazewall.enforcer.api.ContainedExecutors.installOnProcess]
@@ -44,6 +44,7 @@ public object PolicyPresets {
     public val NO_EXEC: PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyBuilder<PolicyScope.ProcessWideSafe>()
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+            .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
             .build()
 
     /**

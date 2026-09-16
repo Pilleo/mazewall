@@ -49,6 +49,7 @@ class FileDescriptorTest {
                 Arguments.of("seccomp notification", FileDescriptorRole.SeccompNotif),
                 Arguments.of("pid", FileDescriptorRole.Pid),
                 Arguments.of("granted", FileDescriptorRole.Granted),
+                Arguments.of("bpf", FileDescriptorRole.Bpf),
             )
     }
 
@@ -505,6 +506,9 @@ class FileDescriptorTest {
                 FileDescriptorRole.Granted ->
                     TestFileDescriptors
                     .adopt(realFd(), FileDescriptorRole.Granted)
+                FileDescriptorRole.Bpf ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Bpf)
             }
             assertTrue(fd.isValid, roleName)
             assertFalse(fd.isInvalid, roleName)

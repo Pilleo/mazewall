@@ -233,12 +233,18 @@ class PolicyTest {
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVE))
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVEAT))
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.MEMFD_CREATE))
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.IO_URING_ENTER))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.IO_URING_ENTER))
     }
 
     @Test
     fun `ProcessPolicies denyProcessCreation is runtime-aware and inspectable`() {
         val hotspot = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
         val native = ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(hotspot.isSyscallAllowed(Syscall.IO_URING_ENTER))
 
         assertTrue(hotspot.argumentRules.allowExecutableMappings)
         assertFalse(native.argumentRules.allowExecutableMappings)

@@ -1,8 +1,14 @@
 package io.mazewall.profiler.tierE.engine
 
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -82,19 +88,21 @@ internal class TierEbpfEngine(
      * reverse-order rollback path instead of nine independently visible FDs.
      */
     private class Resources {
-        var invocationStorageFd: Int = -1
-        var invocationBtfFd: Int = -1
-        var ringFd: Int = -1
-        var lossFd: Int = -1
-        var contextMetricFd: Int = -1
-        var sessionFd: Int = -1
-        var coverageEdgeFd: Int = -1
-        var progFd: Int = -1
-        var markerProgFd: Int = -1
-        var linkFd: Int = -1
-        val markerPerfFds = mutableListOf<Int>()
+        var invocationStorageFd: BpfFd? = null
+        var invocationBtfFd: BpfFd? = null
+        var ringFd: BpfFd? = null
+        var lossFd: BpfFd? = null
+        var contextMetricFd: BpfFd? = null
+        var sessionFd: BpfFd? = null
+        var coverageEdgeFd: BpfFd? = null
+        var progFd: BpfFd? = null
+        var markerProgFd: BpfFd? = null
+        var linkFd: BpfFd? = null
+        val markerPerfFds = mutableListOf<BpfFd>()
         var ringReader: BpfRingBufferReader? = null
     }
+
+    private typealias BpfFd = FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned>
 
     private val lifecycleLock = Any()
     private var lifecycle = Lifecycle.DETACHED
@@ -130,7 +138,7 @@ internal class TierEbpfEngine(
             valueSize = 24,
             maxEntries = 0,
             mapFlags = BPF_F_NO_PREALLOC,
-            btfFd = installed.invocationBtfFd,
+            btfFd = installed.invocationBtfFd!!.value,
             btfKeyTypeId = InvocationStateBtf.taskStorageKeyTypeId(),
             btfValueTypeId = InvocationStateBtf.invocationStateTypeId(),
         )
@@ -146,16 +154,23 @@ internal class TierEbpfEngine(
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
             configuration.set(ValueLayout.JAVA_INT, TARGET_TGID_OFFSET, targetTgid)
             configuration.set(ValueLayout.JAVA_INT, SESSION_RESERVED_OFFSET, 0)
-                updateElem(arena, installed.sessionFd, intSeg(arena, 0), configuration)
+                updateElem(arena, installed.sessionFd!!.value, intSeg(arena, 0), configuration)
             }
-            installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd, installed.lossFd, installed.sessionFd), PROG_KPROBE, "tier_e_marker")
+            installed.markerProgFd = loadProg(buildMarkerProgram(), listOf(installed.invocationStorageFd!!.value, installed.lossFd!!.value, installed.sessionFd!!.value), PROG_KPROBE, "tier_e_marker")
             installed.progFd = loadProg(
             buildProgram(),
-            listOf(installed.invocationStorageFd, installed.ringFd, installed.lossFd, installed.sessionFd, installed.coverageEdgeFd, installed.contextMetricFd),
+            listOf(
+                installed.invocationStorageFd!!.value,
+                installed.ringFd!!.value,
+                installed.lossFd!!.value,
+                installed.sessionFd!!.value,
+                installed.coverageEdgeFd?.value ?: -1,
+                installed.contextMetricFd!!.value,
+            ),
             PROG_RAW_TP,
             "tier_e_syscall",
         )
-            installed.linkFd = openRawTp(installed.progFd, "sys_enter")
+            installed.linkFd = openRawTp(installed.progFd!!.value, "sys_enter")
             synchronized(lifecycleLock) {
                 resources = installed
                 lifecycle = Lifecycle.ATTACHED
@@ -192,7 +207,7 @@ internal class TierEbpfEngine(
             var currentKey: MemorySegment? = null
             while (true) {
                 val nextAttr = arena.allocate(32)
-                nextAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd)
+                nextAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd!!.value)
                 nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, currentKey ?: MemorySegment.NULL)
                 nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, nextKey)
                 when (val result = bpfResult(BPF_MAP_GET_NEXT_KEY, nextAttr, 32)) {
@@ -205,7 +220,7 @@ internal class TierEbpfEngine(
                 val contextId = nextKey.get(ValueLayout.JAVA_LONG, 0)
                 key.set(ValueLayout.JAVA_LONG, 0, contextId)
                 val lookupAttr = arena.allocate(32)
-                lookupAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd)
+                lookupAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.contextMetricFd!!.value)
                 lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, key)
                 lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
                 when (val result = bpfResult(BPF_MAP_LOOKUP_ELEM, lookupAttr, 32)) {
@@ -223,7 +238,7 @@ internal class TierEbpfEngine(
         val key = intSeg(arena, index)
         val value = arena.allocate(8, 8)
         val attr = arena.allocate(24)
-        attr.set(ValueLayout.JAVA_INT, 0, installed.lossFd)
+        attr.set(ValueLayout.JAVA_INT, 0, installed.lossFd!!.value)
         attr.set(ValueLayout.ADDRESS, 8, key)
         attr.set(ValueLayout.ADDRESS, 16, value)
         bpfCall(H_LOOKUP.toLong(), attr, 24)
@@ -258,11 +273,11 @@ internal class TierEbpfEngine(
                     NativeArg.LongArg(cpu.toLong()),
                     NativeArg.LongArg(-1),
                     NativeArg.LongArg(PERF_FLAG_FD_CLOEXEC),
-                ).getOrThrow("perf_event_open(uprobe,cpu=$cpu)")
-                    .toInt()
+                ).recordDescriptorAcquisition()
+                    .getFdOrThrow("perf_event_open(uprobe,cpu=$cpu)", FileDescriptorRole.Bpf)
                 installed.markerPerfFds += fd
-                rawIoctl(fd, PERF_EVENT_IOC_SET_BPF, installed.markerProgFd.toLong())
-                rawIoctl(fd, PERF_EVENT_IOC_ENABLE, 0)
+                rawIoctl(fd.value, PERF_EVENT_IOC_SET_BPF, installed.markerProgFd!!.value.toLong())
+                rawIoctl(fd.value, PERF_EVENT_IOC_ENABLE, 0)
             }
         }
         setMarkerAttached(installed, true)
@@ -276,13 +291,13 @@ internal class TierEbpfEngine(
         // numeric descriptor that the kernel may already have reused.
         val markerPerfFds = installed.markerPerfFds.toList()
         installed.markerPerfFds.clear()
-        markerPerfFds.forEach(::closeIfOpen)
+        markerPerfFds.forEach { closeOwned(it) }
     }
 
     /** Drains committed syscall records without waiting or timestamp correlation. */
     public fun drainEvents(): List<SyscallInvocationEvent> {
         val installed = requireInstalled()
-        val reader = installed.ringReader ?: BpfRingBufferReader(native, installed.ringFd, RING_CAPACITY.toLong(), EVENT_SIZE).also {
+        val reader = installed.ringReader ?: BpfRingBufferReader(native, installed.ringFd!!.value, RING_CAPACITY.toLong(), EVENT_SIZE).also {
             installed.ringReader = it
         }
         return reader.drain().map(SyscallInvocationEvent::fromBytes)
@@ -332,13 +347,13 @@ internal class TierEbpfEngine(
             val current = arena.allocate(16, 4)
             val value = arena.allocate(16, 4)
             val lookup = arena.allocate(32)
-            lookup.set(ValueLayout.JAVA_INT, 0, installed.sessionFd)
+            lookup.set(ValueLayout.JAVA_INT, 0, installed.sessionFd!!.value)
             lookup.set(ValueLayout.ADDRESS, 8, key)
             lookup.set(ValueLayout.ADDRESS, 16, current)
             bpfCall(BPF_MAP_LOOKUP_ELEM, lookup, 32)
             value.copyFrom(current)
             value.set(ValueLayout.JAVA_INT, 8, if (attached) 1 else 0)
-            updateElem(arena, installed.sessionFd, key, value)
+            updateElem(arena, installed.sessionFd!!.value, key, value)
         }
     }
 
@@ -353,11 +368,11 @@ internal class TierEbpfEngine(
         }
 
         fun close(
-            fd: Int,
+            fd: BpfFd?,
             clear: () -> Unit,
         ) {
             try {
-                closeIfOpen(fd)
+                closeOwned(fd)
             } catch (failure: Throwable) {
                 cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
             } finally {
@@ -369,16 +384,16 @@ internal class TierEbpfEngine(
         val markerPerfFds = installed.markerPerfFds.toList()
         installed.markerPerfFds.clear()
         markerPerfFds.asReversed().forEach { close(it) {} }
-        close(installed.linkFd) { installed.linkFd = -1 }
-        close(installed.progFd) { installed.progFd = -1 }
-        close(installed.markerProgFd) { installed.markerProgFd = -1 }
-        close(installed.ringFd) { installed.ringFd = -1 }
-        close(installed.lossFd) { installed.lossFd = -1 }
-        close(installed.contextMetricFd) { installed.contextMetricFd = -1 }
-        close(installed.sessionFd) { installed.sessionFd = -1 }
-        close(installed.coverageEdgeFd) { installed.coverageEdgeFd = -1 }
-        close(installed.invocationStorageFd) { installed.invocationStorageFd = -1 }
-        close(installed.invocationBtfFd) { installed.invocationBtfFd = -1 }
+        close(installed.linkFd) { installed.linkFd = null }
+        close(installed.progFd) { installed.progFd = null }
+        close(installed.markerProgFd) { installed.markerProgFd = null }
+        close(installed.ringFd) { installed.ringFd = null }
+        close(installed.lossFd) { installed.lossFd = null }
+        close(installed.contextMetricFd) { installed.contextMetricFd = null }
+        close(installed.sessionFd) { installed.sessionFd = null }
+        close(installed.coverageEdgeFd) { installed.coverageEdgeFd = null }
+        close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
+        close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }
     }
 
@@ -424,7 +439,7 @@ internal class TierEbpfEngine(
         btfFd: Int = 0,
         btfKeyTypeId: Int = 0,
         btfValueTypeId: Int = 0,
-    ): Int =
+    ): BpfFd =
         Arena.ofConfined().use {
             val attr = it.allocate(72)
             attr.set(ValueLayout.JAVA_INT, 0, type)
@@ -435,10 +450,12 @@ internal class TierEbpfEngine(
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_FD, btfFd)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_KEY_TYPE_ID, btfKeyTypeId)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_VALUE_TYPE_ID, btfValueTypeId)
-            bpfCall(BPF_MAP_CREATE, attr, 72)
+            bpfResult(BPF_MAP_CREATE, attr, 72)
+                .recordDescriptorAcquisition()
+                .getFdOrThrow("bpf(BPF_MAP_CREATE)", FileDescriptorRole.Bpf)
         }
 
-    private fun loadBtf(bytes: ByteArray): Int =
+    private fun loadBtf(bytes: ByteArray): BpfFd =
         Arena.ofConfined().use {
         val btf = it.allocate(bytes.size.toLong())
         bytes.forEachIndexed { index, byte -> btf.set(ValueLayout.JAVA_BYTE, index.toLong(), byte) }
@@ -450,7 +467,7 @@ internal class TierEbpfEngine(
         attr.set(ValueLayout.JAVA_INT, BpfBtfLoadLayout.LOG_SIZE, verifierLog.byteSize().toInt())
         attr.set(ValueLayout.JAVA_INT, BpfBtfLoadLayout.LOG_LEVEL, 1)
         when (val result = bpfResult(BPF_BTF_LOAD, attr, BpfBtfLoadLayout.SIZE)) {
-            is SyscallResult.Success -> result.value.toInt()
+            is SyscallResult.Success -> result.recordDescriptorAcquisition().getFdOrThrow("BPF_BTF_LOAD", FileDescriptorRole.Bpf)
             is SyscallResult.Error -> error("BPF_BTF_LOAD failed: $result; verifier: ${verifierLog.getString(0).trim()}")
         }
     }
@@ -473,11 +490,11 @@ internal class TierEbpfEngine(
         mapFds: List<Int>,
         programType: Int,
         programName: String,
-    ): Int {
+    ): BpfFd {
         return Arena.ofConfined().use {
             val request = BpfProgLoadRequestEncoder.encode(it, program, mapFds, programType, programName)
             when (val result = bpfResult(BPF_PROG_LOAD, request.attr, BpfProgLoadLayout.SIZE)) {
-                is SyscallResult.Success -> result.value.toInt()
+                is SyscallResult.Success -> result.recordDescriptorAcquisition().getFdOrThrow("BPF_PROG_LOAD", FileDescriptorRole.Bpf)
                 is SyscallResult.Error -> {
                     val log = request.verifierLog.getString(0).trim()
                     val diagnostic = if (log.isEmpty()) "no verifier log" else log
@@ -490,12 +507,14 @@ internal class TierEbpfEngine(
     private fun openRawTp(
         progFd: Int,
         name: String,
-    ): Int =
+    ): BpfFd =
         Arena.ofConfined().use {
             val attr = it.allocate(BpfRawTracepointOpenLayout.SIZE)
             attr.set(ValueLayout.ADDRESS, BpfRawTracepointOpenLayout.NAME, strSeg(it, name, 64))
             attr.set(ValueLayout.JAVA_INT, BpfRawTracepointOpenLayout.PROGRAM_FD, progFd)
-            bpfCall(BPF_RAW_TRACEPOINT_OPEN, attr, BpfRawTracepointOpenLayout.SIZE)
+            bpfResult(BPF_RAW_TRACEPOINT_OPEN, attr, BpfRawTracepointOpenLayout.SIZE)
+                .recordDescriptorAcquisition()
+                .getFdOrThrow("bpf(BPF_RAW_TRACEPOINT_OPEN)", FileDescriptorRole.Bpf)
         }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -519,11 +538,12 @@ internal class TierEbpfEngine(
         return s
     }
 
-    private fun closeIfOpen(fd: Int) {
-        if (fd < 0) return
-        when (val result = native.syscall(SYS_CLOSE, NativeArg.LongArg(fd.toLong()))) {
+    private fun closeOwned(fd: BpfFd?) {
+        if (fd == null) return
+        if (!fd.claimForClose()) return
+        when (val result = native.syscall(SYS_CLOSE, NativeArg.LongArg(fd.value.toLong()))) {
             is SyscallResult.Success -> Unit
-            is SyscallResult.Error -> result.throwErrno("close(Tier E resource fd=$fd)")
+            is SyscallResult.Error -> result.throwErrno("close(Tier E resource fd=${fd.value})")
         }
     }
 

@@ -62,6 +62,7 @@ public class DenyListSpec internal constructor(
 
     public fun denyProcessCreation(): DenyListSpec {
         inner.block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+        inner.block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
         return this
     }
 
@@ -136,6 +137,7 @@ public class AllowListSpec internal constructor(
 
     public fun denyProcessCreation(): AllowListSpec {
         inner.block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+        inner.block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
         return this
     }
 

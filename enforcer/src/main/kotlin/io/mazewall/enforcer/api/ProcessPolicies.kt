@@ -16,6 +16,7 @@ public object ProcessPolicies {
         Policy
             .builder()
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
+            .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
             .forRuntime(runtime)
             .build()
 
