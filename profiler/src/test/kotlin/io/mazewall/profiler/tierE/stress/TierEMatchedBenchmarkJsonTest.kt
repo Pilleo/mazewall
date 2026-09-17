@@ -5,6 +5,18 @@ import kotlin.test.assertEquals
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
+    fun `capture profile scope pairs full and narrowed dictionary captures`() {
+        assertEquals(
+            setOf(
+                "baseline",
+                "dictionary_full_stream_profile_full",
+                "dictionary_full_stream_profile_jdk25_unix_openat0",
+            ),
+            TierEMatchedBenchmark.captureProfileVariantNames(0).toSet(),
+        )
+    }
+
+    @Test
     fun `full stream exact joins produce valid capture efficiency evidence`() {
         val metrics = TierEMatchedBenchmark.captureEfficiency(
             executedOperations = 1_300,

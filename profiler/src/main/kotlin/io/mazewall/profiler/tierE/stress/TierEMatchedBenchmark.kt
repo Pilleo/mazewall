@@ -86,6 +86,7 @@ internal object TierEMatchedBenchmark {
         config: Config,
     ): ForkResult {
         val mode = variant.mode
+        val captureProfile = captureProfileFor(variant)
         val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
         val classpath = System.getProperty("java.class.path")
         val canonicalCache = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
@@ -110,6 +111,7 @@ internal object TierEMatchedBenchmark {
             Mode.FULL_STREAM, Mode.UNIQUE_EDGE, Mode.INLINE_FULL_STREAM, Mode.INLINE_UNIQUE_EDGE -> listOf(
                 java,
                 "-Dmazewall.tier-e.canonical-cache=${variant.cacheMode ?: canonicalCache}",
+                "-Dmazewall.tier-e.capture-profile=${captureProfile.wireName}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
                 "-Dmazewall.tier-e.capture-yield=$captureYield",
                 "-Dmazewall.tier-e.ring-capacity-bytes=8388608",
@@ -316,7 +318,8 @@ internal object TierEMatchedBenchmark {
 
     private fun metadata(config: Config): String {
         val cacheMode = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
-        val captureProfile = escape(System.getProperty("mazewall.tier-e.capture-profile", "full"))
+        val captureProfile = escape(configuredCaptureProfile().wireName)
+        val captureProfileStrategy = if (config.scope == Scope.TIER_E_CAPTURE_PROFILE) "per_variant" else "configured"
         val sourceRevision = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_REVISION") ?: "unknown")
         val sourceDirty = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_DIRTY") ?: "unknown")
         val javaVersion = escape(System.getProperty("java.version"))
@@ -324,7 +327,8 @@ internal object TierEMatchedBenchmark {
         return "{\"kind\":\"metadata\",\"timestamp\":\"${Instant.now()}\",\"iterations\":${config.iterations}," +
             "\"warmups\":${config.warmups},\"batches\":${config.batches},\"forks\":${config.forks}," +
             "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\"," +
-            "\"canonical_cache\":\"$cacheMode\",\"capture_profile\":\"$captureProfile\",\"scope\":\"${config.scope.jsonName}\"," +
+            "\"canonical_cache\":\"$cacheMode\",\"capture_profile\":\"$captureProfile\",\"capture_profile_strategy\":\"$captureProfileStrategy\"," +
+            "\"scope\":\"${config.scope.jsonName}\"," +
             "\"child_timeout_seconds\":${config.childTimeoutSeconds}," +
             "\"user_notif_worker_timeout_seconds\":${config.userNotifWorkerTimeoutSeconds}," +
             "\"user_notif_child_timeout_seconds\":${config.userNotifChildTimeoutSeconds}," +
@@ -365,7 +369,7 @@ internal object TierEMatchedBenchmark {
     ): String =
         "{\"kind\":\"sample\",\"variant\":\"${variant.jsonName(scope)}\",\"mode\":\"${variant.mode.jsonName}\"," +
             "\"transport\":\"${variant.mode.stackTransport}\",\"cache\":\"${variant.cacheMode ?: "not_applicable"}\"," +
-            "\"publication\":\"${variant.publication.jsonName}\",\"fork\":$fork,\"batch\":${batch.index}," +
+            "\"publication\":\"${variant.publication.jsonName}\",\"capture_profile\":\"${captureProfileFor(variant).wireName}\",\"fork\":$fork,\"batch\":${batch.index}," +
             "\"workload_ns\":${batch.workloadNanos},\"operations\":${batch.operations},\"checksum\":${batch.checksum}}"
 
     internal fun performanceEvidence(
@@ -388,6 +392,8 @@ internal object TierEMatchedBenchmark {
             "\"kind\":\"fork-output\"",
             "\"variant\":\"${result.variant.jsonName(result.scope)}\"",
             "\"mode\":\"${result.variant.mode.jsonName}\"",
+            "\"capture_profile\":\"${captureProfileFor(result.variant).wireName}\"",
+            "\"capture_profile_domain\":\"${captureProfileFor(result.variant).domain}\"",
             "\"fork\":${result.fork}",
             "\"elapsed_ns\":${result.elapsedNanos}",
             "\"cpu_ns\":${result.cpuNanos}",
@@ -583,6 +589,18 @@ internal object TierEMatchedBenchmark {
         forks: List<ForkResult>,
         scope: Scope,
     ): String {
+        if (scope == Scope.TIER_E_CAPTURE_PROFILE) {
+            val values = forks.filter { it.variant.mode == Mode.FULL_STREAM }
+            val full = values.filter { captureProfileFor(it.variant) == CaptureProfile.FULL }.associateBy { it.fork }
+            val narrowed = values.filter { captureProfileFor(it.variant) == CaptureProfile.JDK25_UNIX_OPENAT0 }.associateBy { it.fork }
+            val deltas = full.keys.intersect(narrowed.keys).map { fork ->
+                median(full.getValue(fork).batches.map { it.workloadNanos }) -
+                    median(narrowed.getValue(fork).batches.map { it.workloadNanos })
+            }
+            val interval = bootstrapMedianInterval(deltas)
+            return "\"paired_capture_profile_effects\":{\"dictionary_full_stream\":{\"full_minus_narrowed_median_ns\":${median(deltas)}," +
+                "\"paired_bootstrap_95_ci_low_ns\":${interval.first},\"paired_bootstrap_95_ci_high_ns\":${interval.second},\"pairs\":${deltas.size}}},"
+        }
         if (scope != Scope.TIER_E_CACHE_PAIRED) return ""
         val effects = forks.filter { it.variant.mode.tierE }.groupBy { it.variant.mode }.entries.joinToString(",") { (mode, values) ->
             val enabled = values.filter { it.variant.cacheMode == "enabled" }.associateBy { it.fork }
@@ -670,6 +688,7 @@ internal object TierEMatchedBenchmark {
         TIER_E_CACHE_AB("tier-e-cache-ab"),
         TIER_E_CACHE_PAIRED("tier-e-cache-paired"),
         TIER_E_PUBLICATION("tier-e-publication"),
+        TIER_E_CAPTURE_PROFILE("tier-e-capture-profile"),
         ;
 
         companion object {
@@ -684,6 +703,21 @@ internal object TierEMatchedBenchmark {
     ) {
         TERMINAL("terminal"),
         LIVE("live"),
+    }
+
+    private enum class CaptureProfile(
+        val wireName: String,
+        val domain: String,
+    ) {
+        FULL("full", "all admitted native bindings"),
+        JDK25_UNIX_OPENAT0("jdk25-unix-openat0", "JDK 25 UnixNativeDispatcher.openat0"),
+        ;
+
+        companion object {
+            fun fromProperty(value: String): CaptureProfile =
+                entries.singleOrNull { it.wireName == value.ifBlank { FULL.wireName } }
+                ?: error("unknown Tier E capture profile: $value")
+        }
     }
 
     private enum class Workload(
@@ -705,14 +739,27 @@ internal object TierEMatchedBenchmark {
         val mode: Mode,
         val cacheMode: String? = null,
         val publication: Publication = Publication.TERMINAL,
+        val captureProfile: CaptureProfile? = null,
     ) {
         fun jsonName(scope: Scope): String =
             when (scope) {
             Scope.FULL, Scope.TIER_E_CACHE_AB -> mode.jsonName
             Scope.TIER_E_CACHE_PAIRED -> if (mode.tierE) "${mode.jsonName}_cache_$cacheMode" else mode.jsonName
             Scope.TIER_E_PUBLICATION -> if (mode.tierE) "${mode.jsonName}_publication_${publication.jsonName}" else mode.jsonName
+            Scope.TIER_E_CAPTURE_PROFILE ->
+                if (mode.tierE) {
+                    "${mode.jsonName}_profile_${requireNotNull(captureProfile).wireName.replace('-', '_')}"
+                } else {
+                    mode.jsonName
+                }
         }
     }
+
+    private fun configuredCaptureProfile(): CaptureProfile = CaptureProfile.fromProperty(System.getProperty("mazewall.tier-e.capture-profile", "full"))
+
+    private fun captureProfileFor(variant: Variant): CaptureProfile = variant.captureProfile ?: configuredCaptureProfile()
+
+    internal fun captureProfileVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_CAPTURE_PROFILE, rotation).map { it.jsonName(Scope.TIER_E_CAPTURE_PROFILE) }
 
     private fun variants(
         scope: Scope,
@@ -721,6 +768,7 @@ internal object TierEMatchedBenchmark {
         val selected = when (scope) {
             Scope.FULL -> allModes
             Scope.TIER_E_CACHE_AB, Scope.TIER_E_CACHE_PAIRED, Scope.TIER_E_PUBLICATION -> allModes.filter { it == Mode.BASELINE || it.tierE }
+            Scope.TIER_E_CAPTURE_PROFILE -> listOf(Mode.BASELINE, Mode.FULL_STREAM)
         }.let { it.drop(rotation % it.size) + it.take(rotation % it.size) }
         return selected.flatMap { mode ->
             if (!mode.tierE) return@flatMap listOf(Variant(mode))
@@ -730,6 +778,14 @@ internal object TierEMatchedBenchmark {
                     caches.map { cache -> Variant(mode, cache) }
                 }
                 Scope.TIER_E_PUBLICATION -> listOf(Variant(mode, publication = Publication.TERMINAL), Variant(mode, publication = Publication.LIVE))
+                Scope.TIER_E_CAPTURE_PROFILE -> {
+                    val profiles = if (rotation % 2 == 0) {
+                        listOf(CaptureProfile.FULL, CaptureProfile.JDK25_UNIX_OPENAT0)
+                    } else {
+                        listOf(CaptureProfile.JDK25_UNIX_OPENAT0, CaptureProfile.FULL)
+                    }
+                    profiles.map { captureProfile -> Variant(mode, captureProfile = captureProfile) }
+                }
                 else -> listOf(Variant(mode))
             }
         }

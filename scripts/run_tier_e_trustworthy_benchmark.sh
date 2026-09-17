@@ -53,8 +53,12 @@ if [[ "${BENCHMARK_WORKLOAD}" != "application" && "${BENCHMARK_WORKLOAD}" != "or
     echo "MAZEWALL_TIER_E_BENCHMARK_WORKLOAD must be application or oracle" >&2
     exit 2
 fi
-if [[ "${BENCHMARK_SCOPE}" != "full" && "${BENCHMARK_SCOPE}" != "tier-e-cache-ab" && "${BENCHMARK_SCOPE}" != "tier-e-cache-paired" && "${BENCHMARK_SCOPE}" != "tier-e-publication" ]]; then
-    echo "MAZEWALL_TIER_E_BENCHMARK_SCOPE must be full, tier-e-cache-ab, tier-e-cache-paired, or tier-e-publication" >&2
+if [[ "${BENCHMARK_SCOPE}" != "full" && "${BENCHMARK_SCOPE}" != "tier-e-cache-ab" && "${BENCHMARK_SCOPE}" != "tier-e-cache-paired" && "${BENCHMARK_SCOPE}" != "tier-e-publication" && "${BENCHMARK_SCOPE}" != "tier-e-capture-profile" ]]; then
+    echo "MAZEWALL_TIER_E_BENCHMARK_SCOPE must be full, tier-e-cache-ab, tier-e-cache-paired, tier-e-publication, or tier-e-capture-profile" >&2
+    exit 2
+fi
+if [[ "${BENCHMARK_SCOPE}" == "tier-e-capture-profile" && -n "${CAPTURE_PROFILE}" ]]; then
+    echo "tier-e-capture-profile selects full and jdk25-unix-openat0 internally; leave MAZEWALL_TIER_E_CAPTURE_PROFILE empty" >&2
     exit 2
 fi
 if ! [[ "${ITERATIONS}" =~ ^[1-9][0-9]*$ && "${WARMUPS}" =~ ^[0-9]+$ && "${BATCHES}" =~ ^[1-9][0-9]*$ && "${FORKS}" =~ ^[1-9][0-9]*$ && "${CHILD_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ && "${USER_NOTIF_WORKER_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ && "${USER_NOTIF_CHILD_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
