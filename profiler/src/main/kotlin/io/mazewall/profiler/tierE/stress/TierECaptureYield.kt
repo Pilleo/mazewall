@@ -81,15 +81,28 @@ internal object TierECaptureYield {
     fun join(
         report: Report,
         definitions: Collection<InvocationDefinition>,
+        resolvedInvocationIds: Collection<InvocationId> = emptyList(),
     ): Join {
         val byId = definitions.associateBy { it.invocationId }
+        val resolvedCounts = resolvedInvocationIds.groupingBy { it }.eachCount()
         val yields = report.records.groupBy { it.bindingCode }.mapValues { (_, records) ->
-            val joined = records.map { it to byId[InvocationId(it.invocationId)] }
+            val joined = records.map { record ->
+                val invocationId = InvocationId(record.invocationId)
+                JoinedRecord(record, invocationId, byId[invocationId])
+            }
+            val resolved = joined.filter { it.definition != null && matches(it.record.outcome, it.definition) }
             BindingYield(
                 records.size,
-                joined.count { it.second != null },
-                joined.count { it.second == null },
-                joined.count { (record, definition) -> definition != null && !matches(record.outcome, definition) },
+                joined.count { it.definition != null },
+                joined.count { it.definition == null },
+                joined.count { it.definition != null && !matches(it.record.outcome, it.definition) },
+                resolved
+                    .map { it.invocationId }
+                    .filter { resolvedCounts.containsKey(it) }
+                    .toSet()
+                    .size,
+                resolved.sumOf { resolvedCounts[it.invocationId] ?: 0 },
+                resolved.count { it.record.outcome == Outcome.CAPTURED && !resolvedCounts.containsKey(it.invocationId) },
             )
         }
         val seen = report.records.mapTo(HashSet()) { InvocationId(it.invocationId) }
@@ -116,6 +129,15 @@ internal object TierECaptureYield {
         val exactJoined: Int,
         val missingDefinition: Int,
         val outcomeMismatch: Int,
+        val resolvedInvocations: Int,
+        val resolvedSyscalls: Int,
+        val capturedWithoutResolvedSyscall: Int,
+    )
+
+    private data class JoinedRecord(
+        val record: Record,
+        val invocationId: InvocationId,
+        val definition: InvocationDefinition?,
     )
 
     data class Join(

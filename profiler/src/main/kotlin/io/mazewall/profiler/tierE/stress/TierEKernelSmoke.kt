@@ -131,9 +131,17 @@ internal object TierEKernelSmoke {
             }
             check(process.waitFor() == 0) { "agent workload failed" }
             val captureYield = captureYieldPath?.let { TierECaptureYield.read(it) }
-            val captureYieldJoin = captureYield?.let { TierECaptureYield.join(it, AgentDefinitionFile.read(definitions).invocations) }
             val terminalStarted = System.nanoTime()
             val profile = session.finish(definitions)
+            val captureYieldJoin = captureYield?.let {
+                TierECaptureYield.join(
+                    it,
+                    AgentDefinitionFile.read(definitions).invocations,
+                    profile.syscalls
+                        .filter { syscall -> syscall.resolutionStatus == ResolutionStatus.RESOLVED }
+                        .mapNotNull { syscall -> syscall.observation.invocationId },
+                )
+            }
             val terminalNanos = System.nanoTime() - terminalStarted
             val workloadNanos = System.nanoTime() - workloadStarted
             val resolved = profile.syscalls.count { it.resolutionStatus == ResolutionStatus.RESOLVED }
@@ -306,7 +314,8 @@ internal object TierEKernelSmoke {
                 "capture_yield_outcome_mismatch=${captureYieldJoin?.outcomeMismatch ?: 0} " +
                 "capture_yield_unrecorded_definitions=${captureYieldJoin?.unrecordedDefinitions ?: 0} " +
                 "capture_yield_bindings=${captureYieldJoin?.bindings.orEmpty().toSortedMap().entries.joinToString(",") { (binding, yield) ->
-                    "$binding:${yield.records}:${yield.exactJoined}:${yield.missingDefinition}:${yield.outcomeMismatch}"
+                    "$binding:${yield.records}:${yield.exactJoined}:${yield.missingDefinition}:${yield.outcomeMismatch}:" +
+                        "${yield.resolvedInvocations}:${yield.resolvedSyscalls}:${yield.capturedWithoutResolvedSyscall}"
                 }} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",

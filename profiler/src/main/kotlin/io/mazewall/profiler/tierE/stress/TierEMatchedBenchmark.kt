@@ -259,12 +259,30 @@ internal object TierEMatchedBenchmark {
             evidence.contractEvidence(),
             requiresOperationOracle = mode.userNotif && config.workload == Workload.ORACLE,
         )
+        val captureEfficiency = captureEfficiency(
+            executedOperations = if (mode.tierE) (config.warmups + config.batches).toLong() * config.iterations else 0,
+            exactCaptures = evidence.captureYield.captured,
+            resolvedSyscalls = evidence.captureYield.bindings.values
+                .sumOf { it.resolvedSyscalls },
+            productiveCaptures = evidence.captureYield.bindings.values
+                .sumOf { it.resolvedInvocations },
+            getStackTraceNanos = evidence.phases.getStackTraceNanos,
+            fullStream = mode.emissionMode == "full-stream",
+            exactJoinComplete = evidence.captureYield.records == evidence.captureYield.exactJoined &&
+                evidence.captureYield.missingDefinition == 0L &&
+                evidence.captureYield.outcomeMismatch == 0L &&
+                evidence.captureYield.unrecordedDefinitions == 0L,
+            evidenceComplete = evidence.evidenceComplete,
+            observedLosses = evidence.lost,
+            attributionFailures = evidence.attributionFailures,
+        )
         val result = ForkResult(
             config.scope,
             variant,
             fork,
             batches,
             evidence,
+            captureEfficiency,
             verdict,
             elapsedNanos,
             telemetry.cpuNanos,
@@ -409,6 +427,7 @@ internal object TierEMatchedBenchmark {
             "\"evidence_complete\":${evidence.evidenceComplete}",
             "\"phases\":${phaseJson(evidence.phases)}",
             "\"capture_yield\":${captureYieldJson(evidence.captureYield)}",
+            "\"capture_efficiency\":${captureEfficiencyJson(result.captureEfficiency)}",
             "\"user_notif_phases\":${userNotifPhaseJson(evidence.userNotifPhases)}",
             "\"output\":\"${escape(output)}\"",
         )
@@ -458,11 +477,50 @@ internal object TierEMatchedBenchmark {
             "\"unrecorded_definitions\":${metrics.unrecordedDefinitions}",
             "\"bindings\":${metrics.bindings.entries.sortedBy { it.key }.joinToString(",", "{", "}") { (binding, yield) ->
                 "\"$binding\":{\"records\":${yield.records},\"exact_joined\":${yield.exactJoined}," +
-                    "\"missing_definition\":${yield.missingDefinition},\"outcome_mismatch\":${yield.outcomeMismatch}}"
+                    "\"missing_definition\":${yield.missingDefinition},\"outcome_mismatch\":${yield.outcomeMismatch}," +
+                    "\"resolved_invocations\":${yield.resolvedInvocations},\"resolved_syscalls\":${yield.resolvedSyscalls}," +
+                    "\"captured_without_resolved_syscall\":${yield.capturedWithoutResolvedSyscall}}"
             }}",
         ).joinToString(",", prefix = "{", postfix = "}")
 
-    private fun captureYieldBindings(output: String): Map<Int, CaptureYieldBindingMetrics> {
+    private fun captureEfficiencyJson(metrics: CaptureEfficiencyMetrics): String =
+        listOf(
+            "\"valid\":${metrics.valid}",
+            "\"executed_operations\":${metrics.executedOperations}",
+            "\"exact_captures\":${metrics.exactCaptures}",
+            "\"resolved_syscalls\":${metrics.resolvedSyscalls}",
+            "\"productive_captures\":${metrics.productiveCaptures}",
+            "\"get_stack_trace_ns\":${metrics.getStackTraceNanos}",
+        ).joinToString(",", prefix = "{", postfix = "}")
+
+    internal fun captureEfficiency(
+        executedOperations: Long,
+        exactCaptures: Long,
+        resolvedSyscalls: Long,
+        productiveCaptures: Long,
+        getStackTraceNanos: Long,
+        fullStream: Boolean,
+        exactJoinComplete: Boolean,
+        evidenceComplete: Boolean,
+        observedLosses: Long,
+        attributionFailures: Long,
+    ): CaptureEfficiencyMetrics =
+        CaptureEfficiencyMetrics(
+            executedOperations,
+            exactCaptures,
+            resolvedSyscalls,
+            productiveCaptures,
+            getStackTraceNanos,
+            fullStream &&
+                exactJoinComplete &&
+                evidenceComplete &&
+                observedLosses == 0L &&
+                attributionFailures == 0L &&
+                executedOperations > 0L &&
+                exactCaptures > 0L,
+        )
+
+    internal fun captureYieldBindings(output: String): Map<Int, CaptureYieldBindingMetrics> {
         val encoded = CAPTURE_YIELD_BINDINGS_PATTERN
             .find(output)
             ?.groupValues
@@ -471,12 +529,15 @@ internal object TierEMatchedBenchmark {
         if (encoded.isEmpty()) return emptyMap()
         return encoded.split(",").associate { entry ->
             val values = entry.split(":")
-            require(values.size == 5) { "invalid capture-yield binding: $entry" }
+            require(values.size == 8) { "invalid capture-yield binding: $entry" }
             values[0].toInt() to CaptureYieldBindingMetrics(
                 values[1].toLong(),
                 values[2].toLong(),
                 values[3].toLong(),
                 values[4].toLong(),
+                values[5].toLong(),
+                values[6].toLong(),
+                values[7].toLong(),
             )
         }
     }
@@ -778,11 +839,23 @@ internal object TierEMatchedBenchmark {
         val bindings: Map<Int, CaptureYieldBindingMetrics>,
     )
 
-    private data class CaptureYieldBindingMetrics(
+    internal data class CaptureYieldBindingMetrics(
         val records: Long,
         val exactJoined: Long,
         val missingDefinition: Long,
         val outcomeMismatch: Long,
+        val resolvedInvocations: Long,
+        val resolvedSyscalls: Long,
+        val capturedWithoutResolvedSyscall: Long,
+    )
+
+    internal data class CaptureEfficiencyMetrics(
+        val executedOperations: Long,
+        val exactCaptures: Long,
+        val resolvedSyscalls: Long,
+        val productiveCaptures: Long,
+        val getStackTraceNanos: Long,
+        val valid: Boolean,
     )
 
     private data class ForkResult(
@@ -791,6 +864,7 @@ internal object TierEMatchedBenchmark {
         val fork: Int,
         val batches: List<Batch>,
         val evidence: Evidence,
+        val captureEfficiency: CaptureEfficiencyMetrics,
         val verdict: TierEBenchmarkContract.Verdict,
         val elapsedNanos: Long,
         val cpuNanos: Long?,

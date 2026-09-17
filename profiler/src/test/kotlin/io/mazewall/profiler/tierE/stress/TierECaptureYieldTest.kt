@@ -57,4 +57,29 @@ class TierECaptureYieldTest {
         assertEquals(0, join.outcomeMismatch)
         assertEquals(1, join.bindings.getValue(1).exactJoined)
     }
+
+    @Test
+    fun `counts useful captures by their exact resolved invocation identity`() {
+        val join = TierECaptureYield.join(
+            TierECaptureYield.Report(
+                1,
+                listOf(
+                    TierECaptureYield.Record(10, 1, TierECaptureYield.Outcome.CAPTURED),
+                    TierECaptureYield.Record(11, 1, TierECaptureYield.Outcome.CAPTURED),
+                    TierECaptureYield.Record(12, 1, TierECaptureYield.Outcome.CAPTURED),
+                ),
+            ),
+            listOf(
+                InvocationDefinition(InvocationId(10), null, StackTraceId(1)),
+                InvocationDefinition(InvocationId(11), null, StackTraceId(1)),
+                InvocationDefinition(InvocationId(12), null, StackTraceId(1)),
+            ),
+            listOf(InvocationId(10), InvocationId(10), InvocationId(12)),
+        )
+
+        val binding = join.bindings.getValue(1)
+        assertEquals(2, binding.resolvedInvocations)
+        assertEquals(3, binding.resolvedSyscalls)
+        assertEquals(1, binding.capturedWithoutResolvedSyscall)
+    }
 }

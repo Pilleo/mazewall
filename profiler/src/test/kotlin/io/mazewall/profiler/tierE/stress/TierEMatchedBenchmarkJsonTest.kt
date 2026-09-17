@@ -5,6 +5,40 @@ import kotlin.test.assertEquals
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
+    fun `full stream exact joins produce valid capture efficiency evidence`() {
+        val metrics = TierEMatchedBenchmark.captureEfficiency(
+            executedOperations = 1_300,
+            exactCaptures = 7_815,
+            resolvedSyscalls = 1_300,
+            productiveCaptures = 1_300,
+            getStackTraceNanos = 25_000_000,
+            fullStream = true,
+            exactJoinComplete = true,
+            evidenceComplete = true,
+            observedLosses = 0,
+            attributionFailures = 0,
+        )
+
+        assertEquals(1_300, metrics.executedOperations)
+        assertEquals(7_815, metrics.exactCaptures)
+        assertEquals(1_300, metrics.productiveCaptures)
+        assertEquals(true, metrics.valid)
+    }
+
+    @Test
+    fun `capture yield bindings retain exact usefulness counters`() {
+        val bindings = TierEMatchedBenchmark.captureYieldBindings(
+            "capture_yield_bindings=2:4:4:0:0:2:3:2",
+        )
+
+        val binding = bindings.getValue(2)
+        assertEquals(4, binding.records)
+        assertEquals(2, binding.resolvedInvocations)
+        assertEquals(3, binding.resolvedSyscalls)
+        assertEquals(2, binding.capturedWithoutResolvedSyscall)
+    }
+
+    @Test
     fun `verified baseline receives an admissible performance label`() {
         assertEquals(
             "BASELINE_VERIFIED",
