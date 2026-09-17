@@ -78,15 +78,93 @@ set_tests_properties(
 
 add_test(
     NAME agent_phase_benchmark_full
-    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
-set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
 
 add_test(
     NAME agent_phase_benchmark_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_unique PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_full_disabled
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_full_disabled PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_unique_disabled
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
-set_tests_properties(agent_phase_benchmark_unique PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+set_tests_properties(agent_phase_benchmark_unique_disabled PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_full_live
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,live-definitions,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-full-live.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_full_live PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_unique_live
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,live-definitions,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-unique-live.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_unique_live PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_live_publication_coalescing
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,live-definitions,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-live-coalescing.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 1000
+)
+set_tests_properties(agent_live_publication_coalescing PROPERTIES PASS_REGULAR_EXPRESSION "publication_count=[1-9][0-9]* coalesced_publications=[1-9][0-9]* failed_publications=0")
+
+add_test(
+    NAME agent_matched_benchmark_none
+    COMMAND "${Java_JAVA_EXECUTABLE}" -cp "${AGENT_TEST_CLASSES}" AgentWorkload benchmark 3 10 100
+)
+set_tests_properties(agent_matched_benchmark_none PROPERTIES PASS_REGULAR_EXPRESSION "agent-workload-batch: index=10 durationNs=[1-9][0-9]*")
+
+add_test(
+    NAME agent_matched_benchmark_dictionary_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-matched-dictionary-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload benchmark 3 10 100
+)
+set_tests_properties(agent_matched_benchmark_dictionary_full PROPERTIES PASS_REGULAR_EXPRESSION "agent-workload-batch: index=10 durationNs=[1-9][0-9]*")
+
+add_test(
+    NAME agent_matched_benchmark_dictionary_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-matched-dictionary-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload benchmark 3 10 100
+)
+set_tests_properties(agent_matched_benchmark_dictionary_unique PROPERTIES PASS_REGULAR_EXPRESSION "agent-workload-batch: index=10 durationNs=[1-9][0-9]*")
+
+add_test(
+    NAME agent_matched_benchmark_inline_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,stack-transport=inline-per-invocation,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-matched-inline-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload benchmark 3 10 100
+)
+set_tests_properties(agent_matched_benchmark_inline_full PROPERTIES PASS_REGULAR_EXPRESSION "agent-workload-batch: index=10 durationNs=[1-9][0-9]*")
+
+add_test(
+    NAME agent_matched_benchmark_inline_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,stack-transport=inline-per-invocation,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-matched-inline-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload benchmark 3 10 100
+)
+set_tests_properties(agent_matched_benchmark_inline_unique PROPERTIES PASS_REGULAR_EXPRESSION "agent-workload-batch: index=10 durationNs=[1-9][0-9]*")
+
+add_test(
+    NAME agent_native_retention_exhaustion
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,retained-budget-bytes=1,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-retention-exhaustion.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 1
+)
+set_tests_properties(agent_native_retention_exhaustion PROPERTIES PASS_REGULAR_EXPRESSION "native_retention_exhaustions=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_inline_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,stack-transport=inline-per-invocation,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-inline-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_inline_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=inline-per-invocation get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_benchmark_inline_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,stack-transport=inline-per-invocation,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-inline-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_benchmark_inline_unique PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=inline-per-invocation get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
 
 add_test(
     NAME agent_redefinition_smoke_test

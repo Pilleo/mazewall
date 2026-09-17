@@ -4,13 +4,16 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <mutex>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -42,9 +45,21 @@ std::atomic<std::uint64_t> benchmark_cache_hits{0};
 std::atomic<std::uint64_t> benchmark_cache_misses{0};
 std::atomic<std::uint64_t> benchmark_metadata_cache_hits{0};
 std::atomic<std::uint64_t> benchmark_metadata_cache_misses{0};
+std::atomic<std::uint64_t> benchmark_serialization_nanos{0};
+std::atomic<std::uint64_t> benchmark_publication_bytes{0};
+std::atomic<std::uint64_t> benchmark_publication_latency_nanos{0};
+std::atomic<std::uint64_t> benchmark_definition_lock_wait_nanos{0};
+std::atomic<std::uint64_t> benchmark_peak_retained_bytes{0};
+std::atomic<std::uint64_t> benchmark_publication_count{0};
+std::atomic<std::uint64_t> benchmark_coalesced_publications{0};
+std::atomic<std::uint64_t> benchmark_failed_publications{0};
+std::atomic<std::uint64_t> native_retention_exhaustions{0};
+std::atomic<std::size_t> native_retained_bytes{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::atomic<bool> live_definitions{false};
+std::atomic<bool> live_publisher_stop{false};
+std::atomic<std::uint64_t> live_publication_requests{0};
 std::atomic<std::uint64_t> next_publication_id{1};
 std::uint32_t session_tag = 1;
 std::atomic<std::uint64_t> next_loader_id{1};
@@ -56,6 +71,7 @@ jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
 
 bool write_definitions(bool producer_closed = false) noexcept;
+void request_live_publication() noexcept;
 
 
 struct LogicalFrame final {
@@ -75,6 +91,59 @@ struct LogicalStack final {
     bool truncated = false;
     std::uint64_t symbol_epoch = 1;
 };
+
+constexpr std::size_t NATIVE_RETAINED_LIMIT_BYTES = 64ULL * 1024ULL * 1024ULL;
+std::atomic<std::size_t> native_retained_limit{NATIVE_RETAINED_LIMIT_BYTES};
+
+bool reserve_native_bytes(std::size_t bytes) noexcept {
+    auto retained = native_retained_bytes.load(std::memory_order_relaxed);
+    const auto limit = native_retained_limit.load(std::memory_order_relaxed);
+    while (retained <= limit && bytes <= limit - retained) {
+        if (native_retained_bytes.compare_exchange_weak(
+                retained,
+                retained + bytes,
+                std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+    native_retention_exhaustions.fetch_add(1, std::memory_order_relaxed);
+    return false;
+}
+
+void release_native_bytes(std::size_t bytes) noexcept {
+    native_retained_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+}
+
+struct ScopedNativeReservation final {
+    explicit ScopedNativeReservation(std::size_t bytes) : bytes_(bytes), reserved_(reserve_native_bytes(bytes)) {}
+    ~ScopedNativeReservation() { if (reserved_) release_native_bytes(bytes_); }
+
+    [[nodiscard]] bool reserved() const noexcept { return reserved_; }
+
+private:
+    std::size_t bytes_ = 0;
+    bool reserved_ = false;
+};
+
+std::size_t combine_hash(std::size_t hash, std::size_t value) noexcept {
+    return hash ^ (value + 0x9e3779b9 + (hash << 6) + (hash >> 2));
+}
+
+std::size_t logical_stack_hash(
+    const std::vector<LogicalFrame>& frames,
+    bool truncated,
+    std::uint64_t symbol_epoch) noexcept {
+    auto hash = combine_hash(std::hash<std::uint64_t>{}(symbol_epoch), truncated ? 1U : 0U);
+    for (const auto& frame : frames) {
+        hash = combine_hash(hash, std::hash<std::string>{}(frame.loader));
+        hash = combine_hash(hash, std::hash<std::string>{}(frame.owner));
+        hash = combine_hash(hash, std::hash<std::string>{}(frame.name));
+        hash = combine_hash(hash, std::hash<std::string>{}(frame.descriptor));
+        hash = combine_hash(hash, std::hash<std::int64_t>{}(frame.location));
+        hash = combine_hash(hash, frame.native_method ? 1U : 0U);
+    }
+    return hash;
+}
 
 struct InvocationDefinition final {
     std::uint64_t id = 0;
@@ -111,6 +180,11 @@ enum class EmissionMode : std::uint8_t {
     unique_stack_syscall,
 };
 
+enum class StackTransport : std::uint8_t {
+    dictionary,
+    inline_per_invocation,
+};
+
 struct RawFrame final {
     std::uintptr_t method = 0;
     std::int64_t location = 0;
@@ -126,33 +200,101 @@ struct RawStack final {
     bool operator==(const RawStack&) const = default;
 };
 
+struct RawStackView final {
+    const jvmtiFrameInfo* frames = nullptr;
+    std::size_t frame_count = 0;
+    std::uint32_t flags = 0;
+    std::uint64_t symbol_epoch = 1;
+};
+
 struct RawStackHash final {
+    using is_transparent = void;
+
+    static std::size_t combine(std::size_t hash, std::size_t value) noexcept {
+        return hash ^ (value + 0x9e3779b9 + (hash << 6) + (hash >> 2));
+    }
+
     std::size_t operator()(const RawStack& stack) const noexcept {
         std::size_t hash = stack.flags;
-        hash ^= std::hash<std::uint64_t>{}(stack.symbol_epoch) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash = combine(hash, std::hash<std::uint64_t>{}(stack.symbol_epoch));
         for (const auto& frame : stack.frames) {
-            hash ^= std::hash<std::uintptr_t>{}(frame.method) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-            hash ^= std::hash<std::int64_t>{}(frame.location) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            hash = combine(hash, std::hash<std::uintptr_t>{}(frame.method));
+            hash = combine(hash, std::hash<std::int64_t>{}(frame.location));
+        }
+        return hash;
+    }
+
+    std::size_t operator()(const RawStackView& stack) const noexcept {
+        std::size_t hash = stack.flags;
+        hash = combine(hash, std::hash<std::uint64_t>{}(stack.symbol_epoch));
+        for (std::size_t index = 0; index < stack.frame_count; ++index) {
+            hash = combine(hash, std::hash<std::uintptr_t>{}(reinterpret_cast<std::uintptr_t>(stack.frames[index].method)));
+            hash = combine(hash, std::hash<std::int64_t>{}(stack.frames[index].location));
         }
         return hash;
     }
 };
 
+struct RawStackEqual final {
+    using is_transparent = void;
+
+    bool operator()(const RawStack& left, const RawStack& right) const noexcept { return left == right; }
+    [[maybe_unused]] bool operator()(const RawStack& left, const RawStackView& right) const noexcept;
+    [[maybe_unused]] bool operator()(const RawStackView& left, const RawStack& right) const noexcept;
+};
+
+bool raw_stack_equals(const RawStack& stored, const RawStackView& candidate) noexcept {
+    if (stored.flags != candidate.flags || stored.symbol_epoch != candidate.symbol_epoch || stored.frames.size() != candidate.frame_count) return false;
+    for (std::size_t index = 0; index < candidate.frame_count; ++index) {
+        if (stored.frames[index] != RawFrame{reinterpret_cast<std::uintptr_t>(candidate.frames[index].method), static_cast<std::int64_t>(candidate.frames[index].location)}) return false;
+    }
+    return true;
+}
+
+bool RawStackEqual::operator()(const RawStack& left, const RawStackView& right) const noexcept {
+    return raw_stack_equals(left, right);
+}
+
+bool RawStackEqual::operator()(const RawStackView& left, const RawStack& right) const noexcept {
+    return raw_stack_equals(right, left);
+}
+
 struct CanonicalContext final {
     std::uint32_t stack_id = 0;
     std::vector<jweak> class_guards;
+    std::size_t retained_bytes = 0;
 };
 
 std::mutex definitions_mutex;
-std::vector<LogicalStack> logical_stacks;
+std::vector<std::shared_ptr<const LogicalStack>> logical_stacks;
+std::unordered_multimap<std::size_t, std::uint32_t> logical_stack_index;
 std::vector<InvocationDefinition> invocation_definitions;
 std::vector<ExecutionDefinition> execution_definitions;
 std::unordered_map<jlong, ExecutionEntry> executions_by_java_thread_id;
 std::atomic<std::uint64_t> next_execution_id{1};
-std::unordered_map<RawStack, CanonicalContext, RawStackHash> canonical_contexts;
+std::unordered_map<RawStack, CanonicalContext, RawStackHash, RawStackEqual> canonical_contexts;
+std::atomic<std::uint64_t> definition_generation{0};
+std::mutex publication_mutex;
+std::uint64_t last_published_generation = 0;
+std::mutex live_publisher_wait_mutex;
+std::condition_variable live_publisher_wakeup;
+std::thread live_publisher;
 EmissionMode emission_mode = EmissionMode::full_stream;
+StackTransport stack_transport = StackTransport::dictionary;
 bool benchmark_phases = false;
+bool canonical_cache_enabled = true;
 constexpr std::size_t MAX_METADATA_CACHE_ENTRIES = 4096;
+constexpr std::size_t MAX_CANONICAL_CONTEXTS = 4096;
+
+std::size_t frame_retained_bytes(const LogicalFrame& frame) noexcept {
+    return sizeof(LogicalFrame) + frame.loader.size() + frame.owner.size() + frame.name.size() + frame.descriptor.size();
+}
+
+std::size_t stack_retained_bytes(const std::vector<LogicalFrame>& frames) noexcept {
+    std::size_t bytes = sizeof(LogicalStack) + sizeof(std::shared_ptr<const LogicalStack>) + sizeof(std::pair<const std::size_t, std::uint32_t>);
+    for (const auto& frame : frames) bytes += frame_retained_bytes(frame);
+    return bytes;
+}
 
 std::uint64_t elapsed_nanos(std::chrono::steady_clock::time_point started) noexcept {
     const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -232,6 +374,7 @@ struct FrameMetadataKeyHash final {
 struct CachedFrameMetadata final {
     LogicalFrame frame;
     jweak class_guard = nullptr;
+    std::size_t retained_bytes = 0;
 };
 
 std::mutex metadata_cache_mutex;
@@ -250,6 +393,7 @@ bool resolve_frame_cached(
         if (found != metadata_cache.end()) {
             if (env->IsSameObject(found->second.class_guard, nullptr) == JNI_TRUE) {
                 env->DeleteWeakGlobalRef(found->second.class_guard);
+                release_native_bytes(found->second.retained_bytes);
                 metadata_cache.erase(found);
             } else {
                 result = found->second.frame;
@@ -270,11 +414,20 @@ bool resolve_frame_cached(
         if (metadata_cache.size() >= MAX_METADATA_CACHE_ENTRIES) {
             const auto evicted = metadata_cache.begin();
             env->DeleteWeakGlobalRef(evicted->second.class_guard);
+            release_native_bytes(evicted->second.retained_bytes);
             metadata_cache.erase(evicted);
         }
-        const auto [inserted, was_inserted] = metadata_cache.emplace(key, CachedFrameMetadata{resolved, cache_guard});
+        const auto retained_bytes = sizeof(FrameMetadataKey) + frame_retained_bytes(resolved);
+        if (!reserve_native_bytes(retained_bytes)) {
+            env->DeleteWeakGlobalRef(cache_guard);
+            result = std::move(resolved);
+            result.location = static_cast<std::int64_t>(raw.location);
+            return true;
+        }
+        const auto [inserted, was_inserted] = metadata_cache.emplace(key, CachedFrameMetadata{resolved, cache_guard, retained_bytes});
         if (!was_inserted) {
             env->DeleteWeakGlobalRef(cache_guard);
+            release_native_bytes(retained_bytes);
         }
         result = inserted->second.frame;
         result.location = static_cast<std::int64_t>(raw.location);
@@ -285,21 +438,31 @@ bool resolve_frame_cached(
 
 std::uint32_t intern_stack(std::vector<LogicalFrame> frames, bool truncated, std::uint64_t symbol_epoch) {
     std::lock_guard lock(definitions_mutex);
-    for (const auto& stack : logical_stacks) {
-        if (stack.truncated == truncated && stack.symbol_epoch == symbol_epoch && stack.frames == frames) return stack.id;
+    const auto hash = logical_stack_hash(frames, truncated, symbol_epoch);
+    const auto [first, last] = logical_stack_index.equal_range(hash);
+    for (auto candidate = first; candidate != last; ++candidate) {
+        const auto id = candidate->second;
+        const auto& stack = logical_stacks[id - 1];
+        if (stack->truncated == truncated && stack->symbol_epoch == symbol_epoch && stack->frames == frames) return id;
     }
     const auto id = static_cast<std::uint32_t>(logical_stacks.size() + 1);
     if (id == 0) return 0;
-    logical_stacks.push_back(LogicalStack{id, std::move(frames), truncated, symbol_epoch});
+    if (!reserve_native_bytes(stack_retained_bytes(frames))) return 0;
+    logical_stacks.push_back(std::make_shared<LogicalStack>(LogicalStack{id, std::move(frames), truncated, symbol_epoch}));
+    logical_stack_index.emplace(hash, id);
+    definition_generation.fetch_add(1, std::memory_order_release);
     return id;
 }
 
-void record_invocation(InvocationDefinition definition) {
+bool record_invocation(InvocationDefinition definition) {
     {
         std::lock_guard lock(definitions_mutex);
+        if (!reserve_native_bytes(sizeof(InvocationDefinition))) return false;
         invocation_definitions.push_back(definition);
+        definition_generation.fetch_add(1, std::memory_order_release);
     }
-    if (live_definitions.load(std::memory_order_acquire)) write_definitions();
+    if (live_definitions.load(std::memory_order_acquire)) request_live_publication();
+    return true;
 }
 
 ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
@@ -360,13 +523,14 @@ void release_guards(JNIEnv* env, const std::vector<jweak>& guards) {
     for (const auto guard : guards) if (guard != nullptr) env->DeleteWeakGlobalRef(guard);
 }
 
-std::uint32_t find_canonical_stack(JNIEnv* env, const RawStack& stack) {
+std::uint32_t find_canonical_stack(JNIEnv* env, const RawStackView& stack) {
     std::lock_guard lock(definitions_mutex);
     const auto found = canonical_contexts.find(stack);
     if (found == canonical_contexts.end()) return 0;
     for (const auto guard : found->second.class_guards) {
         if (env->IsSameObject(guard, nullptr) == JNI_TRUE) {
             release_guards(env, found->second.class_guards);
+            release_native_bytes(found->second.retained_bytes);
             canonical_contexts.erase(found);
             return 0;
         }
@@ -374,25 +538,42 @@ std::uint32_t find_canonical_stack(JNIEnv* env, const RawStack& stack) {
     return found->second.stack_id;
 }
 
-void remember_canonical_context(JNIEnv* env, const RawStack& stack, std::uint32_t stack_id, std::vector<jweak> guards) {
+void remember_canonical_context(JNIEnv* env, RawStack stack, std::uint32_t stack_id, std::vector<jweak> guards) {
     std::lock_guard lock(definitions_mutex);
     if (const auto found = canonical_contexts.find(stack); found != canonical_contexts.end()) {
         release_guards(env, guards);
         return;
     }
-    canonical_contexts.emplace(stack, CanonicalContext{stack_id, std::move(guards)});
+    if (canonical_contexts.size() >= MAX_CANONICAL_CONTEXTS) {
+        const auto evicted = canonical_contexts.begin();
+        release_guards(env, evicted->second.class_guards);
+        release_native_bytes(evicted->second.retained_bytes);
+        canonical_contexts.erase(evicted);
+    }
+    const auto retained_bytes = sizeof(CanonicalContext) + stack.frames.size() * sizeof(RawFrame) + guards.size() * sizeof(jweak);
+    if (!reserve_native_bytes(retained_bytes)) {
+        release_guards(env, guards);
+        return;
+    }
+    canonical_contexts.emplace(std::move(stack), CanonicalContext{stack_id, std::move(guards), retained_bytes});
 }
 
 void clear_symbolization_caches(JNIEnv* env) noexcept {
     if (env == nullptr) return;
     {
         std::lock_guard lock(metadata_cache_mutex);
-        for (const auto& entry : metadata_cache) env->DeleteWeakGlobalRef(entry.second.class_guard);
+        for (const auto& entry : metadata_cache) {
+            env->DeleteWeakGlobalRef(entry.second.class_guard);
+            release_native_bytes(entry.second.retained_bytes);
+        }
         metadata_cache.clear();
     }
     {
         std::lock_guard lock(definitions_mutex);
-        for (const auto& entry : canonical_contexts) release_guards(env, entry.second.class_guards);
+        for (const auto& entry : canonical_contexts) {
+            release_guards(env, entry.second.class_guards);
+            release_native_bytes(entry.second.retained_bytes);
+        }
         canonical_contexts.clear();
     }
 }
@@ -464,13 +645,21 @@ public:
             return;
         }
         const auto capture = capture_stack(env, scope_.id);
-        if (capture.context_id != scope_.id && !invocation_registry.replace_current(scope_, capture.context_id)) {
+        const auto captured_context_id = capture.context_id;
+        const auto captured_stack_id = capture.stack_id;
+        const auto capture_failure = capture.failure;
+        const auto captured_new_context = capture.new_context;
+        if (captured_context_id != scope_.id && !invocation_registry.replace_current(scope_, captured_context_id)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             mazewall_stack_marker(0, 0);
             return;
         }
-        if (capture.new_context) {
-            record_invocation(InvocationDefinition{scope_.id, scope_.parent_id, capture.stack_id, capture.failure, execution_.id});
+        if (captured_new_context) {
+            if (!record_invocation(InvocationDefinition{scope_.id, scope_.parent_id, captured_stack_id, capture_failure, execution_.id})) {
+                scope_failures.fetch_add(1, std::memory_order_relaxed);
+                mazewall_stack_marker(0, 0);
+                return;
+            }
         }
         mazewall_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
     }
@@ -566,22 +755,23 @@ private:
         if (truncated) stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
         const auto retained = truncated ? frames.size() - 1 : static_cast<std::size_t>(frame_count);
         const auto raw_key_started = std::chrono::steady_clock::now();
-        RawStack raw;
-        raw.flags = flags_;
-        raw.symbol_epoch = capture_epoch;
-        raw.frames.reserve(retained);
-        for (std::size_t index = 0; index < retained; ++index) {
-            raw.frames.push_back(RawFrame{reinterpret_cast<std::uintptr_t>(frames[index].method), static_cast<std::int64_t>(frames[index].location)});
-        }
-        if (!truncated && emission_mode == EmissionMode::unique_stack_syscall) {
-            if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
-                if (benchmark_phases) {
-                    benchmark_cache_hits.fetch_add(1, std::memory_order_relaxed);
-                    benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
+        const RawStackView raw{frames.data(), retained, flags_, capture_epoch};
+        if (!truncated) {
+            if (canonical_cache_enabled) {
+                if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
+                    if (!symbolization_generation.validate(capture_lease)) {
+                        stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
+                        env->DeleteLocalRef(current_thread);
+                        return Capture{0, 5, 0, false};
+                    }
+                    if (benchmark_phases) {
+                        benchmark_cache_hits.fetch_add(1, std::memory_order_relaxed);
+                        benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
+                    }
+                    env->DeleteLocalRef(current_thread);
+                    stack_capture_count.fetch_add(1, std::memory_order_relaxed);
+                    return Capture{existing, 0, proposed_context_id, true};
                 }
-                env->DeleteLocalRef(current_thread);
-                stack_capture_count.fetch_add(1, std::memory_order_relaxed);
-                return Capture{existing, 0, proposed_context_id, true};
             }
             if (benchmark_phases) benchmark_cache_misses.fetch_add(1, std::memory_order_relaxed);
         }
@@ -595,7 +785,7 @@ private:
             LogicalFrame frame;
             jweak guard = nullptr;
             if (!resolve_frame_cached(env, frames[index], raw.symbol_epoch, frame,
-                    emission_mode == EmissionMode::unique_stack_syscall ? &guard : nullptr)) {
+                    !truncated ? &guard : nullptr)) {
                 release_guards(env, class_guards);
                 if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
                 stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
@@ -620,11 +810,18 @@ private:
             return {};
         }
         stack_capture_count.fetch_add(1, std::memory_order_relaxed);
-        if (!truncated && emission_mode == EmissionMode::unique_stack_syscall) {
+        if (!truncated && canonical_cache_enabled) {
             // A canonical stack is reusable, but an InvocationId is not: it carries the
             // opaque logical execution owner. Reusing an invocation from another virtual
             // thread would turn a correct stack match into wrong thread attribution.
-            remember_canonical_context(env, raw, stack_id, std::move(class_guards));
+            RawStack owned_raw;
+            owned_raw.flags = raw.flags;
+            owned_raw.symbol_epoch = raw.symbol_epoch;
+            owned_raw.frames.reserve(raw.frame_count);
+            for (std::size_t index = 0; index < raw.frame_count; ++index) {
+                owned_raw.frames.push_back(RawFrame{reinterpret_cast<std::uintptr_t>(raw.frames[index].method), static_cast<std::int64_t>(raw.frames[index].location)});
+            }
+            remember_canonical_context(env, std::move(owned_raw), stack_id, std::move(class_guards));
         } else {
             release_guards(env, class_guards);
         }
@@ -828,59 +1025,174 @@ void append_string(std::vector<std::uint8_t>& output, const std::string& value) 
     output.insert(output.end(), value.begin(), value.end());
 }
 
-void append_record(std::vector<std::uint8_t>& output, std::uint8_t type, const std::vector<std::uint8_t>& payload) {
+std::size_t begin_record(std::vector<std::uint8_t>& output, std::uint8_t type) {
     output.push_back(type);
-    append_le<std::uint32_t>(output, static_cast<std::uint32_t>(payload.size()));
-    output.insert(output.end(), payload.begin(), payload.end());
+    const auto length_offset = output.size();
+    append_le<std::uint32_t>(output, 0);
+    return length_offset;
+}
+
+void finish_record(std::vector<std::uint8_t>& output, std::size_t length_offset) {
+    const auto length = output.size() - length_offset - sizeof(std::uint32_t);
+    if (length > UINT32_MAX) throw std::runtime_error("dictionary record exceeds wire limit");
+    for (std::size_t index = 0; index < sizeof(std::uint32_t); ++index) {
+        output[length_offset + index] = static_cast<std::uint8_t>((length >> (index * 8)) & 0xff);
+    }
+}
+
+void append_stack_payload(std::vector<std::uint8_t>& record, const LogicalStack& stack) {
+    append_le<std::uint32_t>(record, stack.id);
+    record.push_back(stack.truncated ? 1 : 0);
+    append_le<std::uint16_t>(record, static_cast<std::uint16_t>(stack.frames.size()));
+    for (const auto& frame : stack.frames) {
+        append_string(record, frame.loader);
+        append_string(record, frame.owner);
+        append_string(record, frame.name);
+        append_string(record, frame.descriptor);
+        append_le<std::int64_t>(record, frame.location);
+        record.push_back(frame.native_method ? 1 : 0);
+    }
+}
+
+struct DefinitionSnapshot final {
+    std::vector<std::shared_ptr<const LogicalStack>> stacks;
+    std::vector<InvocationDefinition> invocations;
+    std::vector<ExecutionDefinition> executions;
+    std::uint64_t generation = 0;
+    std::size_t retained_bytes = 0;
+};
+
+std::size_t estimate_retained_bytes(const DefinitionSnapshot& snapshot) {
+    std::size_t bytes = snapshot.invocations.size() * sizeof(InvocationDefinition) +
+        snapshot.executions.size() * sizeof(ExecutionDefinition);
+    for (const auto& stack : snapshot.stacks) {
+        bytes += sizeof(LogicalStack) + stack->frames.size() * sizeof(LogicalFrame);
+        for (const auto& frame : stack->frames) {
+            bytes += frame.loader.size() + frame.owner.size() + frame.name.size() + frame.descriptor.size();
+        }
+    }
+    return bytes;
+}
+
+bool checked_add(std::size_t& total, std::size_t value) noexcept {
+    if (value > NATIVE_RETAINED_LIMIT_BYTES - total) return false;
+    total += value;
+    return true;
+}
+
+bool estimate_stack_wire_bytes(const LogicalStack& stack, std::size_t& total) noexcept {
+    if (!checked_add(total, sizeof(std::uint32_t) + sizeof(std::uint8_t) + sizeof(std::uint16_t))) return false;
+    for (const auto& frame : stack.frames) {
+        if (!checked_add(total, sizeof(std::uint16_t) + frame.loader.size())) return false;
+        if (!checked_add(total, sizeof(std::uint16_t) + frame.owner.size())) return false;
+        if (!checked_add(total, sizeof(std::uint16_t) + frame.name.size())) return false;
+        if (!checked_add(total, sizeof(std::uint16_t) + frame.descriptor.size())) return false;
+        if (!checked_add(total, sizeof(std::int64_t) + sizeof(std::uint8_t))) return false;
+    }
+    return true;
+}
+
+bool estimate_snapshot_wire_bytes(const DefinitionSnapshot& snapshot, std::size_t& total) noexcept {
+    total = 6;
+    if (stack_transport == StackTransport::dictionary) {
+        for (const auto& stack : snapshot.stacks) {
+            if (!checked_add(total, 5) || !estimate_stack_wire_bytes(*stack, total)) return false;
+        }
+    }
+    for (const auto& execution : snapshot.executions) {
+        if (!checked_add(total, 5 + sizeof(execution.id) + sizeof(std::uint8_t))) return false;
+    }
+    for (const auto& invocation : snapshot.invocations) {
+        if (!checked_add(total, 5 + sizeof(invocation.id) + sizeof(invocation.parent_id) +
+                sizeof(invocation.stack_id) + sizeof(invocation.failure) + sizeof(invocation.execution_id))) return false;
+        if (stack_transport == StackTransport::inline_per_invocation && invocation.failure == 0) {
+            if (invocation.stack_id == 0 || invocation.stack_id > snapshot.stacks.size() ||
+                !estimate_stack_wire_bytes(*snapshot.stacks[invocation.stack_id - 1], total)) return false;
+        }
+    }
+    if (!checked_add(total, 5 + 4 * sizeof(std::uint64_t))) return false;
+    return !live_definitions.load(std::memory_order_acquire) || checked_add(total, 40);
+}
+
+DefinitionSnapshot snapshot_definitions() {
+    const auto lock_started = std::chrono::steady_clock::now();
+    std::lock_guard lock(definitions_mutex);
+    if (benchmark_phases) {
+        benchmark_definition_lock_wait_nanos.fetch_add(elapsed_nanos(lock_started), std::memory_order_relaxed);
+    }
+    DefinitionSnapshot snapshot{
+        logical_stacks,
+        invocation_definitions,
+        execution_definitions,
+        definition_generation.load(std::memory_order_acquire),
+    };
+    snapshot.retained_bytes = estimate_retained_bytes(snapshot);
+    auto observed = benchmark_peak_retained_bytes.load(std::memory_order_relaxed);
+    while (observed < snapshot.retained_bytes &&
+        !benchmark_peak_retained_bytes.compare_exchange_weak(observed, snapshot.retained_bytes, std::memory_order_relaxed)) {}
+    return snapshot;
 }
 
 bool write_definitions(bool producer_closed) noexcept {
     if (definitions_path.empty()) return true;
     try {
+        const auto publication_started = std::chrono::steady_clock::now();
+        const auto snapshot = snapshot_definitions();
+        std::lock_guard publication_lock(publication_mutex);
+        if ((!producer_closed && snapshot.generation <= last_published_generation) ||
+            (producer_closed && snapshot.generation < last_published_generation)) {
+            return true;
+        }
         const auto temporary_path = definitions_path + ".tmp";
         std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
         if (!stream) return false;
+        std::size_t encoded_capacity = 0;
+        if (!estimate_snapshot_wire_bytes(snapshot, encoded_capacity)) return false;
+        ScopedNativeReservation encoded_reservation(encoded_capacity);
+        if (!encoded_reservation.reserved()) return false;
+        const auto serialization_started = std::chrono::steady_clock::now();
         std::vector<std::uint8_t> encoded;
-        encoded.insert(encoded.end(), {'M', 'Z', 'S', 'D', 2, 0});
+        encoded.reserve(encoded_capacity);
+        encoded.insert(
+            encoded.end(),
+            {'M', 'Z', 'S', 'D', static_cast<std::uint8_t>(stack_transport == StackTransport::dictionary ? 2 : 3), 0});
         std::uint64_t committed_watermark = 0;
-        std::lock_guard lock(definitions_mutex);
-        for (const auto& stack : logical_stacks) {
-            std::vector<std::uint8_t> record;
-            append_le<std::uint32_t>(record, stack.id);
-            record.push_back(stack.truncated ? 1 : 0);
-            append_le<std::uint16_t>(record, static_cast<std::uint16_t>(stack.frames.size()));
-            for (const auto& frame : stack.frames) {
-                append_string(record, frame.loader);
-                append_string(record, frame.owner);
-                append_string(record, frame.name);
-                append_string(record, frame.descriptor);
-                append_le<std::int64_t>(record, frame.location);
-                record.push_back(frame.native_method ? 1 : 0);
+        if (stack_transport == StackTransport::dictionary) {
+            for (const auto& stack : snapshot.stacks) {
+                const auto record = begin_record(encoded, 1);
+                append_stack_payload(encoded, *stack);
+                finish_record(encoded, record);
             }
-            append_record(encoded, 1, record);
         }
-        for (const auto& execution : execution_definitions) {
-            std::vector<std::uint8_t> record;
-            append_le<std::uint64_t>(record, execution.id);
-            record.push_back(static_cast<std::uint8_t>(execution.kind));
-            append_record(encoded, 4, record);
+        for (const auto& execution : snapshot.executions) {
+            const auto record = begin_record(encoded, 4);
+            append_le<std::uint64_t>(encoded, execution.id);
+            encoded.push_back(static_cast<std::uint8_t>(execution.kind));
+            finish_record(encoded, record);
         }
-        for (const auto& invocation : invocation_definitions) {
-            std::vector<std::uint8_t> record;
-            append_le<std::uint64_t>(record, invocation.id);
-            append_le<std::uint64_t>(record, invocation.parent_id);
-            append_le<std::uint32_t>(record, invocation.stack_id);
-            record.push_back(invocation.failure);
-            append_le<std::uint64_t>(record, invocation.execution_id);
-            append_record(encoded, 2, record);
+        for (const auto& invocation : snapshot.invocations) {
+            const auto record = begin_record(encoded,
+                stack_transport == StackTransport::inline_per_invocation && invocation.failure == 0 ? 5 : 2);
+            append_le<std::uint64_t>(encoded, invocation.id);
+            append_le<std::uint64_t>(encoded, invocation.parent_id);
+            append_le<std::uint32_t>(encoded, invocation.stack_id);
+            encoded.push_back(invocation.failure);
+            append_le<std::uint64_t>(encoded, invocation.execution_id);
+            if (stack_transport == StackTransport::inline_per_invocation && invocation.failure == 0) {
+                if (invocation.stack_id == 0 || invocation.stack_id > snapshot.stacks.size()) {
+                    throw std::runtime_error("inline invocation references an unknown stack");
+                }
+                append_stack_payload(encoded, *snapshot.stacks[invocation.stack_id - 1]);
+            }
+            finish_record(encoded, record);
         }
-        std::vector<std::uint8_t> stats;
-        append_le<std::uint64_t>(stats, stack_capture_failures.load(std::memory_order_relaxed));
-        append_le<std::uint64_t>(stats, scope_failures.load(std::memory_order_relaxed));
-        append_le<std::uint64_t>(stats, virtual_pinned_scopes.load(std::memory_order_relaxed));
-        append_le<std::uint64_t>(stats, virtual_pinned_nanos.load(std::memory_order_relaxed));
-        append_record(encoded, 3, stats);
-        if (!invocation_definitions.empty()) committed_watermark = invocation_definitions.back().id;
+        const auto stats_record = begin_record(encoded, 3);
+        append_le<std::uint64_t>(encoded, stack_capture_failures.load(std::memory_order_relaxed));
+        append_le<std::uint64_t>(encoded, scope_failures.load(std::memory_order_relaxed));
+        append_le<std::uint64_t>(encoded, virtual_pinned_scopes.load(std::memory_order_relaxed));
+        append_le<std::uint64_t>(encoded, virtual_pinned_nanos.load(std::memory_order_relaxed));
+        finish_record(encoded, stats_record);
+        if (!snapshot.invocations.empty()) committed_watermark = snapshot.invocations.back().id;
         if (live_definitions.load(std::memory_order_acquire)) {
             std::vector<std::uint8_t> envelope;
             envelope.insert(envelope.end(), {'M', 'Z', 'S', 'E'});
@@ -892,14 +1204,68 @@ bool write_definitions(bool producer_closed) noexcept {
             envelope.insert(envelope.end(), encoded.begin(), encoded.end());
             encoded = std::move(envelope);
         }
+        if (benchmark_phases) {
+            benchmark_serialization_nanos.fetch_add(elapsed_nanos(serialization_started), std::memory_order_relaxed);
+            benchmark_publication_bytes.fetch_add(encoded.size(), std::memory_order_relaxed);
+        }
         stream.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
         stream.flush();
         if (!stream.good()) return false;
         stream.close();
-        return std::rename(temporary_path.c_str(), definitions_path.c_str()) == 0;
+        if (std::rename(temporary_path.c_str(), definitions_path.c_str()) != 0) return false;
+        last_published_generation = snapshot.generation;
+        if (benchmark_phases) {
+            benchmark_publication_count.fetch_add(1, std::memory_order_relaxed);
+            benchmark_publication_latency_nanos.fetch_add(elapsed_nanos(publication_started), std::memory_order_relaxed);
+        }
+        return true;
     } catch (...) {
+        if (benchmark_phases) benchmark_failed_publications.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
+}
+
+void request_live_publication() noexcept {
+    live_publication_requests.fetch_add(1, std::memory_order_release);
+    live_publisher_wakeup.notify_one();
+}
+
+void run_live_publisher() noexcept {
+    std::uint64_t observed_requests = 0;
+    std::unique_lock lock(live_publisher_wait_mutex);
+    while (!live_publisher_stop.load(std::memory_order_acquire)) {
+        live_publisher_wakeup.wait(lock, [&] {
+            return live_publisher_stop.load(std::memory_order_acquire) ||
+                live_publication_requests.load(std::memory_order_acquire) != observed_requests;
+        });
+        if (live_publisher_stop.load(std::memory_order_acquire)) return;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+        while (!live_publisher_stop.load(std::memory_order_acquire) &&
+            std::chrono::steady_clock::now() < deadline) {
+            live_publisher_wakeup.wait_until(lock, deadline);
+        }
+        if (live_publisher_stop.load(std::memory_order_acquire)) return;
+        const auto requested = live_publication_requests.load(std::memory_order_acquire);
+        if (requested > observed_requests + 1 && benchmark_phases) {
+            benchmark_coalesced_publications.fetch_add(requested - observed_requests - 1, std::memory_order_relaxed);
+        }
+        observed_requests = requested;
+        lock.unlock();
+        (void)write_definitions();
+        lock.lock();
+    }
+}
+
+void start_live_publisher() {
+    if (!live_definitions.load(std::memory_order_acquire) || live_publisher.joinable()) return;
+    live_publisher_stop.store(false, std::memory_order_release);
+    live_publisher = std::thread(run_live_publisher);
+}
+
+void stop_live_publisher() noexcept {
+    live_publisher_stop.store(true, std::memory_order_release);
+    live_publisher_wakeup.notify_one();
+    if (live_publisher.joinable()) live_publisher.join();
 }
 
 bool parse_options(const char* options) {
@@ -924,8 +1290,24 @@ bool parse_options(const char* options) {
             emission_mode = EmissionMode::full_stream;
         } else if (option == "mode=unique-stack-syscall") {
             emission_mode = EmissionMode::unique_stack_syscall;
+        } else if (option == "stack-transport=dictionary") {
+            stack_transport = StackTransport::dictionary;
+        } else if (option == "stack-transport=inline-per-invocation") {
+            stack_transport = StackTransport::inline_per_invocation;
+        } else if (option.starts_with("retained-budget-bytes=")) {
+            try {
+                const auto value = std::stoull(option.substr(std::strlen("retained-budget-bytes=")));
+                if (value == 0 || value > NATIVE_RETAINED_LIMIT_BYTES) return false;
+                native_retained_limit.store(static_cast<std::size_t>(value), std::memory_order_release);
+            } catch (...) {
+                return false;
+            }
         } else if (option == "benchmark-phases") {
             benchmark_phases = true;
+        } else if (option == "canonical-cache=enabled") {
+            canonical_cache_enabled = true;
+        } else if (option == "canonical-cache=disabled") {
+            canonical_cache_enabled = false;
         } else if (option == "live-definitions") {
             live_definitions.store(true, std::memory_order_release);
         } else {
@@ -961,10 +1343,13 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
     }
 
     global_jvmti = jvmti;
-    return configure_native_bind_events(jvmti) ? JNI_OK : JNI_ERR;
+    if (!configure_native_bind_events(jvmti)) return JNI_ERR;
+    start_live_publisher();
+    return JNI_OK;
 }
 
 extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
+    stop_live_publisher();
     const bool definitions_written = write_definitions(true);
     std::fprintf(
         stderr,
@@ -978,10 +1363,21 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     if (benchmark_phases) {
         std::fprintf(
             stderr,
-            "tier-e-benchmark: get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
+            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
+            stack_transport == StackTransport::dictionary ? "dictionary" : "inline-per-invocation",
             static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_logical_metadata_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_serialization_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_publication_bytes.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_publication_latency_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_definition_lock_wait_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_peak_retained_bytes.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(native_retained_bytes.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(native_retention_exhaustions.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_publication_count.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_coalesced_publications.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_failed_publications.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_cache_hits.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_cache_misses.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_metadata_cache_hits.load(std::memory_order_relaxed)),

@@ -6,6 +6,10 @@ import java.net.Socket;
 
 public final class AgentWorkload {
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("benchmark")) {
+            runBenchmark(args);
+            return;
+        }
         if (args.length > 0 && args[0].startsWith("gate:")) {
             var gate = Path.of(args[0].substring(5));
             while (!Files.exists(gate)) Thread.sleep(1);
@@ -29,6 +33,24 @@ public final class AgentWorkload {
             exercise(iterations);
         } finally {
             System.out.println("agent-workload: workloadNs=" + (System.nanoTime() - workloadStarted));
+        }
+    }
+
+    private static void runBenchmark(String[] args) throws Exception {
+        if (args.length != 4) {
+            throw new IllegalArgumentException("usage: benchmark <warmups> <batches> <iterations>");
+        }
+        int warmups = Integer.parseInt(args[1]);
+        int batches = Integer.parseInt(args[2]);
+        int iterations = Integer.parseInt(args[3]);
+        if (warmups < 0 || batches <= 0 || iterations <= 0) {
+            throw new IllegalArgumentException("benchmark counts must be positive");
+        }
+        for (int index = 0; index < warmups; index++) exercise(iterations);
+        for (int index = 1; index <= batches; index++) {
+            long started = System.nanoTime();
+            exercise(iterations);
+            System.out.println("agent-workload-batch: index=" + index + " durationNs=" + (System.nanoTime() - started));
         }
     }
 
