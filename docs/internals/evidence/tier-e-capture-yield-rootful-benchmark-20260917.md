@@ -45,3 +45,36 @@ Exact stack walking is therefore the next dominant steady-state Tier E cost.
 The narrowed profile remains an opt-in, JDK-qualified benchmark experiment;
 no production capture behavior, MZSD/MZSE format, BPF state, or public API was
 changed by this result.
+
+## Post-join artifact refresh
+
+The benchmark harness was rerun after `d124ed14` so that capture yield is
+retained as structured, binding-keyed JSON instead of only child-process text.
+
+- Artifact directory: `build/tier-e-trustworthy-benchmark-20260917-post-join/`
+- Source revision: `d124ed14`
+- Terminal record: `success=true`
+- Tier E workload correctness: `PASS`
+- Tier E whole-session evidence: `5/5` complete forks for every dictionary and
+  inline variant.
+- Policy eligibility: `false`
+
+Each Tier E fork recorded 7,815 capture-yield records. All 7,815 joined to the
+definition stream by exact `InvocationId`; there were zero missing definitions,
+outcome mismatches, and unrecorded definitions. Binding-level counts are now
+included under `capture_yield.bindings` in every fork JSON record.
+
+| Variant | Median workload time, 100 operations | Evidence |
+| --- | ---: | --- |
+| Baseline | 0.387 ms | baseline only |
+| Dictionary full-stream | 1.977 ms | complete 5/5 |
+| Dictionary unique-edge | 2.070 ms | complete 5/5 |
+| Inline full-stream | 2.037 ms | complete 5/5 |
+| Inline unique-edge | 2.061 ms | complete 5/5 |
+| USER_NOTIF, no stack | 65.462 ms | incomplete 1/5 |
+| USER_NOTIF, stack | 50.677 ms | incomplete 0/5 |
+
+The four complete Tier E modes remain close together. This supports the prior
+finding: steady-state exact stack walking, rather than dictionary versus inline
+transport, is the dominant measured cost. USER_NOTIF timings remain explicitly
+non-comparable because their whole-session evidence gate did not pass.
