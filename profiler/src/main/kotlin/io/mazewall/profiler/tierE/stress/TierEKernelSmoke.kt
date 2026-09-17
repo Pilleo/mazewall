@@ -66,7 +66,12 @@ internal object TierEKernelSmoke {
         val benchmarkOptions = if (benchmark) {
             ",benchmark-phases" +
                 (if (System.getProperty("mazewall.tier-e.canonical-cache") == "disabled") ",canonical-cache=disabled" else "") +
-                (if (System.getProperty("mazewall.tier-e.live-publication") == "true") ",live-definitions" else "")
+                (if (System.getProperty("mazewall.tier-e.live-publication") == "true") ",live-definitions" else "") +
+                System
+                    .getProperty("mazewall.tier-e.capture-profile")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { ",capture-profile=$it" }
+                    .orEmpty()
         } else {
             ""
         }
