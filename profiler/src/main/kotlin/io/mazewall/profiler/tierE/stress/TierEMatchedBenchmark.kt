@@ -215,23 +215,7 @@ internal object TierEMatchedBenchmark {
                 wrong = metricOrZero(output, "wrong_operations"),
                 unclassified = metricOrZero(output, "unclassified_operations"),
             ),
-            PhaseMetrics(
-                metricOrZero(output, "get_stack_trace_ns"),
-                metricOrZero(output, "raw_key_ns"),
-                metricOrZero(output, "logical_metadata_ns"),
-                metricOrZero(output, "serialization_ns"),
-                metricOrZero(output, "publication_bytes"),
-                metricOrZero(output, "publication_latency_ns"),
-                metricOrZero(output, "lock_wait_ns"),
-                metricOrZero(output, "peak_retained_bytes"),
-                metricOrZero(output, "native_retained_bytes"),
-                metricOrZero(output, "native_retention_exhaustions"),
-                metricOrZero(output, "publication_count"),
-                metricOrZero(output, "coalesced_publications"),
-                metricOrZero(output, "failed_publications"),
-                metricOrZero(output, "cache_hits"),
-                metricOrZero(output, "cache_misses"),
-            ),
+            phaseMetrics(output),
             CaptureYieldMetrics(
                 metricOrZero(output, "capture_yield_records"),
                 metricOrZero(output, "capture_yield_captured"),
@@ -449,6 +433,8 @@ internal object TierEMatchedBenchmark {
             "\"get_stack_trace_ns\":${phases.getStackTraceNanos}",
             "\"raw_key_ns\":${phases.rawKeyNanos}",
             "\"logical_metadata_ns\":${phases.logicalMetadataNanos}",
+            "\"marker_set_ns\":${phases.markerSetNanos}",
+            "\"marker_clear_ns\":${phases.markerClearNanos}",
             "\"serialization_ns\":${phases.serializationNanos}",
             "\"publication_bytes\":${phases.publicationBytes}",
             "\"publication_latency_ns\":${phases.publicationLatencyNanos}",
@@ -462,6 +448,27 @@ internal object TierEMatchedBenchmark {
             "\"cache_hits\":${phases.cacheHits}",
             "\"cache_misses\":${phases.cacheMisses}",
         ).joinToString(",", prefix = "{", postfix = "}")
+
+    internal fun phaseMetrics(output: String): PhaseMetrics =
+        PhaseMetrics(
+            metricOrZero(output, "get_stack_trace_ns"),
+            metricOrZero(output, "raw_key_ns"),
+            metricOrZero(output, "logical_metadata_ns"),
+            metricOrZero(output, "marker_set_ns"),
+            metricOrZero(output, "marker_clear_ns"),
+            metricOrZero(output, "serialization_ns"),
+            metricOrZero(output, "publication_bytes"),
+            metricOrZero(output, "publication_latency_ns"),
+            metricOrZero(output, "lock_wait_ns"),
+            metricOrZero(output, "peak_retained_bytes"),
+            metricOrZero(output, "native_retained_bytes"),
+            metricOrZero(output, "native_retention_exhaustions"),
+            metricOrZero(output, "publication_count"),
+            metricOrZero(output, "coalesced_publications"),
+            metricOrZero(output, "failed_publications"),
+            metricOrZero(output, "cache_hits"),
+            metricOrZero(output, "cache_misses"),
+        )
 
     private fun userNotifPhaseJson(phases: UserNotifPhaseMetrics): String =
         listOf(
@@ -917,10 +924,12 @@ internal object TierEMatchedBenchmark {
         )
     }
 
-    private data class PhaseMetrics(
+    internal data class PhaseMetrics(
         val getStackTraceNanos: Long,
         val rawKeyNanos: Long,
         val logicalMetadataNanos: Long,
+        val markerSetNanos: Long,
+        val markerClearNanos: Long,
         val serializationNanos: Long,
         val publicationBytes: Long,
         val publicationLatencyNanos: Long,

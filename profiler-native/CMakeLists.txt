@@ -89,7 +89,7 @@ add_test(
     NAME agent_phase_benchmark_full
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
-set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* marker_set_ns=[1-9][0-9]* marker_clear_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
 
 add_test(
     NAME agent_capture_profile_jdk25_openat

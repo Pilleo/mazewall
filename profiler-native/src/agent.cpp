@@ -42,6 +42,8 @@ std::atomic<std::uint64_t> virtual_pinned_nanos{0};
 std::atomic<std::uint64_t> benchmark_get_stack_trace_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_key_nanos{0};
 std::atomic<std::uint64_t> benchmark_logical_metadata_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_set_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_clear_nanos{0};
 std::atomic<std::uint64_t> benchmark_cache_hits{0};
 std::atomic<std::uint64_t> benchmark_cache_misses{0};
 std::atomic<std::uint64_t> benchmark_metadata_cache_hits{0};
@@ -370,6 +372,26 @@ EmissionMode emission_mode = EmissionMode::full_stream;
 StackTransport stack_transport = StackTransport::dictionary;
 bool benchmark_phases = false;
 bool canonical_cache_enabled = true;
+
+void publish_stack_marker(
+    std::uint64_t invocation_id,
+    std::uint32_t flags) noexcept {
+    if (!benchmark_phases) {
+        mazewall_stack_marker(invocation_id, flags);
+        return;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    mazewall_stack_marker(invocation_id, flags);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    const auto nanos = static_cast<std::uint64_t>(elapsed);
+    if (invocation_id == 0) {
+        benchmark_marker_clear_nanos.fetch_add(nanos, std::memory_order_relaxed);
+    } else {
+        benchmark_marker_set_nanos.fetch_add(nanos, std::memory_order_relaxed);
+    }
+}
+
 constexpr std::size_t MAX_METADATA_CACHE_ENTRIES = 4096;
 constexpr std::size_t MAX_CANONICAL_CONTEXTS = 4096;
 
@@ -698,14 +720,14 @@ public:
         scope_started_ = std::chrono::steady_clock::now();
         if (invocation_ids_exhausted.load(std::memory_order_relaxed)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
-            mazewall_stack_marker(0, 0);
+            publish_stack_marker(0, 0);
             return;
         }
         const auto counter = next_invocation_id.fetch_add(1, std::memory_order_relaxed);
         if (counter == 0) {
             invocation_ids_exhausted.store(true, std::memory_order_relaxed);
             scope_failures.fetch_add(1, std::memory_order_relaxed);
-            mazewall_stack_marker(0, 0);
+            publish_stack_marker(0, 0);
             return;
         }
         const auto id = (static_cast<std::uint64_t>(session_tag) << 32) | counter;
@@ -713,14 +735,14 @@ public:
         jthread current_thread = nullptr;
         if (global_jvmti == nullptr || global_jvmti->GetCurrentThread(&current_thread) != JVMTI_ERROR_NONE || current_thread == nullptr) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
-            mazewall_stack_marker(0, 0);
+            publish_stack_marker(0, 0);
             return;
         }
         current_thread_ = current_thread;
         execution_ = execution_context(env, current_thread);
         if (!execution_.valid()) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
-            mazewall_stack_marker(0, 0);
+            publish_stack_marker(0, 0);
             return;
         }
         flags_ = execution_.kind == ExecutionKind::virtual_thread ? 1U : 0U;
@@ -728,14 +750,14 @@ public:
         scope_ = invocation_registry.enter(id, execution_.id);
         // Clear the parent's attribution before JVMTI work. Any agent-internal
         // syscall is therefore UNKNOWN rather than incorrectly assigned.
-        mazewall_stack_marker(0, 0);
+        publish_stack_marker(0, 0);
         if (!scope_.valid()) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         if (!profile_admits(binding_kind_)) {
             capture_yield_outcome_ = mazewall::profiler::CaptureYieldOutcome::excluded;
-            mazewall_stack_marker(0, flags_);
+            publish_stack_marker(0, flags_);
             return;
         }
         const auto capture = capture_stack(env, scope_.id);
@@ -745,26 +767,26 @@ public:
         const auto captured_new_context = capture.new_context;
         if (captured_context_id != scope_.id && !invocation_registry.replace_current(scope_, captured_context_id)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
-            mazewall_stack_marker(0, 0);
+            publish_stack_marker(0, 0);
             return;
         }
         if (captured_new_context) {
             if (!record_invocation(InvocationDefinition{scope_.id, scope_.parent_id, captured_stack_id, capture_failure, execution_.id})) {
                 scope_failures.fetch_add(1, std::memory_order_relaxed);
-                mazewall_stack_marker(0, 0);
+                publish_stack_marker(0, 0);
                 return;
             }
         }
         capture_yield_outcome_ = capture_failure == 0
             ? mazewall::profiler::CaptureYieldOutcome::captured
             : mazewall::profiler::CaptureYieldOutcome::capture_failed;
-        mazewall_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
+        publish_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
     }
 
     ~InvocationScope() {
-        mazewall_stack_marker(0, 0);
+        publish_stack_marker(0, 0);
         if (!scope_.valid()) {
-            mazewall_stack_marker(invocation_registry.current_id(), flags_);
+            publish_stack_marker(invocation_registry.current_id(), flags_);
             record_virtual_duration();
             record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
             release_current_thread();
@@ -786,7 +808,7 @@ public:
             return;
         }
         const bool restored = invocation_registry.leave(scope_);
-        mazewall_stack_marker(restored ? invocation_registry.current_id() : 0, flags_);
+        publish_stack_marker(restored ? invocation_registry.current_id() : 0, flags_);
         record_virtual_duration();
         record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
     }
@@ -1504,11 +1526,13 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     if (benchmark_phases) {
         std::fprintf(
             stderr,
-            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
+            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
             stack_transport == StackTransport::dictionary ? "dictionary" : "inline-per-invocation",
             static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_logical_metadata_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_set_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_clear_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_serialization_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_publication_bytes.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_publication_latency_nanos.load(std::memory_order_relaxed)),

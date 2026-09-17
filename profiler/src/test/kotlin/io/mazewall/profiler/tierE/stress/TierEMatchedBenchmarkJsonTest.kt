@@ -47,6 +47,16 @@ class TierEMatchedBenchmarkJsonTest {
     }
 
     @Test
+    fun `native marker transition phases are retained in benchmark evidence`() {
+        val phases = TierEMatchedBenchmark.phaseMetrics(
+            "tier-e-benchmark: marker_set_ns=17 marker_clear_ns=29",
+        )
+
+        assertEquals(17, phases.markerSetNanos)
+        assertEquals(29, phases.markerClearNanos)
+    }
+
+    @Test
     fun `full stream exact joins produce valid capture efficiency evidence`() {
         val metrics = TierEMatchedBenchmark.captureEfficiency(
             executedOperations = 1_300,
