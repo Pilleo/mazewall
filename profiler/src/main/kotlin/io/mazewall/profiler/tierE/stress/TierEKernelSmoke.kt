@@ -32,6 +32,7 @@ internal object TierEKernelSmoke {
             args[1].removePrefix("0x").toLong(16)
         }
         val definitions = Path.of(args[3]).toAbsolutePath()
+        val captureYieldPath = System.getProperty("mazewall.tier-e.capture-yield")?.let(Path::of)?.toAbsolutePath()
         val sessionTag = 0x4d5a
         val emissionMode = when (args.getOrElse(7) { "full-stream" }) {
             "full-stream" -> TierEEmissionMode.FULL_STREAM
@@ -48,6 +49,7 @@ internal object TierEKernelSmoke {
         Files.deleteIfExists(gate)
         Files.deleteIfExists(oracleManifest)
         Files.deleteIfExists(definitions)
+        captureYieldPath?.let(Files::deleteIfExists)
         val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
         val commonWorkload = args.getOrNull(9) == "common-file-workload"
         val writeOracleWorkload = args.getOrNull(9) == "write-oracle-workload"
@@ -67,11 +69,12 @@ internal object TierEKernelSmoke {
         } else {
             ""
         }
+        val captureYieldOption = captureYieldPath?.let { ",capture-yield=$it" } ?: ""
         val command = mutableListOf(
             java,
             "-agentpath:$agent=definitions=$definitions,session=${sessionTag.toString(
                 16,
-            )},mode=${args.getOrElse(7) { "full-stream" }},stack-transport=${args.getOrElse(8) { "dictionary" }}$benchmarkOptions",
+            )},mode=${args.getOrElse(7) { "full-stream" }},stack-transport=${args.getOrElse(8) { "dictionary" }}$benchmarkOptions$captureYieldOption",
             "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
             "-D${TierESharedOpenatOracleWorkload.MANIFEST_PROPERTY}=$oracleManifest",
             "-cp",
@@ -121,6 +124,7 @@ internal object TierEKernelSmoke {
                 }
             }
             check(process.waitFor() == 0) { "agent workload failed" }
+            val captureYield = captureYieldPath?.let { TierECaptureYield.read(it) }
             val terminalStarted = System.nanoTime()
             val profile = session.finish(definitions)
             val terminalNanos = System.nanoTime() - terminalStarted
@@ -285,6 +289,11 @@ internal object TierEKernelSmoke {
                 "duplicate_operations=${oracle.duplicates} wrong_operations=${oracle.wrong} " +
                 "unclassified_operations=${oracle.unclassified} operation_oracle_available=$oracleEnabled " +
                 "operation_oracle_expectation=$operationOracleExpectation " +
+                "capture_yield_records=${captureYield?.records?.size ?: 0} " +
+                "capture_yield_captured=${captureYield?.captured ?: 0} " +
+                "capture_yield_capture_failed=${captureYield?.captureFailed ?: 0} " +
+                "capture_yield_admission_failed=${captureYield?.admissionFailed ?: 0} " +
+                "capture_yield_excluded=${captureYield?.excluded ?: 0} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
@@ -322,6 +331,9 @@ internal object TierEKernelSmoke {
                     "virtual-thread proxy intervals did not report their pinning cost"
                 }
             }
+            if (captureYield != null) {
+                check(captureYield.records.isNotEmpty()) { "native capture-yield sidecar is empty" }
+            }
         } catch (expectedFailure: Exception) {
             process.destroyForcibly()
             System.err.print(expectedFailure.stackTraceToString())
@@ -332,6 +344,7 @@ internal object TierEKernelSmoke {
             oracleRoot?.let { root -> runCatching { deleteTree(root) } }
             Files.deleteIfExists(gate)
             Files.deleteIfExists(oracleManifest)
+            captureYieldPath?.let(Files::deleteIfExists)
         }
     }
 

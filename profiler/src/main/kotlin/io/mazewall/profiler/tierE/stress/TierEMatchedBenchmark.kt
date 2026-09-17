@@ -90,7 +90,9 @@ internal object TierEMatchedBenchmark {
         val classpath = System.getProperty("java.class.path")
         val canonicalCache = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
         val definitions = Files.createTempFile("tier-e-matched-${mode.jsonName}-", ".mzsd")
+        val captureYield = if (mode.tierE) Files.createTempFile("tier-e-matched-${mode.jsonName}-", ".mzcy") else null
         Files.deleteIfExists(definitions)
+        captureYield?.let(Files::deleteIfExists)
         val command = when (mode) {
             Mode.BASELINE -> listOf(
                 java,
@@ -109,6 +111,7 @@ internal object TierEMatchedBenchmark {
                 java,
                 "-Dmazewall.tier-e.canonical-cache=${variant.cacheMode ?: canonicalCache}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
+                "-Dmazewall.tier-e.capture-yield=$captureYield",
                 "-Dmazewall.tier-e.ring-capacity-bytes=8388608",
                 "--enable-native-access=ALL-UNNAMED",
                 "-cp",
@@ -226,6 +229,13 @@ internal object TierEMatchedBenchmark {
                 metricOrZero(output, "cache_hits"),
                 metricOrZero(output, "cache_misses"),
             ),
+            CaptureYieldMetrics(
+                metricOrZero(output, "capture_yield_records"),
+                metricOrZero(output, "capture_yield_captured"),
+                metricOrZero(output, "capture_yield_capture_failed"),
+                metricOrZero(output, "capture_yield_admission_failed"),
+                metricOrZero(output, "capture_yield_excluded"),
+            ),
             UserNotifPhaseMetrics(
                 metricOrZero(output, "user_notif_timed_operations"),
                 metricOrZero(output, "user_notif_operation_ns"),
@@ -257,6 +267,7 @@ internal object TierEMatchedBenchmark {
         append(config.artifact, forkJson(result, output))
         batches.forEach { batch -> append(config.artifact, sampleJson(variant, config.scope, fork, batch)) }
         Files.deleteIfExists(definitions)
+        captureYield?.let(Files::deleteIfExists)
         return result
     }
 
@@ -374,6 +385,7 @@ internal object TierEMatchedBenchmark {
             "\"duplicate_acknowledgement_accounting\":\"unavailable\"",
             "\"evidence_complete\":${evidence.evidenceComplete}",
             "\"phases\":${phaseJson(evidence.phases)}",
+            "\"capture_yield\":${captureYieldJson(evidence.captureYield)}",
             "\"user_notif_phases\":${userNotifPhaseJson(evidence.userNotifPhases)}",
             "\"output\":\"${escape(output)}\"",
         )
@@ -408,6 +420,15 @@ internal object TierEMatchedBenchmark {
             "\"stack_capture_ns\":${phases.stackCaptureNanos}",
             "\"queue_ns\":${phases.queueNanos}",
             "\"ack_to_return_ns\":${phases.ackToReturnNanos}",
+        ).joinToString(",", prefix = "{", postfix = "}")
+
+    private fun captureYieldJson(metrics: CaptureYieldMetrics): String =
+        listOf(
+            "\"records\":${metrics.records}",
+            "\"captured\":${metrics.captured}",
+            "\"capture_failed\":${metrics.captureFailed}",
+            "\"admission_failed\":${metrics.admissionFailed}",
+            "\"excluded\":${metrics.excluded}",
         ).joinToString(",", prefix = "{", postfix = "}")
 
     private fun terminal(
@@ -646,6 +667,7 @@ internal object TierEMatchedBenchmark {
         val evidenceComplete: Boolean,
         val operationOracle: TierEBenchmarkContract.OperationOracle,
         val phases: PhaseMetrics,
+        val captureYield: CaptureYieldMetrics,
         val userNotifPhases: UserNotifPhaseMetrics,
     ) {
         fun contractEvidence() =
@@ -689,6 +711,14 @@ internal object TierEMatchedBenchmark {
         val stackCaptureNanos: Long,
         val queueNanos: Long,
         val ackToReturnNanos: Long,
+    )
+
+    private data class CaptureYieldMetrics(
+        val records: Long,
+        val captured: Long,
+        val captureFailed: Long,
+        val admissionFailed: Long,
+        val excluded: Long,
     )
 
     private data class ForkResult(
