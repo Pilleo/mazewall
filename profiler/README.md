@@ -11,7 +11,7 @@ Figuring out which system calls and filesystem paths your code uses by hand is e
 ## Quick Start
 
 ```kotlin
-import io.mazewall.profiler.Profiler
+import io.mazewall.profiler.api.Profiler
 
 // 1. Wrap your workload in a profile block during a test
 val result = Profiler.profile {
@@ -122,6 +122,18 @@ behavior.toDsl()         // → String (Kotlin DSL to paste into your codebase)
 behavior.toJson()        // → String (machine-readable SBoB JSON)
 behavior.toStackTracesJson() // → String (JSON mapping stack traces to events)
 ```
+
+`behavior.toJson()` is deliberately an SBoB-only export. It cannot authorize portal
+`--complete-profile`, because it carries no coverage evidence. For that mode, persist the
+versioned measured artifact instead:
+
+```kotlin
+val profileDocumentJson = result.toProfileDocumentJson()
+```
+
+`ProfileDocument.fromJson(profileDocumentJson)` restores both the SBoB and the complete
+`ProfilingCoverage`. Portal workers reject a missing, legacy, plain-SBoB, or incomplete
+document. The document is structured operator evidence, not a cryptographic signature.
 
 ---
 

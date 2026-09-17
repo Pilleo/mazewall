@@ -69,3 +69,12 @@ session.snapshot(): ProfilingResult<Unit>
 ## Failure Semantics
 
 Profiler setup, event loss, daemon failure and incomplete drain must be typed outcomes. A partial result may be returned only when explicitly requested and must carry `complete = false`; it must never be emitted as an enforcement-ready policy without an explicit override.
+
+## Persisted Complete-Profile Evidence
+
+`ProfilingResult.toProfileDocumentJson()` persists a versioned `ProfileDocument` that contains
+both its `BillOfBehavior` and the measured `ProfilingCoverage`. `ProfileDocument.fromJson(...)`
+is the only decoder for this format. Portal `--complete-profile` accepts this document only when
+its measured coverage is complete; it rejects a plain SBoB JSON document, the removed
+`mazewallComplete` marker, legacy formats, and incomplete results. The document is auditable
+operator-controlled evidence rather than a signed or tamper-proof assertion.

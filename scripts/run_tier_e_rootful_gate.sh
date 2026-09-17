@@ -28,6 +28,7 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
     -w "${PROJECT_ROOT}" \
     "${IMAGE}" bash -lc '
         set -euo pipefail
+        mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing
         mkdir -p profiler-native/build
         cmake -S profiler-native -B profiler-native/build -DCMAKE_BUILD_TYPE=Debug
         cmake --build profiler-native/build -j2

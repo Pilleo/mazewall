@@ -17,7 +17,7 @@ check_mode() {
     local mode_log="${OUTPUT_FILE}.${mode}"
     : > "${mode_log}"
     for _ in 1 2 3; do
-        ctest --test-dir "${BUILD_DIR}" -V -R "agent_phase_benchmark_${mode}" 2>&1 \
+        ctest --test-dir "${BUILD_DIR}" -V -R "^agent_phase_benchmark_${mode}$" 2>&1 \
             | tee -a "${OUTPUT_FILE}" >> "${mode_log}"
     done
     mapfile -t lines < <(grep "tier-e-benchmark:" "${mode_log}")

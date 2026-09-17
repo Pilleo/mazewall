@@ -43,12 +43,15 @@ every hit. TGID filtering in the BPF program rejects other processes even if the
 agent library and use the same session tag. The kernel gate pins the target away from CPU 0 to
 verify that this dynamic-probe form still observes migrated execution.
 
-The raw tracepoint emits every syscall made by the target after attachment. When task storage has
-no active invocation, it emits `InvocationId=0`, which userspace resolves to
-`NO_ACTIVE_INVOCATION` and marks incomplete. This makes agent-internal calls, pre-marker calls,
-unsupported native bindings, and missed marker transitions visible instead of silently dropping
-them. Completeness is therefore a strict claim; useful attributed subsets can still have zero
-wrong attribution while the overall run remains explicitly incomplete.
+The raw tracepoint evaluates every selected `sys_enter` event made by the target after attachment,
+but only reserves a ring record for a validated active invocation. Syscalls outside a native
+boundary are counted in a bounded kernel `ambient_inactive` diagnostic rather than being emitted
+as fabricated `InvocationId=0` records. This prevents ordinary JVM background activity from
+consuming ring capacity or being misclassified as an attribution failure. A missing task pointer,
+ring loss, invalid marker update, capture failure, or lifecycle inconsistency remains fail-closed
+and makes the evidence incomplete. A declared workload must supply an independent denominator to
+distinguish a missing expected attributed syscall from ordinary ambient activity; zero ambient
+count is not claimed as complete syscall-attempt coverage.
 
 The JVM API is doing the stack walk, not eBPF. Consequently inlined Java calls are represented by
 the logical JVMTI stack rather than a native PC-only unwind. A bounded 129-frame request detects
@@ -294,9 +297,9 @@ never converted into a passing kernel claim.
 `TierEEmissionMode.FULL_STREAM` is the default.  The opt-in
 `UNIQUE_STACK_SYSCALL` mode still proves the complete logical stack at every proxied native
 boundary using the JVMTI `(jmethodID, BCI)` sequence, but it reuses a canonical stack context
-after an exact match.  The kernel then emits only the first observed `(canonical stack, syscall
-number)` pair from its session-local LRU cache.  Cache eviction or concurrent first use may
-re-emit an edge; they never suppress a new one.
+after an exact match. The kernel coverage map is diagnostic only: it reserves and submits every
+ring observation. Collector-owned acknowledgement is the only suppression boundary, so a failed
+downstream write leaves a later identical observation eligible for retry.
 
 This mode is a unique-edge coverage report: arguments are representative of the first retained
 observation, event counts are unavailable, and it must not claim `FULL_STREAM` completeness.
@@ -325,6 +328,104 @@ by the pending queue, `COMMITTED` batches are removed and advance the watermark,
 unresolved in-flight batch at session termination is incomplete evidence, never an implicit commit.
 The legacy `drainEncoded()` adapter commits immediately for compatibility, while new sinks must
 use prepare/commit/rollback to make write failure observable.
+
+### 2.1.1 Stack-definition transport flavours
+
+> **Status: Implemented contract.**
+
+`TierEStackTransport.DICTIONARY` is the default. It writes raw `MZSD v2`: each immutable
+canonical stack definition appears once and successful invocations reference its
+`StackTraceId`. `INLINE_PER_INVOCATION` is an opt-in diagnostic transport. It writes `MZSD v3`
+and repeats the full immutable stack payload beside each successful invocation. Failed captures
+continue to use the ordinary invocation failure record, so they remain explicit and are never
+fabricated as an inline exact stack.
+
+The collector normalizes both transports into the same `StackDefinition` and
+`InvocationDefinition` model before joining ring observations. `InvocationId` stays an execution
+identity, never a canonical-stack or unique-edge identity. MZSD v1 and v2 remain readable; a v3
+reader rejects an inline record whose embedded stack ID conflicts with the invocation reference.
+
+The native `benchmark-phases` option reports capture phases plus `serialization_ns` and
+`publication_bytes` for dictionary/full-stream, dictionary/unique-edge, inline/full-stream, and
+inline/unique-edge runs. These are host-specific comparison measurements, not universal latency
+guarantees or a replacement for the existing regression gate. USDT is not a transport flavour;
+it remains a separately validated marker-backend experiment.
+
+### 2.1.2 Trustworthy flavour benchmark contract
+
+> **Status: Implemented contract.**
+
+The rootful benchmark records a controlled-workload verdict separately from whole-session evidence.
+`workload_correctness=PASS` requires the shared operation/checksum contract, an exact workload stack
+and controlled unlink relationship for Tier E, no wrong exact workload stack, no ring loss and no
+unexplained resolution status. Background `NO_ACTIVE_INVOCATION` records are retained as an explicit
+count and make whole-session evidence `INCOMPLETE` when applicable; they do not silently convert
+into either a pass or a false workload failure. Every result records `policy_eligibility=false`.
+
+In unique-edge mode, missing resolved records are not treated as suppression. The collector emits
+benchmark-only audit decisions for `CANDIDATE`, `ACKNOWLEDGED`, and `SUPPRESSED`; every declared
+operation must have exactly one explicit terminal `ACKNOWLEDGED` or `SUPPRESSED` decision. A
+candidate without acknowledgement is incomplete, and a missing decision is a missing operation.
+
+Each run emits metadata, fork-start, fork-output, batch samples and an explicit terminal record.
+Phase totals belong to the fork record, while samples contain only batch workload duration. The
+benchmark rotates fork order, pins workload and collector to distinct physical cores, and supports
+the full baseline/Tier E/USER_NOTIF comparison, paired cache comparison, and terminal-versus-live
+publication comparison. Artifacts retain source revision, dirty state, JDK, OS, affinity, timeout,
+raw child output, publication and retained-state counters.
+The rootful runner additionally retains a JSON manifest with the source dirty-tree fingerprint,
+native-agent checksum, container image ID, kernel, CPU topology, arguments, deadlines, and raw-log
+paths. It compiles as the local user, then performs privileged measurement from a read-only source
+mount with writable scratch space only.
+
+The existing snapshot transport remains the default. Incremental dictionary transport is deferred
+until stack-diverse, class-churn and long-session live-publication measurements prove that repeated
+snapshot serialization is a material cost. The decision record
+`issue-20260917-000001-defer-incremental-tier-e-dictionary-publication.md` defines the evidence
+required before that protocol work starts.
+
+The retained rootful paired-cache artifact `tier-e-cache-paired-20260917.jsonl` validates the
+corrected benchmark contract across 450 samples. Cache-enabled medians were lower for all four
+Tier E flavours and all five-pair bootstrap intervals excluded zero. Dictionary/full-stream with
+canonical cache reuse remains the performance default; the report keeps the host/workload limits
+of that conclusion explicit.
+
+`tier-e-publication-benchmark-20260917.jsonl` validates terminal and 100 ms live snapshot
+publication for all dictionary and inline flavours. Its first rotated run has mixed median deltas;
+it demonstrates publication behavior and retained phase metrics, but it does not yet justify a
+publication-mode change or incremental dictionary transport.
+
+The corrected full rootful comparison is retained as
+`docs/internals/evidence/tier-e-full-matrix-20260917.jsonl`, with its provenance in the adjacent
+manifest and its interpretation in
+`docs/internals/evidence/tier-e-flavour-and-cache-report-20260917.md`. It contains five rotated
+forks and 350 measured batches. On this native-call-heavy oracle workload, dictionary/full-stream
+had the lowest Tier E median at 1.854 ms per 100-operation batch; inline and unique-edge showed no
+demonstrated speed advantage. Paired cache A/B measurements showed a positive saving for every
+Tier E flavour, so canonical cache reuse remains enabled. USER_NOTIF remained roughly three orders
+of magnitude slower. These are host- and workload-specific observations, not universal overhead
+guarantees or a policy decision.
+
+The bounded rootful USER_NOTIF latency diagnostic retained in
+`docs/internals/evidence/tier-e-user-notif-latency-20260917.md` found that the earlier 21 ms
+per-operation result came from delayed admission of completed off-reactor preparation, not JVM
+stack retrieval. A temporary 1 ms poll bound reduced the observed median from 21.51 ms to
+3.56 ms in the matched no-stack diagnostic. The stack-enabled counterpart was 4.07 ms and
+measured 40.5 microseconds in listener-side stack capture.
+
+The implemented reactor contract now uses one session-owned nonblocking `eventfd` as a third poll
+descriptor. A preparation future signals it after completing; the reactor drains the counter and
+alone advances the notification to its single reply lease. Completing preparation also immediately
+drives the newly armed control exchange through its first nonblocking send before waiting for the
+controller acknowledgement; otherwise the consumed wakeup would leave that send dormant until the
+deadline. Pending work therefore waits for an actual descriptor readiness event or its deadline,
+never a fixed completion-poll interval. Worker threads cannot send kernel replies. The rootful
+five-fork measurement retained in
+`docs/internals/evidence/tier-e-eventfd-full-matrix-20260917.md` validates the corrected path:
+every Tier E variant had a complete, oracle-matched run; USER_NOTIF matched the same controlled
+operations but retained bounded-observation loss as incomplete whole-session evidence. Its measured
+cost is dominated by profiling lifecycle and broad notification work, not the narrowly measured
+stack-capture phase. The earlier one-fork figures remain historical diagnosis only.
 
 Capture-domain limitations are recorded separately from observed events. A denied or otherwise
 out-of-domain syscall attempt increments `outOfDomainAttempts` and makes the session incomplete;
@@ -918,6 +1019,42 @@ TGID guard.
 
 > **Status: Required hardening.**
 
+### D.0 Benchmark correctness vocabulary
+
+> **Status: Implemented contract.**
+
+Benchmark artifacts report `workload_correctness` as `PASS`, `FAILED`, or `UNVERIFIED`.
+`PASS` requires a benchmark-only, independent operation oracle that maps every declared
+operation to exactly one observed syscall and validates its invocation, execution identity,
+and version-qualified logical stack. Aggregate resolved-event counts and matching stack names
+are useful diagnostics but are not an operation oracle.
+
+The current shared file workload supplies only a batch-scoped expected `unlink` count. Ring
+records intentionally retain syscall arguments, not dereferenced pathname bytes, so it cannot
+map an `unlink` to a particular declared pathname. Its benchmark results are therefore
+`UNVERIFIED`, never `PASS`; a missing, extra, wrong, duplicate, or unclassified operation is
+`FAILED`. Whole-session evidence is reported independently and does not become policy input.
+The runner also retains `attach_ns`, `workload_ns`, and `terminal_ns` for Tier E, plus
+`profile_session_ns` and `profile_overhead_ns` for USER_NOTIF. These are phase measurements,
+not a causal explanation; deeper USER_NOTIF readiness/receive/ack instrumentation remains
+required before changing its reactor or acknowledgement schedule.
+
+The privileged `write-oracle-workload` is the correctness fixture. It writes to `/dev/null`
+through the supported `UnixFileDispatcherImpl.write0` proxy and encodes a run-local operation
+identifier in the `write(2)` byte-count argument. The collector matches this value before any
+unique-edge retention decision. In full-stream mode it requires one resolved record with the
+workload stack, invocation identity, and execution identity for every declared operation. In
+unique-edge mode it records the same identity checks for every collector delivery decision and
+requires an explicit acknowledged representative or post-acknowledgement suppression for every
+declared operation. Nonmatching, unresolved, duplicate, or missing decisions are classified
+independently and do not satisfy the fixture denominator.
+
+The current USER_NOTIF filter selects `openat` for this workload but does not select its
+subsequent `write`. Its artifact therefore records `operation_oracle_available=false` and
+`operation_oracle_reason=write_not_selected_by_user_notif`; it remains a timing and
+stack-capture comparison, not a corresponding operation-identity proof. A USER_NOTIF oracle
+requires a separately selected syscall with an argument-visible operation identifier.
+
 ### D.1 Live dictionary publication
 
 > **Status: Implemented contract.** The current implementation provides opt-in live
@@ -938,7 +1075,7 @@ Live publication is opt-in. It has four distinct guarantees:
    Host-power durability requires an opt-in file synchronization and containing-directory
    synchronization step; it is not paid for on every live publication by default.
 
-The live path uses a versioned outer `MZSE` envelope around unchanged MZSD v2 bytes:
+The live path uses a versioned outer `MZSE` envelope around unchanged raw MZSD bytes:
 
 ```text
 magic            4 bytes: ASCII MZSE
@@ -947,10 +1084,11 @@ flags            u16 LE: bit 0 means producer closed
 publication_id   u64 LE
 watermark        u64 LE
 payload_length   u64 LE
-payload          payload_length bytes containing unchanged MZSD v2 data
+payload          payload_length bytes containing unchanged MZSD v2 or v3 data
 ```
 
-Raw MZSD v2 files remain readable as legacy snapshots. A raw or open MZSE snapshot is a
+Raw MZSD v1/v2 files remain readable as legacy snapshots; v3 is used only by the opt-in
+inline-per-invocation transport. A raw or open MZSE snapshot is a
 recoverable prefix only; it is not proof of terminal dictionary completeness. The reader
 opens one descriptor and parses both envelope metadata and payload from that descriptor. It
 does not combine metadata from one pathname lookup with bytes from a later lookup.
@@ -1143,7 +1281,8 @@ Benchmark evidence reports phase totals and:
 - dictionary-resolution latency.
 
 Measurements compare publication disabled/enabled, instrumentation disabled/enabled,
-full-stream/unique-edge modes, warmed execution, and class-loading/retransformation churn.
+dictionary/inline-per-invocation transport, full-stream/unique-edge modes, warmed execution, and
+class-loading/retransformation churn.
 The existing host measurements remain historical evidence. A 25% regression threshold applies
 to each measured phase and mode total, and logical stack bytes must remain identical before and
 after an optimization.
@@ -1290,8 +1429,9 @@ may restore an older exact invocation implicitly.
 
 ### MZSE publication and replay
 
-**Implemented contract.** Raw `MZSD v2` bytes remain backward-compatible. MZSE version 1
-remains readable. A session-bound MZSE version 2 has this exact envelope:
+**Implemented contract.** Raw `MZSD v2` dictionary bytes remain backward-compatible; raw
+`MZSD v3` carries the opt-in inline-per-invocation records. MZSE version 1 remains readable.
+A session-bound MZSE version 2 has this exact envelope:
 
 ```text
 magic            4 bytes: MZSE
@@ -1301,7 +1441,7 @@ session_epoch    u64 LE
 publication_id   u64 LE
 watermark        u64 LE
 payload_length   u64 LE
-payload          unchanged MZSD v2 bytes
+payload          unchanged MZSD v2 dictionary bytes or MZSD v3 inline bytes
 ```
 
 The watermark is the highest committed `StackTraceId` represented by the committed
@@ -1377,16 +1517,34 @@ hard socket errors retain hard-error behavior.
 
 ### Performance targets and evidence
 
-**Required hardening.** A warmed metadata-cache hit performs no profiler-owned heap
-allocation, string formatting, or file I/O. Full raw-key equality remains the
-identity decision after hash lookup. Scratch storage is depth-aware for nested native
-calls. Snapshot serialization and sink I/O stay off capture threads.
+**Implemented contract.** A warmed metadata-cache hit is available to both full-stream
+and unique-edge modes. It validates the complete raw key, symbolization generation, and
+weak class guard before returning a canonical immutable stack definition; every boundary
+still receives a fresh invocation and execution identity. The canonical cache is bounded
+to 4,096 entries and eviction removes acceleration state only.
 
-Benchmarks report phase totals, cache hits and misses, lock wait, snapshot bytes,
-publication latency, pending high-water marks, dictionary-resolution latency,
-allocation bytes, retained-state peak, and tail latency. Full-stream and unique-edge
-modes are compared separately, with publication and instrumentation each measured
-enabled and disabled. Warmed workloads include class churn and retransformation.
+**Implemented contract.** Logical-stack interning uses a hash-to-candidate index followed
+by full frame equality, preserving monotonic IDs and collision safety. Publication snapshots
+retain shared immutable stack records under the definitions lock, then encode and atomically
+replace the file outside that lock. Opt-in live snapshots coalesce for 100 ms on one publisher
+worker and terminal finish joins the worker before publishing closure.
+
+The native agent enforces a default 64 MiB retained-state ceiling for immutable-definition,
+canonical-cache, metadata-cache, interning-index admission, and temporary-publication-buffer
+growth. Container-capacity accounting and execution-identity map charging remain required
+hardening before this can be treated as a complete native-process memory limit.
+An internal agent option permits a smaller test budget only. Exhaustion stops exact definition
+admission, leaves the proxied native operation intact, and is retained as incomplete evidence.
+The collector's independently enforced budget is reported separately because it runs in another
+process.
+
+The Release benchmark runner performs three warm-ups and ten measured samples per scenario.
+The matched-flavour runner executes five rotated JVM forks for no agent, dictionary full-stream,
+dictionary unique-edge, inline full-stream, and inline unique-edge with identical batch arguments.
+It records workload-batch distributions separately from serialization and shutdown publication.
+Native-agent-only evidence is labelled as such; privileged end-to-end overhead remains a separate
+rootful fixture because it includes BPF and collector costs. Allocation and RSS instrumentation,
+class churn, retransformation, and per-operation tail latency remain required hardening.
 USDT remains experimental until ordering, identity, failure behavior, and wire output
 are proven identical to the plain-uprobe path.
 

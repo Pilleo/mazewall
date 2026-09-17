@@ -1,0 +1,89 @@
+{
+  "generated_at": "2026-09-17T15:14:15.695817308Z",
+  "matrix": "rootful Docker, isolated container, CPU pinned workload=0 collector=2",
+  "benchmark": {
+    "kind": "metadata",
+    "timestamp": "2026-09-17T15:07:16.491829825Z",
+    "iterations": 100,
+    "warmups": 3,
+    "batches": 10,
+    "forks": 5,
+    "workload_cpu": "0",
+    "collector_cpu": "2",
+    "canonical_cache": "enabled",
+    "scope": "full",
+    "child_timeout_seconds": 180,
+    "user_notif_worker_timeout_seconds": 480,
+    "user_notif_child_timeout_seconds": 540,
+    "source_revision": "unknown",
+    "source_dirty": "unknown",
+    "java_version": "25.0.4",
+    "os": "Linux 7.2.4-x64v3-xanmod1"
+  },
+  "summary": {
+    "kind": "summary",
+    "timestamp": "2026-09-17T15:14:15.693719670Z",
+    "workload_correctness": "PASS",
+    "policy_eligibility": false,
+    "baseline": {
+      "median_ns": 380980,
+      "p95_ns": 3146006,
+      "p99_ns": 14696046,
+      "whole_session_complete_forks": 0,
+      "forks": 5
+    },
+    "dictionary_full_stream": {
+      "median_ns": 1995314,
+      "p95_ns": 10015752,
+      "p99_ns": 13379250,
+      "whole_session_complete_forks": 5,
+      "forks": 5
+    },
+    "dictionary_unique_edge": {
+      "median_ns": 2078910,
+      "p95_ns": 66572994,
+      "p99_ns": 330032254,
+      "whole_session_complete_forks": 5,
+      "forks": 5
+    },
+    "inline_full_stream": {
+      "median_ns": 1946599,
+      "p95_ns": 4169718,
+      "p99_ns": 41800149,
+      "whole_session_complete_forks": 5,
+      "forks": 5
+    },
+    "inline_unique_edge": {
+      "median_ns": 2145185,
+      "p95_ns": 25092144,
+      "p99_ns": 331772065,
+      "whole_session_complete_forks": 5,
+      "forks": 5
+    },
+    "user_notif_no_stack": {
+      "median_ns": 313654350,
+      "p95_ns": 400792127,
+      "p99_ns": 480507237,
+      "whole_session_complete_forks": 0,
+      "forks": 5
+    },
+    "user_notif": {
+      "median_ns": 341493788,
+      "p95_ns": 1463413249,
+      "p99_ns": 1556068991,
+      "whole_session_complete_forks": 0,
+      "forks": 5
+    },
+    "sample_count": 350,
+    "expected_per_variant": 50
+  },
+  "terminal": {
+    "kind": "terminal",
+    "timestamp": "2026-09-17T15:14:15.695817308Z",
+    "success": true,
+    "message": "completed"
+  },
+  "checksums": {
+    "jsonl_sha256": "see repository artifact hash"
+  }
+}
