@@ -2,6 +2,8 @@ package io.mazewall.profiler.internal
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -32,6 +34,8 @@ internal object BenchmarkRawSyscallDiagnostics {
         private val accepts: (String) -> Boolean,
     ) {
         private val records = CopyOnWriteArrayList<Record>()
+        private val reservedRecords = AtomicInteger()
+        private val droppedRecords = AtomicLong()
         private val operationStarts = ConcurrentHashMap<Long, Long>()
         private val operationReturns = ConcurrentHashMap<Long, Long>()
 
@@ -40,9 +44,15 @@ internal object BenchmarkRawSyscallDiagnostics {
             syscallName: String,
             arguments: List<Long>,
         ): Record? {
-            if (!accepts(syscallName) || records.size >= MAX_RECORDS) return null
+            if (!accepts(syscallName)) return null
+            if (reservedRecords.getAndIncrement() >= MAX_RECORDS) {
+                droppedRecords.incrementAndGet()
+                return null
+            }
             return Record(tid, syscallName, arguments.take(6), System.nanoTime()).also(records::add)
         }
+
+        val droppedCount: Long get() = droppedRecords.get()
 
         /** Benchmark-only timestamps keyed by the stable first raw argument of the shared oracle. */
         fun operationStarted(key: Long) {

@@ -50,6 +50,7 @@ internal object UserNotifOracleSmoke {
             if (rawDiagnostics.isEmpty()) rawDiagnostics = diagnostics?.finish().orEmpty()
         }
         val profileSessionNanos = System.nanoTime() - profileStarted
+        val diagnosticDrops = diagnostics?.droppedCount ?: 0L
         rawDiagnostics.forEach { raw ->
             if (oracleDiagnostics.size < 12) oracleDiagnostics += "${raw.syscallName}:${raw.arguments.joinToString(",")}"
             val operationId = sharedOpenatOperationId(raw.arguments)
@@ -97,6 +98,7 @@ internal object UserNotifOracleSmoke {
         println(
             "user-notif-oracle: observations=$observations stacks=$stackCount " +
                 "dropped=$droppedEvents complete=$evidenceComplete " +
+                "diagnostic_dropped=$diagnosticDrops " +
                 "workloadFrames=$workloadFrames evidenceComplete=$evidenceComplete " +
                 "expected_operations=${if (oracleEnabled) oracle.expected else expectedOperations} matched_operations=${oracle.matched} " +
                 "duplicate_operations=${oracle.duplicates} wrong_operations=${oracle.wrong} " +
@@ -113,6 +115,7 @@ internal object UserNotifOracleSmoke {
         // reports incomplete whole-session evidence. The rendered `complete=false` remains
         // machine-readable; ordinary diagnostics continue to fail closed below.
         if (!benchmark) check(droppedEvents == 0) { "USER_NOTIF oracle dropped events" }
+        if (benchmark) check(diagnosticDrops == 0L) { "USER_NOTIF benchmark diagnostics dropped $diagnosticDrops records" }
         if (captureStackTraces) check(workloadFrames) { "USER_NOTIF oracle did not capture the shared workload stack" }
         if (operationOracleAvailable) {
             check(oracle.expected == oracle.matched && oracle.duplicates == 0L && oracle.wrong == 0L && oracle.unclassified == 0L) {
