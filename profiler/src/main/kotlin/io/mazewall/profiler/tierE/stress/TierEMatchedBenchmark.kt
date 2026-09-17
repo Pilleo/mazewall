@@ -292,13 +292,15 @@ internal object TierEMatchedBenchmark {
 
     private fun metadata(config: Config): String {
         val cacheMode = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
+        val captureProfile = escape(System.getProperty("mazewall.tier-e.capture-profile", "full"))
         val sourceRevision = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_REVISION") ?: "unknown")
         val sourceDirty = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_DIRTY") ?: "unknown")
         val javaVersion = escape(System.getProperty("java.version"))
         val operatingSystem = escape(System.getProperty("os.name") + " " + System.getProperty("os.version"))
         return "{\"kind\":\"metadata\",\"timestamp\":\"${Instant.now()}\",\"iterations\":${config.iterations}," +
             "\"warmups\":${config.warmups},\"batches\":${config.batches},\"forks\":${config.forks}," +
-            "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\",\"canonical_cache\":\"$cacheMode\",\"scope\":\"${config.scope.jsonName}\"," +
+            "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\"," +
+            "\"canonical_cache\":\"$cacheMode\",\"capture_profile\":\"$captureProfile\",\"scope\":\"${config.scope.jsonName}\"," +
             "\"child_timeout_seconds\":${config.childTimeoutSeconds}," +
             "\"user_notif_worker_timeout_seconds\":${config.userNotifWorkerTimeoutSeconds}," +
             "\"user_notif_child_timeout_seconds\":${config.userNotifChildTimeoutSeconds}," +
