@@ -5,6 +5,25 @@ import kotlin.test.assertEquals
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
+    fun `full benchmark schedules every profiler comparator exactly once per rotated fork`() {
+        val expected = setOf(
+            "baseline",
+            "dictionary_full_stream",
+            "dictionary_unique_edge",
+            "inline_full_stream",
+            "inline_unique_edge",
+            "user_notif_no_stack",
+            "user_notif",
+        )
+
+        repeat(expected.size) { rotation ->
+            val scheduled = TierEMatchedBenchmark.fullVariantNames(rotation)
+            assertEquals(expected, scheduled.toSet())
+            assertEquals(expected.size, scheduled.size)
+        }
+    }
+
+    @Test
     fun `capture profile scope pairs full and narrowed dictionary captures`() {
         assertEquals(
             setOf(

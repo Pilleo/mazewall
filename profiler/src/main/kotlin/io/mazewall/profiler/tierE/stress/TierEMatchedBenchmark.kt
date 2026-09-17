@@ -820,6 +820,8 @@ internal object TierEMatchedBenchmark {
 
     private fun captureProfileFor(variant: Variant): CaptureProfile = variant.captureProfile ?: configuredCaptureProfile()
 
+    internal fun fullVariantNames(rotation: Int): List<String> = variants(Scope.FULL, rotation).map { it.jsonName(Scope.FULL) }
+
     internal fun captureProfileVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_CAPTURE_PROFILE, rotation).map { it.jsonName(Scope.TIER_E_CAPTURE_PROFILE) }
 
     private fun variants(
