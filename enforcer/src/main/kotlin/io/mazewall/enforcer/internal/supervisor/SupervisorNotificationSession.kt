@@ -35,13 +35,13 @@ internal class SupervisorNotificationSession(
             ?: return object : NotificationWork {
                 context(arena: NativeArena) override fun poll(): NotificationProgress = NotificationProgress.Ready({ replies.rejectOverload(SupervisorReplyContext(notification.id, response)) })
             }
-        var acquired: SupervisorRouteExecutor? = null
+        var acquired: SupervisorRouteDispatcher? = null
         try {
             val delegate = if (authority != null) {
                 authority.invoke(notification, response, deadline)
             } else {
-                val executor = SupervisorRouteExecutor(engine, descriptors, helpers).also { acquired = it }
-                SupervisorNotificationWork(notification, response, deadline, preparation, exchange, SupervisorRouteDispatcher(executor), replies, reportUncaught)
+                val dispatcher = SupervisorRouteDispatcher(engine, descriptors, helpers).also { acquired = it }
+                SupervisorNotificationWork(notification, response, deadline, preparation, exchange, dispatcher, replies, reportUncaught)
             }
             return object : NotificationWork {
                 private var retired = false

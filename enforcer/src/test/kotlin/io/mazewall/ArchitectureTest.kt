@@ -14,8 +14,13 @@ import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.enforcer.internal.supervisor.SocketHelperPool
 import io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
 import io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+import io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher
+import io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor
+import io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
+import io.mazewall.enforcer.internal.supervisor.TraceeAuthorityExecution
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.lifecycle.*
@@ -48,6 +53,26 @@ class MazewallProductionLocations : LocationProvider {
     importOptions = [ImportOption.DoNotIncludeTests::class, DoNotIncludeCompiledTestOutputs::class],
 )
 class ArchitectureTest {
+    @ArchTest
+    fun supervisorRouteHelpersMustNotLeakOutsideTheirPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        listOf(
+            SupervisorRouteDispatcher::class.java,
+            SupervisorRouteExecutor::class.java,
+            SupervisorRoutePreparation::class.java,
+            SocketHelperPool::class.java,
+            TraceeAuthorityExecution::class.java,
+        ).forEach { helper ->
+            noClasses()
+                .that()
+                .resideOutsideOfPackage("io.mazewall.enforcer.internal.supervisor..")
+                .should()
+                .dependOnClassesThat()
+                .haveFullyQualifiedName(helper.name)
+                .because("supervisor route execution must cross its dispatcher boundary")
+                .check(allClasses)
+        }
+    }
+
     @ArchTest
     fun singletonProvidersMustBeImmutable(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         singletonProviderRule().check(allClasses)

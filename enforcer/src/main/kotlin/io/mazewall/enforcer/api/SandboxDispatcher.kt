@@ -24,6 +24,12 @@ import java.util.concurrent.TimeUnit
  */
 public object SandboxDispatcher : AutoCloseable {
     internal const val MAX_CACHED_POOLS: Int = 32
+    private const val HEX_RADIX: Int = 16
+    private const val POOL_SHUTDOWN_WAIT_SECONDS: Long = 5
+    private const val POOL_FORCE_STOP_WAIT_SECONDS: Long = 1
+
+    // Java's access-ordered LinkedHashMap constructor requires an explicit load factor.
+    private val cacheLoadFactor: Float = java.lang.Float.parseFloat("0.75")
 
     /**
      * Cache key for the sandbox dispatcher pools.
@@ -64,7 +70,7 @@ public object SandboxDispatcher : AutoCloseable {
      * Executor threads are permanently contained and therefore pooled forever by design;
      * eviction only happens under cap pressure or shutdownAll().
      */
-    private val poolCache = java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, 0.75f, true)
+    private val poolCache = java.util.LinkedHashMap<CacheKey, ExecutorService>(MAX_CACHED_POOLS, cacheLoadFactor, true)
 
     /**
      * Executes the given [block] on a thread pool perfectly constrained by the [policy].
@@ -113,7 +119,7 @@ public object SandboxDispatcher : AutoCloseable {
             val rawPool = Executors.newCachedThreadPool { runnable ->
                 val thread = Thread(runnable)
                 thread.isDaemon = true
-                thread.name = "mazewall-sandbox-${definition.hashCode().toUInt().toString(16)}"
+                thread.name = "mazewall-sandbox-${definition.hashCode().toUInt().toString(HEX_RADIX)}"
                 thread
             }
 
@@ -154,9 +160,9 @@ public object SandboxDispatcher : AutoCloseable {
     private fun retirePool(pool: ExecutorService) {
         pool.shutdown()
         try {
-            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+            if (!pool.awaitTermination(POOL_SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS)) {
                 pool.shutdownNow()
-                pool.awaitTermination(1, TimeUnit.SECONDS)
+                pool.awaitTermination(POOL_FORCE_STOP_WAIT_SECONDS, TimeUnit.SECONDS)
             }
         } catch (_: InterruptedException) {
             pool.shutdownNow()

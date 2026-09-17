@@ -121,42 +121,10 @@ public object ContainedExecutors {
 
     /**
      * Installs the given policies onto the current thread immediately.
-     *
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.enforcer.api.InstallationReceipt] for receipt and diagnostic information.
-     */
-    @Deprecated(
-        "This variant returns Unit. Use installOnCurrentThread(vararg policies) that returns InstallationReceipt.",
-        ReplaceWith("installOnCurrentThread(*policies)"),
-        DeprecationLevel.HIDDEN,
-    )
-    public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
-        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installOnCurrentThread(combined).releaseIfUnsupervised()
-    }
-
-    /**
-     * Installs the given policies onto the current thread immediately.
      */
     public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         return installOnCurrentThread(combined)
-    }
-
-    /**
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.enforcer.api.InstallationReceipt] for receipt and diagnostic information.
-     */
-    @Deprecated(
-        "This variant returns Unit. Use installOnCurrentThread(policy, scopingPolicy) that returns InstallationReceipt.",
-        ReplaceWith("installOnCurrentThread(policy, scopingPolicy)"),
-        DeprecationLevel.HIDDEN,
-    )
-    public fun installOnCurrentThread(
-        policy: Policy<*, Uncompiled>,
-        scopingPolicy: StacktraceScopingPolicy,
-    ) {
-        installOnCurrentThread(policy.definition, scopingPolicy).releaseIfUnsupervised()
     }
 
     public fun installOnCurrentThread(
@@ -182,22 +150,6 @@ public object ContainedExecutors {
 
     /** Read-only preflight for the current thread. Does not install filters. */
     public fun assessOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = false)
-
-    /**
-     * Installs the given policies onto the entire process (all threads) immediately.
-     *
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.enforcer.api.InstallationReceipt] for receipt and diagnostic information.
-     */
-    @Deprecated(
-        "This variant returns Unit. Use installOnProcess(vararg policies) that returns InstallationReceipt.",
-        ReplaceWith("installOnProcess(*policies)"),
-        DeprecationLevel.HIDDEN,
-    )
-    public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
-        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installInternal(true, combined).releaseIfUnsupervised()
-    }
 
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
@@ -256,7 +208,6 @@ public object ContainedExecutors {
         policy: Policy<S, Uncompiled>,
     ): ContainedExecutor<S> = ContainedExecutorView(ContainedExecutorWrapper(delegate, policy.definition), policy)
 
-    @Suppress("UNCHECKED_CAST")
     private fun PolicyDefinition<*>.asThreadLocalPolicy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = Policy(this as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
 
     private fun containedThreadFactory(

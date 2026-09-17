@@ -6,7 +6,7 @@ Supported application contracts are limited to:
 
 - `io.mazewall`: configuration, policies, installation assessment and receipts;
 - `io.mazewall.enforcer.api` and `io.mazewall.enforcer.diagnostics`: contained execution, violations and diagnostics;
-- `io.mazewall.profiler`: profiling options, sessions, results and behavioural evidence.
+- `io.mazewall.profiler.api`: profiling options, sessions, results and behavioural evidence.
 
 Native engines, syscalls, FFM layouts, descriptor ownership, BPF programs, daemon protocols, attribution, replay and collector types are implementation details. They are not extension points and may change without compatibility notice. The Tier E daemon launcher is an executable JVM entrypoint, not a library API.
 
@@ -20,6 +20,11 @@ Applications must install containment through `Mazewall` and inspect receipts,
 diagnostics, and violations through the enforcer facade. Profiling must start
 through `MazewallProfiler` and consume its session, result, evidence, and
 coverage contracts.
+
+For portal dedicated-worker startup, a plain `BillOfBehavior.toJson()` is not
+completion evidence. Persist `ProfilingResult.toProfileDocumentJson()` and supply
+that versioned `ProfileDocument` JSON to `--complete-profile`; the worker rejects
+legacy attestation markers, missing evidence, and incomplete measured coverage.
 
 When an application combines a process-wide baseline with later thread-scoped
 stacktrace-scoped policies, call `Supervision.prepareSupervisor()` before installing

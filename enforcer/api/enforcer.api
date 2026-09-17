@@ -1,22 +1,6 @@
-public final class io/mazewall/enforcer/ContainedExecutors {
-	public static final field INSTANCE Lio/mazewall/enforcer/ContainedExecutors;
-	public final fun installOnCurrentThread (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)V
-	public final fun installOnCurrentThread ([Lio/mazewall/enforcer/api/Policy;)V
-	public final fun installOnProcess ([Lio/mazewall/enforcer/api/Policy;)V
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Ljava/util/concurrent/ExecutorService;
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-}
-
 public class io/mazewall/enforcer/ContainmentViolationException : java/lang/RuntimeException {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-}
-
-public final class io/mazewall/enforcer/SandboxDispatcher {
-	public static final field INSTANCE Lio/mazewall/enforcer/SandboxDispatcher;
-	public static final fun execute (Lio/mazewall/enforcer/api/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
-	public final fun executeBlock (Lio/mazewall/enforcer/api/Policy;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
-	public static final fun shutdownAll ()V
 }
 
 public final class io/mazewall/enforcer/api/AllowListSpec {
@@ -56,7 +40,7 @@ public final class io/mazewall/enforcer/api/BillOfBehaviorDto$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
-public abstract interface class io/mazewall/enforcer/api/ContainedExecutor : java/util/concurrent/Executor {
+public abstract interface class io/mazewall/enforcer/api/ContainedExecutor : java/util/concurrent/ExecutorService {
 	public abstract fun getPolicy ()Lio/mazewall/enforcer/api/Policy;
 }
 
@@ -65,17 +49,14 @@ public final class io/mazewall/enforcer/api/ContainedExecutors {
 	public final fun assessOnCurrentThread (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationAssessment;
 	public final fun assessOnProcess (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationAssessment;
 	public final fun installOnCurrentThread (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public final synthetic fun installOnCurrentThread (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)V
 	public final fun installOnCurrentThread ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public final synthetic fun installOnCurrentThread ([Lio/mazewall/enforcer/api/Policy;)V
 	public final fun installOnDedicatedProcess ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
 	public final fun installOnProcess ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public final synthetic fun installOnProcess ([Lio/mazewall/enforcer/api/Policy;)V
 	public final fun newCachedThreadPool (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
 	public final fun newFixedThreadPool (ILio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
 	public final fun newSingleThreadExecutor (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Ljava/util/concurrent/ExecutorService;
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/ContainedExecutor;
+	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
 	public final fun wrapTyped (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
 }
 
@@ -358,9 +339,9 @@ public final class io/mazewall/enforcer/api/Mazewall {
 	public static final fun runContained (Lio/mazewall/enforcer/api/Policy;Ljava/util/function/Supplier;)Ljava/lang/Object;
 	public static final fun threadLocalBuilder ()Lio/mazewall/enforcer/api/JavaPolicyBuilder;
 	public static final fun threadLocalBuilder (Lio/mazewall/enforcer/api/RuntimeProfile;)Lio/mazewall/enforcer/api/JavaPolicyBuilder;
-	public static final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public static final fun wrapContainedExecutor (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public static final fun wrapExecutor (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
+	public static final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
+	public static final fun wrapContainedExecutor (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
+	public static final fun wrapExecutor (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
 }
 
 public final class io/mazewall/enforcer/api/PartialInstallationException : java/lang/IllegalStateException {
@@ -661,8 +642,9 @@ public final class io/mazewall/enforcer/api/RuntimeProfile : java/lang/Enum {
 	public static fun values ()[Lio/mazewall/enforcer/api/RuntimeProfile;
 }
 
-public final class io/mazewall/enforcer/api/SandboxDispatcher {
+public final class io/mazewall/enforcer/api/SandboxDispatcher : java/lang/AutoCloseable {
 	public static final field INSTANCE Lio/mazewall/enforcer/api/SandboxDispatcher;
+	public fun close ()V
 	public static final fun execute (Lio/mazewall/enforcer/api/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
 	public final fun executeBlock (Lio/mazewall/enforcer/api/Policy;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun getOrCreateElasticPool (Lio/mazewall/enforcer/api/PolicyDefinition;)Ljava/util/concurrent/ExecutorService;
@@ -1000,6 +982,8 @@ public final class io/mazewall/enforcer/diagnostics/MazewallEvents$SelfVerificat
 public final class io/mazewall/enforcer/diagnostics/ValidationKt {
 	public static final fun isVirtualOrCarrierThread (Ljava/lang/Thread;)Z
 	public static synthetic fun isVirtualOrCarrierThread$default (Ljava/lang/Thread;ILjava/lang/Object;)Z
+	public static final fun requirePlatformThread (Ljava/lang/Thread;)V
+	public static synthetic fun requirePlatformThread$default (Ljava/lang/Thread;ILjava/lang/Object;)V
 	public static final fun validateLinuxAndNotVirtual ()V
 	public static final fun validateNotVirtual ()V
 }

@@ -5,14 +5,17 @@ title Supervisor: only the interpreter replies to the kernel
 
 rectangle "Sandboxed JVM" as jvm
 rectangle "USER_NOTIF" as notif
-rectangle "Route" as route
+rectangle "SupervisorRouteDispatcher" as dispatcher
+rectangle "Private route helpers" as route
 rectangle "Effect" as effect
 rectangle "Interpreter" as interp
 rectangle "Kernel CONTINUE / EPERM / ADDFD" as kernel
 
 jvm --> notif : seccomp listener
-notif --> route : parsed syscall
-route --> effect : planned reply
+notif --> dispatcher : parsed syscall
+dispatcher --> route : prepare + execute
+route --> dispatcher : planned reply
+dispatcher --> effect : terminal effect
 effect --> interp : owned FDs + verdict
 interp --> kernel : terminal reply
 
@@ -20,6 +23,7 @@ note bottom of jvm
   JVM verdict is validated in-process.
   The sidecar must not consume a second
   authorization store.
+  Only the dispatcher reaches route helpers.
 end note
 
 @enduml

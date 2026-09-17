@@ -666,6 +666,12 @@ An unusable exchange remains terminal even if closing its connection fails. Its 
 
 Open, socket, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, value replies, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply.
 
+`SupervisorSessionHandler` reaches those route executors only through one
+`SupervisorRouteDispatcher`. The dispatcher owns route preparation, authority and socket
+helpers, executor lifecycle, and terminal-effect mapping. Route helpers are implementation
+details of `io.mazewall.enforcer.internal.supervisor`; other packages may depend only on the
+supervisor protocol/facade types and cannot execute a route directly.
+
 Enforcement compilation rejects a default `ACT_NOTIFY` action and explicitly supervised syscall numbers without a known supervisor route. Profiling is exempt because it observes rather than authorizes operations. Unknown supervisor kinds deny before JVM validation and cannot gain authority from an allow or FD-injection verdict. An FD-injection verdict is accepted only for open, connect, and accept routes.
 
 Open fast-path authorization requires a resolved path and a copied pathname. Unresolved names deny with EPERM regardless of `.class`, `.jar`, or `META-INF/` spelling. Resolved JVM bypass paths use the open executor and atomic FD injection, never CONTINUE; other resolved paths require JVM validation. This removes tracee-memory pointer resumption without claiming race-free filesystem resolution: the existing open executor and filesystem preparation limitations above still apply. Ordinary CONTINUE is confined to the audited spawn category after JVM authorization; fork/vfork and clone authorization depend on parent identity and register flags, not clone's stack/TID pointer contents. Secure exec retains its separate, experimental rewrite protocol and documented limitations.
@@ -781,6 +787,9 @@ Migration: callers that manually invoked `SupervisorInstaller.registerThread` or
 `unregisterThread` must scope the `InstallationReceipt` itself with `use`; closing
 the receipt releases only its private registration lease. It never closes an
 installation listener or reverses containment. Wrapped executors manage receipts.
+The old hidden `Unit`-returning `install*` overloads no longer exist: every installation call
+returns that receipt, so Kotlin callers use `installOnCurrentThread(...).use { receipt -> ... }`
+where a supervisor may be involved and Java callers use try-with-resources.
 
 **Related issues:**
 - WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)

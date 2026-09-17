@@ -39,6 +39,10 @@ If adoption of an existing executor remains supported, the operation must be nam
 
 `Policy.install()` returns an `InstallationReceipt` that is `AutoCloseable` solely to own any supervisor-registration lease. `receipt.use { ... }` releases that registration deterministically; it never removes Seccomp or Landlock restrictions. The receipt does not expose the underlying lease, so callers cannot accidentally retain or duplicate it.
 
+All installation entry points return this receipt. The former hidden `Unit` overloads were
+deleted in the `0.1.0-SNAPSHOT` cutover, including binary-only compatibility declarations;
+Kotlin code scopes a receipt with `use`, and Java code uses try-with-resources.
+
 ### Runtime-Compatible Process Baselines
 
 Preset names do not reveal implicit argument filters. Application-facing APIs should select a runtime profile and explicit capabilities:

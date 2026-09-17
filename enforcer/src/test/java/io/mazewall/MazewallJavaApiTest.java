@@ -180,4 +180,13 @@ class MazewallJavaApiTest {
         assertFalse(receipt.getLandlockApplied());
         assertEquals(12345L, receipt.getTimestampMillis());
     }
+
+    @Test
+    void testJavaInstallationApiReturnsReceiptOnly() {
+        assertTrue(
+                java.util.Arrays.stream(ContainedExecutors.class.getDeclaredMethods())
+                        .filter(method -> method.getName().startsWith("install"))
+                        .allMatch(method -> method.getReturnType().equals(InstallationReceipt.class))
+        );
+    }
 }

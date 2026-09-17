@@ -35,7 +35,7 @@ class SecureExecRouteExecutorTest {
     fun `denied JVM verdict cannot independently authorize or open a secure exec route`() {
         val fixture = SupervisorBoundaryFixture()
         fixture.engine.fileSystem.onOpen = { _, _, _ -> error("route preparation cannot override JVM authorization") }
-        val dispatcher = SupervisorRouteDispatcher(SupervisorRouteExecutor(fixture.engine, TraceeDescriptorImporter(fixture.engine)))
+        val dispatcher = SupervisorRouteDispatcher(fixture.engine, TraceeDescriptorImporter(fixture.engine))
         NativeArena.ofConfined().use { arena ->
             val effect = with(arena) { dispatcher.execute(SupervisorRoute.Abort(13, "session authorization consumed"), fixture.context(arena, Arch.AMD64.execve), "/bin/true") }
             assertEquals(SupervisorReplyEffect.Error(13), effect.getOrFail("denied route"))

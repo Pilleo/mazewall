@@ -42,8 +42,7 @@ internal class SupervisorSessionHandler(
     private val reader = NotificationReader(engine, logger)
     private val exchange = JvmVerdictExchange(engine, socketFd, socketManager)
     private val descriptors = TraceeDescriptorImporter(engine)
-    private val routeExecutor = SupervisorRouteExecutor(engine, descriptors, socketHelpers)
-    private val routes = SupervisorRouteDispatcher(routeExecutor)
+    private val routes = SupervisorRouteDispatcher(engine, descriptors, socketHelpers)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)
     private val notifications = SupervisorNotificationSession(
         admission,
@@ -257,7 +256,7 @@ internal class SupervisorSessionHandler(
             try {
                 notifications.close()
             } finally {
-                routeExecutor.cancel()
+                routes.cancel()
             }
         } finally {
             try {
