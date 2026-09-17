@@ -9,9 +9,19 @@ internal enum class TierEEmissionMode {
     UNIQUE_STACK_SYSCALL,
 }
 
+/** Controls how exact stack definitions travel from the native agent to the collector. */
+internal enum class TierEStackTransport {
+    /** Publish each canonical stack once and reference it from invocation records. */
+    DICTIONARY,
+
+    /** Repeat the captured stack alongside every successful native invocation. */
+    INLINE_PER_INVOCATION,
+}
+
 /** Explicit Tier E session configuration. The full stream remains the safe default. */
 internal data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
+    val stackTransport: TierEStackTransport = TierEStackTransport.DICTIONARY,
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,

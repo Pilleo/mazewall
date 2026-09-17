@@ -49,6 +49,31 @@ import kotlin.test.assertTrue
 @io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 class ProfilerServiceTest {
     @Test
+    fun `execution limits retain the production defaults and reject nonpositive values`() {
+        assertEquals(60_000L, ProfilerExecutionLimits.DEFAULT.workerTimeoutMillis)
+        assertEquals(5_000L, ProfilerExecutionLimits.DEFAULT.workerGraceMillis)
+        assertFailsWith<IllegalArgumentException> { ProfilerExecutionLimits(0, 1) }
+        assertFailsWith<IllegalArgumentException> { ProfilerExecutionLimits(1, 0) }
+    }
+
+    @Test
+    @Timeout(20)
+    fun `diagnostic limits bound a blocked profiler worker`() {
+        StreamInstaller().use { stream ->
+            val service = ProfilerService(runtime(stream))
+            val failure = assertFailsWith<IllegalStateException> {
+                service.profile(
+                    limits = ProfilerExecutionLimits(workerTimeoutMillis = 20, workerGraceMillis = 500),
+                ) {
+                    CountDownLatch(1).await()
+                }
+            }
+
+            assertTrue(failure.message!!.contains("20ms"))
+        }
+    }
+
+    @Test
     @Timeout(20)
     fun `service retains cleanup failures from a listener acquired after close`() {
         val entered = CountDownLatch(1)

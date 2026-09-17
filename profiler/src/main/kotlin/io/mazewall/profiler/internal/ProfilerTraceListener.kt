@@ -331,7 +331,7 @@ internal class ProfilerTraceListener(
 
             while (true) {
                 advanceListener(TraceListenerEvent.AwaitEvent)
-                val event = try {
+                val decoded = try {
                     readNextEvent(dis)
                 } catch (_: java.io.EOFException) {
                     break
@@ -347,8 +347,8 @@ internal class ProfilerTraceListener(
                     throw expectedCloseIoFailure
                 }
 
-                advanceListener(TraceListenerEvent.EventRead(event))
-                processEvent(event)
+                advanceListener(TraceListenerEvent.EventRead(decoded.event))
+                processEvent(decoded.event, decoded.diagnosticRecord)
             }
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
@@ -358,7 +358,7 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun readNextEvent(dis: DataInputStream): TraceEvent {
+    private fun readNextEvent(dis: DataInputStream): DecodedTraceEvent {
         val tidValue = dis.readInt()
         advanceListener(TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
@@ -370,6 +370,7 @@ internal class ProfilerTraceListener(
             throw java.io.IOException(decoded.reason)
         }
         decoded as TraceEventDecodeResult.Event
+        val diagnosticRecord = BenchmarkRawSyscallDiagnostics.record(tidValue, decoded.event.syscallName, decoded.rawArguments)
         advanceListener(TraceListenerEvent.SyscallRead(tidValue, decoded.syscallNameLength))
         advanceListener(TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount))
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
@@ -377,7 +378,7 @@ internal class ProfilerTraceListener(
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
         // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
-        return decoded.event
+        return DecodedTraceEvent(decoded.event, diagnosticRecord)
     }
 
     private fun advanceListener(event: TraceListenerEvent) {
@@ -393,15 +394,19 @@ internal class ProfilerTraceListener(
     }
 
     @Suppress("TooGenericExceptionCaught") // Preserve fatal identity while settling the independent ACK obligation.
-    private fun processEvent(event: TraceEvent) {
+    private fun processEvent(
+        event: TraceEvent,
+        diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+    ) {
          var primary: Throwable? = null
          try {
-             processAndQueueEvent(event)
+             processAndQueueEvent(event, diagnosticRecord)
         } catch (failure: Throwable) {
             primary = failure
         }
         try {
             sendAck()
+            BenchmarkRawSyscallDiagnostics.activeCapture()?.listenerAcknowledged(diagnosticRecord)
         } catch (ackFailure: Throwable) {
             val processingFailure = primary
             if (processingFailure == null) throw ackFailure
@@ -410,14 +415,29 @@ internal class ProfilerTraceListener(
         primary?.let { throw it }
     }
 
-    private fun processAndQueueEvent(event: TraceEvent) {
+    private fun processAndQueueEvent(
+        event: TraceEvent,
+        diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+    ) {
          val resolution = event.pathResolution
-         if (resolution is PathResolution.Resolved && isDuplicate(event.syscallName, resolution)) {
+         if (
+             BenchmarkRawSyscallDiagnostics.activeCapture() == null &&
+             resolution is PathResolution.Resolved &&
+             isDuplicate(event.syscallName, resolution)
+         ) {
              return
          }
 
+         val stackStarted = System.nanoTime()
          event.jvmStackTrace = captureStackTrace(event)
+         val stackCaptureNanos = System.nanoTime() - stackStarted
+         val queueStarted = System.nanoTime()
          eventQueue.offer(event)
+         BenchmarkRawSyscallDiagnostics.activeCapture()?.listenerProcessed(
+             diagnosticRecord,
+             stackCaptureNanos,
+             System.nanoTime() - queueStarted,
+         )
     }
 
     private fun sendAck() {
@@ -470,6 +490,11 @@ internal class ProfilerTraceListener(
         }
     }
 }
+
+private data class DecodedTraceEvent(
+    val event: TraceEvent,
+    val diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+)
 
 internal sealed interface TraceCommandWriteResult {
     data object Written : TraceCommandWriteResult

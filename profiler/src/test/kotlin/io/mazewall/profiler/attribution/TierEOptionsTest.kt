@@ -11,6 +11,11 @@ import kotlin.test.assertTrue
 
 class TierEOptionsTest {
     @Test
+    fun `dictionary stack transport is the default`() {
+        assertEquals(TierEStackTransport.DICTIONARY, TierEOptions().stackTransport)
+    }
+
+    @Test
     fun `full stream is the default and is the only full-trace guarantee`() {
         assertEquals(TierEEmissionMode.FULL_STREAM, TierEOptions().emissionMode)
 

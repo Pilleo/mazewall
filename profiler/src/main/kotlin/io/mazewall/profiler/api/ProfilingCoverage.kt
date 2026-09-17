@@ -64,13 +64,13 @@ public sealed interface ProfileEvidence {
 }
 
 /** Immutable completeness decision and its operator-facing diagnostics. */
-public class ProfileIntegrity(
+internal class ProfileIntegrity internal constructor(
     public val complete: Boolean,
     warnings: List<String> = emptyList(),
 ) {
     public val warnings: List<String> = if (warnings is PathDiagnostics) warnings else java.util.List.copyOf(warnings)
 
-    public fun copy(
+    internal fun copy(
         complete: Boolean = this.complete,
         warnings: List<String> = this.warnings,
     ): ProfileIntegrity = ProfileIntegrity(complete, warnings)
@@ -88,7 +88,7 @@ public class ProfileIntegrity(
  * make the immutable evidence less cohesive, so completeness and diagnostics are grouped in
  * [ProfileIntegrity] while the remaining observation dimensions stay directly addressable.
  */
-public class ProfilingCoverage(
+public class ProfilingCoverage internal constructor(
     public val strategy: ProfileStrategy,
     public val strategyReason: String,
     public val processWide: Boolean,
@@ -98,12 +98,12 @@ public class ProfilingCoverage(
     public val droppedEvents: Int,
     public val drainComplete: Boolean,
     public val environment: ProfileEnvironment,
-    public val integrity: ProfileIntegrity,
+    internal val integrity: ProfileIntegrity,
 ) {
     public val complete: Boolean get() = integrity.complete
     public val warnings: List<String> get() = integrity.warnings
 
-    public fun copy(
+    internal fun copy(
         strategy: ProfileStrategy = this.strategy,
         strategyReason: String = this.strategyReason,
         processWide: Boolean = this.processWide,
@@ -166,7 +166,7 @@ public class ProfilingCoverage(
 
     private fun withPathEvidence(observations: List<ProfileObservation>): ProfilingCoverage = withPathFailures(observations.flatMap { it.pathResolution.failures })
 
-    private fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(integrity = integrity.copy(warnings = PathDiagnostics(warnings, failures)))
+    internal fun withPathFailures(failures: List<PathResolutionFailure>): ProfilingCoverage = copy(integrity = integrity.copy(warnings = PathDiagnostics(warnings, failures)))
 
     /** Internal warning augmentation preserves evidence independently of the new list projection. */
     internal fun withWarnings(

@@ -55,4 +55,36 @@ class TierEBpfProgramBuilderTest {
             "program must reference the dedicated per-context metrics map",
         )
     }
+
+    @Test
+    fun `active session without task storage records an ambient diagnostic before ring reservation`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+        val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
+        val noStorage = program[taskStorageGet + 1]
+        val noStorageTarget = taskStorageGet + 2 + noStorage.off
+
+        assertEquals(0x15, noStorage.code, "task-storage lookup result must be checked")
+        assertEquals(0x18, program[noStorageTarget].code, "missing task storage must enter the diagnostic path")
+        assertEquals(2, program[noStorageTarget].imm, "ambient diagnostics must use the kernel counter map")
+        val diagnosticHandler = program.drop(noStorageTarget)
+        val diagnosticExit = diagnosticHandler.indexOfFirst { it.code == 0x95 }
+        assertTrue(
+            diagnosticExit >= 0 && diagnosticHandler.take(diagnosticExit + 1).none { it.code == 0x85 && it.imm == 131 },
+            "ambient syscalls must exit before ring-buffer reservation",
+        )
+    }
+
+    @Test
+    fun `sys enter program reads syscall arguments directly from the typed tracepoint context`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+
+        assertTrue(
+            program.none { it.code == 0x85 && it.imm == 113 },
+            "raw_syscalls/sys_enter supplies id and args directly; pt_regs probe reads must not be used",
+        )
+        assertTrue(
+            program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 16 },
+            "program must read the first syscall argument from raw_syscalls/sys_enter args[0]",
+        )
+    }
 }

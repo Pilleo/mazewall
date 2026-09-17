@@ -29,6 +29,10 @@ internal interface TierEEventSource : AutoCloseable {
 
     fun readMarkerFailureCount(): Long
 
+    fun readAmbientInactiveCount(): Long = 0L
+
+    fun readContextMetrics(): Map<Long, Long> = emptyMap()
+
     fun readMarkerTransitionCount(): Long
 
     fun readLastMarkerPidTgid(): Long
@@ -56,6 +60,10 @@ private class NativeTierEEventSource(
     override fun readLossCount(): Long = engine.readLossCount()
 
     override fun readMarkerFailureCount(): Long = engine.readMarkerFailureCount()
+
+    override fun readAmbientInactiveCount(): Long = engine.readAmbientInactiveCount()
+
+    override fun readContextMetrics(): Map<Long, Long> = engine.readContextMetrics()
 
     override fun readMarkerTransitionCount(): Long = engine.readMarkerTransitionCount()
 
@@ -85,6 +93,7 @@ internal class TierEProfilerSession internal constructor(
     private val options: TierEOptions = TierEOptions(),
     private val definitionReader: (Path) -> AgentDefinitionFile.Contents = AgentDefinitionFile::read,
     private val dictionarySink: DictionaryBatchSink? = null,
+    private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -99,6 +108,20 @@ internal class TierEProfilerSession internal constructor(
         dictionarySink: DictionaryBatchSink,
     ) : this(NativeTierEEventSource(engine), processEpoch, options, AgentDefinitionFile::read, dictionarySink)
 
+    internal constructor(
+        engine: TierEbpfEngine,
+        processEpoch: Long,
+        options: TierEOptions,
+        uniqueEdgeDecisionObserver: (UniqueEdgeDecision) -> Unit,
+    ) : this(
+        NativeTierEEventSource(engine),
+        processEpoch,
+        options,
+        AgentDefinitionFile::read,
+        null,
+        uniqueEdgeDecisionObserver,
+    )
+
     private val sessionEpoch = SessionEpoch(NEXT_SESSION_EPOCH.incrementAndGet())
     private val processIncarnation = ProcessIncarnationId(processEpoch)
     private val retainedBudget = TierERetainedStateBudget(options.maxRetainedBytes)
@@ -107,6 +130,7 @@ internal class TierEProfilerSession internal constructor(
         options.maxPendingRecords,
         expectedProcessIncarnation = processIncarnation,
         maxRetainedBytes = options.maxRetainedBytes,
+        uniqueEdgeDecisionObserver = uniqueEdgeDecisionObserver,
     )
     private val dictionaryEncoder = dictionarySink?.let {
         StackDictionaryStreamEncoder(options.maxPendingRecords).also { encoder ->
@@ -121,6 +145,7 @@ internal class TierEProfilerSession internal constructor(
     private val resolved = mutableListOf<ResolvedSyscall>()
     private var reportedKernelLosses = 0L
     private var reportedMarkerFailures = 0L
+    private var reportedAmbientInactive = 0L
     private var state: TierESessionState = TierESessionState.Collecting
     private var lifecycle: TierESessionLifecycleState = TierESessionLifecycleState.RUNNING
     private var liveDefinitionFile: Path? = null
@@ -245,6 +270,15 @@ internal class TierEProfilerSession internal constructor(
             collector.recordDictionaryTransport(dictionaryPublisher.transportEvidence)
         }
         definitions.invocations.forEach { retain(collector.accept(it)) }
+        collector.recordReconciliation(
+            TierEReconciliation(
+                admittedInvocations = definitions.invocations.size.toLong(),
+                exactInvocations = definitions.invocations.count { it.captureFailure == null }.toLong(),
+                failedInvocations = definitions.invocations.count { it.captureFailure != null }.toLong(),
+                kernelActiveObservations = source.readContextMetrics().values.fold(0L, Math::addExact),
+                markerTransitions = source.readMarkerTransitionCount(),
+            ),
+        )
         retain(collector.finish())
         val profile = TierEProfile(
             resolved,
@@ -310,6 +344,12 @@ internal class TierEProfilerSession internal constructor(
         if (markerFailures != reportedMarkerFailures) {
             collector.recordLoss(markerFailures - reportedMarkerFailures)
             reportedMarkerFailures = markerFailures
+        }
+        val ambientInactive = source.readAmbientInactiveCount()
+        check(ambientInactive >= reportedAmbientInactive) { "ambient inactive counter moved backwards" }
+        if (ambientInactive != reportedAmbientInactive) {
+            collector.recordAmbientInactive(ambientInactive - reportedAmbientInactive)
+            reportedAmbientInactive = ambientInactive
         }
     }
 

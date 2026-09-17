@@ -4,12 +4,14 @@ package io.mazewall.profiler.internal.attribution
 internal class TierEIntegrityAccumulator {
     private var observedLosses: Long = 0L
     private var attributionFailures: Long = 0L
+    private var ambientInactiveObservations: Long = 0L
     private var outOfDomainAttempts: Long = 0L
     private var virtualPinnedScopes: Long = 0L
     private var virtualPinnedNanos: Long = 0L
     private var lifecycleInvalidations: Long = 0L
     private var dictionaryIntegrityFailures: Long = 0L
     private var dictionaryTransport = DictionaryTransportEvidence()
+    private var reconciliation = TierEReconciliation()
 
     fun recordLoss(count: Long) {
         require(count > 0) { "loss count must be positive" }
@@ -19,6 +21,11 @@ internal class TierEIntegrityAccumulator {
     fun recordAttributionFailure(count: Long = 1L) {
         require(count > 0) { "attribution failure count must be positive" }
         attributionFailures = Math.addExact(attributionFailures, count)
+    }
+
+    fun recordAmbientInactive(count: Long) {
+        require(count > 0) { "ambient inactive count must be positive" }
+        ambientInactiveObservations = Math.addExact(ambientInactiveObservations, count)
     }
 
     fun recordOutOfDomainAttempt(count: Long = 1L) {
@@ -49,6 +56,10 @@ internal class TierEIntegrityAccumulator {
         dictionaryTransport = evidence
     }
 
+    fun recordReconciliation(value: TierEReconciliation) {
+        reconciliation = value
+    }
+
     fun snapshot(
         emissionMode: TierEEmissionMode,
         captureDomain: ObservationScope,
@@ -56,6 +67,7 @@ internal class TierEIntegrityAccumulator {
         SessionIntegrity(
             observedLosses = observedLosses,
             attributionFailures = attributionFailures,
+            ambientInactiveObservations = ambientInactiveObservations,
             outOfDomainAttempts = outOfDomainAttempts,
             lifecycleInvalidations = lifecycleInvalidations,
             emissionMode = emissionMode,
@@ -64,5 +76,6 @@ internal class TierEIntegrityAccumulator {
             captureDomain = captureDomain,
             dictionaryTransport = dictionaryTransport,
             dictionaryIntegrityFailures = dictionaryIntegrityFailures,
+            reconciliation = reconciliation,
         )
 }

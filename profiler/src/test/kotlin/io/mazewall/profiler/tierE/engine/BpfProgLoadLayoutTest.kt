@@ -83,12 +83,6 @@ class BpfProgLoadLayoutTest {
     }
 
     @Test
-    fun `uses the linux raw tracepoint open attribute offsets`() {
-        assertEquals(0L, BpfRawTracepointOpenLayout.NAME)
-        assertEquals(8L, BpfRawTracepointOpenLayout.PROGRAM_FD)
-    }
-
-    @Test
     fun `uses the linux btf load and typed map attribute offsets`() {
         assertEquals(0L, BpfBtfLoadLayout.BTF)
         assertEquals(8L, BpfBtfLoadLayout.LOG_BUFFER)
@@ -104,30 +98,26 @@ class BpfProgLoadLayoutTest {
     fun `uses the linux perf event uprobe attribute offsets`() {
         assertEquals(0L, PerfEventAttrLayout.TYPE)
         assertEquals(4L, PerfEventAttrLayout.SIZE_FIELD)
+        assertEquals(8L, PerfEventAttrLayout.CONFIG)
         assertEquals(16L, PerfEventAttrLayout.SAMPLE_PERIOD)
         assertEquals(56L, PerfEventAttrLayout.UPROBE_PATH)
         assertEquals(64L, PerfEventAttrLayout.UPROBE_OFFSET)
     }
 
     @Test
-    fun `all generated branches stay inside the program and filters exit`() {
+    fun `all generated branches are reachable and stay inside the program`() {
         val unusedNative = Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(RawSyscallOperations::class.java),
         ) { _, _, _ -> error("buildProgram must not make syscalls") } as RawSyscallOperations
-        val program = TierEbpfEngine(unusedNative).buildProgram()
-        val exitIndex = program.lastIndex
+        val fullStream = TierEbpfEngine(unusedNative).buildProgram()
+        val uniqueCoverage = TierEbpfEngine(unusedNative).buildProgram(
+            TierEOptions(TierEEmissionMode.UNIQUE_STACK_SYSCALL),
+        )
 
-        program.forEachIndexed { index, instruction ->
-            if (instruction.code == 0x15 || instruction.code == 0x5d) {
-                val target = index + instruction.off + 1
-                assertTrue(target in program.indices, "branch at $index targets $target outside program")
-                if (instruction.code == 0x5d) {
-                    assertEquals(exitIndex, target, "early exit branch at $index must target exit")
-                }
-            }
-        }
-        assertTrue(program.any { it.code == 0x85 && it.imm == 113 }, "syscall arguments must use probe_read_kernel")
+        assertVerifierReachable(fullStream)
+        assertVerifierReachable(uniqueCoverage)
+        assertTrue(fullStream.none { it.code == 0x85 && it.imm == 113 }, "typed tracepoint arguments must not use pt_regs probe reads")
     }
 
     @Test
@@ -164,5 +154,38 @@ class BpfProgLoadLayoutTest {
         assertTrue(program.any { it.code == 0x79 && it.off.toInt() == 112 }, "marker must read pt_regs di")
         assertTrue(program.any { it.code == 0x85 && it.imm == 158 }, "marker must get current task BTF pointer")
         assertTrue(program.any { it.code == 0x85 && it.imm == 156 }, "marker must create/read task storage")
+    }
+
+    private fun assertVerifierReachable(program: List<TierEbpfEngine.Insn>) {
+        val reachable = mutableSetOf<Int>()
+        val pending = ArrayDeque<Int>()
+
+        fun admit(index: Int) {
+            assertTrue(index in program.indices, "control flow targets $index outside program")
+            if (reachable.add(index)) pending.addLast(index)
+        }
+
+        admit(0)
+        while (pending.isNotEmpty()) {
+            val index = pending.removeFirst()
+            val instruction = program[index]
+            when (instruction.code) {
+                0x95 -> Unit
+                0x05 -> {
+                    val target = index + instruction.off + 1
+                    assertTrue(program[target].code != 0, "jump at $index targets an LD_MAP_FD continuation")
+                    admit(target)
+                }
+                0x15, 0x5d -> {
+                    val target = index + instruction.off + 1
+                    assertTrue(program[target].code != 0, "branch at $index targets an LD_MAP_FD continuation")
+                    admit(target)
+                    admit(index + 1)
+                }
+                else -> if (index != program.lastIndex) admit(index + 1)
+            }
+        }
+
+        assertEquals(program.indices.toSet(), reachable, "generated program contains verifier-unreachable instructions")
     }
 }

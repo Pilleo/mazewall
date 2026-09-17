@@ -11,6 +11,7 @@ import java.nio.file.Path
 /** Deterministic userspace consumer for a Linux `BPF_MAP_TYPE_RINGBUF`. */
 internal enum class BpfRingBufferRecordKind { READY, BUSY, DISCARDED }
 
+@Suppress("TooGenericExceptionCaught") // Mapping rollback must retain every native failure, including linkage errors.
 internal class BpfRingBufferReader(
     private val native: RawSyscallOperations,
     mapFd: Int,

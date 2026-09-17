@@ -109,9 +109,15 @@ class ProfilerTraceListenerTest {
                     io.mazewall.profiler.api.PathResolution.NotApplicable,
             ),
             )
-            val process = ProfilerTraceListener::class.java.getDeclaredMethod("processEvent", TraceEvent::class.java).apply { isAccessible = true }
+            val process =
+                ProfilerTraceListener::class.java
+                    .getDeclaredMethod(
+                        "processEvent",
+                        TraceEvent::class.java,
+                        BenchmarkRawSyscallDiagnostics.Record::class.java,
+                    ).apply { isAccessible = true }
             val thrown = org.junit.jupiter.api.Assertions
-                .assertThrows(java.lang.reflect.InvocationTargetException::class.java) { process.invoke(listener, event) }
+                .assertThrows(java.lang.reflect.InvocationTargetException::class.java) { process.invoke(listener, event, null) }
             org.junit.jupiter.api.Assertions
                 .assertSame(original, thrown.cause)
             assertEquals(1, original.suppressed.size)

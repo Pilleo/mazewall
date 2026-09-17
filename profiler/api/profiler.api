@@ -69,15 +69,13 @@ public final class io/mazewall/profiler/api/BillOfBehavior {
 	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;)Ljava/lang/String;
 	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;)Ljava/lang/String;
 	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;)Ljava/lang/String;
-	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;Z)Ljava/lang/String;
-	public static synthetic fun toDsl$default (Lio/mazewall/profiler/api/BillOfBehavior;Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;ZILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun toDsl$default (Lio/mazewall/profiler/api/BillOfBehavior;Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;ILjava/lang/Object;)Ljava/lang/String;
 	public final fun toJson ()Ljava/lang/String;
 	public final fun toPolicy ()Lio/mazewall/enforcer/api/Policy;
 	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;)Lio/mazewall/enforcer/api/Policy;
 	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;)Lio/mazewall/enforcer/api/Policy;
-	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;Z)Lio/mazewall/enforcer/api/Policy;
-	public static synthetic fun toPolicy$default (Lio/mazewall/profiler/api/BillOfBehavior;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;ZILjava/lang/Object;)Lio/mazewall/enforcer/api/Policy;
+	public static synthetic fun toPolicy$default (Lio/mazewall/profiler/api/BillOfBehavior;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Lio/mazewall/profiler/api/ProfilingCoverage;ILjava/lang/Object;)Lio/mazewall/enforcer/api/Policy;
 	public final fun toStackTracesJson ()Ljava/lang/String;
 }
 
@@ -473,6 +471,21 @@ public final class io/mazewall/profiler/api/PathResolutionQuality : java/lang/En
 	public static fun values ()[Lio/mazewall/profiler/api/PathResolutionQuality;
 }
 
+public final class io/mazewall/profiler/api/ProfileDocument {
+	public static final field CURRENT_FORMAT_VERSION I
+	public static final field Companion Lio/mazewall/profiler/api/ProfileDocument$Companion;
+	public static final fun fromJson (Ljava/lang/String;)Lio/mazewall/profiler/api/ProfileDocument;
+	public final fun getBehavior ()Lio/mazewall/profiler/api/BillOfBehavior;
+	public final fun getCoverage ()Lio/mazewall/profiler/api/ProfilingCoverage;
+	public final fun getFormatVersion ()I
+	public final fun toJson ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/api/ProfileDocument$Companion {
+	public final fun from (Lio/mazewall/profiler/api/ProfilingResult;)Lio/mazewall/profiler/api/ProfileDocument;
+	public final fun fromJson (Ljava/lang/String;)Lio/mazewall/profiler/api/ProfileDocument;
+}
+
 public final class io/mazewall/profiler/api/ProfileEnvironment {
 	public fun <init> (Ljava/lang/String;Lio/mazewall/profiler/api/EbpfLoad;Ljava/lang/Integer;Ljava/lang/Boolean;)V
 	public synthetic fun <init> (Ljava/lang/String;Lio/mazewall/profiler/api/EbpfLoad;Ljava/lang/Integer;Ljava/lang/Boolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -510,17 +523,6 @@ public final class io/mazewall/profiler/api/ProfileEvidence$Incomplete : io/maze
 	public final fun getReasons ()Ljava/util/List;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
-}
-
-public final class io/mazewall/profiler/api/ProfileIntegrity {
-	public fun <init> (ZLjava/util/List;)V
-	public synthetic fun <init> (ZLjava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun copy (ZLjava/util/List;)Lio/mazewall/profiler/api/ProfileIntegrity;
-	public static synthetic fun copy$default (Lio/mazewall/profiler/api/ProfileIntegrity;ZLjava/util/List;ILjava/lang/Object;)Lio/mazewall/profiler/api/ProfileIntegrity;
-	public fun equals (Ljava/lang/Object;)Z
-	public final fun getComplete ()Z
-	public final fun getWarnings ()Ljava/util/List;
-	public fun hashCode ()I
 }
 
 public abstract interface class io/mazewall/profiler/api/ProfileObservation {
@@ -676,17 +678,13 @@ public final class io/mazewall/profiler/api/Profiler$ProfilerExecutorWrapper : j
 
 public final class io/mazewall/profiler/api/ProfilingCoverage {
 	public static final field Companion Lio/mazewall/profiler/api/ProfilingCoverage$Companion;
-	public fun <init> (Lio/mazewall/profiler/api/ProfileStrategy;Ljava/lang/String;ZLio/mazewall/profiler/api/IoUringVisibility;Lio/mazewall/profiler/api/PathResolutionQuality;Lio/mazewall/profiler/api/StackAttribution;IZLio/mazewall/profiler/api/ProfileEnvironment;Lio/mazewall/profiler/api/ProfileIntegrity;)V
 	public static final fun absent ()Lio/mazewall/profiler/api/ProfilingCoverage;
-	public final fun copy (Lio/mazewall/profiler/api/ProfileStrategy;Ljava/lang/String;ZLio/mazewall/profiler/api/IoUringVisibility;Lio/mazewall/profiler/api/PathResolutionQuality;Lio/mazewall/profiler/api/StackAttribution;IZLio/mazewall/profiler/api/ProfileEnvironment;Lio/mazewall/profiler/api/ProfileIntegrity;)Lio/mazewall/profiler/api/ProfilingCoverage;
-	public static synthetic fun copy$default (Lio/mazewall/profiler/api/ProfilingCoverage;Lio/mazewall/profiler/api/ProfileStrategy;Ljava/lang/String;ZLio/mazewall/profiler/api/IoUringVisibility;Lio/mazewall/profiler/api/PathResolutionQuality;Lio/mazewall/profiler/api/StackAttribution;IZLio/mazewall/profiler/api/ProfileEnvironment;Lio/mazewall/profiler/api/ProfileIntegrity;ILjava/lang/Object;)Lio/mazewall/profiler/api/ProfilingCoverage;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun evidence ()Lio/mazewall/profiler/api/ProfileEvidence;
 	public final fun getComplete ()Z
 	public final fun getDrainComplete ()Z
 	public final fun getDroppedEvents ()I
 	public final fun getEnvironment ()Lio/mazewall/profiler/api/ProfileEnvironment;
-	public final fun getIntegrity ()Lio/mazewall/profiler/api/ProfileIntegrity;
 	public final fun getIoUring ()Lio/mazewall/profiler/api/IoUringVisibility;
 	public final fun getPathFailures ()Ljava/util/List;
 	public final fun getPathResolution ()Lio/mazewall/profiler/api/PathResolutionQuality;
@@ -704,26 +702,34 @@ public final class io/mazewall/profiler/api/ProfilingCoverage$Companion {
 }
 
 public final class io/mazewall/profiler/api/ProfilingResult {
+	public static final field Companion Lio/mazewall/profiler/api/ProfilingResult$Companion;
 	public fun <init> (Ljava/lang/Object;Lio/mazewall/profiler/api/BillOfBehavior;Ljava/util/Map;Lio/mazewall/profiler/api/ProfilingCoverage;Ljava/util/List;)V
 	public synthetic fun <init> (Ljava/lang/Object;Lio/mazewall/profiler/api/BillOfBehavior;Ljava/util/Map;Lio/mazewall/profiler/api/ProfilingCoverage;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun copy (Ljava/lang/Object;Lio/mazewall/profiler/api/BillOfBehavior;Ljava/util/Map;Lio/mazewall/profiler/api/ProfilingCoverage;Ljava/util/List;)Lio/mazewall/profiler/api/ProfilingResult;
 	public static synthetic fun copy$default (Lio/mazewall/profiler/api/ProfilingResult;Ljava/lang/Object;Lio/mazewall/profiler/api/BillOfBehavior;Ljava/util/Map;Lio/mazewall/profiler/api/ProfilingCoverage;Ljava/util/List;ILjava/lang/Object;)Lio/mazewall/profiler/api/ProfilingResult;
+	public static final fun dedicatedWorkerPoliciesFromDocument (Ljava/lang/String;)[Lio/mazewall/enforcer/api/Policy;
 	public final fun getBehavior ()Lio/mazewall/profiler/api/BillOfBehavior;
 	public final fun getCoverage ()Lio/mazewall/profiler/api/ProfilingCoverage;
 	public final fun getObservations ()Ljava/util/List;
 	public final fun getStackProfile ()Ljava/util/Map;
 	public final fun getValue ()Ljava/lang/Object;
+	public final fun toDedicatedWorkerPolicies ()[Lio/mazewall/enforcer/api/Policy;
+	public final fun toDedicatedWorkerPolicies (Lio/mazewall/enforcer/api/RuntimeProfile;)[Lio/mazewall/enforcer/api/Policy;
+	public static synthetic fun toDedicatedWorkerPolicies$default (Lio/mazewall/profiler/api/ProfilingResult;Lio/mazewall/enforcer/api/RuntimeProfile;ILjava/lang/Object;)[Lio/mazewall/enforcer/api/Policy;
 	public final fun toDsl ()Ljava/lang/String;
 	public final fun toDsl (Ljava/lang/String;)Ljava/lang/String;
 	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;)Ljava/lang/String;
 	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;)Ljava/lang/String;
-	public final fun toDsl (Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Z)Ljava/lang/String;
-	public static synthetic fun toDsl$default (Lio/mazewall/profiler/api/ProfilingResult;Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;ZILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun toDsl$default (Lio/mazewall/profiler/api/ProfilingResult;Ljava/lang/String;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;ILjava/lang/Object;)Ljava/lang/String;
 	public final fun toPolicy ()Lio/mazewall/enforcer/api/Policy;
 	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;)Lio/mazewall/enforcer/api/Policy;
-	public final fun toPolicy (Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;Z)Lio/mazewall/enforcer/api/Policy;
-	public static synthetic fun toPolicy$default (Lio/mazewall/profiler/api/ProfilingResult;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;ZILjava/lang/Object;)Lio/mazewall/enforcer/api/Policy;
+	public static synthetic fun toPolicy$default (Lio/mazewall/profiler/api/ProfilingResult;Lio/mazewall/enforcer/api/Policy;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/mazewall/enforcer/api/Policy;
+	public final fun toProfileDocumentJson ()Ljava/lang/String;
+}
+
+public final class io/mazewall/profiler/api/ProfilingResult$Companion {
+	public final fun dedicatedWorkerPoliciesFromDocument (Ljava/lang/String;)[Lio/mazewall/enforcer/api/Policy;
 }
 
 public final class io/mazewall/profiler/api/SocketType {

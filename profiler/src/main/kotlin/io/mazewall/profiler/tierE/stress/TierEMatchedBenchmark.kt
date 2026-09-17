@@ -1,0 +1,714 @@
+package io.mazewall.profiler.tierE.stress
+
+import java.nio.file.Files
+import java.nio.file.Path
+import java.time.Instant
+import java.util.concurrent.TimeUnit
+import kotlin.io.path.createDirectories
+import kotlin.random.Random
+
+/** Privileged matched benchmark with warmed, in-process batches and fork-level rotation. */
+internal object TierEMatchedBenchmark {
+    private const val COMMON_WORKLOAD = "common-file-workload"
+    private const val WRITE_ORACLE_WORKLOAD = "write-oracle-workload"
+    private val allModes = listOf(
+        Mode.BASELINE,
+        Mode.FULL_STREAM,
+        Mode.UNIQUE_EDGE,
+        Mode.INLINE_FULL_STREAM,
+        Mode.INLINE_UNIQUE_EDGE,
+        Mode.USER_NOTIF_NO_STACK,
+        Mode.USER_NOTIF,
+    )
+
+    @JvmStatic
+    fun main(args: Array<String>) {
+        require(args.size in 1..8) {
+            "usage: <agent.so> [iterations] [warmups] [batches] [forks] [workload-cpu] [collector-cpu] [results.jsonl]"
+        }
+        val config = Config(
+            agent = Path.of(args[0]).toAbsolutePath(),
+            iterations = args.getOrElse(1) { "100" }.toInt(),
+            warmups = args.getOrElse(2) { "3" }.toInt(),
+            batches = args.getOrElse(3) { "10" }.toInt(),
+            forks = args.getOrElse(4) { "5" }.toInt(),
+            workloadCpu = args.getOrElse(5) { "0" },
+            collectorCpu = args.getOrElse(6) { "1" },
+            artifact = Path.of(args.getOrElse(7) { "build/tier-e-matched-benchmark/results.jsonl" }).toAbsolutePath(),
+            scope = Scope.fromProperty(System.getProperty("mazewall.tier-e.benchmark-scope", "full")),
+            workload = Workload.fromProperty(System.getProperty("mazewall.tier-e.benchmark-workload", "oracle")),
+            childTimeoutSeconds = System.getProperty("mazewall.tier-e.child-timeout-seconds", "180").toLong(),
+            userNotifWorkerTimeoutSeconds = System.getProperty("mazewall.tier-e.user-notif-worker-timeout-seconds", "480").toLong(),
+            userNotifChildTimeoutSeconds = System.getProperty("mazewall.tier-e.user-notif-child-timeout-seconds", "540").toLong(),
+        )
+        require(Files.isRegularFile(config.agent)) { "missing agent: ${config.agent}" }
+        require(
+            config.iterations > 0 &&
+                config.warmups >= 0 &&
+                config.batches > 0 &&
+                config.forks > 0 &&
+                config.childTimeoutSeconds > 0 &&
+                config.userNotifWorkerTimeoutSeconds > 0 &&
+                config.userNotifChildTimeoutSeconds > config.userNotifWorkerTimeoutSeconds,
+        ) {
+            "benchmark dimensions and deadlines must be positive; USER_NOTIF child timeout must exceed its worker timeout"
+        }
+        config.artifact.parent?.createDirectories()
+        Files.deleteIfExists(config.artifact)
+        append(config.artifact, metadata(config))
+        try {
+            val forks = buildList {
+                repeat(config.forks) { fork ->
+                    variants(config.scope, fork).forEach { variant ->
+                        add(run(variant, fork + 1, config))
+                    }
+                }
+            }
+            verify(forks, config)
+            append(config.artifact, summary(forks, config))
+            append(config.artifact, terminal(success = true, message = "completed"))
+            val profiledForks = forks.filterNot { it.variant.mode == Mode.BASELINE }
+            val correctness = when {
+                profiledForks.any { it.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.FAILED } -> "FAILED"
+                profiledForks.isNotEmpty() && profiledForks.all { it.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS } -> "PASS"
+                else -> "UNVERIFIED"
+            }
+            println("tier-e-matched-benchmark: artifact=${config.artifact} forks=${config.forks} workload_correctness=$correctness")
+        } catch (failure: Throwable) {
+            append(config.artifact, terminal(success = false, message = failure.message ?: failure::class.java.name))
+            throw failure
+        }
+    }
+
+    private fun run(
+        variant: Variant,
+        fork: Int,
+        config: Config,
+    ): ForkResult {
+        val mode = variant.mode
+        val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
+        val classpath = System.getProperty("java.class.path")
+        val canonicalCache = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
+        val definitions = Files.createTempFile("tier-e-matched-${mode.jsonName}-", ".mzsd")
+        Files.deleteIfExists(definitions)
+        val command = when (mode) {
+            Mode.BASELINE -> listOf(
+                java,
+                "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
+                "-cp",
+                classpath,
+                config.workload.className,
+                "benchmark",
+                "0",
+                "platform",
+                config.warmups.toString(),
+                config.batches.toString(),
+                config.iterations.toString(),
+            )
+            Mode.FULL_STREAM, Mode.UNIQUE_EDGE, Mode.INLINE_FULL_STREAM, Mode.INLINE_UNIQUE_EDGE -> listOf(
+                java,
+                "-Dmazewall.tier-e.canonical-cache=${variant.cacheMode ?: canonicalCache}",
+                "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
+                "-Dmazewall.tier-e.ring-capacity-bytes=8388608",
+                "--enable-native-access=ALL-UNNAMED",
+                "-cp",
+                classpath,
+                TierEKernelSmoke::class.java.name,
+                config.agent.toString(),
+                "auto",
+                classpath,
+                definitions.toString(),
+                "platform",
+                config.iterations.toString(),
+                config.workloadCpu,
+                mode.emissionMode,
+                mode.stackTransport,
+                config.workload.kernelArgument,
+                "benchmark",
+                config.warmups.toString(),
+                config.batches.toString(),
+            )
+            Mode.USER_NOTIF, Mode.USER_NOTIF_NO_STACK -> listOf(
+                java,
+                "--enable-native-access=ALL-UNNAMED",
+                "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
+                "-cp",
+                classpath,
+                UserNotifOracleSmoke::class.java.name,
+                "benchmark",
+                config.warmups.toString(),
+                config.batches.toString(),
+                config.iterations.toString(),
+                mode.userNotifStackOption,
+                config.workload.userNotifArgument,
+                config.userNotifWorkerTimeoutSeconds.toString(),
+            )
+        }
+        val cpu = if (mode.tierE) config.collectorCpu else config.workloadCpu
+        append(config.artifact, "{\"kind\":\"fork-start\",\"variant\":\"${variant.jsonName(config.scope)}\",\"fork\":$fork}")
+        val outputFile = Files.createTempFile("tier-e-matched-output-", ".log")
+        val started = System.nanoTime()
+        val process = ProcessBuilder(listOf("taskset", "-c", cpu) + command)
+            .redirectErrorStream(true)
+            .redirectOutput(outputFile.toFile())
+            .start()
+        val childTimeoutSeconds = if (mode.userNotif) {
+            config.userNotifChildTimeoutSeconds
+        } else {
+            config.childTimeoutSeconds
+        }
+        val telemetry = awaitProcess(process, childTimeoutSeconds)
+        val completed = telemetry.completed
+        if (!completed) {
+            process.destroyForcibly()
+            process.waitFor(10, TimeUnit.SECONDS)
+        }
+        val output = Files.readString(outputFile)
+        Files.deleteIfExists(outputFile)
+        val elapsedNanos = System.nanoTime() - started
+        if (!completed || process.exitValue() != 0) {
+            append(config.artifact, "{\"kind\":\"failure\",\"variant\":\"${variant.jsonName(config.scope)}\",\"fork\":$fork,\"timed_out\":${!completed},\"output\":\"${escape(output)}\"}")
+            error("${variant.jsonName(config.scope)} fork $fork ${if (completed) "failed" else "timed out"}:\n$output")
+        }
+        val batches = BATCH_PATTERN
+            .findAll(output)
+            .filter { it.groupValues[1] == "measured" }
+            .map { match ->
+            Batch(match.groupValues[2].toInt(), match.groupValues[3].toLong(), match.groupValues[4].toLong(), match.groupValues[5].toLong())
+        }.toList()
+        check(batches.size == config.batches) { "${mode.jsonName} fork $fork emitted ${batches.size} measured batches" }
+        val evidence = Evidence(
+            metricOrZero(output, "observations"),
+            metricOrZero(output, "resolved"),
+            metricOrZero(output, "workload_resolved"),
+            metricOrZero(output, "workload_unlinks_resolved"),
+            metricOrZero(output, "unknown_no_active"),
+            metricOrZero(output, "ambient_inactive"),
+            metricOrZero(output, "unknown_other"),
+            metricOrZero(output, "wrong"),
+            metricOrZero(output, "lost"),
+            metricOrZero(output, "failures"),
+            metricOrZero(output, "dropped"),
+            metricOrZero(output, "reconciliation_admitted_invocations"),
+            metricOrZero(output, "reconciliation_exact_invocations"),
+            metricOrZero(output, "reconciliation_failed_invocations"),
+            metricOrZero(output, "reconciliation_kernel_active_observations"),
+            output.contains("workloadFrames=true"),
+            output.contains("evidence_complete=true") || output.contains("evidenceComplete=true"),
+            TierEBenchmarkContract.OperationOracle(
+                available = output.contains("operation_oracle_available=true"),
+                expected = metricOrZero(output, "expected_operations"),
+                matched = metricOrZero(output, "matched_operations"),
+                representativeOnly = output.contains("operation_oracle_expectation=unique_representative"),
+                candidates = metricOrZero(output, "candidate_operations"),
+                acknowledged = metricOrZero(output, "acknowledged_operations"),
+                suppressed = metricOrZero(output, "suppressed_representatives"),
+                unresolved = metricOrZero(output, "unresolved_operations"),
+                missing = metricOrZero(output, "missing_operations"),
+                duplicates = metricOrZero(output, "duplicate_operations"),
+                wrong = metricOrZero(output, "wrong_operations"),
+                unclassified = metricOrZero(output, "unclassified_operations"),
+            ),
+            PhaseMetrics(
+                metricOrZero(output, "get_stack_trace_ns"),
+                metricOrZero(output, "raw_key_ns"),
+                metricOrZero(output, "logical_metadata_ns"),
+                metricOrZero(output, "serialization_ns"),
+                metricOrZero(output, "publication_bytes"),
+                metricOrZero(output, "publication_latency_ns"),
+                metricOrZero(output, "lock_wait_ns"),
+                metricOrZero(output, "peak_retained_bytes"),
+                metricOrZero(output, "native_retained_bytes"),
+                metricOrZero(output, "native_retention_exhaustions"),
+                metricOrZero(output, "publication_count"),
+                metricOrZero(output, "coalesced_publications"),
+                metricOrZero(output, "failed_publications"),
+                metricOrZero(output, "cache_hits"),
+                metricOrZero(output, "cache_misses"),
+            ),
+            UserNotifPhaseMetrics(
+                metricOrZero(output, "user_notif_timed_operations"),
+                metricOrZero(output, "user_notif_operation_ns"),
+                metricOrZero(output, "user_notif_blocked_before_listener_ns"),
+                metricOrZero(output, "user_notif_listener_to_ack_ns"),
+                metricOrZero(output, "user_notif_stack_capture_ns"),
+                metricOrZero(output, "user_notif_queue_ns"),
+                metricOrZero(output, "user_notif_ack_to_return_ns"),
+            ),
+        )
+        val verdict = TierEBenchmarkContract.evaluate(
+            mode.tierE,
+            mode.userNotif,
+            mode.requiresWorkloadFrames,
+            evidence.contractEvidence(),
+            requiresOperationOracle = mode.userNotif && config.workload == Workload.ORACLE,
+        )
+        val result = ForkResult(
+            config.scope,
+            variant,
+            fork,
+            batches,
+            evidence,
+            verdict,
+            elapsedNanos,
+            telemetry.cpuNanos,
+            telemetry.peakRssBytes,
+        )
+        append(config.artifact, forkJson(result, output))
+        batches.forEach { batch -> append(config.artifact, sampleJson(variant, config.scope, fork, batch)) }
+        Files.deleteIfExists(definitions)
+        return result
+    }
+
+    private fun verify(
+        forks: List<ForkResult>,
+        config: Config,
+    ) {
+        val expectedForks = variants(config.scope, 0).size * config.forks
+        check(forks.size == expectedForks) { "expected $expectedForks forks, received ${forks.size}" }
+        // The shared-file workload checksum includes a fresh temporary path per JVM. Its child-local
+        // verification is authoritative; cross-process benchmark comparison uses declared operation counts.
+        forks.forEach { result ->
+            check(result.batches.size == config.batches) { "${result.variant.mode.jsonName} has incomplete batches" }
+            result.batches.forEach { batch ->
+                check(batch.operations == config.iterations.toLong()) { "${result.variant.mode.jsonName} operation mismatch" }
+            }
+            check(result.verdict.workloadCorrectness != TierEBenchmarkContract.CorrectnessState.FAILED) {
+                "${result.variant.jsonName(config.scope)} workload failure: ${result.verdict.failures}"
+            }
+        }
+    }
+
+    private fun metadata(config: Config): String {
+        val cacheMode = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
+        val sourceRevision = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_REVISION") ?: "unknown")
+        val sourceDirty = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_DIRTY") ?: "unknown")
+        val javaVersion = escape(System.getProperty("java.version"))
+        val operatingSystem = escape(System.getProperty("os.name") + " " + System.getProperty("os.version"))
+        return "{\"kind\":\"metadata\",\"timestamp\":\"${Instant.now()}\",\"iterations\":${config.iterations}," +
+            "\"warmups\":${config.warmups},\"batches\":${config.batches},\"forks\":${config.forks}," +
+            "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\",\"canonical_cache\":\"$cacheMode\",\"scope\":\"${config.scope.jsonName}\"," +
+            "\"child_timeout_seconds\":${config.childTimeoutSeconds}," +
+            "\"user_notif_worker_timeout_seconds\":${config.userNotifWorkerTimeoutSeconds}," +
+            "\"user_notif_child_timeout_seconds\":${config.userNotifChildTimeoutSeconds}," +
+            "\"source_revision\":\"$sourceRevision\",\"source_dirty\":\"$sourceDirty\",\"java_version\":\"$javaVersion\",\"os\":\"$operatingSystem\"}"
+    }
+
+    private fun summary(
+        forks: List<ForkResult>,
+        config: Config,
+    ): String {
+        val variants = forks.groupBy { it.variant.jsonName(config.scope) }.entries.joinToString(",") { (name, values) ->
+            val batches = values.flatMap { it.batches }.map { it.workloadNanos }
+            val complete = values.count { it.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE }
+            "\"$name\":{\"median_ns\":${median(batches)},\"p95_ns\":${percentile(batches, 95.0)}," +
+                "\"p99_ns\":${percentile(batches, 99.0)},\"whole_session_complete_forks\":$complete," +
+                "\"forks\":${values.size}}"
+        }
+        val profiledForks = forks.filterNot { it.variant.mode == Mode.BASELINE }
+        val correctness = when {
+            profiledForks.any { it.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.FAILED } -> "FAILED"
+            profiledForks.isNotEmpty() && profiledForks.all { it.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS } -> "PASS"
+            else -> "UNVERIFIED"
+        }
+        return "{\"kind\":\"summary\",\"timestamp\":\"${Instant.now()}\",\"workload_correctness\":\"$correctness\",\"policy_eligibility\":false," +
+            "$variants,${pairedSummary(forks, config.scope)}\"sample_count\":${forks.sumOf { it.batches.size }}," +
+            "\"expected_per_variant\":${config.forks * config.batches}}"
+    }
+
+    private fun sampleJson(
+        variant: Variant,
+        scope: Scope,
+        fork: Int,
+        batch: Batch,
+    ): String =
+        "{\"kind\":\"sample\",\"variant\":\"${variant.jsonName(scope)}\",\"mode\":\"${variant.mode.jsonName}\"," +
+            "\"transport\":\"${variant.mode.stackTransport}\",\"cache\":\"${variant.cacheMode ?: "not_applicable"}\"," +
+            "\"publication\":\"${variant.publication.jsonName}\",\"fork\":$fork,\"batch\":${batch.index}," +
+            "\"workload_ns\":${batch.workloadNanos},\"operations\":${batch.operations},\"checksum\":${batch.checksum}}"
+
+    private fun forkJson(
+        result: ForkResult,
+        output: String,
+    ): String {
+        val evidence = result.evidence
+        val fields = listOf(
+            "\"kind\":\"fork-output\"",
+            "\"variant\":\"${result.variant.jsonName(result.scope)}\"",
+            "\"mode\":\"${result.variant.mode.jsonName}\"",
+            "\"fork\":${result.fork}",
+            "\"elapsed_ns\":${result.elapsedNanos}",
+            "\"cpu_ns\":${result.cpuNanos}",
+            "\"cpu_time_available\":${result.cpuNanos != null}",
+            "\"peak_rss_bytes\":${result.peakRssBytes}",
+            "\"workload_correctness\":\"${result.verdict.workloadCorrectness}\"",
+            "\"whole_session_evidence\":\"${result.verdict.wholeSessionEvidence}\"",
+            "\"verdict_failures\":[${result.verdict.failures.joinToString(",") { "\"${escape(it)}\"" }}]",
+            "\"observations\":${evidence.observations}",
+            "\"resolved\":${evidence.resolved}",
+            "\"workload_resolved\":${evidence.workloadResolved}",
+            "\"workload_unlinks_resolved\":${evidence.workloadUnlinksResolved}",
+            "\"unknown_no_active\":${evidence.unknownNoActive}",
+            "\"ambient_inactive\":${evidence.ambientInactive}",
+            "\"unknown_other\":${evidence.unknownOther}",
+            "\"wrong\":${evidence.wrong}",
+            "\"lost\":${evidence.lost}",
+            "\"attribution_failures\":${evidence.attributionFailures}",
+            "\"dropped\":${evidence.dropped}",
+            "\"reconciliation_admitted_invocations\":${evidence.reconciliationAdmittedInvocations}",
+            "\"reconciliation_exact_invocations\":${evidence.reconciliationExactInvocations}",
+            "\"reconciliation_failed_invocations\":${evidence.reconciliationFailedInvocations}",
+            "\"reconciliation_kernel_active_observations\":${evidence.reconciliationKernelActiveObservations}",
+            "\"expected_operations\":${evidence.operationOracle.expected}",
+            "\"matched_operations\":${evidence.operationOracle.matched}",
+            "\"candidate_operations\":${evidence.operationOracle.candidates}",
+            "\"acknowledged_operations\":${evidence.operationOracle.acknowledged}",
+            "\"suppressed_operations\":${evidence.operationOracle.suppressed}",
+            "\"unresolved_operations\":${evidence.operationOracle.unresolved}",
+            "\"missing_operations\":${evidence.operationOracle.missing}",
+            "\"duplicate_operations\":${evidence.operationOracle.duplicates}",
+            "\"wrong_operations\":${evidence.operationOracle.wrong}",
+            "\"unclassified_operations\":${evidence.operationOracle.unclassified}",
+            "\"operation_oracle_available\":${evidence.operationOracle.available}",
+            "\"operation_oracle_representative_only\":${evidence.operationOracle.representativeOnly}",
+            "\"duplicate_acknowledgement_accounting\":\"unavailable\"",
+            "\"evidence_complete\":${evidence.evidenceComplete}",
+            "\"phases\":${phaseJson(evidence.phases)}",
+            "\"user_notif_phases\":${userNotifPhaseJson(evidence.userNotifPhases)}",
+            "\"output\":\"${escape(output)}\"",
+        )
+        return fields.joinToString(",", prefix = "{", postfix = "}")
+    }
+
+    private fun phaseJson(phases: PhaseMetrics): String =
+        listOf(
+            "\"get_stack_trace_ns\":${phases.getStackTraceNanos}",
+            "\"raw_key_ns\":${phases.rawKeyNanos}",
+            "\"logical_metadata_ns\":${phases.logicalMetadataNanos}",
+            "\"serialization_ns\":${phases.serializationNanos}",
+            "\"publication_bytes\":${phases.publicationBytes}",
+            "\"publication_latency_ns\":${phases.publicationLatencyNanos}",
+            "\"lock_wait_ns\":${phases.lockWaitNanos}",
+            "\"peak_retained_bytes\":${phases.peakRetainedBytes}",
+            "\"native_retained_bytes\":${phases.nativeRetainedBytes}",
+            "\"native_retention_exhaustions\":${phases.nativeRetentionExhaustions}",
+            "\"publication_count\":${phases.publicationCount}",
+            "\"coalesced_publications\":${phases.coalescedPublications}",
+            "\"failed_publications\":${phases.failedPublications}",
+            "\"cache_hits\":${phases.cacheHits}",
+            "\"cache_misses\":${phases.cacheMisses}",
+        ).joinToString(",", prefix = "{", postfix = "}")
+
+    private fun userNotifPhaseJson(phases: UserNotifPhaseMetrics): String =
+        listOf(
+            "\"timed_operations\":${phases.timedOperations}",
+            "\"operation_ns\":${phases.operationNanos}",
+            "\"blocked_before_listener_ns\":${phases.blockedBeforeListenerNanos}",
+            "\"listener_to_ack_ns\":${phases.listenerToAckNanos}",
+            "\"stack_capture_ns\":${phases.stackCaptureNanos}",
+            "\"queue_ns\":${phases.queueNanos}",
+            "\"ack_to_return_ns\":${phases.ackToReturnNanos}",
+        ).joinToString(",", prefix = "{", postfix = "}")
+
+    private fun terminal(
+        success: Boolean,
+        message: String,
+    ): String = "{\"kind\":\"terminal\",\"timestamp\":\"${Instant.now()}\",\"success\":$success,\"message\":\"${escape(message)}\"}"
+
+    private fun awaitProcess(
+        process: Process,
+        timeoutSeconds: Long,
+    ): ProcessTelemetry {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+        var peakRssBytes = 0L
+        var cpuNanos: Long? = null
+        while (process.isAlive && System.nanoTime() < deadline) {
+            peakRssBytes = maxOf(peakRssBytes, readPeakRssBytes(process.pid()))
+            process.toHandle().info().totalCpuDuration().ifPresent { duration ->
+                cpuNanos = maxOf(cpuNanos ?: 0L, duration.toNanos())
+            }
+            process.waitFor(100, TimeUnit.MILLISECONDS)
+        }
+        peakRssBytes = maxOf(peakRssBytes, readPeakRssBytes(process.pid()))
+        process.toHandle().info().totalCpuDuration().ifPresent { duration ->
+            cpuNanos = maxOf(cpuNanos ?: 0L, duration.toNanos())
+        }
+        return ProcessTelemetry(!process.isAlive, cpuNanos, peakRssBytes)
+    }
+
+    private fun readPeakRssBytes(pid: Long): Long =
+        runCatching {
+            Files
+                .readAllLines(Path.of("/proc/$pid/status"))
+                .first { it.startsWith("VmHWM:") }
+                .trim()
+                .split(Regex("\\s+"))[1]
+                .toLong() *
+                1024L
+        }.getOrDefault(0L)
+
+    private fun pairedSummary(
+        forks: List<ForkResult>,
+        scope: Scope,
+    ): String {
+        if (scope != Scope.TIER_E_CACHE_PAIRED) return ""
+        val effects = forks.filter { it.variant.mode.tierE }.groupBy { it.variant.mode }.entries.joinToString(",") { (mode, values) ->
+            val enabled = values.filter { it.variant.cacheMode == "enabled" }.associateBy { it.fork }
+            val disabled = values.filter { it.variant.cacheMode == "disabled" }.associateBy { it.fork }
+            val deltas = enabled.keys.intersect(disabled.keys).map { fork ->
+                median(disabled.getValue(fork).batches.map { it.workloadNanos }) - median(enabled.getValue(fork).batches.map { it.workloadNanos })
+            }
+            val interval = bootstrapMedianInterval(deltas)
+            "\"${mode.jsonName}\":{\"paired_median_delta_ns\":${median(
+                deltas,
+            )},\"paired_bootstrap_95_ci_low_ns\":${interval.first},\"paired_bootstrap_95_ci_high_ns\":${interval.second},\"pairs\":${deltas.size}}"
+        }
+        return "\"paired_cache_effects\":{$effects},"
+    }
+
+    private fun bootstrapMedianInterval(values: List<Long>): Pair<Long, Long> {
+        require(values.isNotEmpty()) { "paired benchmark has no samples" }
+        val random = Random(0)
+        val medians = List(1_000) {
+            median(List(values.size) { values[random.nextInt(values.size)] })
+        }
+        return percentile(medians, 2.5) to percentile(medians, 97.5)
+    }
+
+    private fun metricOrZero(
+        output: String,
+        name: String,
+    ): Long =
+        Regex("(?:^|\\s)$name=(-?\\d+)")
+        .find(output)
+        ?.groupValues
+        ?.get(1)
+        ?.toLong() ?: 0L
+
+    private fun median(values: List<Long>): Long = values.sorted().let { sorted -> if (sorted.size % 2 == 0) (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2 else sorted[sorted.size / 2] }
+
+    private fun percentile(
+        values: List<Long>,
+        percentile: Double,
+    ): Long = values.sorted().let { it[(kotlin.math.ceil(it.size * percentile / 100.0).toInt() - 1).coerceIn(0, it.lastIndex)] }
+
+    private fun append(
+        artifact: Path,
+        line: String,
+    ) = Files.writeString(artifact, line + System.lineSeparator(), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+
+    internal fun escape(value: String): String =
+        buildString(value.length) {
+        value.forEach { character ->
+            when (character) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\b' -> append("\\b")
+                '\u000c' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (character.code < 0x20) append("\\u%04x".format(character.code)) else append(character)
+            }
+        }
+    }
+
+    private enum class Mode(
+        val jsonName: String,
+        val emissionMode: String = "",
+        val stackTransport: String = "none",
+        val tierE: Boolean = false,
+        val userNotif: Boolean = false,
+        val userNotifStackOption: String = "",
+        val requiresWorkloadFrames: Boolean = false,
+    ) {
+        BASELINE("baseline"),
+        FULL_STREAM("dictionary_full_stream", "full-stream", "dictionary", true),
+        UNIQUE_EDGE("dictionary_unique_edge", "unique-stack-syscall", "dictionary", true),
+        INLINE_FULL_STREAM("inline_full_stream", "full-stream", "inline-per-invocation", true),
+        INLINE_UNIQUE_EDGE("inline_unique_edge", "unique-stack-syscall", "inline-per-invocation", true),
+        USER_NOTIF_NO_STACK("user_notif_no_stack", userNotif = true, userNotifStackOption = "no-stack"),
+        USER_NOTIF("user_notif", userNotif = true, requiresWorkloadFrames = true),
+    }
+
+    private enum class Scope(
+        val jsonName: String,
+    ) {
+        FULL("full"),
+        TIER_E_CACHE_AB("tier-e-cache-ab"),
+        TIER_E_CACHE_PAIRED("tier-e-cache-paired"),
+        TIER_E_PUBLICATION("tier-e-publication"),
+        ;
+
+        companion object {
+            fun fromProperty(value: String): Scope =
+                entries.singleOrNull { it.jsonName == value }
+                ?: error("unknown Tier E benchmark scope: $value")
+        }
+    }
+
+    private enum class Publication(
+        val jsonName: String,
+    ) {
+        TERMINAL("terminal"),
+        LIVE("live"),
+    }
+
+    private enum class Workload(
+        val jsonName: String,
+        val kernelArgument: String,
+        val userNotifArgument: String,
+        val className: String,
+    ) {
+        APPLICATION("application", COMMON_WORKLOAD, "common-file", TierECommonFileWorkload::class.java.name),
+        ORACLE("oracle", "shared-openat-oracle-workload", "shared-openat-oracle", TierESharedOpenatOracleWorkload::class.java.name),
+        ;
+
+        companion object {
+            fun fromProperty(value: String): Workload = entries.singleOrNull { it.jsonName == value } ?: error("unknown Tier E benchmark workload: $value")
+        }
+    }
+
+    private data class Variant(
+        val mode: Mode,
+        val cacheMode: String? = null,
+        val publication: Publication = Publication.TERMINAL,
+    ) {
+        fun jsonName(scope: Scope): String =
+            when (scope) {
+            Scope.FULL, Scope.TIER_E_CACHE_AB -> mode.jsonName
+            Scope.TIER_E_CACHE_PAIRED -> if (mode.tierE) "${mode.jsonName}_cache_$cacheMode" else mode.jsonName
+            Scope.TIER_E_PUBLICATION -> if (mode.tierE) "${mode.jsonName}_publication_${publication.jsonName}" else mode.jsonName
+        }
+    }
+
+    private fun variants(
+        scope: Scope,
+        rotation: Int,
+    ): List<Variant> {
+        val selected = when (scope) {
+            Scope.FULL -> allModes
+            Scope.TIER_E_CACHE_AB, Scope.TIER_E_CACHE_PAIRED, Scope.TIER_E_PUBLICATION -> allModes.filter { it == Mode.BASELINE || it.tierE }
+        }.let { it.drop(rotation % it.size) + it.take(rotation % it.size) }
+        return selected.flatMap { mode ->
+            if (!mode.tierE) return@flatMap listOf(Variant(mode))
+            when (scope) {
+                Scope.TIER_E_CACHE_PAIRED -> {
+                    val caches = if (rotation % 2 == 0) listOf("disabled", "enabled") else listOf("enabled", "disabled")
+                    caches.map { cache -> Variant(mode, cache) }
+                }
+                Scope.TIER_E_PUBLICATION -> listOf(Variant(mode, publication = Publication.TERMINAL), Variant(mode, publication = Publication.LIVE))
+                else -> listOf(Variant(mode))
+            }
+        }
+    }
+
+    private data class Config(
+        val agent: Path,
+        val iterations: Int,
+        val warmups: Int,
+        val batches: Int,
+        val forks: Int,
+        val workloadCpu: String,
+        val collectorCpu: String,
+        val artifact: Path,
+        val scope: Scope,
+        val workload: Workload,
+        val childTimeoutSeconds: Long,
+        val userNotifWorkerTimeoutSeconds: Long,
+        val userNotifChildTimeoutSeconds: Long,
+    )
+
+    private data class Batch(
+        val index: Int,
+        val operations: Long,
+        val checksum: Long,
+        val workloadNanos: Long,
+    )
+
+    private data class Evidence(
+        val observations: Long,
+        val resolved: Long,
+        val workloadResolved: Long,
+        val workloadUnlinksResolved: Long,
+        val unknownNoActive: Long,
+        val ambientInactive: Long,
+        val unknownOther: Long,
+        val wrong: Long,
+        val lost: Long,
+        val attributionFailures: Long,
+        val dropped: Long,
+        val reconciliationAdmittedInvocations: Long,
+        val reconciliationExactInvocations: Long,
+        val reconciliationFailedInvocations: Long,
+        val reconciliationKernelActiveObservations: Long,
+        val workloadFrames: Boolean,
+        val evidenceComplete: Boolean,
+        val operationOracle: TierEBenchmarkContract.OperationOracle,
+        val phases: PhaseMetrics,
+        val userNotifPhases: UserNotifPhaseMetrics,
+    ) {
+        fun contractEvidence() =
+            TierEBenchmarkContract.Evidence(
+            observations = observations,
+            workloadResolved = workloadResolved,
+            workloadUnlinksResolved = workloadUnlinksResolved,
+            wrong = wrong,
+            lost = lost,
+            unknownOther = unknownOther,
+            dropped = dropped,
+            workloadFrames = workloadFrames,
+            evidenceComplete = evidenceComplete,
+            operationOracle = operationOracle,
+        )
+    }
+
+    private data class PhaseMetrics(
+        val getStackTraceNanos: Long,
+        val rawKeyNanos: Long,
+        val logicalMetadataNanos: Long,
+        val serializationNanos: Long,
+        val publicationBytes: Long,
+        val publicationLatencyNanos: Long,
+        val lockWaitNanos: Long,
+        val peakRetainedBytes: Long,
+        val nativeRetainedBytes: Long,
+        val nativeRetentionExhaustions: Long,
+        val publicationCount: Long,
+        val coalescedPublications: Long,
+        val failedPublications: Long,
+        val cacheHits: Long,
+        val cacheMisses: Long,
+    )
+
+    private data class UserNotifPhaseMetrics(
+        val timedOperations: Long,
+        val operationNanos: Long,
+        val blockedBeforeListenerNanos: Long,
+        val listenerToAckNanos: Long,
+        val stackCaptureNanos: Long,
+        val queueNanos: Long,
+        val ackToReturnNanos: Long,
+    )
+
+    private data class ForkResult(
+        val scope: Scope,
+        val variant: Variant,
+        val fork: Int,
+        val batches: List<Batch>,
+        val evidence: Evidence,
+        val verdict: TierEBenchmarkContract.Verdict,
+        val elapsedNanos: Long,
+        val cpuNanos: Long?,
+        val peakRssBytes: Long,
+    )
+
+    private data class ProcessTelemetry(
+        val completed: Boolean,
+        val cpuNanos: Long?,
+        val peakRssBytes: Long,
+    )
+
+    private val BATCH_PATTERN =
+        Regex("(?:tier-e-common-workload|tier-e-write-oracle|tier-e-shared-openat-oracle|user-notif-oracle)-batch: phase=(\\w+) index=(\\d+) operations=(\\d+) checksum=(-?\\d+) .*workloadNs=(\\d+)")
+}

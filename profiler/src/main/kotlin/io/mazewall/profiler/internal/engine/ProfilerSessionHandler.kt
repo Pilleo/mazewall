@@ -29,6 +29,7 @@ import io.mazewall.platform.seccomp.daemon.ControlSocketExchange
 import io.mazewall.platform.seccomp.daemon.ControlSocketFailure
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup
 import io.mazewall.platform.seccomp.daemon.NotificationProgress
 import io.mazewall.platform.seccomp.daemon.NotificationWork
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
@@ -109,6 +110,11 @@ internal class ProfilerSessionHandler(
             private var preparing: ProfilerPreparationJob? = null
 
             private var completed = false
+            private var completionWakeup: NotificationCompletionWakeup? = null
+
+            override fun bindCompletionWakeup(wakeup: NotificationCompletionWakeup) {
+                completionWakeup = wakeup
+            }
 
             context(arena: NativeArena) override fun poll(): NotificationProgress {
                 check(!completed) { "Notification work is already terminal" }
@@ -133,10 +139,14 @@ internal class ProfilerSessionHandler(
                 if (exchange == null) {
                     val current = state as? ProfilerState.ActiveSession ?: return reply(ECONNRESET, NotifResult.TERMINATE)
                     val job = preparing ?: run {
+                        val wakeup = checkNotNull(completionWakeup) { "Notification completion wakeup was not bound" }
                         ledger.record(SessionEvent.Notified(System.nanoTime(), notification.pid.toLong(), notification.nr.toLong(), notification.arch))
                         checkNotNull(preparation) { "Profiler preparation worker is unavailable" }
                             .submit(notification, syscallMap[notification.nr] ?: "SYSCALL_${notification.nr}")
-                            .also { preparing = it }
+                            .also {
+                                preparing = it
+                                it.result.whenComplete { _, _ -> wakeup.signal() }
+                            }
                     }
                     if (!job.result.isDone) return NotificationProgress.Await
                     val event = job.result.join()
@@ -149,7 +159,10 @@ internal class ProfilerSessionHandler(
                     control = ControlSocketExchange(ioOps.raw, ioOps.controlMemory(), socketFd, frame, ACK_BUF_SIZE.toInt(), deadline, minimumResponseSize = 1)
                     waiting = transitionToAckWait(current, notification.id, event)
                     state = checkNotNull(waiting)
-                    return NotificationProgress.Await
+                    // Completing preparation creates a locally runnable control exchange. Drive its
+                    // first nonblocking write now; otherwise an eventfd wakeup would be consumed
+                    // before the exchange is armed and the reactor would sleep until the deadline.
+                    return advance()
                 }
                 val bytes = try {
                     val received = exchange.poll()

@@ -88,6 +88,8 @@ internal data class ResolvedSyscall(
 internal data class SessionIntegrity(
     val observedLosses: Long = 0,
     val attributionFailures: Long = 0,
+    /** Target-process syscalls outside any active native invocation; diagnostic only. */
+    val ambientInactiveObservations: Long = 0,
     /** Syscall attempts known to fall outside the selected observation path. */
     val outOfDomainAttempts: Long = 0,
     val lifecycleInvalidations: Long = 0,
@@ -108,6 +110,8 @@ internal data class SessionIntegrity(
     val dictionaryIntegrityFailures: Long = 0,
     /** Publication cost and retained-buffer accounting; independent of completeness. */
     val publicationMetrics: SnapshotPublicationMetrics = SnapshotPublicationMetrics(),
+    /** Terminal native-to-kernel accounting; diagnostic until a workload supplies an independent denominator. */
+    val reconciliation: TierEReconciliation = TierEReconciliation(),
 ) {
     public val evidenceIntegrity: EvidenceIntegrity
         get() = when {
@@ -159,6 +163,15 @@ internal data class TierEVerdictDimensions(
     public val lifecycleValid: Boolean,
 )
 
+/** Immutable terminal accounting across native boundary admission and kernel observation. */
+internal data class TierEReconciliation(
+    val admittedInvocations: Long = 0,
+    val exactInvocations: Long = 0,
+    val failedInvocations: Long = 0,
+    val kernelActiveObservations: Long = 0,
+    val markerTransitions: Long = 0,
+)
+
 internal enum class EvidenceIntegrity {
     COMPLETE,
     INCOMPLETE,
@@ -183,6 +196,7 @@ internal class AttributionCollector(
     private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
     private val expectedProcessIncarnation: ProcessIncarnationId? = null,
     maxRetainedBytes: Long = TierERetainedStateBudget.DEFAULT_LIMIT_BYTES,
+    private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
 ) {
     private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
     private val integrityAccumulator = TierEIntegrityAccumulator()
@@ -287,6 +301,17 @@ internal class AttributionCollector(
         integrityAccumulator.recordOutOfDomainAttempt(count)
     }
 
+    /** Records target-process activity outside an active Tier E native boundary. */
+    public fun recordAmbientInactive(count: Long = 1) {
+        require(count > 0) { "ambient inactive count must be positive" }
+        integrityAccumulator.recordAmbientInactive(count)
+    }
+
+    /** Records immutable terminal admission/observation accounting without changing completeness. */
+    public fun recordReconciliation(reconciliation: TierEReconciliation) {
+        integrityAccumulator.recordReconciliation(reconciliation)
+    }
+
     public fun recordCaptureDomainEvent(event: CaptureDomainEvent) {
         when (event.classification) {
             CaptureDomainClassification.OBSERVED_SYS_ENTER -> Unit
@@ -359,12 +384,15 @@ internal class AttributionCollector(
     /** Acknowledges only the exact outstanding candidate represented by [token]. */
     public fun acknowledgeEmission(token: EmissionToken) {
         if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL) return
-        require(tokensByResult.values.any { it === token }) {
+        val entry = tokensByResult.entries.firstOrNull { it.value === token }
+        require(entry != null) {
             "emission token is stale, duplicated, or foreign"
         }
-        tokensByResult.entries.removeIf { it.value === token }
+        val acknowledged = entry.key
+        tokensByResult.remove(acknowledged)
         retainedBudget.release(TierERetainedStateBudget.Category.EMISSION_TOKENS, EMISSION_TOKEN_BYTES)
         uniqueEdgeGate.acknowledge(token.edge)
+        uniqueEdgeDecisionObserver?.invoke(UniqueEdgeDecision(UniqueEdgeDecision.Kind.ACKNOWLEDGED, acknowledged))
     }
 
     /** Ends the session and makes all retained records explicit, terminal outcomes. */
@@ -416,11 +444,14 @@ internal class AttributionCollector(
             status = ResolutionStatus.EXECUTION_IDENTITY_UNRESOLVED
         }
         return pending.mapNotNull { observation ->
-            if (
-                status == ResolutionStatus.RESOLVED &&
-                emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL &&
-                !uniqueEdgeGate.canEmit(UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags))
-            ) {
+            val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
+            if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !uniqueEdgeGate.canEmit(edge)) {
+                uniqueEdgeDecisionObserver?.invoke(
+                    UniqueEdgeDecision(
+                        UniqueEdgeDecision.Kind.SUPPRESSED,
+                        ResolvedSyscall(observation, stack, status, invocation.executionContext),
+                    ),
+                )
                 null
             } else {
                 ResolvedSyscall(observation, stack, status, invocation.executionContext).also { resolved ->
@@ -430,9 +461,9 @@ internal class AttributionCollector(
                             return@mapNotNull null
                         }
                         val candidateId = nextCandidateId++
-                        val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
                         val token = EmissionToken(candidateId, edge)
                         tokensByResult[resolved] = token
+                        uniqueEdgeDecisionObserver?.invoke(UniqueEdgeDecision(UniqueEdgeDecision.Kind.CANDIDATE, resolved))
                     }
                 }
             }
@@ -443,5 +474,17 @@ internal class AttributionCollector(
         const val VIRTUAL_THREAD_CAPTURE_FLAG = 1
         const val PENDING_OBSERVATION_BYTES = 128L
         const val EMISSION_TOKEN_BYTES = 64L
+    }
+}
+
+/** Benchmark-only observation of collector-owned unique-edge delivery decisions. */
+internal data class UniqueEdgeDecision(
+    val kind: Kind,
+    val syscall: ResolvedSyscall,
+) {
+    internal enum class Kind {
+        CANDIDATE,
+        ACKNOWLEDGED,
+        SUPPRESSED,
     }
 }

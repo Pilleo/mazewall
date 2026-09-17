@@ -21,6 +21,15 @@ import kotlin.test.assertTrue
 class TierEEndToEndIntegrationTest {
     @Test
     fun `native session captures definitions and becomes terminal after finish`() {
+        runNativeSession(TierEEmissionMode.FULL_STREAM)
+    }
+
+    @Test
+    fun `unique edge native session attaches and captures definitions`() {
+        runNativeSession(TierEEmissionMode.UNIQUE_STACK_SYSCALL)
+    }
+
+    private fun runNativeSession(emissionMode: TierEEmissionMode) {
         val agent = (System.getProperty("tier.e.agent") ?: System.getenv("TIER_E_AGENT_LIBRARY"))?.let(Path::of)
         val workloadClasspath = System.getProperty("tier.e.workloadClasspath")
             ?: System.getenv("TIER_E_WORKLOAD_CLASSPATH")
@@ -34,7 +43,7 @@ class TierEEndToEndIntegrationTest {
         val sessionTag = 0x4d5a
         val process = ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "-agentpath:$agent=definitions=$definitions,live-definitions,session=${sessionTag.toString(16)},mode=full-stream",
+            "-agentpath:$agent=definitions=$definitions,live-definitions,session=${sessionTag.toString(16)},mode=${emissionMode.agentOption}",
             "-cp",
             workloadClasspath,
             "AgentWorkload",
@@ -53,7 +62,7 @@ class TierEEndToEndIntegrationTest {
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
             processEpoch(process.pid()),
-            TierEOptions(TierEEmissionMode.FULL_STREAM),
+            TierEOptions(emissionMode),
             sink,
         )
         try {
@@ -97,4 +106,10 @@ class TierEEndToEndIntegrationTest {
         val stat = Files.readString(Path.of("/proc/$pid/stat"))
         return stat.substringAfterLast(") ").split(' ')[19].toLong()
     }
+
+    private val TierEEmissionMode.agentOption: String
+        get() = when (this) {
+            TierEEmissionMode.FULL_STREAM -> "full-stream"
+            TierEEmissionMode.UNIQUE_STACK_SYSCALL -> "unique-stack-syscall"
+        }
 }

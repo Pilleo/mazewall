@@ -42,6 +42,14 @@ public object Profiler {
         block: () -> T,
     ): ProfilingResult<T> = service().profile(processWide, captureStackTraces, block)
 
+    /** Benchmark-only bounded execution path; ordinary callers retain [profile]'s default limits. */
+    internal fun <T> profileForDiagnostics(
+        processWide: Boolean = false,
+        captureStackTraces: Boolean = true,
+        limits: ProfilerExecutionLimits,
+        block: () -> T,
+    ): ProfilingResult<T> = service().profile(processWide, captureStackTraces, limits, block)
+
     /** Java-friendly overload for profiling a [Callable]. */
     @JvmStatic
     @JvmOverloads

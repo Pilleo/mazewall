@@ -104,45 +104,7 @@ public class BillOfBehavior(
         allowIncomplete: Boolean,
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
         val evidence = coverage ?: ProfilingCoverage.absent()
-        if (connects.isNotEmpty()) {
-            val withConnects =
-                evidence.withWarnings(
-                    complete = false,
-                    warnings = evidence.warnings +
-                        "connect destinations were observed but cannot be enforced; " +
-                            "toPolicy() only unblocks SOCKET/CONNECT",
-                )
-            if (!allowIncomplete) {
-                throw IncompleteProfileException(withConnects)
-            }
-        }
-        if (execs.isNotEmpty()) {
-            val withExecs =
-                evidence.withWarnings(
-                    complete = false,
-                    warnings = evidence.warnings +
-                        "exec destinations were observed but cannot be enforced; " +
-                            "toPolicy() only unblocks EXECVE",
-                )
-            if (!allowIncomplete) {
-                throw IncompleteProfileException(withExecs)
-            }
-        }
-        val unenforceableIoUring = ioUringOps.filter { op ->
-            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
-        }
-        if (unenforceableIoUring.isNotEmpty()) {
-            val withUring =
-                evidence.withWarnings(
-                    complete = false,
-                    warnings = evidence.warnings +
-                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
-                )
-            if (!allowIncomplete) {
-                throw IncompleteProfileException(withUring)
-            }
-        }
-        requireComplete(evidence, allowIncomplete)
+        requirePolicyCoverage(evidence, allowIncomplete)
 
         var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW) {
@@ -196,41 +158,7 @@ public class BillOfBehavior(
         coverage: ProfilingCoverage,
         allowIncomplete: Boolean,
     ): String {
-        requireComplete(coverage, allowIncomplete)
-        if (connects.isNotEmpty() && !allowIncomplete) {
-            throw IncompleteProfileException(
-                coverage.withWarnings(
-                    complete = false,
-                    warnings = listOf(
-                        "connect destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks SOCKET/CONNECT",
-                    ),
-                ),
-            )
-        }
-        if (execs.isNotEmpty() && !allowIncomplete) {
-            throw IncompleteProfileException(
-                coverage.withWarnings(
-                    complete = false,
-                    warnings = listOf(
-                        "exec destinations were observed but cannot be enforced; " +
-                            "toDsl() only unblocks EXECVE",
-                    ),
-                ),
-            )
-        }
-        val unenforceableIoUring = ioUringOps.filter { op ->
-            FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable
-        }
-        if (unenforceableIoUring.isNotEmpty() && !allowIncomplete) {
-            throw IncompleteProfileException(
-                coverage.withWarnings(
-                    complete = false,
-                    warnings = coverage.warnings +
-                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceableIoUring.joinToString(",")}",
-                ),
-            )
-        }
+        requireDslCoverage(coverage, allowIncomplete)
 
         val sb = StringBuilder()
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
@@ -269,6 +197,118 @@ public class BillOfBehavior(
         sb.append("    .build()")
         return sb.toString()
     }
+
+    private fun requirePolicyCoverage(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        rejectPolicyConnects(evidence, allowIncomplete)
+        rejectPolicyExecs(evidence, allowIncomplete)
+        rejectPolicyUnenforceableIoUring(evidence, allowIncomplete)
+        requireComplete(evidence, allowIncomplete)
+    }
+
+    private fun rejectPolicyConnects(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (connects.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "connect destinations were observed but cannot be enforced; toPolicy() only unblocks SOCKET/CONNECT",
+                ),
+            )
+        }
+    }
+
+    private fun rejectPolicyExecs(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (execs.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "exec destinations were observed but cannot be enforced; toPolicy() only unblocks EXECVE",
+                ),
+            )
+        }
+    }
+
+    private fun rejectPolicyUnenforceableIoUring(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        val unenforceable = unenforceableIoUringOps()
+        if (unenforceable.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceable.joinToString(",")}",
+                ),
+            )
+        }
+    }
+
+    private fun requireDslCoverage(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        requireComplete(coverage, allowIncomplete)
+        rejectDslConnects(coverage, allowIncomplete)
+        rejectDslExecs(coverage, allowIncomplete)
+        rejectDslUnenforceableIoUring(coverage, allowIncomplete)
+    }
+
+    private fun rejectDslConnects(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (connects.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = listOf("connect destinations were observed but cannot be enforced; toDsl() only unblocks SOCKET/CONNECT"),
+                ),
+            )
+        }
+    }
+
+    private fun rejectDslExecs(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (execs.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = listOf("exec destinations were observed but cannot be enforced; toDsl() only unblocks EXECVE"),
+                ),
+            )
+        }
+    }
+
+    private fun rejectDslUnenforceableIoUring(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        val unenforceable = unenforceableIoUringOps()
+        if (unenforceable.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = coverage.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceable.joinToString(",")}",
+                ),
+            )
+        }
+    }
+
+    private fun unenforceableIoUringOps(): List<String> = ioUringOps.filter { op -> FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable }
 
     /**
      * Merges two bills of behavior (union of all observations).

@@ -7,6 +7,9 @@ import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -138,6 +141,90 @@ class AgentDefinitionFileTest {
         assertEquals(StackTraceId(7), contents.invocations.single().stackTraceId)
         assertEquals(InvocationId(9), contents.invocations.single().invocationId)
         assertEquals(0, contents.agentLosses)
+    }
+
+    @Test
+    fun `decodes inline invocation stack from version three`() {
+        val inlineInvocation = payload {
+            putLong(9)
+            putLong(0)
+            putInt(7)
+            put(0)
+            putLong(42)
+            putInt(7)
+            put(0)
+            putShort(1)
+            putString("bootstrap")
+            putString("Ljava/lang/String;")
+            putString("charAt")
+            putString("(I)C")
+            putLong(12)
+            put(0)
+        }
+        val execution = payload {
+            putLong(42)
+            put(1)
+        }
+        val file = ByteArrayOutputStream()
+            .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(3, 0))
+                record(4, execution)
+                record(5, inlineInvocation)
+            }.toByteArray()
+
+        val contents = AgentDefinitionFile.decode(file)
+
+        assertEquals(StackTraceId(7), contents.stacks.single().stackTraceId)
+        assertEquals(
+            "java.lang.String",
+            contents.stacks
+            .single()
+            .frames
+            .single()
+            .className,
+        )
+        assertEquals(InvocationId(9), contents.invocations.single().invocationId)
+        assertEquals(StackTraceId(7), contents.invocations.single().stackTraceId)
+        assertEquals(
+            ExecutionKind.VIRTUAL,
+            contents.invocations
+            .single()
+            .executionContext
+            ?.kind,
+        )
+    }
+
+    @Test
+    fun `rejects stack records that exceed the native frame limit`() {
+        val stack = payload {
+            putInt(7)
+            put(0)
+            putShort(130)
+        }
+        val file = ByteArrayOutputStream()
+            .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(2, 0))
+                record(1, stack)
+            }.toByteArray()
+
+        assertFailsWith<IllegalArgumentException> { AgentDefinitionFile.decode(file) }
+    }
+
+    @Test
+    fun `rejects definition files larger than the retained-state limit before reading`() {
+        val file = Files.createTempFile("tier-e-definition-limit", ".mzsd")
+        try {
+            FileChannel.open(file, StandardOpenOption.WRITE).use { channel ->
+                channel.position(64L * 1024L * 1024L)
+                channel.write(ByteBuffer.wrap(byteArrayOf(0)))
+            }
+
+            assertFailsWith<IllegalArgumentException> { AgentDefinitionFile.read(file) }
+        } finally {
+            Files.deleteIfExists(file)
+        }
     }
 
     private fun payload(block: LittleEndianWriter.() -> Unit): ByteArray = LittleEndianWriter().apply(block).bytes()

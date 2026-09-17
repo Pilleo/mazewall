@@ -120,6 +120,31 @@ class TierEProfilerSessionLifecycleTest {
         session.close()
     }
 
+    @Test
+    fun `terminal reconciliation retains native admission and capture outcomes`() {
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(),
+            processEpoch = 1,
+            definitionReader = {
+                AgentDefinitionFile.Contents(
+                    stacks = emptyList(),
+                    invocations = listOf(
+                        InvocationDefinition(InvocationId(1), null, StackTraceId(7)),
+                        InvocationDefinition(InvocationId(2), null, null, CaptureFailure.STACK_WALK_FAILED),
+                    ),
+                    agentLosses = 1,
+                )
+            },
+        )
+
+        val profile = session.finish(Path.of("ignored"))
+
+        assertEquals(2, profile.integrity.reconciliation.admittedInvocations)
+        assertEquals(1, profile.integrity.reconciliation.exactInvocations)
+        assertEquals(1, profile.integrity.reconciliation.failedInvocations)
+        assertEquals(0, profile.integrity.reconciliation.kernelActiveObservations)
+    }
+
     private fun emptyDefinitions() = AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
 
     private fun event(sequence: ULong) =

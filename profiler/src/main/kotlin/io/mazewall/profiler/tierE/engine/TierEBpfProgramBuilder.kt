@@ -6,7 +6,7 @@ import io.mazewall.profiler.tierE.engine.TierEbpfEngine.Insn
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 
 /**
- * Pure eBPF bytecode builder for Tier E marker uprobe and sys_enter raw tracepoint programs.
+ * Pure eBPF bytecode builder for Tier E marker uprobe and sys_enter tracepoint programs.
  *
  * Extracted from [TierEbpfEngine] to allow unit testing and isolated verification of bytecode
  * generation without requiring root privileges or bpf(2) syscall execution.
@@ -17,11 +17,14 @@ internal object TierEBpfProgramBuilder {
     private const val H_UPDATE: Int = 2
     private const val H_KTIME: Int = 5
     private const val H_PID_TGID: Int = 14
-    private const val H_PROBE_READ_KERNEL: Int = 113
     private const val H_RB_RESERVE: Int = 131
     private const val H_RB_SUBMIT: Int = 132
     private const val H_TASK_STORAGE_GET: Int = 156
     private const val H_CURRENT_TASK_BTF: Int = 158
+
+    private const val COUNTER_MAP_INDEX: Int = 2
+    private const val MARKER_FAILURE_COUNTER_INDEX: Int = 3
+    private const val AMBIENT_INACTIVE_COUNTER_INDEX: Int = 4
 
     // eBPF opcodes (64-bit class)
     private const val ADD_IMM: Int = 0x07
@@ -47,7 +50,7 @@ internal object TierEBpfProgramBuilder {
     private const val FP: Int = 10
 
     /**
-     * Builds the raw_tracepoint/sys_enter eBPF program for capturing syscall events with active invocation state.
+     * Builds the tracepoint/raw_syscalls/sys_enter eBPF program for capturing syscall events with active invocation state.
      */
     public fun buildSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> {
         val p = mutableListOf<Insn>()
@@ -92,22 +95,12 @@ internal object TierEBpfProgramBuilder {
 
         emit(Insn(LDX_W, dst = 5, src = 0, off = 8))
         val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
+        val markerAttached = emit(Insn(JA))
 
-        // A detached marker must bypass task storage completely. Otherwise an
-        // old task-storage value could be copied into a new ring observation.
-        val detachedObservation = p.size
-        emit(Insn(MOV_IMM, dst = 5, imm = 0))
-        emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
-        emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -8))
-        val detachedToReserve = emit(Insn(JA))
-
-        // Default to an explicit un-attributed observation. A missing marker is
-        // evidence, not permission to hide the target syscall.
-        emit(Insn(MOV_IMM, dst = 5, imm = 0))
-        emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
-        emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -8))
+        // Active marker admission is the Tier E observation boundary. A
+        // detached marker exits without reading task storage, so an old state
+        // cannot leak into a later session.
+        val activeMarkerObservation = p.size
         ldMap(6, 0)
         emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
         val noTask = emit(Insn(JEQ_IMM, dst = 0))
@@ -120,13 +113,14 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 6, src = 0))
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
+        val inactiveInvocation = emit(Insn(JEQ_IMM, dst = 5))
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 8))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
         emit(Insn(LDX_W, dst = 5, src = 6, off = 16))
         emit(Insn(STX_W, dst = FP, src = 5, off = -8))
 
-        // Diagnostic counts are keyed by the active invocation, bounded by
-        // the map's LRU capacity, and never participate in attribution.
+        // Diagnostic counts are keyed by active invocation, bounded by the
+        // map's LRU capacity, and never participate in attribution.
         emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
         val noMetricContext = emit(Insn(JEQ_IMM, dst = 5))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -72))
@@ -153,13 +147,7 @@ internal object TierEBpfProgramBuilder {
         // Unique-edge mode keeps a bounded kernel observation map, but never
         // suppresses ring-buffer observations. The collector owns suppression
         // because only it can commit an edge after downstream acknowledgement.
-        var contextHasNoCoverage: Int? = null
         if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
-            // Context 0 is the explicit "no marker" state. It is evidence of
-            // incomplete attribution and must remain visible on every syscall;
-            // it is never a coverage edge.
-            emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
-            contextHasNoCoverage = emit(Insn(JEQ_IMM, dst = 5))
             emit(Insn(LDX_DW, dst = 5, src = 9, off = 8))
             emit(Insn(STX_W, dst = FP, src = 5, off = -40))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
@@ -174,7 +162,6 @@ internal object TierEBpfProgramBuilder {
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
         p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
-        contextHasNoCoverage?.let { p[it] = p[it].copy(off = (reserveStart - it - 1).toShort()) }
         ldMap(1, 1)
         emit(Insn(MOV_IMM, dst = 2, imm = 88))
         emit(Insn(MOV_IMM, dst = 3, imm = 0))
@@ -195,21 +182,12 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_DW, dst = 7, src = 5, off = 24))
         emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
         emit(Insn(STX_DW, dst = 7, src = 5, off = 32))
-        // raw_tracepoint_args only exposes the pt_regs address as an untyped
-        // scalar. The verifier therefore requires probe_read_kernel rather
-        // than direct LDX instructions through that address.
-        emit(Insn(LDX_DW, dst = 6, src = 9, off = 0))
-        listOf(112, 104, 96, 56, 72, 64).forEachIndexed { index, offset ->
-            emit(Insn(MOV_REG, dst = 1, src = 7))
-            emit(Insn(ADD_IMM, dst = 1, imm = 40 + index * 8))
-            emit(Insn(MOV_IMM, dst = 2, imm = 8))
-            emit(Insn(MOV_REG, dst = 3, src = 6))
-            emit(Insn(ADD_IMM, dst = 3, imm = offset))
-            emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
-            emit(Insn(JEQ_IMM, dst = 0, off = 3))
-            emit(Insn(LDX_W, dst = 5, src = 7, off = 20))
-            emit(Insn(OR_IMM, dst = 5, imm = SyscallInvocationEvent.FLAG_ARGUMENT_READ_FAILED))
-            emit(Insn(STX_W, dst = 7, src = 5, off = 20))
+        // tracepoint/raw_syscalls/sys_enter exposes syscall arguments directly
+        // in its typed context: id at +8 and args[6] at +16. This avoids using
+        // architecture-specific pt_regs offsets through a raw tracepoint.
+        repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = (16 + index * 8).toShort()))
+            emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
         }
         if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
             // Do not turn a malformed observation into a covered edge. A later
@@ -250,11 +228,35 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
         val exitIndex = p.lastIndex
+
+        fun emitCounterAndExit(counterIndex: Int): Int {
+            ldMap(1, COUNTER_MAP_INDEX)
+            emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -4))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            val counterExit = p.size
+            emit(Insn(MOV_IMM, dst = 0, imm = 0))
+            emit(Insn(EXIT))
+            p[missingCounter] = p[missingCounter].copy(off = (counterExit - missingCounter - 1).toShort())
+            return p.size - (counterExit + 2)
+        }
+        val markerFailureHandler = p.size
+        emitCounterAndExit(MARKER_FAILURE_COUNTER_INDEX)
+        val ambientInactiveHandler = p.size
+        emitCounterAndExit(AMBIENT_INACTIVE_COUNTER_INDEX)
+
         p[reservationFailed] = p[reservationFailed].copy(off = (lossHandler - reservationFailed - 1).toShort())
-        p[noTask] = p[noTask].copy(off = (reserveStart - noTask - 1).toShort())
-        p[noStorage] = p[noStorage].copy(off = (reserveStart - noStorage - 1).toShort())
-        p[markerDetached] = p[markerDetached].copy(off = (detachedObservation - markerDetached - 1).toShort())
-        p[detachedToReserve] = p[detachedToReserve].copy(off = (reserveStart - detachedToReserve - 1).toShort())
+        p[noTask] = p[noTask].copy(off = (markerFailureHandler - noTask - 1).toShort())
+        p[noStorage] = p[noStorage].copy(off = (ambientInactiveHandler - noStorage - 1).toShort())
+        p[inactiveInvocation] = p[inactiveInvocation].copy(off = (ambientInactiveHandler - inactiveInvocation - 1).toShort())
+        p[noMetricContext] = p[noMetricContext].copy(off = (ambientInactiveHandler - noMetricContext - 1).toShort())
+        p[markerDetached] = p[markerDetached].copy(off = (exitIndex - markerDetached - 1).toShort())
+        p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
         p[submitted] = p[submitted].copy(off = (exitIndex - submitted - 2).toShort())
         p[missingLossCounter] = p[missingLossCounter].copy(off = (exitIndex - missingLossCounter - 1).toShort())
         exits.forEach { index -> p[index] = p[index].copy(off = (exitIndex - index - 1).toShort()) }

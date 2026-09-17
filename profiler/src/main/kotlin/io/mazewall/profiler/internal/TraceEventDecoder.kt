@@ -36,6 +36,7 @@ internal object TraceEventDecoder {
             val resolution = PathResolutionWire.read(input, paths)
             TraceEventDecodeResult.Event(
                 event = TraceEvent.fromSyscallEvent(SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(tidValue), syscallName, arguments.toList(), resolution)),
+                rawArguments = arguments.toList(),
                 syscallNameLength = syscallNameLength,
                 argumentCount = argumentCount,
             )
@@ -68,6 +69,8 @@ internal fun decodeTraceUtf8(bytes: ByteArray): String =
 internal sealed interface TraceEventDecodeResult {
     data class Event(
         val event: TraceEvent,
+        /** Internal decode-boundary diagnostic; public observations deliberately normalize OPENAT. */
+        val rawArguments: List<Long>,
         val syscallNameLength: Int,
         val argumentCount: Int,
     ) : TraceEventDecodeResult

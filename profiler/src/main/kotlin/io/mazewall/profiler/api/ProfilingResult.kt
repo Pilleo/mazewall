@@ -55,6 +55,9 @@ public class ProfilingResult<T>(
         observations: List<ProfileObservation> = this.observations,
     ): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations)
 
+    /** Serializes the observed behavior and its measured coverage, never [value]. */
+    public fun toProfileDocumentJson(): String = ProfileDocument.from(this).toJson()
+
     @JvmOverloads
     public fun toPolicy(
         base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
@@ -104,29 +107,17 @@ public class ProfilingResult<T>(
 
     public companion object {
         /**
-         * Portal worker opt-in: BoB JSON must contain `"mazewallComplete": true`.
-         * Missing attestation is incomplete and never becomes a worker allow-list.
+         * Portal worker opt-in: the document must preserve measured complete
+         * coverage. Plain SBoB JSON and legacy attestations are rejected.
          */
         @JvmStatic
         public fun dedicatedWorkerPoliciesFromDocument(json: String): Array<io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled>> {
-            if (!MAZEWALL_COMPLETE.containsMatchIn(json)) {
+            val document = try {
+                ProfileDocument.fromJson(json)
+            } catch (_: IllegalArgumentException) {
                 throw IncompleteProfileException(ProfilingCoverage.absent())
             }
-            val bob = BillOfBehavior.fromJson(json)
-            val coverage =
-                ProfilingCoverage.infer(
-                    strategy = ProfileStrategy.USER_NOTIF,
-                    strategyReason = "portal worker --complete-profile",
-                    processWide = true,
-                    observations = emptyList(),
-                    stacks = StackAttribution.SKIPPED,
-                    droppedEvents = 0,
-                    drainComplete = true,
-                    environment = ProfileEnvironment("portal-worker", EbpfLoad.Denied("not required for attested complete BoB")),
-                )
-            return ProfilingResult(Unit, bob, emptyMap(), coverage).toDedicatedWorkerPolicies()
+            return ProfilingResult(Unit, document.behavior, emptyMap(), document.coverage).toDedicatedWorkerPolicies()
         }
-
-        private val MAZEWALL_COMPLETE = Regex("\"mazewallComplete\"\\s*:\\s*true")
     }
 }

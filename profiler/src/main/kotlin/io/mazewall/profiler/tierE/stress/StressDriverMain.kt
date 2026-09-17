@@ -102,6 +102,7 @@ private class StressRpc private constructor(
         return input.readUTF()
     }
 
+    @Suppress("TooGenericExceptionCaught") // Every independently owned stream/socket must close and retain all failures.
     override fun close() {
         var failure: Throwable? = null
         try {

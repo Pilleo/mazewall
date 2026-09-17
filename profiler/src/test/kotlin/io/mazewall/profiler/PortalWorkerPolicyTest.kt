@@ -40,17 +40,28 @@ class PortalWorkerPolicyTest {
     }
 
     @Test
-    fun `profile document without mazewallComplete is incomplete`() {
+    fun `plain SBoB document is incomplete`() {
         assertFailsWith<IncompleteProfileException> {
             ProfilingResult.dedicatedWorkerPoliciesFromDocument("""{"syscalls":[]}""")
         }
     }
 
     @Test
-    fun `attested complete document compiles dedicated worker policies`() {
+    fun `measured complete document compiles dedicated worker policies`() {
+        val coverage =
+            ProfilingCoverage.infer(
+                strategy = ProfileStrategy.USER_NOTIF,
+                strategyReason = "test",
+                processWide = true,
+                observations = emptyList(),
+                stacks = StackAttribution.SKIPPED,
+                droppedEvents = 0,
+                drainComplete = true,
+                environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+            )
         val policies =
             ProfilingResult.dedicatedWorkerPoliciesFromDocument(
-                """{"mazewallComplete": true, "syscalls": []}""",
+                ProfilingResult(Unit, BillOfBehavior(), emptyMap(), coverage).toProfileDocumentJson(),
             )
         assertTrue(policies.any { policy -> !policy.isSyscallAllowed(Syscall.EXECVE) })
     }

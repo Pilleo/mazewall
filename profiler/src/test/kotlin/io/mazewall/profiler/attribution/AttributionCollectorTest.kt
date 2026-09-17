@@ -269,6 +269,32 @@ class AttributionCollectorTest {
     }
 
     @Test
+    fun `unique edge audit distinguishes candidate acknowledgement and suppression`() {
+        val decisions = mutableListOf<UniqueEdgeDecision>()
+        val collector = AttributionCollector(
+            emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL,
+            uniqueEdgeDecisionObserver = decisions::add,
+        )
+        val invocationId = InvocationId(201)
+        val stack = StackDefinition(StackTraceId(2L), listOf(frame()), StackCaptureQuality.COMPLETE)
+        collector.accept(stack)
+        collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
+
+        val candidate = collector.accept(pendingObservation(invocationId)).single()
+        collector.acknowledgeEmission(candidate)
+        assertEquals(emptyList<ResolvedSyscall>(), collector.accept(pendingObservation(invocationId)))
+
+        assertEquals(
+            listOf(
+                UniqueEdgeDecision.Kind.CANDIDATE,
+                UniqueEdgeDecision.Kind.ACKNOWLEDGED,
+                UniqueEdgeDecision.Kind.SUPPRESSED,
+            ),
+            decisions.map(UniqueEdgeDecision::kind),
+        )
+    }
+
+    @Test
     fun `emission acknowledgement requires the exact outstanding token`() {
         val collector = AttributionCollector(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
         val invocationId = InvocationId(300)

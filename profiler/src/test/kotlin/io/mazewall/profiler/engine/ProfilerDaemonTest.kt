@@ -282,8 +282,17 @@ class ProfilerDaemonTest {
                     io.mazewall.platform.lifecycle.Deadline
                     .afterMillis(30_000),
                 ).use { work ->
-                    repeat(2) { assertEquals(io.mazewall.platform.seccomp.daemon.NotificationProgress.Await, work.poll()) }
-                    val ready = work.poll() as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    var completionSignals = 0
+                    work.bindCompletionWakeup(
+                        io.mazewall.platform.seccomp.daemon
+                        .NotificationCompletionWakeup { completionSignals += 1 },
+                    )
+                    var progress: io.mazewall.platform.seccomp.daemon.NotificationProgress = work.poll()
+                    if (progress is io.mazewall.platform.seccomp.daemon.NotificationProgress.Await) {
+                        progress = work.poll()
+                    }
+                    val ready = progress as io.mazewall.platform.seccomp.daemon.NotificationProgress.Ready
+                    assertEquals(1, completionSignals)
                     assertTrue(transport.ioctlCalls.isEmpty())
                     assertEquals(io.mazewall.platform.seccomp.UserNotifReplyResult.Sent, ready.reply())
                     assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
