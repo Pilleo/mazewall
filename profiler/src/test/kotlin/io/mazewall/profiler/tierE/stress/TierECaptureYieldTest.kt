@@ -1,5 +1,8 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.InvocationDefinition
+import io.mazewall.profiler.internal.attribution.InvocationId
+import io.mazewall.profiler.internal.attribution.StackTraceId
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -41,5 +44,17 @@ class TierECaptureYieldTest {
         } finally {
             Files.deleteIfExists(file)
         }
+    }
+
+    @Test
+    fun `joins each yield record with its exact invocation identity`() {
+        val join = TierECaptureYield.join(
+            TierECaptureYield.Report(1, listOf(TierECaptureYield.Record(10, 1, TierECaptureYield.Outcome.CAPTURED), TierECaptureYield.Record(11, 1, TierECaptureYield.Outcome.ADMISSION_FAILED))),
+            listOf(InvocationDefinition(InvocationId(10), null, StackTraceId(1))),
+        )
+        assertEquals(1, join.exactJoined)
+        assertEquals(1, join.missingDefinition)
+        assertEquals(0, join.outcomeMismatch)
+        assertEquals(1, join.bindings.getValue(1).exactJoined)
     }
 }

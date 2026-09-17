@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.stress
 
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.ExecutionKind
 import io.mazewall.profiler.internal.attribution.ResolutionStatus
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
@@ -125,6 +126,7 @@ internal object TierEKernelSmoke {
             }
             check(process.waitFor() == 0) { "agent workload failed" }
             val captureYield = captureYieldPath?.let { TierECaptureYield.read(it) }
+            val captureYieldJoin = captureYield?.let { TierECaptureYield.join(it, AgentDefinitionFile.read(definitions).invocations) }
             val terminalStarted = System.nanoTime()
             val profile = session.finish(definitions)
             val terminalNanos = System.nanoTime() - terminalStarted
@@ -294,6 +296,10 @@ internal object TierEKernelSmoke {
                 "capture_yield_capture_failed=${captureYield?.captureFailed ?: 0} " +
                 "capture_yield_admission_failed=${captureYield?.admissionFailed ?: 0} " +
                 "capture_yield_excluded=${captureYield?.excluded ?: 0} " +
+                "capture_yield_exact_joined=${captureYieldJoin?.exactJoined ?: 0} " +
+                "capture_yield_missing_definition=${captureYieldJoin?.missingDefinition ?: 0} " +
+                "capture_yield_outcome_mismatch=${captureYieldJoin?.outcomeMismatch ?: 0} " +
+                "capture_yield_unrecorded_definitions=${captureYieldJoin?.unrecordedDefinitions ?: 0} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )

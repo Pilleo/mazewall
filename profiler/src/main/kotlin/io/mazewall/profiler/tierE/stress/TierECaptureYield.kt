@@ -1,5 +1,7 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.InvocationDefinition
+import io.mazewall.profiler.internal.attribution.InvocationId
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -74,6 +76,55 @@ internal object TierECaptureYield {
         val admissionFailed: Int get() = records.count { it.outcome == Outcome.ADMISSION_FAILED }
         val excluded: Int get() = records.count { it.outcome == Outcome.EXCLUDED }
     }
+
+    /** Exact benchmark-only join; it never changes attribution or native-call behavior. */
+    fun join(
+        report: Report,
+        definitions: Collection<InvocationDefinition>,
+    ): Join {
+        val byId = definitions.associateBy { it.invocationId }
+        val yields = report.records.groupBy { it.bindingCode }.mapValues { (_, records) ->
+            val joined = records.map { it to byId[InvocationId(it.invocationId)] }
+            BindingYield(
+                records.size,
+                joined.count { it.second != null },
+                joined.count { it.second == null },
+                joined.count { (record, definition) -> definition != null && !matches(record.outcome, definition) },
+            )
+        }
+        val seen = report.records.mapTo(HashSet()) { InvocationId(it.invocationId) }
+        return Join(
+            yields,
+            yields.values.sumOf { it.exactJoined },
+            yields.values.sumOf { it.missingDefinition },
+            yields.values.sumOf { it.outcomeMismatch },
+            byId.keys.count { it !in seen },
+        )
+    }
+
+    private fun matches(
+        outcome: Outcome,
+        definition: InvocationDefinition,
+    ): Boolean =
+        when (outcome) {
+        Outcome.CAPTURED -> definition.captureFailure == null
+        Outcome.CAPTURE_FAILED, Outcome.ADMISSION_FAILED, Outcome.EXCLUDED -> definition.captureFailure != null
+    }
+
+    data class BindingYield(
+        val records: Int,
+        val exactJoined: Int,
+        val missingDefinition: Int,
+        val outcomeMismatch: Int,
+    )
+
+    data class Join(
+        val bindings: Map<Int, BindingYield>,
+        val exactJoined: Int,
+        val missingDefinition: Int,
+        val outcomeMismatch: Int,
+        val unrecordedDefinitions: Int,
+    )
 
     enum class Outcome(
         val code: Int,
