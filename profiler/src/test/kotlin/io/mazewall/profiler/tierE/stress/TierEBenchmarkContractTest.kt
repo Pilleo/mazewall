@@ -8,6 +8,19 @@ import kotlin.test.assertTrue
 
 class TierEBenchmarkContractTest {
     @Test
+    fun `verified baseline is valid workload evidence without profiler session evidence`() {
+        val verdict = TierEBenchmarkContract.evaluate(
+            tierE = false,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(controlledWorkloadVerified = true),
+        )
+
+        assertEquals(TierEBenchmarkContract.CorrectnessState.PASS, verdict.workloadCorrectness)
+        assertEquals(TierEBenchmarkContract.EvidenceState.NOT_APPLICABLE, verdict.wholeSessionEvidence)
+    }
+
+    @Test
     fun `USER_NOTIF diagnostics accept an explicit bounded worker deadline`() {
         val limits = UserNotifOracleSmoke.diagnosticLimits(480)
 

@@ -42,7 +42,7 @@ internal object TierEBenchmarkContract {
         return Verdict(
             workloadCorrectness = when {
                 failures.isNotEmpty() -> CorrectnessState.FAILED
-                !evidence.operationOracle.available -> CorrectnessState.UNVERIFIED
+                !evidence.operationOracle.available && !evidence.controlledWorkloadVerified -> CorrectnessState.UNVERIFIED
                 else -> CorrectnessState.PASS
             },
             wholeSessionEvidence = if (tierE || userNotif) {
@@ -64,6 +64,8 @@ internal object TierEBenchmarkContract {
         val dropped: Long = 0,
         val workloadFrames: Boolean = false,
         val evidenceComplete: Boolean = false,
+        /** Baseline child completed its independently checked, declared workload. */
+        val controlledWorkloadVerified: Boolean = false,
         val operationOracle: OperationOracle = OperationOracle(),
     )
 

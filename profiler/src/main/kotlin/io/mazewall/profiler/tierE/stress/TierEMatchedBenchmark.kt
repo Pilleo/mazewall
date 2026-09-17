@@ -198,6 +198,7 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "reconciliation_kernel_active_observations"),
             output.contains("workloadFrames=true"),
             output.contains("evidence_complete=true") || output.contains("evidenceComplete=true"),
+            mode == Mode.BASELINE && batches.all { it.operations == config.iterations.toLong() },
             TierEBenchmarkContract.OperationOracle(
                 available = output.contains("operation_oracle_available=true"),
                 expected = metricOrZero(output, "expected_operations"),
@@ -319,7 +320,10 @@ internal object TierEMatchedBenchmark {
         val variants = forks.groupBy { it.variant.jsonName(config.scope) }.entries.joinToString(",") { (name, values) ->
             val batches = values.flatMap { it.batches }.map { it.workloadNanos }
             val complete = values.count { it.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE }
-            val performanceEvidence = if (complete == values.size) "COMPLETE" else "INCOMPLETE"
+            val performanceEvidence = performanceEvidence(
+                values.first().verdict.workloadCorrectness,
+                values.first().verdict.wholeSessionEvidence,
+            )
             "\"$name\":{\"median_ns\":${median(batches)},\"p95_ns\":${percentile(batches, 95.0)}," +
                 "\"p99_ns\":${percentile(batches, 99.0)},\"whole_session_complete_forks\":$complete," +
                 "\"forks\":${values.size},\"performance_evidence\":\"$performanceEvidence\"}"
@@ -345,6 +349,17 @@ internal object TierEMatchedBenchmark {
             "\"transport\":\"${variant.mode.stackTransport}\",\"cache\":\"${variant.cacheMode ?: "not_applicable"}\"," +
             "\"publication\":\"${variant.publication.jsonName}\",\"fork\":$fork,\"batch\":${batch.index}," +
             "\"workload_ns\":${batch.workloadNanos},\"operations\":${batch.operations},\"checksum\":${batch.checksum}}"
+
+    internal fun performanceEvidence(
+        workloadCorrectness: TierEBenchmarkContract.CorrectnessState,
+        wholeSessionEvidence: TierEBenchmarkContract.EvidenceState,
+    ): String =
+        when {
+        wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE -> "COMPLETE"
+        workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS &&
+            wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.NOT_APPLICABLE -> "BASELINE_VERIFIED"
+        else -> "INCOMPLETE"
+    }
 
     private fun forkJson(
         result: ForkResult,
@@ -700,6 +715,7 @@ internal object TierEMatchedBenchmark {
         val reconciliationKernelActiveObservations: Long,
         val workloadFrames: Boolean,
         val evidenceComplete: Boolean,
+        val controlledWorkloadVerified: Boolean,
         val operationOracle: TierEBenchmarkContract.OperationOracle,
         val phases: PhaseMetrics,
         val captureYield: CaptureYieldMetrics,
@@ -716,6 +732,7 @@ internal object TierEMatchedBenchmark {
             dropped = dropped,
             workloadFrames = workloadFrames,
             evidenceComplete = evidenceComplete,
+            controlledWorkloadVerified = controlledWorkloadVerified,
             operationOracle = operationOracle,
         )
     }
