@@ -17,6 +17,17 @@ class TierEMatchedBenchmarkJsonTest {
     }
 
     @Test
+    fun `default full capture profile remains an omitted native agent option`() {
+        assertEquals("", TierEKernelSmoke.captureProfileOption(null))
+        assertEquals("", TierEKernelSmoke.captureProfileOption(""))
+        assertEquals("", TierEKernelSmoke.captureProfileOption("full"))
+        assertEquals(
+            ",capture-profile=jdk25-unix-openat0",
+            TierEKernelSmoke.captureProfileOption("jdk25-unix-openat0"),
+        )
+    }
+
+    @Test
     fun `full stream exact joins produce valid capture efficiency evidence`() {
         val metrics = TierEMatchedBenchmark.captureEfficiency(
             executedOperations = 1_300,
@@ -48,6 +59,58 @@ class TierEMatchedBenchmarkJsonTest {
         assertEquals(2, binding.resolvedInvocations)
         assertEquals(3, binding.resolvedSyscalls)
         assertEquals(2, binding.capturedWithoutResolvedSyscall)
+    }
+
+    @Test
+    fun `profile exclusions do not invalidate joined admitted captures`() {
+        assertEquals(
+            true,
+            TierEMatchedBenchmark.admittedCapturesJoined(
+                captured = 400,
+                captureFailed = 0,
+                admissionFailed = 0,
+                exactJoined = 400,
+                outcomeMismatch = 0,
+                unrecordedDefinitions = 0,
+            ),
+        )
+        assertEquals(
+            false,
+            TierEMatchedBenchmark.admittedCapturesJoined(
+                captured = 400,
+                captureFailed = 0,
+                admissionFailed = 0,
+                exactJoined = 399,
+                outcomeMismatch = 0,
+                unrecordedDefinitions = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `capture profile pair requires complete correct useful evidence on both arms`() {
+        assertEquals(
+            emptyList(),
+            TierEMatchedBenchmark.captureProfilePairExclusionReasons(
+                fullWorkloadCorrect = true,
+                fullEvidenceComplete = true,
+                fullCaptureEfficiencyValid = true,
+                narrowedWorkloadCorrect = true,
+                narrowedEvidenceComplete = true,
+                narrowedCaptureEfficiencyValid = true,
+            ),
+        )
+        assertEquals(
+            listOf("narrowed_capture_efficiency"),
+            TierEMatchedBenchmark.captureProfilePairExclusionReasons(
+                fullWorkloadCorrect = true,
+                fullEvidenceComplete = true,
+                fullCaptureEfficiencyValid = true,
+                narrowedWorkloadCorrect = true,
+                narrowedEvidenceComplete = true,
+                narrowedCaptureEfficiencyValid = false,
+            ),
+        )
     }
 
     @Test

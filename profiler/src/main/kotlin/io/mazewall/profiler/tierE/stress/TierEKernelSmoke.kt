@@ -67,11 +67,7 @@ internal object TierEKernelSmoke {
             ",benchmark-phases" +
                 (if (System.getProperty("mazewall.tier-e.canonical-cache") == "disabled") ",canonical-cache=disabled" else "") +
                 (if (System.getProperty("mazewall.tier-e.live-publication") == "true") ",live-definitions" else "") +
-                System
-                    .getProperty("mazewall.tier-e.capture-profile")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { ",capture-profile=$it" }
-                    .orEmpty()
+                captureProfileOption(System.getProperty("mazewall.tier-e.capture-profile"))
         } else {
             ""
         }
@@ -95,7 +91,10 @@ internal object TierEKernelSmoke {
         }
         val child = ManagedProcessCapture.start(ProcessBuilder(command).inheritIO())
         val process = child.process
-        val processEpoch = processEpoch(process.pid())
+        val processEpoch = runCatching { processEpoch(process.pid()) }
+            .getOrElse { failure ->
+                error("target exited before process identity could be admitted: ${failure.message}")
+            }
         val uniqueEdgeDecisions = mutableListOf<UniqueEdgeDecision>()
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
@@ -375,6 +374,12 @@ internal object TierEKernelSmoke {
         val stat = Files.readString(Path.of("/proc/$pid/stat"))
         return stat.substringAfterLast(") ").split(' ')[19].toLong()
     }
+
+    internal fun captureProfileOption(captureProfile: String?): String =
+        captureProfile
+            ?.takeIf { it.isNotBlank() && it != "full" }
+            ?.let { ",capture-profile=$it" }
+            .orEmpty()
 
     private fun deleteTree(root: Path) {
         Files.walk(root).use { paths ->

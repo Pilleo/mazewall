@@ -270,10 +270,14 @@ internal object TierEMatchedBenchmark {
                 .sumOf { it.resolvedInvocations },
             getStackTraceNanos = evidence.phases.getStackTraceNanos,
             fullStream = mode.emissionMode == "full-stream",
-            exactJoinComplete = evidence.captureYield.records == evidence.captureYield.exactJoined &&
-                evidence.captureYield.missingDefinition == 0L &&
-                evidence.captureYield.outcomeMismatch == 0L &&
-                evidence.captureYield.unrecordedDefinitions == 0L,
+            exactJoinComplete = admittedCapturesJoined(
+                captured = evidence.captureYield.captured,
+                captureFailed = evidence.captureYield.captureFailed,
+                admissionFailed = evidence.captureYield.admissionFailed,
+                exactJoined = evidence.captureYield.exactJoined,
+                outcomeMismatch = evidence.captureYield.outcomeMismatch,
+                unrecordedDefinitions = evidence.captureYield.unrecordedDefinitions,
+            ),
             evidenceComplete = evidence.evidenceComplete,
             observedLosses = evidence.lost,
             attributionFailures = evidence.attributionFailures,
@@ -548,6 +552,37 @@ internal object TierEMatchedBenchmark {
         }
     }
 
+    internal fun admittedCapturesJoined(
+        captured: Long,
+        captureFailed: Long,
+        admissionFailed: Long,
+        exactJoined: Long,
+        outcomeMismatch: Long,
+        unrecordedDefinitions: Long,
+    ): Boolean =
+        captured == exactJoined &&
+            captureFailed == 0L &&
+            admissionFailed == 0L &&
+            outcomeMismatch == 0L &&
+            unrecordedDefinitions == 0L
+
+    internal fun captureProfilePairExclusionReasons(
+        fullWorkloadCorrect: Boolean,
+        fullEvidenceComplete: Boolean,
+        fullCaptureEfficiencyValid: Boolean,
+        narrowedWorkloadCorrect: Boolean,
+        narrowedEvidenceComplete: Boolean,
+        narrowedCaptureEfficiencyValid: Boolean,
+    ): List<String> =
+        buildList {
+        if (!fullWorkloadCorrect) add("full_workload_correctness")
+        if (!fullEvidenceComplete) add("full_evidence_integrity")
+        if (!fullCaptureEfficiencyValid) add("full_capture_efficiency")
+        if (!narrowedWorkloadCorrect) add("narrowed_workload_correctness")
+        if (!narrowedEvidenceComplete) add("narrowed_evidence_integrity")
+        if (!narrowedCaptureEfficiencyValid) add("narrowed_capture_efficiency")
+    }
+
     private fun terminal(
         success: Boolean,
         message: String,
@@ -593,13 +628,39 @@ internal object TierEMatchedBenchmark {
             val values = forks.filter { it.variant.mode == Mode.FULL_STREAM }
             val full = values.filter { captureProfileFor(it.variant) == CaptureProfile.FULL }.associateBy { it.fork }
             val narrowed = values.filter { captureProfileFor(it.variant) == CaptureProfile.JDK25_UNIX_OPENAT0 }.associateBy { it.fork }
-            val deltas = full.keys.intersect(narrowed.keys).map { fork ->
-                median(full.getValue(fork).batches.map { it.workloadNanos }) -
-                    median(narrowed.getValue(fork).batches.map { it.workloadNanos })
+            val pairs = full.keys.intersect(narrowed.keys).sorted().map { fork ->
+                fork to (full.getValue(fork) to narrowed.getValue(fork))
+            }
+            val exclusions = pairs
+                .mapNotNull { (fork, results) ->
+                val reasons = captureProfilePairExclusionReasons(
+                    fullWorkloadCorrect = results.first.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS,
+                    fullEvidenceComplete = results.first.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE,
+                    fullCaptureEfficiencyValid = results.first.captureEfficiency.valid,
+                    narrowedWorkloadCorrect = results.second.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS,
+                    narrowedEvidenceComplete = results.second.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE,
+                    narrowedCaptureEfficiencyValid = results.second.captureEfficiency.valid,
+                )
+                reasons.takeIf { it.isNotEmpty() }?.let { fork to it }
+            }.toMap()
+            val deltas = pairs
+                .filter { (fork, _) -> fork !in exclusions }
+                .map { (_, results) ->
+                    median(results.first.batches.map { it.workloadNanos }) -
+                        median(results.second.batches.map { it.workloadNanos })
+                }
+            val exclusionJson = exclusions.entries.joinToString(",", prefix = "{", postfix = "}") { (fork, reasons) ->
+                "\"$fork\":[${reasons.joinToString(",") { reason -> "\"${escape(reason)}\"" }}]"
+            }
+            if (deltas.isEmpty()) {
+                return "\"paired_capture_profile_effects\":{\"dictionary_full_stream\":{\"full_minus_narrowed_median_ns\":null," +
+                    "\"paired_bootstrap_95_ci_low_ns\":null,\"paired_bootstrap_95_ci_high_ns\":null,\"pairs\":0," +
+                    "\"excluded_pairs\":$exclusionJson}},"
             }
             val interval = bootstrapMedianInterval(deltas)
             return "\"paired_capture_profile_effects\":{\"dictionary_full_stream\":{\"full_minus_narrowed_median_ns\":${median(deltas)}," +
-                "\"paired_bootstrap_95_ci_low_ns\":${interval.first},\"paired_bootstrap_95_ci_high_ns\":${interval.second},\"pairs\":${deltas.size}}},"
+                "\"paired_bootstrap_95_ci_low_ns\":${interval.first},\"paired_bootstrap_95_ci_high_ns\":${interval.second},\"pairs\":${deltas.size}," +
+                "\"excluded_pairs\":$exclusionJson}},"
         }
         if (scope != Scope.TIER_E_CACHE_PAIRED) return ""
         val effects = forks.filter { it.variant.mode.tierE }.groupBy { it.variant.mode }.entries.joinToString(",") { (mode, values) ->

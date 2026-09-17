@@ -77,11 +77,11 @@ docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --
     -v "${REPOSITORY_DIR}:${REPOSITORY_DIR}" -v "${ARTIFACT_DIR}:/artifacts" -v "${ARTIFACT_DIR}/gradle-home:/gradle-cache" -w "${REPOSITORY_DIR}" "${IMAGE}" bash -lc '
         set -euo pipefail
         {
-            native_build_dir=/tmp/jseccomp-tier-e-native-build
+            native_build_dir=$(mktemp -d /tmp/jseccomp-tier-e-native-build.XXXXXX)
             cmake -S profiler-native -B "${native_build_dir}" -DCMAKE_BUILD_TYPE=Release
             cmake --build "${native_build_dir}" -j2
             cp "${native_build_dir}/libmazewall_stack_agent.so" /artifacts/libmazewall_stack_agent.so
-            ./gradlew --no-daemon :profiler:test --tests io.mazewall.profiler.tierE.stress.TierECommonFileWorkloadTest :profiler:installDist
+            ./gradlew --no-daemon --rerun-tasks :profiler:test --tests io.mazewall.profiler.tierE.stress.TierECommonFileWorkloadTest :profiler:installDist
         } 2>&1 | tee /artifacts/build.log
     '
 
