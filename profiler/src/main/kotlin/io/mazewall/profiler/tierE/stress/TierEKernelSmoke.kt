@@ -305,6 +305,9 @@ internal object TierEKernelSmoke {
                 "capture_yield_missing_definition=${captureYieldJoin?.missingDefinition ?: 0} " +
                 "capture_yield_outcome_mismatch=${captureYieldJoin?.outcomeMismatch ?: 0} " +
                 "capture_yield_unrecorded_definitions=${captureYieldJoin?.unrecordedDefinitions ?: 0} " +
+                "capture_yield_bindings=${captureYieldJoin?.bindings.orEmpty().toSortedMap().entries.joinToString(",") { (binding, yield) ->
+                    "$binding:${yield.records}:${yield.exactJoined}:${yield.missingDefinition}:${yield.outcomeMismatch}"
+                }} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )

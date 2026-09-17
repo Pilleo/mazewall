@@ -235,6 +235,11 @@ internal object TierEMatchedBenchmark {
                 metricOrZero(output, "capture_yield_capture_failed"),
                 metricOrZero(output, "capture_yield_admission_failed"),
                 metricOrZero(output, "capture_yield_excluded"),
+                metricOrZero(output, "capture_yield_exact_joined"),
+                metricOrZero(output, "capture_yield_missing_definition"),
+                metricOrZero(output, "capture_yield_outcome_mismatch"),
+                metricOrZero(output, "capture_yield_unrecorded_definitions"),
+                captureYieldBindings(output),
             ),
             UserNotifPhaseMetrics(
                 metricOrZero(output, "user_notif_timed_operations"),
@@ -432,7 +437,34 @@ internal object TierEMatchedBenchmark {
             "\"capture_failed\":${metrics.captureFailed}",
             "\"admission_failed\":${metrics.admissionFailed}",
             "\"excluded\":${metrics.excluded}",
+            "\"exact_joined\":${metrics.exactJoined}",
+            "\"missing_definition\":${metrics.missingDefinition}",
+            "\"outcome_mismatch\":${metrics.outcomeMismatch}",
+            "\"unrecorded_definitions\":${metrics.unrecordedDefinitions}",
+            "\"bindings\":${metrics.bindings.entries.sortedBy { it.key }.joinToString(",", "{", "}") { (binding, yield) ->
+                "\"$binding\":{\"records\":${yield.records},\"exact_joined\":${yield.exactJoined}," +
+                    "\"missing_definition\":${yield.missingDefinition},\"outcome_mismatch\":${yield.outcomeMismatch}}"
+            }}",
         ).joinToString(",", prefix = "{", postfix = "}")
+
+    private fun captureYieldBindings(output: String): Map<Int, CaptureYieldBindingMetrics> {
+        val encoded = CAPTURE_YIELD_BINDINGS_PATTERN
+            .find(output)
+            ?.groupValues
+            ?.get(1)
+            .orEmpty()
+        if (encoded.isEmpty()) return emptyMap()
+        return encoded.split(",").associate { entry ->
+            val values = entry.split(":")
+            require(values.size == 5) { "invalid capture-yield binding: $entry" }
+            values[0].toInt() to CaptureYieldBindingMetrics(
+                values[1].toLong(),
+                values[2].toLong(),
+                values[3].toLong(),
+                values[4].toLong(),
+            )
+        }
+    }
 
     private fun terminal(
         success: Boolean,
@@ -722,6 +754,18 @@ internal object TierEMatchedBenchmark {
         val captureFailed: Long,
         val admissionFailed: Long,
         val excluded: Long,
+        val exactJoined: Long,
+        val missingDefinition: Long,
+        val outcomeMismatch: Long,
+        val unrecordedDefinitions: Long,
+        val bindings: Map<Int, CaptureYieldBindingMetrics>,
+    )
+
+    private data class CaptureYieldBindingMetrics(
+        val records: Long,
+        val exactJoined: Long,
+        val missingDefinition: Long,
+        val outcomeMismatch: Long,
     )
 
     private data class ForkResult(
@@ -744,4 +788,6 @@ internal object TierEMatchedBenchmark {
 
     private val BATCH_PATTERN =
         Regex("(?:tier-e-common-workload|tier-e-write-oracle|tier-e-shared-openat-oracle|user-notif-oracle)-batch: phase=(\\w+) index=(\\d+) operations=(\\d+) checksum=(-?\\d+) .*workloadNs=(\\d+)")
+
+    private val CAPTURE_YIELD_BINDINGS_PATTERN = Regex("(?:^|\\s)capture_yield_bindings=([^\\s]*)")
 }
