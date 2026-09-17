@@ -76,20 +76,53 @@ std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder
 std::atomic<std::uint64_t> capture_yield_contention_drops{0};
 enum class CaptureProfile { full, jdk25_unix_openat0 };
 CaptureProfile capture_profile = CaptureProfile::full;
+std::atomic<bool> capture_profile_admitted{true};
 
 bool write_definitions(bool producer_closed = false) noexcept;
 void request_live_publication() noexcept;
 
 bool profile_admits(mazewall::profiler::BindingKind binding_kind) noexcept {
-    return capture_profile == CaptureProfile::full || binding_kind == mazewall::profiler::BindingKind::unix_openat0;
+    return capture_profile == CaptureProfile::full ||
+        (capture_profile_admitted.load(std::memory_order_acquire) && binding_kind == mazewall::profiler::BindingKind::unix_openat0);
 }
 
-bool validate_capture_profile(jvmtiEnv* jvmti) noexcept {
+bool validate_capture_profile(JNIEnv* env) noexcept {
     if (capture_profile == CaptureProfile::full) return true;
-    char* specification_version = nullptr;
-    if (jvmti->GetSystemProperty("java.specification.version", &specification_version) != JVMTI_ERROR_NONE || specification_version == nullptr) return false;
-    const bool matches = std::strcmp(specification_version, "25") == 0;
-    jvmti->Deallocate(reinterpret_cast<unsigned char*>(specification_version));
+    const auto clear_owned_exception = [env]() noexcept {
+        if (!env->ExceptionCheck()) return false;
+        env->ExceptionClear();
+        return true;
+    };
+    const auto system_class = env->FindClass("java/lang/System");
+    if (system_class == nullptr || clear_owned_exception()) return false;
+    const auto get_property = env->GetStaticMethodID(system_class, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
+    if (get_property == nullptr || clear_owned_exception()) {
+        env->DeleteLocalRef(system_class);
+        return false;
+    }
+    const auto key = env->NewStringUTF("java.specification.version");
+    if (key == nullptr || clear_owned_exception()) {
+        env->DeleteLocalRef(system_class);
+        return false;
+    }
+    const auto specification_version = static_cast<jstring>(env->CallStaticObjectMethod(system_class, get_property, key));
+    if (specification_version == nullptr || clear_owned_exception()) {
+        env->DeleteLocalRef(key);
+        env->DeleteLocalRef(system_class);
+        return false;
+    }
+    const auto value = env->GetStringUTFChars(specification_version, nullptr);
+    if (value == nullptr || clear_owned_exception()) {
+        env->DeleteLocalRef(specification_version);
+        env->DeleteLocalRef(key);
+        env->DeleteLocalRef(system_class);
+        return false;
+    }
+    const bool matches = std::strcmp(value, "25") == 0;
+    env->ReleaseStringUTFChars(specification_version, value);
+    env->DeleteLocalRef(specification_version);
+    env->DeleteLocalRef(key);
+    env->DeleteLocalRef(system_class);
     return matches;
 }
 
@@ -1057,6 +1090,15 @@ void JNICALL on_class_prepare(jvmtiEnv*, JNIEnv*, jthread, jclass) noexcept {
     (void)symbolization_generation.complete_replacement();
 }
 
+void JNICALL on_vm_init(jvmtiEnv*, JNIEnv* env, jthread) noexcept {
+    if (capture_profile == CaptureProfile::full) return;
+    if (!validate_capture_profile(env)) {
+        std::fprintf(stderr, "mazewall-stack-agent: capture profile validation failed after VM initialization\\n");
+        return;
+    }
+    capture_profile_admitted.store(true, std::memory_order_release);
+}
+
 bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     jvmtiCapabilities capabilities{};
     capabilities.can_generate_native_method_bind_events = 1;
@@ -1071,12 +1113,14 @@ bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     callbacks.NativeMethodBind = on_native_method_bind;
     callbacks.ClassFileLoadHook = on_class_file_load;
     callbacks.ClassPrepare = on_class_prepare;
+    callbacks.VMInit = on_vm_init;
     callbacks.VirtualThreadEnd = on_virtual_thread_end;
     if (jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
         return false;
     }
 
-    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr) == JVMTI_ERROR_NONE &&
+    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, nullptr) == JVMTI_ERROR_NONE &&
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VIRTUAL_THREAD_END, nullptr) == JVMTI_ERROR_NONE;
@@ -1401,6 +1445,7 @@ bool parse_options(const char* options) {
         }
     }
     if (capture_profile != CaptureProfile::full && !benchmark_phases) return false;
+    capture_profile_admitted.store(capture_profile == CaptureProfile::full, std::memory_order_release);
     return true;
 }
 
@@ -1419,17 +1464,21 @@ extern "C" void mazewall_symbolization_replacement_end() noexcept {
 
 extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*) {
     if (vm == nullptr || !parse_options(options)) {
+        std::fprintf(stderr, "mazewall-stack-agent: load rejected invalid VM or options\\n");
         return JNI_ERR;
     }
 
     jvmtiEnv* jvmti = nullptr;
     if (vm->GetEnv(reinterpret_cast<void**>(&jvmti), JVMTI_VERSION_1_2) != JNI_OK || jvmti == nullptr) {
+        std::fprintf(stderr, "mazewall-stack-agent: load rejected missing JVMTI 1.2\\n");
         return JNI_ERR;
     }
 
     global_jvmti = jvmti;
-    if (!validate_capture_profile(jvmti)) return JNI_ERR;
-    if (!configure_native_bind_events(jvmti)) return JNI_ERR;
+    if (!configure_native_bind_events(jvmti)) {
+        std::fprintf(stderr, "mazewall-stack-agent: load rejected native bind configuration\\n");
+        return JNI_ERR;
+    }
     start_live_publisher();
     return JNI_OK;
 }

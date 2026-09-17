@@ -57,10 +57,10 @@ add_test(NAME lifecycle_identity_stress_fixture COMMAND lifecycle_identity_stres
 
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
-    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class"
+    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${AGENT_TEST_CLASSES}"
-    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java"
+    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java"
     VERBATIM
 )
 add_custom_command(
@@ -75,7 +75,7 @@ add_custom_command(
     DEPENDS "${AGENT_TEST_CLASSES}/RedefinitionAgent.class" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf"
     VERBATIM
 )
-add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
+add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
 add_test(
     NAME agent_smoke_test
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" AgentWorkload
@@ -93,7 +93,7 @@ set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSI
 
 add_test(
     NAME agent_capture_profile_jdk25_openat
-    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-profile=jdk25-unix-openat0" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 10
+    COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-profile=jdk25-unix-openat0" -cp "${AGENT_TEST_CLASSES}" OpenatProfileWorkload
 )
 set_tests_properties(agent_capture_profile_jdk25_openat PROPERTIES PASS_REGULAR_EXPRESSION "mazewall-stack-agent:.*stack-captures=[1-9][0-9]*")
 
