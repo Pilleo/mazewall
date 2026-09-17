@@ -24,6 +24,7 @@ IFS=, read -r WORKLOAD_CPU COLLECTOR_CPU <<< "${CPU_SET}"
 CALLER_UID=$(id -u)
 CALLER_GID=$(id -g)
 CANONICAL_CACHE=${MAZEWALL_TIER_E_CANONICAL_CACHE:-enabled}
+CAPTURE_PROFILE=${MAZEWALL_TIER_E_CAPTURE_PROFILE:-}
 BENCHMARK_SCOPE=${MAZEWALL_TIER_E_BENCHMARK_SCOPE:-full}
 BENCHMARK_WORKLOAD=${MAZEWALL_TIER_E_BENCHMARK_WORKLOAD:-oracle}
 CHILD_TIMEOUT_SECONDS=${MAZEWALL_TIER_E_CHILD_TIMEOUT_SECONDS:-180}
@@ -42,6 +43,10 @@ CPU_TOPOLOGY_FILE="${ARTIFACT_DIR}/cpu-topology.csv"
 lscpu -p=CPU,CORE,SOCKET > "${CPU_TOPOLOGY_FILE}"
 if [[ "${CANONICAL_CACHE}" != "enabled" && "${CANONICAL_CACHE}" != "disabled" ]]; then
     echo "MAZEWALL_TIER_E_CANONICAL_CACHE must be enabled or disabled" >&2
+    exit 2
+fi
+if [[ -n "${CAPTURE_PROFILE}" && "${CAPTURE_PROFILE}" != "jdk25-unix-openat0" ]]; then
+    echo "MAZEWALL_TIER_E_CAPTURE_PROFILE must be empty or jdk25-unix-openat0" >&2
     exit 2
 fi
 if [[ "${BENCHMARK_WORKLOAD}" != "application" && "${BENCHMARK_WORKLOAD}" != "oracle" ]]; then
@@ -64,6 +69,7 @@ fi
 docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --privileged --pid=host --userns=host --cpuset-cpus="${CPU_SET}" --security-opt seccomp=unconfined \
     --user "${CALLER_UID}:${CALLER_GID}" -e GRADLE_USER_HOME=/gradle-cache \
     -e "WORKLOAD_CPU=${WORKLOAD_CPU}" -e "COLLECTOR_CPU=${COLLECTOR_CPU}" \
+    -e "CAPTURE_PROFILE=${CAPTURE_PROFILE}" \
     -v "${REPOSITORY_DIR}:${REPOSITORY_DIR}" -v "${ARTIFACT_DIR}:/artifacts" -v "${ARTIFACT_DIR}/gradle-home:/gradle-cache" -w "${REPOSITORY_DIR}" "${IMAGE}" bash -lc '
         set -euo pipefail
         {
@@ -114,5 +120,5 @@ docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --
             grep -Eq "cache_hits=0( |$)" /artifacts/cache-disabled-preflight.log
             grep -Eq "cache_misses=[1-9][0-9]*( |$)" /artifacts/cache-disabled-preflight.log
         fi
-        java -Dmazewall.tier-e.canonical-cache="${CANONICAL_CACHE}" -Dmazewall.tier-e.benchmark-scope="${BENCHMARK_SCOPE}" -Dmazewall.tier-e.benchmark-workload="${BENCHMARK_WORKLOAD}" -Dmazewall.tier-e.child-timeout-seconds="${CHILD_TIMEOUT_SECONDS}" -Dmazewall.tier-e.user-notif-worker-timeout-seconds="${USER_NOTIF_WORKER_TIMEOUT_SECONDS}" -Dmazewall.tier-e.user-notif-child-timeout-seconds="${USER_NOTIF_CHILD_TIMEOUT_SECONDS}" --enable-native-access=ALL-UNNAMED -cp "${classpath}" io.mazewall.profiler.tierE.stress.TierEMatchedBenchmark /artifacts/libmazewall_stack_agent.so "${ITERATIONS}" "${WARMUPS}" "${BATCHES}" "${FORKS}" "${WORKLOAD_CPU}" "${COLLECTOR_CPU}" /artifacts/results.jsonl 2>&1 | tee /artifacts/benchmark.log
+        java -Dmazewall.tier-e.canonical-cache="${CANONICAL_CACHE}" -Dmazewall.tier-e.capture-profile="${CAPTURE_PROFILE}" -Dmazewall.tier-e.benchmark-scope="${BENCHMARK_SCOPE}" -Dmazewall.tier-e.benchmark-workload="${BENCHMARK_WORKLOAD}" -Dmazewall.tier-e.child-timeout-seconds="${CHILD_TIMEOUT_SECONDS}" -Dmazewall.tier-e.user-notif-worker-timeout-seconds="${USER_NOTIF_WORKER_TIMEOUT_SECONDS}" -Dmazewall.tier-e.user-notif-child-timeout-seconds="${USER_NOTIF_CHILD_TIMEOUT_SECONDS}" --enable-native-access=ALL-UNNAMED -cp "${classpath}" io.mazewall.profiler.tierE.stress.TierEMatchedBenchmark /artifacts/libmazewall_stack_agent.so "${ITERATIONS}" "${WARMUPS}" "${BATCHES}" "${FORKS}" "${WORKLOAD_CPU}" "${COLLECTOR_CPU}" /artifacts/results.jsonl 2>&1 | tee /artifacts/benchmark.log
     '
