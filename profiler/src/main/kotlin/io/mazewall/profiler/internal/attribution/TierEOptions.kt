@@ -25,6 +25,8 @@ internal data class TierEOptions(
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,
+    /** Enables benchmark-only collector phase timing; ordinary sessions do not read the clock. */
+    val benchmarkPhases: Boolean = false,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }

@@ -145,6 +145,24 @@ class TierEProfilerSessionLifecycleTest {
         assertEquals(0, profile.integrity.reconciliation.kernelActiveObservations)
     }
 
+    @Test
+    fun `benchmark session measures ring drain and collector join separately`() {
+        val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 50L))
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(events = ArrayDeque(listOf(listOf(event(1uL))))),
+            processEpoch = 1,
+            options = TierEOptions(benchmarkPhases = true),
+            definitionReader = { emptyDefinitions() },
+            nanoTime = { timestamps.removeFirst() },
+        )
+
+        session.poll()
+
+        assertEquals(10, session.benchmarkPhaseMetrics().ringDrainNanos)
+        assertEquals(20, session.benchmarkPhaseMetrics().collectorJoinNanos)
+        assertEquals(1, session.benchmarkPhaseMetrics().polls)
+    }
+
     private fun emptyDefinitions() = AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
 
     private fun event(sequence: ULong) =

@@ -94,6 +94,7 @@ internal class TierEProfilerSession internal constructor(
     private val definitionReader: (Path) -> AgentDefinitionFile.Contents = AgentDefinitionFile::read,
     private val dictionarySink: DictionaryBatchSink? = null,
     private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
+    private val nanoTime: () -> Long = System::nanoTime,
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -151,6 +152,9 @@ internal class TierEProfilerSession internal constructor(
     private var liveDefinitionFile: Path? = null
     private val liveKnownStackIds = mutableSetOf<StackTraceId>()
     private val liveDefinitionAdmission = SnapshotReplayAdmission()
+    private var ringDrainNanos = 0L
+    private var collectorJoinNanos = 0L
+    private var collectorPolls = 0L
 
     init {
         collector.attachRetainedBudget(retainedBudget)
@@ -182,12 +186,29 @@ internal class TierEProfilerSession internal constructor(
     @Synchronized
     public fun poll(): List<ResolvedSyscall> {
         requireCollecting()
-        val batch = source.drainEvents().flatMap { collector.accept(it.toAttribution()) }
+        val events = if (options.benchmarkPhases) {
+            val started = nanoTime()
+            source.drainEvents().also { ringDrainNanos += nanoTime() - started }
+        } else {
+            source.drainEvents()
+        }
+        val batch = if (options.benchmarkPhases) {
+            val started = nanoTime()
+            events.flatMap { collector.accept(it.toAttribution()) }.also {
+                collectorJoinNanos += nanoTime() - started
+                collectorPolls++
+            }
+        } else {
+            events.flatMap { collector.accept(it.toAttribution()) }
+        }
         retain(batch)
         refreshLossCounters()
         publishLiveDefinitions()
         return java.util.List.copyOf(batch)
     }
+
+    @Synchronized
+    internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics = TierECollectorPhaseMetrics(ringDrainNanos, collectorJoinNanos, collectorPolls)
 
     /** Completes delayed ID resolution once, then returns the same immutable result. */
     @Synchronized
@@ -402,3 +423,10 @@ internal class TierEProfile(
 
     override fun toString(): String = "TierEProfile(syscalls=$syscalls, integrity=$integrity)"
 }
+
+/** Benchmark-only userspace collector phase totals; zero outside explicitly instrumented runs. */
+internal data class TierECollectorPhaseMetrics(
+    val ringDrainNanos: Long = 0,
+    val collectorJoinNanos: Long = 0,
+    val polls: Long = 0,
+)

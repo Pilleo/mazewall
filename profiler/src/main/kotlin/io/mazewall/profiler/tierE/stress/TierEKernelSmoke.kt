@@ -99,7 +99,7 @@ internal object TierEKernelSmoke {
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
             processEpoch,
-            TierEOptions(emissionMode, stackTransport),
+            TierEOptions(emissionMode = emissionMode, stackTransport = stackTransport, benchmarkPhases = benchmark),
             uniqueEdgeDecisionObserver = uniqueEdgeDecisions::add,
         )
         var oracleRoot: Path? = null
@@ -143,6 +143,7 @@ internal object TierEKernelSmoke {
             }
             val terminalNanos = System.nanoTime() - terminalStarted
             val workloadNanos = System.nanoTime() - workloadStarted
+            val collectorPhases = session.benchmarkPhaseMetrics()
             val resolved = profile.syscalls.count { it.resolutionStatus == ResolutionStatus.RESOLVED }
             check(profile.syscalls.all { it.observation.task.tid > 0 }) { "kernel emitted an invalid task identity" }
             val workloadClassName = when {
@@ -316,6 +317,8 @@ internal object TierEKernelSmoke {
                     "$binding:${yield.records}:${yield.exactJoined}:${yield.missingDefinition}:${yield.outcomeMismatch}:" +
                         "${yield.resolvedInvocations}:${yield.resolvedSyscalls}:${yield.capturedWithoutResolvedSyscall}"
                 }} " +
+                "ring_drain_ns=${collectorPhases.ringDrainNanos} collector_join_ns=${collectorPhases.collectorJoinNanos} " +
+                "collector_polls=${collectorPhases.polls} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
