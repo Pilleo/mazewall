@@ -737,9 +737,12 @@ public:
             release_current_thread();
             return;
         }
-        const auto current_execution = current_thread_ != nullptr
-            ? execution_context_from_current(current_thread_)
-            : ExecutionContext{};
+        jthread exit_thread = nullptr;
+        const auto current_execution =
+            global_jvmti != nullptr && global_jvmti->GetCurrentThread(&exit_thread) == JVMTI_ERROR_NONE
+                ? execution_context_from_current(exit_thread)
+                : ExecutionContext{};
+        if (exit_thread != nullptr) current_env_->DeleteLocalRef(exit_thread);
         release_current_thread();
         if (!current_execution.valid() || current_execution.id != execution_.id ||
             !invocation_registry.matches_current_execution(execution_.id)) {
