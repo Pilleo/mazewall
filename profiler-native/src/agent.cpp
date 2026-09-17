@@ -74,9 +74,24 @@ std::string capture_yield_path;
 std::mutex capture_yield_mutex;
 std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
 std::atomic<std::uint64_t> capture_yield_contention_drops{0};
+enum class CaptureProfile { full, jdk25_unix_openat0 };
+CaptureProfile capture_profile = CaptureProfile::full;
 
 bool write_definitions(bool producer_closed = false) noexcept;
 void request_live_publication() noexcept;
+
+bool profile_admits(mazewall::profiler::BindingKind binding_kind) noexcept {
+    return capture_profile == CaptureProfile::full || binding_kind == mazewall::profiler::BindingKind::unix_openat0;
+}
+
+bool validate_capture_profile(jvmtiEnv* jvmti) noexcept {
+    if (capture_profile == CaptureProfile::full) return true;
+    char* specification_version = nullptr;
+    if (jvmti->GetSystemProperty("java.specification.version", &specification_version) != JVMTI_ERROR_NONE || specification_version == nullptr) return false;
+    const bool matches = std::strcmp(specification_version, "25") == 0;
+    jvmti->Deallocate(reinterpret_cast<unsigned char*>(specification_version));
+    return matches;
+}
 
 void record_capture_yield(
     std::uint64_t invocation_id,
@@ -683,6 +698,11 @@ public:
         mazewall_stack_marker(0, 0);
         if (!scope_.valid()) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        if (!profile_admits(binding_kind_)) {
+            capture_yield_outcome_ = mazewall::profiler::CaptureYieldOutcome::excluded;
+            mazewall_stack_marker(0, flags_);
             return;
         }
         const auto capture = capture_stack(env, scope_.id);
@@ -1356,6 +1376,8 @@ bool parse_options(const char* options) {
             }
         } else if (option == "benchmark-phases") {
             benchmark_phases = true;
+        } else if (option == "capture-profile=jdk25-unix-openat0") {
+            capture_profile = CaptureProfile::jdk25_unix_openat0;
         } else if (option == "canonical-cache=enabled") {
             canonical_cache_enabled = true;
         } else if (option == "canonical-cache=disabled") {
@@ -1375,6 +1397,7 @@ bool parse_options(const char* options) {
             return false;
         }
     }
+    if (capture_profile != CaptureProfile::full && !benchmark_phases) return false;
     return true;
 }
 
@@ -1402,6 +1425,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
     }
 
     global_jvmti = jvmti;
+    if (!validate_capture_profile(jvmti)) return JNI_ERR;
     if (!configure_native_bind_events(jvmti)) return JNI_ERR;
     start_live_publisher();
     return JNI_OK;

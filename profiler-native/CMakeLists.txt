@@ -92,6 +92,12 @@ add_test(
 set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
 
 add_test(
+    NAME agent_capture_profile_jdk25_openat
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-profile=jdk25-unix-openat0" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 10
+)
+set_tests_properties(agent_capture_profile_jdk25_openat PROPERTIES PASS_REGULAR_EXPRESSION "mazewall-stack-agent:.*stack-captures=[1-9][0-9]*")
+
+add_test(
     NAME agent_capture_yield_sidecar
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-yield=${CMAKE_CURRENT_BINARY_DIR}/tier-e-capture-yield.mzcy" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 10
 )
