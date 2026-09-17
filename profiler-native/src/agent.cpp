@@ -668,8 +668,8 @@ public:
             mazewall_stack_marker(0, 0);
             return;
         }
+        current_thread_ = current_thread;
         execution_ = execution_context(env, current_thread);
-        env->DeleteLocalRef(current_thread);
         if (!execution_.valid()) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             mazewall_stack_marker(0, 0);
@@ -714,14 +714,13 @@ public:
             mazewall_stack_marker(invocation_registry.current_id(), flags_);
             record_virtual_duration();
             record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
+            release_current_thread();
             return;
         }
-        jthread current_thread = nullptr;
-        const auto current_execution =
-            global_jvmti != nullptr && global_jvmti->GetCurrentThread(&current_thread) == JVMTI_ERROR_NONE
-                ? execution_context_from_current(current_thread)
-                : ExecutionContext{};
-        if (current_thread != nullptr) current_env_->DeleteLocalRef(current_thread);
+        const auto current_execution = current_thread_ != nullptr
+            ? execution_context_from_current(current_thread_)
+            : ExecutionContext{};
+        release_current_thread();
         if (!current_execution.valid() || current_execution.id != execution_.id ||
             !invocation_registry.matches_current_execution(execution_.id)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
@@ -748,6 +747,13 @@ private:
         return execution_context(current_env_, thread);
     }
 
+    void release_current_thread() noexcept {
+        if (current_thread_ != nullptr) {
+            current_env_->DeleteLocalRef(current_thread_);
+            current_thread_ = nullptr;
+        }
+    }
+
     void record_virtual_duration() noexcept {
         if (!virtual_scope_) return;
         const auto elapsed = std::chrono::steady_clock::now() - scope_started_;
@@ -762,14 +768,12 @@ private:
             return {};
         }
 
-        jthread current_thread = nullptr;
-        if (global_jvmti->GetCurrentThread(&current_thread) != JVMTI_ERROR_NONE || current_thread == nullptr) {
+        if (current_thread_ == nullptr) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return {};
         }
-        if (execution_context(env, current_thread).id != execution_.id) {
+        if (execution_context(env, current_thread_).id != execution_.id) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-            env->DeleteLocalRef(current_thread);
             return Capture{0, 4, 0, false};
         }
 
@@ -778,13 +782,12 @@ private:
         const auto capture_lease = symbolization_generation.begin_capture();
         if (!capture_lease.valid()) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-            env->DeleteLocalRef(current_thread);
             return Capture{0, 5, 0, false};
         }
         const auto capture_epoch = capture_lease.value;
         const auto stack_trace_started = std::chrono::steady_clock::now();
         const auto result = global_jvmti->GetStackTrace(
-            current_thread,
+            current_thread_,
             0,
             static_cast<jint>(frames.size()),
             frames.data(),
@@ -792,7 +795,6 @@ private:
         if (benchmark_phases) benchmark_get_stack_trace_nanos.fetch_add(elapsed_nanos(stack_trace_started), std::memory_order_relaxed);
         if (result != JVMTI_ERROR_NONE || frame_count <= 0) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-            env->DeleteLocalRef(current_thread);
             return {};
         }
         const bool truncated = frame_count == static_cast<jint>(frames.size());
@@ -808,14 +810,12 @@ private:
                 if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
                     if (!symbolization_generation.validate(capture_lease)) {
                         stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-                        env->DeleteLocalRef(current_thread);
                         return Capture{0, 5, 0, false};
                     }
                     if (benchmark_phases) {
                         benchmark_cache_hits.fetch_add(1, std::memory_order_relaxed);
                         benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
                     }
-                    env->DeleteLocalRef(current_thread);
                     stack_capture_count.fetch_add(1, std::memory_order_relaxed);
                     return Capture{existing, 0, proposed_context_id, true};
                 }
@@ -836,7 +836,6 @@ private:
                 release_guards(env, class_guards);
                 if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
                 stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-                env->DeleteLocalRef(current_thread);
                 return {};
             }
             if (guard != nullptr) class_guards.push_back(guard);
@@ -846,10 +845,8 @@ private:
         if (!symbolization_generation.validate(capture_lease)) {
             release_guards(env, class_guards);
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
-            env->DeleteLocalRef(current_thread);
             return Capture{0, 5, 0, false};
         }
-        env->DeleteLocalRef(current_thread);
         const auto stack_id = intern_stack(std::move(logical), truncated, raw.symbol_epoch);
         if (stack_id == 0) {
             release_guards(env, class_guards);
@@ -877,6 +874,7 @@ private:
 
     mazewall::profiler::InvocationRegistry::Scope scope_{};
     JNIEnv* current_env_ = nullptr;
+    jthread current_thread_ = nullptr;
     ExecutionContext execution_{};
     std::uint32_t flags_ = 0;
     std::uint64_t invocation_id_ = 0;
@@ -1413,6 +1411,9 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     stop_live_publisher();
     const bool definitions_written = write_definitions(true);
     const bool capture_yield_written = write_capture_yield();
+    const char* const capture_yield_status = capture_yield_path.empty()
+        ? "disabled"
+        : (capture_yield_written ? "written" : "failed");
     std::fprintf(
         stderr,
         "mazewall-stack-agent: native-binds=%llu proxied-binds=%llu stack-captures=%llu stack-failures=%llu scope-failures=%llu definitions=%s capture-yield=%s capture-yield-dropped=%llu\n",
@@ -1422,7 +1423,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
         static_cast<unsigned long long>(stack_capture_failures.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(scope_failures.load(std::memory_order_relaxed)),
         definitions_written ? "written" : "failed",
-        capture_yield_written ? "written" : "failed",
+        capture_yield_status,
         static_cast<unsigned long long>(capture_yield_contention_drops.load(std::memory_order_relaxed)));
     if (benchmark_phases) {
         std::fprintf(
