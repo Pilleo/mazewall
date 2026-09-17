@@ -24,6 +24,15 @@ target_include_directories(binding_manifest_test PRIVATE include)
 target_compile_options(binding_manifest_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME binding_manifest_test COMMAND binding_manifest_test)
 
+add_executable(capture_yield_recorder_test tests/capture_yield_recorder_test.cpp)
+target_include_directories(capture_yield_recorder_test PRIVATE include)
+target_compile_options(capture_yield_recorder_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME capture_yield_recorder_test COMMAND capture_yield_recorder_test)
+
+add_executable(capture_yield_file_test tests/capture_yield_file_test.cpp)
+target_include_directories(capture_yield_file_test PRIVATE include)
+target_compile_options(capture_yield_file_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+
 add_executable(marker_export_test tests/marker_export_test.cpp)
 target_compile_options(marker_export_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(marker_export_test PRIVATE ${CMAKE_DL_LIBS})
@@ -81,6 +90,17 @@ add_test(
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
 set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_capture_yield_sidecar
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-yield=${CMAKE_CURRENT_BINARY_DIR}/tier-e-capture-yield.mzcy" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 10
+)
+set_tests_properties(agent_capture_yield_sidecar PROPERTIES PASS_REGULAR_EXPRESSION "capture-yield=written")
+add_test(
+    NAME capture_yield_file_test
+    COMMAND capture_yield_file_test "${CMAKE_CURRENT_BINARY_DIR}/tier-e-capture-yield.mzcy"
+)
+set_tests_properties(capture_yield_file_test PROPERTIES DEPENDS agent_capture_yield_sidecar)
 
 add_test(
     NAME agent_phase_benchmark_unique

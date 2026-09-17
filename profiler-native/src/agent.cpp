@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "binding_manifest.hpp"
+#include "capture_yield_recorder.hpp"
 #include "invocation_registry.hpp"
 #include "symbolization_generation.hpp"
 
@@ -69,9 +70,47 @@ std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
+std::string capture_yield_path;
+std::mutex capture_yield_mutex;
+std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
+std::atomic<std::uint64_t> capture_yield_contention_drops{0};
 
 bool write_definitions(bool producer_closed = false) noexcept;
 void request_live_publication() noexcept;
+
+void record_capture_yield(
+    std::uint64_t invocation_id,
+    mazewall::profiler::BindingKind binding_kind,
+    mazewall::profiler::CaptureYieldOutcome outcome) noexcept {
+    if (capture_yield_recorder == nullptr || invocation_id == 0) return;
+    std::unique_lock lock(capture_yield_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        capture_yield_contention_drops.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    (void)capture_yield_recorder->record(invocation_id, binding_kind, outcome);
+}
+
+bool write_capture_yield() noexcept {
+    if (capture_yield_path.empty() || capture_yield_recorder == nullptr) return true;
+    try {
+        std::vector<std::uint8_t> bytes;
+        {
+            std::lock_guard lock(capture_yield_mutex);
+            bytes = capture_yield_recorder->serialize(session_tag);
+        }
+        const auto temporary_path = capture_yield_path + ".tmp";
+        std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
+        if (!stream) return false;
+        stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        stream.flush();
+        if (!stream.good()) return false;
+        stream.close();
+        return std::rename(temporary_path.c_str(), capture_yield_path.c_str()) == 0;
+    } catch (...) {
+        return false;
+    }
+}
 
 
 struct LogicalFrame final {
@@ -605,7 +644,8 @@ thread_local mazewall::profiler::InvocationRegistry invocation_registry;
 
 class InvocationScope final {
 public:
-    explicit InvocationScope(JNIEnv* env) noexcept {
+    InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind) noexcept
+        : binding_kind_(binding_kind) {
         current_env_ = env;
         scope_started_ = std::chrono::steady_clock::now();
         if (invocation_ids_exhausted.load(std::memory_order_relaxed)) {
@@ -621,6 +661,7 @@ public:
             return;
         }
         const auto id = (static_cast<std::uint64_t>(session_tag) << 32) | counter;
+        invocation_id_ = id;
         jthread current_thread = nullptr;
         if (global_jvmti == nullptr || global_jvmti->GetCurrentThread(&current_thread) != JVMTI_ERROR_NONE || current_thread == nullptr) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
@@ -661,6 +702,9 @@ public:
                 return;
             }
         }
+        capture_yield_outcome_ = capture_failure == 0
+            ? mazewall::profiler::CaptureYieldOutcome::captured
+            : mazewall::profiler::CaptureYieldOutcome::capture_failed;
         mazewall_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
     }
 
@@ -669,6 +713,7 @@ public:
         if (!scope_.valid()) {
             mazewall_stack_marker(invocation_registry.current_id(), flags_);
             record_virtual_duration();
+            record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
             return;
         }
         jthread current_thread = nullptr;
@@ -682,11 +727,13 @@ public:
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             invocation_registry.invalidate();
             record_virtual_duration();
+            record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
             return;
         }
         const bool restored = invocation_registry.leave(scope_);
         mazewall_stack_marker(restored ? invocation_registry.current_id() : 0, flags_);
         record_virtual_duration();
+        record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
     }
 
 private:
@@ -832,57 +879,61 @@ private:
     JNIEnv* current_env_ = nullptr;
     ExecutionContext execution_{};
     std::uint32_t flags_ = 0;
+    std::uint64_t invocation_id_ = 0;
+    mazewall::profiler::BindingKind binding_kind_;
+    mazewall::profiler::CaptureYieldOutcome capture_yield_outcome_ =
+        mazewall::profiler::CaptureYieldOutcome::admission_failed;
     std::chrono::steady_clock::time_point scope_started_{};
     bool virtual_scope_ = false;
 };
 
 jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags, jint mode) {
-    InvocationScope invocation(env);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0);
     const auto original = original_unix_open0.load(std::memory_order_acquire);
     return original == nullptr ? -1 : original(env, owner, path, flags, mode);
 }
 
 jint JNICALL proxy_unix_openat0(JNIEnv* env, jclass owner, jint dirfd, jlong path, jint flags, jint mode) {
-    InvocationScope invocation(env);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0);
     const auto original = original_unix_openat0.load(std::memory_order_acquire);
     return original == nullptr ? -1 : original(env, owner, dirfd, path, flags, mode);
 }
 
 void JNICALL proxy_unix_close0(JNIEnv* env, jclass owner, jint fd) {
-    InvocationScope invocation(env);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_close0);
     const auto original = original_unix_close0.load(std::memory_order_acquire);
     if (original != nullptr) original(env, owner, fd);
 }
 
 void JNICALL proxy_unix_unlink0(JNIEnv* env, jclass owner, jlong path) {
-    InvocationScope invocation(env);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_unlink0);
     const auto original = original_unix_unlink0.load(std::memory_order_acquire);
     if (original != nullptr) original(env, owner, path);
 }
 
 jint JNICALL proxy_file_read0(JNIEnv* env, jclass owner, jobject fd, jlong address, jint length) {
-    InvocationScope invocation(env); return original_file_read0.load()(env, owner, fd, address, length);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::file_read0); return original_file_read0.load()(env, owner, fd, address, length);
 }
 jint JNICALL proxy_file_write0(JNIEnv* env, jclass owner, jobject fd, jlong address, jint length) {
-    InvocationScope invocation(env); return original_file_write0.load()(env, owner, fd, address, length);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::file_write0); return original_file_write0.load()(env, owner, fd, address, length);
 }
 void JNICALL proxy_file_close_int_fd(JNIEnv* env, jclass owner, jint fd) {
-    InvocationScope invocation(env); original_file_close_int_fd.load()(env, owner, fd);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::file_close_int_fd); original_file_close_int_fd.load()(env, owner, fd);
 }
 jint JNICALL proxy_socket_read0(JNIEnv* env, jclass owner, jobject fd, jlong address, jint length) {
-    InvocationScope invocation(env); return original_socket_read0.load()(env, owner, fd, address, length);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::socket_read0); return original_socket_read0.load()(env, owner, fd, address, length);
 }
 jint JNICALL proxy_socket_write0(JNIEnv* env, jclass owner, jobject fd, jlong address, jint length) {
-    InvocationScope invocation(env); return original_socket_write0.load()(env, owner, fd, address, length);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::socket_write0); return original_socket_write0.load()(env, owner, fd, address, length);
 }
 jint JNICALL proxy_net_socket0(JNIEnv* env, jclass owner, jboolean ipv6, jboolean stream, jboolean reuse, jboolean loopback) {
-    InvocationScope invocation(env); return original_net_socket0.load()(env, owner, ipv6, stream, reuse, loopback);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::net_socket0); return original_net_socket0.load()(env, owner, ipv6, stream, reuse, loopback);
 }
 jint JNICALL proxy_net_connect0(JNIEnv* env, jclass owner, jboolean ipv6, jobject fd, jobject address, jint port) {
-    InvocationScope invocation(env); return original_net_connect0.load()(env, owner, ipv6, fd, address, port);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::net_connect0); return original_net_connect0.load()(env, owner, ipv6, fd, address, port);
 }
 jint JNICALL proxy_net_accept(JNIEnv* env, jclass owner, jobject fd, jobject accepted, jobjectArray addresses) {
-    InvocationScope invocation(env); return original_net_accept.load()(env, owner, fd, accepted, addresses);
+    InvocationScope invocation(env, mazewall::profiler::BindingKind::net_accept); return original_net_accept.load()(env, owner, fd, accepted, addresses);
 }
 
 bool replace_binding(
@@ -1278,6 +1329,9 @@ bool parse_options(const char* options) {
         if (option.starts_with("definitions=")) {
             definitions_path = option.substr(std::strlen("definitions="));
             if (definitions_path.empty()) return false;
+        } else if (option.starts_with("capture-yield=")) {
+            capture_yield_path = option.substr(std::strlen("capture-yield="));
+            if (capture_yield_path.empty()) return false;
         } else if (option.starts_with("session=")) {
             try {
                 const auto value = std::stoul(option.substr(std::strlen("session=")), nullptr, 16);
@@ -1316,6 +1370,13 @@ bool parse_options(const char* options) {
         if (end == std::string::npos) break;
         start = end + 1;
     }
+    if (!capture_yield_path.empty()) {
+        try {
+            capture_yield_recorder = std::make_unique<mazewall::profiler::CaptureYieldRecorder>(65'536);
+        } catch (...) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1351,15 +1412,18 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
 extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     stop_live_publisher();
     const bool definitions_written = write_definitions(true);
+    const bool capture_yield_written = write_capture_yield();
     std::fprintf(
         stderr,
-        "mazewall-stack-agent: native-binds=%llu proxied-binds=%llu stack-captures=%llu stack-failures=%llu scope-failures=%llu definitions=%s\n",
+        "mazewall-stack-agent: native-binds=%llu proxied-binds=%llu stack-captures=%llu stack-failures=%llu scope-failures=%llu definitions=%s capture-yield=%s capture-yield-dropped=%llu\n",
         static_cast<unsigned long long>(native_bind_count.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(proxied_bind_count.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(stack_capture_count.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(stack_capture_failures.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(scope_failures.load(std::memory_order_relaxed)),
-        definitions_written ? "written" : "failed");
+        definitions_written ? "written" : "failed",
+        capture_yield_written ? "written" : "failed",
+        static_cast<unsigned long long>(capture_yield_contention_drops.load(std::memory_order_relaxed)));
     if (benchmark_phases) {
         std::fprintf(
             stderr,
