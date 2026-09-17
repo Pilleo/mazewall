@@ -378,6 +378,37 @@ native-agent checksum, container image ID, kernel, CPU topology, arguments, dead
 paths. It compiles as the local user, then performs privileged measurement from a read-only source
 mount with writable scratch space only.
 
+### 2.1.3 JDK-qualified capture-profile admission
+
+> **Status: Implemented contract and historical rootful evidence.**
+
+`full` remains the default exact-capture profile and is represented by omitting a
+`capture-profile` native-agent option. The only narrowed profile is
+`jdk25-unix-openat0`; it is benchmark-only and admits exact capture solely for the JDK 25
+`sun.nio.fs.UnixNativeDispatcher.openat0` binding. The agent installs proxy bindings during startup
+but keeps narrowed capture admission closed until `VM_INIT` confirms
+`java.specification.version == "25"` through a profiler-owned JNI lookup. A failed validation leaves
+the narrowed binding excluded rather than fabricating an exact stack or restoring a prior context.
+
+Paired profile statistics include a fork only when both the full and narrowed arms report
+`workload_correctness=PASS`, complete whole-session evidence, and valid admitted-capture joins.
+Excluded pairs are retained with machine-readable reasons; they never contribute to a median or
+confidence interval. Expected exclusions of bindings outside the narrowed profile do not count as
+missing dictionary definitions: validity requires every **admitted** capture to join exactly, with no
+capture/admission failure, outcome mismatch, or unrecorded definition.
+
+The retained rootful artifact
+[`tier-e-capture-profile-20260917.jsonl`](../../evidence/tier-e-capture-profile-20260917.jsonl)
+and adjacent [manifest](../../evidence/tier-e-capture-profile-20260917.manifest.json) were produced
+at clean commit `051be6ab61530864e702c4e4bd3c8fc9968137b1` on kernel `7.2.4-x64v3-xanmod1`, JDK
+`25.0.4`, and pinned CPUs `0,2`. Five rotated forks with three warm-ups and ten measured batches
+each had `PASS`, complete Tier E evidence, valid admitted captures, zero loss, and zero attribution
+failures for both arms. The baseline was independently workload-verified and correctly marked
+`BASELINE_VERIFIED` / `NOT_APPLICABLE` for Tier E session evidence. The paired full-minus-narrowed
+median was `221,849 ns` per 100-operation batch (bootstrap 95% interval `15,981..767,531 ns`), so
+this workload shows a positive narrowed-profile saving. It is host- and binding-domain-specific
+evidence, not a general Tier E performance guarantee or a policy decision.
+
 The existing snapshot transport remains the default. Incremental dictionary transport is deferred
 until stack-diverse, class-churn and long-session live-publication measurements prove that repeated
 snapshot serialization is a material cost. The decision record
@@ -1578,6 +1609,7 @@ runtime_overhead
 | Native outcome preservation | proxy admission and native tests | return/exception/errno fixture | capture_domain_validity |
 | Selected `sys_enter` boundary | Tier E BPF program | denied-attempt limitation artifact | capture_domain_validity |
 | Phase-level performance | native benchmark and baseline gate | JSON baseline and warmed run | runtime_overhead |
+| JDK-qualified narrowed capture profile | `VM_INIT` admission gate, `OpenatProfileWorkload`, paired benchmark runner | clean rootful five-fork full-versus-openat0 pair with explicit exclusions; `tier-e-capture-profile-20260917.jsonl` | `capture_domain_validity`, `attribution_coverage`, `lifecycle_validity`, `runtime_overhead` |
 
 Unimplemented hardening is marked `planned` in evidence, never `implemented`.
 Tier E remains finite, fail-closed, and ineligible as policy input until the required
