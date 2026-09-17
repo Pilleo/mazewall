@@ -312,9 +312,10 @@ internal object TierEMatchedBenchmark {
         val variants = forks.groupBy { it.variant.jsonName(config.scope) }.entries.joinToString(",") { (name, values) ->
             val batches = values.flatMap { it.batches }.map { it.workloadNanos }
             val complete = values.count { it.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE }
+            val performanceEvidence = if (complete == values.size) "COMPLETE" else "INCOMPLETE"
             "\"$name\":{\"median_ns\":${median(batches)},\"p95_ns\":${percentile(batches, 95.0)}," +
                 "\"p99_ns\":${percentile(batches, 99.0)},\"whole_session_complete_forks\":$complete," +
-                "\"forks\":${values.size}}"
+                "\"forks\":${values.size},\"performance_evidence\":\"$performanceEvidence\"}"
         }
         val profiledForks = forks.filterNot { it.variant.mode == Mode.BASELINE }
         val correctness = when {
