@@ -34,8 +34,6 @@ public sealed class PortalMethod(
 
     public data object Sleep : PortalMethod(3)
 
-    public data object TryOpenHostPasswd : PortalMethod(4)
-
     /** A stable code-generated service method; builtin ids remain reserved. */
     public data class Generated public constructor(
         public val generatedWire: Int,
@@ -49,14 +47,13 @@ public sealed class PortalMethod(
 
     public companion object {
         private const val FIRST_BUILTIN_METHOD_ID = 1
-        private const val LAST_BUILTIN_METHOD_ID = 4
+        private const val LAST_BUILTIN_METHOD_ID = 3
 
         public fun fromWire(wire: Int): PortalMethod =
             when (wire) {
                 Echo.wire -> Echo
                 Checksum.wire -> Checksum
                 Sleep.wire -> Sleep
-                TryOpenHostPasswd.wire -> TryOpenHostPasswd
                 else -> Generated(wire)
             }
     }

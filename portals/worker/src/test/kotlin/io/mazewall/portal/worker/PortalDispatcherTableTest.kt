@@ -61,9 +61,12 @@ class PortalDispatcherTableTest {
             .createTempFile("portal-owner", ".txt")
         java.nio.file.Files
             .writeString(path, "x")
-        val owner = io.mazewall.portal
-            .ProcessBroker()
-            .openReadOnly(path.parent, path.fileName.toString())
+        val broker = io.mazewall.portal.ProcessBroker(
+            grantRoots = io.mazewall.portal.PortalGrantRoots.of(
+                io.mazewall.portal.PortalGrantRoot(io.mazewall.portal.PortalGrantRootId("fixture"), path.parent),
+            ),
+        )
+        val owner = broker.openReadOnly(io.mazewall.portal.PortalGrantRootId("fixture"), path.fileName.toString())
         try {
             val builder = PortalDispatcherTable.Builder()
             builder.bootstrapStrict("${PublishedTableEchoService::class.java.name}=${PublishedTableEchoServiceImpl::class.java.name};${ClosingCapabilityPortalDispatcher::class.java.name}")
@@ -73,6 +76,7 @@ class PortalDispatcherTableTest {
             assertFailsWith<IllegalStateException> { owner.borrow { error("closed owner reached native code") } }
         } finally {
             owner.close()
+            broker.close()
             java.nio.file.Files
                 .delete(path)
         }

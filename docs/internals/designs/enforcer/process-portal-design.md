@@ -125,7 +125,18 @@ Transport: `PrivateUnixEndpoint` + `SocketManager` (`AF_UNIX`, `SOCK_CLOEXEC`).
 
 Payload: kotlinx.serialization (already in the repo) or an explicit record schema. Size and nesting caps on unmarshal. No `java.io.Serializable`. No live Java object identity.
 
-Capabilities: broker opens with `openat2` + `RESOLVE_BENEATH`, then `sendDescriptor`. Worker `recvDescriptor(socket, FileDescriptorRole.Granted)`. API type is a token (`Capability.ReadFd`), not `InputStream`.
+Capabilities are rooted at startup: `PortalRuntimeConfig.grantRoots` maps immutable
+`PortalGrantRootId` values to validated real directories. The broker accepts only
+`openReadOnly(rootId, relative)`, opens beneath that configured root with `openat2` +
+`RESOLVE_BENEATH`, verifies the pinned descriptor is a regular file, then
+`sendDescriptor`s it. Unknown IDs, absolute or traversal paths, symlink escapes,
+non-regular files, and grants after broker close fail closed. Worker
+`recvDescriptor(socket, FileDescriptorRole.Granted)`. The API type is a token
+(`Capability.ReadFd`), not `InputStream`.
+
+This deliberately shrinks ambient filesystem authority; it does **not** make a compromised
+broker a complete host-ACE boundary. The broker still owns the worker pool. A separate,
+minimal privileged grant helper remains the future isolation step.
 
 v1 forbids worker → broker FDs (confused deputy). Return values are data only.
 
@@ -151,7 +162,8 @@ read tick. Idle ticks apply only to an admitted receive waiting for its first he
 
 ### Capability ownership migration
 
-`Capability.ReadFd` is now `AutoCloseable`: broker code must use `openReadOnly(...).use { ... }`
+`Capability.ReadFd` is now `AutoCloseable`: broker code must use
+`openReadOnly(rootId, relative).use { ... }`
 (Java: try-with-resources). The broker retains its original owner while `SCM_RIGHTS` creates
 a separate worker-owned descriptor. Each in-process alias shares one owner, including generated
 dispatcher arguments and worker final cleanup; do not re-adopt an alias as another owner.

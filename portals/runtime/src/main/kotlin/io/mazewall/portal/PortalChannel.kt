@@ -17,6 +17,7 @@ import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.platform.socket.NativeCloseFailure
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -209,7 +210,7 @@ internal fun openGrantedRead(
 
                 is LinuxNative.SyscallResult.Success -> {
                     val granted = opened.getFdOrThrow("open grant", FileDescriptorRole.Granted)
-                    return Capability.ReadFd(granted)
+                    return Capability.ReadFd(granted).requireRegularFile(relative)
                 }
             }
         } finally {
@@ -217,3 +218,22 @@ internal fun openGrantedRead(
         }
     }
 }
+
+/**
+ * `openat2` pins the resolved object before this check. Looking it up through the owned
+ * descriptor therefore validates that exact object instead of re-resolving the caller path.
+ */
+@Suppress("TooGenericExceptionCaught") // Validation must close the exact acquired owner for every failure kind.
+private fun Capability.ReadFd.requireRegularFile(relative: String): Capability.ReadFd =
+    try {
+        val isRegular = borrow { fd -> Files.isRegularFile(Path.of("/proc/self/fd/${fd.value}")) }
+        require(isRegular) { "granted path is not a regular file: $relative" }
+        this
+    } catch (failure: Throwable) {
+        try {
+            close()
+        } catch (cleanup: Throwable) {
+            failure.addSuppressed(cleanup)
+        }
+        throw failure
+    }

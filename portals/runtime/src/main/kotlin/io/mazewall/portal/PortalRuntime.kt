@@ -91,6 +91,7 @@ public class PortalRuntime private constructor(
                     workerClasspath = config.workerClasspath(manifest),
                     workerProfile = config.profile(manifest),
                     cgroupRoot = config.cgroupRoot,
+                    grantRoots = config.grantRoots,
                 )
             try {
                 broker.start()

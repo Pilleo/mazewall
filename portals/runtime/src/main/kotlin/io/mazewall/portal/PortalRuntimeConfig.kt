@@ -13,6 +13,7 @@ public class PortalRuntimeConfig(
     public val workerBundleCache: Path = defaultCacheDirectory(),
     public val workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
     public val cgroupRoot: Path? = null,
+    public val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
 ) {
     internal fun profile(manifest: PortalServiceManifest): PortalWorkerProfile = workerProfiles[manifest.policyProfile] ?: throw PortalWorkerProfileUnavailableException(manifest.policyProfile)
 
@@ -47,6 +48,7 @@ public class PortalRuntimeConfig(
             workerBundleCache: Path = defaultCacheDirectory(),
             workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
             cgroupRoot: Path? = null,
+            grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
         ): PortalRuntimeConfig {
             val generated = PortalWorkerArtifactCatalog.load(loader)
             generated.forEach { (key, generatedArtifact) ->
@@ -62,6 +64,7 @@ public class PortalRuntimeConfig(
                 workerBundleCache = workerBundleCache,
                 workerProfiles = workerProfiles,
                 cgroupRoot = cgroupRoot,
+                grantRoots = grantRoots,
             )
         }
 

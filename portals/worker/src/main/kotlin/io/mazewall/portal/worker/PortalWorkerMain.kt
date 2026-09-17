@@ -15,8 +15,10 @@ import kotlin.system.exitProcess
 /**
  * Placement worker: process-wide policy then RPC. Not USER_NOTIF.
  * Default install is the static fail-closed trio.
- * Pass `--complete-profile <bob.json>` with `"mazewallComplete": true` to install
+ * Pass `--complete-profile <profile-document.json>` to install
  * [io.mazewall.profiler.api.ProfilingResult.dedicatedWorkerPoliciesFromDocument] instead.
+ * The file must contain versioned measured complete coverage; plain SBoB and legacy completion
+ * markers are rejected.
  * Guest impl is never loaded in the broker process.
  */
 public object PortalWorkerMain {
@@ -26,7 +28,7 @@ public object PortalWorkerMain {
     @Suppress("TooGenericExceptionCaught") // Socket acquisition owns cleanup if channel construction fails, including fatal errors.
     public fun main(args: Array<String>) {
         if (args.isEmpty()) {
-            System.err.println("Usage: PortalWorkerMain <socket_path> [--complete-profile <bob.json>]")
+            System.err.println("Usage: PortalWorkerMain <socket_path> [--complete-profile <profile-document.json>]")
             exitProcess(1)
         }
         // Idle workers must not exit on quiet periods: timeouts are an idle tick (continue),
@@ -64,7 +66,6 @@ public object PortalWorkerMain {
                 PortalMethod.Echo,
                 PortalMethod.Checksum,
                 PortalMethod.Sleep,
-                PortalMethod.TryOpenHostPasswd,
                 -> PortalBuiltinDispatch.handle(method, payload, fds)
             }
                 }
@@ -99,6 +100,7 @@ public object PortalWorkerMain {
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)
 
+    @Suppress("SpreadOperator") // The profile decoder deliberately owns the one array forwarded to the vararg installation API.
     internal fun installWorkerContainment(args: Array<String>) {
         val profile = completeProfilePath(args)
         if (profile == null) {
@@ -120,7 +122,7 @@ public object PortalWorkerMain {
     internal fun completeProfilePath(args: Array<String>): java.nio.file.Path? {
         val index = args.indexOf("--complete-profile")
         if (index < 0) return null
-        require(index + 1 < args.size) { "Usage: PortalWorkerMain <socket_path> [--complete-profile <bob.json>]" }
+        require(index + 1 < args.size) { "Usage: PortalWorkerMain <socket_path> [--complete-profile <profile-document.json>]" }
         return java.nio.file.Path
             .of(args[index + 1])
     }

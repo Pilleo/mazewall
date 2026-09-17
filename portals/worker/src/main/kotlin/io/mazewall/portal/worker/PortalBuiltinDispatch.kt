@@ -41,11 +41,6 @@ internal object PortalBuiltinDispatch {
                 Thread.sleep(ms.toLong().coerceAtLeast(0))
                 ByteArray(0)
             }
-
-            PortalMethod.TryOpenHostPasswd -> {
-                java.io.FileInputStream("/etc/passwd").use { it.read() }
-                error("worker opened /etc/passwd")
-            }
             is PortalMethod.Generated -> throw UnknownPortalMethod(method)
         }
 

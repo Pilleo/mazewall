@@ -48,6 +48,7 @@ public class ProcessBroker internal constructor(
     private val workerExtraJvmArgs: List<String> = emptyList(),
     private val workerProfile: PortalWorkerProfile = PortalWorkerProfile(),
     private val cgroupRoot: java.nio.file.Path? = null,
+    private val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
 ) : AutoCloseable {
     init {
         require(poolSize >= 1) { "poolSize must be >= 1" }
@@ -97,6 +98,7 @@ public class ProcessBroker internal constructor(
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val startupRetirement = StartupRetirement(sockets, cgroupController)
     private val closeRetirement = CloseRetirement()
+    private val socketAcceptance = SocketAcceptance()
 
     @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
 
@@ -125,11 +127,11 @@ public class ProcessBroker internal constructor(
         val acquired = ArrayList<WorkerSlot>(poolSize)
         try {
             repeat(poolSize) {
-                check(startupIsActive()) { "broker startup cancelled" }
-                val slot = spawnWorker(deadline, ::startupIsActive)
+                check(lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled) { "broker startup cancelled" }
+                val slot = spawnWorker(deadline) { lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled }
                 provisionalSlots.add(slot)
                 acquired += slot
-                check(startupIsActive()) { "broker startup cancelled" }
+                check(lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled) { "broker startup cancelled" }
             }
             synchronized(lifecycleGate) {
                 check(lifecycle == ProcessBrokerLifecycle.Starting) { "broker closed during startup" }
@@ -190,10 +192,17 @@ public class ProcessBroker internal constructor(
             (payload[3].toInt() and 0xff)
     }
 
+    /** Grants a read-only descriptor below a root authorized at broker startup. */
     public fun openReadOnly(
-        rootDir: java.nio.file.Path,
+        rootId: PortalGrantRootId,
         relative: String,
-    ): Capability.ReadFd = openGrantedRead(rootDir, relative)
+    ): Capability.ReadFd {
+        val root = grantRoots.directory(rootId)
+        check(lifecycle == ProcessBrokerLifecycle.New || lifecycle == ProcessBrokerLifecycle.Running) {
+            "broker is not accepting grants: $lifecycle"
+        }
+        return openGrantedRead(root, relative)
+    }
 
     internal fun sleep(millis: Int) {
         val buf = ByteArray(4)
@@ -202,10 +211,6 @@ public class ProcessBroker internal constructor(
         buf[2] = (millis ushr 8).toByte()
         buf[3] = millis.toByte()
         call(PortalMethod.Sleep, buf, emptyList())
-    }
-
-    internal fun tryOpenHostPasswd() {
-        call(PortalMethod.TryOpenHostPasswd, ByteArray(0), emptyList())
     }
 
     internal fun spawnedWorkers(): Int = spawned.get()
@@ -312,7 +317,7 @@ public class ProcessBroker internal constructor(
     override fun close() {
         val preparation = prepareClose()
         preparation.waitForOtherClose?.let { operation ->
-            awaitCloseOperation(operation).raiseIfFailed()
+            awaitBrokerCloseOperation(operation).raiseIfFailed()
             return
         }
         if (!preparation.executeCleanup) return
@@ -363,7 +368,7 @@ public class ProcessBroker internal constructor(
         provisionalSlots.toList().forEach { slot ->
             cleanup.attempt("provisional worker") { destroySlot(slot) }
         }
-        val startupStopped = awaitStartup(startupToJoin, deadline)
+        val startupStopped = awaitBrokerStartup(startupToJoin, deadline)
         closeRetirement.retireAllSlots(cleanup)
         provisionalAttempts.toList().forEach { attempt ->
             cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
@@ -422,16 +427,6 @@ public class ProcessBroker internal constructor(
             ClosePreparation.execute(startupCompletion, operation)
         }
 
-    private fun awaitStartup(
-        completion: CountDownLatch?,
-        deadline: Deadline,
-    ): Boolean {
-        if (completion == null || completion.count == 0L) return true
-        val result = runCatching { completion.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) }
-        if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
-        return result.getOrDefault(false)
-    }
-
     private fun awaitMaintenance(deadline: Deadline): Boolean {
         val waitMs = maxOf(deadline.remainingMillis().toLong(), 5_000L)
         val result = runCatching { maintenance.awaitTermination(waitMs, TimeUnit.MILLISECONDS) }
@@ -455,27 +450,6 @@ public class ProcessBroker internal constructor(
         }
     }
 
-    private fun awaitCloseOperation(operation: CloseOperation): BrokerCloseResult =
-        try {
-            val remaining = operation.deadline
-                .remainingMillis()
-                .coerceAtLeast(0)
-                .toLong()
-            operation.result.get(remaining, TimeUnit.MILLISECONDS)
-        } catch (interrupted: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw PortalCallException("interrupted while waiting for broker cleanup", cause = interrupted)
-        } catch (timedOut: TimeoutException) {
-            throw IncompleteBrokerCleanupException(
-                "ProcessBroker close did not finish before its shared deadline",
-                listOf(BrokerCleanupFailure("concurrent broker close", timedOut)),
-            )
-        } catch (failed: ExecutionException) {
-            throw (failed.cause ?: failed)
-        }
-
-    private fun startupIsActive(): Boolean = lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled
-
     /** Pool the slot unless the broker closed meanwhile; destroy orphans either way. */
     private fun returnToPoolOrDestroy(slot: WorkerSlot) {
         synchronized(lifecycleGate) {
@@ -485,11 +459,6 @@ public class ProcessBroker internal constructor(
                 idle.put(slot)
             }
         }
-    }
-
-    private fun resolveWorkerClasspath(): String {
-        require(workerClasspath.isNotBlank()) { "portal worker classpath is required from a verified runtime artifact" }
-        return workerClasspath
     }
 
     @Suppress("TooGenericExceptionCaught") // Provisional ownership must roll back on every startup failure.
@@ -511,7 +480,7 @@ public class ProcessBroker internal constructor(
                 mainArgs = listOf(ep.path),
                 maxHeap = workerProfile.maxHeapBytes?.toString() ?: "64m",
                 javaAgents = JavaAgentSelection.None,
-                classpath = resolveWorkerClasspath(),
+                classpath = requireWorkerClasspath(workerClasspath),
                 extraJvmArgs = workerExtraJvmArgs,
             )
             val process = JvmChildProcess.start(launcher, spec)
@@ -521,7 +490,7 @@ public class ProcessBroker internal constructor(
             check(active()) { "portal worker acquisition cancelled" }
             val pump = PortalWorkerOutput(process.inputStream)
             synchronized(attempt) { attempt.pump = pump }
-            val peer = acceptWithin(server, process, ep.path, deadline, active)
+            val peer = socketAcceptance.acceptWithin(server, process, ep.path, deadline, active)
             synchronized(attempt) { attempt.peer = peer }
             check(process.isAlive) { "portal worker exited during handshake" }
             check(active()) { "portal worker acquisition cancelled" }
@@ -586,56 +555,83 @@ public class ProcessBroker internal constructor(
         }
     }
 
-    private fun acceptWithin(
-        listener: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-        process: Process,
-        socketPath: String,
-        deadline: Deadline,
-        active: () -> Boolean,
-    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
-        Executors.newVirtualThreadPerTaskExecutor().use { executor ->
-            val handoff = AcceptedSocketHandoff(sockets::close)
-            acceptedHandoffs.add(handoff)
-            val accepted = executor.submit {
+    private inner class SocketAcceptance {
+        @Suppress("TooGenericExceptionCaught") // Every failure must retire the unclaimed socket and child process.
+        fun acceptWithin(
+            listener: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            process: Process,
+            socketPath: String,
+            deadline: Deadline,
+            active: () -> Boolean,
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            Executors.newVirtualThreadPerTaskExecutor().use { executor ->
+                val handoff = AcceptedSocketHandoff(sockets::close)
+                acceptedHandoffs.add(handoff)
+                val accepted = executor.submit { publishAcceptedSocket(listener, handoff) }
                 try {
-                    handoff.publish(sockets.accept(listener))
-                } finally {
-                    handoff.completeProducer()
+                    awaitClaim(handoff, accepted, process, deadline, active).also { acceptedHandoffs.remove(handoff) }
+                } catch (failure: Throwable) {
+                    abandon(handoff, accepted, process, socketPath)
+                    throw failure
                 }
             }
-            var claimed: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+
+        private fun publishAcceptedSocket(
+            listener: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            handoff: AcceptedSocketHandoff,
+        ) {
             try {
-                while (claimed == null) {
-                    check(active()) { "portal worker connection cancelled" }
-                    claimed = handoff.claim()
-                    if (claimed == null) {
-                        check(process.isAlive) { "portal worker exited before connecting" }
-                        val remaining = deadline.remainingMillis()
-                        check(remaining > 0) { "portal worker connection timed out" }
-                        try {
-                            accepted.get(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
-                        } catch (_: TimeoutException) {
-                            continue
-                        } catch (failed: ExecutionException) {
-                            throw (failed.cause ?: failed)
-                        }
-                    }
-                }
-                acceptedHandoffs.remove(handoff)
-                return checkNotNull(claimed)
+                handoff.publish(sockets.accept(listener))
             } finally {
-                if (claimed == null) {
-                    runCatching { handoff.cancel() }
-                    process.destroyForciblyWithDescendants()
-                    runCatching {
-                        java.nio.channels.SocketChannel
-                            .open(java.net.UnixDomainSocketAddress.of(socketPath))
-                            .use { }
-                    }
-                    accepted.cancel(true)
-                    closeRetirement.retireHandoff(handoff)
-                }
+                handoff.completeProducer()
             }
+        }
+
+        private fun awaitClaim(
+            handoff: AcceptedSocketHandoff,
+            accepted: java.util.concurrent.Future<*>,
+            process: Process,
+            deadline: Deadline,
+            active: () -> Boolean,
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+            while (true) {
+                check(active()) { "portal worker connection cancelled" }
+                handoff.claim()?.let { return it }
+                check(process.isAlive) { "portal worker exited before connecting" }
+                val remaining = deadline.remainingMillis()
+                check(remaining > 0) { "portal worker connection timed out" }
+                awaitAcceptance(accepted, remaining)
+            }
+        }
+
+        private fun awaitAcceptance(
+            accepted: java.util.concurrent.Future<*>,
+            remaining: Int,
+        ) {
+            try {
+                accepted.get(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                return
+            } catch (failed: ExecutionException) {
+                throw (failed.cause ?: failed)
+            }
+        }
+
+        private fun abandon(
+            handoff: AcceptedSocketHandoff,
+            accepted: java.util.concurrent.Future<*>,
+            process: Process,
+            socketPath: String,
+        ) {
+            runCatching { handoff.cancel() }
+            process.destroyForciblyWithDescendants()
+            runCatching {
+                java.nio.channels.SocketChannel
+                    .open(java.net.UnixDomainSocketAddress.of(socketPath))
+                    .use { }
+            }
+            accepted.cancel(true)
+            closeRetirement.retireHandoff(handoff)
         }
     }
 
@@ -777,26 +773,6 @@ public class ProcessBroker internal constructor(
                 startup: CountDownLatch?,
                 operation: CloseOperation,
             ): ClosePreparation = ClosePreparation(true, null, startup, operation)
-        }
-    }
-
-    private data class CloseOperation(
-        val deadline: Deadline,
-        val result: CompletableFuture<BrokerCloseResult>,
-    )
-
-    private sealed interface BrokerCloseResult {
-        data object Succeeded : BrokerCloseResult
-
-        data class Failed(
-            val failure: Throwable,
-        ) : BrokerCloseResult
-
-        fun raiseIfFailed() {
-            when (this) {
-                Succeeded -> Unit
-                is Failed -> raiseBrokerFailure(failure)
-            }
         }
     }
 
@@ -976,6 +952,60 @@ internal data class BrokerCleanupFailure(
 )
 
 private fun raiseBrokerFailure(failure: Throwable): Nothing = throw failure
+
+private data class CloseOperation(
+    val deadline: Deadline,
+    val result: CompletableFuture<BrokerCloseResult>,
+)
+
+private sealed interface BrokerCloseResult {
+    data object Succeeded : BrokerCloseResult
+
+    data class Failed(
+        val failure: Throwable,
+    ) : BrokerCloseResult
+
+    fun raiseIfFailed() {
+        when (this) {
+            Succeeded -> Unit
+            is Failed -> raiseBrokerFailure(failure)
+        }
+    }
+}
+
+private fun awaitBrokerStartup(
+    completion: CountDownLatch?,
+    deadline: Deadline,
+): Boolean {
+    if (completion == null || completion.count == 0L) return true
+    val result = runCatching { completion.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) }
+    if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
+    return result.getOrDefault(false)
+}
+
+private fun awaitBrokerCloseOperation(operation: CloseOperation): BrokerCloseResult =
+    try {
+        val remaining = operation.deadline
+            .remainingMillis()
+            .coerceAtLeast(0)
+            .toLong()
+        operation.result.get(remaining, TimeUnit.MILLISECONDS)
+    } catch (interrupted: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw PortalCallException("interrupted while waiting for broker cleanup", cause = interrupted)
+    } catch (timedOut: TimeoutException) {
+        throw IncompleteBrokerCleanupException(
+            "ProcessBroker close did not finish before its shared deadline",
+            listOf(BrokerCleanupFailure("concurrent broker close", timedOut)),
+        )
+    } catch (failed: ExecutionException) {
+        throw (failed.cause ?: failed)
+    }
+
+private fun requireWorkerClasspath(workerClasspath: String): String {
+    require(workerClasspath.isNotBlank()) { "portal worker classpath is required from a verified runtime artifact" }
+    return workerClasspath
+}
 
 @Suppress("InstanceOfCheckForException") // Cleanup aggregation deliberately promotes fatal failures.
 private fun throwWithCleanupFailure(

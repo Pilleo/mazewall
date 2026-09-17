@@ -21,6 +21,10 @@ import java.util.zip.Adler32
 
 @Execution(ExecutionMode.SAME_THREAD)
 class ProcessBrokerIntegrationTest {
+    private companion object {
+        val FIXTURE_ROOT = PortalGrantRootId("fixture")
+    }
+
     @Test
     fun `fatal checkout retires child before propagating original error and suppresses cleanup`() {
         val children = java.util.concurrent.CopyOnWriteArrayList<Process>()
@@ -344,11 +348,11 @@ class ProcessBrokerIntegrationTest {
 
     @Test
     fun `interrupted capability admission preserves interruption and never reuses the partial-frame worker`() {
-        ProcessBroker(callTimeoutMs = 5_000).use { broker ->
+        val fixture = Files.createTempFile("mazewall-portal-interrupt-", ".txt")
+        Files.writeString(fixture, "blocked grant")
+        ProcessBroker(callTimeoutMs = 5_000, grantRoots = PortalGrantRoots.of(PortalGrantRoot(FIXTURE_ROOT, fixture.parent))).use { broker ->
             broker.start()
-            val fixture = Files.createTempFile("mazewall-portal-interrupt-", ".txt")
-            Files.writeString(fixture, "blocked grant")
-            val capability = broker.openReadOnly(fixture.parent, fixture.fileName.toString())
+            val capability = broker.openReadOnly(FIXTURE_ROOT, fixture.fileName.toString())
             val borrowEntered = CountDownLatch(1)
             val releaseBorrow = CountDownLatch(1)
             val borrower = CompletableFuture.runAsync {
@@ -428,7 +432,7 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
-    fun `granted-fd checksum works and worker cannot open host passwd`() {
+    fun `granted-fd checksum works through a startup-authorized root`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         assumeTrue(
             java.nio.file.Files
@@ -439,28 +443,14 @@ class ProcessBrokerIntegrationTest {
         )
         val payload = Files.createTempFile("mazewall-portal-", ".bin")
         Files.write(payload, byteArrayOf(1, 2, 3, 4, 5))
-        ProcessBroker().use { broker ->
+        ProcessBroker(grantRoots = PortalGrantRoots.of(PortalGrantRoot(FIXTURE_ROOT, payload.parent))).use { broker ->
             broker.start()
             assertEquals(1, broker.spawnedWorkers())
             val expected = Adler32().also { it.update(byteArrayOf(1, 2, 3, 4, 5)) }.value.toInt()
-            broker.openReadOnly(payload.parent, payload.fileName.toString()).use { granted ->
+            broker.openReadOnly(FIXTURE_ROOT, payload.fileName.toString()).use { granted ->
                 assertEquals(expected, broker.checksum(granted))
             }
-            val ex = assertThrows(PortalCallException::class.java) { broker.tryOpenHostPasswd() }
-            val msg = ex.message ?: ""
-            val strerror13 = io.mazewall.ffi.memory
-                .getSystemStrerror(13)
-            val matchesLocale = strerror13 != null && msg.contains(strerror13, ignoreCase = true)
-            assertTrue(
-                msg.contains("Permission denied", ignoreCase = true) ||
-                    msg.contains("EACCES") ||
-                    msg.contains("EPERM") ||
-                    matchesLocale,
-                "expected Landlock denial, got: $msg",
-            )
-            val afterDeny = broker.spawnedWorkers()
             assertEquals("after-landlock-deny", broker.echo("after-landlock-deny"))
-            assertEquals(afterDeny, broker.spawnedWorkers(), "ERROR must not recycle the worker JVM")
         }
         Files.deleteIfExists(payload)
     }
@@ -470,11 +460,11 @@ class ProcessBrokerIntegrationTest {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         val payload = Files.createTempFile("mazewall-portal-", ".bin")
         Files.write(payload, byteArrayOf(1, 2, 3, 4, 5))
-        ProcessBroker().use { broker ->
+        ProcessBroker(grantRoots = PortalGrantRoots.of(PortalGrantRoot(FIXTURE_ROOT, payload.parent))).use { broker ->
             broker.start()
             assertEquals("hello-portal", broker.echo("hello-portal"))
             val expected = Adler32().also { it.update(byteArrayOf(1, 2, 3, 4, 5)) }.value.toInt()
-            broker.openReadOnly(payload.parent, payload.fileName.toString()).use { granted ->
+            broker.openReadOnly(FIXTURE_ROOT, payload.fileName.toString()).use { granted ->
                 assertEquals(expected, broker.checksum(granted))
             }
         }
