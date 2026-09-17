@@ -30,6 +30,103 @@ import org.junit.jupiter.api.Test
 
 class SeccompSessionHandlerTest {
     @Test
+    fun `completion wakeup advances pending work before its fallback poll`() {
+        var replyAttempts = 0
+        var readyReplies = 0
+        var completionWakeup: NotificationCompletionWakeup? = null
+        val wakeup = object : SessionCompletionWakeup {
+            override val pollFd: Int = 12
+            var drainCount: Int = 0
+
+            override fun signal() = Unit
+
+            override fun drain() {
+                drainCount += 1
+            }
+
+            override fun close() = Unit
+        }
+        val engine = MockNativeEngine().apply {
+            onIoctl = { _, command, buffer ->
+                when (command) {
+                    IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV.code -> {
+                        buffer.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 1L)
+                        LinuxNative.SyscallResult.Success(0L)
+                    }
+                    IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND.code -> {
+                        replyAttempts += 1
+                        LinuxNative.SyscallResult.Success(0L)
+                    }
+                    else -> error("unexpected ioctl command: $command")
+                }
+            }
+        }
+        val handler = SeccompSessionHandler(
+            socketFd = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(11),
+            notifHandler = object : SeccompNotifHandler {
+                context(arena: NativeArena) override fun beginNotification(
+                    notif: ManagedSegment,
+                    resp: ManagedSegment,
+                    listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                    socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+                    deadline: io.mazewall.platform.lifecycle.Deadline,
+                ): NotificationWork =
+                    object : NotificationWork {
+                    private var polls = 0
+
+                    override fun bindCompletionWakeup(wakeup: NotificationCompletionWakeup) {
+                        completionWakeup = wakeup
+                    }
+
+                    context(arena: NativeArena) override fun poll(): NotificationProgress =
+                        if (++polls == 1) {
+                            NotificationProgress.Await
+                        } else {
+                            NotificationProgress.Ready(
+                            reply = {
+                                readyReplies += 1
+                                io.mazewall.platform.seccomp.UserNotifReplyResult.Sent
+                            },
+                        )
+                        }
+                }
+            },
+            engine = engine,
+            socketManager = recordingSocketManager {},
+            nanoTime = { 0L },
+            providedCompletionWakeup = wakeup,
+        )
+
+        NativeArena.ofConfined().use { arena ->
+            val pollFds = arena.allocate(Layouts.POLLFD_SIZE * 3)
+            val listenerPollFd = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
+            val socketPollFd = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))
+            val wakeupPollFd = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE * 2, Layouts.POLLFD_SIZE))
+            listenerPollFd.setFd(11)
+            listenerPollFd.setEvents(NativeConstants.POLLIN)
+            socketPollFd.setFd(10)
+            socketPollFd.setEvents(NativeConstants.POLLIN)
+            wakeupPollFd.setFd(wakeup.pollFd)
+            wakeupPollFd.setEvents(NativeConstants.POLLIN)
+            listenerPollFd.setRevents(NativeConstants.POLLIN)
+
+            assertEquals(LoopAction.Continue, with(arena) { handler.handleActiveListener(pollFds) })
+            assertEquals(50, handler.pollTimeoutMillis())
+            checkNotNull(completionWakeup).signal()
+
+            listenerPollFd.setRevents(0)
+            wakeupPollFd.setRevents(NativeConstants.POLLIN)
+            assertEquals(LoopAction.Continue, with(arena) { handler.handleActiveListener(pollFds) })
+        }
+
+        assertEquals(1, wakeup.drainCount)
+        assertEquals(0, replyAttempts)
+        assertEquals(1, readyReplies)
+        assertEquals(SeccompCleanupOutcome.Complete, handler.closeWithResult())
+    }
+
+    @Test
     fun `expired pass-through notification terminates the session without another reply`() {
         var receiveAttempts = 0
         var replyAttempts = 0

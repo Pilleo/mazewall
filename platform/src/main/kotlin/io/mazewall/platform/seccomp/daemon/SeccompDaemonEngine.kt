@@ -555,7 +555,7 @@ internal class SeccompDaemonEngine(
             )
             try {
                 NativeArena.ofConfined().use { sessionArena ->
-                    val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
+                    val pollFds = sessionArena.allocate(Layouts.POLLFD, 3)
                     val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
                     pfd1.setFd(listenerFd.value)
                     pfd1.setEvents(NativeConstants.POLLIN)
@@ -564,11 +564,16 @@ internal class SeccompDaemonEngine(
                     pfd2.setFd(socketFd.value)
                     pfd2.setEvents(NativeConstants.POLLIN)
 
+                    val pfd3 = PollFdSegment.of(pollFds.asSlice(POLLFD_STRUCT_SIZE * 2, Layouts.POLLFD_SIZE))
+                    pfd3.setFd(sessionHandler.completionWakeupPollFd)
+                    pfd3.setEvents(NativeConstants.POLLIN)
+
                     while (!isGlobalShutdown()) {
                         // Expiration and helper completions are reactor events even on idle/EINTR polls.
                         pfd1.setRevents(0)
                         pfd2.setRevents(0)
-                        val pollRes = raw.poll(pollFds, 2L, sessionHandler.pollTimeoutMillis())
+                        pfd3.setRevents(0)
+                        val pollRes = raw.poll(pollFds, 3L, sessionHandler.pollTimeoutMillis())
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use
                             0L
@@ -576,6 +581,7 @@ internal class SeccompDaemonEngine(
                         if (count <= 0) {
                             pfd1.setRevents(0)
                             pfd2.setRevents(0)
+                            pfd3.setRevents(0)
                         }
 
                         var shouldBreak = false

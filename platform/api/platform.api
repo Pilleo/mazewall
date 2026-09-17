@@ -322,11 +322,16 @@ public final class io/mazewall/platform/process/JvmChildSpec {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/platform/process/ProcessTreeKt {
+	public static final fun destroyForciblyWithDescendants (Ljava/lang/Process;)V
+	public static final fun snapshotDescendants (Ljava/lang/ProcessHandle;)Ljava/util/List;
+}
+
 public final class io/mazewall/platform/syscall/Arch {
 	public static final field AUDIT_ARCH_AARCH64 I
 	public static final field AUDIT_ARCH_X86_64 I
 	public static final field Companion Lio/mazewall/platform/syscall/Arch$Companion;
-	public fun <init> (Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)V
+	public fun <init> (Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()I
 	public final fun component100 ()I
@@ -344,6 +349,7 @@ public final class io/mazewall/platform/syscall/Arch {
 	public final fun component111 ()I
 	public final fun component112 ()I
 	public final fun component113 ()I
+	public final fun component114 ()I
 	public final fun component12 ()I
 	public final fun component13 ()I
 	public final fun component14 ()I
@@ -440,8 +446,8 @@ public final class io/mazewall/platform/syscall/Arch {
 	public final fun component97 ()I
 	public final fun component98 ()I
 	public final fun component99 ()I
-	public final fun copy (Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)Lio/mazewall/platform/syscall/Arch;
-	public static synthetic fun copy$default (Lio/mazewall/platform/syscall/Arch;Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIILjava/lang/Object;)Lio/mazewall/platform/syscall/Arch;
+	public final fun copy (Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII)Lio/mazewall/platform/syscall/Arch;
+	public static synthetic fun copy$default (Lio/mazewall/platform/syscall/Arch;Ljava/lang/String;IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIILjava/lang/Object;)Lio/mazewall/platform/syscall/Arch;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAccept ()I
 	public final fun getAccept4 ()I
@@ -511,6 +517,7 @@ public final class io/mazewall/platform/syscall/Arch {
 	public final fun getOpenat ()I
 	public final fun getOpenat2 ()I
 	public final fun getPause ()I
+	public final fun getPerfEventOpen ()I
 	public final fun getPidfdGetFd ()I
 	public final fun getPidfdOpen ()I
 	public final fun getPivotRoot ()I

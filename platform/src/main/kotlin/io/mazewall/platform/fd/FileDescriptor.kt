@@ -500,6 +500,7 @@ internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdO
  * Executes the given [block] with this file descriptor and then closes it correctly,
  * even if an exception is thrown.
  */
+@Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally") // Preserve the primary failure and attach a native-close failure as evidence.
 internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
     var blockFailure: Throwable? = null
     try {

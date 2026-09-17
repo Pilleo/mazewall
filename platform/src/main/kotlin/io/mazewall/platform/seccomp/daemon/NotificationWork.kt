@@ -13,9 +13,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 @MazewallInternal
 internal interface NotificationWork : AutoCloseable {
+    /**
+     * Registers the reactor-owned completion signal before the first [poll].
+     * Worker threads may signal readiness, but only the reactor may claim a reply lease.
+     */
+    fun bindCompletionWakeup(wakeup: NotificationCompletionWakeup) {}
+
     context(arena: NativeArena) public fun poll(): NotificationProgress
 
     override fun close() {}
+}
+
+/** A bounded, session-local signal used only to wake the reactor after preparation completes. */
+internal fun interface NotificationCompletionWakeup {
+    fun signal()
 }
 
 @MazewallInternal

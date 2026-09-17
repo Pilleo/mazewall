@@ -40,8 +40,10 @@ internal class SeccompSessionHandler(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
     private val nanoTime: () -> Long = System::nanoTime,
+    providedCompletionWakeup: SessionCompletionWakeup? = null,
 ) : AutoCloseable {
     private val buffers: SeccompSessionBuffers
+    private val completionWakeup: SessionCompletionWakeup = providedCompletionWakeup ?: EventFdCompletionWakeup.create(engine)
 
     init {
         configureListenerNonblocking()
@@ -55,8 +57,10 @@ internal class SeccompSessionHandler(
     private var isPassThrough = false
     private var pending: PendingNotification? = null
 
-    /** Pending work must advance on idle polls and EINTR, not only descriptor readiness. */
-    public fun pollTimeoutMillis(): Int = pending?.let { minOf(WORK_POLL_MS, it.deadline.remainingMillis(nanoTime())) } ?: IDLE_POLL_MS
+    /** Completion wakeups are prompt, while periodic polls retain control-exchange progress. */
+    public fun pollTimeoutMillis(): Int = pending?.let { pendingDeadlinePollTimeoutMillis(it.deadline.remainingMillis(nanoTime())) } ?: IDLE_POLL_MS
+
+    internal val completionWakeupPollFd: Int get() = completionWakeup.pollFd
 
     private class PendingNotification(
         val id: Long,
@@ -96,6 +100,7 @@ internal class SeccompSessionHandler(
             val current = pending
             if (current != null) denyAndTerminate(current)
         },
+        { completionWakeup.close() },
         { buffers.close() },
         ),
         recordOutcome,
@@ -108,12 +113,18 @@ internal class SeccompSessionHandler(
             return LoopAction.Break
         }
 
-        if (pending != null) return advancePending(pollFds)
+        if (pending != null) {
+            drainCompletionWakeup(pollFds)
+            return advancePending(pollFds)
+        }
 
         // pollFds layout:
         // [0]: listenerFd (Layouts.POLLFD_SIZE)
         // [1]: socketFd   (Layouts.POLLFD_SIZE)
+        // [2]: completion wakeup eventfd (Layouts.POLLFD_SIZE)
         val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        drainCompletionWakeup(pollFds)
+        if (isTerminated) return LoopAction.Break
 
         // Process pending seccomp notifications BEFORE checking for shutdown.
         // This ensures a blocked tracee always gets a response even if a shutdown
@@ -162,6 +173,7 @@ internal class SeccompSessionHandler(
                 } else {
                     current.work = notifHandler.beginNotification(notif, resp, listenerFd, socketFd, current.deadline)
                 }
+                checkNotNull(current.work).bindCompletionWakeup(completionWakeup)
             } catch (expectedNotificationFailure: Throwable) {
                 terminateAfterFailure(current, expectedNotificationFailure)
             }
@@ -185,6 +197,19 @@ internal class SeccompSessionHandler(
         }
 
         return LoopAction.Continue
+    }
+
+    private fun drainCompletionWakeup(pollFds: ManagedSegment) {
+        // Direct handler fixtures predating the reactor-owned wakeup descriptor use two slots.
+        if (pollFds.byteSize() < Layouts.POLLFD_SIZE * 3) return
+        val wakeupPollFd = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE * 2, Layouts.POLLFD_SIZE))
+        val revents = wakeupPollFd.getRevents().toInt()
+        val errorOrHup = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+        if ((revents and errorOrHup) != 0) {
+            isTerminated = true
+            return
+        }
+        if ((revents and NativeConstants.POLLIN.toInt()) != 0) completionWakeup.drain()
     }
 
     // SUPPRESSION-RATIONALE: Terminal claim, timeout and Await paths must return independently so a notification cannot reach a second reply branch.
@@ -367,11 +392,14 @@ internal class SeccompSessionHandler(
     public companion object {
         private const val NOTIFICATION_TIMEOUT_MS = 30_000L
         private const val MAX_ATTEMPTS = 8
-        private const val WORK_POLL_MS = 10
+        private const val WORK_POLL_MS = 50
+
         private const val DEADLINE_NEAR_MILLIS = 5_000
         private const val IDLE_POLL_MS = 1000
         private const val SHUTDOWN_COMMAND_BYTE: Byte = 0x53.toByte()
         private const val PASS_THROUGH_COMMAND_BYTE: Byte = 0x54.toByte()
+
+        internal fun pendingDeadlinePollTimeoutMillis(remainingMillis: Int): Int = minOf(WORK_POLL_MS, maxOf(0, remainingMillis))
     }
 }
 
