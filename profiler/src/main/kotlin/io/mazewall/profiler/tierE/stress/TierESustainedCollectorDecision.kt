@@ -9,6 +9,16 @@ internal object TierESustainedCollectorDecision {
         BELOW_CAPACITY,
         NEAR_CAPACITY,
         INTENTIONAL_OVERLOAD,
+        ;
+
+        internal val wireName: String
+            get() = name.lowercase()
+
+        companion object {
+            internal fun fromProperty(value: String): Load =
+                entries.singleOrNull { it.wireName == value }
+                    ?: error("unknown Tier E sustained collector load: $value")
+        }
     }
 
     internal enum class EvidenceIntegrity {

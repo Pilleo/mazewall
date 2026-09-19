@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.locks.LockSupport
 import kotlin.io.path.deleteRecursively
 
 /**
@@ -22,6 +23,7 @@ import kotlin.io.path.deleteRecursively
 internal object TierESharedOpenatOracleWorkload {
     const val FIRST_OPERATION_MODE = 0x100
     const val PROFILE_PROPERTY = "mazewall.tier-e.workload-profile"
+    const val RATE_PER_SECOND_PROPERTY = "mazewall.tier-e.sustained-rate-per-second"
     private const val AT_FDCWD = -100
     private const val O_RDONLY = 0
     private const val O_DIRECTORY = 0x10000
@@ -184,13 +186,22 @@ internal object TierESharedOpenatOracleWorkload {
             // and emit buffered windows only after all timed operations have finished.
             val clock = if (System.getenv("PERF_RECORD") == "true") TierELinuxMonotonicClock() else null
             val windows = if (clock != null) LongArray((warmups + batches) * 2) else null
+            val rateController = RateController.fromSystemProperty()
             val result = clock.use {
                 buildList(warmups + batches) {
                     repeat(warmups + batches) { ordinal ->
                         val phase = if (ordinal < warmups) BatchPhase.WARMUP else BatchPhase.MEASURED
                         val index = if (ordinal < warmups) ordinal + 1 else ordinal - warmups + 1
                         if (windows != null) windows[ordinal * 2] = requireNotNull(clock).nowNanos()
-                        val measured = runRange(ordinal * iterations, iterations, ordinal * iterations, onOperationStarted, onOperationReturned, profile)
+                        val measured = runRange(
+                            ordinal * iterations,
+                            iterations,
+                            ordinal * iterations,
+                            onOperationStarted,
+                            onOperationReturned,
+                            profile,
+                            rateController,
+                        )
                         if (windows != null) windows[ordinal * 2 + 1] = requireNotNull(clock).nowNanos()
                         add(Batch(phase, index, measured))
                     }
@@ -214,10 +225,12 @@ internal object TierESharedOpenatOracleWorkload {
             onOperationStarted: (Int) -> Unit = {},
             onOperationReturned: (Int) -> Unit = {},
             profile: Profile,
+            rateController: RateController? = null,
         ): Result {
             val started = System.nanoTime()
             var checksum = 0L
             directoryFds.subList(start, start + iterations).forEachIndexed { offset, directoryFd ->
+                rateController?.awaitNextOperation()
                 val operationId = FIRST_OPERATION_MODE + firstOperationOffset + offset
                 onOperationStarted(directoryFd)
                 val fileFd = openAtWithProfile(
@@ -318,6 +331,36 @@ internal object TierESharedOpenatOracleWorkload {
             value = value * 6_364_136_223_846_793_005L + 1_442_695_040_888_963_407L
         }
         if (rounds > 0) cpuSink = value
+    }
+
+    /**
+     * Monotonic open-loop pacing keeps a sustained test at its declared offered rate. When the
+     * producer falls behind it never catches up in a burst, which keeps saturation observable.
+     */
+    private class RateController private constructor(
+        private val intervalNanos: Long,
+        private val startedNanos: Long = System.nanoTime(),
+    ) {
+        private var nextOperation = 0L
+
+        fun awaitNextOperation() {
+            val deadline = startedNanos + nextOperation * intervalNanos
+            nextOperation += 1L
+            while (true) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0L) return
+                LockSupport.parkNanos(remaining)
+            }
+        }
+
+        companion object {
+            fun fromSystemProperty(): RateController? {
+                val rate = System.getProperty(RATE_PER_SECOND_PROPERTY, "0").toLongOrNull()
+                    ?: error("$RATE_PER_SECOND_PROPERTY must be a non-negative integer")
+                require(rate >= 0L) { "$RATE_PER_SECOND_PROPERTY must be a non-negative integer" }
+                return if (rate == 0L) null else RateController(1_000_000_000L / rate.coerceAtMost(1_000_000_000L))
+            }
+        }
     }
 
     private object UnixDispatcher {

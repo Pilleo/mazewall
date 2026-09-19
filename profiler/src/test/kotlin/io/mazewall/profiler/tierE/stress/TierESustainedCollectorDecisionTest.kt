@@ -7,6 +7,14 @@ import kotlin.test.assertTrue
 
 class TierESustainedCollectorDecisionTest {
     @Test
+    fun `load values have stable property names`() {
+        assertEquals(
+            TierESustainedCollectorDecision.Load.NEAR_CAPACITY,
+            TierESustainedCollectorDecision.Load.fromProperty("near_capacity"),
+        )
+    }
+
+    @Test
     fun `below capacity complete sample is eligible for performance analysis`() {
         val verdict = TierESustainedCollectorDecision.evaluate(
             TierESustainedCollectorDecision.Sample(

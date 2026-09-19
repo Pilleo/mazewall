@@ -231,6 +231,7 @@ internal object TierEKernelSmoke {
             ) { "dictionary" }}$benchmarkOptions$captureYieldOption$lifecycleBarrierOption$callbackSuppressionOption$captureFailureOption$execTransitionOption",
             "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
             "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${TierESharedOpenatOracleWorkload.Profile.fromSystemProperty().wireName}",
+            "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0")}",
             "-D${TierESharedOpenatOracleWorkload.MANIFEST_PROPERTY}=$oracleManifest",
             "-cp",
             workloadClasspath,
@@ -357,7 +358,8 @@ internal object TierEKernelSmoke {
             val lastMarkerPidTgid = terminalLastMarkerPidTgid ?: session.lastMarkerPidTgid()
             // The child has exited successfully, providing the producer-quiescence proof that
             // finish deliberately refuses to infer from an empty final ring drain.
-            val profile = terminalProfile ?: session.finish(definitions, producerClosed = lifecycleScenario != "exec_transition")
+            val producerClosed = terminalProfile == null && lifecycleScenario != "exec_transition"
+            val profile = terminalProfile ?: session.finish(definitions, producerClosed = producerClosed)
             val resolvedInvocationIds = profile.syscalls
                 .filter { syscall -> syscall.resolutionStatus == ResolutionStatus.RESOLVED }
                 .mapNotNull { syscall -> syscall.observation.invocationId }
@@ -555,6 +557,7 @@ internal object TierEKernelSmoke {
                 "kernel_active_before_detach=${kernelActiveBeforeDetach ?: -1} " +
                 "unknown_other=$unexplainedUnknown wrong=$wrong lost=${profile.integrity.observedLosses} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=${profile.integrity.coverageComplete} " +
+                "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
                 "missing_operations=$missingWorkloadUnlinks extra_operations=$extraWorkloadUnlinks " +
                 "candidate_operations=${oracle.candidates} acknowledged_operations=${oracle.acknowledged} " +

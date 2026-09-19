@@ -47,6 +47,10 @@ internal object TierEMatchedBenchmark {
             calibrationEnabled = System.getProperty("mazewall.tier-e.calibration", "false").toBooleanStrictOrNull()
                 ?: error("mazewall.tier-e.calibration must be true or false"),
             runLevel = System.getProperty("mazewall.tier-e.run-level", "custom"),
+            sustainedLoad = TierESustainedCollectorDecision.Load.fromProperty(
+                System.getProperty("mazewall.tier-e.sustained-load", "below_capacity"),
+            ),
+            sustainedRatePerSecond = System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0").toLong(),
         )
         require(Files.isRegularFile(requestedConfig.agent)) { "missing agent: ${requestedConfig.agent}" }
         require(
@@ -59,6 +63,12 @@ internal object TierEMatchedBenchmark {
                 requestedConfig.userNotifChildTimeoutSeconds > requestedConfig.userNotifWorkerTimeoutSeconds,
         ) {
             "benchmark dimensions and deadlines must be positive; USER_NOTIF child timeout must exceed its worker timeout"
+        }
+        require(requestedConfig.sustainedRatePerSecond >= 0L) {
+            "${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY} must be non-negative"
+        }
+        require(requestedConfig.scope != Scope.TIER_E_SUSTAINED_COLLECTOR || requestedConfig.sustainedRatePerSecond > 0L) {
+            "tier-e-sustained-collector requires a positive ${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}"
         }
         requestedConfig.artifact.parent?.createDirectories()
         val calibration = if (requestedConfig.calibrationEnabled) calibrate(requestedConfig) else null
@@ -235,6 +245,7 @@ internal object TierEMatchedBenchmark {
                 listOf(
                 "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
+                "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
                 "-cp",
                 classpath,
                 config.workload.className,
@@ -280,6 +291,7 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.capture-yield=$captureYield",
                 "-Dmazewall.tier-e.ring-capacity-bytes=8388608",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
+                "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
                 "--enable-native-access=ALL-UNNAMED",
                 "-cp",
                 classpath,
@@ -304,6 +316,7 @@ internal object TierEMatchedBenchmark {
                 "--enable-native-access=ALL-UNNAMED",
                 "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
+                "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
                 "-cp",
                 classpath,
                 UserNotifOracleSmoke::class.java.name,
@@ -380,6 +393,7 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "reconciliation_kernel_active_observations"),
             output.contains("workloadFrames=true"),
             output.contains("evidence_complete=true") || output.contains("evidenceComplete=true"),
+            output.contains("producer_closed=true"),
             selectedMarkerTransport(output),
             (mode == Mode.BASELINE || output.contains("unique_edge_observer_enabled=false")) &&
                 batches.all { it.operations == config.iterations.toLong() },
@@ -467,6 +481,8 @@ internal object TierEMatchedBenchmark {
         val result = ForkResult(
             config.scope,
             config.lifecycleScenario,
+            config.sustainedLoad,
+            config.sustainedRatePerSecond,
             variant,
             config.workload.profile,
             fork,
@@ -573,6 +589,7 @@ internal object TierEMatchedBenchmark {
             "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\"," +
             "\"canonical_cache\":\"$cacheMode\",\"capture_profile\":\"$captureProfile\",\"capture_profile_strategy\":\"$captureProfileStrategy\"," +
             "\"scope\":\"${config.scope.jsonName}\"," +
+            "\"sustained_load\":\"${config.sustainedLoad.wireName}\",\"sustained_rate_per_second\":${config.sustainedRatePerSecond}," +
             "\"run_level\":\"${escape(config.runLevel)}\",\"calibration_enabled\":${config.calibrationEnabled}," +
             "\"calibration_target\":${calibration?.let { "\"${it.selection.status}\"" } ?: "null"}," +
             "\"calibration_artifact\":${calibration?.let { "\"${escape(it.artifact)}\"" } ?: "null"}," +
@@ -645,6 +662,37 @@ internal object TierEMatchedBenchmark {
             "\"expected_per_variant\":${config.forks * config.batches}}"
     }
 
+    private fun sustainedCollectorJson(result: ForkResult): String {
+        if (result.scope != Scope.TIER_E_SUSTAINED_COLLECTOR) return "\"sustained_collector\":null"
+        val requested = result.batches.sumOf { it.operations }
+        val resolved = result.evidence.operationOracle.matched
+            .coerceIn(0L, requested)
+        val verdict = TierESustainedCollectorDecision.evaluate(
+            TierESustainedCollectorDecision.Sample(
+                load = result.sustainedLoad,
+                requestedOperations = requested,
+                achievedOperations = requested,
+                resolvedOperations = resolved,
+                observedLosses = result.evidence.lost,
+                producerClosed = result.evidence.producerClosed,
+                evidenceComplete = result.evidence.evidenceComplete,
+            ),
+        )
+        val achievedRate = operationsPerSecond(requested, result.batches.sumOf { it.workloadNanos })
+        return buildString {
+            append("\"sustained_collector\":{\"load\":\"").append(result.sustainedLoad.wireName)
+            append("\",\"requested_rate_per_second\":").append(result.sustainedRatePerSecond)
+            append(",\"achieved_rate_per_second\":").append(achievedRate)
+            append(",\"requested_operations\":").append(requested)
+            append(",\"achieved_operations\":").append(requested)
+            append(",\"resolved_operations\":").append(resolved)
+            append(",\"evidence_integrity\":\"").append(verdict.evidenceIntegrity).append('\"')
+            append(",\"performance_eligible\":").append(verdict.performanceEligible)
+            append(",\"exclusion_reason\":").append(verdict.exclusionReason?.let { "\"$it\"" } ?: "null")
+            append('}')
+        }
+    }
+
     private fun sampleJson(
         variant: Variant,
         scope: Scope,
@@ -691,6 +739,7 @@ internal object TierEMatchedBenchmark {
             "\"owned_arguments\":\"${ownedArgumentsFor(result.variant).wireName}\"",
             "\"ready_transfer\":\"${readyTransferFor(result.variant).wireName}\"",
             "\"workload_profile\":\"${result.workloadProfile.wireName}\"",
+            sustainedCollectorJson(result),
             "\"fork\":${result.fork}",
             "\"target_pid\":${result.targetPid}",
             "\"elapsed_ns\":${result.elapsedNanos}",
@@ -1797,6 +1846,7 @@ internal object TierEMatchedBenchmark {
         TIER_E_MARKER_TRANSPORT_COMPARABLE("tier-e-marker-transport-comparable"),
         TIER_E_LIFECYCLE("tier-e-lifecycle"),
         TIER_E_PRODUCTION_SELECTION("tier-e-production-selection"),
+        TIER_E_SUSTAINED_COLLECTOR("tier-e-sustained-collector"),
         ;
 
         companion object {
@@ -1998,6 +2048,8 @@ internal object TierEMatchedBenchmark {
                 if (mode.tierE) "${mode.jsonName}_ring_decode_${ringDecode?.wireName ?: RingDecode.DIRECT.wireName}" else mode.jsonName
             Scope.TIER_E_POLL_BACKOFF -> if (mode.tierE) "${mode.jsonName}_poll_backoff_${requireNotNull(pollBackoff).wireName}" else mode.jsonName
             Scope.TIER_E_READINESS -> if (mode.tierE) "${mode.jsonName}_collector_${requireNotNull(pollBackoff).wireName}" else mode.jsonName
+            Scope.TIER_E_SUSTAINED_COLLECTOR ->
+                "${mode.jsonName}_collector_${requireNotNull(pollBackoff).takeIf { it != PollBackoff.NONE }?.wireName ?: "continuous"}"
             Scope.TIER_E_RING_ARGUMENT_LIST ->
                 if (mode.tierE) "${mode.jsonName}_ring_arguments_${ringArgumentList?.wireName?.replace('-', '_') ?: RingArgumentList.IMMUTABLE_FACTORY.wireName.replace('-', '_')}" else mode.jsonName
             Scope.TIER_E_RING_ARGUMENT_VIEW ->
@@ -2074,6 +2126,8 @@ internal object TierEMatchedBenchmark {
 
     internal fun readinessVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_READINESS, rotation).map { it.jsonName(Scope.TIER_E_READINESS) }
 
+    internal fun sustainedCollectorVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_SUSTAINED_COLLECTOR, rotation).map { it.jsonName(Scope.TIER_E_SUSTAINED_COLLECTOR) }
+
     internal fun pollBackoffVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_POLL_BACKOFF, rotation).map { it.jsonName(Scope.TIER_E_POLL_BACKOFF) }
 
     internal fun ringArgumentListVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_RING_ARGUMENT_LIST, rotation).map { it.jsonName(Scope.TIER_E_RING_ARGUMENT_LIST) }
@@ -2130,6 +2184,7 @@ internal object TierEMatchedBenchmark {
                 Mode.USER_NOTIF,
             )
             Scope.TIER_E_LIFECYCLE -> listOf(Mode.FULL_STREAM, Mode.UNIQUE_EDGE)
+            Scope.TIER_E_SUSTAINED_COLLECTOR -> listOf(Mode.FULL_STREAM, Mode.UNIQUE_EDGE)
             Scope.TIER_E_PRODUCTION_SELECTION -> listOf(Mode.BASELINE, Mode.FULL_STREAM)
             Scope.TIER_E_COMPARABLE -> listOf(
                 Mode.BASELINE,
@@ -2189,6 +2244,14 @@ internal object TierEMatchedBenchmark {
                         listOf(PollBackoff.NONE, PollBackoff.READINESS)
                     } else {
                         listOf(PollBackoff.READINESS, PollBackoff.NONE)
+                    }
+                    policies.map { policy -> Variant(mode, pollBackoff = policy) }
+                }
+                Scope.TIER_E_SUSTAINED_COLLECTOR -> {
+                    val policies = if (rotation % 2 == 0) {
+                        listOf(PollBackoff.NONE, PollBackoff.ADAPTIVE_1_TO_50)
+                    } else {
+                        listOf(PollBackoff.ADAPTIVE_1_TO_50, PollBackoff.NONE)
                     }
                     policies.map { policy -> Variant(mode, pollBackoff = policy) }
                 }
@@ -2312,6 +2375,8 @@ internal object TierEMatchedBenchmark {
         val userNotifChildTimeoutSeconds: Long,
         val calibrationEnabled: Boolean,
         val runLevel: String,
+        val sustainedLoad: TierESustainedCollectorDecision.Load,
+        val sustainedRatePerSecond: Long,
     )
 
     private data class CalibrationOutcome(
@@ -2344,6 +2409,7 @@ internal object TierEMatchedBenchmark {
         val reconciliationKernelActiveObservations: Long,
         val workloadFrames: Boolean,
         val evidenceComplete: Boolean,
+        val producerClosed: Boolean,
         val selectedMarkerTransport: String?,
         val controlledWorkloadVerified: Boolean,
         val detachedInactiveScenario: Boolean,
@@ -2506,6 +2572,8 @@ internal object TierEMatchedBenchmark {
     private data class ForkResult(
         val scope: Scope,
         val lifecycleScenario: String,
+        val sustainedLoad: TierESustainedCollectorDecision.Load,
+        val sustainedRatePerSecond: Long,
         val variant: Variant,
         val workloadProfile: TierESharedOpenatOracleWorkload.Profile,
         val fork: Int,
