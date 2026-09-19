@@ -196,6 +196,87 @@ class AgentDefinitionFileTest {
     }
 
     @Test
+    fun `dictionary and inline transports preserve normalized decoded evidence`() {
+        val dictionaryStack = payload {
+            putInt(7)
+            put(0)
+            putShort(1)
+            putString("bootstrap")
+            putString("Ljava/lang/String;")
+            putString("charAt")
+            putString("(I)C")
+            putLong(12)
+            put(0)
+        }
+        val dictionaryInvocation = payload {
+            putLong(9)
+            putLong(0)
+            putInt(7)
+            put(0)
+            putLong(42)
+        }
+        val inlineInvocation = payload {
+            putLong(99)
+            putLong(0)
+            putInt(13)
+            put(0)
+            putLong(100)
+            putInt(13)
+            put(0)
+            putShort(1)
+            putString("bootstrap")
+            putString("Ljava/lang/String;")
+            putString("charAt")
+            putString("(I)C")
+            putLong(12)
+            put(0)
+        }
+        val dictionary = AgentDefinitionFile.decode(
+            ByteArrayOutputStream()
+                .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(2, 0))
+                record(1, dictionaryStack)
+                record(
+                    4,
+                    payload {
+                    putLong(42)
+                    put(1)
+                },
+                )
+                record(2, dictionaryInvocation)
+            }.toByteArray(),
+        )
+        val inline = AgentDefinitionFile.decode(
+            ByteArrayOutputStream()
+                .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(3, 0))
+                record(
+                    4,
+                    payload {
+                    putLong(100)
+                    put(1)
+                },
+                )
+                record(5, inlineInvocation)
+            }.toByteArray(),
+        )
+
+        val dictionaryInvocationDefinition = dictionary.invocations.single()
+        val inlineInvocationDefinition = inline.invocations.single()
+        assertEquals(
+            dictionary.stacks.single().frames,
+            inline.stacks.single().frames,
+        )
+        assertEquals(dictionaryInvocationDefinition.captureFailure, inlineInvocationDefinition.captureFailure)
+        assertEquals(
+            dictionaryInvocationDefinition.executionContext?.kind,
+            inlineInvocationDefinition.executionContext?.kind,
+        )
+    }
+
+    @Test
     fun `rejects stack records that exceed the native frame limit`() {
         val stack = payload {
             putInt(7)
@@ -225,6 +306,43 @@ class AgentDefinitionFileTest {
         } finally {
             Files.deleteIfExists(file)
         }
+    }
+
+    @Test
+    fun `classifies decoded record budget exhaustion`() {
+        val stats = payload {
+            putLong(0)
+            putLong(0)
+        }
+        val file = ByteArrayOutputStream()
+            .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(2, 0))
+                repeat(100_001) { record(3, stats) }
+            }.toByteArray()
+
+        val failure = assertFailsWith<IllegalArgumentException> { AgentDefinitionFile.decode(file) }
+
+        assertEquals("agent definition file exceeds decoded record budget", failure.message)
+    }
+
+    @Test
+    fun `selective decoding retains a bounded invocation subset beyond the full record budget`() {
+        val stats = payload {
+            putLong(0)
+            putLong(0)
+        }
+        val file = ByteArrayOutputStream()
+            .apply {
+                write("MZSD".toByteArray())
+                write(byteArrayOf(2, 0))
+                repeat(100_001) { record(3, stats) }
+            }.toByteArray()
+
+        val contents = AgentDefinitionFile.decodeForInvocations(file, emptySet())
+
+        assertEquals(emptyList(), contents.invocations)
+        assertEquals(0, contents.agentLosses)
     }
 
     private fun payload(block: LittleEndianWriter.() -> Unit): ByteArray = LittleEndianWriter().apply(block).bytes()

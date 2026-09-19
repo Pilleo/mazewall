@@ -57,6 +57,45 @@ class AttributionCollectorTest {
     }
 
     @Test
+    fun `ready join transfer preserves order and is immutable`() {
+        val joiner = InvocationDictionaryJoiner(maxPendingRecords = 3)
+        val invocationId = InvocationId(101)
+        val stackTraceId = StackTraceId(7)
+        val first = pendingObservation(invocationId)
+        val second = first.copy(taskSequence = 5)
+
+        assertEquals(true, joiner.enqueue(first))
+        assertEquals(true, joiner.enqueue(second))
+        joiner.registerInvocation(InvocationDefinition(invocationId, parentInvocationId = null, stackTraceId = stackTraceId))
+        joiner.registerStack(StackDefinition(stackTraceId, listOf(frame()), StackCaptureQuality.COMPLETE))
+
+        val ready = requireNotNull(joiner.takeReady(invocationId))
+        assertEquals(listOf(first, second), ready.observations)
+        assertFailsWith<UnsupportedOperationException> {
+            (ready.observations as MutableList).clear()
+        }
+        assertEquals(null, joiner.takeReady(invocationId))
+    }
+
+    @Test
+    fun `ready join preserves a single pending observation without requiring a mutable bucket`() {
+        val joiner = InvocationDictionaryJoiner(maxPendingRecords = 1)
+        val invocationId = InvocationId(102)
+        val stackTraceId = StackTraceId(8)
+        val observation = pendingObservation(invocationId)
+
+        assertEquals(true, joiner.enqueue(observation))
+        joiner.registerInvocation(InvocationDefinition(invocationId, parentInvocationId = null, stackTraceId = stackTraceId))
+        joiner.registerStack(StackDefinition(stackTraceId, listOf(frame()), StackCaptureQuality.COMPLETE))
+
+        val ready = requireNotNull(joiner.takeReady(invocationId))
+        assertEquals(listOf(observation), ready.observations)
+        assertFailsWith<UnsupportedOperationException> {
+            (ready.observations as MutableList).clear()
+        }
+    }
+
+    @Test
     fun `resolves a syscall with its opaque virtual execution context`() {
         val collector = AttributionCollector()
         val invocationId = InvocationId(101)
@@ -292,6 +331,61 @@ class AttributionCollectorTest {
             ),
             decisions.map(UniqueEdgeDecision::kind),
         )
+    }
+
+    @Test
+    fun `unique edge observer does not change resolved evidence or integrity`() {
+        val observed = mutableListOf<UniqueEdgeDecision>()
+        val observedCollector = AttributionCollector(
+            emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL,
+            uniqueEdgeDecisionObserver = observed::add,
+        )
+        val productionCollector = AttributionCollector(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
+        val invocationId = InvocationId(203)
+        val stack = StackDefinition(StackTraceId(21L), listOf(frame()), StackCaptureQuality.COMPLETE)
+        listOf(observedCollector, productionCollector).forEach { collector ->
+            collector.accept(stack)
+            collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
+        }
+
+        val observedCandidate = observedCollector.accept(pendingObservation(invocationId)).single()
+        val productionCandidate = productionCollector.accept(pendingObservation(invocationId)).single()
+        assertEquals(productionCandidate, observedCandidate)
+        observedCollector.acknowledgeEmission(observedCandidate)
+        productionCollector.acknowledgeEmission(productionCandidate)
+
+        assertEquals(emptyList<ResolvedSyscall>(), observedCollector.accept(pendingObservation(invocationId)))
+        assertEquals(emptyList<ResolvedSyscall>(), productionCollector.accept(pendingObservation(invocationId)))
+        assertEquals(productionCollector.integrity, observedCollector.integrity)
+        assertEquals(
+            listOf(UniqueEdgeDecision.Kind.CANDIDATE, UniqueEdgeDecision.Kind.ACKNOWLEDGED, UniqueEdgeDecision.Kind.SUPPRESSED),
+            observed.map(UniqueEdgeDecision::kind),
+        )
+    }
+
+    @Test
+    fun `unique edge allocation accounting separates observer diagnostics from ownership`() {
+        val allocated = java.util.concurrent.atomic
+            .AtomicLong()
+        val collector = AttributionCollector(
+            emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL,
+            uniqueEdgeDecisionObserver = { allocated.addAndGet(100) },
+            allocationCounter = TierEAllocationCounter { allocated.get() },
+        )
+        val invocationId = InvocationId(202)
+        val stack = StackDefinition(StackTraceId(20L), listOf(frame()), StackCaptureQuality.COMPLETE)
+        collector.accept(stack)
+        collector.accept(InvocationDefinition(invocationId, null, stack.stackTraceId))
+
+        val candidate = collector.accept(pendingObservation(invocationId)).single()
+        collector.acknowledgeEmission(candidate)
+        collector.accept(pendingObservation(invocationId))
+
+        val allocation = collector.uniqueEdgeAllocationBreakdown()
+        assertEquals(100L, allocation.candidateDiagnosticBytes)
+        assertEquals(100L, allocation.suppressionDiagnosticBytes)
+        assertEquals(0L, allocation.candidateOwnershipBytes)
+        assertEquals(0L, allocation.gateCheckBytes)
     }
 
     @Test

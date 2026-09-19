@@ -196,9 +196,12 @@ internal class AttributionCollector(
     private val captureDomain: ObservationScope = ObservationScope.SYS_ENTER_TRACEPOINT,
     private val expectedProcessIncarnation: ProcessIncarnationId? = null,
     maxRetainedBytes: Long = TierERetainedStateBudget.DEFAULT_LIMIT_BYTES,
+    private val readyTransferMode: TierEReadyTransferMode = TierEReadyTransferMode.READ_ONLY,
+    private val knownJoinMode: TierEKnownJoinMode = TierEKnownJoinMode.QUEUED_CONTROL,
     private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
+    private val allocationCounter: TierEAllocationCounter? = null,
 ) {
-    private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords)
+    private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords, readyTransferMode, allocationCounter)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
     private var retainedBudget = TierERetainedStateBudget(maxRetainedBytes)
@@ -207,6 +210,11 @@ internal class AttributionCollector(
     private var finished = false
     private var pendingCount: Int = 0
     private var attributionLifecycleValid = true
+    private var resolvedEvidenceAllocatedBytes = 0L
+    private var uniqueEdgeGateAllocatedBytes = 0L
+    private var uniqueEdgeSuppressionDiagnosticAllocatedBytes = 0L
+    private var uniqueEdgeCandidateOwnershipAllocatedBytes = 0L
+    private var uniqueEdgeCandidateDiagnosticAllocatedBytes = 0L
 
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
@@ -223,6 +231,24 @@ internal class AttributionCollector(
     public val integrity: SessionIntegrity
         get() = integrityAccumulator.snapshot(emissionMode, captureDomain)
 
+    /** Benchmark-only allocation attributed to immutable resolved-result construction and append. */
+    internal fun resolvedEvidenceAllocatedBytes(): Long = resolvedEvidenceAllocatedBytes
+
+    /** Benchmark-only allocation split for the unique-edge collector hot path. */
+    internal fun uniqueEdgeAllocationBreakdown(): UniqueEdgeAllocationBreakdown =
+        UniqueEdgeAllocationBreakdown(
+            gateCheckBytes = uniqueEdgeGateAllocatedBytes,
+            suppressionDiagnosticBytes = uniqueEdgeSuppressionDiagnosticAllocatedBytes,
+            candidateOwnershipBytes = uniqueEdgeCandidateOwnershipAllocatedBytes,
+            candidateDiagnosticBytes = uniqueEdgeCandidateDiagnosticAllocatedBytes,
+        )
+
+    /** Benchmark-only allocation split across delayed dictionary join boundaries. */
+    internal fun joinerAllocationBreakdown(): JoinerAllocationBreakdown = dictionaryJoiner.allocationBreakdown()
+
+    /** Immutable IDs whose observations still require a terminal invocation definition. */
+    internal fun pendingInvocationIds(): Set<InvocationId> = dictionaryJoiner.pendingInvocationIds()
+
     public fun accept(definition: StackDefinition): List<ResolvedSyscall> {
         return java.util.List.copyOf(
             dictionaryJoiner.registerStack(definition).flatMap(::resolveReady),
@@ -233,23 +259,30 @@ internal class AttributionCollector(
         return java.util.List.copyOf(resolveReady(dictionaryJoiner.registerInvocation(definition)))
     }
 
-    public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> {
-        return when {
+    public fun accept(observation: SyscallAttribution): List<ResolvedSyscall> = ArrayList<ResolvedSyscall>(1).also { acceptInto(observation, it) }
+
+    /**
+     * Appends resolved evidence directly to a session-owned batch.
+     *
+     * This is internal because public callers retain the independent-list contract of [accept].
+     */
+    internal fun acceptInto(
+        observation: SyscallAttribution,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+        when {
             expectedProcessIncarnation != null && observation.task.processIncarnation != expectedProcessIncarnation -> {
                 integrityAccumulator.recordLifecycleInvalidation()
                 integrityAccumulator.recordAttributionFailure()
-                listOf(
-                ResolvedSyscall(
+                target += ResolvedSyscall(
                     observation.copy(invocationId = null, attributionStatus = AttributionStatus.STALE_LIFECYCLE_IDENTITY),
                     null,
                     ResolutionStatus.STALE_LIFECYCLE_IDENTITY,
-                ),
-            )
+                )
             }
             observation.attributionStatus != AttributionStatus.PENDING_DICTIONARY -> {
                 integrityAccumulator.recordAttributionFailure()
-                listOf(
-                ResolvedSyscall(
+                target += ResolvedSyscall(
                     observation,
                     null,
                     when (observation.attributionStatus) {
@@ -262,33 +295,63 @@ internal class AttributionCollector(
                         AttributionStatus.PENDING_DICTIONARY,
                         -> ResolutionStatus.INVALID_KERNEL_ATTRIBUTION
                     },
-                ),
-            )
+                )
             }
             !attributionLifecycleValid -> {
                 integrityAccumulator.recordAttributionFailure()
-                listOf(
-                ResolvedSyscall(
+                target += ResolvedSyscall(
                     observation.copy(invocationId = null, attributionStatus = AttributionStatus.CAUSAL_UNCERTAIN),
                     null,
                     ResolutionStatus.CAUSAL_UNCERTAIN,
-                ),
-            )
+                )
             }
-            !retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES) -> {
-                recordLoss()
-                emptyList()
-            }
-            !dictionaryJoiner.enqueue(observation) -> {
-                retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
-                recordLoss()
-                emptyList()
-            }
-            else -> {
-                val invocationId = requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }
-                resolveReady(invocationId)
-            }
+            else -> resolveKnownOrQueue(observation, target)
         }
+    }
+
+    private fun resolveKnownOrQueue(
+        observation: SyscallAttribution,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+        if (knownJoinMode == TierEKnownJoinMode.DIRECT_KNOWN && resolveKnownFullStream(observation, target)) return
+        if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)) {
+            recordLoss()
+            return
+        }
+        if (!dictionaryJoiner.enqueue(observation)) {
+            retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
+            recordLoss()
+            return
+        }
+        resolveReadyInto(requireNotNull(observation.invocationId) { "pending syscall must have an invocation id" }, target)
+    }
+
+    /** Resolves only a complete full-stream definition set; out-of-order and unique-edge paths remain queued. */
+    private fun resolveKnownFullStream(
+        observation: SyscallAttribution,
+        target: MutableCollection<ResolvedSyscall>,
+    ): Boolean {
+        if (emissionMode != TierEEmissionMode.FULL_STREAM) return false
+        val invocation = dictionaryJoiner.knownInvocation(requireNotNull(observation.invocationId)) ?: return false
+        val stack = dictionaryJoiner.knownStack(invocation)
+        if (stack == null && invocation.captureFailure == null) return false
+        if (invocation.captureFailure != null) {
+            integrityAccumulator.recordAttributionFailure()
+            target += ResolvedSyscall(observation, null, ResolutionStatus.CAPTURE_FAILED)
+            return true
+        }
+        var status = if (requireNotNull(stack).captureQuality == StackCaptureQuality.TRUNCATED) {
+            integrityAccumulator.recordAttributionFailure()
+            ResolutionStatus.TRUNCATED_STACK
+        } else {
+            ResolutionStatus.RESOLVED
+        }
+        if (status == ResolutionStatus.RESOLVED && invocation.executionContext == null && observation.captureFlags and VIRTUAL_THREAD_CAPTURE_FLAG != 0) {
+            integrityAccumulator.recordAttributionFailure()
+            status = ResolutionStatus.EXECUTION_IDENTITY_UNRESOLVED
+        }
+        target += ResolvedSyscall(observation, stack, status, invocation.executionContext)
+        return true
     }
 
     public fun recordLoss(count: Long = 1) {
@@ -416,8 +479,13 @@ internal class AttributionCollector(
         )
     }
 
-    private fun resolveReady(invocationId: InvocationId): List<ResolvedSyscall> {
-        val ready = dictionaryJoiner.takeReady(invocationId) ?: return emptyList()
+    private fun resolveReady(invocationId: InvocationId): List<ResolvedSyscall> = ArrayList<ResolvedSyscall>().also { resolveReadyInto(invocationId, it) }
+
+    private fun resolveReadyInto(
+        invocationId: InvocationId,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+        val ready = dictionaryJoiner.takeReady(invocationId) ?: return
         val invocation = ready.invocation
         val pending = ready.observations
         retainedBudget.release(
@@ -426,7 +494,10 @@ internal class AttributionCollector(
         )
         if (invocation.captureFailure != null) {
             integrityAccumulator.recordAttributionFailure(pending.size.toLong())
-            return pending.map { ResolvedSyscall(it, null, ResolutionStatus.CAPTURE_FAILED) }
+            for (observation in pending) {
+                target += ResolvedSyscall(observation, null, ResolutionStatus.CAPTURE_FAILED)
+            }
+            return
         }
         val stack = requireNotNull(ready.stack) { "ready invocation must have a stack or capture failure" }
         var status = if (stack.captureQuality == StackCaptureQuality.TRUNCATED) {
@@ -443,31 +514,125 @@ internal class AttributionCollector(
             integrityAccumulator.recordAttributionFailure(pending.size.toLong())
             status = ResolutionStatus.EXECUTION_IDENTITY_UNRESOLVED
         }
-        return pending.mapNotNull { observation ->
+        when (emissionMode) {
+            TierEEmissionMode.FULL_STREAM -> appendFullStream(pending, stack, status, invocation, target)
+            TierEEmissionMode.UNIQUE_STACK_SYSCALL -> appendUniqueEdges(pending, stack, status, invocation, target)
+        }
+    }
+
+    /**
+     * Full-stream retains every resolved observation. It deliberately avoids allocating a
+     * unique-edge key or a filtering lambda on the collector's steady-state hot path.
+     */
+    private fun appendFullStream(
+        pending: List<SyscallAttribution>,
+        stack: StackDefinition,
+        status: ResolutionStatus,
+        invocation: InvocationDefinition,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+        for (observation in pending) {
+            appendResolved(target, observation, stack, status, invocation.executionContext)
+        }
+    }
+
+    private fun appendUniqueEdges(
+        pending: List<SyscallAttribution>,
+        stack: StackDefinition,
+        status: ResolutionStatus,
+        invocation: InvocationDefinition,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+        for (observation in pending) {
+            appendUniqueEdge(observation, stack, status, invocation, target)
+        }
+    }
+
+    private fun appendUniqueEdge(
+        observation: SyscallAttribution,
+        stack: StackDefinition,
+        status: ResolutionStatus,
+        invocation: InvocationDefinition,
+        target: MutableCollection<ResolvedSyscall>,
+    ) {
+            val gateAllocationBefore = allocationBefore()
             val edge = UniqueEdgeGate.Edge(stack.stackTraceId, observation.syscallNumber, observation.captureFlags)
-            if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !uniqueEdgeGate.canEmit(edge)) {
-                uniqueEdgeDecisionObserver?.invoke(
-                    UniqueEdgeDecision(
-                        UniqueEdgeDecision.Kind.SUPPRESSED,
-                        ResolvedSyscall(observation, stack, status, invocation.executionContext),
-                    ),
-                )
-                null
+            val canEmit = uniqueEdgeGate.canEmit(edge)
+            recordAllocation(gateAllocationBefore) { uniqueEdgeGateAllocatedBytes += it }
+            if (status == ResolutionStatus.RESOLVED && !canEmit) {
+                uniqueEdgeDecisionObserver?.let { observer ->
+                    val diagnosticAllocationBefore = allocationBefore()
+                    observer(
+                        UniqueEdgeDecision(
+                            UniqueEdgeDecision.Kind.SUPPRESSED,
+                            ResolvedSyscall(observation, stack, status, invocation.executionContext),
+                        ),
+                    )
+                    recordAllocation(diagnosticAllocationBefore) { uniqueEdgeSuppressionDiagnosticAllocatedBytes += it }
+                }
             } else {
-                ResolvedSyscall(observation, stack, status, invocation.executionContext).also { resolved ->
-                    if (status == ResolutionStatus.RESOLVED && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL && !finished) {
-                        if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.EMISSION_TOKENS, EMISSION_TOKEN_BYTES)) {
-                            integrityAccumulator.recordAttributionFailure()
-                            return@mapNotNull null
-                        }
-                        val candidateId = nextCandidateId++
-                        val token = EmissionToken(candidateId, edge)
-                        tokensByResult[resolved] = token
-                        uniqueEdgeDecisionObserver?.invoke(UniqueEdgeDecision(UniqueEdgeDecision.Kind.CANDIDATE, resolved))
+                val resolved = createResolved(observation, stack, status, invocation.executionContext)
+                if (status == ResolutionStatus.RESOLVED && !finished) {
+                    if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.EMISSION_TOKENS, EMISSION_TOKEN_BYTES)) {
+                        integrityAccumulator.recordAttributionFailure()
+                        return
+                    }
+                    val ownershipAllocationBefore = allocationBefore()
+                    val candidateId = nextCandidateId++
+                    val token = EmissionToken(candidateId, edge)
+                    tokensByResult[resolved] = token
+                    recordAllocation(ownershipAllocationBefore) { uniqueEdgeCandidateOwnershipAllocatedBytes += it }
+                    uniqueEdgeDecisionObserver?.let { observer ->
+                        val diagnosticAllocationBefore = allocationBefore()
+                        observer(
+                            UniqueEdgeDecision(
+                                UniqueEdgeDecision.Kind.CANDIDATE,
+                                resolved,
+                            ),
+                        )
+                        recordAllocation(diagnosticAllocationBefore) { uniqueEdgeCandidateDiagnosticAllocatedBytes += it }
                     }
                 }
+                target += resolved
             }
-        }
+    }
+
+    private fun appendResolved(
+        target: MutableCollection<ResolvedSyscall>,
+        observation: SyscallAttribution,
+        stack: StackDefinition?,
+        status: ResolutionStatus,
+        executionContext: ExecutionContext? = null,
+    ) {
+        val before = allocationBefore()
+        target += ResolvedSyscall(observation, stack, status, executionContext)
+        recordResolvedAllocation(before)
+    }
+
+    private fun createResolved(
+        observation: SyscallAttribution,
+        stack: StackDefinition?,
+        status: ResolutionStatus,
+        executionContext: ExecutionContext? = null,
+    ): ResolvedSyscall {
+        val before = allocationBefore()
+        return ResolvedSyscall(observation, stack, status, executionContext).also { recordResolvedAllocation(before) }
+    }
+
+    private fun allocationBefore(): Long = allocationCounter?.currentThreadAllocatedBytes() ?: TierEAllocationCounters.UNAVAILABLE
+
+    private fun recordResolvedAllocation(before: Long) {
+        recordAllocation(before) { resolvedEvidenceAllocatedBytes += it }
+    }
+
+    private inline fun recordAllocation(
+        before: Long,
+        record: (Long) -> Unit,
+    ) {
+        if (before == TierEAllocationCounters.UNAVAILABLE) return
+        val after = allocationBefore()
+        if (after == TierEAllocationCounters.UNAVAILABLE) return
+        if (after >= before) record(after - before)
     }
 
     private companion object {
@@ -476,6 +641,14 @@ internal class AttributionCollector(
         const val EMISSION_TOKEN_BYTES = 64L
     }
 }
+
+/** Benchmark-only non-overlapping allocation buckets for unique-edge emission. */
+internal data class UniqueEdgeAllocationBreakdown(
+    val gateCheckBytes: Long = 0,
+    val suppressionDiagnosticBytes: Long = 0,
+    val candidateOwnershipBytes: Long = 0,
+    val candidateDiagnosticBytes: Long = 0,
+)
 
 /** Benchmark-only observation of collector-owned unique-edge delivery decisions. */
 internal data class UniqueEdgeDecision(

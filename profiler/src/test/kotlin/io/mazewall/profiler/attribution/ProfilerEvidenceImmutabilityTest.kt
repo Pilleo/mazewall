@@ -50,5 +50,21 @@ class ProfilerEvidenceImmutabilityTest {
         assertFailsWith<UnsupportedOperationException> { (profile.syscalls as MutableList).clear() }
     }
 
+    @Test
+    fun `owned syscall argument transfer preserves an immutable list view`() {
+        val ownedArgs = LongArray(6) { it.toLong() }
+        val attribution = SyscallAttribution.fromOwnedArguments(
+            task = TaskIdentity(1, 2, 3),
+            taskSequence = 4,
+            syscallNumber = 257,
+            ownedArgs = ownedArgs,
+            invocationId = InvocationId(5),
+            attributionStatus = AttributionStatus.PENDING_DICTIONARY,
+        )
+
+        assertEquals((0L..5L).toList(), attribution.args)
+        assertFailsWith<UnsupportedOperationException> { (attribution.args as MutableList).clear() }
+    }
+
     private fun frame(method: String) = ManagedFrame("loader", "pkg.Type", method, "()V", 1, ManagedFrameKind.JAVA)
 }

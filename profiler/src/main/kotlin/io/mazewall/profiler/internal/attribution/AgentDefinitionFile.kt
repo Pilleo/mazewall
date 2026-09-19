@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
+internal class DefinitionRecordBudgetExceededException : IllegalArgumentException("agent definition file exceeds decoded record budget")
+
 /** Reader for the native agent's immutable, post-run stack dictionary. */
 internal object AgentDefinitionFile {
     internal class Contents(
@@ -30,6 +32,11 @@ internal object AgentDefinitionFile {
 
     public fun read(path: Path): Contents = decode(readBounded(path))
 
+    internal fun readForInvocations(
+        path: Path,
+        invocationIds: Set<InvocationId>,
+    ): Contents = decodeForInvocations(readBounded(path), invocationIds)
+
     public fun readForSession(
         path: Path,
         expectedSessionEpoch: SessionEpoch,
@@ -49,7 +56,23 @@ internal object AgentDefinitionFile {
         return contents
     }
 
-    public fun decode(bytes: ByteArray): Contents {
+    /**
+     * Decodes only invocation definitions referenced by retained observations.
+     *
+     * The input remains bounded and every record is structurally validated, but this mode avoids
+     * retaining an otherwise valid long-session invocation history that cannot affect final joins.
+     */
+    internal fun decodeForInvocations(
+        bytes: ByteArray,
+        invocationIds: Set<InvocationId>,
+    ): Contents = decode(bytes, invocationIds)
+
+    public fun decode(bytes: ByteArray): Contents = decode(bytes, null)
+
+    private fun decode(
+        bytes: ByteArray,
+        retainedInvocationIds: Set<InvocationId>?,
+    ): Contents {
         val envelope = bytes.takeIf(SnapshotEnvelope::isEnvelope)?.let(SnapshotEnvelope::decode)
         val input = ByteBuffer.wrap(envelope?.payload ?: bytes).order(ByteOrder.LITTLE_ENDIAN)
         require(input.remaining() >= HEADER_SIZE) { "agent definition file is shorter than its header" }
@@ -68,7 +91,8 @@ internal object AgentDefinitionFile {
         var recordCount = 0
         var decodedBytes = 0L
         while (input.hasRemaining()) {
-            require(++recordCount <= MAX_RECORD_COUNT) { "agent definition file exceeds record limit" }
+            val recordLimit = if (retainedInvocationIds == null) MAX_RECORD_COUNT.toLong() else MAX_SELECTIVE_RECORD_COUNT
+            if ((++recordCount).toLong() > recordLimit) throw DefinitionRecordBudgetExceededException()
             require(input.remaining() >= RECORD_HEADER_SIZE) { "truncated agent definition record header" }
             val type = input.get().toInt() and 0xff
             val length = input.int
@@ -87,10 +111,12 @@ internal object AgentDefinitionFile {
                 }
                 INVOCATION_RECORD -> {
                     val invocation = decodeInvocation(payload, version, executions)
-                    val previous = invocationsById.putIfAbsent(invocation.invocationId, invocation)
-                    when {
-                        previous == null -> invocations += invocation
-                        previous != invocation -> throw IllegalArgumentException("conflicting invocation id ${invocation.invocationId.value}")
+                    if (retainedInvocationIds == null || invocation.invocationId in retainedInvocationIds) {
+                        val previous = invocationsById.putIfAbsent(invocation.invocationId, invocation)
+                        when {
+                            previous == null -> invocations += invocation
+                            previous != invocation -> throw IllegalArgumentException("conflicting invocation id ${invocation.invocationId.value}")
+                        }
                     }
                 }
                 INLINE_INVOCATION_RECORD -> {
@@ -112,10 +138,12 @@ internal object AgentDefinitionFile {
                         previousStack == null -> stacks += stack
                         previousStack != stack -> throw IllegalArgumentException("conflicting stack trace id ${stack.stackTraceId.value}")
                     }
-                    val previousInvocation = invocationsById.putIfAbsent(invocation.invocationId, invocation)
-                    when {
-                        previousInvocation == null -> invocations += invocation
-                        previousInvocation != invocation -> throw IllegalArgumentException("conflicting invocation id ${invocation.invocationId.value}")
+                    if (retainedInvocationIds == null || invocation.invocationId in retainedInvocationIds) {
+                        val previousInvocation = invocationsById.putIfAbsent(invocation.invocationId, invocation)
+                        when {
+                            previousInvocation == null -> invocations += invocation
+                            previousInvocation != invocation -> throw IllegalArgumentException("conflicting invocation id ${invocation.invocationId.value}")
+                        }
                     }
                 }
                 EXECUTION_RECORD -> {
@@ -240,6 +268,7 @@ internal object AgentDefinitionFile {
     private const val EXECUTION_RECORD = 4
     private const val INLINE_INVOCATION_RECORD = 5
     private const val MAX_RECORD_COUNT = 100_000
+    private val MAX_SELECTIVE_RECORD_COUNT = MAX_DECODED_BYTES / RECORD_HEADER_SIZE
     private const val MAX_FRAME_COUNT = 129
     private const val MAX_STRING_BYTES = 65_535
     private const val READ_BUFFER_BYTES = 16 * 1024

@@ -3,10 +3,13 @@
 package io.mazewall.profiler.internal.attribution
 
 import io.mazewall.profiler.tierE.TierERetainedStateBudget
+import io.mazewall.profiler.tierE.daemon.UsdtProbeNote
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
+
+internal enum class TierEEventReadiness { READY, TIMEOUT }
 
 internal interface TierEEventSource : AutoCloseable {
     fun install(
@@ -21,9 +24,22 @@ internal interface TierEEventSource : AutoCloseable {
         markerOffset: Long,
     )
 
+    fun attachUsdtMarker(
+        targetPid: Int,
+        agentLibrary: Path,
+        note: UsdtProbeNote,
+    ) {
+        attachMarker(targetPid, agentLibrary, note.fileOffset)
+    }
+
     fun detachMarker() {}
 
     fun drainEvents(): List<SyscallInvocationEvent>
+
+    fun drainEventsMeasured(): TierERingEventDrain = TierERingEventDrain(drainEvents())
+
+    /** A readiness notification is only a scheduling hint and never proves producer closure. */
+    fun awaitEvents(timeoutMillis: Int): TierEEventReadiness = TierEEventReadiness.TIMEOUT
 
     fun readLossCount(): Long
 
@@ -36,6 +52,9 @@ internal interface TierEEventSource : AutoCloseable {
     fun readMarkerTransitionCount(): Long
 
     fun readLastMarkerPidTgid(): Long
+
+    /** Waits for handlers admitted before marker detachment to leave the kernel program. */
+    fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = false
 }
 
 private class NativeTierEEventSource(
@@ -53,9 +72,19 @@ private class NativeTierEEventSource(
         markerOffset: Long,
     ) = engine.attachMarker(targetPid, agentLibrary, markerOffset)
 
+    override fun attachUsdtMarker(
+        targetPid: Int,
+        agentLibrary: Path,
+        note: UsdtProbeNote,
+    ) = engine.attachUsdtMarker(targetPid, agentLibrary, note)
+
     override fun detachMarker() = engine.detachMarker()
 
     override fun drainEvents(): List<SyscallInvocationEvent> = engine.drainEvents()
+
+    override fun drainEventsMeasured(): TierERingEventDrain = engine.drainEventsMeasured()
+
+    override fun awaitEvents(timeoutMillis: Int): TierEEventReadiness = engine.awaitEvents(timeoutMillis)
 
     override fun readLossCount(): Long = engine.readLossCount()
 
@@ -68,6 +97,8 @@ private class NativeTierEEventSource(
     override fun readMarkerTransitionCount(): Long = engine.readMarkerTransitionCount()
 
     override fun readLastMarkerPidTgid(): Long = engine.readLastMarkerPidTgid()
+
+    override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = engine.awaitSysEnterQuiescence(timeoutNanos)
 
     override fun close() = engine.close()
 }
@@ -95,6 +126,8 @@ internal class TierEProfilerSession internal constructor(
     private val dictionarySink: DictionaryBatchSink? = null,
     private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
     private val nanoTime: () -> Long = System::nanoTime,
+    private val allocationCounter: TierEAllocationCounter = TierEAllocationCounter { TierEAllocationCounters.currentThreadAllocatedBytes() },
+    private val selectiveDefinitionReader: (Path, Set<InvocationId>) -> AgentDefinitionFile.Contents = AgentDefinitionFile::readForInvocations,
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -113,7 +146,7 @@ internal class TierEProfilerSession internal constructor(
         engine: TierEbpfEngine,
         processEpoch: Long,
         options: TierEOptions,
-        uniqueEdgeDecisionObserver: (UniqueEdgeDecision) -> Unit,
+        uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)?,
     ) : this(
         NativeTierEEventSource(engine),
         processEpoch,
@@ -131,7 +164,10 @@ internal class TierEProfilerSession internal constructor(
         options.maxPendingRecords,
         expectedProcessIncarnation = processIncarnation,
         maxRetainedBytes = options.maxRetainedBytes,
+        readyTransferMode = options.readyTransferMode,
+        knownJoinMode = options.knownJoinMode,
         uniqueEdgeDecisionObserver = uniqueEdgeDecisionObserver,
+        allocationCounter = allocationCounter.takeIf { options.benchmarkAllocationAccounting },
     )
     private val dictionaryEncoder = dictionarySink?.let {
         StackDictionaryStreamEncoder(options.maxPendingRecords).also { encoder ->
@@ -148,13 +184,29 @@ internal class TierEProfilerSession internal constructor(
     private var reportedMarkerFailures = 0L
     private var reportedAmbientInactive = 0L
     private var state: TierESessionState = TierESessionState.Collecting
+    private var sourceClosed = false
     private var lifecycle: TierESessionLifecycleState = TierESessionLifecycleState.RUNNING
     private var liveDefinitionFile: Path? = null
     private val liveKnownStackIds = mutableSetOf<StackTraceId>()
     private val liveDefinitionAdmission = SnapshotReplayAdmission()
     private var ringDrainNanos = 0L
+    private var ringScanNanos = 0L
+    private var ringPayloadSliceNanos = 0L
+    private var ringDecodeNanos = 0L
+    private var ringAppendNanos = 0L
+    private var ringConsumerPublishNanos = 0L
+    private var ringScannedRecords = 0L
+    private var ringReadyRecords = 0L
+    private var ringReaderInitializationNanos = 0L
     private var collectorJoinNanos = 0L
     private var collectorPolls = 0L
+    private var allocationMeasurementAvailable = false
+    private var ringDrainAllocatedBytes = 0L
+    private var collectorJoinAllocatedBytes = 0L
+    private var observationConversionAllocatedBytes = 0L
+    private var collectorResolutionAllocatedBytes = 0L
+    private var batchFreezeAllocatedBytes = 0L
+    private var lastTaskIdentity: TaskIdentity? = null
 
     init {
         collector.attachRetainedBudget(retainedBudget)
@@ -174,47 +226,173 @@ internal class TierEProfilerSession internal constructor(
         sessionTag: Int,
         agentLibrary: Path,
         markerOffset: Long,
+        usdtNote: UsdtProbeNote? = null,
     ) {
         requireCollecting()
         lifecycle = TierESessionLifecycleState.ATTACHING
         source.install(targetPid, sessionTag, options)
-        source.attachMarker(targetPid, agentLibrary, markerOffset)
+        if (usdtNote == null) {
+            source.attachMarker(targetPid, agentLibrary, markerOffset)
+        } else {
+            source.attachUsdtMarker(targetPid, agentLibrary, usdtNote)
+        }
         lifecycle = TierESessionLifecycleState.RUNNING
     }
 
     /** Non-blocking drain suitable for a dedicated collector thread. */
     @Synchronized
-    public fun poll(): List<ResolvedSyscall> {
+    public fun poll(): List<ResolvedSyscall> = pollOutcome().resolved
+
+    @Synchronized
+    internal fun awaitEvents(timeoutMillis: Int): TierEEventReadiness {
+        requireCollecting()
+        return source.awaitEvents(timeoutMillis)
+    }
+
+    /** Internal drain outcome so collector pacing follows actual ring activity, not join timing. */
+    @Synchronized
+    internal fun pollOutcome(receiptClock: TierECollectorClock? = null): TierECollectorPoll {
         requireCollecting()
         val events = if (options.benchmarkPhases) {
+            val allocationBefore = allocationBeforePhase()
             val started = nanoTime()
-            source.drainEvents().also { ringDrainNanos += nanoTime() - started }
+            source
+                .drainEventsMeasured()
+                .also { drained ->
+                ringDrainNanos += nanoTime() - started
+                ringScanNanos += drained.metrics.scanNanos
+                ringPayloadSliceNanos += drained.metrics.payloadSliceNanos
+                ringDecodeNanos += drained.metrics.decodeNanos
+                ringAppendNanos += drained.metrics.appendNanos
+                ringConsumerPublishNanos += drained.metrics.consumerPublishNanos
+                ringScannedRecords += drained.metrics.scannedRecords
+                // The production reader deliberately has no per-record clocks. Every returned
+                // event is an owned READY record, so this denominator is exact without adding
+                // measurement work to the record loop.
+                ringReadyRecords += drained.events.size
+                ringReaderInitializationNanos += drained.metrics.readerInitializationNanos
+            }.events
+                .also {
+                val allocated = allocationDelta(allocationBefore)
+                if (allocated != TierEAllocationCounters.UNAVAILABLE) ringDrainAllocatedBytes += allocated
+            }
         } else {
             source.drainEvents()
         }
+        val receiptNanos = receiptClock?.nowNanos()
+        val receiptAgesNanos = receiptNanos?.let { receipt ->
+            events
+                .mapNotNull { event ->
+                event.ktimeNs
+                    .takeIf { it <= Long.MAX_VALUE.toULong() }
+                    ?.toLong()
+                    ?.let { eventTime -> (receipt - eventTime).takeIf { it >= 0L } }
+            }.toLongArray()
+        } ?: LongArray(0)
         val batch = if (options.benchmarkPhases) {
+            val allocationBefore = allocationBeforePhase()
             val started = nanoTime()
-            events.flatMap { collector.accept(it.toAttribution()) }.also {
+            resolveDrainedEvents(events)
+                .also {
                 collectorJoinNanos += nanoTime() - started
                 collectorPolls++
+            }.also {
+                val allocated = allocationDelta(allocationBefore)
+                if (allocated != TierEAllocationCounters.UNAVAILABLE) collectorJoinAllocatedBytes += allocated
             }
         } else {
-            events.flatMap { collector.accept(it.toAttribution()) }
+            resolveDrainedEvents(events)
         }
-        retain(batch)
+        val retainedSnapshot = if (options.benchmarkPhases) {
+            val allocationBefore = allocationBeforePhase()
+            retain(batch)
+            java.util.List.copyOf(batch).also {
+                val allocated = allocationDelta(allocationBefore)
+                if (allocated != TierEAllocationCounters.UNAVAILABLE) batchFreezeAllocatedBytes += allocated
+            }
+        } else {
+            retain(batch)
+            java.util.List.copyOf(batch)
+        }
         refreshLossCounters()
         publishLiveDefinitions()
-        return java.util.List.copyOf(batch)
+        return TierECollectorPoll(retainedSnapshot, events.size, receiptAgesNanos)
+    }
+
+    /** Preserves event order while avoiding the intermediate collections created by [Iterable.flatMap]. */
+    private fun resolveDrainedEvents(events: List<SyscallInvocationEvent>): List<ResolvedSyscall> {
+        if (events.isEmpty()) return emptyList()
+        val resolved = ArrayList<ResolvedSyscall>(events.size)
+        for (event in events) {
+            val conversionAllocationBefore = allocationBeforePhase()
+            val observation = event.toAttribution()
+            val conversionAllocated = allocationDelta(conversionAllocationBefore)
+            if (conversionAllocated != TierEAllocationCounters.UNAVAILABLE) observationConversionAllocatedBytes += conversionAllocated
+            val resolutionAllocationBefore = allocationBeforePhase()
+            if (options.collectorResultMode == TierECollectorResultMode.APPEND_TARGET) {
+                collector.acceptInto(observation, resolved)
+            } else {
+                resolved.addAll(collector.accept(observation))
+            }
+            val resolutionAllocated = allocationDelta(resolutionAllocationBefore)
+            if (resolutionAllocated != TierEAllocationCounters.UNAVAILABLE) collectorResolutionAllocatedBytes += resolutionAllocated
+        }
+        return resolved
     }
 
     @Synchronized
-    internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics = TierECollectorPhaseMetrics(ringDrainNanos, collectorJoinNanos, collectorPolls)
+    internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics =
+        TierECollectorPhaseMetrics(
+        ringDrainNanos = ringDrainNanos,
+        ringScanNanos = ringScanNanos,
+        ringPayloadSliceNanos = ringPayloadSliceNanos,
+        ringDecodeNanos = ringDecodeNanos,
+        ringAppendNanos = ringAppendNanos,
+        ringConsumerPublishNanos = ringConsumerPublishNanos,
+        ringScannedRecords = ringScannedRecords,
+        ringReadyRecords = ringReadyRecords,
+        ringReaderInitializationNanos = ringReaderInitializationNanos,
+        collectorJoinNanos = collectorJoinNanos,
+        polls = collectorPolls,
+        allocationMeasurementAvailable = allocationMeasurementAvailable,
+        ringDrainAllocatedBytes = ringDrainAllocatedBytes,
+        collectorJoinAllocatedBytes = collectorJoinAllocatedBytes,
+        observationConversionAllocatedBytes = observationConversionAllocatedBytes,
+        collectorResolutionAllocatedBytes = collectorResolutionAllocatedBytes,
+        resolvedEvidenceAllocatedBytes = collector.resolvedEvidenceAllocatedBytes(),
+        joinerEnqueueAllocatedBytes = collector.joinerAllocationBreakdown().enqueueBytes,
+        joinerTakeReadyAllocatedBytes = collector.joinerAllocationBreakdown().takeReadyBytes,
+        uniqueEdgeGateAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().gateCheckBytes,
+        uniqueEdgeSuppressionDiagnosticAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().suppressionDiagnosticBytes,
+        uniqueEdgeCandidateOwnershipAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().candidateOwnershipBytes,
+        uniqueEdgeCandidateDiagnosticAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().candidateDiagnosticBytes,
+        batchFreezeAllocatedBytes = batchFreezeAllocatedBytes,
+    )
 
-    /** Completes delayed ID resolution once, then returns the same immutable result. */
+    private fun allocationBeforePhase(): Long = if (options.benchmarkAllocationAccounting) allocationCounter.currentThreadAllocatedBytes() else TierEAllocationCounters.UNAVAILABLE
+
+    private fun allocationDelta(before: Long): Long {
+        if (before == TierEAllocationCounters.UNAVAILABLE) return TierEAllocationCounters.UNAVAILABLE
+        val after = allocationCounter.currentThreadAllocatedBytes()
+        if (after == TierEAllocationCounters.UNAVAILABLE || after < before) return TierEAllocationCounters.UNAVAILABLE
+        allocationMeasurementAvailable = true
+        return after - before
+    }
+
+    /**
+     * Completes delayed ID resolution once, then returns the same immutable result.
+     *
+     * [producerClosed] is an externally proven producer-quiescence fact, not an inference from
+     * an empty ring drain. It defaults to false so a caller cannot accidentally publish a
+     * complete terminal verdict while native scopes may still be producing observations.
+     */
     @Synchronized
-    public fun finish(definitionFile: Path): TierEProfile =
+    public fun finish(
+        definitionFile: Path,
+        producerClosed: Boolean = false,
+    ): TierEProfile =
         when (val current = state) {
-            TierESessionState.Collecting -> finishCollecting(definitionFile)
+            TierESessionState.Collecting -> finishCollecting(definitionFile, producerClosed)
             is TierESessionState.Finished -> current.profile
             TierESessionState.Closed -> error("Tier E profiler session is closed")
         }
@@ -234,16 +412,24 @@ internal class TierEProfilerSession internal constructor(
         collector.invalidateAttribution()
     }
 
+    /** Returns the monotonic kernel-active observation total at a lifecycle boundary. */
+    public fun kernelActiveObservationCount(): Long = source.readContextMetrics().values.fold(0L, Math::addExact)
+
     /** Reattaches a marker only as an explicit validated attribution re-entry. */
     @Synchronized
     public fun reattachMarker(
         targetPid: Int,
         agentLibrary: Path,
         markerOffset: Long,
+        usdtNote: UsdtProbeNote? = null,
     ) {
         requireCollecting()
         check(lifecycle == TierESessionLifecycleState.RUNNING) { "attribution lifecycle is not running" }
-        source.attachMarker(targetPid, agentLibrary, markerOffset)
+        if (usdtNote == null) {
+            source.attachMarker(targetPid, agentLibrary, markerOffset)
+        } else {
+            source.attachUsdtMarker(targetPid, agentLibrary, usdtNote)
+        }
         collector.validateAttributionReentry()
     }
 
@@ -265,17 +451,43 @@ internal class TierEProfilerSession internal constructor(
         if (state == TierESessionState.Closed) return
         lifecycle = TierESessionLifecycleState.CLOSING
         try {
-            source.close()
+            closeSource()
             state = TierESessionState.Closed
         } finally {
             lifecycle = TierESessionLifecycleState.DEAD
         }
     }
 
-    private fun finishCollecting(definitionFile: Path): TierEProfile {
+    private fun finishCollecting(
+        definitionFile: Path,
+        producerClosed: Boolean,
+    ): TierEProfile {
         lifecycle = TierESessionLifecycleState.CLOSING
+        // Stop marker admission before the final drain. A caller that cannot prove producer
+        // closure must leave a durable lifecycle invalidation rather than treating an empty
+        // ring as a producer barrier.
+        source.detachMarker()
+        val quiescent = producerClosed || source.awaitSysEnterQuiescence(TERMINAL_QUIESCENCE_TIMEOUT_NANOS)
+        // The counter proves that the detached BPF program cannot append an
+        // already-admitted ring record after this drain. It does not prove the
+        // native agent has stopped producing future definitions, so it cannot
+        // replace the caller's independent producer-closure proof.
+        if (!producerClosed || !quiescent) collector.invalidateAttribution()
         poll()
-        val definitions = readDefinitions(definitionFile)
+        val reconciliation = TierEReconciliation(
+            admittedInvocations = 0L,
+            exactInvocations = 0L,
+            failedInvocations = 0L,
+            kernelActiveObservations = source.readContextMetrics().values.fold(0L, Math::addExact),
+            markerTransitions = source.readMarkerTransitionCount(),
+        )
+        closeSource()
+        val definitions = try {
+            readDefinitions(definitionFile, collector.pendingInvocationIds())
+        } catch (_: DefinitionRecordBudgetExceededException) {
+            collector.recordDictionaryConflict()
+            AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
+        }
         if (definitions.agentLosses > 0) collector.recordLoss(definitions.agentLosses)
         collector.recordVirtualPinnedIntervals(definitions.virtualPinnedScopes, definitions.virtualPinnedNanos)
         if (dictionaryPublisher == null) {
@@ -292,12 +504,10 @@ internal class TierEProfilerSession internal constructor(
         }
         definitions.invocations.forEach { retain(collector.accept(it)) }
         collector.recordReconciliation(
-            TierEReconciliation(
+            reconciliation.copy(
                 admittedInvocations = definitions.invocations.size.toLong(),
                 exactInvocations = definitions.invocations.count { it.captureFailure == null }.toLong(),
                 failedInvocations = definitions.invocations.count { it.captureFailure != null }.toLong(),
-                kernelActiveObservations = source.readContextMetrics().values.fold(0L, Math::addExact),
-                markerTransitions = source.readMarkerTransitionCount(),
             ),
         )
         retain(collector.finish())
@@ -310,8 +520,23 @@ internal class TierEProfilerSession internal constructor(
         return profile
     }
 
-    private fun readDefinitions(definitionFile: Path): AgentDefinitionFile.Contents =
-        definitionReader(definitionFile).also { definitions ->
+    private fun closeSource() {
+        if (sourceClosed) return
+        source.close()
+        sourceClosed = true
+    }
+
+    private fun readDefinitions(
+        definitionFile: Path,
+        pendingInvocationIds: Set<InvocationId>? = null,
+    ): AgentDefinitionFile.Contents =
+        (
+            if (pendingInvocationIds.isNullOrEmpty()) {
+            definitionReader(definitionFile)
+        } else {
+            selectiveDefinitionReader(definitionFile, pendingInvocationIds)
+        }
+        ).also { definitions ->
             definitions.publication?.sessionEpoch?.let { publicationSession ->
                 check(publicationSession == sessionEpoch) {
                     "definition publication belongs to session $publicationSession, expected $sessionEpoch"
@@ -381,6 +606,7 @@ internal class TierEProfilerSession internal constructor(
 
     private fun SyscallInvocationEvent.toAttribution(): SyscallAttribution {
         val invalidFlags = flags and SyscallInvocationEvent.FLAG_ARGUMENT_READ_FAILED
+        val task = taskIdentityFor(tid.toInt())
         val active = invocationId
             .takeIf { it != 0uL }
             ?.toLong()
@@ -391,15 +617,22 @@ internal class TierEProfilerSession internal constructor(
             active == null -> AttributionStatus.NO_ACTIVE_INVOCATION
             else -> AttributionStatus.PENDING_DICTIONARY
         }
-        return SyscallAttribution(
-            task = TaskIdentity.from(
-                process = processIncarnation,
-                tid = tid.toInt(),
-                lifetime = TaskLifetimeId(0),
-            ),
+        if (!options.ownedArgumentStorage) {
+            return SyscallAttribution(
+                task = task,
+                taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
+                syscallNumber = syscallNr,
+                args = args.map(ULong::toLong),
+                invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
+                attributionStatus = status,
+                captureFlags = flags,
+            )
+        }
+        return SyscallAttribution.fromOwnedArguments(
+            task = task,
             taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
             syscallNumber = syscallNr,
-            args = args.map(ULong::toLong),
+            ownedArgs = takeOwnedArguments(),
             invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
             attributionStatus = status,
             captureFlags = flags,
@@ -408,6 +641,16 @@ internal class TierEProfilerSession internal constructor(
 
     private companion object {
         private val NEXT_SESSION_EPOCH = AtomicLong()
+        private const val TERMINAL_QUIESCENCE_TIMEOUT_NANOS = 1_000_000_000L
+    }
+
+    private fun taskIdentityFor(tid: Int): TaskIdentity {
+        if (options.taskIdentityMode == TierETaskIdentityMode.REUSE_CONSECUTIVE) {
+            lastTaskIdentity?.takeIf { it.tid == tid }?.let { return it }
+        }
+        return TaskIdentity.from(processIncarnation, tid, TaskLifetimeId(0)).also { identity ->
+            if (options.taskIdentityMode == TierETaskIdentityMode.REUSE_CONSECUTIVE) lastTaskIdentity = identity
+        }
     }
 }
 
@@ -427,6 +670,50 @@ internal class TierEProfile(
 /** Benchmark-only userspace collector phase totals; zero outside explicitly instrumented runs. */
 internal data class TierECollectorPhaseMetrics(
     val ringDrainNanos: Long = 0,
+    val ringScanNanos: Long = 0,
+    val ringPayloadSliceNanos: Long = 0,
+    val ringDecodeNanos: Long = 0,
+    val ringAppendNanos: Long = 0,
+    val ringConsumerPublishNanos: Long = 0,
+    val ringScannedRecords: Long = 0,
+    val ringReadyRecords: Long = 0,
+    val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,
+    val allocationMeasurementAvailable: Boolean = false,
+    val ringDrainAllocatedBytes: Long = 0,
+    val collectorJoinAllocatedBytes: Long = 0,
+    val observationConversionAllocatedBytes: Long = 0,
+    val collectorResolutionAllocatedBytes: Long = 0,
+    val resolvedEvidenceAllocatedBytes: Long = 0,
+    val joinerEnqueueAllocatedBytes: Long = 0,
+    val joinerTakeReadyAllocatedBytes: Long = 0,
+    val uniqueEdgeGateAllocatedBytes: Long = 0,
+    val uniqueEdgeSuppressionDiagnosticAllocatedBytes: Long = 0,
+    val uniqueEdgeCandidateOwnershipAllocatedBytes: Long = 0,
+    val uniqueEdgeCandidateDiagnosticAllocatedBytes: Long = 0,
+    val batchFreezeAllocatedBytes: Long = 0,
+)
+
+/** Owned events plus benchmark-only ring-drain sub-phase totals. */
+internal data class TierERingEventDrain(
+    val events: List<SyscallInvocationEvent>,
+    val metrics: TierERingDrainPhaseMetrics = TierERingDrainPhaseMetrics(),
+)
+
+internal data class TierECollectorPoll(
+    val resolved: List<ResolvedSyscall>,
+    val drainedEventCount: Int,
+    val receiptAgesNanos: LongArray = LongArray(0),
+)
+
+internal data class TierERingDrainPhaseMetrics(
+    val scanNanos: Long = 0,
+    val payloadSliceNanos: Long = 0,
+    val decodeNanos: Long = 0,
+    val appendNanos: Long = 0,
+    val consumerPublishNanos: Long = 0,
+    val scannedRecords: Long = 0,
+    val readyRecords: Long = 0,
+    val readerInitializationNanos: Long = 0,
 )

@@ -77,16 +77,26 @@ internal enum class AttributionStatus {
 }
 
 /** A raw syscall plus the invocation identity that was valid at its ordered capture point. */
-internal class SyscallAttribution(
+internal class SyscallAttribution private constructor(
     public val task: TaskIdentity,
     public val taskSequence: Long,
     public val syscallNumber: Int,
-    args: List<Long>,
+    private val ownedArgs: LongArray,
     public val invocationId: InvocationId?,
     public val attributionStatus: AttributionStatus,
     public val captureFlags: Int = 0,
 ) {
-    public val args: List<Long> = java.util.List.copyOf(args)
+    public val args: List<Long> = OwnedLongArguments(ownedArgs)
+
+    public constructor(
+        task: TaskIdentity,
+        taskSequence: Long,
+        syscallNumber: Int,
+        args: List<Long>,
+        invocationId: InvocationId?,
+        attributionStatus: AttributionStatus,
+        captureFlags: Int = 0,
+    ) : this(task, taskSequence, syscallNumber, args.toLongArray(), invocationId, attributionStatus, captureFlags)
 
     init {
         require(taskSequence > 0) { "task sequence must be positive" }
@@ -120,7 +130,42 @@ internal class SyscallAttribution(
 
     public companion object {
         public const val ARGUMENT_COUNT: Int = 6
+
+        /**
+         * Transfers a freshly allocated argument array into immutable attribution state. The
+         * caller must not retain or mutate [ownedArgs] after this call.
+         */
+        internal fun fromOwnedArguments(
+            task: TaskIdentity,
+            taskSequence: Long,
+            syscallNumber: Int,
+            ownedArgs: LongArray,
+            invocationId: InvocationId?,
+            attributionStatus: AttributionStatus,
+            captureFlags: Int = 0,
+        ): SyscallAttribution {
+            require(ownedArgs.size == ARGUMENT_COUNT) { "syscall observations need exactly $ARGUMENT_COUNT arguments" }
+            return SyscallAttribution(
+                task = task,
+                taskSequence = taskSequence,
+                syscallNumber = syscallNumber,
+                ownedArgs = ownedArgs,
+                invocationId = invocationId,
+                attributionStatus = attributionStatus,
+                captureFlags = captureFlags,
+            )
+        }
     }
+}
+
+/** Read-only boxed view over owned primitive syscall arguments. */
+private class OwnedLongArguments(
+    private val values: LongArray,
+) : java.util.AbstractList<Long>() {
+    override val size: Int
+        get() = values.size
+
+    override fun get(index: Int): Long = values[index]
 }
 
 /** Input from the shared per-task ordering domain used by marker and syscall events. */
