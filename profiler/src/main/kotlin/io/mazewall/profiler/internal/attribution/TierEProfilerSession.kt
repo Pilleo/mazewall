@@ -473,7 +473,14 @@ internal class TierEProfilerSession internal constructor(
         // native agent has stopped producing future definitions, so it cannot
         // replace the caller's independent producer-closure proof.
         if (!producerClosed || !quiescent) collector.invalidateAttribution()
-        poll()
+        try {
+            poll()
+        } catch (_: Exception) {
+            // A terminal drain failure cannot become a complete profile. Preserve every result
+            // already retained, but account for the unread tail before closing the source.
+            collector.recordLoss()
+            collector.invalidateAttribution()
+        }
         val reconciliation = TierEReconciliation(
             admittedInvocations = 0L,
             exactInvocations = 0L,
