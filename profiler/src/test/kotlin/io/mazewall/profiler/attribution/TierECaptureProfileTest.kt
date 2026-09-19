@@ -44,4 +44,16 @@ class TierECaptureProfileTest {
         }
         assertFailsWith<IllegalArgumentException> { TierECaptureProfile.fromProperty("capture-bindings=unknown") }
     }
+
+    @Test
+    fun `application presets use only canonical manifest bindings`() {
+        assertEquals(
+            "capture-bindings=unix-open0+unix-openat0+unix-close0+unix-unlink0",
+            TierECaptureProfilePreset.FILESYSTEM_METADATA.profile.agentOption,
+        )
+        assertEquals(
+            "capture-bindings=socket-read0+socket-write0+net-socket0+net-connect0+net-accept",
+            TierECaptureProfilePreset.NETWORK_IO.profile.agentOption,
+        )
+    }
 }

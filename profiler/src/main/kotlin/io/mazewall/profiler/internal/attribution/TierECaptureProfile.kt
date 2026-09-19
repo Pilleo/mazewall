@@ -89,3 +89,33 @@ internal sealed class TierECaptureProfile {
             }
     }
 }
+
+/** Named benchmark conveniences; production still receives only the canonical selected bindings. */
+internal enum class TierECaptureProfilePreset(
+    val profile: TierECaptureProfile,
+) {
+    FILESYSTEM_METADATA(
+        TierECaptureProfile.selected(
+            TierECaptureBinding.UNIX_OPEN0,
+            TierECaptureBinding.UNIX_OPENAT0,
+            TierECaptureBinding.UNIX_CLOSE0,
+            TierECaptureBinding.UNIX_UNLINK0,
+        ),
+    ),
+    FILE_IO(
+        TierECaptureProfile.selected(
+            TierECaptureBinding.FILE_READ0,
+            TierECaptureBinding.FILE_WRITE0,
+            TierECaptureBinding.FILE_CLOSE_INT_FD,
+        ),
+    ),
+    NETWORK_IO(
+        TierECaptureProfile.selected(
+            TierECaptureBinding.SOCKET_READ0,
+            TierECaptureBinding.SOCKET_WRITE0,
+            TierECaptureBinding.NET_SOCKET0,
+            TierECaptureBinding.NET_CONNECT0,
+            TierECaptureBinding.NET_ACCEPT,
+        ),
+    ),
+}
