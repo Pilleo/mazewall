@@ -119,6 +119,9 @@ class TierEMatchedBenchmarkJsonTest {
         assertEquals(true, TierEMatchedBenchmark.userNotifOperationOracleRequired("calibration_cpu"))
         assertEquals(true, TierEMatchedBenchmark.userNotifOperationOracleRequired("oracle"))
         assertEquals(false, TierEMatchedBenchmark.userNotifOperationOracleRequired("application"))
+        assertEquals(false, TierEMatchedBenchmark.userNotifOperationOracleRequired("filesystem_metadata"))
+        assertEquals(false, TierEMatchedBenchmark.userNotifOperationOracleRequired("buffered_file_io"))
+        assertEquals(false, TierEMatchedBenchmark.userNotifOperationOracleRequired("loopback_socket"))
     }
 
     @Test

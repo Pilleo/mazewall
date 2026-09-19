@@ -35,6 +35,16 @@ class TierECommonFileWorkloadTest {
     }
 
     @Test
+    fun `application-shaped workloads preserve their logical operation contract`() {
+        TierECommonFileWorkload.ApplicationKind.entries.forEach { kind ->
+            val result = TierECommonFileWorkload.run(iterations = 3, applicationKind = kind)
+
+            assertEquals(3, result.completedOperations)
+            assertTrue(result.workloadNanos > 0)
+        }
+    }
+
+    @Test
     fun `oracle manifest is atomically published as a complete fd set`() {
         val directory = Files.createTempDirectory("tier-e-oracle-manifest-")
         val manifest = directory.resolve("openat-fds")

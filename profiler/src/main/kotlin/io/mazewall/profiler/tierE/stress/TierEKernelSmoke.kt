@@ -231,6 +231,10 @@ internal object TierEKernelSmoke {
             ) { "dictionary" }}$benchmarkOptions$captureYieldOption$lifecycleBarrierOption$callbackSuppressionOption$captureFailureOption$execTransitionOption",
             "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
             "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${TierESharedOpenatOracleWorkload.Profile.fromSystemProperty().wireName}",
+            "-D${TierECommonFileWorkload.APPLICATION_KIND_PROPERTY}=${System.getProperty(
+                TierECommonFileWorkload.APPLICATION_KIND_PROPERTY,
+                TierECommonFileWorkload.ApplicationKind.BUFFERED_FILE_IO.wireName,
+            )}",
             "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0")}",
             "-D${TierESharedOpenatOracleWorkload.MANIFEST_PROPERTY}=$oracleManifest",
             "-cp",

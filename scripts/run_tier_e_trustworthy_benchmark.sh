@@ -144,8 +144,8 @@ if [[ -n "${CAPTURE_PROFILE}" && "${CAPTURE_PROFILE}" != "jdk25-unix-openat0" &&
     echo "MAZEWALL_TIER_E_CAPTURE_PROFILE must be empty, jdk25-unix-openat0, or capture-bindings=name+name" >&2
     exit 2
 fi
-if [[ "${BENCHMARK_WORKLOAD}" != "application" && "${BENCHMARK_WORKLOAD}" != "oracle" && "${BENCHMARK_WORKLOAD}" != "syscall_dense" && "${BENCHMARK_WORKLOAD}" != "mixed_cpu_io" && "${BENCHMARK_WORKLOAD}" != "bursty_io" && "${BENCHMARK_WORKLOAD}" != "calibration_cpu" && "${BENCHMARK_WORKLOAD}" != "stack_diverse" && "${BENCHMARK_WORKLOAD}" != "class_churn" ]]; then
-    echo "MAZEWALL_TIER_E_BENCHMARK_WORKLOAD must be application, oracle, syscall_dense, mixed_cpu_io, bursty_io, calibration_cpu, stack_diverse, or class_churn" >&2
+if [[ "${BENCHMARK_WORKLOAD}" != "application" && "${BENCHMARK_WORKLOAD}" != "filesystem_metadata" && "${BENCHMARK_WORKLOAD}" != "buffered_file_io" && "${BENCHMARK_WORKLOAD}" != "loopback_socket" && "${BENCHMARK_WORKLOAD}" != "oracle" && "${BENCHMARK_WORKLOAD}" != "syscall_dense" && "${BENCHMARK_WORKLOAD}" != "mixed_cpu_io" && "${BENCHMARK_WORKLOAD}" != "bursty_io" && "${BENCHMARK_WORKLOAD}" != "calibration_cpu" && "${BENCHMARK_WORKLOAD}" != "stack_diverse" && "${BENCHMARK_WORKLOAD}" != "class_churn" ]]; then
+    echo "MAZEWALL_TIER_E_BENCHMARK_WORKLOAD must be application, filesystem_metadata, buffered_file_io, loopback_socket, oracle, syscall_dense, mixed_cpu_io, bursty_io, calibration_cpu, stack_diverse, or class_churn" >&2
     exit 2
 fi
 if [[ "${LIFECYCLE_SCENARIO}" != "normal" && "${LIFECYCLE_SCENARIO}" != "detach_while_active" &&
