@@ -1,0 +1,32 @@
+{
+  "kind": "tier_e_sustained_receipt_rootful_smoke",
+  "timestamp": "2026-09-20",
+  "run_level": "smoke",
+  "artifact": "build/tier-e-sustained-receipt-rootful/results.jsonl",
+  "command": "env -u DOCKER_HOST MAZEWALL_TIER_E_RUN_LEVEL=smoke MAZEWALL_TIER_E_CALIBRATION=false MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_SUSTAINED_LOAD=near_capacity MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND=1000 MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK=monotonic bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-sustained-receipt-rootful",
+  "receipt_clock": "monotonic",
+  "near_capacity": {
+    "rate_per_second": 1000,
+    "receipt_samples_per_variant": 1800,
+    "peak_retained_bytes_per_variant": 175400,
+    "full_stream_continuous": { "polls": 23959, "p50_upper_ns": 8388607, "p95_upper_ns": 33554431, "p99_upper_ns": 33554431 },
+    "full_stream_adaptive": { "polls": 2539, "p50_upper_ns": 262143, "p95_upper_ns": 8388607, "p99_upper_ns": 8388607 },
+    "unique_edge_continuous": { "polls": 33523, "p50_upper_ns": 8388607, "p95_upper_ns": 16777215, "p99_upper_ns": 33554431 },
+    "unique_edge_adaptive": { "polls": 2782, "p50_upper_ns": 524287, "p95_upper_ns": 8388607, "p99_upper_ns": 33554431 }
+  },
+  "dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false,
+  "limitations": [
+    "One fork is sufficient only to validate metric wiring and bounded receipt accounting.",
+    "This artifact does not decide a collector policy; that requires the paired fifteen-fork receipt-enabled matrix."
+  ]
+}

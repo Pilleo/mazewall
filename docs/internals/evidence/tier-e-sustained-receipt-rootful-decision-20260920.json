@@ -1,0 +1,72 @@
+{
+  "kind": "tier_e_sustained_receipt_rootful_decision",
+  "timestamp": "2026-09-20",
+  "run_level": "decision",
+  "environment": {
+    "runner": "local rootful Docker",
+    "receipt_clock": "monotonic",
+    "rate_per_second": 1000,
+    "forks": 15,
+    "batches_per_fork": 10,
+    "samples_per_variant": 150
+  },
+  "artifact": "build/tier-e-sustained-receipt-decision/results.jsonl",
+  "command": "env -u DOCKER_HOST MAZEWALL_TIER_E_RUN_LEVEL=decision MAZEWALL_TIER_E_CALIBRATION=false MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_SUSTAINED_LOAD=near_capacity MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND=1000 MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK=monotonic bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-sustained-receipt-decision",
+  "workload_correctness": "PASS",
+  "whole_session_complete_forks_per_variant": 15,
+  "measured_operations_per_variant": 15000,
+  "variants": {
+    "dictionary_full_stream_collector_continuous": {
+      "receipt_samples": 58500,
+      "median_receipt_p50_upper_ns": 4194303,
+      "median_receipt_p95_upper_ns": 16777215,
+      "median_receipt_p99_upper_ns": 33554431,
+      "median_collector_polls": 258177,
+      "max_peak_retained_bytes": 309832
+    },
+    "dictionary_full_stream_collector_adaptive_1us_to_50us": {
+      "receipt_samples": 58500,
+      "median_receipt_p50_upper_ns": 262143,
+      "median_receipt_p95_upper_ns": 8388607,
+      "median_receipt_p99_upper_ns": 16777215,
+      "median_collector_polls": 7850,
+      "max_peak_retained_bytes": 309832
+    },
+    "dictionary_unique_edge_collector_continuous": {
+      "receipt_samples": 58500,
+      "median_receipt_p50_upper_ns": 4194303,
+      "median_receipt_p95_upper_ns": 16777215,
+      "median_receipt_p99_upper_ns": 33554431,
+      "median_collector_polls": 240517,
+      "max_peak_retained_bytes": 309832
+    },
+    "dictionary_unique_edge_collector_adaptive_1us_to_50us": {
+      "receipt_samples": 58500,
+      "median_receipt_p50_upper_ns": 262143,
+      "median_receipt_p95_upper_ns": 8388607,
+      "median_receipt_p99_upper_ns": 8388607,
+      "median_collector_polls": 7508,
+      "max_peak_retained_bytes": 309832
+    }
+  },
+  "decision": {
+    "continuous_default_changed": false,
+    "conclusion": "All sustained near-capacity samples completed with the receipt clock enabled. Bounded adaptive polling materially reduced poll count and did not regress the reported receipt quantiles in this host run. It remains experimental because collector CPU, paired confidence intervals, and the predeclared readiness-policy acceptance calculation were not collected by this matrix."
+  },
+  "dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false,
+  "limitations": [
+    "Receipt histograms use power-of-two upper bounds rather than exact quantiles.",
+    "This is an adaptive-polling comparison, not the required readiness-driven collector policy decision.",
+    "No process-level collector CPU measurement or paired confidence interval was retained, so this evidence cannot promote a policy default."
+  ]
+}

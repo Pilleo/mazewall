@@ -54,11 +54,15 @@ retained only as an explicit experiment and continuous polling remains the produ
    open-loop producer. The retained 2026-09-19 evidence covers a complete fifteen-fork,
    ten-batch near-capacity matrix at 1,000 boundaries/s in both dictionary modes, plus an
    intentional-overload lane that is explicitly `INCOMPLETE` and performance-ineligible even when
-   its short smoke has no observed loss. See
-   `docs/internals/evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json`.
-   It still lacks ring-capacity, receipt-age quantiles, maximum ready records per drain, and
-   retained-state high-water marks under a sustained overload. Those measurements are required
-   before any default-policy promotion.
+   its short smoke has no observed loss. The receipt-clock-enabled 2026-09-20 decision additionally
+   retained 58,500 receipt samples per policy/mode, bounded p50/p95/p99 receipt ages, median poll
+   counts, and peak retained bytes. It confirmed complete evidence in all arms but did not retain
+   collector CPU or paired confidence intervals, so it cannot promote adaptive polling or change
+   the continuous default. See
+   `docs/internals/evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json`
+   and `docs/internals/evidence/tier-e-sustained-receipt-rootful-decision-20260920.json`.
+   A sustained overload run still needs ring-capacity, maximum-ready-per-drain, and retained-state
+   high-water measurements before any default-policy promotion.
 4. Integrate the reusable loop into the non-harness production Tier E entry point when that entry
    point is introduced, retaining explicit producer closure and all five evidence dimensions.
 

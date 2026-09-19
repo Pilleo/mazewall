@@ -1468,6 +1468,17 @@ load generator and terminal accounting; it does not promote either policy becaus
 not include the readiness-policy CPU and receipt-latency acceptance dimensions. See
 [tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json](../../evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json).
 
+**Historical evidence.** A follow-up rootful fifteen-fork, ten-batch near-capacity matrix enabled
+the benchmark-only monotonic receipt clock for the same 1,000-boundaries/s producer. All four
+dictionary policy/mode arms retained complete evidence for 15,000 operations each. Adaptive
+polling reduced median poll counts from `258,177` to `7,850` in full-stream and from `240,517` to
+`7,508` in unique-edge; its bounded receipt p99 was `16.78 ms` and `8.39 ms`, respectively,
+versus `33.55 ms` for continuous polling. These power-of-two histogram bounds are scheduling
+observations, not application blocking times. The matrix did not retain collector CPU or paired
+confidence intervals, and it compares adaptive polling rather than the separately rejected
+readiness policy, so continuous polling remains the production default. See
+[tier-e-sustained-receipt-rootful-decision-20260920.json](../../evidence/tier-e-sustained-receipt-rootful-decision-20260920.json).
+
 The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
 operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
 exact Tier E measured approximately 7.3--9.3k profiled operations/s for `syscall_dense`,
