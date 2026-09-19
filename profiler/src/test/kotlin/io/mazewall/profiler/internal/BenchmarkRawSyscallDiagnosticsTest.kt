@@ -6,6 +6,25 @@ import kotlin.test.assertTrue
 
 class BenchmarkRawSyscallDiagnosticsTest {
     @Test
+    fun `first argument admission retains only configured benchmark oracle records`() {
+        val capture = BenchmarkRawSyscallDiagnostics.begin(
+            awaitFirstArgumentAdmission = true,
+            accepts = { it == "OPENAT" },
+        )
+        try {
+            assertEquals(null, BenchmarkRawSyscallDiagnostics.record(41, "OPENAT", listOf(72, 2, 3)))
+
+            capture.admitFirstArguments(listOf(73))
+
+            assertEquals(null, BenchmarkRawSyscallDiagnostics.record(41, "OPENAT", listOf(72, 2, 3)))
+            assertTrue(BenchmarkRawSyscallDiagnostics.record(41, "OPENAT", listOf(73, 2, 3)) != null)
+            assertEquals(0, capture.droppedCount)
+        } finally {
+            capture.finish()
+        }
+    }
+
+    @Test
     fun `capture correlates a shared operation with listener and return timing`() {
         val capture = BenchmarkRawSyscallDiagnostics.begin { it == "OPENAT" }
         try {

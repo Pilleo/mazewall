@@ -4,9 +4,12 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
+import java.lang.foreign.Arena
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 
 class SyscallInvocationEventTest {
     @Test
@@ -50,6 +53,32 @@ class SyscallInvocationEventTest {
                 sequence = 0u,
                 args = emptyList(),
             )
+        }
+    }
+
+    @Test
+    fun `direct ring decoder argument construction controls preserve immutable event content`() {
+        val bytes = ByteArray(SyscallInvocationEvent.SIZE_BYTES)
+        putLong(bytes, 0, 101)
+        putInt(bytes, 8, 17)
+        putInt(bytes, 12, 23)
+        putInt(bytes, 16, 257)
+        putLong(bytes, 24, 101)
+        putLong(bytes, 32, 202)
+        (0 until SyscallInvocationEvent.ARGUMENT_COUNT).forEach { putLong(bytes, 40 + it * 8, it.toLong() + 1000) }
+
+        Arena.ofConfined().use { arena ->
+            val segment = arena.allocate(bytes.size.toLong())
+            segment.asByteBuffer().put(bytes)
+            val immutableFactory = SyscallInvocationEvent.fromSegment(segment)
+            val lambdaCopy = SyscallInvocationEvent.fromSegment(segment, legacyArgumentListConstruction = true)
+
+            assertEquals(immutableFactory, lambdaCopy)
+            assertEquals(immutableFactory.args, lambdaCopy.args)
+            assertContentEquals(longArrayOf(1000, 1001, 1002, 1003, 1004, 1005), immutableFactory.takeOwnedArguments())
+            assertEquals(List(SyscallInvocationEvent.ARGUMENT_COUNT) { it.toULong() + 1000u }, immutableFactory.args)
+            assertSame(immutableFactory.args, immutableFactory.args)
+            assertFailsWith<IllegalStateException> { immutableFactory.takeOwnedArguments() }
         }
     }
 

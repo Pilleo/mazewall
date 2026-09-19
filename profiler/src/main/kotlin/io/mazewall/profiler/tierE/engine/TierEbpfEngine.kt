@@ -15,6 +15,9 @@ import io.mazewall.platform.native.openDescriptor
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierERingDrainPhaseMetrics
+import io.mazewall.profiler.internal.attribution.TierERingEventDrain
+import io.mazewall.profiler.tierE.daemon.UsdtProbeNote
 import io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import java.lang.foreign.Arena
@@ -33,6 +36,8 @@ import java.nio.file.Path
 internal class TierEbpfEngine(
     private val native: RawSyscallOperations,
 ) : AutoCloseable {
+    private val readinessPoller = TierERingReadinessPoller(native)
+
     public companion object {
         private val SYS_CLOSE: Long get() = io.mazewall.platform.syscall.Arch
             .current()
@@ -59,6 +64,7 @@ internal class TierEbpfEngine(
         private const val BPF_BTF_LOAD: Long = 18
 
         private const val MAP_ARRAY: Int = 2
+        private const val MAP_PERCPU_ARRAY: Int = 6
         private const val MAP_LRU_HASH: Int = 9
         private const val MAP_RINGBUF: Int = 27
         private const val MAP_TASK_STORAGE: Int = 29
@@ -75,9 +81,11 @@ internal class TierEbpfEngine(
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
         private const val SESSION_TAG_OFFSET: Long = 0
         private const val TARGET_TGID_OFFSET: Long = 4
-        private const val SESSION_RESERVED_OFFSET: Long = 8
+        private const val MARKER_ATTACHED_OFFSET: Long = 8
+        private const val MARKER_GENERATION_OFFSET: Long = 12
         private const val MARKER_FAILURE_COUNTER_INDEX = 3
         private const val AMBIENT_INACTIVE_COUNTER_INDEX = 4
+        private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
         private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
@@ -113,12 +121,15 @@ internal class TierEbpfEngine(
         var ringFd: BpfFd? = null
         var lossFd: BpfFd? = null
         var contextMetricFd: BpfFd? = null
+        var inFlightFd: BpfFd? = null
         var sessionFd: BpfFd? = null
         var coverageEdgeFd: BpfFd? = null
         var progFd: BpfFd? = null
         var markerProgFd: BpfFd? = null
+        var execProgFd: BpfFd? = null
         val syscallPerfFds = mutableListOf<BpfFd>()
         val markerPerfFds = mutableListOf<BpfFd>()
+        val execPerfFds = mutableListOf<BpfFd>()
         var ringReader: BpfRingBufferReader? = null
 
         fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
@@ -130,6 +141,8 @@ internal class TierEbpfEngine(
         fun requireLossFd(): BpfFd = requireNotNull(lossFd) { "loss counter descriptor was not acquired" }
 
         fun requireContextMetricFd(): BpfFd = requireNotNull(contextMetricFd) { "context metric descriptor was not acquired" }
+
+        fun requireInFlightFd(): BpfFd = requireNotNull(inFlightFd) { "in-flight counter descriptor was not acquired" }
 
         fun requireSessionFd(): BpfFd = requireNotNull(sessionFd) { "session descriptor was not acquired" }
 
@@ -181,16 +194,20 @@ internal class TierEbpfEngine(
             }
             installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 5)
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
+            installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
             configuration.set(ValueLayout.JAVA_INT, TARGET_TGID_OFFSET, targetTgid)
-            configuration.set(ValueLayout.JAVA_INT, SESSION_RESERVED_OFFSET, 0)
+            configuration.set(ValueLayout.JAVA_INT, MARKER_ATTACHED_OFFSET, 0)
+            configuration.set(ValueLayout.JAVA_INT, MARKER_GENERATION_OFFSET, 0)
                 updateElem(arena, installed.requireSessionFd().value, intSeg(arena, 0), configuration)
             }
             installed.markerProgFd =
                 loadProg(buildMarkerProgram(), listOf(installed.requireInvocationStorageFd().value, installed.requireLossFd().value, installed.requireSessionFd().value), PROG_KPROBE, "tier_e_marker")
+            installed.execProgFd =
+                loadProg(buildProcessExecProgram(), listOf(installed.requireInvocationStorageFd().value, -1, installed.requireSessionFd().value), PROG_TRACEPOINT, "tier_e_exec")
             installed.progFd = loadProg(
                 buildProgram(),
                 listOf(
@@ -200,11 +217,13 @@ internal class TierEbpfEngine(
                 installed.requireSessionFd().value,
                 installed.coverageEdgeFd?.value ?: -1,
                 installed.requireContextMetricFd().value,
+                installed.requireInFlightFd().value,
                 ),
                 PROG_TRACEPOINT,
                 "tier_e_syscall",
             )
             attachSysEnter(installed)
+            attachProcessExec(installed)
             synchronized(lifecycleLock) {
                 resources = installed
                 lifecycle = Lifecycle.ATTACHED
@@ -233,13 +252,30 @@ internal class TierEbpfEngine(
     /** Target-process syscalls observed while marker admission was active but no invocation was active. */
     public fun readAmbientInactiveCount(): Long = readCounter(AMBIENT_INACTIVE_COUNTER_INDEX)
 
+    /** Waits until all handlers admitted before marker detachment reach their completion epilogue. */
+    public fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean {
+        require(timeoutNanos >= 0) { "timeoutNanos must not be negative" }
+        val deadline = System.nanoTime() + timeoutNanos
+        try {
+            do {
+                if (readInFlightCount() == 0L) return true
+                Thread.sleep(1)
+            } while (System.nanoTime() < deadline)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        return readInFlightCount() == 0L
+    }
+
     /** Snapshot of bounded per-invocation event counts from the BPF metric map. */
     public fun readContextMetrics(): Map<Long, Long> =
         Arena.ofConfined().use { arena ->
             val installed = requireInstalled()
             val key = arena.allocate(8, 8)
             val nextKey = arena.allocate(8, 8)
-            val value = arena.allocate(8, 8)
+            val cpuCount = possibleCpus().size
+            val value = arena.allocate(Long.SIZE_BYTES.toLong() * cpuCount, Long.SIZE_BYTES.toLong())
             val metrics = linkedMapOf<Long, Long>()
             var currentKey: MemorySegment? = null
             while (true) {
@@ -282,7 +318,35 @@ internal class TierEbpfEngine(
         value.get(ValueLayout.JAVA_LONG, 0)
     }
 
+    private fun readInFlightCount(): Long =
+        Arena.ofConfined().use { arena ->
+            val installed = requireInstalled()
+            val cpuCount = possibleCpus().size
+            val value = arena.allocate(Long.SIZE_BYTES.toLong() * cpuCount, Long.SIZE_BYTES.toLong())
+            val attr = arena.allocate(24)
+            attr.set(ValueLayout.JAVA_INT, 0, installed.requireInFlightFd().value)
+            attr.set(ValueLayout.ADDRESS, 8, intSeg(arena, 0))
+            attr.set(ValueLayout.ADDRESS, 16, value)
+            bpfCall(H_LOOKUP.toLong(), attr, 24)
+            (0 until cpuCount).sumOf { index -> value.get(ValueLayout.JAVA_LONG, index.toLong() * Long.SIZE_BYTES) }
+        }
+
     public fun attachMarker(
+        targetPid: Int,
+        agentLibrary: Path,
+        markerOffset: Long,
+    ) = attachMarkerAtOffset(targetPid, agentLibrary, markerOffset)
+
+    /** Attaches the existing marker program at one validated USDT probe site. */
+    internal fun attachUsdtMarker(
+        targetPid: Int,
+        agentLibrary: Path,
+        note: UsdtProbeNote,
+    ) {
+        attachMarkerAtOffset(targetPid, agentLibrary, note.fileOffset)
+    }
+
+    private fun attachMarkerAtOffset(
         targetPid: Int,
         agentLibrary: Path,
         markerOffset: Long,
@@ -337,7 +401,60 @@ internal class TierEbpfEngine(
         val reader = installed.ringReader ?: BpfRingBufferReader(native, installed.requireRingFd().value, ringCapacity.toLong(), EVENT_SIZE).also {
             installed.ringReader = it
         }
-        return reader.drain().map(SyscallInvocationEvent::fromBytes)
+        return when (options.ringDecodeMode) {
+            io.mazewall.profiler.internal.attribution.TierERingDecodeMode.DIRECT ->
+                reader.drainDecoded { event ->
+                    SyscallInvocationEvent.fromSegment(
+                        event,
+                        options.ringArgumentListMode == io.mazewall.profiler.internal.attribution.TierERingArgumentListMode.LAMBDA_COPY,
+                        options.ringArgumentViewMode == io.mazewall.profiler.internal.attribution.TierERingArgumentViewMode.EAGER_CONTROL,
+                    )
+                }
+            io.mazewall.profiler.internal.attribution.TierERingDecodeMode.LEGACY_BYTES ->
+                reader.drain().map { event ->
+                    SyscallInvocationEvent.fromBytes(
+                        event,
+                        options.ringArgumentViewMode == io.mazewall.profiler.internal.attribution.TierERingArgumentViewMode.EAGER_CONTROL,
+                    )
+                }
+        }
+    }
+
+    /** Waits for a ring-buffer notification without consuming or interpreting a record. */
+    internal fun awaitEvents(timeoutMillis: Int): io.mazewall.profiler.internal.attribution.TierEEventReadiness = readinessPoller.await(requireInstalled().requireRingFd().value, timeoutMillis)
+
+    /**
+     * Benchmark-only whole-batch timing. The legacy path records its owned-byte copy and Kotlin
+     * decoding phases separately, without putting a clock read into the record loop. Production
+     * draining remains clock-free and retains the same ownership boundary.
+     */
+    internal fun drainEventsMeasured(): TierERingEventDrain {
+        if (options.ringDecodeMode != io.mazewall.profiler.internal.attribution.TierERingDecodeMode.LEGACY_BYTES) {
+            return TierERingEventDrain(drainEvents())
+        }
+        val installed = requireInstalled()
+        val reader = installed.ringReader ?: BpfRingBufferReader(native, installed.requireRingFd().value, ringCapacity.toLong(), EVENT_SIZE).also {
+            installed.ringReader = it
+        }
+        val copyStarted = System.nanoTime()
+        val bytes = reader.drain()
+        val copyNanos = System.nanoTime() - copyStarted
+        val decodeStarted = System.nanoTime()
+        val events = bytes.map { event ->
+            SyscallInvocationEvent.fromBytes(
+                event,
+                options.ringArgumentViewMode == io.mazewall.profiler.internal.attribution.TierERingArgumentViewMode.EAGER_CONTROL,
+            )
+        }
+        val decodeNanos = System.nanoTime() - decodeStarted
+        return TierERingEventDrain(
+            events,
+            TierERingDrainPhaseMetrics(
+                payloadSliceNanos = copyNanos,
+                decodeNanos = decodeNanos,
+                readyRecords = events.size.toLong(),
+            ),
+        )
     }
 
     @Suppress("TooGenericExceptionCaught") // Cleanup must preserve every native failure, including errors surfaced by an injected syscall seam.
@@ -389,7 +506,15 @@ internal class TierEbpfEngine(
             lookup.set(ValueLayout.ADDRESS, 16, current)
             bpfCall(BPF_MAP_LOOKUP_ELEM, lookup, 32)
             value.copyFrom(current)
-            value.set(ValueLayout.JAVA_INT, 8, if (attached) 1 else 0)
+            check(current.get(ValueLayout.JAVA_INT, MARKER_GENERATION_OFFSET) != -1) {
+                "marker attachment generation is exhausted"
+            }
+            value.set(ValueLayout.JAVA_INT, MARKER_ATTACHED_OFFSET, if (attached) 1 else 0)
+            value.set(
+                ValueLayout.JAVA_INT,
+                MARKER_GENERATION_OFFSET,
+                current.get(ValueLayout.JAVA_INT, MARKER_GENERATION_OFFSET) + 1,
+            )
             updateElem(arena, installed.requireSessionFd().value, key, value)
         }
     }
@@ -421,14 +546,19 @@ internal class TierEbpfEngine(
         val markerPerfFds = installed.markerPerfFds.toList()
         installed.markerPerfFds.clear()
         markerPerfFds.asReversed().forEach { close(it) {} }
+        val execPerfFds = installed.execPerfFds.toList()
+        installed.execPerfFds.clear()
+        execPerfFds.asReversed().forEach { close(it) {} }
         val syscallPerfFds = installed.syscallPerfFds.toList()
         installed.syscallPerfFds.clear()
         syscallPerfFds.asReversed().forEach { close(it) {} }
         close(installed.progFd) { installed.progFd = null }
         close(installed.markerProgFd) { installed.markerProgFd = null }
+        close(installed.execProgFd) { installed.execProgFd = null }
         close(installed.ringFd) { installed.ringFd = null }
         close(installed.lossFd) { installed.lossFd = null }
         close(installed.contextMetricFd) { installed.contextMetricFd = null }
+        close(installed.inFlightFd) { installed.inFlightFd = null }
         close(installed.sessionFd) { installed.sessionFd = null }
         close(installed.coverageEdgeFd) { installed.coverageEdgeFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
@@ -442,6 +572,9 @@ internal class TierEbpfEngine(
 
     /** x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`. */
     internal fun buildMarkerProgram(): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram()
+
+    /** Tracepoint program that invalidates task storage after a successful exec. */
+    internal fun buildProcessExecProgram(): List<Insn> = TierEBpfProgramBuilder.buildProcessExecProgram()
 
     internal fun pack(i: Insn): Long = BpfProgLoadRequestEncoder.pack(i)
 
@@ -565,6 +698,32 @@ internal class TierEbpfEngine(
         }
     }
 
+    private fun attachProcessExec(installed: Resources) {
+        val tracepoint = SchedProcessExecTracepoint.discover()
+        Arena.ofConfined().use {
+            onlineCpus().take(1).forEach { cpu ->
+                val attr = it.allocate(PerfEventAttrLayout.SIZE)
+                attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.TYPE, PERF_TYPE_TRACEPOINT)
+                attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.SIZE_FIELD, PerfEventAttrLayout.SIZE.toInt())
+                attr.set(ValueLayout.JAVA_LONG, PerfEventAttrLayout.CONFIG, tracepoint.id.toLong())
+                attr.set(ValueLayout.JAVA_LONG, PerfEventAttrLayout.SAMPLE_PERIOD, 1)
+                val fd = native
+                    .syscall(
+                        SYS_PERF_EVENT_OPEN,
+                        NativeArg.MemoryArg(ConfinedSegment(attr)),
+                        NativeArg.LongArg(-1),
+                        NativeArg.LongArg(cpu.toLong()),
+                        NativeArg.LongArg(-1),
+                        NativeArg.LongArg(PERF_FLAG_FD_CLOEXEC),
+                    ).recordDescriptorAcquisition()
+                    .getFdOrThrow("perf_event_open(sched/sched_process_exec,cpu=$cpu)", FileDescriptorRole.Bpf)
+                installed.execPerfFds += fd
+                rawIoctl(fd.value, PERF_EVENT_IOC_SET_BPF, requireNotNull(installed.execProgFd).value.toLong())
+                rawIoctl(fd.value, PERF_EVENT_IOC_ENABLE, 0)
+            }
+        }
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
 
     private fun strSeg(
@@ -595,9 +754,13 @@ internal class TierEbpfEngine(
         }
     }
 
-    private fun onlineCpus(): List<Int> =
+    private fun onlineCpus(): List<Int> = cpusFrom(Path.of("/sys/devices/system/cpu/online"))
+
+    private fun possibleCpus(): List<Int> = cpusFrom(Path.of("/sys/devices/system/cpu/possible"))
+
+    private fun cpusFrom(path: Path): List<Int> =
         Files
-            .readString(Path.of("/sys/devices/system/cpu/online"))
+            .readString(path)
         .trim()
         .split(',')
         .flatMap { range ->

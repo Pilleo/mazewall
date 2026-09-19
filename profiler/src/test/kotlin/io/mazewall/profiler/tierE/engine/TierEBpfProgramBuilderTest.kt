@@ -7,6 +7,7 @@ import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
+import java.util.ArrayDeque
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -66,10 +67,8 @@ class TierEBpfProgramBuilderTest {
         assertEquals(0x15, noStorage.code, "task-storage lookup result must be checked")
         assertEquals(0x18, program[noStorageTarget].code, "missing task storage must enter the diagnostic path")
         assertEquals(2, program[noStorageTarget].imm, "ambient diagnostics must use the kernel counter map")
-        val diagnosticHandler = program.drop(noStorageTarget)
-        val diagnosticExit = diagnosticHandler.indexOfFirst { it.code == 0x95 }
         assertTrue(
-            diagnosticExit >= 0 && diagnosticHandler.take(diagnosticExit + 1).none { it.code == 0x85 && it.imm == 131 },
+            reachableInstructions(program, noStorageTarget).none { index -> program[index].code == 0x85 && program[index].imm == 131 },
             "ambient syscalls must exit before ring-buffer reservation",
         )
     }
@@ -86,5 +85,60 @@ class TierEBpfProgramBuilderTest {
             program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 16 },
             "program must read the first syscall argument from raw_syscalls/sys_enter args[0]",
         )
+    }
+
+    @Test
+    fun `marker attachment generation is stored and required before syscall emission`() {
+        val marker = TierEBpfProgramBuilder.buildMarkerProgram()
+        val sysEnter = TierEBpfProgramBuilder.buildSysEnterProgram()
+
+        assertTrue(
+            marker.any { it.code == 0x63 && it.off.toInt() == 20 },
+            "marker state must retain its attachment generation in task-storage padding",
+        )
+        assertTrue(
+            sysEnter.any { it.code == 0x61 && it.off.toInt() == 20 },
+            "sys_enter must load the task-storage attachment generation",
+        )
+    }
+
+    @Test
+    fun `admitted sys enter paths use the dedicated in flight counter`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+
+        assertEquals(
+            2,
+            program.count { it.code == 0x18 && it.src == 1 && it.imm == 6 },
+            "admission and shared completion must each load the in-flight map",
+        )
+        assertTrue(
+            program.count { it.code == 0xdb } >= 3,
+            "in-flight admission and completion must both be atomic",
+        )
+    }
+
+    private fun reachableInstructions(
+        program: List<TierEbpfEngine.Insn>,
+        start: Int,
+    ): Set<Int> {
+        val pending = ArrayDeque<Int>()
+        val reached = mutableSetOf<Int>()
+        pending += start
+        while (pending.isNotEmpty()) {
+            val index = pending.removeFirst()
+            if (index !in program.indices || !reached.add(index)) continue
+            val instruction = program[index]
+            val fallthrough = index + 1
+            when (instruction.code) {
+                0x95 -> Unit
+                0x05 -> pending += fallthrough + instruction.off
+                0x15, 0x5d -> {
+                    pending += fallthrough
+                    pending += fallthrough + instruction.off
+                }
+                else -> pending += fallthrough
+            }
+        }
+        return reached
     }
 }

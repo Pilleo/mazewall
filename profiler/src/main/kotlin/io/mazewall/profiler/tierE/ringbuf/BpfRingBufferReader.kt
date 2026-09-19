@@ -52,19 +52,48 @@ internal class BpfRingBufferReader(
         }
     }
 
-    /** Returns all records committed at the instant the producer position is acquired. */
+    /** Returns copied records committed at the instant the producer position is acquired. */
     fun drain(): List<ByteArray> {
         var position = LONG_HANDLE.getAcquire(consumer, 0L) as Long
         val producerPosition = LONG_HANDLE.getAcquire(producer, 0L) as Long
-        val records = mutableListOf<ByteArray>()
+        val records = ArrayList<ByteArray>()
         while (position < producerPosition) {
             val recordOffset = pageSize + (position and (capacity - 1))
             val lengthWord = INT_HANDLE.getAcquire(producer, recordOffset) as Int
-            if (classify(lengthWord) == BpfRingBufferRecordKind.BUSY) break
+            val kind = classify(lengthWord)
+            if (kind == BpfRingBufferRecordKind.BUSY) {
+                break
+            }
             val length = lengthWord and LENGTH_MASK
             check(length == validatedRecordSize) { "unexpected BPF ring record size $length (expected $validatedRecordSize)" }
-            if (classify(lengthWord) == BpfRingBufferRecordKind.READY) {
+            if (kind == BpfRingBufferRecordKind.READY) {
                 records += producer.asSlice(recordOffset + HEADER_SIZE, length.toLong()).toArray(ValueLayout.JAVA_BYTE)
+            }
+            position += alignedRecordSize(length)
+        }
+        LONG_HANDLE.setRelease(consumer, 0L, position)
+        return records
+    }
+
+    /**
+     * Decodes each committed payload before advancing the consumer position.
+     * [decode] must return owned state and must not retain the supplied mapped slice.
+     */
+    internal fun <T> drainDecoded(decode: (MemorySegment) -> T): List<T> {
+        var position = LONG_HANDLE.getAcquire(consumer, 0L) as Long
+        val producerPosition = LONG_HANDLE.getAcquire(producer, 0L) as Long
+        val records = ArrayList<T>()
+        while (position < producerPosition) {
+            val recordOffset = pageSize + (position and (capacity - 1))
+            val lengthWord = INT_HANDLE.getAcquire(producer, recordOffset) as Int
+            val kind = classify(lengthWord)
+            if (kind == BpfRingBufferRecordKind.BUSY) {
+                break
+            }
+            val length = lengthWord and LENGTH_MASK
+            check(length == validatedRecordSize) { "unexpected BPF ring record size $length (expected $validatedRecordSize)" }
+            if (kind == BpfRingBufferRecordKind.READY) {
+                records += decode(producer.asSlice(recordOffset + HEADER_SIZE, length.toLong()))
             }
             position += alignedRecordSize(length)
         }

@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.engine
 
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine.Insn
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 
@@ -25,6 +26,7 @@ internal object TierEBpfProgramBuilder {
     private const val COUNTER_MAP_INDEX: Int = 2
     private const val MARKER_FAILURE_COUNTER_INDEX: Int = 3
     private const val AMBIENT_INACTIVE_COUNTER_INDEX: Int = 4
+    private const val IN_FLIGHT_MAP_INDEX: Int = 6
 
     // eBPF opcodes (64-bit class)
     private const val ADD_IMM: Int = 0x07
@@ -93,14 +95,29 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         exits.add(emit(Insn(JNE_REG, dst = 5, src = 4)))
 
-        emit(Insn(LDX_W, dst = 5, src = 0, off = 8))
+        // Count before reading marker attachment. Otherwise a handler could
+        // read the old attached state, be preempted during detach, and start
+        // producing only after userspace observed an empty counter.
+        // bpf_map_lookup_elem returns through r0, so retain the session-map
+        // value in callee-saved r7 until marker state has been read.
+        emit(Insn(MOV_REG, dst = 7, src = 0))
+        ldMap(1, IN_FLIGHT_MAP_INDEX)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingInFlightCounter = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        emit(Insn(LDX_W, dst = 5, src = 7, off = 8))
         val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
         val markerAttached = emit(Insn(JA))
 
         // Active marker admission is the Tier E observation boundary. A
-        // detached marker exits without reading task storage, so an old state
-        // cannot leak into a later session.
+        // detached marker never reads task storage, so an old state cannot
+        // leak into a later session.
         val activeMarkerObservation = p.size
+        emit(Insn(LDX_W, dst = 5, src = 7, off = 12))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -36))
         ldMap(6, 0)
         emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
         val noTask = emit(Insn(JEQ_IMM, dst = 0))
@@ -118,6 +135,9 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
         emit(Insn(LDX_W, dst = 5, src = 6, off = 16))
         emit(Insn(STX_W, dst = FP, src = 5, off = -8))
+        emit(Insn(LDX_W, dst = 5, src = 6, off = 20))
+        emit(Insn(LDX_W, dst = 4, src = FP, off = -36))
+        val staleAttachmentGeneration = emit(Insn(JNE_REG, dst = 5, src = 4))
 
         // Diagnostic counts are keyed by active invocation, bounded by the
         // map's LRU capacity, and never participate in attribution.
@@ -162,32 +182,42 @@ internal object TierEBpfProgramBuilder {
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
         p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
-        ldMap(1, 1)
-        emit(Insn(MOV_IMM, dst = 2, imm = 88))
-        emit(Insn(MOV_IMM, dst = 3, imm = 0))
-        emit(Insn(CALL, imm = H_RB_RESERVE))
-        val reservationFailed = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(MOV_REG, dst = 7, src = 0))
-        emit(Insn(CALL, imm = H_KTIME))
-        emit(Insn(STX_DW, dst = 7, src = 0, off = 0))
-        emit(Insn(MOV_REG, dst = 5, src = 8))
-        emit(Insn(RSH_IMM, dst = 5, imm = 32))
-        emit(Insn(STX_W, dst = 7, src = 5, off = 8))
-        emit(Insn(STX_W, dst = 7, src = 8, off = 12))
-        emit(Insn(LDX_DW, dst = 5, src = 9, off = 8))
-        emit(Insn(STX_W, dst = 7, src = 5, off = 16))
-        emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
-        emit(Insn(STX_W, dst = 7, src = 5, off = 20))
-        emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
-        emit(Insn(STX_DW, dst = 7, src = 5, off = 24))
-        emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
-        emit(Insn(STX_DW, dst = 7, src = 5, off = 32))
-        // tracepoint/raw_syscalls/sys_enter exposes syscall arguments directly
-        // in its typed context: id at +8 and args[6] at +16. This avoids using
-        // architecture-specific pt_regs offsets through a raw tracepoint.
-        repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
-            emit(Insn(LDX_DW, dst = 5, src = 9, off = (16 + index * 8).toShort()))
-            emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
+        val reservationFailed: Int?
+        var submitted: Int? = null
+        if (options.ringSubmissionMode == TierERingSubmissionMode.BENCHMARK_DISABLED) {
+            // This benchmark-only build intentionally preserves the target filter, active-marker
+            // admission, task-storage lookup, diagnostic maps, and in-flight accounting. It omits
+            // only ring reservation, payload construction, and submission, so it is never evidence.
+            // Falling through retains unique-edge diagnostic coverage without leaving dead code.
+            reservationFailed = null
+        } else {
+            ldMap(1, 1)
+            emit(Insn(MOV_IMM, dst = 2, imm = 88))
+            emit(Insn(MOV_IMM, dst = 3, imm = 0))
+            emit(Insn(CALL, imm = H_RB_RESERVE))
+            reservationFailed = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_REG, dst = 7, src = 0))
+            emit(Insn(CALL, imm = H_KTIME))
+            emit(Insn(STX_DW, dst = 7, src = 0, off = 0))
+            emit(Insn(MOV_REG, dst = 5, src = 8))
+            emit(Insn(RSH_IMM, dst = 5, imm = 32))
+            emit(Insn(STX_W, dst = 7, src = 5, off = 8))
+            emit(Insn(STX_W, dst = 7, src = 8, off = 12))
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = 8))
+            emit(Insn(STX_W, dst = 7, src = 5, off = 16))
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
+            emit(Insn(STX_W, dst = 7, src = 5, off = 20))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
+            emit(Insn(STX_DW, dst = 7, src = 5, off = 24))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
+            emit(Insn(STX_DW, dst = 7, src = 5, off = 32))
+            // tracepoint/raw_syscalls/sys_enter exposes syscall arguments directly
+            // in its typed context: id at +8 and args[6] at +16. This avoids using
+            // architecture-specific pt_regs offsets through a raw tracepoint.
+            repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
+                emit(Insn(LDX_DW, dst = 5, src = 9, off = (16 + index * 8).toShort()))
+                emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
+            }
         }
         if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
             // Do not turn a malformed observation into a covered edge. A later
@@ -195,7 +225,9 @@ internal object TierEBpfProgramBuilder {
             // valid representative instead of being suppressed by this one.
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
             val noContextForUpdate = emit(Insn(JEQ_IMM, dst = 5))
-            emit(Insn(LDX_W, dst = 5, src = 7, off = 20))
+            // Capture flags were already copied from task storage to this stack slot. Reading
+            // them here avoids making diagnostic coverage depend on a ring payload existing.
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
             val argumentsWereRead = emit(Insn(JEQ_IMM, dst = 5))
             val skipInvalidCoverageUpdate = emit(Insn(JA))
             val coverageUpdateStart = p.size
@@ -213,23 +245,40 @@ internal object TierEBpfProgramBuilder {
             p[noContextForUpdate] = p[noContextForUpdate].copy(off = (afterCoverageUpdate - noContextForUpdate - 1).toShort())
             p[skipInvalidCoverageUpdate] = p[skipInvalidCoverageUpdate].copy(off = (afterCoverageUpdate - skipInvalidCoverageUpdate - 1).toShort())
         }
-        emit(Insn(MOV_REG, dst = 1, src = 7))
-        emit(Insn(MOV_IMM, dst = 2, imm = 0))
-        emit(Insn(CALL, imm = H_RB_SUBMIT))
-        val submitted = emit(Insn(JA))
-        val lossHandler = p.size
-        ldMap(1, 2)
+        if (options.ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
+            emit(Insn(MOV_REG, dst = 1, src = 7))
+            emit(Insn(MOV_IMM, dst = 2, imm = 0))
+            emit(Insn(CALL, imm = H_RB_SUBMIT))
+            submitted = emit(Insn(JA))
+        }
+        val lossHandler: Int?
+        val missingLossCounter: Int?
+        if (options.ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
+            lossHandler = p.size
+            ldMap(1, 2)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -4))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            missingLossCounter = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        } else {
+            lossHandler = null
+            missingLossCounter = null
+        }
+        val completeActive = p.size
+        ldMap(1, IN_FLIGHT_MAP_INDEX)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
         emit(Insn(CALL, imm = H_LOOKUP))
-        val missingLossCounter = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        val missingCompletionCounter = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = -1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val activeExit = p.size
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
-        val exitIndex = p.lastIndex
 
-        fun emitCounterAndExit(counterIndex: Int): Int {
+        fun emitCounterAndComplete(counterIndex: Int) {
             ldMap(1, COUNTER_MAP_INDEX)
             emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
             emit(Insn(STX_W, dst = FP, src = 5, off = -4))
@@ -239,27 +288,51 @@ internal object TierEBpfProgramBuilder {
             val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
             emit(Insn(MOV_IMM, dst = 5, imm = 1))
             emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-            val counterExit = p.size
-            emit(Insn(MOV_IMM, dst = 0, imm = 0))
-            emit(Insn(EXIT))
-            p[missingCounter] = p[missingCounter].copy(off = (counterExit - missingCounter - 1).toShort())
-            return p.size - (counterExit + 2)
+            val complete = emit(Insn(JA))
+            p[missingCounter] = p[missingCounter].copy(off = (completeActive - missingCounter - 1).toShort())
+            p[complete] = p[complete].copy(off = (completeActive - complete - 1).toShort())
         }
         val markerFailureHandler = p.size
-        emitCounterAndExit(MARKER_FAILURE_COUNTER_INDEX)
+        emitCounterAndComplete(MARKER_FAILURE_COUNTER_INDEX)
         val ambientInactiveHandler = p.size
-        emitCounterAndExit(AMBIENT_INACTIVE_COUNTER_INDEX)
+        emitCounterAndComplete(AMBIENT_INACTIVE_COUNTER_INDEX)
+        // Map descriptors are fixed for the program lifetime, but if lookup
+        // nevertheless fails we cannot prove this handler was counted. Mark
+        // the run incomplete without executing the completion decrement.
+        val inFlightCounterFailureHandler = p.size
+        ldMap(1, COUNTER_MAP_INDEX)
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingLossCounterForInFlightFailure = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val finishInFlightFailure = emit(Insn(JA))
+        val inFlightFailureExit = p.size
+        emit(Insn(MOV_IMM, dst = 0, imm = 0))
+        emit(Insn(EXIT))
 
-        p[reservationFailed] = p[reservationFailed].copy(off = (lossHandler - reservationFailed - 1).toShort())
+        reservationFailed?.let { index ->
+            p[index] = p[index].copy(off = (requireNotNull(lossHandler) - index - 1).toShort())
+        }
         p[noTask] = p[noTask].copy(off = (markerFailureHandler - noTask - 1).toShort())
         p[noStorage] = p[noStorage].copy(off = (ambientInactiveHandler - noStorage - 1).toShort())
         p[inactiveInvocation] = p[inactiveInvocation].copy(off = (ambientInactiveHandler - inactiveInvocation - 1).toShort())
+        p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(off = (ambientInactiveHandler - staleAttachmentGeneration - 1).toShort())
         p[noMetricContext] = p[noMetricContext].copy(off = (ambientInactiveHandler - noMetricContext - 1).toShort())
-        p[markerDetached] = p[markerDetached].copy(off = (exitIndex - markerDetached - 1).toShort())
+        p[markerDetached] = p[markerDetached].copy(off = (completeActive - markerDetached - 1).toShort())
         p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
-        p[submitted] = p[submitted].copy(off = (exitIndex - submitted - 2).toShort())
-        p[missingLossCounter] = p[missingLossCounter].copy(off = (exitIndex - missingLossCounter - 1).toShort())
-        exits.forEach { index -> p[index] = p[index].copy(off = (exitIndex - index - 1).toShort()) }
+        submitted?.let { index -> p[index] = p[index].copy(off = (completeActive - index - 1).toShort()) }
+        missingLossCounter?.let { index ->
+            p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
+        }
+        p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (inFlightCounterFailureHandler - missingInFlightCounter - 1).toShort())
+        p[missingCompletionCounter] = p[missingCompletionCounter].copy(off = (activeExit - missingCompletionCounter - 1).toShort())
+        p[missingLossCounterForInFlightFailure] = p[missingLossCounterForInFlightFailure].copy(off = (inFlightFailureExit - missingLossCounterForInFlightFailure - 1).toShort())
+        p[finishInFlightFailure] = p[finishInFlightFailure].copy(off = (inFlightFailureExit - finishInFlightFailure - 1).toShort())
+        exits.forEach { index -> p[index] = p[index].copy(off = (activeExit - index - 1).toShort()) }
 
         return p.toList()
     }
@@ -294,6 +367,8 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_LOOKUP))
         val noTargetConfig = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
+        emit(Insn(LDX_W, dst = 5, src = 0, off = 12))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -44))
         emit(Insn(MOV_REG, dst = 5, src = 6))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
@@ -352,6 +427,8 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 8))
         emit(Insn(STX_W, dst = 0, src = 8, off = 16))
+        emit(Insn(LDX_W, dst = 5, src = FP, off = -44))
+        emit(Insn(STX_W, dst = 0, src = 5, off = 20))
         val markerStored = emit(Insn(JA))
         val markerFailureHandler = program.size
         emit(Insn(MOV_IMM, dst = 5, imm = 3))
@@ -377,6 +454,64 @@ internal object TierEBpfProgramBuilder {
         program[noStorage] = program[noStorage].copy(off = (markerFailureHandler - noStorage - 1).toShort())
         program[markerStored] = program[markerStored].copy(off = (exitIndex - markerStored - 2).toShort())
         program[noFailureCounter] = program[noFailureCounter].copy(off = (exitIndex - noFailureCounter - 1).toShort())
+        return program
+    }
+
+    /**
+     * Clears task-local marker state after the kernel has committed an exec transition.
+     *
+     * This attaches to `sched_process_exec`, rather than execve entry: failed exec attempts
+     * retain the original image and may safely continue their active native scope.
+     */
+    public fun buildProcessExecProgram(): List<Insn> {
+        val program = mutableListOf<Insn>()
+
+        fun emit(instruction: Insn): Int {
+            program += instruction
+            return program.lastIndex
+        }
+
+        fun loadMap(
+            destination: Int,
+            index: Int,
+        ) {
+            emit(Insn(LD_MAP_FD, dst = destination, src = PSEUDO_FD, imm = index))
+            emit(Insn(code = 0))
+        }
+
+        emit(Insn(CALL, imm = H_PID_TGID))
+        emit(Insn(MOV_REG, dst = 7, src = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+        loadMap(1, 2)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingSession = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_W, dst = 5, src = 0, off = 4))
+        emit(Insn(MOV_REG, dst = 6, src = 7))
+        emit(Insn(RSH_IMM, dst = 6, imm = 32))
+        val wrongTarget = emit(Insn(JNE_REG, dst = 6, src = 5))
+        loadMap(6, 0)
+        emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
+        val missingTask = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_REG, dst = 1, src = 6))
+        emit(Insn(MOV_REG, dst = 2, src = 0))
+        emit(Insn(MOV_IMM, dst = 3, imm = 0))
+        emit(Insn(MOV_IMM, dst = 4, imm = 0))
+        emit(Insn(CALL, imm = H_TASK_STORAGE_GET))
+        val missingStorage = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_DW, dst = 0, src = 5, off = 0))
+        emit(Insn(STX_DW, dst = 0, src = 5, off = 8))
+        emit(Insn(STX_W, dst = 0, src = 5, off = 16))
+        emit(Insn(STX_W, dst = 0, src = 5, off = 20))
+        emit(Insn(MOV_IMM, dst = 0, imm = 0))
+        emit(Insn(EXIT))
+        val exit = program.lastIndex
+        listOf(missingSession, wrongTarget, missingTask, missingStorage).forEach { branch ->
+            program[branch] = program[branch].copy(off = (exit - branch - 1).toShort())
+        }
         return program
     }
 }

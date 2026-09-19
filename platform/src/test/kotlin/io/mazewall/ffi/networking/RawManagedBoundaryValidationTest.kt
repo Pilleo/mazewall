@@ -69,6 +69,33 @@ class RawManagedBoundaryValidationTest {
     }
 
     @Test
+    fun `raw clock gettime requires a writable timespec`() {
+        NativeArena.ofConfined().use { arena ->
+            val clock = NativeArg.LongArg(1) // CLOCK_MONOTONIC
+            assertAll(
+                {
+                    org.junit.jupiter.api.assertDoesNotThrow {
+                        RealNativeEngine.raw.syscall(
+                            Arch.current().clock_gettime.toLong(),
+                            clock,
+                            NativeArg.MemoryArg(arena.allocate(16)),
+                        )
+                    }
+                },
+                {
+                    assertThrows<IllegalArgumentException> {
+                        RealNativeEngine.raw.syscall(
+                            Arch.current().clock_gettime.toLong(),
+                            clock,
+                            NativeArg.MemoryArg(arena.allocate(16).asSlice(0, 15)),
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    @Test
     fun `legacy pointer ioctl requires known payload size in both dispatch paths`() {
         NativeArena.ofConfined().use { arena ->
             val fd = RealNativeEngine.fileSystem.open(arena.allocateFrom("/dev/null"), OpenFlags.RDONLY).getFdOrThrow("open")

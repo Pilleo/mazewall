@@ -28,7 +28,7 @@ internal sealed interface ControlCommand {
     ) : ControlCommand
 }
 
-internal enum class AttachMode { UPROBE, USDT }
+internal enum class AttachMode { AUTO, UPROBE, USDT }
 
 /** Single-line replies; `ok` mirrors the OK/ERR prefix contract. */
 internal data class ControlReply(
@@ -45,7 +45,7 @@ internal data class ControlReply(
 }
 
 private val USAGE_ERR =
-    "USAGE: ATTACH <pid> <uprobe|usdt> <agent.so> <marker-offset> <session-tag-hex> [full-stream|unique-stack-syscall] | DETACH | STATUS | SHUTDOWN"
+    "USAGE: ATTACH <pid> <auto|uprobe|usdt> <agent.so> <marker-offset> <session-tag-hex> [full-stream|unique-stack-syscall] | DETACH | STATUS | SHUTDOWN"
 
 /** A reply required before an unrecognized command reaches daemon execution. */
 internal fun ControlCommand.rejectionReply(): ControlReply? =
@@ -68,6 +68,7 @@ internal fun parseControlCommand(line: String): Either<ControlCommand, ControlRe
             val pid = tokens[1].toIntOrNull()
             if (pid == null || pid <= 0) return Either.Right(ControlReply.err("BAD_PID"))
             val mode = when (tokens[2].lowercase()) {
+                "auto" -> AttachMode.AUTO
                 "uprobe" -> AttachMode.UPROBE
                 "usdt" -> AttachMode.USDT
                 else -> return Either.Right(ControlReply.err("BAD_MODE"))

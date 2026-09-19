@@ -13,21 +13,26 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/syscall.h>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include "binding_manifest.hpp"
 #include "capture_yield_recorder.hpp"
 #include "invocation_registry.hpp"
+#include "lifecycle_barrier.hpp"
 #include "symbolization_generation.hpp"
+#include "tier_e_usdt_marker.hpp"
 
 extern "C" __attribute__((noinline, visibility("default"))) void mazewall_stack_marker(
     std::uint64_t invocation_id,
     std::uint32_t flags) noexcept {
     asm volatile("" : : "r"(invocation_id), "r"(flags) : "memory");
+    MAZEWALL_TIER_E_USDT_MARKER(invocation_id, flags);
 }
 
 namespace {
@@ -41,9 +46,20 @@ std::atomic<std::uint64_t> virtual_pinned_scopes{0};
 std::atomic<std::uint64_t> virtual_pinned_nanos{0};
 std::atomic<std::uint64_t> benchmark_get_stack_trace_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_key_nanos{0};
+std::atomic<std::uint64_t> benchmark_raw_hash_nanos{0};
+std::atomic<std::uint64_t> benchmark_raw_equality_nanos{0};
+std::atomic<std::uint64_t> benchmark_generation_validation_nanos{0};
+std::atomic<std::uint64_t> benchmark_guard_validation_nanos{0};
+std::atomic<std::uint64_t> benchmark_canonical_cache_lock_wait_nanos{0};
 std::atomic<std::uint64_t> benchmark_logical_metadata_nanos{0};
 std::atomic<std::uint64_t> benchmark_marker_set_nanos{0};
 std::atomic<std::uint64_t> benchmark_marker_clear_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_admission_clear_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_exact_set_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_exit_clear_nanos{0};
+std::atomic<std::uint64_t> benchmark_marker_admission_clear_count{0};
+std::atomic<std::uint64_t> benchmark_marker_exact_set_count{0};
+std::atomic<std::uint64_t> benchmark_marker_exit_clear_count{0};
 std::atomic<std::uint64_t> benchmark_cache_hits{0};
 std::atomic<std::uint64_t> benchmark_cache_misses{0};
 std::atomic<std::uint64_t> benchmark_metadata_cache_hits{0};
@@ -75,10 +91,30 @@ std::string definitions_path;
 std::string capture_yield_path;
 std::mutex capture_yield_mutex;
 std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
+std::unique_ptr<mazewall::profiler::LifecycleBarrier> lifecycle_barrier;
+std::string lifecycle_barrier_gate_path;
+// Benchmark-only fault injection. The marker has already been cleared before
+// this can run, so the original native call continues without stale exact state.
+std::atomic<bool> force_capture_failure_once{false};
+std::string capture_failure_gate_path;
+std::atomic<bool> force_exec_once{false};
 std::atomic<std::uint64_t> capture_yield_contention_drops{0};
 enum class CaptureProfile { full, jdk25_unix_openat0 };
 CaptureProfile capture_profile = CaptureProfile::full;
 std::atomic<bool> capture_profile_admitted{true};
+std::atomic<bool> callback_suppression_probe_enabled{false};
+std::atomic<bool> callback_suppression_probe_fired{false};
+std::atomic<jclass> callback_suppression_probe_class{nullptr};
+std::atomic<jmethodID> callback_suppression_probe_method{nullptr};
+std::atomic<bool> callback_suppression_probe_ready{false};
+std::string callback_suppression_probe_gate_path;
+bool benchmark_phases = false;
+
+std::uint64_t elapsed_nanos(std::chrono::steady_clock::time_point started) noexcept;
+
+std::chrono::steady_clock::time_point benchmark_started() noexcept {
+    return benchmark_phases ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+}
 
 bool write_definitions(bool producer_closed = false) noexcept;
 void request_live_publication() noexcept;
@@ -304,22 +340,26 @@ struct RawStackHash final {
     }
 
     std::size_t operator()(const RawStack& stack) const noexcept {
+        const auto started = benchmark_started();
         std::size_t hash = stack.flags;
         hash = combine(hash, std::hash<std::uint64_t>{}(stack.symbol_epoch));
         for (const auto& frame : stack.frames) {
             hash = combine(hash, std::hash<std::uintptr_t>{}(frame.method));
             hash = combine(hash, std::hash<std::int64_t>{}(frame.location));
         }
+        if (benchmark_phases) benchmark_raw_hash_nanos.fetch_add(elapsed_nanos(started), std::memory_order_relaxed);
         return hash;
     }
 
     std::size_t operator()(const RawStackView& stack) const noexcept {
+        const auto started = benchmark_started();
         std::size_t hash = stack.flags;
         hash = combine(hash, std::hash<std::uint64_t>{}(stack.symbol_epoch));
         for (std::size_t index = 0; index < stack.frame_count; ++index) {
             hash = combine(hash, std::hash<std::uintptr_t>{}(reinterpret_cast<std::uintptr_t>(stack.frames[index].method)));
             hash = combine(hash, std::hash<std::int64_t>{}(stack.frames[index].location));
         }
+        if (benchmark_phases) benchmark_raw_hash_nanos.fetch_add(elapsed_nanos(started), std::memory_order_relaxed);
         return hash;
     }
 };
@@ -327,17 +367,27 @@ struct RawStackHash final {
 struct RawStackEqual final {
     using is_transparent = void;
 
-    bool operator()(const RawStack& left, const RawStack& right) const noexcept { return left == right; }
+    bool operator()(const RawStack& left, const RawStack& right) const noexcept {
+        const auto started = benchmark_started();
+        const auto equal = left == right;
+        if (benchmark_phases) benchmark_raw_equality_nanos.fetch_add(elapsed_nanos(started), std::memory_order_relaxed);
+        return equal;
+    }
     [[maybe_unused]] bool operator()(const RawStack& left, const RawStackView& right) const noexcept;
     [[maybe_unused]] bool operator()(const RawStackView& left, const RawStack& right) const noexcept;
 };
 
 bool raw_stack_equals(const RawStack& stored, const RawStackView& candidate) noexcept {
-    if (stored.flags != candidate.flags || stored.symbol_epoch != candidate.symbol_epoch || stored.frames.size() != candidate.frame_count) return false;
-    for (std::size_t index = 0; index < candidate.frame_count; ++index) {
-        if (stored.frames[index] != RawFrame{reinterpret_cast<std::uintptr_t>(candidate.frames[index].method), static_cast<std::int64_t>(candidate.frames[index].location)}) return false;
-    }
-    return true;
+    const auto started = benchmark_started();
+    const auto equal = [&]() noexcept {
+        if (stored.flags != candidate.flags || stored.symbol_epoch != candidate.symbol_epoch || stored.frames.size() != candidate.frame_count) return false;
+        for (std::size_t index = 0; index < candidate.frame_count; ++index) {
+            if (stored.frames[index] != RawFrame{reinterpret_cast<std::uintptr_t>(candidate.frames[index].method), static_cast<std::int64_t>(candidate.frames[index].location)}) return false;
+        }
+        return true;
+    }();
+    if (benchmark_phases) benchmark_raw_equality_nanos.fetch_add(elapsed_nanos(started), std::memory_order_relaxed);
+    return equal;
 }
 
 bool RawStackEqual::operator()(const RawStack& left, const RawStackView& right) const noexcept {
@@ -370,12 +420,19 @@ std::condition_variable live_publisher_wakeup;
 std::thread live_publisher;
 EmissionMode emission_mode = EmissionMode::full_stream;
 StackTransport stack_transport = StackTransport::dictionary;
-bool benchmark_phases = false;
 bool canonical_cache_enabled = true;
+
+enum class MarkerTransition : std::uint8_t {
+    generic,
+    admission_clear,
+    exact_set,
+    exit_clear,
+};
 
 void publish_stack_marker(
     std::uint64_t invocation_id,
-    std::uint32_t flags) noexcept {
+    std::uint32_t flags,
+    MarkerTransition transition = MarkerTransition::generic) noexcept {
     if (!benchmark_phases) {
         mazewall_stack_marker(invocation_id, flags);
         return;
@@ -389,6 +446,22 @@ void publish_stack_marker(
         benchmark_marker_clear_nanos.fetch_add(nanos, std::memory_order_relaxed);
     } else {
         benchmark_marker_set_nanos.fetch_add(nanos, std::memory_order_relaxed);
+    }
+    switch (transition) {
+        case MarkerTransition::admission_clear:
+            benchmark_marker_admission_clear_nanos.fetch_add(nanos, std::memory_order_relaxed);
+            benchmark_marker_admission_clear_count.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case MarkerTransition::exact_set:
+            benchmark_marker_exact_set_nanos.fetch_add(nanos, std::memory_order_relaxed);
+            benchmark_marker_exact_set_count.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case MarkerTransition::exit_clear:
+            benchmark_marker_exit_clear_nanos.fetch_add(nanos, std::memory_order_relaxed);
+            benchmark_marker_exit_clear_count.fetch_add(1, std::memory_order_relaxed);
+            break;
+        case MarkerTransition::generic:
+            break;
     }
 }
 
@@ -633,17 +706,23 @@ void release_guards(JNIEnv* env, const std::vector<jweak>& guards) {
 }
 
 std::uint32_t find_canonical_stack(JNIEnv* env, const RawStackView& stack) {
-    std::lock_guard lock(definitions_mutex);
+    std::unique_lock lock(definitions_mutex, std::defer_lock);
+    const auto lock_started = benchmark_started();
+    lock.lock();
+    if (benchmark_phases) benchmark_canonical_cache_lock_wait_nanos.fetch_add(elapsed_nanos(lock_started), std::memory_order_relaxed);
     const auto found = canonical_contexts.find(stack);
     if (found == canonical_contexts.end()) return 0;
+    const auto guard_started = benchmark_started();
     for (const auto guard : found->second.class_guards) {
         if (env->IsSameObject(guard, nullptr) == JNI_TRUE) {
+            if (benchmark_phases) benchmark_guard_validation_nanos.fetch_add(elapsed_nanos(guard_started), std::memory_order_relaxed);
             release_guards(env, found->second.class_guards);
             release_native_bytes(found->second.retained_bytes);
             canonical_contexts.erase(found);
             return 0;
         }
     }
+    if (benchmark_phases) benchmark_guard_validation_nanos.fetch_add(elapsed_nanos(guard_started), std::memory_order_relaxed);
     return found->second.stack_id;
 }
 
@@ -750,7 +829,7 @@ public:
         scope_ = invocation_registry.enter(id, execution_.id);
         // Clear the parent's attribution before JVMTI work. Any agent-internal
         // syscall is therefore UNKNOWN rather than incorrectly assigned.
-        publish_stack_marker(0, 0);
+        publish_stack_marker(0, 0, MarkerTransition::admission_clear);
         if (!scope_.valid()) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             return;
@@ -765,6 +844,9 @@ public:
         const auto captured_stack_id = capture.stack_id;
         const auto capture_failure = capture.failure;
         const auto captured_new_context = capture.new_context;
+        capture_yield_outcome_ = capture_failure == 0
+            ? mazewall::profiler::CaptureYieldOutcome::captured
+            : mazewall::profiler::CaptureYieldOutcome::capture_failed;
         if (captured_context_id != scope_.id && !invocation_registry.replace_current(scope_, captured_context_id)) {
             scope_failures.fetch_add(1, std::memory_order_relaxed);
             publish_stack_marker(0, 0);
@@ -777,14 +859,27 @@ public:
                 return;
             }
         }
-        capture_yield_outcome_ = capture_failure == 0
-            ? mazewall::profiler::CaptureYieldOutcome::captured
-            : mazewall::profiler::CaptureYieldOutcome::capture_failed;
-        publish_stack_marker(scope_.valid() ? scope_.id : 0, flags_);
+        publish_stack_marker(scope_.valid() ? scope_.id : 0, flags_, MarkerTransition::exact_set);
+        invoke_callback_suppression_probe();
+        if (binding_kind_ == mazewall::profiler::BindingKind::unix_openat0 && lifecycle_barrier != nullptr &&
+            !lifecycle_barrier_gate_path.empty() && std::ifstream(lifecycle_barrier_gate_path).good() &&
+            !lifecycle_barrier->wait_once()) {
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+        }
+        // Test-only lifecycle fault injection. The barrier makes the captured definition
+        // observable before replacing the JVM image; exec only returns on failure, in which
+        // case the original native operation remains available to continue normally.
+        if (binding_kind_ == mazewall::profiler::BindingKind::unix_openat0 &&
+            !lifecycle_barrier_gate_path.empty() && std::ifstream(lifecycle_barrier_gate_path).good() &&
+            force_exec_once.exchange(false, std::memory_order_acq_rel)) {
+            const char* const arguments[] = {"sh", "-c", "for i in 1 2 3; do :; done; sleep 1", nullptr};
+            ::execv("/bin/sh", const_cast<char* const*>(arguments));
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+        }
     }
 
     ~InvocationScope() {
-        publish_stack_marker(0, 0);
+        publish_stack_marker(0, 0, MarkerTransition::exit_clear);
         if (!scope_.valid()) {
             publish_stack_marker(invocation_registry.current_id(), flags_);
             record_virtual_duration();
@@ -840,7 +935,51 @@ private:
         virtual_pinned_nanos.fetch_add(static_cast<std::uint64_t>(nanos > 0 ? nanos : 0), std::memory_order_relaxed);
     }
 
+    void invoke_callback_suppression_probe() noexcept {
+        if (binding_kind_ != mazewall::profiler::BindingKind::unix_openat0 ||
+            !callback_suppression_probe_enabled.load(std::memory_order_acquire) ||
+            !callback_suppression_probe_ready.load(std::memory_order_acquire) ||
+            callback_suppression_probe_gate_path.empty()) {
+            return;
+        }
+
+        // This test-only path models a supported native wrapper calling back into Java. The
+        // outer marker and nesting state must be inactive before gate I/O or arbitrary callback
+        // JVM work. A nested proxy may establish its own exact boundary, but this outer scope is
+        // never restored implicitly after the callback returns.
+        publish_stack_marker(0, 0, MarkerTransition::admission_clear);
+        invocation_registry.suppress();
+        scope_ = {};
+        if (!std::ifstream(callback_suppression_probe_gate_path).good() ||
+            callback_suppression_probe_fired.exchange(true, std::memory_order_acq_rel)) {
+            return;
+        }
+        const auto callback_class = callback_suppression_probe_class.load(std::memory_order_acquire);
+        const auto callback = callback_suppression_probe_method.load(std::memory_order_acquire);
+        if (callback_class == nullptr || callback == nullptr) {
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        current_env_->CallStaticVoidMethod(callback_class, callback);
+        if (current_env_->ExceptionCheck()) {
+            // A callback exception belongs to application code and must remain pending.
+            scope_failures.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        // A deterministic unsupported syscall for the rootful callback fixture. The marker and
+        // registry remain suppressed, so this must be observed as inactive rather than inherit
+        // the outer native invocation.
+        (void)::syscall(SYS_getpid);
+    }
+
     Capture capture_stack(JNIEnv* env, std::uint64_t proposed_context_id) noexcept {
+        if (binding_kind_ == mazewall::profiler::BindingKind::unix_openat0 &&
+            force_capture_failure_once.load(std::memory_order_acquire) &&
+            (capture_failure_gate_path.empty() || std::ifstream(capture_failure_gate_path).good()) &&
+            force_capture_failure_once.exchange(false, std::memory_order_acq_rel)) {
+            stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
+            return {};
+        }
         if (global_jvmti == nullptr) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return {};
@@ -863,7 +1002,7 @@ private:
             return Capture{0, 5, 0, false};
         }
         const auto capture_epoch = capture_lease.value;
-        const auto stack_trace_started = std::chrono::steady_clock::now();
+        const auto stack_trace_started = benchmark_started();
         const auto result = global_jvmti->GetStackTrace(
             current_thread_,
             0,
@@ -881,12 +1020,15 @@ private:
         // happened to reference it before shutdown.
         if (truncated) stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
         const auto retained = truncated ? frames.size() - 1 : static_cast<std::size_t>(frame_count);
-        const auto raw_key_started = std::chrono::steady_clock::now();
+        const auto raw_key_started = benchmark_started();
         const RawStackView raw{frames.data(), retained, flags_, capture_epoch};
         if (!truncated) {
             if (canonical_cache_enabled) {
                 if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
-                    if (!symbolization_generation.validate(capture_lease)) {
+                    const auto validation_started = benchmark_started();
+                    const auto generation_valid = symbolization_generation.validate(capture_lease);
+                    if (benchmark_phases) benchmark_generation_validation_nanos.fetch_add(elapsed_nanos(validation_started), std::memory_order_relaxed);
+                    if (!generation_valid) {
                         stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
                         return Capture{0, 5, 0, false};
                     }
@@ -905,7 +1047,7 @@ private:
         std::vector<jweak> class_guards;
         logical.reserve(retained);
         if (emission_mode == EmissionMode::unique_stack_syscall) class_guards.reserve(retained);
-        const auto logical_metadata_started = std::chrono::steady_clock::now();
+        const auto logical_metadata_started = benchmark_started();
         for (std::size_t index = 0; index < retained; ++index) {
             LogicalFrame frame;
             jweak guard = nullptr;
@@ -920,7 +1062,10 @@ private:
             logical.push_back(std::move(frame));
         }
         if (benchmark_phases) benchmark_logical_metadata_nanos.fetch_add(elapsed_nanos(logical_metadata_started), std::memory_order_relaxed);
-        if (!symbolization_generation.validate(capture_lease)) {
+        const auto validation_started = benchmark_started();
+        const auto generation_valid = symbolization_generation.validate(capture_lease);
+        if (benchmark_phases) benchmark_generation_validation_nanos.fetch_add(elapsed_nanos(validation_started), std::memory_order_relaxed);
+        if (!generation_valid) {
             release_guards(env, class_guards);
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return Capture{0, 5, 0, false};
@@ -1108,8 +1253,39 @@ void JNICALL on_class_file_load(
     }
 }
 
-void JNICALL on_class_prepare(jvmtiEnv*, JNIEnv*, jthread, jclass) noexcept {
+void JNICALL on_class_prepare(jvmtiEnv* jvmti, JNIEnv* env, jthread, jclass klass) noexcept {
     (void)symbolization_generation.complete_replacement();
+    if (!callback_suppression_probe_enabled.load(std::memory_order_acquire) ||
+        callback_suppression_probe_class.load(std::memory_order_acquire) != nullptr) {
+        return;
+    }
+    char* signature = nullptr;
+    if (jvmti == nullptr || jvmti->GetClassSignature(klass, &signature, nullptr) != JVMTI_ERROR_NONE || signature == nullptr) {
+        return;
+    }
+    const bool is_probe_class = std::strcmp(
+        signature,
+        "Lio/mazewall/profiler/tierE/stress/TierESharedOpenatOracleWorkload;") == 0;
+    (void)jvmti->Deallocate(reinterpret_cast<unsigned char*>(signature));
+    if (!is_probe_class) return;
+    const auto method = env->GetStaticMethodID(klass, "callbackSuppressionProbe", "()V");
+    if (method == nullptr) {
+        // Method lookup belongs wholly to this optional test fixture.
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    const auto global_class = static_cast<jclass>(env->NewGlobalRef(klass));
+    if (global_class == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    jclass expected = nullptr;
+    if (callback_suppression_probe_class.compare_exchange_strong(expected, global_class, std::memory_order_acq_rel)) {
+        callback_suppression_probe_method.store(method, std::memory_order_release);
+        callback_suppression_probe_ready.store(true, std::memory_order_release);
+    } else {
+        env->DeleteGlobalRef(global_class);
+    }
 }
 
 void JNICALL on_vm_init(jvmtiEnv*, JNIEnv* env, jthread) noexcept {
@@ -1244,8 +1420,16 @@ bool estimate_snapshot_wire_bytes(const DefinitionSnapshot& snapshot, std::size_
         if (!checked_add(total, 5 + sizeof(invocation.id) + sizeof(invocation.parent_id) +
                 sizeof(invocation.stack_id) + sizeof(invocation.failure) + sizeof(invocation.execution_id))) return false;
         if (stack_transport == StackTransport::inline_per_invocation && invocation.failure == 0) {
-            if (invocation.stack_id == 0 || invocation.stack_id > snapshot.stacks.size() ||
-                !estimate_stack_wire_bytes(*snapshot.stacks[invocation.stack_id - 1], total)) return false;
+            if (invocation.stack_id == 0 || invocation.stack_id > snapshot.stacks.size()) {
+                std::fprintf(
+                    stderr,
+                    "mazewall-stack-agent: inline definition references stack id %u with %zu snapshot stacks (failure=%u)\n",
+                    invocation.stack_id,
+                    snapshot.stacks.size(),
+                    invocation.failure);
+                return false;
+            }
+            if (!estimate_stack_wire_bytes(*snapshot.stacks[invocation.stack_id - 1], total)) return false;
         }
     }
     if (!checked_add(total, 5 + 4 * sizeof(std::uint64_t))) return false;
@@ -1253,7 +1437,7 @@ bool estimate_snapshot_wire_bytes(const DefinitionSnapshot& snapshot, std::size_
 }
 
 DefinitionSnapshot snapshot_definitions() {
-    const auto lock_started = std::chrono::steady_clock::now();
+    const auto lock_started = benchmark_started();
     std::lock_guard lock(definitions_mutex);
     if (benchmark_phases) {
         benchmark_definition_lock_wait_nanos.fetch_add(elapsed_nanos(lock_started), std::memory_order_relaxed);
@@ -1274,7 +1458,7 @@ DefinitionSnapshot snapshot_definitions() {
 bool write_definitions(bool producer_closed) noexcept {
     if (definitions_path.empty()) return true;
     try {
-        const auto publication_started = std::chrono::steady_clock::now();
+        const auto publication_started = benchmark_started();
         const auto snapshot = snapshot_definitions();
         std::lock_guard publication_lock(publication_mutex);
         if ((!producer_closed && snapshot.generation <= last_published_generation) ||
@@ -1283,12 +1467,23 @@ bool write_definitions(bool producer_closed) noexcept {
         }
         const auto temporary_path = definitions_path + ".tmp";
         std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
-        if (!stream) return false;
+        if (!stream) {
+            std::fprintf(stderr, "mazewall-stack-agent: definition publication failed opening temporary file\n");
+            return false;
+        }
         std::size_t encoded_capacity = 0;
-        if (!estimate_snapshot_wire_bytes(snapshot, encoded_capacity)) return false;
+        if (!estimate_snapshot_wire_bytes(snapshot, encoded_capacity)) {
+            std::fprintf(
+                stderr,
+                "mazewall-stack-agent: definition_publication_failure=encoded_snapshot_exceeds_retained_limit\n");
+            return false;
+        }
         ScopedNativeReservation encoded_reservation(encoded_capacity);
-        if (!encoded_reservation.reserved()) return false;
-        const auto serialization_started = std::chrono::steady_clock::now();
+        if (!encoded_reservation.reserved()) {
+            std::fprintf(stderr, "mazewall-stack-agent: definition publication exhausted retained-state budget\n");
+            return false;
+        }
+        const auto serialization_started = benchmark_started();
         std::vector<std::uint8_t> encoded;
         encoded.reserve(encoded_capacity);
         encoded.insert(
@@ -1348,16 +1543,27 @@ bool write_definitions(bool producer_closed) noexcept {
         }
         stream.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size()));
         stream.flush();
-        if (!stream.good()) return false;
+        if (!stream.good()) {
+            std::fprintf(stderr, "mazewall-stack-agent: definition publication failed writing temporary file\n");
+            return false;
+        }
         stream.close();
-        if (std::rename(temporary_path.c_str(), definitions_path.c_str()) != 0) return false;
+        if (std::rename(temporary_path.c_str(), definitions_path.c_str()) != 0) {
+            std::fprintf(stderr, "mazewall-stack-agent: definition publication failed replacing snapshot\n");
+            return false;
+        }
         last_published_generation = snapshot.generation;
         if (benchmark_phases) {
             benchmark_publication_count.fetch_add(1, std::memory_order_relaxed);
             benchmark_publication_latency_nanos.fetch_add(elapsed_nanos(publication_started), std::memory_order_relaxed);
         }
         return true;
+    } catch (const std::exception& failure) {
+        std::fprintf(stderr, "mazewall-stack-agent: definition publication threw: %s\n", failure.what());
+        if (benchmark_phases) benchmark_failed_publications.fetch_add(1, std::memory_order_relaxed);
+        return false;
     } catch (...) {
+        std::fprintf(stderr, "mazewall-stack-agent: definition publication threw a non-standard exception\n");
         if (benchmark_phases) benchmark_failed_publications.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -1419,6 +1625,31 @@ bool parse_options(const char* options) {
         } else if (option.starts_with("capture-yield=")) {
             capture_yield_path = option.substr(std::strlen("capture-yield="));
             if (capture_yield_path.empty()) return false;
+        } else if (option.starts_with("lifecycle-barrier=")) {
+            const auto path = option.substr(std::strlen("lifecycle-barrier="));
+            if (path.empty()) return false;
+            try {
+                lifecycle_barrier = std::make_unique<mazewall::profiler::LifecycleBarrier>(
+                    path,
+                    std::chrono::seconds(10));
+            } catch (...) {
+                return false;
+            }
+        } else if (option.starts_with("lifecycle-gate=")) {
+            lifecycle_barrier_gate_path = option.substr(std::strlen("lifecycle-gate="));
+            if (lifecycle_barrier_gate_path.empty()) return false;
+        } else if (option == "force-capture-failure-once") {
+            force_capture_failure_once.store(true, std::memory_order_release);
+        } else if (option.starts_with("capture-failure-gate=")) {
+            capture_failure_gate_path = option.substr(std::strlen("capture-failure-gate="));
+            if (capture_failure_gate_path.empty()) return false;
+        } else if (option == "force-exec-once") {
+            force_exec_once.store(true, std::memory_order_release);
+        } else if (option == "callback-suppression-probe") {
+            callback_suppression_probe_enabled.store(true, std::memory_order_release);
+        } else if (option.starts_with("callback-suppression-gate=")) {
+            callback_suppression_probe_gate_path = option.substr(std::strlen("callback-suppression-gate="));
+            if (callback_suppression_probe_gate_path.empty()) return false;
         } else if (option.starts_with("session=")) {
             try {
                 const auto value = std::stoul(option.substr(std::strlen("session=")), nullptr, 16);
@@ -1526,10 +1757,15 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     if (benchmark_phases) {
         std::fprintf(
             stderr,
-            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu\n",
+            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu raw_hash_ns=%llu raw_equality_ns=%llu generation_validation_ns=%llu guard_validation_ns=%llu canonical_cache_lock_wait_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu marker_admission_clear_ns=%llu marker_exact_set_ns=%llu marker_exit_clear_ns=%llu marker_admission_clear_count=%llu marker_exact_set_count=%llu marker_exit_clear_count=%llu\n",
             stack_transport == StackTransport::dictionary ? "dictionary" : "inline-per-invocation",
             static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_raw_hash_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_raw_equality_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_generation_validation_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_guard_validation_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_canonical_cache_lock_wait_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_logical_metadata_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_marker_set_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_marker_clear_nanos.load(std::memory_order_relaxed)),
@@ -1546,10 +1782,22 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
             static_cast<unsigned long long>(benchmark_cache_hits.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_cache_misses.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_metadata_cache_hits.load(std::memory_order_relaxed)),
-            static_cast<unsigned long long>(benchmark_metadata_cache_misses.load(std::memory_order_relaxed)));
+            static_cast<unsigned long long>(benchmark_metadata_cache_misses.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_admission_clear_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_exact_set_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_exit_clear_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_admission_clear_count.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_exact_set_count.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_marker_exit_clear_count.load(std::memory_order_relaxed)));
     }
     JNIEnv* env = nullptr;
     if (vm != nullptr && vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_8) == JNI_OK) {
+        if (const auto callback_class = callback_suppression_probe_class.exchange(nullptr, std::memory_order_acq_rel);
+            callback_class != nullptr) {
+            env->DeleteGlobalRef(callback_class);
+        }
+        callback_suppression_probe_ready.store(false, std::memory_order_release);
+        callback_suppression_probe_method.store(nullptr, std::memory_order_release);
         clear_symbolization_caches(env);
     }
 }

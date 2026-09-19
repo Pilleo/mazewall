@@ -67,6 +67,12 @@ public:
         return execution_id != 0 && current_execution_id_ == execution_id;
     }
 
+    /**
+     * Invalidates the active nesting chain before callback-driven JVM work. A later native entry
+     * must establish a fresh scope; leaving an older scope cannot restore exact attribution.
+     */
+    void suppress() noexcept { clear(); }
+
     void invalidate() noexcept { clear(); }
 
 private:

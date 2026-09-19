@@ -49,6 +49,14 @@ class ControlProtocolTest {
     }
 
     @Test
+    fun `attach accepts auto marker transport without changing explicit transports`() {
+        val parsed = parseControlCommand("ATTACH 42 auto /opt/libagent.so b0aa 4d5a")
+        val attach = assertIs<Either.Left<ControlCommand, ControlReply>>(parsed).value
+
+        assertEquals(ControlCommand.Attach(42, AttachMode.AUTO, "/opt/libagent.so", 0xb0aa, 0x4d5a), attach)
+    }
+
+    @Test
     fun `attach defaults to full stream and accepts explicit unique edge coverage`() {
         val defaultAttach = assertIs<Either.Left<ControlCommand, ControlReply>>(
             parseControlCommand("ATTACH 42 uprobe /opt/libagent.so b0aa 4d5a"),

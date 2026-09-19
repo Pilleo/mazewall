@@ -24,4 +24,16 @@ int main() {
 
     const auto leaked_carrier_scope = registry.enter(505, 88);
     if (leaked_carrier_scope.valid() || registry.current_id() != 0) return 8;
+
+    auto callback_outer = registry.enter(606);
+    if (!callback_outer.valid() || registry.current_id() != 606) return 9;
+
+    registry.suppress();
+    if (registry.current_id() != 0) return 10;
+
+    const auto callback_inner = registry.enter(707);
+    if (!callback_inner.valid() || registry.current_id() != 707) return 11;
+    if (!registry.leave(callback_inner) || registry.current_id() != 0) return 12;
+
+    if (registry.leave(callback_outer) || registry.current_id() != 0) return 13;
 }

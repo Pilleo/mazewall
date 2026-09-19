@@ -8,6 +8,7 @@ import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import java.lang.reflect.Proxy
 import kotlin.test.Test
@@ -114,9 +115,17 @@ class BpfProgLoadLayoutTest {
         val uniqueCoverage = TierEbpfEngine(unusedNative).buildProgram(
             TierEOptions(TierEEmissionMode.UNIQUE_STACK_SYSCALL),
         )
+        val noRingControl = TierEbpfEngine(unusedNative).buildProgram(
+            TierEOptions(
+                benchmarkPhases = true,
+                ringSubmissionMode = TierERingSubmissionMode.BENCHMARK_DISABLED,
+            ),
+        )
 
         assertVerifierReachable(fullStream)
         assertVerifierReachable(uniqueCoverage)
+        assertVerifierReachable(noRingControl)
+        assertTrue(noRingControl.size < fullStream.size, "no-ring control should omit ring payload construction")
         assertTrue(fullStream.none { it.code == 0x85 && it.imm == 113 }, "typed tracepoint arguments must not use pt_regs probe reads")
     }
 

@@ -84,6 +84,47 @@ class BpfRingBufferReaderTest {
     }
 
     @Test
+    fun `drain copies each record before releasing its consumer position`() {
+        val mappings = FakeMappings()
+        val reader = BpfRingBufferReader(mappings.native, 7, CAPACITY, PAYLOAD_SIZE)
+        try {
+            mappings.writeRecord(0, PAYLOAD_SIZE, ByteArray(PAYLOAD_SIZE) { (it + 1).toByte() })
+            mappings.setProducerPosition(16)
+
+            val record = reader.drain().single()
+            record[0] = 99
+
+            assertEquals(16L, mappings.consumerPosition())
+            assertEquals(1, mappings.payloadAt(0)[0].toInt())
+        } finally {
+            reader.close()
+            mappings.close()
+        }
+    }
+
+    @Test
+    fun `direct decoded drain retains an immutable syscall event after release`() {
+        val mappings = FakeMappings()
+        val reader = BpfRingBufferReader(mappings.native, 7, CAPACITY, SyscallInvocationEvent.SIZE_BYTES)
+        try {
+            val payload = ByteArray(SyscallInvocationEvent.SIZE_BYTES) { (it * 3).toByte() }
+            mappings.writeRecord(0, SyscallInvocationEvent.SIZE_BYTES, payload)
+            mappings.setProducerPosition(BpfRingBufferReader.alignedRecordSize(SyscallInvocationEvent.SIZE_BYTES))
+
+            val expected = SyscallInvocationEvent.fromBytes(payload)
+            val event = reader.drainDecoded(SyscallInvocationEvent::fromSegment).single()
+
+            assertEquals(expected, event)
+            assertEquals(BpfRingBufferReader.alignedRecordSize(SyscallInvocationEvent.SIZE_BYTES), mappings.consumerPosition())
+            mappings.writeRecord(0, SyscallInvocationEvent.SIZE_BYTES, ByteArray(SyscallInvocationEvent.SIZE_BYTES))
+            assertEquals(expected, event)
+        } finally {
+            reader.close()
+            mappings.close()
+        }
+    }
+
+    @Test
     fun `close retains only a failed mapping for a later retry`() {
         val mappings = FakeMappings(failFirstProducerUnmap = true)
         val reader = BpfRingBufferReader(mappings.native, 7, CAPACITY, PAYLOAD_SIZE)
@@ -149,6 +190,11 @@ class BpfRingBufferReaderTest {
             val offset = PAGE_SIZE + (position and (CAPACITY - 1))
             INT_HANDLE.setRelease(producer, offset, word)
             payload.forEachIndexed { index, value -> producer.set(ValueLayout.JAVA_BYTE, offset + 8 + index, value) }
+        }
+
+        fun payloadAt(position: Long): ByteArray {
+            val offset = PAGE_SIZE + (position and (CAPACITY - 1))
+            return producer.asSlice(offset + 8, PAYLOAD_SIZE.toLong()).toArray(ValueLayout.JAVA_BYTE)
         }
 
         override fun close() {

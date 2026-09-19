@@ -66,6 +66,8 @@ internal class TierEDaemonService(
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeEngine: TierEbpfEngine? = null
+    private var activeMarkerTransport = "idle"
+    private var activeMarkerFallbackReason: String? = null
 
     @Synchronized
     fun executeCommand(line: String): String =
@@ -100,7 +102,9 @@ internal class TierEDaemonService(
                         .entries
                         .sortedBy { entry -> entry.key }
                         .joinToString(",") { entry -> "${entry.key}:${entry.value}" }
-                    "engine=active queued=${it.drainEvents().size} lost=${it.readLossCount()} metrics=$metrics"
+                    "engine=active marker_transport=$activeMarkerTransport " +
+                        "marker_fallback=${activeMarkerFallbackReason ?: "none"} " +
+                        "queued=${it.drainEvents().size} lost=${it.readLossCount()} metrics=$metrics"
                 } ?: "engine=idle"
                 ControlReply.ok(statusText).render().trimEnd()
             }
@@ -109,10 +113,28 @@ internal class TierEDaemonService(
                 activeEngine?.close()
                 activeEngine = null
                 val cmd = effect.command
-                val engine = engineFactory()
-                try {
-                    engine.install(cmd.pid, cmd.sessionTag, TierEOptions(cmd.emissionMode))
-                    engine.attachMarker(cmd.pid, Path.of(cmd.markerPath), cmd.markerOffset)
+                    val engine = engineFactory()
+                    try {
+                        engine.install(cmd.pid, cmd.sessionTag, TierEOptions(cmd.emissionMode))
+                        val markerPath = Path.of(cmd.markerPath)
+                        val selection = selectMarkerTransport(cmd.mode) {
+                            UsdtProbeNotes.findStackMarkerV1(markerPath)
+                        }
+                        when (selection.selected) {
+                            AttachMode.UPROBE -> {
+                                engine.attachMarker(cmd.pid, markerPath, cmd.markerOffset)
+                                activeMarkerTransport = "uprobe"
+                                activeMarkerFallbackReason = selection.fallbackReason
+                            }
+
+                            AttachMode.USDT -> {
+                                engine.attachUsdtMarker(cmd.pid, markerPath, requireNotNull(selection.usdtNote))
+                                activeMarkerTransport = "usdt"
+                                activeMarkerFallbackReason = null
+                            }
+
+                            AttachMode.AUTO -> error("marker transport selection must be concrete")
+                        }
                     activeEngine = engine
                     val postTransition = ControlSessionMachine.evaluate(
                         sessionState,
