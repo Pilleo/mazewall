@@ -138,8 +138,8 @@ if [[ "${CANONICAL_CACHE}" != "enabled" && "${CANONICAL_CACHE}" != "disabled" ]]
     echo "MAZEWALL_TIER_E_CANONICAL_CACHE must be enabled or disabled" >&2
     exit 2
 fi
-if [[ -n "${CAPTURE_PROFILE}" && "${CAPTURE_PROFILE}" != "jdk25-unix-openat0" ]]; then
-    echo "MAZEWALL_TIER_E_CAPTURE_PROFILE must be empty or jdk25-unix-openat0" >&2
+if [[ -n "${CAPTURE_PROFILE}" && "${CAPTURE_PROFILE}" != "jdk25-unix-openat0" && ! "${CAPTURE_PROFILE}" =~ ^capture-bindings=([a-z0-9-]+)(\+[a-z0-9-]+)*$ ]]; then
+    echo "MAZEWALL_TIER_E_CAPTURE_PROFILE must be empty, jdk25-unix-openat0, or capture-bindings=name+name" >&2
     exit 2
 fi
 if [[ "${BENCHMARK_WORKLOAD}" != "application" && "${BENCHMARK_WORKLOAD}" != "oracle" && "${BENCHMARK_WORKLOAD}" != "syscall_dense" && "${BENCHMARK_WORKLOAD}" != "mixed_cpu_io" && "${BENCHMARK_WORKLOAD}" != "bursty_io" && "${BENCHMARK_WORKLOAD}" != "calibration_cpu" && "${BENCHMARK_WORKLOAD}" != "stack_diverse" && "${BENCHMARK_WORKLOAD}" != "class_churn" ]]; then
