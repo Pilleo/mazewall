@@ -50,10 +50,15 @@ retained only as an explicit experiment and continuous polling remains the produ
    validated raw-syscall boundary, matching the `bpf_ktime_get_ns` event domain. Do not use
    `System.nanoTime()` as a substitute: its epoch is not a JVM API contract and a raw subtraction
    would be an unverified latency claim.
-3. Add a rootful sustained-overload fixture with a declared event rate, ring capacity, p50/p95/p99
-   calibrated receipt age, maximum ready records per drain, ring loss, and retained-state
-   high-water marks. It must run five rotated forks for continuous and adaptive policy and retain
-   complete evidence in both dictionary modes before any default-policy promotion.
+3. Partial: the rootful sustained-load runner now declares its target rate and uses a monotonic
+   open-loop producer. The retained 2026-09-19 evidence covers a complete fifteen-fork,
+   ten-batch near-capacity matrix at 1,000 boundaries/s in both dictionary modes, plus an
+   intentional-overload lane that is explicitly `INCOMPLETE` and performance-ineligible even when
+   its short smoke has no observed loss. See
+   `docs/internals/evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json`.
+   It still lacks ring-capacity, receipt-age quantiles, maximum ready records per drain, and
+   retained-state high-water marks under a sustained overload. Those measurements are required
+   before any default-policy promotion.
 4. Integrate the reusable loop into the non-harness production Tier E entry point when that entry
    point is introduced, retaining explicit producer closure and all five evidence dimensions.
 

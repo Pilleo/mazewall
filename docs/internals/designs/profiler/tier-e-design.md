@@ -1310,6 +1310,13 @@ compared across every matched arm and the terminal frame proves the profiled chi
 declared batch. This is deliberately narrower than a per-syscall pathname identity oracle.
 USER_NOTIF has no equivalent operation-identity mapping for those workloads and remains
 `UNVERIFIED`. Whole-session evidence is reported independently and does not become policy input.
+
+The rootful fifteen-fork application matrix retained `PASS` controlled-workload correctness and
+complete Tier E terminal evidence for all three application shapes. Its purpose is to retain a
+semantic floor and workload-specific operating guidance, not to claim a universal slowdown or pick
+a marker transport where the paired interval includes zero. The retained raw summaries and
+intervals are in
+[tier-e-application-semantic-rootful-smoke-20260919.json](../../evidence/tier-e-application-semantic-rootful-smoke-20260919.json).
 The runner also retains `attach_ns`, `workload_ns`, and `terminal_ns` for Tier E, plus
 `profile_session_ns` and `profile_overhead_ns` for USER_NOTIF. These are phase measurements,
 not a causal explanation; deeper USER_NOTIF readiness/receive/ack instrumentation remains
