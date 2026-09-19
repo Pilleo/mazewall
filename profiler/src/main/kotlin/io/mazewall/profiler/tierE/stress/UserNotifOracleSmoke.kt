@@ -20,7 +20,14 @@ internal object UserNotifOracleSmoke {
         val expectedOperationIds = LinkedHashSet<Int>()
         val oracleObservations = mutableListOf<TierEOperationOracle.Observation>()
         val oracleDiagnostics = mutableListOf<String>()
-        val diagnostics = if (sharedOpenatOracle) BenchmarkRawSyscallDiagnostics.begin { it == "OPENAT" } else null
+        val diagnostics = if (sharedOpenatOracle) {
+            BenchmarkRawSyscallDiagnostics.begin(
+                accepts = { it == "OPENAT" },
+                awaitFirstArgumentAdmission = true,
+            )
+        } else {
+            null
+        }
         var rawDiagnostics = emptyList<BenchmarkRawSyscallDiagnostics.Record>()
         val profileStarted = System.nanoTime()
         val workerTimeoutSeconds = if (benchmark) {
@@ -40,7 +47,10 @@ internal object UserNotifOracleSmoke {
                     warmups,
                     batches,
                     iterations,
-                    onSharedOpenatPrepared = { directoryFds -> expectedOperationIds.addAll(directoryFds) },
+                    onSharedOpenatPrepared = { directoryFds ->
+                        expectedOperationIds.addAll(directoryFds)
+                        diagnostics?.admitFirstArguments(directoryFds.map(Int::toLong))
+                    },
                     onSharedOpenatOperationsComplete = { rawDiagnostics = diagnostics?.finish().orEmpty() },
                     onSharedOpenatOperationStarted = { directoryFd -> diagnostics?.operationStarted(directoryFd.toLong()) },
                     onSharedOpenatOperationReturned = { directoryFd -> diagnostics?.operationReturned(directoryFd.toLong()) },
@@ -87,7 +97,7 @@ internal object UserNotifOracleSmoke {
         } else {
             TierEOperationOracle.Report(0, 0, 0, 0, 0)
         }
-        val operationOracleAvailable = sharedOpenatOracle
+        val operationOracleAvailable = operationOracleAvailable(sharedOpenatOracle, diagnosticDrops)
         val operationTimings = diagnostics
             ?.let { capture ->
             rawDiagnostics
@@ -103,7 +113,13 @@ internal object UserNotifOracleSmoke {
                 "expected_operations=${if (oracleEnabled) oracle.expected else expectedOperations} matched_operations=${oracle.matched} " +
                 "duplicate_operations=${oracle.duplicates} wrong_operations=${oracle.wrong} " +
                 "unclassified_operations=${oracle.unclassified} operation_oracle_available=$operationOracleAvailable " +
-                "operation_oracle_reason=${if (operationOracleAvailable) "shared_openat_raw_diagnostic" else "write_not_selected_by_user_notif"} " +
+                "operation_oracle_reason=${
+                    when {
+                        operationOracleAvailable -> "shared_openat_raw_diagnostic"
+                        sharedOpenatOracle -> "bounded_raw_diagnostic_dropped"
+                        else -> "write_not_selected_by_user_notif"
+                    }
+                } " +
                 "operation_oracle_diagnostics=${oracleDiagnostics.take(8).joinToString("|")} " +
                 "profile_session_ns=$profileSessionNanos workload_ns=$workloadNanos " +
                 "profile_overhead_ns=${(profileSessionNanos - workloadNanos).coerceAtLeast(0L)} " +
@@ -115,7 +131,6 @@ internal object UserNotifOracleSmoke {
         // reports incomplete whole-session evidence. The rendered `complete=false` remains
         // machine-readable; ordinary diagnostics continue to fail closed below.
         if (!benchmark) check(droppedEvents == 0) { "USER_NOTIF oracle dropped events" }
-        if (benchmark) check(diagnosticDrops == 0L) { "USER_NOTIF benchmark diagnostics dropped $diagnosticDrops records" }
         if (captureStackTraces) check(workloadFrames) { "USER_NOTIF oracle did not capture the shared workload stack" }
         if (operationOracleAvailable) {
             check(oracle.expected == oracle.matched && oracle.duplicates == 0L && oracle.wrong == 0L && oracle.unclassified == 0L) {
@@ -182,6 +197,12 @@ internal object UserNotifOracleSmoke {
 
     /** `openat(dirfd, pathname, flags, mode)` is identified by its preallocated directory FD. */
     internal fun sharedOpenatOperationId(arguments: List<Long>): Int? = arguments.getOrNull(0)?.toInt()
+
+    /** Raw diagnostic loss makes operation-identity proof unavailable without falsifying primary profiler evidence. */
+    internal fun operationOracleAvailable(
+        sharedOpenatOracle: Boolean,
+        diagnosticDrops: Long,
+    ): Boolean = sharedOpenatOracle && diagnosticDrops == 0L
 
     private data class UserNotifTimingSummary(
         val count: Int,

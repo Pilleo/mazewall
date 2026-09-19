@@ -85,6 +85,25 @@ class TierEBenchmarkContractTest {
     }
 
     @Test
+    fun `observer-free unique edge cost lane requires an independently verified workload`() {
+        val verdict = TierEBenchmarkContract.evaluate(
+            tierE = true,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(
+                observations = 1,
+                workloadResolved = 1,
+                evidenceComplete = true,
+                controlledWorkloadVerified = true,
+                observerFreeUniqueEdgeMeasurement = true,
+            ),
+        )
+
+        assertEquals(TierEBenchmarkContract.CorrectnessState.PASS, verdict.workloadCorrectness)
+        assertEquals(TierEBenchmarkContract.EvidenceState.COMPLETE, verdict.wholeSessionEvidence)
+    }
+
+    @Test
     fun `user notif stack and no-stack claims are verified separately`() {
         val stackVerdict = TierEBenchmarkContract.evaluate(
             tierE = false,
@@ -213,6 +232,76 @@ class TierEBenchmarkContractTest {
         )
 
         assertTrue(verdict.workloadCorrect)
+    }
+
+    @Test
+    fun `callback suppression requires nested proof and rejects restored outer operations`() {
+        val accepted = TierEBenchmarkContract.evaluate(
+            tierE = true,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(
+                observations = 1,
+                workloadResolved = 1,
+                ambientInactive = 1,
+                callbackSuppressionScenario = true,
+                callbackProbeResolved = 1,
+                operationOracle = TierEBenchmarkContract.OperationOracle(available = true, expected = 4),
+            ),
+        )
+        val resurrected = TierEBenchmarkContract.evaluate(
+            tierE = true,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(
+                observations = 1,
+                workloadResolved = 1,
+                ambientInactive = 1,
+                callbackSuppressionScenario = true,
+                callbackProbeResolved = 1,
+                operationOracle = TierEBenchmarkContract.OperationOracle(available = true, expected = 4, matched = 1),
+            ),
+        )
+        val reportedOmission = TierEBenchmarkContract.evaluate(
+            tierE = true,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(
+                observations = 1,
+                workloadResolved = 1,
+                ambientInactive = 1,
+                callbackSuppressionScenario = true,
+                callbackProbeResolved = 1,
+                operationOracle = TierEBenchmarkContract.OperationOracle(available = true, expected = 4, missing = 4),
+            ),
+        )
+
+        assertTrue(accepted.workloadCorrect)
+        assertEquals(TierEBenchmarkContract.EvidenceState.INCOMPLETE, accepted.wholeSessionEvidence)
+        assertTrue(reportedOmission.workloadCorrect)
+        assertEquals(
+            listOf("callback_suppression_resurrected_outer_operation"),
+            resurrected.failures,
+        )
+    }
+
+    @Test
+    fun `forced capture failure remains a passing workload with incomplete evidence`() {
+        val verdict = TierEBenchmarkContract.evaluate(
+            tierE = true,
+            userNotif = false,
+            requiresWorkloadFrames = false,
+            evidence = TierEBenchmarkContract.Evidence(
+                observations = 1,
+                workloadResolved = 1,
+                evidenceComplete = true,
+                forcedCaptureFailureScenario = true,
+                operationOracle = TierEBenchmarkContract.OperationOracle(available = true, expected = 2, matched = 1),
+            ),
+        )
+
+        assertTrue(verdict.workloadCorrect)
+        assertEquals(TierEBenchmarkContract.EvidenceState.INCOMPLETE, verdict.wholeSessionEvidence)
     }
 
     @Test

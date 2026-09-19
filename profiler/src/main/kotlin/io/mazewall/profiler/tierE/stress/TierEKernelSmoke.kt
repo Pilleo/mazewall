@@ -4,12 +4,27 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.ExecutionKind
 import io.mazewall.profiler.internal.attribution.ResolutionStatus
+import io.mazewall.profiler.internal.attribution.TierECollectorLoop
+import io.mazewall.profiler.internal.attribution.TierECollectorLoopPolicy
+import io.mazewall.profiler.internal.attribution.TierECollectorResultMode
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEKnownJoinMode
+import io.mazewall.profiler.internal.attribution.TierELinuxMonotonicClock
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEProfile
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
+import io.mazewall.profiler.internal.attribution.TierEReadyTransferMode
+import io.mazewall.profiler.internal.attribution.TierERingArgumentListMode
+import io.mazewall.profiler.internal.attribution.TierERingArgumentViewMode
+import io.mazewall.profiler.internal.attribution.TierERingDecodeMode
+import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import io.mazewall.profiler.internal.attribution.TierEStackTransport
+import io.mazewall.profiler.internal.attribution.TierETaskIdentityMode
 import io.mazewall.profiler.internal.attribution.UniqueEdgeDecision
+import io.mazewall.profiler.tierE.daemon.AttachMode
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
+import io.mazewall.profiler.tierE.daemon.UsdtProbeNotes
+import io.mazewall.profiler.tierE.daemon.selectMarkerTransport
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
@@ -32,8 +47,23 @@ internal object TierEKernelSmoke {
         } else {
             args[1].removePrefix("0x").toLong(16)
         }
+        val requestedMarkerTransport = when (System.getProperty("mazewall.tier-e.marker-transport", "uprobe")) {
+            "auto" -> AttachMode.AUTO
+            "uprobe" -> AttachMode.UPROBE
+            "usdt" -> AttachMode.USDT
+            else -> error("unknown Tier E marker transport")
+        }
+        val markerSelection = selectMarkerTransport(requestedMarkerTransport) {
+            UsdtProbeNotes.findStackMarkerV1(agent)
+        }
+        val markerTransport = markerSelection.selected.name.lowercase()
+        val usdtNote = markerSelection.usdtNote
         val definitions = Path.of(args[3]).toAbsolutePath()
         val captureYieldPath = System.getProperty("mazewall.tier-e.capture-yield")?.let(Path::of)?.toAbsolutePath()
+        val lifecycleScenario = System.getProperty("mazewall.tier-e.lifecycle-scenario", "normal")
+        require(lifecycleScenario in setOf("normal", "detach_while_active", "callback_suppression", "terminal_while_active", "capture_failure", "exec_transition")) {
+            "unknown Tier E lifecycle scenario: $lifecycleScenario"
+        }
         val sessionTag = 0x4d5a
         val emissionMode = when (args.getOrElse(7) { "full-stream" }) {
             "full-stream" -> TierEEmissionMode.FULL_STREAM
@@ -47,8 +77,13 @@ internal object TierEKernelSmoke {
         }
         val gate = Path.of("$definitions.gate")
         val oracleManifest = Path.of("$definitions.openat-fds")
+        val lifecycleBarrier = Path.of("$definitions.lifecycle-barrier")
+        val lifecycleReady = Path.of("$lifecycleBarrier.ready")
+        val lifecycleRelease = Path.of("$lifecycleBarrier.release")
         Files.deleteIfExists(gate)
         Files.deleteIfExists(oracleManifest)
+        Files.deleteIfExists(lifecycleReady)
+        Files.deleteIfExists(lifecycleRelease)
         Files.deleteIfExists(definitions)
         captureYieldPath?.let(Files::deleteIfExists)
         val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
@@ -63,21 +98,137 @@ internal object TierEKernelSmoke {
         }
         val workloadClasspath = if (commonWorkload || writeOracleWorkload || sharedOpenatOracleWorkload) System.getProperty("java.class.path") else args[2]
         val benchmark = args.getOrNull(10) == "benchmark"
+        val nativePhaseTiming = System.getProperty("mazewall.tier-e.native-phase-timing", "true").toBooleanStrictOrNull()
+            ?: error("native phase timing must be true or false")
+        val expectRetentionExhaustion = System
+            .getProperty(
+            "mazewall.tier-e.expect-retention-exhaustion",
+            "false",
+        ).toBooleanStrictOrNull()
+            ?: error("retention exhaustion expectation must be true or false")
+        require(benchmark || !expectRetentionExhaustion) {
+            "retention exhaustion expectation is benchmark-only"
+        }
+        val benchmarkAllocationAccounting = System.getProperty("mazewall.tier-e.benchmark-allocation-accounting", "false").toBooleanStrictOrNull()
+            ?: error("benchmark allocation accounting must be true or false")
+        val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
+            ?: error("unique edge observer must be true or false")
+        val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
+        val idlePollPolicy = System.getProperty("mazewall.tier-e.idle-poll-policy", "continuous")
+        val maxIdlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-max-backoff-nanos", "50000").toLong()
+        val receiptClockMode = System.getProperty("mazewall.tier-e.collector-receipt-clock", "disabled")
+        val ringSubmissionMode = when (System.getProperty("mazewall.tier-e.ring-submission", "enabled")) {
+            "enabled" -> TierERingSubmissionMode.ENABLED
+            "benchmark-disabled" -> TierERingSubmissionMode.BENCHMARK_DISABLED
+            else -> error("unknown Tier E ring submission mode")
+        }
+        val ownedArgumentStorage = when (System.getProperty("mazewall.tier-e.owned-arguments", "owned")) {
+            "owned" -> true
+            "boxed-control" -> false
+            else -> error("unknown Tier E owned argument storage mode")
+        }
+        val readyTransferMode = when (System.getProperty("mazewall.tier-e.ready-transfer", "read-only")) {
+            "read-only" -> TierEReadyTransferMode.READ_ONLY
+            "copy-control" -> TierEReadyTransferMode.COPY_CONTROL
+            else -> error("unknown Tier E ready transfer mode")
+        }
+        val collectorResultMode = when (System.getProperty("mazewall.tier-e.collector-result", "append-target")) {
+            "temporary-list" -> TierECollectorResultMode.TEMPORARY_LIST
+            "append-target" -> TierECollectorResultMode.APPEND_TARGET
+            else -> error("unknown Tier E collector result mode")
+        }
+        require(idlePollBackoffNanos in 0..1_000_000L) { "idle poll backoff must be between zero and one millisecond" }
+        require(maxIdlePollBackoffNanos in idlePollBackoffNanos..1_000_000L) { "maximum idle poll backoff must cover the initial delay and be at most one millisecond" }
+        require(idlePollPolicy in setOf("continuous", "fixed", "adaptive", "readiness")) { "unknown idle poll policy" }
+        require(receiptClockMode in setOf("disabled", "monotonic")) { "unknown collector receipt clock" }
+        require(benchmark || idlePollPolicy == "continuous") { "idle poll pacing is benchmark-only" }
+        require(benchmark || receiptClockMode == "disabled") { "collector receipt clock is benchmark-only" }
+        require(benchmark || !benchmarkAllocationAccounting) { "allocation accounting is benchmark-only" }
+        require(benchmark || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
+            "ring submission control is benchmark-only"
+        }
+        require(benchmark || ownedArgumentStorage) { "boxed argument storage is benchmark-only" }
+        require(benchmark || readyTransferMode == TierEReadyTransferMode.READ_ONLY) {
+            "copying ready transfer is benchmark-only"
+        }
+        require(benchmark || collectorResultMode == TierECollectorResultMode.APPEND_TARGET) {
+            "temporary collector results are benchmark-only"
+        }
+        require(benchmark || uniqueEdgeObserverEnabled) { "unique-edge observer control is benchmark-only" }
+        require(ringSubmissionMode == TierERingSubmissionMode.ENABLED || lifecycleScenario == "normal") {
+            "ring submission control does not support lifecycle fixtures"
+        }
+        require(idlePollPolicy != "continuous" || idlePollBackoffNanos == 0L) { "continuous idle poll policy requires zero delay" }
+        require(lifecycleScenario == "normal" || sharedOpenatOracleWorkload) {
+            "$lifecycleScenario requires the shared-openat-oracle-workload"
+        }
+        val ringDecodeMode = when (System.getProperty("mazewall.tier-e.ring-decode", "legacy")) {
+            "direct" -> TierERingDecodeMode.DIRECT
+            "legacy" -> TierERingDecodeMode.LEGACY_BYTES
+            else -> error("unknown Tier E ring decode mode")
+        }
+        val ringArgumentListMode = when (System.getProperty("mazewall.tier-e.ring-argument-list", "immutable-factory")) {
+            "immutable-factory" -> TierERingArgumentListMode.IMMUTABLE_FACTORY
+            "lambda-copy" -> TierERingArgumentListMode.LAMBDA_COPY
+            else -> error("unknown Tier E ring argument list mode")
+        }
+        val ringArgumentViewMode = when (System.getProperty("mazewall.tier-e.ring-argument-view", "lazy")) {
+            "lazy" -> TierERingArgumentViewMode.LAZY
+            "eager-control" -> TierERingArgumentViewMode.EAGER_CONTROL
+            else -> error("unknown Tier E ring argument view mode")
+        }
+        val taskIdentityMode = when (System.getProperty("mazewall.tier-e.task-identity", "reuse-consecutive")) {
+            "per-event" -> TierETaskIdentityMode.PER_EVENT
+            "reuse-consecutive" -> TierETaskIdentityMode.REUSE_CONSECUTIVE
+            else -> error("unknown Tier E task identity mode")
+        }
+        val knownJoinMode = when (System.getProperty("mazewall.tier-e.known-join", "queued-control")) {
+            "queued-control" -> TierEKnownJoinMode.QUEUED_CONTROL
+            "direct-known" -> TierEKnownJoinMode.DIRECT_KNOWN
+            else -> error("unknown Tier E known join mode")
+        }
+        require(benchmark || knownJoinMode == TierEKnownJoinMode.QUEUED_CONTROL) {
+            "direct known joins are benchmark-only"
+        }
+        require(benchmark || ringArgumentViewMode == TierERingArgumentViewMode.LAZY) {
+            "eager ring argument views are benchmark-only"
+        }
         val benchmarkOptions = if (benchmark) {
-            ",benchmark-phases" +
+            (if (nativePhaseTiming) ",benchmark-phases" else "") +
                 (if (System.getProperty("mazewall.tier-e.canonical-cache") == "disabled") ",canonical-cache=disabled" else "") +
-                (if (System.getProperty("mazewall.tier-e.live-publication") == "true") ",live-definitions" else "") +
+                (if (System.getProperty("mazewall.tier-e.live-publication") == "true" || lifecycleScenario in setOf("terminal_while_active", "exec_transition")) ",live-definitions" else "") +
                 captureProfileOption(System.getProperty("mazewall.tier-e.capture-profile"))
         } else {
             ""
         }
         val captureYieldOption = captureYieldPath?.let { ",capture-yield=$it" } ?: ""
+        val lifecycleBarrierOption = if (lifecycleScenario in setOf("detach_while_active", "terminal_while_active", "exec_transition")) {
+            ",lifecycle-barrier=$lifecycleBarrier,lifecycle-gate=$gate"
+        } else {
+            ""
+        }
+        val callbackSuppressionOption = if (lifecycleScenario == "callback_suppression") {
+            ",callback-suppression-probe,callback-suppression-gate=$gate"
+        } else {
+            ""
+        }
+        val captureFailureOption = if (lifecycleScenario == "capture_failure") {
+            ",force-capture-failure-once,capture-failure-gate=$gate"
+        } else {
+            ""
+        }
+        val execTransitionOption = if (lifecycleScenario == "exec_transition") ",force-exec-once" else ""
         val command = mutableListOf(
             java,
             "-agentpath:$agent=definitions=$definitions,session=${sessionTag.toString(
                 16,
-            )},mode=${args.getOrElse(7) { "full-stream" }},stack-transport=${args.getOrElse(8) { "dictionary" }}$benchmarkOptions$captureYieldOption",
+            )},mode=${args.getOrElse(
+                7,
+            ) { "full-stream" }},stack-transport=${args.getOrElse(
+                8,
+            ) { "dictionary" }}$benchmarkOptions$captureYieldOption$lifecycleBarrierOption$callbackSuppressionOption$captureFailureOption$execTransitionOption",
             "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
+            "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${TierESharedOpenatOracleWorkload.Profile.fromSystemProperty().wireName}",
             "-D${TierESharedOpenatOracleWorkload.MANIFEST_PROPERTY}=$oracleManifest",
             "-cp",
             workloadClasspath,
@@ -95,19 +246,50 @@ internal object TierEKernelSmoke {
             .getOrElse { failure ->
                 error("target exited before process identity could be admitted: ${failure.message}")
             }
-        val uniqueEdgeDecisions = mutableListOf<UniqueEdgeDecision>()
+        val uniqueEdgeDecisions = if (uniqueEdgeObserverEnabled) mutableListOf<UniqueEdgeDecision>() else null
+        val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = uniqueEdgeDecisions?.let { decisions ->
+            { decision: UniqueEdgeDecision -> decisions.add(decision) }
+        }
         val session = TierEProfilerSession(
             TierEbpfEngine(RealNativeEngine),
             processEpoch,
-            TierEOptions(emissionMode = emissionMode, stackTransport = stackTransport, benchmarkPhases = benchmark),
-            uniqueEdgeDecisionObserver = uniqueEdgeDecisions::add,
+            TierEOptions(
+                emissionMode = emissionMode,
+                stackTransport = stackTransport,
+                benchmarkPhases = benchmark,
+                benchmarkAllocationAccounting = benchmarkAllocationAccounting,
+                ringDecodeMode = ringDecodeMode,
+                ringArgumentListMode = ringArgumentListMode,
+                ringArgumentViewMode = ringArgumentViewMode,
+                taskIdentityMode = taskIdentityMode,
+                knownJoinMode = knownJoinMode,
+                ringSubmissionMode = ringSubmissionMode,
+                ownedArgumentStorage = ownedArgumentStorage,
+                readyTransferMode = readyTransferMode,
+                collectorResultMode = collectorResultMode,
+            ),
+            uniqueEdgeDecisionObserver = uniqueEdgeDecisionObserver,
+        )
+        val receiptClock = if (receiptClockMode == "monotonic") TierELinuxMonotonicClock() else null
+        val collectorLoop = TierECollectorLoop(
+            session = session,
+            policy = when (idlePollPolicy) {
+                "continuous" -> TierECollectorLoopPolicy.CONTINUOUS
+                "fixed" -> TierECollectorLoopPolicy(idlePollBackoffNanos, idlePollBackoffNanos, multiplier = 1)
+                "adaptive" -> TierECollectorLoopPolicy.boundedAdaptive(idlePollBackoffNanos, maxIdlePollBackoffNanos)
+                "readiness" -> TierECollectorLoopPolicy.READINESS_DRIVEN
+                else -> error("unreachable idle poll policy")
+            },
+            receiptClock = receiptClock,
         )
         var oracleRoot: Path? = null
+        var lifecycleFaultApplied = false
+        var kernelActiveBeforeDetach: Long? = null
+        var terminalProfile: TierEProfile? = null
+        var terminalLastMarkerPidTgid: Long? = null
         try {
             val expectedOpenatFds = if (sharedOpenatOracleWorkload) {
-            if (sharedOpenatOracleWorkload) {
                 while (!Files.exists(oracleManifest) || Files.size(oracleManifest) == 0L) Thread.sleep(1)
-            }
                 val manifest = Files.readAllLines(oracleManifest)
                 oracleRoot = manifest.first { it.startsWith("root=") }.removePrefix("root=").let(Path::of)
                 manifest.filter { it.startsWith("fd=") }.map { it.removePrefix("fd=").toInt() }.toSet()
@@ -115,7 +297,7 @@ internal object TierEKernelSmoke {
                 emptySet()
             }
             val attachStarted = System.nanoTime()
-            session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset)
+            session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
             args.getOrNull(6)?.toInt()?.let { cpu ->
                 pinTargetToCpu(cpu, process.pid())
@@ -123,27 +305,71 @@ internal object TierEKernelSmoke {
             val workloadStarted = System.nanoTime()
             Files.writeString(gate, "go")
             while (process.isAlive) {
-                session.poll()
+                if (terminalProfile == null) {
+                    collectorLoop.pollOnce()
+                }
+                if (lifecycleScenario == "detach_while_active" && !lifecycleFaultApplied && Files.exists(lifecycleReady)) {
+                    session.detachMarker()
+                    collectorLoop.pollOnce()
+                    kernelActiveBeforeDetach = session.kernelActiveObservationCount()
+                    Files.writeString(lifecycleRelease, "release\n")
+                    lifecycleFaultApplied = true
+                }
+                if (lifecycleScenario == "terminal_while_active" && !lifecycleFaultApplied && Files.exists(lifecycleReady)) {
+                    val snapshotDeadline = System.nanoTime() + 10_000_000_000L
+                    while ((!Files.exists(definitions) || Files.size(definitions) == 0L) && System.nanoTime() < snapshotDeadline) {
+                        Thread.sleep(10)
+                    }
+                    check(Files.exists(definitions) && Files.size(definitions) > 0L) {
+                        "terminal scenario did not receive a live definition snapshot"
+                    }
+                    collectorLoop.pollOnce()
+                    terminalLastMarkerPidTgid = session.lastMarkerPidTgid()
+                    terminalProfile = session.finish(definitions, producerClosed = false)
+                    Files.writeString(lifecycleRelease, "release\n")
+                    lifecycleFaultApplied = true
+                }
+                if (lifecycleScenario == "exec_transition" && !lifecycleFaultApplied && Files.exists(lifecycleReady)) {
+                    val snapshotDeadline = System.nanoTime() + 10_000_000_000L
+                    while ((!Files.exists(definitions) || Files.size(definitions) == 0L) && System.nanoTime() < snapshotDeadline) {
+                        Thread.sleep(10)
+                    }
+                    check(Files.exists(definitions) && Files.size(definitions) > 0L) {
+                        "exec scenario did not receive a live definition snapshot"
+                    }
+                    collectorLoop.pollOnce()
+                    terminalLastMarkerPidTgid = session.lastMarkerPidTgid()
+                    Files.writeString(lifecycleRelease, "release\n")
+                    lifecycleFaultApplied = true
+                }
                 if (!benchmark) {
                     Thread.sleep(5)
                 }
             }
             check(process.waitFor() == 0) { "agent workload failed" }
-            val captureYield = captureYieldPath?.let { TierECaptureYield.read(it) }
+            val captureYield = captureYieldPath
+                ?.takeIf(Files::exists)
+                ?.let(TierECaptureYield::read)
             val terminalStarted = System.nanoTime()
-            val profile = session.finish(definitions)
+            val lastMarkerPidTgid = terminalLastMarkerPidTgid ?: session.lastMarkerPidTgid()
+            // The child has exited successfully, providing the producer-quiescence proof that
+            // finish deliberately refuses to infer from an empty final ring drain.
+            val profile = terminalProfile ?: session.finish(definitions, producerClosed = lifecycleScenario != "exec_transition")
+            val resolvedInvocationIds = profile.syscalls
+                .filter { syscall -> syscall.resolutionStatus == ResolutionStatus.RESOLVED }
+                .mapNotNull { syscall -> syscall.observation.invocationId }
+                .toSet()
             val captureYieldJoin = captureYield?.let {
                 TierECaptureYield.join(
                     it,
-                    AgentDefinitionFile.read(definitions).invocations,
-                    profile.syscalls
-                        .filter { syscall -> syscall.resolutionStatus == ResolutionStatus.RESOLVED }
-                        .mapNotNull { syscall -> syscall.observation.invocationId },
+                    AgentDefinitionFile.readForInvocations(definitions, resolvedInvocationIds).invocations,
+                    resolvedInvocationIds,
                 )
             }
             val terminalNanos = System.nanoTime() - terminalStarted
             val workloadNanos = System.nanoTime() - workloadStarted
             val collectorPhases = session.benchmarkPhaseMetrics()
+            val collectorLoopMetrics = collectorLoop.metrics()
             val resolved = profile.syscalls.count { it.resolutionStatus == ResolutionStatus.RESOLVED }
             check(profile.syscalls.all { it.observation.task.tid > 0 }) { "kernel emitted an invalid task identity" }
             val workloadClassName = when {
@@ -196,7 +422,9 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
-            val oracle = if (oracleEnabled) {
+            val operationOracleAvailable = oracleEnabled &&
+                (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL || uniqueEdgeObserverEnabled)
+            val oracle = if (operationOracleAvailable) {
                 val expected = if (writeOracleWorkload) {
                     TierEWriteOracleWorkload.expectedOperationIds(
                     warmups = args.getOrElse(11) { "3" }.toInt(),
@@ -211,7 +439,7 @@ internal object TierEKernelSmoke {
                 if (emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
                     TierEOperationOracle.evaluateUnique(
                         expected,
-                        uniqueEdgeDecisions
+                        requireNotNull(uniqueEdgeDecisions)
                             .filter { decision ->
                                 decision.syscall.observation.syscallNumber == syscallNumber &&
                                     decision.syscall.observation.args[argumentIndex]
@@ -262,10 +490,18 @@ internal object TierEKernelSmoke {
             } else {
                 TierEOperationOracle.Report(0, 0, 0, 0, 0)
             }
+            if (ringSubmissionMode == TierERingSubmissionMode.BENCHMARK_DISABLED) {
+                check(profile.syscalls.isEmpty() && resolved == 0) {
+                    "ring submission control unexpectedly retained syscall evidence: ${profile.syscalls.size}"
+                }
+                check(oracleEnabled && oracle.expected > 0L && oracle.matched == 0L) {
+                    "ring submission control did not retain the expected absent-operation control: $oracle"
+                }
+            }
             // The shared workload declares one delete per batch. This verifies a stable
             // operation count, but path pointers are not copied from the ring record, so it
             // cannot prove a per-operation identity mapping. Keep this explicitly unverified.
-            val expectedWorkloadUnlinks: Long = if (oracleEnabled) {
+            val expectedWorkloadUnlinks: Long = if (operationOracleAvailable) {
                 oracle.expected
             } else if (commonWorkload && benchmark) {
                 args.getOrElse(11) { "3" }.toLong() + args.getOrElse(12) { "10" }.toLong()
@@ -274,19 +510,38 @@ internal object TierEKernelSmoke {
             } else {
                 0L
             }
-            val matchedOperations: Long = if (oracleEnabled) oracle.matched else workloadUnlinksResolved.toLong()
-            val missingWorkloadUnlinks = if (oracleEnabled) oracle.missing else (expectedWorkloadUnlinks - matchedOperations).coerceAtLeast(0L)
+            val matchedOperations: Long = if (operationOracleAvailable) oracle.matched else workloadUnlinksResolved.toLong()
+            val missingWorkloadUnlinks = if (operationOracleAvailable) oracle.missing else (expectedWorkloadUnlinks - matchedOperations).coerceAtLeast(0L)
             val extraWorkloadUnlinks = (matchedOperations - expectedWorkloadUnlinks).coerceAtLeast(0L)
-            val uniqueRepresentativeOracle = oracleEnabled && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL
+            val uniqueRepresentativeOracle = operationOracleAvailable && emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL
             val suppressedRepresentatives = if (uniqueRepresentativeOracle) oracle.suppressed else 0L
-            val operationOracleExpectation = if (uniqueRepresentativeOracle) {
+            val callbackProbeResolved = profile.syscalls.count { syscall ->
+                syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                    syscall.stackDefinition?.frames?.any { frame ->
+                        frame.className == TierESharedOpenatOracleWorkload::class.java.name &&
+                            frame.methodName == "callbackSuppressionProbe"
+                    } == true
+            }
+            val operationOracleExpectation = if (lifecycleScenario == "detach_while_active") {
+                "detached_inactive"
+            } else if (lifecycleScenario == "terminal_while_active") {
+                "terminal_incomplete"
+            } else if (lifecycleScenario == "callback_suppression") {
+                "callback_suppressed_outer"
+            } else if (lifecycleScenario == "capture_failure") {
+                "capture_failure_unknown"
+            } else if (uniqueRepresentativeOracle) {
                 "unique_representative"
             } else {
                 "full_exact"
             }
             println(
-                "tier-e-kernel-smoke: markerTransitions=${session.markerTransitionCount()} " +
-                "lastMarkerPidTgid=${session.lastMarkerPidTgid().toULong().toString(16)} " +
+                "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
+                    "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
+                "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
+                "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
+                "benchmark_control_evidence=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "none" else "EXPECTED_INCOMPLETE"} " +
+                "lastMarkerPidTgid=${lastMarkerPidTgid.toULong().toString(16)} " +
                 "observations=${profile.syscalls.size} resolved=$resolved workload_resolved=$workloadResolved " +
                 "workload_unlinks_resolved=$workloadUnlinksResolved unknown_no_active=$unknown " +
                 "ambient_inactive=${profile.integrity.ambientInactiveObservations} " +
@@ -294,15 +549,18 @@ internal object TierEKernelSmoke {
                 "reconciliation_exact_invocations=${profile.integrity.reconciliation.exactInvocations} " +
                 "reconciliation_failed_invocations=${profile.integrity.reconciliation.failedInvocations} " +
                 "reconciliation_kernel_active_observations=${profile.integrity.reconciliation.kernelActiveObservations} " +
+                "kernel_active_before_detach=${kernelActiveBeforeDetach ?: -1} " +
                 "unknown_other=$unexplainedUnknown wrong=$wrong lost=${profile.integrity.observedLosses} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=${profile.integrity.coverageComplete} " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
                 "missing_operations=$missingWorkloadUnlinks extra_operations=$extraWorkloadUnlinks " +
                 "candidate_operations=${oracle.candidates} acknowledged_operations=${oracle.acknowledged} " +
                 "suppressed_representatives=$suppressedRepresentatives " +
+                "callback_probe_resolved=$callbackProbeResolved " +
                 "unresolved_operations=${oracle.unresolved} " +
                 "duplicate_operations=${oracle.duplicates} wrong_operations=${oracle.wrong} " +
-                "unclassified_operations=${oracle.unclassified} operation_oracle_available=$oracleEnabled " +
+                "unclassified_operations=${oracle.unclassified} operation_oracle_available=$operationOracleAvailable " +
+                "unique_edge_observer_enabled=$uniqueEdgeObserverEnabled " +
                 "operation_oracle_expectation=$operationOracleExpectation " +
                 "capture_yield_records=${captureYield?.records?.size ?: 0} " +
                 "capture_yield_captured=${captureYield?.captured ?: 0} " +
@@ -317,18 +575,151 @@ internal object TierEKernelSmoke {
                     "$binding:${yield.records}:${yield.exactJoined}:${yield.missingDefinition}:${yield.outcomeMismatch}:" +
                         "${yield.resolvedInvocations}:${yield.resolvedSyscalls}:${yield.capturedWithoutResolvedSyscall}"
                 }} " +
-                "ring_drain_ns=${collectorPhases.ringDrainNanos} collector_join_ns=${collectorPhases.collectorJoinNanos} " +
+                "ring_drain_ns=${collectorPhases.ringDrainNanos} ring_scan_ns=${collectorPhases.ringScanNanos} " +
+                    "ring_payload_slice_ns=${collectorPhases.ringPayloadSliceNanos} ring_decode_ns=${collectorPhases.ringDecodeNanos} ring_append_ns=${collectorPhases.ringAppendNanos} " +
+                    "ring_consumer_publish_ns=${collectorPhases.ringConsumerPublishNanos} " +
+                    "ring_scanned_records=${collectorPhases.ringScannedRecords} ring_ready_records=${collectorPhases.ringReadyRecords} " +
+                    "ring_reader_initialization_ns=${collectorPhases.ringReaderInitializationNanos} " +
+                    "collector_join_ns=${collectorPhases.collectorJoinNanos} " +
+                    "allocation_measurement_available=${if (collectorPhases.allocationMeasurementAvailable) 1 else 0} " +
+                    "ring_drain_allocated_bytes=${collectorPhases.ringDrainAllocatedBytes} " +
+                    "collector_join_allocated_bytes=${collectorPhases.collectorJoinAllocatedBytes} " +
+                    "observation_conversion_allocated_bytes=${collectorPhases.observationConversionAllocatedBytes} " +
+                    "collector_resolution_allocated_bytes=${collectorPhases.collectorResolutionAllocatedBytes} " +
+                    "resolved_evidence_allocated_bytes=${collectorPhases.resolvedEvidenceAllocatedBytes} " +
+                    "joiner_enqueue_allocated_bytes=${collectorPhases.joinerEnqueueAllocatedBytes} " +
+                    "joiner_take_ready_allocated_bytes=${collectorPhases.joinerTakeReadyAllocatedBytes} " +
+                    "unique_edge_gate_allocated_bytes=${collectorPhases.uniqueEdgeGateAllocatedBytes} " +
+                    "unique_edge_suppression_diagnostic_allocated_bytes=${collectorPhases.uniqueEdgeSuppressionDiagnosticAllocatedBytes} " +
+                    "unique_edge_candidate_ownership_allocated_bytes=${collectorPhases.uniqueEdgeCandidateOwnershipAllocatedBytes} " +
+                    "unique_edge_candidate_diagnostic_allocated_bytes=${collectorPhases.uniqueEdgeCandidateDiagnosticAllocatedBytes} " +
+                    "batch_freeze_allocated_bytes=${collectorPhases.batchFreezeAllocatedBytes} " +
                 "collector_polls=${collectorPhases.polls} " +
+                "collector_loop_active_polls=${collectorLoopMetrics.activePolls} " +
+                "collector_loop_idle_polls=${collectorLoopMetrics.idlePolls} " +
+                "collector_loop_parks=${collectorLoopMetrics.parks} " +
+                "collector_loop_parked_ns=${collectorLoopMetrics.parkedNanos} " +
+                "collector_loop_max_consecutive_idle_polls=${collectorLoopMetrics.maxConsecutiveIdlePolls} " +
+                "collector_readiness_waits=${collectorLoopMetrics.readinessWaits} " +
+                "collector_readiness_wakeups=${collectorLoopMetrics.readinessWakeups} " +
+                "collector_readiness_timeouts=${collectorLoopMetrics.readinessTimeouts} " +
+                "collector_readiness_spurious_wakeups=${collectorLoopMetrics.readinessSpuriousWakeups} " +
+                "collector_readiness_waited_ns=${collectorLoopMetrics.readinessWaitedNanos} " +
+                "collector_receipt_samples=${collectorLoopMetrics.receiptAge.samples} " +
+                "collector_receipt_min_ns=${collectorLoopMetrics.receiptAge.minNanos} " +
+                "collector_receipt_mean_ns=${collectorLoopMetrics.receiptAge.meanNanos} " +
+                "collector_receipt_max_ns=${collectorLoopMetrics.receiptAge.maxNanos} " +
+                "collector_receipt_p50_upper_ns=${collectorLoopMetrics.receiptAge.p50UpperBoundNanos} " +
+                "collector_receipt_p95_upper_ns=${collectorLoopMetrics.receiptAge.p95UpperBoundNanos} " +
+                "collector_receipt_p99_upper_ns=${collectorLoopMetrics.receiptAge.p99UpperBoundNanos} " +
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
-            check(profile.integrity.observedLosses == 0L) { "Tier E lost observations: ${profile.integrity}" }
-            check(resolved > 0) { "no syscall received a logical Java stack" }
+            if (lifecycleScenario == "detach_while_active") {
+                check(lifecycleFaultApplied) { "native lifecycle barrier was never observed" }
+                check(profile.integrity.lifecycleInvalidations > 0L) {
+                    "detach scenario did not invalidate the active lifecycle: ${profile.integrity}"
+                }
+                check(profile.integrity.ambientInactiveObservations > 0L) {
+                    "detach scenario produced no explicit inactive observations: ${profile.integrity}"
+                }
+                check(profile.integrity.reconciliation.admittedInvocations > 0L) {
+                    "detach scenario did not admit a native invocation before detachment: ${profile.integrity}"
+                }
+                val activeBeforeDetach = requireNotNull(kernelActiveBeforeDetach) { "detach scenario missed active-observation snapshot" }
+                check(profile.integrity.reconciliation.kernelActiveObservations == activeBeforeDetach) {
+                    "detach scenario retained kernel-active observations after detachment: before=$activeBeforeDetach after=${profile.integrity.reconciliation.kernelActiveObservations}"
+                }
+            } else if (lifecycleScenario == "terminal_while_active") {
+                check(lifecycleFaultApplied) { "native terminal barrier was never observed" }
+                check(!profile.integrity.coverageComplete) {
+                    "terminal shutdown with an active producer was incorrectly complete: ${profile.integrity}"
+                }
+                check(profile.integrity.lifecycleInvalidations > 0L) {
+                    "terminal shutdown with an active producer did not invalidate lifecycle evidence: ${profile.integrity}"
+                }
+                check(profile.integrity.reconciliation.admittedInvocations > 0L) {
+                    "terminal scenario did not retain the active native invocation"
+                }
+            } else if (lifecycleScenario == "capture_failure") {
+                val yield = requireNotNull(captureYield) { "capture failure scenario requires capture-yield evidence" }
+                val join = requireNotNull(captureYieldJoin) { "capture failure scenario requires capture-yield join evidence" }
+                val failedInvocationIds = yield.records
+                    .filter { it.outcome == TierECaptureYield.Outcome.CAPTURE_FAILED }
+                    .mapTo(HashSet()) { it.invocationId }
+                check(failedInvocationIds.isNotEmpty()) { "native capture failure injection did not fire" }
+                check(join.missingDefinition > 0) { "failed capture unexpectedly had an exact invocation definition: $join" }
+                check(
+                    profile.syscalls.none { syscall ->
+                        syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                            syscall.observation.invocationId?.value in failedInvocationIds
+                    },
+                ) { "a failed capture invocation was emitted as exact attribution" }
+                check(oracle.expected > oracle.matched && oracle.duplicates == 0L && oracle.wrong == 0L && oracle.unclassified == 0L) {
+                    "capture failure did not omit its controlled operation from exact attribution: $oracle"
+                }
+            } else if (lifecycleScenario == "exec_transition") {
+                check(lifecycleFaultApplied) { "native exec barrier was never observed" }
+                check(!profile.integrity.coverageComplete) {
+                    "exec transition incorrectly claimed complete lifecycle evidence: ${profile.integrity}"
+                }
+                check(profile.integrity.lifecycleInvalidations > 0L) {
+                    "exec transition did not invalidate lifecycle evidence: ${profile.integrity}"
+                }
+                check(profile.integrity.ambientInactiveObservations > 0L) {
+                    "post-exec syscalls did not become explicitly inactive: ${profile.integrity}"
+                }
+                check(profile.syscalls.none { it.resolutionStatus == ResolutionStatus.RESOLVED }) {
+                    "post-exec syscall retained exact attribution from the replaced JVM"
+                }
+            } else if (expectRetentionExhaustion) {
+                check(profile.integrity.observedLosses > 0L && !profile.integrity.coverageComplete) {
+                    "retention exhaustion must remain explicit incomplete evidence: ${profile.integrity}"
+                }
+                check(resolved > 0) { "retention exhaustion control did not retain any resolved observations" }
+            } else {
+                check(profile.integrity.observedLosses == 0L) { "Tier E lost observations: ${profile.integrity}" }
+                if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
+                    check(resolved > 0) { "no syscall received a logical Java stack" }
+                } else {
+                    check(resolved == 0 && profile.syscalls.isEmpty()) {
+                        "ring submission control retained exact observation evidence"
+                    }
+                }
+                if (lifecycleScenario == "callback_suppression") {
+                    check(profile.integrity.ambientInactiveObservations > 0L) {
+                        "callback probe did not produce an explicit inactive interval: ${profile.integrity}"
+                    }
+                    check(callbackProbeResolved > 0L) {
+                        "callback probe did not establish an independently resolved nested attribution"
+                    }
+                    check(
+                            operationOracleAvailable &&
+                            oracle.expected > 0L &&
+                            oracle.matched == 0L &&
+                            oracle.candidates == 0L &&
+                            oracle.acknowledged == 0L &&
+                            oracle.suppressed == 0L &&
+                            oracle.unresolved == 0L &&
+                            (oracle.missing == 0L || oracle.missing == oracle.expected) &&
+                            oracle.duplicates == 0L &&
+                            oracle.wrong == 0L &&
+                            oracle.unclassified == 0L,
+                    ) {
+                        "callback suppression restored or misclassified an invalidated outer operation: $oracle"
+                    }
+                }
+            }
             check(wrong == 0) { "$wrong syscalls were attributed outside the controlled workload stack" }
             check(wronglyAttributedUnlinks == 0) {
                 "$wronglyAttributedUnlinks unlink syscalls were assigned a non-deletion stack"
             }
-            if (oracleEnabled) {
+            if (
+                ringSubmissionMode == TierERingSubmissionMode.ENABLED &&
+                lifecycleScenario !in setOf("detach_while_active", "callback_suppression", "terminal_while_active", "capture_failure", "exec_transition") &&
+                operationOracleAvailable &&
+                !expectRetentionExhaustion
+            ) {
                 val oracleMatchesMode = if (uniqueRepresentativeOracle) {
                     oracle.expected > 0L &&
                         oracle.matched == oracle.expected &&
@@ -364,11 +755,14 @@ internal object TierEKernelSmoke {
             System.err.print(expectedFailure.stackTraceToString())
             exitProcess(1)
         } finally {
+            receiptClock?.close()
             session.close()
             child.close()
             oracleRoot?.let { root -> runCatching { deleteTree(root) } }
             Files.deleteIfExists(gate)
             Files.deleteIfExists(oracleManifest)
+            Files.deleteIfExists(lifecycleReady)
+            Files.deleteIfExists(lifecycleRelease)
             captureYieldPath?.let(Files::deleteIfExists)
         }
     }

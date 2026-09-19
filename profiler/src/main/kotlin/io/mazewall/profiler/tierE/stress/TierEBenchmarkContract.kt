@@ -10,18 +10,46 @@ internal object TierEBenchmarkContract {
         requiresOperationOracle: Boolean = userNotif,
     ): Verdict {
         val workloadFailures = buildList {
-            if (tierE && evidence.observations == 0L) add("no_observations")
-            if (tierE && evidence.workloadResolved == 0L) add("missing_workload_stack")
-            if (tierE && !evidence.operationOracle.available && evidence.workloadUnlinksResolved == 0L) add("missing_workload_unlink")
+            if (tierE && !evidence.expectedInactiveLifecycleScenario && evidence.observations == 0L) add("no_observations")
+            if (tierE && !evidence.expectedInactiveLifecycleScenario && evidence.workloadResolved == 0L) add("missing_workload_stack")
+            if (
+                tierE &&
+                !evidence.expectedInactiveLifecycleScenario &&
+                !evidence.observerFreeUniqueEdgeMeasurement &&
+                !evidence.operationOracle.available &&
+                evidence.workloadUnlinksResolved == 0L
+            ) {
+                add("missing_workload_unlink")
+            }
             if (tierE && evidence.wrong != 0L) add("wrong_workload_stack")
-            if (tierE && evidence.lost != 0L) add("ring_loss")
-            if (tierE && evidence.unknownOther != 0L) add("unexplained_unknown")
+            if (tierE && !evidence.expectedIncompleteLifecycleScenario && evidence.lost != 0L) add("ring_loss")
+            if (tierE && !evidence.expectedIncompleteLifecycleScenario && evidence.unknownOther != 0L) add("unexplained_unknown")
+            if (tierE && evidence.callbackSuppressionScenario && evidence.ambientInactive == 0L) add("missing_callback_inactive_diagnostic")
+            if (tierE && evidence.callbackSuppressionScenario && evidence.callbackProbeResolved == 0L) add("missing_callback_suppression_probe")
             if (requiresWorkloadFrames && !evidence.workloadFrames) add("missing_workload_frames")
             if (userNotif && !requiresWorkloadFrames && evidence.workloadFrames) add("unexpected_workload_frames")
         }
         val oracleFailures = buildList {
             if (requiresOperationOracle && !evidence.operationOracle.available) add("operation_oracle_unavailable")
-            if (evidence.operationOracle.available) {
+            if (evidence.operationOracle.available && evidence.callbackSuppressionScenario) {
+                if (evidence.operationOracle.expected == 0L) add("no_expected_operations")
+                if (
+                    evidence.operationOracle.matched != 0L ||
+                    evidence.operationOracle.candidates != 0L ||
+                    evidence.operationOracle.acknowledged != 0L ||
+                    evidence.operationOracle.suppressed != 0L ||
+                    evidence.operationOracle.unresolved != 0L ||
+                    (
+                        evidence.operationOracle.missing != 0L &&
+                        evidence.operationOracle.missing != evidence.operationOracle.expected
+                    )
+                ) {
+                    add("callback_suppression_resurrected_outer_operation")
+                }
+                if (evidence.operationOracle.duplicates != 0L) add("duplicate_operations")
+                if (evidence.operationOracle.wrong != 0L) add("wrong_operation_identity")
+                if (evidence.operationOracle.unclassified != 0L) add("unclassified_operation")
+            } else if (evidence.operationOracle.available && !evidence.expectedIncompleteLifecycleScenario) {
                 if (evidence.operationOracle.expected == 0L) add("no_expected_operations")
                 val expectedMatches = if (evidence.operationOracle.representativeOnly) {
                     evidence.operationOracle.expected > 0L &&
@@ -46,7 +74,11 @@ internal object TierEBenchmarkContract {
                 else -> CorrectnessState.PASS
             },
             wholeSessionEvidence = if (tierE || userNotif) {
-                if (evidence.evidenceComplete) EvidenceState.COMPLETE else EvidenceState.INCOMPLETE
+                if (evidence.evidenceComplete && !evidence.callbackSuppressionScenario && !evidence.expectedIncompleteLifecycleScenario) {
+                    EvidenceState.COMPLETE
+                } else {
+                    EvidenceState.INCOMPLETE
+                }
             } else {
                 EvidenceState.NOT_APPLICABLE
             },
@@ -61,13 +93,35 @@ internal object TierEBenchmarkContract {
         val wrong: Long = 0,
         val lost: Long = 0,
         val unknownOther: Long = 0,
+        /** Aggregate inactive task-storage observations; no per-syscall record is retained. */
+        val ambientInactive: Long = 0,
         val dropped: Long = 0,
         val workloadFrames: Boolean = false,
         val evidenceComplete: Boolean = false,
         /** Baseline child completed its independently checked, declared workload. */
         val controlledWorkloadVerified: Boolean = false,
+        /** A deterministic fixture detached attribution before releasing its controlled syscall. */
+        val detachedInactiveScenario: Boolean = false,
+        /** A deterministic fixture terminally closes the source before releasing its controlled syscall. */
+        val terminalWhileActiveScenario: Boolean = false,
+        /** A test-only native fault rejected exact-stack admission after the workload gate opened. */
+        val forcedCaptureFailureScenario: Boolean = false,
+        /** A test-only native fault replaced the JVM after an exact marker was admitted. */
+        val execTransitionScenario: Boolean = false,
+        /** A Java callback invalidated the outer native scope before the controlled operation resumed. */
+        val callbackSuppressionScenario: Boolean = false,
+        /** Exact nested callback evidence; inactive observations remain aggregate diagnostics. */
+        val callbackProbeResolved: Long = 0,
+        /** Paired production-cost lane without the benchmark-only unique-edge decision observer. */
+        val observerFreeUniqueEdgeMeasurement: Boolean = false,
         val operationOracle: OperationOracle = OperationOracle(),
-    )
+    ) {
+        val expectedIncompleteLifecycleScenario: Boolean
+            get() = detachedInactiveScenario || terminalWhileActiveScenario || forcedCaptureFailureScenario || execTransitionScenario
+
+        val expectedInactiveLifecycleScenario: Boolean
+            get() = expectedIncompleteLifecycleScenario || callbackSuppressionScenario
+    }
 
     /** Independent expected-to-observed operation accounting for benchmark-only fixtures. */
     internal data class OperationOracle(

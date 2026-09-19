@@ -5,6 +5,13 @@ import kotlin.test.assertEquals
 
 class TierEOperationOracleTest {
     @Test
+    fun `raw diagnostic saturation makes USER NOTIF operation identity unverified`() {
+        assertEquals(true, UserNotifOracleSmoke.operationOracleAvailable(sharedOpenatOracle = true, diagnosticDrops = 0))
+        assertEquals(false, UserNotifOracleSmoke.operationOracleAvailable(sharedOpenatOracle = true, diagnosticDrops = 1))
+        assertEquals(false, UserNotifOracleSmoke.operationOracleAvailable(sharedOpenatOracle = false, diagnosticDrops = 0))
+    }
+
+    @Test
     fun `shared openat oracle uses directory fd from syscall argument zero`() {
         assertEquals(73, UserNotifOracleSmoke.sharedOpenatOperationId(listOf(73L, 1L, 2L, 999L)))
     }
