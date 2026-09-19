@@ -132,24 +132,29 @@ internal object TierECommonFileWorkload {
     private fun runLoopbackSocket(iterations: Int): Result {
         val started = System.nanoTime()
         var checksum = 0L
-        ServerSocket(0).use { server ->
-            repeat(iterations) { index ->
-                val received = AtomicReference<Int>()
-                val accepted = Thread {
-                    server.accept().use { peer ->
-                        received.set(peer.getInputStream().read())
-                        peer.getOutputStream().write(index and 0xff)
+        val terminalFile = Files.createTempFile("mazewall-tier-e-loopback", ".tmp")
+        try {
+            ServerSocket(0).use { server ->
+                repeat(iterations) { index ->
+                    val received = AtomicReference<Int>()
+                    val accepted = Thread {
+                        server.accept().use { peer ->
+                            received.set(peer.getInputStream().read())
+                            peer.getOutputStream().write(index and 0xff)
+                        }
                     }
+                    accepted.start()
+                    Socket("127.0.0.1", server.localPort).use { client ->
+                        client.getOutputStream().write((index xor 0x5a) and 0xff)
+                        check(client.getInputStream().read() == (index and 0xff)) { "loopback response mismatch at iteration $index" }
+                    }
+                    accepted.join()
+                    check(received.get() == ((index xor 0x5a) and 0xff)) { "loopback request mismatch at iteration $index" }
+                    checksum = checksum * 31 + index
                 }
-                accepted.start()
-                Socket("127.0.0.1", server.localPort).use { client ->
-                    client.getOutputStream().write((index xor 0x5a) and 0xff)
-                    check(client.getInputStream().read() == (index and 0xff)) { "loopback response mismatch at iteration $index" }
-                }
-                accepted.join()
-                check(received.get() == ((index xor 0x5a) and 0xff)) { "loopback request mismatch at iteration $index" }
-                checksum = checksum * 31 + index
             }
+        } finally {
+            Files.deleteIfExists(terminalFile)
         }
         return Result(iterations, checksum, System.nanoTime() - started)
     }

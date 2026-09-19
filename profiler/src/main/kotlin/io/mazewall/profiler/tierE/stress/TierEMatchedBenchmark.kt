@@ -444,11 +444,18 @@ internal object TierEMatchedBenchmark {
                 metricOrZero(output, "user_notif_ack_to_return_ns"),
             ),
         )
+        val contractEvidence = evidence.contractEvidence()
+        val applicationSemanticFrames =
+            applicationWorkloadRequiresSemanticFrames(config.workload.jsonName) && contractEvidence.workloadFrames
         val evaluatedVerdict = TierEBenchmarkContract.evaluate(
             mode.tierE,
             mode.userNotif,
-            mode.requiresWorkloadFrames,
-            evidence.contractEvidence(),
+            mode.requiresWorkloadFrames || applicationSemanticFrames,
+            if (applicationSemanticFrames) {
+                contractEvidence.copy(controlledWorkloadVerified = true)
+            } else {
+                contractEvidence
+            },
             requiresOperationOracle = mode.userNotif && userNotifOperationOracleRequired(config.workload.jsonName),
         )
         val verdict = if (variant.isBenchmarkControl) {
@@ -2145,6 +2152,12 @@ internal object TierEMatchedBenchmark {
     internal fun lifecycleVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_LIFECYCLE, rotation).map { it.jsonName(Scope.TIER_E_LIFECYCLE) }
 
     internal fun userNotifOperationOracleRequired(workload: String): Boolean = Workload.fromProperty(workload).userNotifArgument == "shared-openat-oracle"
+
+    /**
+     * These workloads emit an independently checked batch checksum and a terminal workload frame.
+     * That pair is the Tier E controlled-workload oracle; USER_NOTIF still needs an identity oracle.
+     */
+    internal fun applicationWorkloadRequiresSemanticFrames(workload: String): Boolean = Workload.fromProperty(workload).kernelArgument == COMMON_WORKLOAD
 
     internal fun captureProfileVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_CAPTURE_PROFILE, rotation).map { it.jsonName(Scope.TIER_E_CAPTURE_PROFILE) }
 

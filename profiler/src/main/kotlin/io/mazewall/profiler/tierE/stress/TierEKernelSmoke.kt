@@ -551,7 +551,7 @@ internal object TierEKernelSmoke {
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "benchmark_control_evidence=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "none" else "EXPECTED_INCOMPLETE"} " +
                 "lastMarkerPidTgid=${lastMarkerPidTgid.toULong().toString(16)} " +
-                "observations=${profile.syscalls.size} resolved=$resolved workload_resolved=$workloadResolved " +
+                "observations=${profile.syscalls.size} resolved=$resolved workload_resolved=$workloadResolved workloadFrames=${workloadResolved > 0} " +
                 "workload_unlinks_resolved=$workloadUnlinksResolved unknown_no_active=$unknown " +
                 "ambient_inactive=${profile.integrity.ambientInactiveObservations} " +
                 "reconciliation_admitted_invocations=${profile.integrity.reconciliation.admittedInvocations} " +

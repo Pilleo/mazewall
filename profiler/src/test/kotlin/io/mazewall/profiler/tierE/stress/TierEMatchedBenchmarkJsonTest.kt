@@ -125,6 +125,15 @@ class TierEMatchedBenchmarkJsonTest {
     }
 
     @Test
+    fun `application workloads require checked terminal frames for Tier E semantic verification`() {
+        assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("application"))
+        assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("filesystem_metadata"))
+        assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("buffered_file_io"))
+        assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("loopback_socket"))
+        assertEquals(false, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("syscall_dense"))
+    }
+
+    @Test
     fun `capture profile scope pairs full and narrowed dictionary captures`() {
         assertEquals(
             setOf(
