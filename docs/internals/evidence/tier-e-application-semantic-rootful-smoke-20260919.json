@@ -44,6 +44,20 @@
     "uprobe_minus_usdt_bootstrap_95_ci_ns": [83005, 4092056],
     "conclusion": "AUTO selected a valid concrete marker transport for this application workload. This decision does not generalize to filesystem-metadata or loopback-socket workloads without matched decision runs."
   },
+  "filesystem_metadata_decision": {
+    "artifact": "build/tier-e-metadata-semantic-decision-rootful/results.jsonl",
+    "run_level": "decision",
+    "forks": 15,
+    "batches_per_fork": 10,
+    "measured_operations_per_variant": 15000,
+    "workload_correctness": "PASS",
+    "profiled_whole_session_complete_forks": 15,
+    "auto_minus_usdt_workload_median_ns": -603985,
+    "auto_minus_usdt_bootstrap_95_ci_ns": [-2957118, 4384297],
+    "uprobe_minus_usdt_workload_median_ns": 2067047,
+    "uprobe_minus_usdt_bootstrap_95_ci_ns": [-249502, 4532350],
+    "conclusion": "All concrete marker transports were semantically complete. Neither comparison interval excludes zero, so this workload does not select between AUTO, explicit Uprobe, and explicit USDT."
+  },
   "semantic_oracle": "Each application batch emits an independently checked checksum. Tier E may claim controlled-workload correctness only when the matching terminal workload frame is present; USER_NOTIF remains unverified for these workloads because it has no per-operation identity oracle.",
   "dimensions": {
     "capture_domain_validity": "complete",
@@ -57,7 +71,7 @@
   "performance_gate": "not_measured",
   "policy_eligibility": false,
   "limitations": [
-    "Filesystem-metadata and loopback-socket are one-fork semantic smoke evidence, not performance decision runs.",
+    "Loopback-socket is one-fork semantic smoke evidence, not a performance decision run.",
     "The artifact was produced from the exact source content later committed as 05d699a8; its manifest records the pre-commit working-tree revision and dirty count."
   ]
 }
