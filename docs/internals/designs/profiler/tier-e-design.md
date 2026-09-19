@@ -1298,11 +1298,18 @@ operation to exactly one observed syscall and validates its invocation, executio
 and version-qualified logical stack. Aggregate resolved-event counts and matching stack names
 are useful diagnostics but are not an operation oracle.
 
-The current shared file workload supplies only a batch-scoped expected `unlink` count. Ring
+The legacy shared file workload supplies only a batch-scoped expected `unlink` count. Ring
 records intentionally retain syscall arguments, not dereferenced pathname bytes, so it cannot
-map an `unlink` to a particular declared pathname. Its benchmark results are therefore
-`UNVERIFIED`, never `PASS`; a missing, extra, wrong, duplicate, or unclassified operation is
-`FAILED`. Whole-session evidence is reported independently and does not become policy input.
+map an `unlink` to a particular declared pathname. Its benchmark results remain `UNVERIFIED`,
+never `PASS`; a missing, extra, wrong, duplicate, or unclassified operation is `FAILED`.
+
+The application-shaped `filesystem_metadata`, `buffered_file_io`, and `loopback_socket`
+workloads additionally emit a deterministic batch checksum and a terminal workload frame. Tier E
+may report `PASS` for that controlled workload only when both are retained; checksum equality is
+compared across every matched arm and the terminal frame proves the profiled child completed its
+declared batch. This is deliberately narrower than a per-syscall pathname identity oracle.
+USER_NOTIF has no equivalent operation-identity mapping for those workloads and remains
+`UNVERIFIED`. Whole-session evidence is reported independently and does not become policy input.
 The runner also retains `attach_ns`, `workload_ns`, and `terminal_ns` for Tier E, plus
 `profile_session_ns` and `profile_overhead_ns` for USER_NOTIF. These are phase measurements,
 not a causal explanation; deeper USER_NOTIF readiness/receive/ack instrumentation remains
@@ -1444,6 +1451,15 @@ full-stream and `-4.856 ms` for unique-edge, with mixed per-fork signs. Adaptive
 remains opt-in. The result does not measure end-to-end observation latency, sustained overload, or
 adaptive long-session behavior and cannot promote a production default. The retained artifact is
 [tier-e-adaptive-poll-20260918.json](../../evidence/tier-e-adaptive-poll-20260918.json).
+
+The later sustained collector contract uses a monotonic open-loop producer: it never catches up
+in a burst after delay, records requested and achieved rate separately, and classifies an
+intentional overload as `INCOMPLETE` and performance-ineligible even when a short run happens to
+lose no records. A rootful fifteen-fork, ten-batch near-capacity run at 1,000 boundaries/s retained
+complete evidence for both continuous and bounded-adaptive collector policies. It validates the
+load generator and terminal accounting; it does not promote either policy because that matrix does
+not include the readiness-policy CPU and receipt-latency acceptance dimensions. See
+[tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json](../../evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json).
 
 The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
 operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
