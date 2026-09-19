@@ -1479,6 +1479,18 @@ confidence intervals, and it compares adaptive polling rather than the separatel
 readiness policy, so continuous polling remains the production default. See
 [tier-e-sustained-receipt-rootful-decision-20260920.json](../../evidence/tier-e-sustained-receipt-rootful-decision-20260920.json).
 
+**Historical evidence.** The rootful fifteen-fork capture-profile decision compared full capture
+with the opt-in `jdk25-unix-openat0` domain on the same syscall-dense application oracle. Both
+profiled arms matched all 1,300 declared operations per fork and retained complete terminal
+evidence. The full-minus-selected paired median was `392.10 us` per measured batch with a
+bootstrap interval of `30.98 us` to `778.13 us`; this is operational guidance for the declared
+capture domain, not a universal application slowdown or a default change. Full capture remains
+the safest default. A selected profile covers only its declared binding set, and excluded bindings
+remain explicit capture-domain omissions. The retained harness proves operation-oracle and
+admitted dictionary-join equivalence; it does not retain a cross-JVM logical-frame transcript, so
+it does not claim byte-for-byte frame equivalence across separate JVM forks. See
+[tier-e-capture-profile-rootful-decision-20260920.json](../../evidence/tier-e-capture-profile-rootful-decision-20260920.json).
+
 The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
 operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
 exact Tier E measured approximately 7.3--9.3k profiled operations/s for `syscall_dense`,

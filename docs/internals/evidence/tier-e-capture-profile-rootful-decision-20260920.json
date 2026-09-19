@@ -1,0 +1,56 @@
+{
+  "kind": "tier_e_capture_profile_rootful_decision",
+  "timestamp": "2026-09-20",
+  "environment": {
+    "runner": "local rootful Docker",
+    "run_level": "decision",
+    "forks": 15,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "workload": "syscall_dense"
+  },
+  "artifact": "build/tier-e-capture-profile-decision-rootful/results.jsonl",
+  "command": "env -u DOCKER_HOST MAZEWALL_TIER_E_RUN_LEVEL=decision MAZEWALL_TIER_E_CALIBRATION=false MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-capture-profile MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-capture-profile-decision-rootful",
+  "workload_correctness": "PASS",
+  "variants": {
+    "dictionary_full_stream_profile_full": {
+      "complete_forks": 15,
+      "matched_operations_per_fork": 1300,
+      "median_batch_ns": 2078329,
+      "profiled_operations_per_second": 16763.72226700452,
+      "max_peak_rss_bytes": 129146880,
+      "capture_domain": "all admitted native bindings"
+    },
+    "dictionary_full_stream_profile_jdk25_unix_openat0": {
+      "complete_forks": 15,
+      "matched_operations_per_fork": 1300,
+      "median_batch_ns": 1661304,
+      "profiled_operations_per_second": 21909.032473186715,
+      "max_peak_rss_bytes": 126935040,
+      "capture_domain": "JDK 25 UnixNativeDispatcher.openat0"
+    }
+  },
+  "paired_full_minus_selected": {
+    "median_batch_ns": 392097,
+    "bootstrap_95_ci_low_ns": 30976,
+    "bootstrap_95_ci_high_ns": 778128,
+    "pairs": 15
+  },
+  "semantic_contract": {
+    "application_oracle_matched": true,
+    "admitted_capture_dictionary_join_complete": true,
+    "cross_jvm_logical_frame_transcript": "not_retained",
+    "interpretation": "The selected profile is a valid opt-in capture-domain narrowing for this declared workload. It is not a claim that excluded bindings are semantically covered, and it does not replace the full-capture default."
+  },
+  "dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete_for_declared_domain",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "measured"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "passed_for_opt_in_scope",
+  "policy_eligibility": false
+}
