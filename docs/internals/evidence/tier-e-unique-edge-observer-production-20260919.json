@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_unique_edge_observer_oracle_vs_production_allocation",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "path": "build/tier-e-unique-edge-observer-accounting-20260919/results.jsonl",
+    "sha256": "7b6fa9a23599b0127bd2ad67c7efb92bea92245613366a2c19982f858f996795",
+    "manifest_sha256": "484b0dc43d85c48ddb259e1fbb9bde4a297f59c2b7de8dff64ea78200ebabc34",
+    "benchmark_log_sha256": "bf6ebe7ddd1c3570a0ac85376596a1f6cc8648146d8261f158cbe72c39027274"
+  },
+  "environment": { "execution": "rootful Docker", "scope": "tier-e-unique-edge-observer", "warmups": 3, "measured_batches": 10, "rotated_forks": 5 },
+  "correctness": { "outputs": 10, "workload_correctness": "PASS", "tier_e_session_evidence": "COMPLETE", "policy_eligibility": false },
+  "per_ring_ready_record": {
+    "oracle_lane": { "collector_resolution": 234.97, "edge_gate": 92.13, "suppression_diagnostic": 117.13, "candidate_ownership": 10.03, "candidate_diagnostic": 10.41 },
+    "production_lane": { "collector_resolution": 234.96, "edge_gate": 92.13, "suppression_diagnostic": 0.0, "candidate_ownership": 10.03, "candidate_diagnostic": 0.0, "remaining_unclassified_production": 132.80 }
+  },
+  "decision": "The observer-free production lane has the same aggregate collector-resolution allocation as the oracle lane. Observer decisions are measured side counters, not the cause of the aggregate allocation. The next work is to split the approximately 132.80 B per ready record remaining after edge-gate and candidate-token ownership; no allocation optimization is accepted by this artifact.",
+  "verdict_dimensions": { "capture_domain_validity": "complete", "transport_completeness": "complete", "attribution_coverage": "complete", "dictionary_integrity": "complete", "lifecycle_validity": "complete", "runtime_overhead": "complete" }
+}

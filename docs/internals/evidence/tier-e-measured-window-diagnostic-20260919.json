@@ -1,0 +1,514 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_measured_window_diagnostic",
+  "status": "UNVERIFIED",
+  "policy_eligibility": false,
+  "processes": [
+    {
+      "pid": 558193,
+      "variant": "baseline",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 4763047,
+      "measured_samples": 16,
+      "outside_samples": 1622
+    },
+    {
+      "pid": 558241,
+      "variant": "dictionary_full_stream",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 124777678,
+      "measured_samples": 72,
+      "outside_samples": 1391
+    },
+    {
+      "pid": 558228,
+      "variant": "dictionary_full_stream",
+      "fork": 1,
+      "role": "collector",
+      "measured_ns": 124777678,
+      "measured_samples": 101,
+      "outside_samples": 2909
+    },
+    {
+      "pid": 558429,
+      "variant": "dictionary_unique_edge",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 65523498,
+      "measured_samples": 72,
+      "outside_samples": 1391
+    },
+    {
+      "pid": 558416,
+      "variant": "dictionary_unique_edge",
+      "fork": 1,
+      "role": "collector",
+      "measured_ns": 65523498,
+      "measured_samples": 2,
+      "outside_samples": 2767
+    },
+    {
+      "pid": 558506,
+      "variant": "inline_full_stream",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 71411728,
+      "measured_samples": 72,
+      "outside_samples": 1461
+    },
+    {
+      "pid": 558493,
+      "variant": "inline_full_stream",
+      "fork": 1,
+      "role": "collector",
+      "measured_ns": 71411728,
+      "measured_samples": 70,
+      "outside_samples": 3750
+    },
+    {
+      "pid": 558538,
+      "variant": "inline_unique_edge",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 53527865,
+      "measured_samples": 68,
+      "outside_samples": 1476
+    },
+    {
+      "pid": 558525,
+      "variant": "inline_unique_edge",
+      "fork": 1,
+      "role": "collector",
+      "measured_ns": 53527865,
+      "measured_samples": 1,
+      "outside_samples": 3449
+    },
+    {
+      "pid": 558559,
+      "variant": "user_notif_no_stack",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 481106611,
+      "measured_samples": 264,
+      "outside_samples": 5372
+    },
+    {
+      "pid": 558786,
+      "variant": "user_notif",
+      "fork": 1,
+      "role": "workload",
+      "measured_ns": 556214403,
+      "measured_samples": 324,
+      "outside_samples": 6414
+    },
+    {
+      "pid": 558981,
+      "variant": "dictionary_full_stream",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 66592309,
+      "measured_samples": 70,
+      "outside_samples": 1422
+    },
+    {
+      "pid": 558968,
+      "variant": "dictionary_full_stream",
+      "fork": 2,
+      "role": "collector",
+      "measured_ns": 66592309,
+      "measured_samples": 1,
+      "outside_samples": 2945
+    },
+    {
+      "pid": 559127,
+      "variant": "dictionary_unique_edge",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 67119965,
+      "measured_samples": 73,
+      "outside_samples": 1443
+    },
+    {
+      "pid": 559114,
+      "variant": "dictionary_unique_edge",
+      "fork": 2,
+      "role": "collector",
+      "measured_ns": 67119965,
+      "measured_samples": 48,
+      "outside_samples": 2652
+    },
+    {
+      "pid": 559290,
+      "variant": "inline_full_stream",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 88298755,
+      "measured_samples": 72,
+      "outside_samples": 1370
+    },
+    {
+      "pid": 559261,
+      "variant": "inline_full_stream",
+      "fork": 2,
+      "role": "collector",
+      "measured_ns": 88298755,
+      "measured_samples": 48,
+      "outside_samples": 3253
+    },
+    {
+      "pid": 559359,
+      "variant": "inline_unique_edge",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 51240330,
+      "measured_samples": 78,
+      "outside_samples": 1447
+    },
+    {
+      "pid": 559340,
+      "variant": "inline_unique_edge",
+      "fork": 2,
+      "role": "collector",
+      "measured_ns": 51240330,
+      "measured_samples": 36,
+      "outside_samples": 3254
+    },
+    {
+      "pid": 559423,
+      "variant": "user_notif_no_stack",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 411769088,
+      "measured_samples": 238,
+      "outside_samples": 5356
+    },
+    {
+      "pid": 559790,
+      "variant": "user_notif",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 557368494,
+      "measured_samples": 318,
+      "outside_samples": 6347
+    },
+    {
+      "pid": 560030,
+      "variant": "baseline",
+      "fork": 2,
+      "role": "workload",
+      "measured_ns": 16166098,
+      "measured_samples": 17,
+      "outside_samples": 1412
+    },
+    {
+      "pid": 560074,
+      "variant": "dictionary_unique_edge",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 85741248,
+      "measured_samples": 70,
+      "outside_samples": 1405
+    },
+    {
+      "pid": 560061,
+      "variant": "dictionary_unique_edge",
+      "fork": 3,
+      "role": "collector",
+      "measured_ns": 85741248,
+      "measured_samples": 43,
+      "outside_samples": 2763
+    },
+    {
+      "pid": 560105,
+      "variant": "inline_full_stream",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 60610524,
+      "measured_samples": 66,
+      "outside_samples": 1448
+    },
+    {
+      "pid": 560092,
+      "variant": "inline_full_stream",
+      "fork": 3,
+      "role": "collector",
+      "measured_ns": 60610524,
+      "measured_samples": 50,
+      "outside_samples": 3303
+    },
+    {
+      "pid": 560246,
+      "variant": "inline_unique_edge",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 47604530,
+      "measured_samples": 77,
+      "outside_samples": 1444
+    },
+    {
+      "pid": 560233,
+      "variant": "inline_unique_edge",
+      "fork": 3,
+      "role": "collector",
+      "measured_ns": 47604530,
+      "measured_samples": 1,
+      "outside_samples": 3239
+    },
+    {
+      "pid": 560284,
+      "variant": "user_notif_no_stack",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 490271348,
+      "measured_samples": 283,
+      "outside_samples": 5487
+    },
+    {
+      "pid": 560708,
+      "variant": "user_notif",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 408156858,
+      "measured_samples": 348,
+      "outside_samples": 6574
+    },
+    {
+      "pid": 560956,
+      "variant": "baseline",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 12870917,
+      "measured_samples": 15,
+      "outside_samples": 1344
+    },
+    {
+      "pid": 560998,
+      "variant": "dictionary_full_stream",
+      "fork": 3,
+      "role": "workload",
+      "measured_ns": 74827349,
+      "measured_samples": 72,
+      "outside_samples": 1376
+    },
+    {
+      "pid": 560985,
+      "variant": "dictionary_full_stream",
+      "fork": 3,
+      "role": "collector",
+      "measured_ns": 74827349,
+      "measured_samples": 1,
+      "outside_samples": 2755
+    },
+    {
+      "pid": 561109,
+      "variant": "inline_full_stream",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 67886455,
+      "measured_samples": 74,
+      "outside_samples": 1373
+    },
+    {
+      "pid": 561096,
+      "variant": "inline_full_stream",
+      "fork": 4,
+      "role": "collector",
+      "measured_ns": 67886455,
+      "measured_samples": 20,
+      "outside_samples": 3287
+    },
+    {
+      "pid": 561227,
+      "variant": "inline_unique_edge",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 77533026,
+      "measured_samples": 66,
+      "outside_samples": 1402
+    },
+    {
+      "pid": 561214,
+      "variant": "inline_unique_edge",
+      "fork": 4,
+      "role": "collector",
+      "measured_ns": 77533026,
+      "measured_samples": 77,
+      "outside_samples": 3447
+    },
+    {
+      "pid": 561266,
+      "variant": "user_notif_no_stack",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 529628799,
+      "measured_samples": 232,
+      "outside_samples": 6165
+    },
+    {
+      "pid": 562618,
+      "variant": "user_notif",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 486187626,
+      "measured_samples": 351,
+      "outside_samples": 6766
+    },
+    {
+      "pid": 562967,
+      "variant": "baseline",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 5128931,
+      "measured_samples": 14,
+      "outside_samples": 1444
+    },
+    {
+      "pid": 562994,
+      "variant": "dictionary_full_stream",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 91140621,
+      "measured_samples": 73,
+      "outside_samples": 1349
+    },
+    {
+      "pid": 562980,
+      "variant": "dictionary_full_stream",
+      "fork": 4,
+      "role": "collector",
+      "measured_ns": 91140621,
+      "measured_samples": 51,
+      "outside_samples": 2723
+    },
+    {
+      "pid": 563031,
+      "variant": "dictionary_unique_edge",
+      "fork": 4,
+      "role": "workload",
+      "measured_ns": 92873934,
+      "measured_samples": 69,
+      "outside_samples": 1450
+    },
+    {
+      "pid": 563018,
+      "variant": "dictionary_unique_edge",
+      "fork": 4,
+      "role": "collector",
+      "measured_ns": 92873934,
+      "measured_samples": 24,
+      "outside_samples": 2702
+    },
+    {
+      "pid": 563085,
+      "variant": "inline_unique_edge",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 52717990,
+      "measured_samples": 70,
+      "outside_samples": 1403
+    },
+    {
+      "pid": 563072,
+      "variant": "inline_unique_edge",
+      "fork": 5,
+      "role": "collector",
+      "measured_ns": 52717990,
+      "measured_samples": 17,
+      "outside_samples": 3411
+    },
+    {
+      "pid": 563106,
+      "variant": "user_notif_no_stack",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 378222536,
+      "measured_samples": 212,
+      "outside_samples": 5254
+    },
+    {
+      "pid": 563271,
+      "variant": "user_notif",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 494521203,
+      "measured_samples": 362,
+      "outside_samples": 6649
+    },
+    {
+      "pid": 563524,
+      "variant": "baseline",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 6830265,
+      "measured_samples": 22,
+      "outside_samples": 1632
+    },
+    {
+      "pid": 563553,
+      "variant": "dictionary_full_stream",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 87950945,
+      "measured_samples": 75,
+      "outside_samples": 1389
+    },
+    {
+      "pid": 563540,
+      "variant": "dictionary_full_stream",
+      "fork": 5,
+      "role": "collector",
+      "measured_ns": 87950945,
+      "measured_samples": 70,
+      "outside_samples": 2842
+    },
+    {
+      "pid": 563620,
+      "variant": "dictionary_unique_edge",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 72545756,
+      "measured_samples": 71,
+      "outside_samples": 1418
+    },
+    {
+      "pid": 563607,
+      "variant": "dictionary_unique_edge",
+      "fork": 5,
+      "role": "collector",
+      "measured_ns": 72545756,
+      "measured_samples": 45,
+      "outside_samples": 2604
+    },
+    {
+      "pid": 563668,
+      "variant": "inline_full_stream",
+      "fork": 5,
+      "role": "workload",
+      "measured_ns": 105201711,
+      "measured_samples": 75,
+      "outside_samples": 1382
+    },
+    {
+      "pid": 563655,
+      "variant": "inline_full_stream",
+      "fork": 5,
+      "role": "collector",
+      "measured_ns": 105201711,
+      "measured_samples": 67,
+      "outside_samples": 3323
+    }
+  ],
+  "limitations": [
+    "Compatibility task-identity mode was per-event; production defaults to consecutive reuse.",
+    "Sample counts are not weighted CPU-cycle estimates.",
+    "Exit-time maps cannot prove temporal identity after JIT code retirement or reuse.",
+    "No exclusive attribution or optimization acceptance follows from this run."
+  ],
+  "artifacts": {
+    "root": "build/tier-e-seven-mode-window-profile",
+    "samples": "build/tier-e-seven-mode-window-profile/perf-timed-samples.txt",
+    "analysis": "build/tier-e-seven-mode-window-profile/measured-window-analysis.json"
+  }
+}

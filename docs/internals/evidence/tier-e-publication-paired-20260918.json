@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_paired_publication_measurement",
+  "timestamp": "2026-09-18T14:47:51.575324743Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 26,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-publication",
+    "workload": "oracle",
+    "workload_profile": "syscall_dense",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 100,
+    "sample_count": 450,
+    "paired_statistic": "live_minus_terminal median batch workload time",
+    "bootstrap_resamples": 1000,
+    "pair_exclusions": "workload correctness and whole-session evidence must both be valid"
+  },
+  "workload_correctness": "PASS",
+  "whole_session_evidence": "COMPLETE for every Tier E variant",
+  "paired_publication_effects_ns": {
+    "dictionary_full_stream": {
+      "median": 106136,
+      "bootstrap_95_ci": [-783615, 351334],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": -10535,
+      "bootstrap_95_ci": [-47996, 56941],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": 50447,
+      "bootstrap_95_ci": [-683415, 521143],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 65677,
+      "bootstrap_95_ci": [-35139, 171957],
+      "pairs": 5
+    }
+  },
+  "decision": {
+    "default_publication": "terminal",
+    "live_publication": "retained as opt-in; not promoted",
+    "reason": "Every paired confidence interval includes zero, so this matched workload provides no supported live-publication benefit.",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-publication-paired-20260918/results.jsonl",
+    "manifest": "build/tier-e-publication-paired-20260918/manifest.json",
+    "runner_log": "/tmp/tier-e-publication-paired-20260918.log"
+  }
+}

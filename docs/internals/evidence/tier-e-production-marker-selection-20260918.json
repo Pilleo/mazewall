@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_production_marker_selection_matrix",
+  "date": "2026-09-18",
+  "decision": "retain_validated_usdt_as_x86_64_auto_preference",
+  "provenance": {
+    "run_id": "tier-e-production-selection-ci-20260918",
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 32,
+    "source_fingerprint": "d2a4d0d92d9cd01d2768b1aa08df6449e90460001abe50b0f49202e30b47b371",
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:2958324e6b0df3c3ebb41095b98697e5b7a44ee4d7676c68d22af9b1dbf13a86",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload": "oracle",
+    "lifecycle_scenario": "normal",
+    "forks": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_batch": 100
+  },
+  "results": {
+    "auto": {
+      "requested_marker_transport": "auto",
+      "selected_marker_transport": "usdt",
+      "forks": 5,
+      "complete_forks": 5,
+      "matched_operations_per_fork": 1300,
+      "missing_operations": 0,
+      "wrong_operations": 0,
+      "ring_loss": 0
+    },
+    "explicit_usdt": {
+      "complete_forks": 5,
+      "matched_operations_per_fork": 1300,
+      "missing_operations": 0,
+      "wrong_operations": 0,
+      "ring_loss": 0
+    },
+    "explicit_uprobe": {
+      "complete_forks": 5,
+      "matched_operations_per_fork": 1300,
+      "missing_operations": 0,
+      "wrong_operations": 0,
+      "ring_loss": 0
+    }
+  },
+  "paired_workload_effects_ns_per_1000_operations": {
+    "auto_minus_usdt": {
+      "median": -65297,
+      "bootstrap_95_ci": [-684957, 549101],
+      "pairs": 5
+    },
+    "uprobe_minus_usdt": {
+      "median": 510953,
+      "bootstrap_95_ci": [-187508, 622376],
+      "pairs": 5
+    }
+  },
+  "interpretation": {
+    "auto_equivalence": "AUTO selected USDT in every rootful fork and retained the same complete exact workload evidence as explicit USDT.",
+    "timing": "The five-pair AUTO-minus-USDT interval includes zero, which is the expected result for the same selected backend. The five-pair Uprobe-minus-USDT interval also includes zero, so it is not a stable speed claim; the larger 15-fork marker matrix remains the speed evidence.",
+    "fallback": "Explicit Uprobe remains a supported compatibility choice. AUTO fallback is covered by deterministic note-validation tests and must record its reason.",
+    "policy_eligibility": false
+  },
+  "evidence_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "PASS",
+    "evidence_integrity": "complete",
+    "policy_eligibility": false
+  },
+  "raw_artifacts": {
+    "results_jsonl": "build/tier-e-production-selection-ci-20260918/results.jsonl",
+    "manifest": "build/tier-e-production-selection-ci-20260918/manifest.json",
+    "runner_events": "build/tier-e-production-selection-ci-20260918/runner-events.jsonl",
+    "benchmark_log": "build/tier-e-production-selection-ci-20260918/benchmark.log"
+  }
+}

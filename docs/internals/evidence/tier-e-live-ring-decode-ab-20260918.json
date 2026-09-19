@@ -1,0 +1,50 @@
+{
+  "title": "Tier E corrected live ring decode A/B",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-ring-decode MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-whole-drain-decode-ab-20260918",
+  "artifact": "build/tier-e-whole-drain-decode-ab-20260918/results.jsonl",
+  "artifact_sha256": "72f2ab874b7d3db0ca7fa4b1de9e07177c28b0b963e7e94ce5aa094759e500da",
+  "method": {
+    "marker_transport": "uprobe",
+    "forks": 5,
+    "warmups_per_variant": 3,
+    "samples_per_variant": 10,
+    "iterations_per_batch": 100,
+    "workload": "syscall_dense",
+    "comparison": "direct and legacy decoder arms rotate within each fork; results are paired by fork",
+    "correctness_oracle": "every profiled child reports workload_correctness=PASS and whole_session_evidence=COMPLETE"
+  },
+  "paired_results": {
+    "dictionary_full_stream": {
+      "median_direct_minus_legacy_drain_ns_per_ready_record": -14913.73512820513,
+      "median_direct_minus_legacy_workload_ns": 21252006
+    },
+    "dictionary_unique_edge": {
+      "median_direct_minus_legacy_drain_ns_per_ready_record": -3249.7923076923107,
+      "median_direct_minus_legacy_workload_ns": 13848520
+    },
+    "inline_full_stream": {
+      "median_direct_minus_legacy_drain_ns_per_ready_record": -10096.670256410254,
+      "median_direct_minus_legacy_workload_ns": 11760961
+    },
+    "inline_unique_edge": {
+      "median_direct_minus_legacy_drain_ns_per_ready_record": -10892.324615384616,
+      "median_direct_minus_legacy_workload_ns": 8739169
+    }
+  },
+  "decision": {
+    "default": "LEGACY_BYTES",
+    "direct_status": "validated diagnostic and benchmark control",
+    "reason": "Direct decoding reduces collector-local drain time but does not demonstrate a stable application-level benefit. Paired workload effects vary by fork and have positive median overhead in all four modes."
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "policy_eligibility": false
+}

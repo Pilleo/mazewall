@@ -1,0 +1,66 @@
+{
+  "title": "Tier E reusable collector-loop adaptive pacing matrix",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-poll-backoff MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-adaptive-poll-20260918",
+  "artifact": "build/tier-e-adaptive-poll-20260918/results.jsonl",
+  "artifact_sha256": "1dc79f31ef1cd04be107777df7ccd252802b41c1932fe691d085d9d7d8621b00",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "image": "mazewall-tier-e-rootful:perf-20260916",
+    "image_id": "sha256:6c6a570f7a849a5ce61c7d9371990680e6cc67826887cefa52bbb76dc63496b8",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload_cpu": "0",
+    "collector_cpu": "2",
+    "warmups": 3,
+    "batches": 10,
+    "forks": 5
+  },
+  "scope": "rootful reusable collector-loop pacing comparison; dictionary transport, uprobe, full capture, terminal publication",
+  "arms": {
+    "continuous": "no post-poll park",
+    "fixed_50us": "50 microsecond post-empty-drain park",
+    "fixed_250us": "250 microsecond post-empty-drain park",
+    "adaptive_1us_to_50us": "1 microsecond initial post-empty-drain park, doubled to a 50 microsecond cap and reset by any drained record"
+  },
+  "correctness": {
+    "profiled_forks": 40,
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE",
+    "max_observed_loss": 0,
+    "max_missing_operations": 0,
+    "max_wrong_operations": 0,
+    "decoded_evidence_equivalence": "all fixture-declared operations matched; no arm changed exact operation accounting"
+  },
+  "median_scheduling": {
+    "dictionary_full_stream": {
+      "continuous_idle_polls": 780,
+      "adaptive_idle_polls": 15,
+      "adaptive_parks": 15,
+      "adaptive_parked_ns": 129000,
+      "continuous_workload_total_ns": 56772716,
+      "adaptive_workload_total_ns": 64578782,
+      "adaptive_minus_continuous_paired_median_ns": 7806066
+    },
+    "dictionary_unique_edge": {
+      "continuous_idle_polls": 779,
+      "adaptive_idle_polls": 17,
+      "adaptive_parks": 17,
+      "adaptive_parked_ns": 129000,
+      "continuous_workload_total_ns": 64629954,
+      "adaptive_workload_total_ns": 64327598,
+      "adaptive_minus_continuous_paired_median_ns": -4856026
+    }
+  },
+  "decision": "Do not promote adaptive pacing to the default. It is correct and sharply reduces busy-poll iterations, but the five paired workload deltas differ by emission mode and have wide signs/ranges. This run also does not establish end-to-end observation-latency bounds, sustained-overload behavior, or long-session adaptive behavior. Keep continuous polling as the default and expose adaptive policy only to a future production integration after those measurements.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "measured_not_promoted",
+    "policy_eligibility": false
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_ring_decode_paired_matrix",
+  "date": "2026-09-19",
+  "decision": "retain_legacy_decode_as_default",
+  "decision_reason": "After the primitive owned-argument change, the current rootful paired comparison remains statistically neutral for the default dictionary/full-stream transport. Direct decoding remains benchmark-only until a complete paired interval demonstrates an improvement.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 38,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "java_version": "25.0.4",
+    "workload_profile": "syscall_dense",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5,
+    "scope": "tier-e-ring-decode"
+  },
+  "matrix_quality": {
+    "fork_outputs": 55,
+    "tier_e_complete_forks": 40,
+    "tier_e_expected_operations": 52000,
+    "tier_e_matched_operations": 52000,
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "observed_ring_loss": 0,
+    "incomplete_evidence_forks": 0,
+    "policy_eligible_records": 0
+  },
+  "paired_legacy_minus_direct_ns_per_measured_batch": {
+    "dictionary_full_stream": {
+      "median": 19806,
+      "bootstrap_95_ci": [-92177, 44783],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": -323,
+      "bootstrap_95_ci": [-78712, 563321],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": 1764,
+      "bootstrap_95_ci": [-50146, 263885],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 56595,
+      "bootstrap_95_ci": [-107721, 7956571],
+      "pairs": 5
+    }
+  },
+  "interpretation": {
+    "positive_direction": "legacy is slower; direct is faster",
+    "default_transport": "dictionary_full_stream",
+    "accepted_default_change": false,
+    "direct_decode_status": "benchmark_only",
+    "legacy_decode_status": "session_default"
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifact": {
+    "path": "build/tier-e-ring-decode-owned-arguments-20260919/results.jsonl",
+    "sha256": "72d8b9c0b6798b7dc5cb6bd94e58244a66e7eea23d47bc498be77550dc0eb71c"
+  }
+}

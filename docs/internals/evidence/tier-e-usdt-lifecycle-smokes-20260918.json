@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_usdt_lifecycle_smokes",
+  "date": "2026-09-18",
+  "decision": "partial_lifecycle_equivalence_proven",
+  "decision_reason": "USDT passed the existing rootful detach, callback-suppression, terminal-drain, and forced-capture-failure fixtures for both dictionary modes. Exec-transition remains required before a default-marker decision.",
+  "provenance": {
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload": "calibration_cpu",
+    "warmups": 0,
+    "measured_batches": 1,
+    "operations_per_batch": 100,
+    "marker_transports": ["uprobe", "usdt"],
+    "dictionary_modes": ["full-stream", "unique-stack-syscall"]
+  },
+  "fixture_results": {
+    "detach_while_active": {
+      "expected": "Immediate lifecycle invalidation; no post-detach active observation; incomplete terminal evidence.",
+      "result": "PASS for both dictionary modes and both marker transports; Tier E evidence INCOMPLETE as required."
+    },
+    "callback_suppression": {
+      "expected": "Explicit inactive callback interval; no stale outer exact attribution resurrection.",
+      "result": "PASS for both dictionary modes and both marker transports; the scenario retains its expected incomplete whole-session classification."
+    },
+    "terminal_while_active": {
+      "expected": "Active producer at terminal barrier is not reported complete.",
+      "result": "PASS for both dictionary modes and both marker transports; Tier E evidence INCOMPLETE as required."
+    },
+    "capture_failure": {
+      "expected": "One gated unix_openat0 capture fails after marker clear; its native operation continues but cannot become an exact event.",
+      "result": "PASS for both dictionary modes and both marker transports; each USDT mode recorded one CAPTURE_FAILED sidecar record, one missing definition, 99 exact controlled operations out of 100, and INCOMPLETE evidence."
+    },
+    "exec_transition": "PASS: rootful marker-transport matrix retained at build/tier-e-usdt-exec-lifecycle-20260918/results.jsonl; dictionary full-stream and unique-edge both report PASS/INCOMPLETE, resolved=0, and explicit post-exec inactive observations for Uprobe and USDT.",
+    "forced_capture_failure": "covered_by_capture_failure"
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "incomplete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "incomplete",
+    "runtime_overhead": "not_measured"
+  },
+  "raw_artifacts": {
+    "detach_while_active": {"path": "build/tier-e-usdt-detach-smoke-20260918/results.jsonl", "sha256": "dc11bcbd82421be45f2eebc5784d54cd0a75f14493610863b6112161228fc0e2"},
+    "callback_suppression": {"path": "build/tier-e-usdt-callback-smoke-20260918/results.jsonl", "sha256": "f6f185bdfa1761de750db7d37691873a72dbf47e090ca05fc3bba8db14f4197c"},
+    "terminal_while_active": {"path": "build/tier-e-usdt-terminal-smoke-20260918/results.jsonl", "sha256": "3537c9728980da14052270c9402feb1017644ad5b45a100ca913a41787a4d90a"},
+    "capture_failure": {"path": "build/tier-e-usdt-capture-failure-retry-20260918/results.jsonl", "sha256": "dd37b76bfb134a12cf0db0217d32f34633adb0e34ffa24b1a5333ce284b574a9"}
+  }
+}

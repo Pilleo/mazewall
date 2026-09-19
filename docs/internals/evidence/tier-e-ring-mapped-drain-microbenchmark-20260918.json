@@ -1,0 +1,65 @@
+{
+  "title": "Tier E deterministic mapped-ring drain diagnostic",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_MAPPED_DRAIN_FORKS=5 MAZEWALL_TIER_E_MAPPED_DRAIN_WARMUPS=3 MAZEWALL_TIER_E_MAPPED_DRAIN_SAMPLES=10 MAZEWALL_TIER_E_MAPPED_DRAIN_DRAINS=100000 MAZEWALL_TIER_E_MAPPED_DRAIN_CPU=0 ./scripts/run_tier_e_mapped_drain_microbenchmark.sh build/tier-e-ring-mapped-drain-microbenchmark-20260918",
+  "artifact": "build/tier-e-ring-mapped-drain-microbenchmark-20260918/results.jsonl",
+  "artifact_sha256": "b9277a9f7a0eef45d088a5cc88be14aeff42593ebfe2ab5c85a968f2e9781ad0",
+  "environment": {
+    "java_version": "openjdk 25.0.4",
+    "kernel": "7.2.4-x64v3-xanmod1",
+    "cpu": "0",
+    "forks": 5,
+    "warmups_per_variant": 3,
+    "samples_per_variant": 10,
+    "drains_per_sample": 100000
+  },
+  "results": {
+    "empty": {
+      "samples": 50,
+      "records_per_drain": 0,
+      "median_ns_per_drain": 20.98046
+    },
+    "single": {
+      "samples": 50,
+      "records_per_drain": 1,
+      "median_ns_per_drain": 82.92881,
+      "median_ns_per_record": 82.92881
+    },
+    "batch_16": {
+      "samples": 50,
+      "records_per_drain": 16,
+      "median_ns_per_drain": 488.59051,
+      "median_ns_per_record": 30.536906875
+    }
+  },
+  "method": {
+    "reader": "production BpfRingBufferReader over deterministic test-owned two-mapping storage",
+    "timed_scope": "whole drainDecoded call after producer position publication",
+    "included": [
+      "acquire/release cursor handling",
+      "mapped traversal",
+      "88-byte decode",
+      "owned event construction",
+      "consumer position publication"
+    ],
+    "excluded": [
+      "BPF execution",
+      "kernel-to-user wakeup",
+      "native callback dispatch",
+      "collector scheduling",
+      "dictionary joining"
+    ],
+    "correctness_oracle": "every sample has the fixture-declared ready-record count; terminal success is written only after all samples satisfy that condition"
+  },
+  "interpretation": "Deterministic JVM reader work is nanosecond-scale and does not explain the previously observed microsecond-scale live ring_drain phase. The result is diagnostic only and is not an end-to-end Tier E or BPF throughput measurement.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "not_applicable",
+    "transport_completeness": "not_applicable",
+    "attribution_coverage": "not_applicable",
+    "dictionary_integrity": "not_applicable",
+    "lifecycle_validity": "not_applicable",
+    "runtime_overhead": "complete"
+  },
+  "policy_eligibility": false
+}

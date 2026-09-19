@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-18",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_fingerprint": "522f500e36672cdf8787f25c2afd6c11576025b31c25eee1c058b91c5d7a4ee8",
+  "source_dirty": true,
+  "environment": {
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:24e5eeaf9f0647ec14b3be1d89b80beeaf3f5de5a2f6aaf6cc2500532d00f3ec",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2"
+  },
+  "command": "MAZEWALL_TIER_E_LIFECYCLE_SCENARIO=callback_suppression MAZEWALL_TIER_E_ITERATIONS=2 MAZEWALL_TIER_E_WARMUPS=0 MAZEWALL_TIER_E_BATCHES=1 MAZEWALL_TIER_E_FORKS=1 bash scripts/run_tier_e_trustworthy_benchmark.sh",
+  "scenario": {
+    "callback_suppression": true,
+    "required_nested_callback_probe": true,
+    "required_outer_operation_attribution": "none",
+    "whole_session_evidence": "INCOMPLETE"
+  },
+  "tier_e_variants": {
+    "dictionary_full_stream": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "callback_probe_resolved": 1, "matched_operations": 0, "missing_operations": 0 },
+    "dictionary_unique_edge": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "callback_probe_resolved": 1, "matched_operations": 0, "missing_operations": 2 },
+    "inline_full_stream": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "callback_probe_resolved": 1, "matched_operations": 0, "missing_operations": 0 },
+    "inline_unique_edge": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "callback_probe_resolved": 1, "matched_operations": 0, "missing_operations": 2 }
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "unverified",
+    "transport_completeness": "unverified",
+    "attribution_coverage": "verified_expected_incomplete",
+    "dictionary_integrity": "unverified",
+    "lifecycle_validity": "verified_expected_incomplete",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false
+  },
+  "raw_artifacts": {
+    "durable": false,
+    "location": "/tmp/tier-e-callback-evidence",
+    "results_jsonl_sha256": "f2efef73327356c59d627d1749ad8912c4ff1922277a6a33c369d087b57e9cbb",
+    "manifest_sha256": "f69f6b9d4c4a857e7bc2d09f6647d6343df1b54cc2419f6cc83027a58e9eb77a",
+    "benchmark_log_sha256": "4fdb66257a2af8b8844ea5abf54db504c32ff6411f749a90c77e24553a59f958"
+  },
+  "conclusion": "All Tier E transports and emission modes prove nested callback attribution while refusing to restore the invalidated outer scope. The callback boundary deliberately makes whole-session evidence incomplete."
+}

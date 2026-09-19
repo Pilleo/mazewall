@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_paired_ring_decode_measurement",
+  "timestamp": "2026-09-18T14:40:06.142260516Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 26,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-ring-decode",
+    "workload": "oracle",
+    "workload_profile": "syscall_dense",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 100,
+    "sample_count": 550,
+    "paired_statistic": "legacy_minus_direct median batch workload time",
+    "bootstrap_resamples": 1000
+  },
+  "workload_correctness": "PASS",
+  "whole_session_evidence": "COMPLETE for every Tier E variant",
+  "paired_ring_decode_effects_ns": {
+    "dictionary_full_stream": {
+      "median": -30589,
+      "bootstrap_95_ci": [-94849, 93867],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": 1972,
+      "bootstrap_95_ci": [-340139, 662520],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": -48461,
+      "bootstrap_95_ci": [-368603, -17832],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 43994,
+      "bootstrap_95_ci": [-126633, 1052466],
+      "pairs": 5
+    }
+  },
+  "decision": {
+    "direct_ring_decode": "not_accepted_as_performance_default",
+    "reason": "Three paired confidence intervals include zero and inline/full-stream significantly favours legacy decoding. No uniform supported improvement exists for direct decoding on this workload.",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-ring-decode-20260918/results.jsonl",
+    "manifest": "build/tier-e-ring-decode-20260918/manifest.json",
+    "runner_log": "/tmp/tier-e-ring-decode-20260918.log"
+  }
+}

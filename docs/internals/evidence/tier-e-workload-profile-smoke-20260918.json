@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_workload_profile_smoke",
+  "date": "2026-09-18",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_count": 13,
+  "source_fingerprint": "5a0c09606e14fa04740c3d13a3fb7703f5c1ec496e443015548fb625e21ff820",
+  "environment": {
+    "image": "mazewall-tier-e-rootful:perf-20260916",
+    "image_id": "sha256:6c6a570f7a849a5ce61c7d9371990680e6cc67826887cefa52bbb76dc63496b8",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload_cpu": 0,
+    "collector_cpu": 2
+  },
+  "workload": {
+    "profile": "mixed_cpu_io",
+    "iterations_per_batch": 20,
+    "warmups": 1,
+    "measured_batches": 2,
+    "forks": 1,
+    "all_modes_use_the_same_openat_operation_manifest": true
+  },
+  "terminal": {
+    "success": true,
+    "policy_eligibility": false
+  },
+  "correctness": {
+    "profiled_modes": 6,
+    "profiled_modes_workload_pass": 6,
+    "profiled_modes_complete_evidence": 6,
+    "expected_operations_per_profiled_mode": 60,
+    "matched_operations_per_profiled_mode": 60,
+    "lost": 0,
+    "wrong_operations": 0,
+    "duplicate_operations": 0,
+    "unclassified_operations": 0
+  },
+  "performance_conclusion": "not_measured",
+  "performance_reason": "single-fork smoke validates profile plumbing and correctness only; it cannot support rate or overhead conclusions",
+  "artifact": "/tmp/tier-e-mixed-profile-smoke-20260918"
+}

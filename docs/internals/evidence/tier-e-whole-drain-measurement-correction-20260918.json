@@ -1,0 +1,58 @@
+{
+  "title": "Tier E live whole-drain measurement correction",
+  "date": "2026-09-18",
+  "status": "complete",
+  "supersedes_for_cost_attribution": "tier-e-full-profile-phase-matrix-20260918.json",
+  "historical_measurement_defect": "The historical component reader called System.nanoTime inside every record-loop subphase. Its component totals include measurement overhead and are not valid optimization evidence.",
+  "correction": {
+    "implementation": "BpfRingBufferReader has no benchmark-only per-record timing path. TierEbpfEngine returns the normal owned drain; TierEProfilerSession measures one complete drain boundary outside the loop and counts ready records from the returned owned event list.",
+    "subphase_semantics": "ring_scan_ns, ring_decode_ns, ring_append_ns, and ring_consumer_publish_ns are zero because they are unmeasured, not because their work is free."
+  },
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=full MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-whole-drain-uprobe-rerun-20260918",
+  "artifact": "build/tier-e-whole-drain-uprobe-rerun-20260918/results.jsonl",
+  "artifact_sha256": "34ae2c71e49826207ddabed317f2f57f83c7bfaae269075fbe106e46c475cca3",
+  "environment": {
+    "marker_transport": "uprobe",
+    "forks": 5,
+    "warmups_per_variant": 3,
+    "samples_per_variant": 10,
+    "iterations_per_batch": 100,
+    "workload": "syscall_dense"
+  },
+  "results": {
+    "dictionary_full_stream": {
+      "complete_forks": 5,
+      "median_ready_records_per_fork": 3900,
+      "median_whole_drain_ns_per_ready_record": 23401.835897435896,
+      "median_collector_join_ns_per_ready_record": 8280.855897435897
+    },
+    "dictionary_unique_edge": {
+      "complete_forks": 5,
+      "median_ready_records_per_fork": 3900,
+      "median_whole_drain_ns_per_ready_record": 27575.87358974359,
+      "median_collector_join_ns_per_ready_record": 9472.401282051282
+    },
+    "inline_full_stream": {
+      "complete_forks": 5,
+      "median_ready_records_per_fork": 3900,
+      "median_whole_drain_ns_per_ready_record": 21529.574358974358,
+      "median_collector_join_ns_per_ready_record": 11054.596923076922
+    },
+    "inline_unique_edge": {
+      "complete_forks": 5,
+      "median_ready_records_per_fork": 3900,
+      "median_whole_drain_ns_per_ready_record": 29680.46564102564,
+      "median_collector_join_ns_per_ready_record": 7984.162564102564
+    }
+  },
+  "interpretation": "The live whole-drain boundary remains microsecond-scale after removal of intrusive timers, while the deterministic mapped reader is nanosecond-scale. The remaining gap is not attributed to allocation, lock waits, publication, or transport by this artifact; it requires a real-BPF-map control before optimization.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "policy_eligibility": false
+}

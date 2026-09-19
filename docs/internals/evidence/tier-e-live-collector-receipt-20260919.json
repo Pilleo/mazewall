@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_live_collector_receipt_characterization",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-live-receipt-20260919/results.jsonl",
+  "artifact_sha256": "85b8aa328fb6fd62f1a9787fae76b7cacfff4be832375516c481110c9d3304e5",
+  "benchmark_log_sha256": "6778107df814b3a2973fef7d6e24410a032131f9d844bcfd326f003349db20b0",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-known-join",
+    "workload": "syscall_dense oracle",
+    "marker_transport": "AUTO; validated USDT selected",
+    "ring_decode": "direct",
+    "collector_receipt_clock": "monotonic",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "baseline_outputs": 5,
+    "queued_outputs": 5,
+    "direct_known_outputs": 5,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "policy_eligibility": false
+  },
+  "collector_receipt_ns": {
+    "queued_control": {
+      "samples": 19500,
+      "median_of_fork_means": 23668592,
+      "median_p50_upper_bound": 33554431,
+      "median_p95_upper_bound": 67108863,
+      "median_p99_upper_bound": 67108863,
+      "maximum": 82401494
+    },
+    "direct_known": {
+      "samples": 19500,
+      "median_of_fork_means": 43067369,
+      "median_p50_upper_bound": 67108863,
+      "median_p95_upper_bound": 134217727,
+      "median_p99_upper_bound": 134217727,
+      "maximum": 93066150
+    }
+  },
+  "decision": "The normal queued dictionary join is the faster live path. Direct known-definition joining is not a delivery optimization: it roughly doubles median collector receipt age on this host and was already rejected for higher allocation. Receipt age characterizes BPF-to-collector scheduling and drain latency; it is not exact stack-capture latency or a per-syscall synchronous blocking cost.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

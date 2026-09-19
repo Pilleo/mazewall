@@ -1,0 +1,37 @@
+{
+  "title": "Tier E benchmark-only poll pacing matrix",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-poll-backoff MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-poll-backoff-20260918",
+  "artifact": "build/tier-e-poll-backoff-20260918/results.jsonl",
+  "artifact_sha256": "578ab5fe62e4b5a6364a630e277888112fc8b3c6c3cedcb3c845f71bc7aca5d7",
+  "scope": "benchmark-only post-poll pacing; no production Tier E behavior changes",
+  "results": {
+    "dictionary_full_stream": {
+      "none_median_records_per_poll": 8.647450110864744,
+      "50us_median_records_per_poll": 390,
+      "250us_median_records_per_poll": 354.54545454545456,
+      "paired_50us_minus_none_workload_median_ns": -18377056,
+      "paired_250us_minus_none_workload_median_ns": -19934194,
+      "losses": 0
+    },
+    "dictionary_unique_edge": {
+      "none_median_records_per_poll": 4.16221985058698,
+      "50us_median_records_per_poll": 390,
+      "250us_median_records_per_poll": 433.3333333333333,
+      "paired_50us_minus_none_workload_median_ns": -5454731,
+      "paired_250us_minus_none_workload_median_ns": -11704783,
+      "losses": 0
+    }
+  },
+  "decision": "Reject promotion. The result establishes avoidable busy-poll contention but lacks latency and long-session retention evidence for a production adaptive policy.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "policy_eligibility": false
+}

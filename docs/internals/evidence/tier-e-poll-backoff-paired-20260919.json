@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_collector_poll_backoff_paired_benchmark",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-poll-paired-20260919/results.jsonl",
+  "artifact_sha256": "6862de03e1074dd6a60462902c34c36bb62f31cfb4a63b9d10e7cfa5ef1d4ad1",
+  "benchmark_log_sha256": "2b6ad3ed700e1cd093f67a6d79dddfa85e67ef3792250e94b255b063b9ef882c",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-poll-backoff",
+    "workload": "syscall_dense oracle",
+    "marker_transport": "AUTO; validated USDT selected",
+    "ring_decode": "direct",
+    "collector_receipt_clock": "monotonic",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "baseline_outputs": 5,
+    "tier_e_outputs": 40,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "excluded_pairs": 0,
+    "policy_eligibility": false
+  },
+  "paired_workload_effects_ns": {
+    "full_stream": {
+      "50us": { "median": 6140, "ci_95_low": -56803, "ci_95_high": 288501 },
+      "250us": { "median": -44210, "ci_95_low": -151538, "ci_95_high": 830134 },
+      "adaptive_1us_to_50us": { "median": -288, "ci_95_low": -211845, "ci_95_high": 717449 }
+    },
+    "unique_edge": {
+      "50us": { "median": -184155, "ci_95_low": -527061, "ci_95_high": 439018 },
+      "250us": { "median": -45887, "ci_95_low": -600835, "ci_95_high": 445310 },
+      "adaptive_1us_to_50us": { "median": -82780, "ci_95_low": -567446, "ci_95_high": 41175 }
+    }
+  },
+  "diagnostic_observations": {
+    "full_stream": "All bounded policies reduced the median receipt mean by 14.85-16.84 ms in this run; the adaptive policy reduced median child CPU by 80 ms.",
+    "unique_edge": "Fixed policies reduced median child CPU by 70-110 ms; receipt-mean deltas were mixed and not a supported latency win."
+  },
+  "decision": "Retain CONTINUOUS as the production default. Every paired workload interval includes zero, so no bounded policy has a supported performance win. The syscall-dense workload observed only 5-11 idle polls per profiled fork under bounded policies; it does not measure long-idle CPU behavior. Bounded policies remain an explicit integration option, not a default optimization.",
+  "next_required_measurement": "Run a five-fork sparse-burst workload with controlled idle gaps, reporting paired workload, CPU, receipt-age, parking, loss, and attribution-completeness intervals before considering a production default change.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

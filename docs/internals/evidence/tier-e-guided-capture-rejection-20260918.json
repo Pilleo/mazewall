@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-18",
+  "experiment": "tier-e-cache-guided-exact-stack-capture",
+  "decision": "rejected",
+  "reason": "Every paired workload-time bootstrap confidence interval crosses zero; guided probes add a second JVMTI stack request on fallback boundaries.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 11,
+    "cpu_set": "0,2",
+    "workload": "controlled openat oracle",
+    "forks_per_mode": 15,
+    "warmup_batches": 3,
+    "measured_batches": 10,
+    "default_artifact": "/tmp/tier-e-guided-default-decision-20260918/results.jsonl",
+    "enabled_artifact": "/tmp/tier-e-guided-enabled-decision-20260918/results.jsonl",
+    "paired_analysis_artifact": "/tmp/tier-e-guided-enabled-vs-default-20260918.tsv"
+  },
+  "correctness": {
+    "per_tier_e_mode": {
+      "expected_operations": 19500,
+      "matched_operations": 19500,
+      "missing_operations": 0,
+      "wrong_operations": 0,
+      "duplicate_operations": 0,
+      "unclassified_operations": 0,
+      "lost": 0,
+      "dropped": 0,
+      "unknown_other": 0
+    },
+    "policy_eligibility": false
+  },
+  "guided_phase_totals_per_mode": {
+    "guided_probe_hits": 23265,
+    "guided_probe_fallbacks": 93960,
+    "guided_probe_frames": 440355,
+    "full_capture_frames": 1262985
+  },
+  "paired_workload_effects": [
+    {"mode": "dictionary_full_stream", "direction": "guided_minus_default", "pairs": 15, "median_ns": 776057, "bootstrap_95_ci_ns": [-20318778, 8245583]},
+    {"mode": "dictionary_unique_edge", "direction": "guided_minus_default", "pairs": 15, "median_ns": 4885758, "bootstrap_95_ci_ns": [-9526840, 20185778]},
+    {"mode": "inline_full_stream", "direction": "guided_minus_default", "pairs": 15, "median_ns": 4105523, "bootstrap_95_ci_ns": [-15383799, 21387674]},
+    {"mode": "inline_unique_edge", "direction": "guided_minus_default", "pairs": 15, "median_ns": 7011508, "bootstrap_95_ci_ns": [-27735086, 13294100]}
+  ],
+  "implementation_action": "Removed the experimental prefix index, probe, native option, benchmark counters, launcher wiring, and native fixture; restored the original single full exact stack capture path."
+}

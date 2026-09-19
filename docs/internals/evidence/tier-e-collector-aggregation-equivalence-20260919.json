@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_collector_aggregation_equivalence",
+  "run_date": "2026-09-19",
+  "change": "Replace per-poll events.flatMap { collector.accept(...) } aggregation with one owned ArrayList while retaining event order and collector calls.",
+  "command": "MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-production-selection MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=oracle MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-production-selection-collector-aggregation-20260919",
+  "artifact": {
+    "directory": "build/tier-e-production-selection-collector-aggregation-20260919",
+    "results_jsonl_sha256": "ec20a21226e2f83dc80b051ca9374233b1b2498c628c0d6bb9265791a252f39d",
+    "manifest_json_sha256": "35357137a3012f37769533226b047140220bc0b5a97e829f69bfee1f99a9cdcc"
+  },
+  "correctness_equivalence": {
+    "profiled_variants": ["auto", "explicit_usdt", "explicit_uprobe"],
+    "forks_per_variant": 5,
+    "auto_selected_transport": "usdt",
+    "resolved_syscalls_per_profiled_fork": 3900,
+    "expected_operations_per_profiled_fork": 1300,
+    "matched_operations_per_profiled_fork": 1300,
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "ring_loss": 0,
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE"
+  },
+  "conclusion": "The allocation reduction does not change decoded workload evidence, marker selection, or completion dimensions in the exercised rootful matrix. Its speed effect is intentionally not claimed because the temporary per-record benchmark clock path is not a trustworthy performance instrument.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false
+  }
+}

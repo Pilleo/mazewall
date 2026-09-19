@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_full_profile_phase_matrix",
+  "date": "2026-09-18",
+  "decision": "measure_before_optimizing",
+  "decision_reason": "Ring draining is the largest normalized measured phase across all three workload shapes. Earlier ownership and marker-removal experiments did not meet the paired end-to-end acceptance rule, so this matrix is a constraint on the next optimization rather than authorization for an unvalidated change.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 13,
+    "image": "mazewall-tier-e-rootful:perf-20260916",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks_per_profile": 15,
+    "variant": "dictionary_full_stream",
+    "capture_profile": "full"
+  },
+  "normalization": {
+    "unit": "median nanoseconds per exact capture",
+    "exact_captures_per_fork": 7815,
+    "note": "Phase totals include the configured warm-ups and measured batches. They are divided per fork by exact captures before taking the median across forks."
+  },
+  "profiles": {
+    "syscall_dense": {
+      "get_stack_trace_ns": 9606.02,
+      "raw_key_ns": 2106.09,
+      "marker_set_ns": 3279.68,
+      "marker_clear_ns": 9593.56,
+      "ring_drain_ns": 19727.49,
+      "collector_join_ns": 5140.77
+    },
+    "mixed_cpu_io": {
+      "get_stack_trace_ns": 4393.12,
+      "raw_key_ns": 379.90,
+      "marker_set_ns": 2413.32,
+      "marker_clear_ns": 5146.11,
+      "ring_drain_ns": 10914.63,
+      "collector_join_ns": 4345.50
+    },
+    "bursty_io": {
+      "get_stack_trace_ns": 5265.13,
+      "raw_key_ns": 313.65,
+      "marker_set_ns": 1979.30,
+      "marker_clear_ns": 6289.23,
+      "ring_drain_ns": 9415.88,
+      "collector_join_ns": 2788.45
+    }
+  },
+  "constraints": {
+    "dominant_measured_phase": "ring_drain",
+    "marker_transitions": "Required lifecycle transitions; no removal is authorized by this evidence.",
+    "owned_drain_experiment": "rejected",
+    "guided_stack_capture_experiment": "rejected",
+    "policy_eligibility": false
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifacts": {
+    "syscall_dense": {"path": "/tmp/tier-e-syscall-dense-matrix-20260918/results.jsonl", "sha256": "46b52e7813f5ac2ac91d517d7f207d27a5700138d300395fde4f4c45b23c986e"},
+    "mixed_cpu_io": {"path": "/tmp/tier-e-mixed-cpu-io-matrix-20260918/results.jsonl", "sha256": "6fb565edab86d5974c191ce513dee6b0bc3e7a35002ea5fb9d9ff420fcd562bb"},
+    "bursty_io": {"path": "/tmp/tier-e-bursty-io-matrix-20260918/results.jsonl", "sha256": "9d842707255c007d81370be11c212aca685ab46e9b5f6401eb1ef2470977fe16"}
+  }
+}

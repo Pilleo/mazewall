@@ -1,0 +1,47 @@
+{
+  "title": "Tier E direct-versus-legacy allocation accounting",
+  "date": "2026-09-19",
+  "status": "COMPLETE",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 41,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:2958324e6b0df3c3ebb41095b98697e5b7a44ee4d7676c68d22af9b1dbf13a86",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "scope": "tier-e-ring-decode",
+    "workload": "syscall_dense",
+    "forks_per_arm": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_batch": 100,
+    "results_sha256": "ad719d7b5e8ea037db15f430f2a6d4919aac404c5ea55594b4cd9307fb9c06c1",
+    "benchmark_log_sha256": "ef1e053331b2368849b10627d7402c98baca9b674476d9aeeea5928012454ebf"
+  },
+  "measurement": {
+    "source": "supported com.sun.management.ThreadMXBean current-thread counters",
+    "availability": "1 for every Tier E fork",
+    "boundaries": "whole ring drain and whole collector join only",
+    "production_impact": "none; accounting is enabled only by the dedicated tier-e-ring-decode benchmark scope"
+  },
+  "correctness": {
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "observed_ring_loss": 0,
+    "policy_eligibility": false,
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS"
+  },
+  "median_allocated_bytes_per_ready_record": {
+    "dictionary_full_stream": { "direct_ring": 504.27, "legacy_ring": 716.75, "direct_join": 517.89, "legacy_join": 497.67 },
+    "dictionary_unique_edge": { "direct_ring": 488.98, "legacy_ring": 715.62, "direct_join": 506.13, "legacy_join": 498.12 },
+    "inline_full_stream": { "direct_ring": 531.92, "legacy_ring": 699.43, "direct_join": 542.04, "legacy_join": 484.82 },
+    "inline_unique_edge": { "direct_ring": 501.94, "legacy_ring": 694.27, "direct_join": 516.52, "legacy_join": 479.28 }
+  },
+  "conclusion": "Direct primitive ownership removes approximately 168-227 allocated ring-drain bytes per ready record while preserving complete evidence. It does not establish an end-to-end application-speed improvement because paired workload intervals include zero. Collector joining is the next measured allocation target."
+}

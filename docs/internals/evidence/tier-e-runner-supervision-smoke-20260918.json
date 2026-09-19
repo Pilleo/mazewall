@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_runner_supervision_smoke",
+  "timestamp": "2026-09-18T15:21:27Z",
+  "run_id": "tier-e-20260918T152102Z-2115234",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 27,
+  "source_fingerprint": "a800d1af6fd3a5f7bf999d78617b05ca098e1e46568645d50541ca0744abecdc",
+  "environment": {
+    "image": "mazewall-tier-e-rootful:perf-20260916",
+    "image_id": "sha256:6c6a570f7a849a5ce61c7d9371990680e6cc67826887cefa52bbb76dc63496b8",
+    "kernel": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "rootful_docker": true
+  },
+  "run": {
+    "scope": "tier-e-capture-profile",
+    "workload": "oracle",
+    "forks": 1,
+    "warmups": 0,
+    "batches": 1,
+    "iterations": 1
+  },
+  "validated_contract": {
+    "runner_events_share_manifest_run_id": true,
+    "stages": ["runner", "bundle_build", "bundle_verify", "benchmark"],
+    "benchmark_terminal_success": true,
+    "benchmark_summary_count": 1,
+    "benchmark_fork_output_count": 3,
+    "runner_terminal_state": "PASSED"
+  },
+  "limitations": [
+    "This proves only the normal rootful completion path.",
+    "Timeout, partial JSONL, and resume paths remain required supervision work."
+  ],
+  "policy_eligibility": false,
+  "artifacts": {
+    "manifest": "build/tier-e-runner-supervision-smoke-20260918/manifest.json",
+    "runner_events": "build/tier-e-runner-supervision-smoke-20260918/runner-events.jsonl",
+    "results_jsonl": "build/tier-e-runner-supervision-smoke-20260918/results.jsonl",
+    "runner_log": "/tmp/tier-e-runner-supervision-smoke-20260918.log"
+  }
+}

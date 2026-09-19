@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_real_bpf_ring_decode_control",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "directory": "build/tier-e-ring-decode-control-20260919",
+    "manifest_sha256": "8d8bf3ae144ba6fc34e952f4fe9e33cfcc6b75346b3e3de5d2bbb93c0d3a00f8",
+    "results_sha256": "c8476a595362d1f70a6b85f4c1b759c5b00deaa282b15efe4a0485fb5c3f9d5b",
+    "benchmark_log_sha256": "ef1e053331b2368849b10627d7402c98baca9b674476d9aeeea5928012454ebf"
+  },
+  "method": {
+    "execution": "rootful Docker",
+    "scope": "tier-e-ring-decode",
+    "forks": 5,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "paired_control": "direct mapped-ring decoding versus legacy compatibility decoding"
+  },
+  "result": {
+    "workload_correctness": "PASS",
+    "tier_e_evidence": "COMPLETE",
+    "policy_eligibility": false,
+    "pairs_per_flavour": 5,
+    "all_paired_95_percent_intervals_include_zero": true,
+    "legacy_minus_direct_median_ns": {
+      "dictionary_full_stream": -28608,
+      "dictionary_unique_edge": -168687,
+      "inline_full_stream": 25269,
+      "inline_unique_edge": -81209
+    },
+    "paired_95_percent_intervals_ns": {
+      "dictionary_full_stream": [-138403, 44098],
+      "dictionary_unique_edge": [-7076642, 367991],
+      "inline_full_stream": [-597315, 132672],
+      "inline_unique_edge": [-316465, 16751507]
+    }
+  },
+  "diagnostic_phase_totals": {
+    "ready_records_per_decode_mode": 39000,
+    "direct": {
+      "ring_drain_ns": 726808939,
+      "collector_join_ns": 408291354,
+      "collector_polls": 10550
+    },
+    "legacy": {
+      "ring_drain_ns": 1020170454,
+      "collector_join_ns": 396897530,
+      "collector_polls": 3779
+    }
+  },
+  "interpretation": "Real BPF mapped-record decoding does not establish a measurable workload-cost difference from the legacy compatibility path. Production-direct whole-drain and join counters remain useful diagnostic aggregates, but the differing poll counts show they include cadence/scheduling. The aggregate must not be attributed to record mapping, decoding, or unavoidable exact-stack walking.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "partially_attributed"
+  }
+}

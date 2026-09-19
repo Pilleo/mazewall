@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_external_perf_cpu_methodology",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "directory": "build/tier-e-external-perf-20260919",
+    "perf_data": {
+      "path": "perf.data",
+      "sha256": "9f8836b4ae5473147ce58afb7617ff2e561402a4f3bcd2bae8f8f52126073c2a",
+      "samples": 15049,
+      "lost_samples": 8
+    },
+    "results": {
+      "path": "results.jsonl",
+      "sha256": "46355503a490b9205b1e9b8c4d65b5d64667827a59a7624d3aac6cfbdbf6c5ad"
+    },
+    "manifest_sha256": "1970e1ee73c69f0c2ad57286fc8a35c93e9bb1fdf375870dd58475e327dfc336"
+  },
+  "method": {
+    "execution": "rootful Docker",
+    "sampler": "external perf record --event cycles:u --call-graph dwarf",
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "forks": 1,
+    "scope": "tier-e-unique-edge-observer"
+  },
+  "historical_result": {
+    "production_workload_correctness": "PASS",
+    "production_tier_e_evidence": "COMPLETE",
+    "policy_eligibility": false,
+    "safe_for_exact_evidence": true,
+    "allocation_attribution_available": false,
+    "steady_state_jvm_symbol_attribution_available": false
+  },
+  "historical_limitations": [
+    "The recording includes JVM startup and dynamic-loader work because sampling begins with the benchmark parent process.",
+    "No resolved JIT, JVMTI GetStackTrace, or Mazewall native-agent symbols were present in the report.",
+    "perf CPU samples do not attribute JVM object allocation classes.",
+    "This one-fork diagnostic is not a performance comparison or readiness-closing artifact."
+  ],
+  "follow_up": {
+    "artifact": {
+      "directory": "build/tier-e-external-perf-relwithdebinfo-20260919",
+      "perf_data": {
+        "path": "perf.data",
+        "sha256": "7b7b5e8279fa7bd1c696c51f992f5eabf2b654b6a06289f465d66fee4d7df298",
+        "samples": 63000,
+        "lost_samples": 0
+      },
+      "results": {
+        "path": "results.jsonl",
+        "sha256": "d94083606bedcda75e1cc82e79be8dff93a338367159681bfc54a6fab303676e"
+      },
+      "perf_report": {
+        "path": "perf-report.txt",
+        "sha256": "905671ff731f4d72747102713c2434c9579e8efd5a443106efa3c70b119c0b40"
+      },
+      "manifest_sha256": "ee74ee386a4031cec3f13d02a7c3af634ba6931ce7d7a61b156f9f9d2e79c6c5"
+    },
+    "method": {
+      "execution": "rootful Docker",
+      "sampler": "external perf record --event cycles:u --call-graph fp --delay 1000",
+      "native_build_type": "RelWithDebInfo",
+      "java_options": ["-XX:+PreserveFramePointer", "-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints"],
+      "scope": "tier-e-production-selection",
+      "forks": 1,
+      "warmups": 3,
+      "measured_batches": 100,
+      "operations_per_variant": 10000
+    },
+    "result": {
+      "production_workload_correctness": "PASS",
+      "production_tier_e_evidence": "COMPLETE",
+      "policy_eligibility": false,
+      "safe_for_exact_evidence": true,
+      "native_symbol_attribution_available": true,
+      "jvmti_stack_walk_visible": true,
+      "allocation_attribution_available": false
+    },
+    "measured_cpu_priorities": {
+      "hotspot_vframe_sender_percent": 1.07,
+      "native_publish_stack_marker_percent": 0.13,
+      "native_find_canonical_stack_percent": 0.12,
+      "native_capture_stack_percent": 0.08,
+      "native_invocation_scope_constructor_percent": 0.07,
+      "native_raw_stack_equals_percent": 0.05,
+      "native_write_definitions_percent": 0.01
+    },
+    "interpretation": "The sampled native hot path is materially smaller than HotSpot JVMTI frame walking. Marker publication and canonical lookup remain the only measured native leaves above 0.1 percent. Definition serialization is not a meaningful warmed-boundary CPU target in this workload.",
+    "limitations": [
+      "The one-fork capture includes four production-selection variants and residual JVM compilation, so its percentages are prioritization evidence rather than a per-variant overhead decomposition.",
+      "JIT application methods remain unsymbolized because this Temurin 25.0.4 build exposes no perf-map dump flag.",
+      "perf CPU samples do not attribute JVM allocation classes or retained-state categories.",
+      "This diagnostic does not replace the five-fork paired overhead gate."
+    ]
+  },
+  "next_action": "Use the retained rootful symbol-rich perf methodology for native CPU prioritization. Keep the remaining allocation decomposition blocked until a separate observer-free allocation method can distinguish JVM allocation, collector allocation, and retention without producing target-visible JVM activity.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "unverified"
+  }
+}

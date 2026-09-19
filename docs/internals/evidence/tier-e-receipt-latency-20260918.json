@@ -1,0 +1,71 @@
+{
+  "title": "Tier E calibrated collector receipt-age burst matrix",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK=monotonic MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-poll-backoff MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-receipt-latency-final-20260918",
+  "artifact": "build/tier-e-receipt-latency-final-20260918/results.jsonl",
+  "artifact_sha256": "237ddb4f9e3a28ca5bc89f9a01ef92e71989588f2ac6f60c7c422f325335b818",
+  "manifest_sha256": "d5dfe365ab5997b2d98c497840ab9541b7e8d7a149a12144490d15b8c96e4e61",
+  "provenance": {
+    "environment": "rootful Docker, privileged, pinned CPUs 0 and 2",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 35,
+    "clock": "benchmark-only Linux clock_gettime(CLOCK_MONOTONIC), the bpf_ktime_get_ns domain"
+  },
+  "matrix": {
+    "forks_per_variant": 5,
+    "warmup_batches": 3,
+    "measured_batches": 10,
+    "iterations_per_batch": 100,
+    "profiled_variants": 8,
+    "profiled_forks": 40,
+    "receipt_samples_per_profiled_variant": 19500,
+    "correctness": "all profiled forks PASS and COMPLETE; loss, wrong, and missing operations are zero"
+  },
+  "receipt_age_ns": {
+    "dictionary_full_stream": {
+      "continuous_mean": 17070677.6,
+      "adaptive_mean": 14358497.6,
+      "continuous_p99_upper": 67108863,
+      "adaptive_p99_upper": 67108863,
+      "fixed_250us_p99_upper": 134217727
+    },
+    "dictionary_unique_edge": {
+      "continuous_mean": 24410666.2,
+      "adaptive_mean": 21988080.4,
+      "continuous_p99_upper": 67108863,
+      "adaptive_p99_upper": 67108863,
+      "fixed_250us_p99_upper": 134217727
+    }
+  },
+  "phase_attribution_ns": {
+    "semantics": "Whole drain is timed outside the production record loop. It includes real BPF-map traversal, owned record creation, and batch scheduling; it is not a per-record component timer.",
+    "dictionary_full_stream_continuous": {
+      "stack_capture_per_capture": 4850.46,
+      "marker_publish_per_capture": 6653.92,
+      "whole_drain_per_ready_record": 18487.8,
+      "collector_join_per_ready_record": 6252.44,
+      "serialization_per_capture": 23.37,
+      "lock_wait_per_capture": 0.02
+    },
+    "dictionary_unique_edge_continuous": {
+      "stack_capture_per_capture": 5267.87,
+      "marker_publish_per_capture": 8663.59,
+      "whole_drain_per_ready_record": 24566.55,
+      "collector_join_per_ready_record": 7379.64,
+      "serialization_per_capture": 24.54,
+      "lock_wait_per_capture": 0.02
+    }
+  },
+  "decision": "The calibrated clock is valid for this rootful host and shows burst receipt scheduling in the tens of milliseconds. Adaptive pacing improves the mean in this matrix but does not establish a sustained-overload or long-session contract. Dictionary serialization and lock waiting are not material on this host; whole drain and collector join remain larger than stack capture. Keep continuous polling as the production default and adaptive pacing opt-in. Do not attribute whole-drain cost to a specific ring-reader operation without a real-BPF-map control.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "host_specific",
+    "policy_eligibility": false
+  }
+}

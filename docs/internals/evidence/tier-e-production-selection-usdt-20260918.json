@@ -1,0 +1,43 @@
+{
+  "title": "Tier E current-source AUTO, USDT, and uprobe marker selection",
+  "date": "2026-09-18",
+  "status": "complete",
+  "command": "MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918 MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-production-selection MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-production-selection-usdt-20260918",
+  "artifact": "build/tier-e-production-selection-usdt-20260918/results.jsonl",
+  "artifact_sha256": "7e629009759cd62164bbadd0ef96177e362ae1b18e88c5e7fb4a496e9d9d6ac5",
+  "image": "mazewall-tier-e-rootful:perf-20260918",
+  "results": {
+    "auto": {
+      "forks": 5,
+      "actual_selected_transport": "usdt",
+      "fallback": "none",
+      "expected_operations_per_fork": 1300,
+      "matched_operations_per_fork": 1300,
+      "loss": 0,
+      "wrong": 0
+    },
+    "explicit_usdt": {
+      "forks": 5,
+      "expected_operations_per_fork": 1300,
+      "matched_operations_per_fork": 1300,
+      "loss": 0,
+      "wrong": 0
+    },
+    "explicit_uprobe": {
+      "forks": 5,
+      "expected_operations_per_fork": 1300,
+      "matched_operations_per_fork": 1300,
+      "loss": 0,
+      "wrong": 0
+    }
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "policy_eligibility": false
+}

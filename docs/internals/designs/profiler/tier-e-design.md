@@ -18,6 +18,61 @@ syscall entry and emits attributed events. The result is a per-syscall answer to
 *"which application-level operation caused this?"* — with **no JVM suspension, no
 USER_NOTIF round-trips, and no per-syscall Java work**.
 
+### 1.0.1 Collector ownership and cadence
+
+> **Status: Implemented contract.**
+
+`TierECollectorLoop` is the reusable profiler-library owner of collection cadence around one
+`TierEProfilerSession`. It does not create a thread or own native producer lifetime; an embedding
+integration supplies its execution context and calls `pollOnce()` or `runWhile(...)`. Each poll
+copies ring records and performs dictionary joining through the session before the loop considers
+idle pacing.
+
+The loop has a continuous default, preserving the historical behavior. Integrations may select a
+bounded adaptive policy with an initial delay, maximum delay, and multiplier. Pacing is based on
+the number of ring records drained, not on the number of newly resolved syscalls: delayed dictionary
+resolution is not evidence that the ring was idle. Any drained record resets the backoff. The loop
+reports poll, active-poll, idle-poll, park, accumulated-park, and maximum consecutive-idle metrics.
+
+An empty drain is never a producer barrier. The integration must establish producer closure by its
+own lifecycle protocol and provide that fact to `TierECollectorLoop.finish(..., producerClosed)`.
+The loop delegates terminal reconciliation to `TierEProfilerSession`; `producerClosed=false` stays
+fail-closed and produces incomplete lifecycle evidence. This separation keeps scheduling policy
+independent from attribution validity and prevents a quiet ring from being mistaken for completed
+evidence.
+
+`bpf_ktime_get_ns` timestamps are identity-adjacent kernel metadata, not automatically collector
+latency measurements. `System.nanoTime()` does not promise the same epoch and is never subtracted
+from kernel timestamps. The benchmark-only `TierELinuxMonotonicClock` instead uses Linux
+`clock_gettime(CLOCK_MONOTONIC)` through the validated raw-syscall boundary, matching the clock
+domain of `bpf_ktime_get_ns`. It records bounded logarithmic receipt-age summaries with inclusive
+upper bounds for p50/p95/p99, plus sample count, min/mean/max, ring loss, and ready-record metrics.
+The clock is disabled by default and is not part of production collector behavior. The rootful
+five-fork burst matrix retained zero loss and complete evidence in both dictionary modes; its
+receipt ages are host-specific scheduling observations, not a sustained-overload latency contract.
+See [tier-e-receipt-latency-20260918.json](../../evidence/tier-e-receipt-latency-20260918.json).
+
+The same matrix confirms that dictionary serialization and lock waiting are not the material
+remaining costs on that host. Whole owned-ring draining plus collector joining exceeds exact stack
+capture in both dictionary modes, but the whole-drain metric intentionally avoids intrusive
+per-record clocks and cannot identify a specific reader operation. The 2026-09-19 five-fork
+real-BPF direct-versus-legacy map/decode control retained complete evidence and every paired
+95-percent interval included zero. It excludes mapped-record decoding as the material explanation
+for the whole-drain aggregate. The remaining aggregate still includes copying, scan cadence, and
+scheduling; no performance decision may describe it as unavoidable stack walking until those are
+separated from CPU work.
+
+**Implemented contract:** session draining appends collector results directly to its owned batch.
+The public `AttributionCollector.accept()` list-returning API remains compatible; its temporary
+result list is retained only as a benchmark control. The 2026-09-19 rootful five-fork paired
+control retained identical `PASS`/`COMPLETE` decoded evidence for both paths and reduced measured
+collector-join allocation from 541 to 474 bytes per ready record in dictionary/full-stream and
+from 556 to 464 bytes in dictionary/unique-edge. Its workload-time intervals included zero, so
+this is an accepted allocation reduction, not a claimed application-latency improvement. The
+remaining 464--474 bytes per record must still be separated into necessary immutable evidence and
+avoidable work before attributing Tier E overhead to exact stack walking. See
+[`tier-e-collector-append-current-20260919.json`](../../evidence/tier-e-collector-append-current-20260919.json).
+
 ### 1.1 InvocationId stack backend (supersedes ContextId)
 
 > **Status: Implemented contract.**
@@ -170,20 +225,29 @@ unless that exact logical stack has been proven at the corresponding native boun
 2. **[Implemented baseline] Make the unavoidable capture path cheaper.** Reuse native frame and
    raw-key buffers per thread where the current proxy path permits. This reduces agent-side
    allocation, hashing, and locking, but cannot remove the HotSpot logical stack walk that proves
-   the key. Allocation-free warmed hits and broader scratch-buffer reuse remain measured targets.
+   the key. The 2026-09-19 calibrated capture study found no supported optimization candidate:
+   `GetStackTrace` remained dominant, warmed hits already used the allocation-free `RawStackView`,
+   and every enabled-versus-disabled timing interval included zero. Production phase clocks are
+   now actually disabled when measurement is off; that is a benchmark-correctness fix, not a
+   claimed application-latency gain.
 3. **[Required hardening] Offer an explicit reduced-payload coverage mode.** A coverage-only report may request only a
    syscall number and canonical stack edge, avoiding six-register argument capture where callers
    do not need representative arguments. It must not claim a full stream. Unknown/unmarked
    activity must remain visible as an integrity failure, either as events or as a clearly reported
    aggregate counter.
-4. **[Required hardening] Evaluate a lower-cost marker transport.** A USDT marker or another verified lower-overhead
-   transport can reduce the four current marker transitions around each native scope. It must
-   retain the same per-thread state transitions and binary/attachment verification as the uprobe
-   path.
+4. **[Implemented contract] Prefer a validated lower-cost marker transport.** On x86_64 an `AUTO`
+   attachment selects the verified versioned USDT marker and retains the same per-thread state
+   transitions and binary/attachment verification as the plain-uprobe compatibility path.
 5. **[Required hardening] Evaluate scoped tracepoint attachment for node scale.** Per-platform-TID perf tracepoints
    could avoid running the system-wide raw-tracepoint filter for unrelated host processes. This is
    an operational-cost optimization only; it must correctly track JVM thread lifecycle and carrier
    threads before it can replace the current global attachment.
+6. **[Historical evidence: rejected default] Readiness-driven ring collection.** Polling the ring
+   map descriptor after an empty drain preserved complete evidence and zero loss, but the
+   fifteen-fork decision reached only 11.34% median collector-process CPU improvement in
+   full-stream mode and 12.53% in unique-edge mode. Neither mode met the predeclared 15% confidence
+   gate, and unique-edge also missed the receipt-p99 gate. Continuous polling therefore remains the
+   production default; readiness-driven collection remains an explicit experimental policy.
 
 Rejected shortcuts: Java `StackWalker`, `AsyncGetCallTrace`, a timestamp join, a per-method shadow
 stack, and skipping `GetStackTrace` based only on prior history. Each either adds cost, lacks a
@@ -259,10 +323,15 @@ source tree:
 
 ## 2.4 Performance and lifetime evidence
 
-The native agent's exact stack path is measured in three phases: `GetStackTrace`,
-raw-key validation/cache lookup, and logical-frame metadata resolution. The optional
-`benchmark-phases` agent option emits phase totals and cache hit/miss counts without
-changing definitions. Logical metadata is immutable after insertion and keyed by
+The native agent's exact stack path reports `GetStackTrace`, aggregate raw-key lookup, raw hashing,
+full raw-key equality, symbolization-generation validation, weak-class-guard validation,
+canonical-cache lock wait, and logical-frame metadata resolution separately. Marker set, admission
+clear, exact set, exit clear, collector work, serialization, and publication remain separate
+dimensions. The optional `benchmark-phases` agent option emits those totals and cache hit/miss
+counts without changing definitions. When it is absent, phase clock reads and atomic counter
+updates are omitted rather than merely discarded. The paired `tier-e-capture-timing` scope rotates
+enabled and disabled variants so instrumentation perturbation is measured instead of assumed.
+Logical metadata is immutable after insertion and keyed by
 method identity plus symbolization epoch; every value carries a weak declaring-class
 guard and is rejected when the class is unloaded. The cache is bounded at 4096 entries.
 Class load, retransformation, and redefinition advance the epoch, preventing cross-version
@@ -349,7 +418,7 @@ The native `benchmark-phases` option reports capture phases plus `serialization_
 `publication_bytes` for dictionary/full-stream, dictionary/unique-edge, inline/full-stream, and
 inline/unique-edge runs. These are host-specific comparison measurements, not universal latency
 guarantees or a replacement for the existing regression gate. USDT is not a transport flavour;
-it remains a separately validated marker-backend experiment.
+it is the preferred validated x86_64 marker backend for an `AUTO` attachment request.
 
 ### 2.1.2 Trustworthy flavour benchmark contract
 
@@ -373,6 +442,52 @@ benchmark rotates fork order, pins workload and collector to distinct physical c
 the full baseline/Tier E/USER_NOTIF comparison, paired cache comparison, and terminal-versus-live
 publication comparison. Artifacts retain source revision, dirty state, JDK, OS, affinity, timeout,
 raw child output, publication and retained-state counters.
+
+Calibration starts at 100 operations and doubles to at most 65,536. One shared count is selected
+for every mode in a comparison block, frozen in both benchmark metadata and the run manifest before
+decision forks start, and never shortened after measurement begins. Selection targets a 100 ms
+fastest batch while bounding the predicted slowest batch to 15 seconds, retained bytes to 48 MiB,
+and retained records to 75,000. If those constraints conflict, the largest safe doubled count is
+used and `calibration_target=unmet` is explicit. `smoke` runs one fork and three measured batches,
+`development` runs five rotated forks and ten batches, and `decision` runs fifteen rotated forks
+and ten batches with paired bootstrap 95% intervals.
+
+`TierECollectorLoopPolicy.READINESS_DRIVEN` is an experimental collector policy. After an empty
+drain it polls the BPF ring-map descriptor for at most 10 ms, retries `EINTR` against a monotonic
+deadline, treats descriptor error/hangup/invalid states as terminal, and rechecks shutdown after
+timeouts. A readiness wakeup requests another drain; it is never producer-closure evidence.
+Metrics distinguish waits, ready wakeups, timeouts, spurious wakeups, waited nanoseconds, receipt
+age, CPU, loss, and terminal completeness. The 2026-09-19 decision rejected promotion, so
+continuous collection remains the compatibility and production default.
+
+The shared-openat oracle publishes its target root and directory-FD manifest by atomic pathname
+replacement. The collector may wait for the manifest path, but never reads a directly appended
+file; this prevents an attach-side parser from observing a partially written `fd=` record during a
+large benchmark setup.
+
+Benchmark preparation is separately cached by a content fingerprint over the native source,
+profiler runtime source, Gradle inputs, compiler, CMake, JDK, and selected marker transport. A
+reused CMake tree or `installDist` runtime must have the same fingerprint as the staged agent and
+may only reduce preparation time; it must not alter workload configuration, result provenance, or
+the measured process. Each staged bundle is copied from that immutable cache, checksummed again,
+and given a new manifest before it is mounted read-only into the benchmark container. Missing or
+malformed cache metadata is terminal preparation failure, never a reason to reuse an unverified
+binary.
+
+`scripts/run_tier_e_checks.sh` provides named verification lanes with retained per-stage logs:
+`focused` runs the combined benchmark/lifecycle Kotlin filters in one Gradle invocation, `native`
+runs deterministic CTest fixtures, `kernel-smoke` runs one rootful marker/BPF matrix, and `delivery`
+runs the full profiler suite, native checks, and backlog validation. Fast lanes establish only local
+correctness; performance and backend decisions still require the separately retained rootful paired
+measurements.
+
+Every rootful runner invocation also owns an immutable `run_id` shared by the manifest and
+`runner-events.jsonl`. The event stream records build, bundle verification, and benchmark stage
+transitions. The runner records `PASSED` only after it validates exactly one successful benchmark
+terminal record, exactly one summary, at least one completed fork, and a sample count equal to the
+summary count; otherwise its exit trap retains a `FAILED` or `CANCELLED` terminal event.
+The retained cancellation fixture sends `TERM` during bundle preparation and proves the runner
+emits `CANCELLED` after its `bundle_build:STARTED` event while leaving no Tier E container active.
 The rootful runner additionally retains a JSON manifest with the source dirty-tree fingerprint,
 native-agent checksum, container image ID, kernel, CPU topology, arguments, deadlines, and raw-log
 paths. It compiles as the local user, then performs privileged measurement from a read-only source
@@ -389,6 +504,15 @@ mount with writable scratch space only.
 but keeps narrowed capture admission closed until `VM_INIT` confirms
 `java.specification.version == "25"` through a profiler-owned JNI lookup. A failed validation leaves
 the narrowed binding excluded rather than fabricating an exact stack or restoring a prior context.
+
+Historical rootful evidence from 2026-09-18 retains this profile as an opt-in domain reduction.
+Across fifteen paired JVM forks with the exact `openat` oracle, dictionary/full-stream had median
+boundary times of `1,980,379 ns` for `full` and `1,640,671 ns` for `jdk25-unix-openat0`; the paired
+full-minus-narrowed effect was `312,152 ns` per measured batch (bootstrap 95% interval
+`[278,892, 404,393] ns`). This does not make `jdk25-unix-openat0` the default or prove a lower
+full-domain capture cost: it admits fewer native boundaries by contract. The complete evidence,
+including provenance and all verdict dimensions, is retained in
+[tier-e-capture-profile-matrix-20260918.json](../../evidence/tier-e-capture-profile-matrix-20260918.json).
 
 Paired profile statistics include a fork only when both the full and narrowed arms report
 `workload_correctness=PASS`, complete whole-session evidence, and valid admitted-capture joins.
@@ -421,10 +545,44 @@ Tier E flavours and all five-pair bootstrap intervals excluded zero. Dictionary/
 canonical cache reuse remains the performance default; the report keeps the host/workload limits
 of that conclusion explicit.
 
-`tier-e-publication-benchmark-20260917.jsonl` validates terminal and 100 ms live snapshot
-publication for all dictionary and inline flavours. Its first rotated run has mixed median deltas;
-it demonstrates publication behavior and retained phase metrics, but it does not yet justify a
-publication-mode change or incremental dictionary transport.
+The corrected paired publication artifact
+`docs/internals/evidence/tier-e-publication-paired-20260918.json` compares terminal against
+100 ms live snapshots for all dictionary and inline flavours. It rotates the two publication
+arms inside every JVM fork, excludes invalid pairs, and reports live-minus-terminal bootstrap
+intervals. All four five-pair intervals include zero, so live publication has no demonstrated
+workload-time benefit on this host and terminal publication remains the default. This is evidence
+against a premature publication-mode change or incremental dictionary transport, not a claim that
+live publication is never useful for a stack-diverse, class-churn, or long-running workload.
+
+The stack-diverse follow-up
+`docs/internals/evidence/tier-e-publication-stack-diverse-20260918.json` varies the exact Java
+call depth from zero through fifteen while preserving the same openat operation oracle. A
+dictionary unique-edge fork observed 28 validated cache misses and 7,787 hits. Live dictionary
+publication produced five snapshots and roughly 0.9--1.0 MB per fork, compared with one roughly
+0.35 MB terminal snapshot; the corresponding serialization totals remain about 0.9--1.0 ms. Only
+dictionary unique-edge had a five-pair interval excluding zero, while the other three transport /
+emission combinations remained inconclusive. Therefore this result neither promotes live
+publication globally nor justifies incremental dictionary transport. Class-churn and long-session
+evidence remain required before revisiting that decision.
+
+The class-churn follow-up
+`docs/internals/evidence/tier-e-publication-class-churn-20260918.json` creates a fresh disposable
+child-loader proxy class for every sixty-fourth operation while preserving the same exact openat
+oracle. Dictionary unique-edge observed 34 cache misses and 7,781 hits per fork without retention
+exhaustion or failed publication. Live dictionary snapshots serialized about 1.0--1.3 MB across
+five to six publications, compared with one 0.37 MB terminal snapshot. All four paired intervals
+include zero under this generation-churn workload. Class churn is therefore measured and does not
+justify incremental transport; a genuinely long-session measurement remains required.
+
+The long-session follow-up
+`docs/internals/evidence/tier-e-dictionary-publication-long-session-20260918.json` runs five
+stack-diverse dictionary-only rotations with three warm-ups, ten 500-operation measured batches,
+and five paired terminal/live forks. Live publication created 10--16 snapshots and serialized
+roughly 5.9--11.7 MB per fork in 6--17 ms, compared with one 1.41 MB terminal snapshot in
+approximately 0.8--1.1 ms. Both live-minus-terminal intervals include zero, with no failed
+publication or retained-state exhaustion. Stack diversity, class churn, and long-session evidence
+therefore all reject a premature incremental-dictionary transport change; terminal snapshots remain
+the default and live publication remains opt-in.
 
 The corrected full rootful comparison is retained as
 `docs/internals/evidence/tier-e-full-matrix-20260917.jsonl`, with its provenance in the adjacent
@@ -492,6 +650,35 @@ RUNNING_SESSION
 `INACTIVE_FOR_CALLBACK` is entered before any callback-driven JVM work and must not restore a prior exact
 invocation until a validated re-entry boundary is observed.
 
+### 2.2.1 Terminal producer-quiescence barrier
+
+> **Status: Implemented contract.**
+
+An empty ring-buffer drain is not a producer barrier: a `sys_enter` program that observed the old
+marker attachment can be preempted before reserving or submitting its record. Terminal shutdown
+therefore performs the following ordered transition:
+
+```text
+detach marker admission
+  -> wait for target sys_enter in-flight counter to reach zero
+  -> drain committed ring records
+  -> read loss and diagnostic counters
+  -> close capture and finalize retained evidence
+```
+
+The BPF program increments a per-CPU in-flight counter after target-TGID admission but before it
+reads `marker_attached`. Every path after that increment, including detached-marker, missing task
+storage, inactive invocation, reservation failure, and successful submission, reaches one shared
+decrement epilogue. This ordering closes the detach/preemption race: a handler that saw an old
+attachment cannot begin producing after userspace has accepted quiescence.
+
+The wait is bounded. It proves drain safety only: timeout, interruption, unavailable counter state,
+or any other missing proof leaves lifecycle validity incomplete and invalidates attribution. Even a
+successful zero count never upgrades an empty drain into complete terminal evidence, because the
+native producer can still create later definitions after marker admission is detached. An externally
+observed target-process exit is the independent producer-closure proof required for complete
+lifecycle evidence.
+
 ## 2.7 Retained implementation evidence
 
 > **Status: Historical evidence.**
@@ -506,6 +693,9 @@ verdict dimensions. The lifecycle stress fixture and transport fault-injection d
 retained in [`tier-e-lifecycle-identity-stress-20260913.json`](../../evidence/tier-e-lifecycle-identity-stress-20260913.json)
 and [`tier-e-transport-fault-injection-20260913.json`](../../evidence/tier-e-transport-fault-injection-20260913.json).
 Rootless Podman remains explicitly `INCOMPLETE` and is not used to support a privileged claim.
+The calibrated workload contract, fifteen-fork readiness rejection, three workload capture-phase
+studies, raw JSONL, manifests, runner events, logs, hashes, and verdict dimensions are retained in
+[`tier-e-calibrated-readiness-and-capture-20260919.json`](../../evidence/tier-e-calibrated-readiness-and-capture-20260919.json).
 
 ## 3. Invariants (non-negotiable, enforced by review and where possible by types)
 
@@ -545,8 +735,9 @@ Rootless Podman remains explicitly `INCOMPLETE` and is not used to support a pri
 
 > The ContextId/USDT material below records earlier design iterations. For the implemented stack
 > backend, substitute `InvocationId` for `ContextId`, `mazewall_stack_marker` for the context probe,
-> and the native JVMTI dictionary described in §1.1. The current implementation uses a plain symbol
-> uprobe by default because its dependency-free Kotlin loader resolves the ELF dynamic symbol directly.
+> and the native JVMTI dictionary described in §1.1. The current implementation resolves a validated
+> x86_64 USDT note for `AUTO` attachment and retains the plain symbol uprobe as an explicit and
+> compatibility fallback.
 
 ### 4.1 The handoff primitive
 
@@ -579,15 +770,56 @@ any instant, the write and all subsequent reads are serialized by construction. 
 userspace/kernel memory-ordering proof to make — this is the property that eliminated the
 previous mmap-slot design (§6).
 
-### 4.1.1 Marker ABI: Plain uprobe (implemented) vs Mazewall USDT probe (planned)
+### 4.1.1 Marker ABI: validated Mazewall USDT with plain-uprobe compatibility
 
-> **Status: Required hardening.**
+> **Status: Implemented contract.** On x86_64, `AUTO` prefers a validated versioned Mazewall USDT
+> note. Explicit `UPROBE` remains available, explicit `USDT` remains fail-closed, and invalid or
+> unavailable note metadata makes `AUTO` record a plain-uprobe compatibility fallback.
 
-> **Decision (2026-08-25):** Tier E context transitions are designed to move to a Mazewall
-> **USDT probe** long-term, with the underlying attribution mechanism remaining uprobe → BPF task
-> storage. The current shipped implementation is still **uprobe-first**.
+> **Current contract (2026-09-18):** USDT changes only the marker probe site. Stack capture, BPF
+> task storage, selected `raw_tp/sys_enter`, ring draining, dictionary transport, collector joining,
+> acknowledgement, and terminal integrity are unchanged. Both marker transports execute
+> `mazewall_stack_marker(uint64_t invocation_id, uint32_t flags)`. The enabled x86_64 native
+> artifact emits exactly one `mazewall:stack_marker_v1` `NT_STAPSDT` note with arguments
+> `8@%rdi 4@%esi` and semaphore `0`; `%esi` is required because `flags` is a 32-bit ABI argument.
+> The daemon reads one bounded ELF descriptor, discovers `NT_STAPSDT` entries from both `PT_NOTE`
+> segments and `SHT_NOTE` sections (GNU-linked `.note.stapsdt` is commonly section-table-only),
+> deduplicates shared ranges, requires exactly one matching ELF64 little-endian note, maps its
+> virtual address through `PT_LOAD`, and attaches at that validated probe instruction; it does not
+> compare it with the plain exported function entry, because an SDT probe may follow its prologue.
+> Missing, malformed, duplicate, unsupported, or
+> mismatched metadata is terminal attach failure with no plain-uprobe fallback. `sys/sdt.h` is
+> build-only under opt-in `MAZEWALL_ENABLE_TIER_E_USDT`; no runtime libbpf dependency is used.
+> Other architectures are unsupported until their emitted note ABI and BPF argument contract are
+> proven. Historical `1,324 ns` plain and `596 ns` USDT figures are not a current performance
+> claim and cannot authorize a default switch.
 
-Planned production-facing interface:
+> **Rootful decision evidence (2026-09-18):** a CPU-pinned, rotated 15-fork `syscall_dense`
+> comparison completed all dictionary/inline and full-stream/unique-edge pairs on the current
+> lifecycle implementation. The 60 paired uprobe/USDT observations had identical workload verdicts,
+> complete normal-session evidence, and zero selected loss or wrong attribution. Median matched
+> workload savings for USDT were `100,816 ns` (dictionary/full), `101,247 ns`
+> (dictionary/unique), `97,432 ns` (inline/full), and `98,334 ns` (inline/unique); median marker
+> set-plus-clear savings were `403` to `409 ns` per transition. Separate rootful callback and
+> active-terminal matrices prove the same lifecycle contract: callback re-entry is exact only after
+> a nested validated boundary, while active terminal shutdown remains explicitly incomplete.
+> This authorizes the x86_64 `AUTO` preference. Non-x86_64 ABI validation remains required.
+
+> **Production-selection proof (2026-09-18):** the dedicated five-fork dictionary/full-stream
+> matrix records both the requested and selected marker backend. `AUTO` selected validated USDT in
+> every fork; AUTO, explicit USDT, and explicit Uprobe each completed the same 1,300 exact workload
+> operations per fork with zero missing, wrong, or lost observations. The paired AUTO-minus-USDT
+> workload effect was `-65,297 ns` per 1,000 operations with a bootstrap 95% interval of
+> `[-684,957, 549,101] ns`, which includes zero as expected for the same selected backend. The
+> five-pair Uprobe-minus-USDT interval also includes zero and is therefore not used as a speed
+> claim. The 15-fork transport matrix remains the marker-speed evidence. See
+> [`tier-e-production-marker-selection-20260918.json`](../../evidence/tier-e-production-marker-selection-20260918.json).
+
+> **Decision (2026-09-18):** Tier E uses a Mazewall **USDT probe** as the preferred validated
+> x86_64 `AUTO` marker backend, with the underlying attribution mechanism remaining uprobe → BPF
+> task storage. The plain symbol uprobe is retained for explicit selection and recorded AUTO fallback.
+
+Historical, superseded one-argument prototype interface:
 
 ```text
 Provider: mazewall          Probe: context_switch(uint64_t invocation_id)
@@ -596,6 +828,9 @@ void mazewall_context_marker(uint64_t invocation_id) {
     DTRACE_PROBE1(mazewall, context_switch, invocation_id);   /* sys/sdt.h */
 }
 ```
+
+The remaining prototype rationale below is historical evidence only; it must not override the
+current two-argument contract above.
 
 Rationale (full review in Appendix A):
 
@@ -910,13 +1145,11 @@ sample code: github.com/oracle-samples/linux-blog-sample-code (branch
 
 > **Status: Historical evidence.**
 
-See §4.1.1. Summary: USDT is the userspace analogue of tracepoints — named probes with
-declared arguments recorded in ELF `.note.stapsdt`, implemented atop uprobes. Adopted as the
-production marker ABI because it converts our marker from an implementation detail into a
-discoverable, verifiable, evolvable interface. Trade-offs accepted: `sys/sdt.h` build-time
-dependency (prototype toolchain only), libbpf ≥ 0.8 for `attach_usdt` (prototype only),
-custom `.note.stapsdt` parsing deferred to WP-14 with a documented plain-uprobe fallback
-path. Semaphores rejected for v1 (no argument-prep cost today).
+See §4.1.1. The current experiment uses the existing dependency-free dynamic-uprobe engine, a
+bounded `.note.stapsdt` parser, and no fallback from requested USDT to plain uprobe. It is not
+the production marker ABI. Earlier references to libbpf `attach_usdt`, `context_switch`, or a
+one-argument marker are historical only. Semaphores remain rejected because the marker arguments
+already exist at the native boundary.
 
 ### A.3 Future async extension vocabulary (not v1 scope)
 
@@ -1085,6 +1318,238 @@ subsequent `write`. Its artifact therefore records `operation_oracle_available=f
 `operation_oracle_reason=write_not_selected_by_user_notif`; it remains a timing and
 stack-capture comparison, not a corresponding operation-identity proof. A USER_NOTIF oracle
 requires a separately selected syscall with an argument-visible operation identifier.
+
+#### Workload-rate evidence (historical host evidence)
+
+The saved rootful workload-rate matrix runs the same shared `openat` operation manifest through
+all seven modes for three deterministic schedules: `syscall_dense`, `mixed_cpu_io`, and
+`bursty_io`. Each schedule retains operation identifiers, syscall arguments, phase boundaries,
+and checksum semantics; its CPU work occurs after the observed `openat`, so it changes workload
+shape without weakening attribution or the oracle denominator. Each profile uses three warm-up
+batches, ten measured batches, fifteen rotated JVM forks, two distinct pinned physical CPUs, and
+separate build/lifecycle timing from workload timing.
+
+The earlier full-profile component matrix is retained as historical evidence but is invalid for
+cost attribution: it read `System.nanoTime()` inside every ring-record scan, slice, decode,
+append, and consumer-publication step. Its component totals therefore include measurement
+overhead and must not guide optimization. Current phase reporting uses one clock boundary around
+the complete drain only; detailed reader subphases are deliberately reported as zero
+(`unmeasured`) rather than fabricated. This correction preserves the ownership and exact-oracle
+contracts while preventing a future benchmark from silently reintroducing clock reads into the
+record loop.
+
+A separate paired direct-versus-legacy ring-decode matrix retained all seven benchmark controls and
+rotated the two decoder arms for each Tier E mode. It proved complete exact workload evidence for
+`156,000` expected Tier E operations with zero loss, but did not support a direct-decode default:
+dictionary/full-stream's legacy-minus-direct interval was `[-233,193, 47,813] ns` per measured
+batch and crosses zero. Inline/full-stream did favor direct decode on this host, but inline is not
+the default transport. Therefore legacy byte decoding remains the session default; direct decoding
+is benchmark-only until default-mode evidence supports it. The retained result is
+[tier-e-ring-decode-ab-rejection-20260918.json](../../evidence/tier-e-ring-decode-ab-rejection-20260918.json).
+
+A production-aligned follow-up repeated the decoder decision with the current
+`REUSE_CONSECUTIVE` task identity across fifteen rotated rootful forks. All `120` Tier E children
+retained complete evidence. Direct decoding saved a paired median `0.86--0.91 MiB` of measured
+drain allocation and `22.8--60.9 ms` of local drain time per fork, but all four end-to-end workload
+intervals crossed zero and their medians slightly favored legacy decoding. Paired total CPU medians
+also favored legacy by `10--60 ms` per fork. The local copy reduction is real, but it does not
+justify a production default change; legacy decoding remains the default and direct decoding
+remains diagnostic. The focused decoder scope now excludes USER_NOTIF because it does not execute
+the ring decoder. See
+[tier-e-ring-decode-production-decision-20260919.json](../../evidence/tier-e-ring-decode-production-decision-20260919.json).
+
+The follow-up paired direct-decoder argument-list experiment separately compared the ordinary
+immutable-factory construction with the former lambda-plus-defensive-copy construction. Five
+rotated rootful forks used `AUTO`, which selected validated USDT for every profiled child, and
+retained complete exact workload evidence with zero wrong operations and zero observed ring loss.
+Its lambda-copy-minus-immutable-factory interval was `[-203,973, 486,319] ns` per measured batch,
+so it crosses zero. The immutable factory is retained for straightforward immutable ownership, but
+it is not a claimed throughput optimization. Future decoder work must target a measured dominant
+cost, rather than repeating this allocation hypothesis. The retained rejection is
+[tier-e-ring-argument-list-ab-rejection-20260918.json](../../evidence/tier-e-ring-argument-list-ab-rejection-20260918.json).
+
+A separate fixed-input decoder diagnostic avoids live-ring timing entirely: it prepares one
+88-byte record in a confined arena, times whole decoder loops outside the hot operation, stores
+decoded events in a bounded static sink, and rotates three variants across five pinned JVM forks.
+All 150 samples retained the same nonzero checksum. The complete direct decoder measured
+`23.2 ns/op`, compared with `2.0 ns/op` for scalar reads and `5.6 ns/op` for immutable event
+construction. These controls are deliberately non-additive because their JIT and escape shapes
+differ, but they establish that pure JVM-side decoding cannot explain the microsecond-scale live
+ring-drain phase. Further work must therefore measure mapped-ring polling, callback dispatch, and
+collector scheduling as whole operations; it must not claim an argument-list or event-allocation
+optimization without new paired live-path evidence. The diagnostic is retained in
+[tier-e-ring-decoder-microbenchmark-20260918.json](../../evidence/tier-e-ring-decoder-microbenchmark-20260918.json).
+
+The follow-up mapped-ring drain diagnostic uses the production two-mapping reader contract with
+test-owned deterministic mappings. Producer publication occurs before each timed whole-drain call,
+so the result includes acquire/release cursor handling, mapped traversal, decode, owned-event
+creation, and consumer-position publication, but excludes BPF execution, wakeups, callback
+dispatch, and collector scheduling. Across five CPU-pinned forks with three warm-ups and ten
+samples per shape, median empty polling was `21.0 ns/drain`, one ready 88-byte record was
+`82.9 ns/drain`, and sixteen ready records were `488.6 ns/drain` (`30.5 ns/record`). The latter
+two values are not additive with the fixed-input decoder control, but together they rule out
+deterministic reader traversal as an explanation for the prior microsecond-scale live
+`ring_drain` phase. Any remaining investigation must measure kernel-to-user wakeup, callback
+dispatch, and collector scheduling as an integrated boundary; this diagnostic must not be used
+as an end-to-end throughput or BPF-performance claim. The raw result checksum and methodology are
+retained in [tier-e-ring-mapped-drain-microbenchmark-20260918.json](../../evidence/tier-e-ring-mapped-drain-microbenchmark-20260918.json).
+
+The corrected rootful live measurement retains the gap that the deterministic controls cannot
+explain. Five rotated, CPU-pinned explicit-uprobe forks produced complete evidence for all twenty
+Tier E children and recorded `3,900` ready records per fork. Whole drain median cost was
+`23.4 us/record` for dictionary/full-stream, `27.6 us/record` for dictionary/unique-edge,
+`21.5 us/record` for inline/full-stream, and `29.7 us/record` for inline/unique-edge; the
+collector join was only `8.0--11.1 us/record`. This is a real live-map boundary cost, but it is
+not yet attributable to a specific unavoidable mechanism: the deterministic two-mapping reader
+is still tens of nanoseconds per record. No allocation, lock, publication, or transport
+optimization is justified from this result. The next diagnostic must compare identical reader
+work over real BPF mappings with test-owned mappings, then separately measure native segment
+access and kernel-produced cache behavior. The correction and raw-artifact checksum are retained
+in [tier-e-whole-drain-measurement-correction-20260918.json](../../evidence/tier-e-whole-drain-measurement-correction-20260918.json).
+
+The corrected five-fork direct-versus-legacy live decoder matrix isolates one avoidable local
+cost without supporting a production default change. Direct decoding lowered median whole-drain
+time by `14.9 us/record` for dictionary/full-stream, `3.2 us/record` for dictionary/unique-edge,
+`10.1 us/record` for inline/full-stream, and `10.9 us/record` for inline/unique-edge. However,
+paired whole-workload medians for direct-minus-legacy were respectively `+21.3 ms`, `+13.8 ms`,
+`+11.8 ms`, and `+8.7 ms`, and individual fork effects crossed direction. The collector-local
+gain therefore does not establish an application-level benefit. `LEGACY_BYTES` remains the
+default and `DIRECT` remains a validated diagnostic/control path; no decoded evidence changed in
+either arm. The retained evidence is
+[tier-e-live-ring-decode-ab-20260918.json](../../evidence/tier-e-live-ring-decode-ab-20260918.json).
+
+A subsequent benchmark-only idle-poll pacing matrix shows that collector spin cadence is also an
+avoidable application cost. With a `50 us` or `250 us` post-poll delay, dictionary batches grew
+from roughly `2--11` to `244--975` ready records per poll, while all twenty profiled forks
+retained zero observed loss and complete evidence. Paired workload medians improved by
+approximately `18--20 ms` for dictionary/full-stream and `5--12 ms` for dictionary/unique-edge.
+This is not a production-default decision: the matrix does not establish end-to-end observation
+latency, sustained long-session behavior, or a safe adaptive policy. The delay remains
+benchmark-only until those contracts are measured. The retained artifact is
+[tier-e-poll-backoff-20260918.json](../../evidence/tier-e-poll-backoff-20260918.json).
+
+The reusable `TierECollectorLoop` was subsequently measured in the same rootful environment with
+five paired forks and a bounded adaptive arm (`1 us` initial, doubled to `50 us`, reset by each
+drained record). All forty profiled runs retained `PASS` workload correctness, complete evidence,
+zero loss, and zero missing or wrong declared operations. Adaptive pacing reduced median empty
+drains from `780` to `15` in dictionary/full-stream and from `779` to `17` in dictionary/unique-edge,
+with only `129 us` of cumulative scheduled park time in either mode. It did **not** produce a stable
+workload improvement: the paired median relative to continuous polling was `+7.806 ms` for
+full-stream and `-4.856 ms` for unique-edge, with mixed per-fork signs. Adaptive pacing therefore
+remains opt-in. The result does not measure end-to-end observation latency, sustained overload, or
+adaptive long-session behavior and cannot promote a production default. The retained artifact is
+[tier-e-adaptive-poll-20260918.json](../../evidence/tier-e-adaptive-poll-20260918.json).
+
+The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
+operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
+exact Tier E measured approximately 7.3--9.3k profiled operations/s for `syscall_dense`,
+11.0--13.7k for `mixed_cpu_io`, and 13.9--15.0k for `bursty_io`; USER_NOTIF measured roughly
+0.8--1.0k, 1.6k, and 2.1k respectively. These are per-profile rate points, not whole-application
+slowdown claims. No exact Tier E mode sustained 100k profiled boundaries/s, so that target is
+recorded as `INCOMPLETE` rather than extrapolated.
+
+Dictionary/full-stream remains the default transport. The same matrix found no global
+dictionary-versus-inline throughput winner: the direct interval crossed zero for mixed and bursty
+profiles. `syscall_dense` showed a host-specific inline/full-stream advantage, but that isolated
+result does not justify a transport-default change. The evidence and raw-artifact checksums are
+retained in [`tier-e-workload-rate-matrix-20260918.json`](../../evidence/tier-e-workload-rate-matrix-20260918.json).
+
+#### Calibrated cross-backend comparison (historical host evidence)
+
+A separate rootful five-fork comparison used the same verified shared-`openat` operations for
+baseline, both dictionary modes, and both USER_NOTIF modes. Each operation performed 1,500,000
+deterministic CPU rounds after its verified syscall, giving a roughly 100 ms unprofiled batch on
+this host. The runner used three warm-up batches, ten measured 1,000-operation batches per fork,
+rotated mode order, two pinned physical CPUs, and an exact operation oracle. All 20 profiled forks
+were `PASS` with complete evidence, zero observed loss, zero oracle mismatches, and
+`policy_eligibility=false`.
+
+For this workload, dictionary/full-stream added a median 148.1 ms per 1,000 operations over the
+matched baseline (95% bootstrap interval 146.9--152.5 ms); dictionary/unique-edge added 146.4 ms
+(142.1--161.0 ms). The unique-edge-minus-full-stream interval was -1.8 ms
+([-5.4, 12.2] ms), so it does not establish a dictionary-mode performance winner. USER_NOTIF
+without stack capture was 29.0 ms faster than dictionary/full-stream
+([-36.4, -14.3] ms); stack-enabled USER_NOTIF was 28.2 ms faster
+([-28.7, -6.5] ms). Those direct intervals exclude zero on this host. The additional
+stack-enabled-minus-no-stack USER_NOTIF effect crossed zero, so this workload cannot isolate a
+reliable stack-retrieval increment for USER_NOTIF.
+
+The corrected collector-allocation control then isolated the owned userspace work without changing
+the workload, Tier E transport, marker, or CPU-pinning contract. Its initial component probe was
+rejected because it looked up `ManagementFactory`'s `ThreadMXBean` after every measured phase and
+therefore charged probe work to the phase itself. The accepted control caches that service once and
+retains `PASS` workload correctness plus complete session evidence for all twenty outputs. Median
+append-target allocation is `247.83 B/ready record` for owned event-to-attribution conversion,
+`234.95 B` for collector resolution, `1.33--1.78 B` for freezing the retained batch, and
+`587.08--588.23 B` for the aggregate collector-join boundary; live ring draining is separately
+`669.58--672.94 B/ready record`. The component values are intentionally not summed into the
+aggregate: aggregate join also includes batch construction and loop bookkeeping, while freezing is
+outside that boundary. This identifies concrete representation and live-map-drain targets, but the
+five paired workload intervals still include zero, so it is not an application-latency claim. The
+artifact is [tier-e-component-allocation-current-20260919.json](../../evidence/tier-e-component-allocation-current-20260919.json).
+
+The ring event's public boxed `args` view is cached on first access rather than allocated during
+event decoding. Production collection transfers the owned primitive argument array directly into
+immutable attribution state and does not read that compatibility view, so this removes an otherwise
+unused allocation without weakening ownership or changing the `args` API. The paired rootful
+eager-versus-lazy control retained complete exact evidence for every Tier E output and reduced
+median ring-drain allocation from `441.04 B` to `407.31 B/ready record` (`33.73 B` saved). Its
+workload interval `[-56,092, 108,002] ns` includes zero, so this is an accepted allocation
+reduction, not a throughput claim. The retained artifact is
+[tier-e-ring-argument-view-current-20260919.json](../../evidence/tier-e-ring-argument-view-current-20260919.json).
+
+Tier E also keeps one immutable `TaskIdentity` for the most recently observed TID and reuses it
+only while that TID remains unchanged. The collector is serialized, the process incarnation is
+session-bound, and a TID transition constructs a new identity immediately; the cache therefore
+cannot carry attribution across tasks and retains one bounded object only. The five-fork paired
+rootful control retained complete exact evidence for every Tier E output and reduced owned
+event-to-attribution conversion from `247.87 B` to `215.88 B/ready record` (`31.99 B` saved).
+The mixed-TID lifecycle test proves reference reuse for one TID and distinct identities across a
+TID transition. The workload interval `[-141,025, 45,401] ns` includes zero, so this is an
+accepted allocation reduction, not a throughput claim. The retained artifact is
+[tier-e-task-identity-current-20260919.json](../../evidence/tier-e-task-identity-current-20260919.json).
+
+A paired queued-versus-direct-known dictionary-join control rejected bypassing the pending join
+structures when definitions are already present. Although all rootful outputs retained complete
+exact evidence, direct joining increased collector-resolution allocation from `234.99 B` to
+`258.97 B/ready record` and aggregate collector-join allocation from `592.70 B` to `614.08 B`.
+Its workload interval `[-298,031, 11,301] ns` also crosses zero. The queued join remains the
+production default; future work must not revive this shortcut without new contrary evidence. The
+retained rejection is [tier-e-known-join-rejection-20260919.json](../../evidence/tier-e-known-join-rejection-20260919.json).
+
+This is a benchmark result, not a whole-application slowdown estimate and not a reason to replace
+Tier E's asynchronous attribution and delivery contract. Dictionary/full-stream remains the
+default. Inline transport is deliberately excluded from this long-run comparison: its terminal
+snapshot exceeded the independently enforced 64 MiB retained-state cap and therefore produced
+explicit incomplete evidence rather than a valid performance sample. Full provenance, raw artifact
+checksums, paired intervals, and verdict dimensions are retained in
+[`tier-e-calibrated-cross-backend-matrix-20260918.json`](../../evidence/tier-e-calibrated-cross-backend-matrix-20260918.json).
+
+#### Uprobe versus USDT marker transport (historical host evidence)
+
+The calibrated workload also ran a separate five-fork, rootful paired marker-transport matrix.
+It compared Uprobe and USDT for both dictionary modes, retained the baseline and USER_NOTIF
+controls, and required complete exact-operation evidence for every profiled fork. All 20 Tier E
+forks passed with zero oracle mismatch and zero observed loss. Uprobe minus USDT was a median
+8.1 ms per 1,000 operations for dictionary/full-stream (95% bootstrap interval
+7.3--14.8 ms) and 5.1 ms for dictionary/unique-edge (4.0--7.7 ms). Both intervals exclude zero,
+so USDT is a measured optimization candidate on this host.
+
+USDT has since passed the equivalent rootful detach, callback-suppression, terminal-drain, and
+forced-capture-failure fixtures for both dictionary modes. Detach and terminal shutdown correctly
+reported incomplete evidence; callback suppression did not resurrect the outer exact attribution.
+The capture-failure fixture recorded one failed capture and no exact event for that invocation while
+the original workload completed; evidence remained incomplete. Rootful exec-transition evidence now
+covers both Uprobe and USDT: the successful-exec tracepoint clears the 24-byte task-storage marker,
+post-exec syscalls are explicitly inactive, and no stale exact event is retained. Production `AUTO`
+selects USDT when its versioned note validates and falls back to Uprobe only for compatibility;
+an explicit USDT request fails closed on note-validation failure. The benchmark harness keeps Uprobe
+as its explicit control arm, not as the production default. The rootful benchmark image must compile `#include <sys/sdt.h>`;
+its check intentionally supports distribution-specific multiarch header placement. The native bundle
+reconfigures CMake on every build, preventing a failed optional USDT-header probe from poisoning a
+later retry after an image rebuild. The retained results are
+[`tier-e-usdt-marker-transport-matrix-20260918.json`](../../evidence/tier-e-usdt-marker-transport-matrix-20260918.json)
+and [`tier-e-usdt-lifecycle-smokes-20260918.json`](../../evidence/tier-e-usdt-lifecycle-smokes-20260918.json).
 
 ### D.1 Live dictionary publication
 
@@ -1318,10 +1783,15 @@ The existing host measurements remain historical evidence. A 25% regression thre
 to each measured phase and mode total, and logical stack bytes must remain identical before and
 after an optimization.
 
-USDT remains an experimental marker alternative. It can replace the plain-uprobe path only
-after end-to-end evidence proves identical ordering, identity, failure behavior, and wire
-output with a measured improvement. Manual ring notification suppression and removal of
-failure-path clearing transitions are not accepted optimizations.
+USDT is the preferred x86_64 `AUTO` marker backend after end-to-end evidence proved identical
+ordering, identity, failure behavior, and wire output with a measured improvement. The current
+artifact proves the versioned marker ABI:
+`mazewall:stack_marker_v1(8@%rdi, 4@%esi)`, with semaphore `0`. An explicit USDT request
+fails closed when that note is absent or invalid. The additive `AUTO` request may select the
+plain uprobe only after recording the note-validation failure as a compatibility fallback. USDT
+does not remove ring drain or any later Tier E pipeline
+stage. Manual ring notification suppression and removal of failure-path clearing transitions
+are not accepted optimizations.
 
 ## Requirements and evidence matrix
 
@@ -1388,6 +1858,12 @@ Fail-closed behavior means an incomplete run remains incomplete. No empty ring, 
 file, or zero out-of-domain counter is by itself a producer barrier or proof of
 complete syscall-attempt coverage.
 
+Terminal collection requires an explicit producer-quiescence fact. `TierEProfilerSession.finish`
+defaults that fact to false: it first detaches marker admission, drains only the records already
+owned by the collector, and records lifecycle-invalid evidence unless its caller has independently
+proved the target producer has stopped (for example, a successful target-process exit). An empty
+final ring drain is never upgraded into that proof.
+
 ### Active native and eBPF path
 
 **Implemented contract.** The active path is the native-method proxy, exact JVMTI
@@ -1431,6 +1907,10 @@ argument applies only when storage is first created. A clear transition writes z
 invocation and flags while advancing the marker-state version only after a successful
 update. Failed lookup or update leaves attribution conservative. Removing marker
 attachment prevents later `sys_enter` events from restoring an old exact invocation.
+Inactive task-storage observations increment the bounded `ambientInactiveObservations`
+diagnostic and exit before ring submission. They are aggregate unknown diagnostics, not
+retained per-syscall `UNKNOWN` records; retaining all inactive process traffic would
+erase Tier E's native-boundary observation limit and consume the ring with noise.
 
 ### Symbolization generation and cache safety
 
@@ -1564,6 +2044,14 @@ The native agent enforces a default 64 MiB retained-state ceiling for immutable-
 canonical-cache, metadata-cache, interning-index admission, and temporary-publication-buffer
 growth. Container-capacity accounting and execution-identity map charging remain required
 hardening before this can be treated as a complete native-process memory limit.
+
+The rootful `tier-e-retention-exhaustion` fixture is the complementary overload contract. On
+2026-09-19 it admitted 300,900 ready records, retained and resolved the bounded 100,000-record
+prefix, and reported 200,900 explicit losses with `whole_session_evidence=INCOMPLETE`. Native
+retained state peaked at 19,349,747 bytes with zero native-retention exhaustion. This is a
+successful fail-closed saturation result, not a complete long-session throughput measurement:
+production correctness scopes continue to require zero observed loss. The retained result is
+[`tier-e-retention-exhaustion-20260919.json`](../../evidence/tier-e-retention-exhaustion-20260919.json).
 An internal agent option permits a smaller test budget only. Exhaustion stops exact definition
 admission, leaves the proxied native operation intact, and is retained as incomplete evidence.
 The collector's independently enforced budget is reported separately because it runs in another
@@ -1573,16 +2061,167 @@ The Release benchmark runner performs three warm-ups and ten measured samples pe
 The matched-flavour runner executes five rotated JVM forks for no agent, dictionary full-stream,
 dictionary unique-edge, inline full-stream, and inline unique-edge with identical batch arguments.
 It records workload-batch distributions separately from serialization and shutdown publication.
+The separate `tier-e-lifecycle` scope executes only dictionary full-stream and unique-edge for both
+Uprobe and USDT. It is the fast rootful correctness path for detach, callback, capture-failure, and
+exec-transition fixtures; it intentionally excludes baseline and USER_NOTIF controls because those
+belong to matched performance comparison, not marker-lifecycle proof.
 Native-agent-only evidence is labelled as such; privileged end-to-end overhead remains a separate
 rootful fixture because it includes BPF and collector costs. Allocation and RSS instrumentation,
 class churn, retransformation, and per-operation tail latency remain required hardening.
-USDT remains experimental until ordering, identity, failure behavior, and wire output
-are proven identical to the plain-uprobe path.
+
+**Implemented measurement contract:** `MAZEWALL_TIER_E_PERF_RECORD=true` retains external
+`perf.data` and a resolved `perf-report.txt`. The rootful runner records the call-graph mode and
+profiling-only JVM options in its manifest, then populates a build-ID cache from the exact bundled
+native agent before rendering the report. `RelWithDebInfo` bundles are cache-isolated from default
+`Release` bundles, so symbol-rich diagnostics cannot be mistaken for production artifacts.
+
+The 2026-09-19 rootful symbol-rich diagnostic used frame pointers with three warm-ups, one
+100-batch fork, and the production marker-selection matrix. It retained `PASS` workload
+correctness and `COMPLETE` Tier E evidence. It resolves HotSpot's JVMTI frame walk
+(`vframe::sender`, 1.07% of sampled cycles) and the largest native leaves: marker publication
+(0.13%), canonical-stack lookup (0.12%), exact-capture wrapper (0.08%), scope construction
+(0.07%), and raw-stack equality (0.05%). Definition serialization was 0.01% in that warmed
+trace. This establishes CPU priorities: publication is not the first optimization target. It does
+not yet decompose JVM or collector allocation, and it is not a five-fork overhead comparison;
+those limits remain explicit in the retained external-perf evidence.
+
+**Implemented allocation measurement contract:** an opt-in rootful runner mode records an external
+temporary `perf probe` at libc `malloc(size=%di:s64)`. It is mutually exclusive with CPU sampling,
+removes the tracepoint on every exit path, and decodes the retained trace only after temporarily
+restoring its format definition. The decoded lower-bound stream is summarized by PID, then joined
+to the immutable `target_pid` emitted in each benchmark fork record. Unmatched helper processes
+remain explicit. This is an external observer: it does not add JFR, JVMTI callbacks, or any other
+target-JVM diagnostic work.
+
+The 2026-09-19 five-fork production-marker measurement matched all 20 worker processes with
+`PASS` workload correctness and `COMPLETE` Tier E evidence. Relative to baseline's 210 malloc
+calls, each Tier E arm made 270 calls per 1,000 operations. Requested-byte deltas were stable:
+AUTO 6,672.2 bytes, explicit USDT 6,673.8 bytes, and uprobe 6,682.6 bytes. The measurement is
+explicitly a libc-`malloc` lower bound, not retained-memory accounting and not an attribution of
+JVM heap-object classes. It rules out observed allocator work as the dominant overhead and
+confirms that all validated marker transports have allocation-equivalent behavior.
+
+The legacy-bytes benchmark control recorded 430.1 ms exact-stack capture, 1,717.7 ms whole ring
+draining, 424.7 ms collector joining, 2.9 ms serialization, and 2.8 microseconds of lock waiting
+across 15,000 operations. Payload/decode and whole-drain values from that control are not
+production-direct timings: the direct decoder intentionally avoids intrusive per-record clocks.
+They must not be used to assign production overhead to copying, decoding, scanning, or scheduling.
+
+The real-BPF ring-decode control separately retained production-direct whole-drain diagnostics:
+726.8 ms draining and 408.3 ms joining for 39,000 ready records, with 10,550 collector polls.
+The legacy companion had 1,020.2 ms draining, 396.9 ms joining, and 3,779 polls. Since every
+paired workload interval included zero and poll cadence differs materially, these values remain
+diagnostic aggregates rather than a basis for a production refactor or an unavoidable-stack-walk
+claim.
+
+The 2026-09-19 five-fork immutable-factory versus lambda-copy argument control likewise retained
+complete evidence but its paired interval included zero (`-363,579..64,242 ns`). Argument
+ownership is therefore not a supported application-latency optimization target; the accepted
+lazy compatibility view remains an allocation improvement only.
+
+The 2026-09-19 five-fork capture-domain control held the workload fixed while comparing full
+exact capture to the validated `jdk25-unix-openat0` domain. Full capture added a median
+350,642 ns per 100-operation batch (95-percent interval `123,379..566,421 ns`), establishing a
+supported cost for capture-domain breadth. It is evidence for the exact-capture component only:
+collector cadence and unsymbolized JVM/JIT work remain separately unallocated.
+
+Its native phase counters make the exact component concrete: full capture admitted 39,080 raw
+stacks and spent 140.6 ms in `GetStackTrace` (about 3.6 microseconds per admission), versus
+13,000 and 37.9 ms (about 2.9 microseconds) for the narrowed domain. The 102.8 ms differential
+is direct exact-stack CPU evidence. It must remain separate from collector poll/drain wall-time
+aggregates, which include scheduling and cannot be added to a per-boundary CPU budget.
+
+**Evidence correction:** The following historical control does not establish exclusive
+overhead attribution. Its 21 maps cover the coordinator and collectors, leaving nested workload
+maps missing. Whole-process counts mix startup, compilation, timed work, and shutdown.
+Similar means do not demonstrate statistical equivalence, and exit-time maps can omit retired
+JIT code or misrepresent reused addresses. Broader-integration overhead attribution remains
+unverified pending per-process map coverage and measured-window analysis.
+
+The corrected runner inherits diagnostic options through nested JVMs and validates maps against
+recorded process identities. Diagnostic shared-openat batches now buffer CLOCK_MONOTONIC
+windows, paired with perf's explicit monotonic clock. Window parsing rejects missing or overlapping
+intervals and PID reuse. Exit-time maps remain temporally incomplete evidence.
+
+The subsequent clean seven-mode run uses production consecutive task-identity reuse, Release
+builds, three warm-ups, ten measured batches, and five rotated forks. All 35 variants passed
+workload correctness; all 30 profiled variants retained complete evidence. Median 100-operation
+batches were 0.529 ms baseline, 2.186/2.143 ms dictionary full/unique, 2.189/2.209 ms inline
+full/unique, and 35.356/41.643 ms USER_NOTIF without/with stacks. Paired dictionary-versus-inline
+intervals include zero. These are syscall-dense workload measurements, not general application
+slowdown estimates or proof of exclusive stack-walking overhead. See
+[`tier-e-production-clean-seven-mode-20260919.json`](../../evidence/tier-e-production-clean-seven-mode-20260919.json).
+
+The rootful five-fork `tier-e-jit-map-ring-control` follow-up retained 21 HotSpot perf maps and
+121 named JIT frames while keeping every enabled arm `PASS`/`COMPLETE`. It separates workload
+and collector CPU using immutable child process identities. Real ring submission did not explain
+collector CPU conclusively: full-stream collector means were 2,233.8 enabled versus 2,265.4 disabled samples
+per fork, and unique-edge means were 2,361.0 enabled versus 2,237.2 disabled. These are descriptive
+counts; collector polling has not been isolated. The independent capture-domain comparison
+establishes a measurable exact-capture component, while exclusive attribution remains open. See
+[`tier-e-jit-map-overhead-attribution-20260919.json`](../../evidence/tier-e-jit-map-overhead-attribution-20260919.json).
+USDT is preferred only for the validated x86_64 ABI; other architectures remain unsupported until
+ordering, identity, failure behavior, and wire output are proven identical to the plain-uprobe path.
 
 A 25 percent increase is a review trigger, with separate blocking budgets for total
 workload, allocation, retained memory, and tail latency. A baseline may be renewed
 only with an explicit hardware, JDK, kernel, or workload rationale. The historical
 1,324 ns and 596 ns values are host-specific evidence, not universal guarantees.
+
+**Historical evidence.** The rootful five-fork live collector-receipt run retained
+complete evidence for every Tier E output and measured the elapsed monotonic time from
+the BPF event timestamp to collector receipt. The normal queued dictionary path had a
+median-of-fork-means of 23.67 ms, with its conservative p95 bucket below 67.11 ms.
+The experimental direct-known-definition bypass was worse at 43.07 ms with a p95 bucket
+below 134.22 ms. Receipt age characterizes asynchronous BPF-to-collector scheduling and
+ring-drain cadence; it is neither exact-stack capture time nor a synchronous blocking cost
+of the application operation. The bypass remains rejected. See
+`tier-e-live-collector-receipt-20260919.json` and
+`tier-e-known-join-rejection-20260919.json`.
+
+**Historical evidence.** A corrected five-fork collector-pacing matrix compared
+continuous polling with fixed 50 us, fixed 250 us, and adaptive 1-50 us idle backoff
+for dictionary full-stream and unique-edge. All 40 Tier E arms were correct and complete,
+but every paired workload interval against continuous polling crossed zero. Tier E therefore
+retains continuous polling as its default. This syscall-dense workload entered only a handful
+of idle polls per profiled fork, so its lower CPU and receipt-age medians do not establish a
+long-idle production benefit. A sparse-burst, controlled-idle benchmark is required before
+changing the default. See `tier-e-poll-backoff-paired-20260919.json`.
+
+**Historical evidence.** The same paired matrix on the deterministic `BURSTY_IO`
+oracle preserved complete evidence in all 40 Tier E arms. It found no supported bounded
+policy improvement. More strongly, fixed 50 us backoff regressed unique-edge workload
+time by a median 62.32 us per measured batch (95% paired bootstrap interval 5.60 us to
+643.51 us). This is a concrete reason not to infer a production benefit from lower CPU
+or receipt-age medians alone. See `tier-e-poll-bursty-paired-20260919.json`.
+
+**Historical evidence.** Five rootful collector-allocation forks separated immutable
+`ResolvedSyscall` creation from total join work. In full-stream append-target mode, immutable
+retained evidence was 115.81 B of 234.96 B per ring-ready record. The first unique-edge split
+correctly established that retained representative evidence is not the dominant cost, but its
+aggregate 231.14 B remainder was not a valid production-only number: the benchmark fixture
+installs a `UniqueEdgeDecision` observer to prove acknowledgement and suppression behavior.
+A current-source five-fork breakdown attributes 117.13 B per ring-ready record to suppressed
+observer decisions and 10.41 B to candidate observer decisions, with 92.13 B in the edge-gate
+check and 10.03 B in candidate token ownership. A paired observer-free production lane retained
+identical `PASS`/`COMPLETE` evidence and the same 234.96 B aggregate collector-resolution
+allocation. The observer counters are therefore diagnostic side measurements, not the source of
+the aggregate allocation. A first joiner split was rejected because nullable counter samples and
+non-inline accounting callbacks allocated while measuring. The corrected primitive-sentinel,
+inline accounting contract measured 230.09 B per ready record. It then identified the common
+one-observation join path as an avoidable cost: replacing its eager mutable-list bucket with
+single-observation storage that promotes only on a second event retained identical per-fork
+evidence and reduced collector allocation to 170.06 B per ready record (26.09%). Enqueue staging
+fell from 169.63 B to 112.30 B; ready transfer remained 74.88 B. A direct single-ready transfer
+probe lowered its local transfer bucket to 59.84 B but raised aggregate collector allocation to
+172.46 B, so it was rejected as a bucket shift. A thread-local edge-lookup probe was likewise
+rejected because it changed bucket placement without reducing end-to-end collector allocation.
+No remaining unique-edge residual may be called unavoidable before other non-overlapping
+production work is split. See
+`tier-e-resolved-evidence-allocation-20260919.json` and
+`tier-e-unique-edge-allocation-breakdown-20260919.json`, and
+`tier-e-unique-edge-observer-production-20260919.json`, and
+`tier-e-single-observation-joiner-allocation-20260919.json`.
 
 ### Evidence dimensions and implementation matrix
 

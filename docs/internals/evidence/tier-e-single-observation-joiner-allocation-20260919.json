@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_single_observation_joiner_allocation_optimization",
+  "run_date": "2026-09-19",
+  "measurement_contract": {
+    "repair": "Benchmark allocation samples use a primitive -1 unavailable sentinel and inline accumulation. Earlier nullable/callback probes were rejected because the probe itself allocated.",
+    "environment": "rootful Docker",
+    "scope": "tier-e-unique-edge-observer",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5,
+    "production_lane": "observer-free; independent workload oracle enabled"
+  },
+  "before": {
+    "path": "build/tier-e-primitive-counter-allocation-20260919/results.jsonl",
+    "sha256": "60e36d5384c0e2e9c14575bb7a30f7c807319bc053c67b471ada65f16f8a15e4",
+    "collector_resolution_bytes_per_ring_ready_record": 230.09189354542673,
+    "joiner_enqueue_bytes_per_ring_ready_record": 169.63303762618537,
+    "joiner_take_ready_bytes_per_ring_ready_record": 74.87060263077393
+  },
+  "after": {
+    "path": "build/tier-e-single-observation-joiner-20260919/results.jsonl",
+    "sha256": "14c5d3a34eb3f5e9e27131cbbf59d7087618f612169a42b1709215803e3654d1",
+    "collector_resolution_bytes_per_ring_ready_record": 170.06252676659528,
+    "joiner_enqueue_bytes_per_ring_ready_record": 112.30174365249312,
+    "joiner_take_ready_bytes_per_ring_ready_record": 74.87525237075559,
+    "collector_allocation_reduction_percent": 26.09
+  },
+  "rejected_direct_ready_probe": {
+    "path": "build/tier-e-direct-single-ready-20260919/results.jsonl",
+    "sha256": "276694e25cc75149ed7e68f166287cc474325bbb423c30d5fc79b276fe810224",
+    "collector_resolution_bytes_per_ring_ready_record": 172.45616396451516,
+    "joiner_take_ready_bytes_per_ring_ready_record": 59.839706332211684,
+    "reason": "The local ready-transfer counter decreased, but aggregate collector allocation increased from 170.06 to 172.46 bytes per ready record. The implementation was reverted."
+  },
+  "equivalence": {
+    "checked_fields": ["resolved", "observations", "expected_operations", "matched_operations", "missing_operations", "wrong_operations", "unknown_no_active", "unknown_other", "lost", "dropped", "duplicate_operations", "checksum", "whole_session_evidence", "workload_correctness", "ring_ready_records", "cache_hits", "cache_misses"],
+    "per_fork_comparison": "identical",
+    "production_forks": 5,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "policy_eligibility": false
+  },
+  "decision": "Accepted. The internal joiner retains a single observation directly and promotes to a mutable list only for a second observation. A direct ready-transfer probe was rejected because it raised aggregate collector allocation. Nested accounting buckets must not be summed.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  }
+}

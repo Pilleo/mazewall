@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_external_jit_map_overhead_attribution",
+  "timestamp": "2026-09-19T14:19:19.792382005Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 42,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "7.2.4-x64v3-xanmod1",
+    "rootful_docker": true,
+    "workload_cpu": 0,
+    "collector_cpu": 2
+  },
+  "methodology": {
+    "scope": "tier-e-ring-submission-control",
+    "forks": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_batch": 100,
+    "perf_event": "cycles:u",
+    "call_graph": "frame-pointer",
+    "jit_symbolization": "HotSpot DumpPerfMapAtExit, persisted per fork and restored before offline perf analysis",
+    "process_attribution": "collector and workload PIDs parsed from immutable terminal output"
+  },
+  "correctness": {
+    "enabled_arms": 10,
+    "enabled_arms_pass_complete": 10,
+    "persisted_perf_maps": 21,
+    "named_jit_frames": 121,
+    "policy_eligibility": false
+  },
+  "collector_user_cycle_samples_per_fork": {
+    "dictionary_full_stream": {
+      "ring_submission_enabled": 2233.8,
+      "ring_submission_disabled": 2265.4
+    },
+    "dictionary_unique_edge": {
+      "ring_submission_enabled": 2361.0,
+      "ring_submission_disabled": 2237.2
+    }
+  },
+  "attribution": {
+    "ring_submission": "Whole-process sample means are descriptive only; no equivalence test or warmed-window attribution was performed.",
+    "exact_capture": "supported workload-latency component by the independent capture-domain paired control: 102.8 ms additional GetStackTrace time across 26080 additional admissions and a positive 123379..566421 ns per 100-operation interval",
+    "collector_polling": "Not isolated from JVM startup, compilation, shutdown, or other collector work.",
+    "allocation_locking_publication": "external allocation, lock, serialization, mapped-decoder, and argument controls do not establish a dominant workload-latency target"
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete for enabled arms",
+    "transport_completeness": "complete for enabled arms",
+    "attribution_coverage": "complete for enabled arms",
+    "dictionary_integrity": "complete for enabled arms",
+    "lifecycle_validity": "complete for enabled arms",
+    "runtime_overhead": "unverified",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-jit-map-ring-control-20260919/results.jsonl",
+    "manifest": "build/tier-e-jit-map-ring-control-20260919/manifest.json",
+    "perf_data": "build/tier-e-jit-map-ring-control-20260919/perf.data",
+    "perf_report": "build/tier-e-jit-map-ring-control-20260919/perf-report.txt",
+    "perf_maps": "build/tier-e-jit-map-ring-control-20260919/perf-maps",
+    "process_attribution": "build/tier-e-jit-map-ring-control-20260919/perf-process-attribution.json"
+  },
+  "limitations": [
+    "21 maps did not cover nested workload JVMs.",
+    "Exit-time maps can omit retired compiled code and do not encode address reuse over time.",
+    "Counts of named JIT frames do not establish sample coverage.",
+    "Capture-domain cost proves a component, not exclusive attribution of remaining overhead."
+  ]
+}

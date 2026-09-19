@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-18",
+  "status": "preferred_x86_64_auto",
+  "scope": "Tier E USDT marker ABI and fail-closed control-plane admission",
+  "marker": {
+    "provider": "mazewall",
+    "probe": "stack_marker_v1",
+    "function": "mazewall_stack_marker(uint64_t invocation_id, uint32_t flags)",
+    "architecture": "x86_64",
+    "arguments": "8@%rdi 4@%esi",
+    "semaphore": 0
+  },
+  "verified": [
+    {
+      "command": "cmake -S profiler-native -B /tmp/jseccomp-profiler-native-usdt-default -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/jseccomp-profiler-native-usdt-default -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-usdt-default -R 'marker_export_test|usdt_marker_note_test' -V",
+      "result": "PASS",
+      "assertion": "Default artifact retains the plain exported marker and emits no NT_STAPSDT note."
+    },
+    {
+      "command": "cmake -S profiler-native -B /tmp/jseccomp-profiler-native-usdt-enabled -DCMAKE_BUILD_TYPE=Release -DMAZEWALL_ENABLE_TIER_E_USDT=ON && cmake --build /tmp/jseccomp-profiler-native-usdt-enabled -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-usdt-enabled -R 'marker_export_test|usdt_marker_note_test' -V",
+      "result": "PASS",
+      "assertion": "Enabled artifact exports the same marker and emits one real mazewall:stack_marker_v1 NT_STAPSDT record."
+    },
+    {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.tierE.daemon.UsdtProbeNoteTest",
+      "result": "PASS",
+    "assertion": "The fixed v1 parser admits only one matching ELF64 little-endian mazewall:stack_marker_v1 note with the emitted x86_64 ABI, a zero semaphore, a PT_LOAD-derived expected file offset, and both PT_NOTE and section-table-only SHT_NOTE placement."
+    },
+    {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest",
+      "result": "PASS",
+      "assertion": "USDT attaches at its validated probe site even when it differs from the plain marker entry, then follows the existing detach and terminal session lifecycle path."
+    },
+    {
+      "command": "MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-marker-transport MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=1 MAZEWALL_TIER_E_WARMUPS=1 MAZEWALL_TIER_E_BATCHES=1 MAZEWALL_TIER_E_ITERATIONS=2 bash ./scripts/run_tier_e_trustworthy_benchmark.sh /tmp/tier-e-usdt-marker-transport-smoke-20260918-probe-site",
+      "result": "PASS",
+      "assertion": "Rootful one-fork smoke passed for dictionary and inline, full-stream and unique-edge modes. Uprobe and USDT each had complete evidence, zero loss and attribution failures, 38 exact captures, 12 active-kernel observations, and all four oracle operations matched."
+    },
+    {
+      "command": "MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-marker-transport MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=15 bash ./scripts/run_tier_e_trustworthy_benchmark.sh /tmp/tier-e-usdt-marker-transport-decision-20260918",
+      "result": "PASS",
+      "assertion": "CPU-pinned rotated 15-fork rootful decision run produced 60 complete Tier E uprobe/USDT pairs with no selected semantic mismatch. USDT improved every mode's paired workload interval and reduced median marker set-plus-clear cost by 1337.6 ns per transition."
+    },
+    {
+      "command": "MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-marker-transport MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=1 MAZEWALL_TIER_E_WARMUPS=1 MAZEWALL_TIER_E_BATCHES=1 MAZEWALL_TIER_E_ITERATIONS=2 bash ./scripts/run_tier_e_trustworthy_benchmark.sh /tmp/tier-e-usdt-v1-smoke",
+      "result": "PASS",
+      "assertion": "The versioned native marker passed rootful end-to-end attachment for uprobe and USDT across dictionary/inline and full-stream/unique-edge modes. All eight Tier E results were workload PASS and evidence COMPLETE with zero loss, wrong attribution, attribution failure, and missing oracle operation. Results SHA-256: 379105411b1141022187e02a547fe286e3282f1a47dabcda7c0625a5ad30a97a; one fork is correctness evidence only."
+    },
+    {
+      "command": "rootful Docker --privileged --pid=host, workload=mixed_cpu_io, scope=tier-e-marker-transport, forks=1, warmups=1, batches=1, iterations=2; artifact=/tmp/tier-e-usdt-mixed-current-final/results.jsonl",
+      "result": "PASS",
+      "assertion": "All eight dictionary/inline, full-stream/unique-edge, uprobe/USDT variants completed with matching operation counts, zero loss, zero wrong attribution, and complete whole-session evidence."
+    },
+    {
+      "command": "rootful Docker --privileged --pid=host, workload=bursty_io, scope=tier-e-marker-transport, forks=1, warmups=1, batches=1, iterations=64; artifact=/tmp/tier-e-usdt-bursty-current-final/results.jsonl",
+      "result": "PASS",
+      "assertion": "All eight dictionary/inline, full-stream/unique-edge, uprobe/USDT variants completed with 128 matched expected operations, zero loss, zero wrong attribution, and complete whole-session evidence."
+    },
+    {
+      "command": "rootful Docker --privileged --pid=host, lifecycle=callback_suppression, workload=syscall_dense, scope=tier-e-marker-transport, forks=1, warmups=1, batches=1, iterations=2; artifact=/tmp/tier-e-usdt-callback-current/results.jsonl",
+      "result": "PASS",
+      "assertion": "All eight variants completed with complete evidence, zero loss, and zero wrong attribution. Each backend emitted an explicit inactive callback interval and four independently resolved nested callback stacks before validated outer-scope restoration."
+    },
+    {
+      "command": "rootful Docker --privileged --pid=host, lifecycle=terminal_while_active, workload=syscall_dense, scope=tier-e-marker-transport, forks=1, warmups=1, batches=1, iterations=2; artifact=/tmp/tier-e-usdt-terminal-active-v6/results.jsonl",
+      "result": "PASS",
+      "assertion": "All eight variants completed their original workload after release while preserving explicitly incomplete terminal evidence with lifecycle invalidation. No result fabricated post-terminal workload operation matches."
+    },
+    {
+      "command": "rootful Docker --privileged --pid=host, lifecycle=normal, workload=syscall_dense, scope=tier-e-marker-transport, forks=15, warmups=3, batches=10, iterations=2; artifact=/tmp/tier-e-usdt-marker-transport-current-decision/results.jsonl",
+      "result": "PASS",
+      "assertion": "All 60 paired uprobe/USDT Tier E observations had workload PASS, complete whole-session evidence, zero loss, and zero wrong attribution. USDT improved every mode's paired median workload interval and marker-transition cost."
+    }
+  ],
+  "findings": [
+    "USDT changes only the marker probe site; raw_tp/sys_enter, ring draining, dictionary transport, collector joining, acknowledgement, and terminal accounting remain required.",
+    "GNU-linked .note.stapsdt can be an unallocated SHT_NOTE section rather than a PT_NOTE program segment; admission scans both bounded sources and deduplicates their ranges.",
+    "The rootful smoke validates semantic parity but is not a speed decision: one-fork marker effects ranged from -13,257 ns to +47,718 ns by mode and require rotated multi-fork confidence intervals.",
+    "The historical 1324 ns plain-uprobe and 596 ns USDT measurements are prototype-host evidence, not a current performance conclusion.",
+    "A requested USDT attach rejects malformed, duplicate, or unsupported metadata and never falls back to plain uprobe; it attaches at the validated SDT probe instruction rather than comparing it with the plain function entry.",
+    "The versioned mazewall:stack_marker_v1 ABI is 8@%rdi 4@%esi with semaphore 0. On validated x86_64 artifacts AUTO prefers USDT; AUTO may record a plain-uprobe compatibility fallback after note-validation failure, while explicit USDT remains fail-closed.",
+    "The initial detach fixture exposed stale task-storage admission. Attachment generations now advance across each attach/detach transition, are stamped into task-storage padding, and are compared at sys_enter before emission. The corrected rootful one-fork detach_while_active matrix passed for all eight current uprobe/USDT dictionary/inline and full-stream/unique-edge variants. Each post-detach active-observation count equalled its settled pre-release snapshot; controlled syscalls were accounted as ambient inactive and terminal evidence remained explicitly incomplete. Artifact: /tmp/tier-e-usdt-detach-current/results.jsonl.",
+    "Privileged container fixtures must use --pid=host. The BPF target filter compares the kernel TGID with the target PID admitted by the control plane; a private PID namespace supplies a namespace-local PID and therefore correctly produces zero admitted observations. The private-PID failures are harness-invalid, not evidence of a backend mismatch.",
+    "Normal mixed_cpu_io and bursty_io rootful matrices are semantically equivalent for uprobe and USDT across both dictionary transports and both emission modes. Artifacts: /tmp/tier-e-usdt-mixed-current-final/results.jsonl and /tmp/tier-e-usdt-bursty-current-final/results.jsonl.",
+    "The callback fixture is test-only and is armed only after the workload gate. It clears the outer marker before a real JNI callback into Java, verifies the nested Java native operation independently, and restores the outer exact marker only on normal return. Artifact: /tmp/tier-e-usdt-callback-current/results.jsonl.",
+    "Terminal finish now detaches and closes the event source before immutable evidence is finalized. A caller that cannot prove producer closure uses producerClosed=false, which records lifecycle invalidation and leaves evidence incomplete. The active-scope fixture retains any final-drain observations but never turns them into complete or policy-eligible evidence. Artifact: /tmp/tier-e-usdt-terminal-active-v6/results.jsonl.",
+    "The current CPU-pinned 15-fork decision run retained 60 complete uprobe/USDT semantic pairs. USDT's median matched-workload saving was 97,432 to 101,247 ns by mode, and its median marker set-plus-clear saving was 403 to 409 ns per transition. This authorizes validated x86_64 AUTO preference only. Artifact: /tmp/tier-e-usdt-marker-transport-current-decision/results.jsonl."
+  ],
+  "unmeasured": [
+    "Non-x86_64 ABI contracts."
+  ],
+  "rootful_decision": {
+    "artifact": "/tmp/tier-e-usdt-marker-transport-current-decision/results.jsonl",
+    "artifact_sha256": "25a05b3df63b0bcac310e7d73d9d9baa2fbbf8492bac9ee05df2c6d97384f8a3",
+    "workload": "syscall_dense",
+    "forks": 15,
+    "semantic_pairs": 60,
+    "semantic_mismatches": 0,
+    "median_marker_set_plus_clear_saving_ns_per_transition": {
+      "dictionary_full_stream": 403.0941176470588,
+      "dictionary_unique_edge": 407.6372549019608,
+      "inline_full_stream": 409.1450980392157,
+      "inline_unique_edge": 407.01568627450985
+    },
+    "paired_workload_uprobe_minus_usdt_median_ns": {
+      "dictionary_full_stream": 100816,
+      "dictionary_unique_edge": 101247,
+      "inline_full_stream": 97432,
+      "inline_unique_edge": 98334
+    },
+    "decision": "USDT is the preferred validated x86_64 backend for AUTO attachment on this rootful host; explicit uprobe remains available and AUTO records compatibility fallback after note-validation failure."
+  },
+  "evidence_integrity": "incomplete",
+  "performance_gate": "passed",
+  "policy_eligibility": false,
+  "capture_domain_validity": "unverified",
+  "transport_completeness": "unverified",
+  "attribution_coverage": "unverified",
+  "dictionary_integrity": "unverified",
+  "lifecycle_validity": "unverified",
+  "runtime_overhead": "measured"
+}

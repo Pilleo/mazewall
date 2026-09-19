@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_current_source_long_session_dictionary_publication",
+  "run_date": "2026-09-19",
+  "command": "MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-dictionary-publication MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=stack_diverse MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=500 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-dictionary-publication-current-20260919",
+  "environment": {
+    "execution": "rootful Docker privileged benchmark runner",
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "workload": "stack_diverse",
+    "warmups": 3,
+    "measured_batches": 10,
+    "forks_per_variant": 5,
+    "operations_per_batch": 500,
+    "retained_state_budget_bytes": 67108864
+  },
+  "artifact": {
+    "directory": "build/tier-e-dictionary-publication-current-20260919",
+    "results_jsonl_sha256": "2c90c8fc7c9d92d4ebe690517c3dabf76002668947c6f1faf3dddd36d33661cc",
+    "manifest_json_sha256": "a93221f39d1ba8c4a75130d2d1bd3fb43482f53b0898f482302e9b597eef7a53"
+  },
+  "results": {
+    "tier_e_forks": 20,
+    "workload_correctness": "PASS for every Tier E fork",
+    "whole_session_evidence": "COMPLETE for every Tier E fork",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "ring_loss": 0,
+    "native_retention_exhaustions": 0,
+    "failed_publications": 0,
+    "kotlin_peak_retained_bytes": 1414226,
+    "native_retained_bytes": 1453043,
+    "retained_state_budget_utilization_percent": 2.17
+  },
+  "publication": {
+    "terminal_serialized_bytes_per_fork": 1414303,
+    "live_full_stream_serialized_bytes_range": [8138184, 9522837],
+    "live_unique_edge_serialized_bytes_range": [6777919, 8136008]
+  },
+  "conclusion": "The current source tree retained bounded state across five rotated long-session forks for each dictionary emission and publication mode. This proves bounded retention for the exercised stack-diverse workload, not an indefinite node-agent collection claim.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-18",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "matrix": {
+    "forks_per_mode": 15,
+    "warmup_batches": 3,
+    "measured_batches": 10,
+    "artifact": "/tmp/tier-e-drain-owned-decision-20260918/results.jsonl"
+  },
+  "aggregate_transition_cost_ns": {
+    "admission_clear": 1120474124,
+    "exact_set": 1142346604,
+    "exit_clear": 862199398
+  },
+  "aggregate_transition_count": 468900,
+  "average_transition_cost_ns": {
+    "admission_clear": 2390,
+    "exact_set": 2436,
+    "exit_clear": 1839
+  },
+  "decision": "No marker transition is removed. Each is required for fail-closed attribution lifecycle semantics; the next optimization target is exact stack capture."
+}

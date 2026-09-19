@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_ring_argument_list_paired_ab",
+  "date": "2026-09-18",
+  "decision": "reject_as_measured_performance_optimization",
+  "decision_reason": "The paired five-fork experiment preserved complete evidence and decoded event content, but the confidence interval for lambda-copy minus immutable-factory includes zero. The immutable factory remains the ordinary direct-decoder construction for its simpler immutable ownership semantics, but it is not claimed as a measured speed improvement.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 32,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "jvm": "25.0.4",
+    "cpu_set": "0,2",
+    "workload_profile": "syscall_dense",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5,
+    "scope": "tier-e-ring-argument-list",
+    "marker_transport": "AUTO selected USDT for every profiled child"
+  },
+  "matrix_quality": {
+    "profiled_children": 10,
+    "expected_operations_per_profiled_variant": 5000,
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "observed_ring_loss": 0,
+    "incomplete_evidence_forks": 0,
+    "policy_eligible_records": 0
+  },
+  "paired_lambda_copy_minus_immutable_factory_ns_per_measured_batch": {
+    "median": -4931,
+    "bootstrap_95_ci": [-203973, 486319],
+    "pairs": 5,
+    "interpretation": "Negative favours lambda-copy, but the interval spans zero; neither construction has a supported throughput advantage."
+  },
+  "implementation_status": {
+    "immutable_factory_default": "retained for immutable list construction without a defensive-copy allocation",
+    "lambda_copy": "benchmark-only paired control",
+    "decoded_event_equivalence_test": "SyscallInvocationEventTest.direct ring decoder argument construction controls preserve immutable event content"
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifact": {
+    "path": "build/tier-e-ring-argument-list-20260918/results.jsonl",
+    "sha256": "9a28c5004fa54dfd526ac3cf41bdac874ade38b1b0c76618c07d75510f3fe6e6"
+  }
+}

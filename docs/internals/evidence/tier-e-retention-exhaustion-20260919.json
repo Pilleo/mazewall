@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_bounded_retention_saturation",
+  "timestamp": "2026-09-19T14:06:25.733607470Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 42,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-retention-exhaustion",
+    "transport": "dictionary",
+    "emission_mode": "full-stream",
+    "workload": "oracle syscall_dense",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 1000,
+    "operations_per_batch": 100,
+    "forks": 1,
+    "expected_outcome": "bounded retained prefix and explicit incomplete evidence"
+  },
+  "result": {
+    "terminal_success": true,
+    "workload_correctness": "FAILED",
+    "whole_session_evidence": "INCOMPLETE",
+    "ready_records": 300900,
+    "resolved_records": 100000,
+    "observed_losses": 200900,
+    "wrong_operations": 0,
+    "duplicate_operations": 0,
+    "native_retained_bytes": 19349747,
+    "peak_retained_bytes": 19321010,
+    "native_retention_exhaustions": 0
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "unverified under intentional loss",
+    "transport_completeness": "incomplete",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "complete for retained prefix",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not a throughput measurement",
+    "policy_eligibility": false
+  },
+  "decision": {
+    "status": "pass_expected_incomplete",
+    "meaning": "The collector remains bounded and fails closed under saturation; this artifact must not be used as a complete-evidence or performance result.",
+    "next_requirement": "A complete sustained full-stream result requires streaming retirement or downstream evidence delivery rather than increasing only pending-record limits."
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-retention-exhaustion-20260919/results.jsonl",
+    "manifest": "build/tier-e-retention-exhaustion-20260919/manifest.json",
+    "child_log": "build/tier-e-retention-exhaustion-20260919/child-logs/dictionary_full_stream_retention_exhaustion-fork-1.log",
+    "perf_process_attribution": "build/tier-e-retention-exhaustion-20260919/perf-process-attribution.json"
+  }
+}

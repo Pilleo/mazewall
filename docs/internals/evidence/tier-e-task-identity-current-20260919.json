@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_task_identity_paired_control",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-task-identity-20260919/results.jsonl",
+  "artifact_sha256": "329c759a8852e9a23f04d78196e64f18ffb8d21163e463ac622be0c5f3daec62",
+  "benchmark_log_sha256": "7a0dac39aae37679559a5e89314aedca05a24201c7ec254c30afe67b69944851",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-task-identity",
+    "workload": "syscall_dense oracle",
+    "marker_transport": "AUTO; validated USDT selected",
+    "ring_decode": "direct",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "baseline_outputs": 5,
+    "per_event_outputs": 5,
+    "reuse_consecutive_outputs": 5,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "excluded_pairs": 0,
+    "mixed_tid_unit_test": "PASS",
+    "policy_eligibility": false
+  },
+  "median_allocation_bytes_per_ready_record": {
+    "per_event": { "observation_conversion": 247.87, "aggregate_collector_join": 589.74 },
+    "reuse_consecutive": { "observation_conversion": 215.88, "aggregate_collector_join": 560.83 },
+    "saved": { "observation_conversion": 31.99, "aggregate_collector_join": 28.91 }
+  },
+  "paired_workload_effect_ns": {
+    "reuse_consecutive_minus_per_event_median": -57932,
+    "ci_95_low": -141025,
+    "ci_95_high": 45401,
+    "pairs": 5
+  },
+  "decision": "One-entry, same-TID task-identity reuse is the production default. It preserves exact evidence, never crosses a TID boundary, and saves 31.99 bytes per ready record in owned event-to-attribution conversion. The paired workload interval includes zero, so no application-latency improvement is claimed.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

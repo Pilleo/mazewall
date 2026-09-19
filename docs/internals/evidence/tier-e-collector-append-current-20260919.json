@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_collector_append_allocation_and_equivalence_control",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-collector-append-20260919/results.jsonl",
+  "artifact_sha256": "659d3569ac4eeba1befb798194c250ae19931db83092b4f3945040eb74101925",
+  "benchmark_log_sha256": "c44036de465015480c8439eff1da3f90900b02bd5671eab3adb001937eae8d7a",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-collector-append",
+    "workload": "syscall_dense oracle",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "expected_outputs": 20,
+    "completed_outputs": 20,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "lost_observations": 0,
+    "policy_eligibility": false
+  },
+  "median_collector_join_allocation_bytes_per_ready_record": {
+    "dictionary_full_stream": { "temporary_list": 541.50, "append_target": 474.02, "saved": 67.47 },
+    "dictionary_unique_edge": { "temporary_list": 555.75, "append_target": 464.22, "saved": 91.53 }
+  },
+  "paired_workload_effects_ns": {
+    "dictionary_full_stream": { "temporary_list_minus_append_target_median": -56810, "ci_95_low": -198235, "ci_95_high": 149008 },
+    "dictionary_unique_edge": { "temporary_list_minus_append_target_median": -18451, "ci_95_low": -79797, "ci_95_high": 762661 }
+  },
+  "decision": "append_target is the production session-drain default because it removes measured allocation without changing decoded evidence. The workload intervals include zero, so no application-latency improvement is claimed.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

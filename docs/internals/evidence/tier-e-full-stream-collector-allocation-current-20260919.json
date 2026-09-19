@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_full_stream_collector_allocation_control",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-full-stream-collector-allocation-20260919-rerun/results.jsonl",
+  "artifact_sha256": "801999c455f97a198db3640b199b0c63ccff1e4d5923e062cf6c697fa4a699c9",
+  "benchmark_log_sha256": "1b662836477c9a632ab6e11d3588967ab0cf8c43443dbab6b8121de5027126b4",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-ring-decode",
+    "workload": "syscall_dense oracle",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "expected_outputs": 55,
+    "completed_outputs": 55,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "lost_observations": 0,
+    "policy_eligibility": false
+  },
+  "median_allocation_bytes_per_ready_record": {
+    "dictionary_full_stream": { "direct_ring": 465.02, "legacy_ring": 690.14, "direct_join": 483.97, "legacy_join": 474.82 },
+    "dictionary_unique_edge": { "direct_ring": 484.97, "legacy_ring": 705.61, "direct_join": 502.60, "legacy_join": 489.10 },
+    "inline_full_stream": { "direct_ring": 491.05, "legacy_ring": 713.49, "direct_join": 506.77, "legacy_join": 496.57 },
+    "inline_unique_edge": { "direct_ring": 538.06, "legacy_ring": 722.19, "direct_join": 548.24, "legacy_join": 500.55 }
+  },
+  "paired_workload_effects_ns": {
+    "dictionary_full_stream": { "legacy_minus_direct_median": 75981, "ci_95_low": -278813, "ci_95_high": 454215 },
+    "dictionary_unique_edge": { "legacy_minus_direct_median": -113610, "ci_95_low": -260421, "ci_95_high": -7441 },
+    "inline_full_stream": { "legacy_minus_direct_median": -47444, "ci_95_low": -548779, "ci_95_high": 37838 },
+    "inline_unique_edge": { "legacy_minus_direct_median": -50063, "ci_95_low": -121416, "ci_95_high": 13613 }
+  },
+  "conclusion": "Direct primitive ring ownership continues to reduce allocation. The full-stream collector-loop refactoring did not demonstrate a supported end-to-end speed improvement in five paired forks. Collector join allocation includes required retained resolved evidence and temporary result-list copying; its avoidable component remains unmeasured.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

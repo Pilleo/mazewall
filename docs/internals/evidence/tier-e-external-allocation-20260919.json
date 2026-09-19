@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_external_allocator_measurement",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "directory": "build/tier-e-allocation-five-fork-20260919",
+    "manifest_sha256": "5cfe7ebc682683854191d30aed14fcc5991eedab9d64ed1f4ffad49db1ebfd8b",
+    "results_sha256": "527bf51ba47926f689a102568e5fbf9e8c1a7bbdea63166b88e98193fa437bc9",
+    "allocation_data_sha256": "39a84122c1de2ac39c32abbdc9bd783bfb27a1937f85210364c110acbd839bb1",
+    "allocation_events_sha256": "b2ca13dbe5c6b18f420c1144528b105df68e99680a113a85cc1e54388a3cef10",
+    "allocation_by_pid_sha256": "24c18e3c6f919f6cd22f4d71eaf9b25f96bfe57ade9808f8fcc0fcf7c6a8fa6b",
+    "allocation_summary_sha256": "f34236d9e46249da2bfb2ed476a4cb5152091b7430c418c7f7264fbd94f3777f"
+  },
+  "method": {
+    "execution": "rootful Docker",
+    "observer": "temporary external perf probe on libc malloc(size=%di:s64)",
+    "forks": 5,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_worker": 1000,
+    "pid_join": "TierEMatchedBenchmark fork-output target_pid",
+    "probe_cleanup": "passed"
+  },
+  "coverage": {
+    "measurement": "requested libc malloc bytes and calls",
+    "classification": "lower_bound_malloc_only",
+    "excluded": ["calloc", "realloc", "free", "allocator-retained memory", "JVM heap object class attribution"]
+  },
+  "result": {
+    "matched_workers": 20,
+    "all_workload_correctness": "PASS",
+    "all_tier_e_evidence": "COMPLETE",
+    "policy_eligibility": false,
+    "paired_delta_per_1000_operations": {
+      "dictionary_full_stream_marker_auto": {"requested_bytes_mean": 6672.2, "malloc_calls": 60},
+      "dictionary_full_stream_marker_uprobe": {"requested_bytes_mean": 6682.6, "malloc_calls": 60},
+      "dictionary_full_stream_marker_usdt": {"requested_bytes_mean": 6673.8, "malloc_calls": 60}
+    }
+  },
+  "paired_phase_totals": {
+    "ring_decode_mode": "legacy_benchmark_control",
+    "tier_e_workers": 15,
+    "operations": 15000,
+    "get_stack_trace_ns": 430052072,
+    "raw_key_ns": 51241177,
+    "logical_metadata_ns": 26840333,
+    "marker_set_ns": 171317477,
+    "ring_drain_ns": 1717691684,
+    "collector_join_ns": 424725182,
+    "serialization_ns": 2872498,
+    "lock_wait_ns": 2809
+  },
+  "interpretation": "The external allocator lower bound is stable and small relative to the measured Tier E workload overhead. AUTO, explicit USDT, and uprobe have allocation-equivalent results; allocator work is not the dominant remaining per-operation cost on this host. The retained phase totals were emitted by the benchmark-only legacy-bytes decode control, so payload/decode/whole-drain timing is not production-direct evidence. It must not be used to assign the residual to an avoidable production component.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "partially_attributed"
+  }
+}

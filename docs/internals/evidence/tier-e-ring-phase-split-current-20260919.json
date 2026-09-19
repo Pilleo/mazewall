@@ -1,0 +1,50 @@
+{
+  "title": "Tier E legacy ring copy/decode batch-phase measurement",
+  "date": "2026-09-19",
+  "status": "COMPLETE",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 41,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:2958324e6b0df3c3ebb41095b98697e5b7a44ee4d7676c68d22af9b1dbf13a86",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "scope": "tier-e-ring-submission-control",
+    "workload": "syscall_dense",
+    "forks_per_arm": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_batch": 100,
+    "results_sha256": "5cd774da0d52cc71633b9c7a76a19d6a31b04c045132778f602e85995a93c9aa",
+    "benchmark_log_sha256": "7742799aca4f1a34e3097ac756c9d07c89f530fb8921999f7a2ea85f4d332212"
+  },
+  "verdict": {
+    "workload_correctness": "PASS",
+    "terminal_success": true,
+    "policy_eligibility": false,
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS"
+  },
+  "method": {
+    "mode": "legacy byte-copy decoder only",
+    "timing_boundary": "one clock pair around BpfRingBufferReader.drain() and one around ByteArray-to-event decoding per batch",
+    "production_record_loop_timing": false,
+    "ready_records_per_fork": 3900
+  },
+  "median_phase_ns_per_ready_record": {
+    "dictionary_full_stream": {
+      "ring_copy": 17358.06,
+      "ring_decode": 7271.81,
+      "collector_join": 7940.66
+    },
+    "dictionary_unique_edge": {
+      "ring_copy": 18776.61,
+      "ring_decode": 8032.24,
+      "collector_join": 4845.62
+    }
+  },
+  "conclusion": "The owned ByteArray copy is the largest measured userspace ring/collector phase in both modes. This result supports investigating a correctness-preserving owned-record representation or batched ownership transfer before further dictionary publication work. It does not support a production decoder change by itself."
+}

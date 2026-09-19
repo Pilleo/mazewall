@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_stack_diverse_paired_publication_measurement",
+  "timestamp": "2026-09-18T14:55:42.938608800Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 30,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-publication",
+    "workload": "stack_diverse",
+    "workload_definition": "The same exact openat operation oracle invoked through deterministic Java call depths 0 through 15.",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 100,
+    "sample_count": 450,
+    "paired_statistic": "live_minus_terminal median batch workload time",
+    "bootstrap_resamples": 1000
+  },
+  "correctness": {
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE for every Tier E variant",
+    "dictionary_unique_edge_representative_fork": {
+      "cache_misses": 28,
+      "cache_hits": 7787,
+      "native_retention_exhaustions": 0
+    }
+  },
+  "paired_publication_effects_ns": {
+    "dictionary_full_stream": {
+      "median": 79941,
+      "bootstrap_95_ci": [-1181072, 195704],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": -106583,
+      "bootstrap_95_ci": [-492963, -55048],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": -18993,
+      "bootstrap_95_ci": [-1141775, 113266],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 184999,
+      "bootstrap_95_ci": [-453606, 381531],
+      "pairs": 5
+    }
+  },
+  "publication_accounting": {
+    "dictionary_terminal": {
+      "publication_count_per_fork": 1,
+      "serialized_bytes_per_fork": 350781,
+      "serialization_ns_per_fork_range": [200711, 325209]
+    },
+    "dictionary_live": {
+      "publication_count_per_fork_range": [4, 6],
+      "serialized_bytes_per_fork_range": [607935, 1018402],
+      "serialization_ns_per_fork_range": [617362, 1045766]
+    }
+  },
+  "decision": {
+    "default_publication": "terminal",
+    "incremental_dictionary_transport": "deferred",
+    "reason": "One mode has a supported live-publication saving, but three do not; the additional snapshots increase serialized bytes without proving a global workload benefit. Class churn and long-session evidence are still required.",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-publication-stack-diverse-20260918/results.jsonl",
+    "manifest": "build/tier-e-publication-stack-diverse-20260918/manifest.json",
+    "runner_log": "/tmp/tier-e-publication-stack-diverse-20260918.log"
+  }
+}

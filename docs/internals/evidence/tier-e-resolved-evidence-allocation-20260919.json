@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_resolved_evidence_allocation_split",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-resolved-evidence-20260919/results.jsonl",
+  "artifact_sha256": "6f820d860049b87b49c69020be91b47055f9e162954322490bbaa3e8379709b5",
+  "benchmark_log_sha256": "d2517a23683d8769e1fc4ccaf1efa2b69c49a2c2b0984d8ba4501ed4a17d216c",
+  "environment": { "execution": "rootful Docker", "scope": "tier-e-collector-append", "warmups": 3, "measured_batches": 10, "rotated_forks": 5 },
+  "correctness": { "outputs": 20, "workload_correctness": "PASS", "tier_e_session_evidence": "COMPLETE", "policy_eligibility": false },
+  "bytes_per_ring_ready_record": {
+    "full_stream_append_target": { "collector_resolution": 234.96, "immutable_resolved_evidence": 115.81, "remaining_join_work": 119.16 },
+    "unique_edge_append_target": { "collector_resolution": 235.01, "immutable_resolved_evidence": 3.86, "remaining_join_work": 231.14 }
+  },
+  "decision": "Full-stream immutable ResolvedSyscall evidence explains approximately half of collector resolution allocation. Unique-edge representative evidence is amortized over all ring observations and explains only 3.86 B per observed record; its remaining 231.14 B per record is the next optimization target. Temporary-list control remains worse in both modes.",
+  "verdict_dimensions": { "capture_domain_validity": "complete", "transport_completeness": "complete", "attribution_coverage": "complete", "dictionary_integrity": "complete", "lifecycle_validity": "complete", "runtime_overhead": "complete" }
+}

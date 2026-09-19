@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_owned_primitive_arguments_paired_control",
+  "run_date": "2026-09-19",
+  "command": "MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-owned-arguments MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-owned-arguments-paired-20260919",
+  "artifact": {
+    "directory": "build/tier-e-owned-arguments-paired-20260919",
+    "results_jsonl_sha256": "1599247460ff6e87d856ba2b6e7f86dedb3ecc25ae99153f8db5e5d9ac387c90",
+    "manifest_json_sha256": "3747565becc36f5375a903947058acf5aa39b9b120420922bbdd13d092da6936"
+  },
+  "method": {
+    "arms": ["owned primitive LongArray", "boxed List<Long> benchmark control"],
+    "forks_per_arm": 5,
+    "warmups": 3,
+    "measured_batches": 10,
+    "operations_per_batch": 100,
+    "rotation": "The two storage modes reverse order on alternate forks."
+  },
+  "correctness": {
+    "workload_correctness": "PASS for every arm",
+    "whole_session_evidence": "COMPLETE for every arm",
+    "full_stream_resolved_per_fork": 3900,
+    "unique_edge_resolved_per_fork": 4,
+    "decoded_counts_equal_within_each_pair": true
+  },
+  "paired_owned_minus_boxed_workload_ns_per_fork": {
+    "dictionary_full_stream": {
+      "median": -8805629,
+      "samples": [-8805629, -13892285, -10666374, 11300455, -8377449]
+    },
+    "dictionary_unique_edge": {
+      "median": -9353358,
+      "samples": [3106704, -26855273, 416598, -42524427, -9353358]
+    }
+  },
+  "decision": {
+    "production_default": "owned primitive LongArray",
+    "boxed_list_status": "benchmark-only control",
+    "claim": "The paired result supports the allocation reduction on this rootful host while preserving decoded evidence. It is not a universal throughput guarantee."
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "host-specific paired measurement",
+    "policy_eligibility": false
+  }
+}
