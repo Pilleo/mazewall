@@ -497,13 +497,18 @@ mount with writable scratch space only.
 
 > **Status: Implemented contract and historical rootful evidence.**
 
-`full` remains the default exact-capture profile and is represented by omitting a
-`capture-profile` native-agent option. The only narrowed profile is
-`jdk25-unix-openat0`; it is benchmark-only and admits exact capture solely for the JDK 25
-`sun.nio.fs.UnixNativeDispatcher.openat0` binding. The agent installs proxy bindings during startup
-but keeps narrowed capture admission closed until `VM_INIT` confirms
+`full` remains the default exact-capture profile and is represented by omitting a native-agent
+profile option. `TierECaptureProfile` is the single Kotlin configuration boundary: it validates
+the finite manifest names, rejects empty, duplicate, and unknown selections, sorts valid members
+in manifest order, and renders a bounded `capture-bindings=name+name` option. The legacy
+`capture-profile=jdk25-unix-openat0` spelling remains readable for compatibility and selects only
+the JDK 25 `sun.nio.fs.UnixNativeDispatcher.openat0` binding. The agent installs proxy bindings
+during startup but keeps every narrowed profile closed until `VM_INIT` confirms
 `java.specification.version == "25"` through a profiler-owned JNI lookup. A failed validation leaves
-the narrowed binding excluded rather than fabricating an exact stack or restoring a prior context.
+the selected bindings excluded rather than fabricating an exact stack or restoring a prior context.
+Each finite manifest binding has admitted and excluded diagnostic counters. They report declared
+capture-domain scope only; they never authorize attribution, alter marker transitions, or turn an
+out-of-domain syscall attempt into an observed event.
 
 Historical rootful evidence from 2026-09-18 retains this profile as an opt-in domain reduction.
 Across fifteen paired JVM forks with the exact `openat` oracle, dictionary/full-stream had median
