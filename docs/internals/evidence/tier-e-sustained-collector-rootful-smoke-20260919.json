@@ -1,0 +1,63 @@
+{
+  "kind": "tier_e_sustained_collector_rootful_smoke",
+  "timestamp": "2026-09-19T19:42:37.857980316Z",
+  "commit": "58107d7373b6c772bb75190a114f16cfd7df1e8c",
+  "source_dirty_count": 1,
+  "run_level": "smoke",
+  "artifact": "build/tier-e-sustained-rootful-smoke-retry/results.jsonl",
+  "runner_events": "build/tier-e-sustained-rootful-smoke-retry/runner-events.jsonl",
+  "marker_transport": "auto_selected_usdt",
+  "workload": "syscall_dense",
+  "load": "below_capacity",
+  "requested_rate_per_second": 100,
+  "full_stream": {
+    "continuous": {
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "evidence_integrity": "COMPLETE",
+      "requested_operations": 300,
+      "resolved_operations": 300,
+      "observed_loss": 0,
+      "collector_polls": 2806156
+    },
+    "adaptive": {
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "evidence_integrity": "COMPLETE",
+      "requested_operations": 300,
+      "resolved_operations": 300,
+      "observed_loss": 0,
+      "collector_polls": 43487
+    }
+  },
+  "unique_edge": {
+    "continuous": {
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "evidence_integrity": "COMPLETE",
+      "requested_operations": 300,
+      "resolved_operations": 300,
+      "observed_loss": 0,
+      "collector_polls": 2994994
+    },
+    "adaptive": {
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "evidence_integrity": "COMPLETE",
+      "requested_operations": 300,
+      "resolved_operations": 300,
+      "observed_loss": 0,
+      "collector_polls": 41465
+    }
+  },
+  "capture_domain_validity": "complete",
+  "transport_completeness": "complete",
+  "attribution_coverage": "complete",
+  "dictionary_integrity": "complete",
+  "lifecycle_validity": "complete",
+  "runtime_overhead": "not_measured",
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false,
+  "notes": "A one-fork, rootful smoke run validates rate-control, policy selection, operation reconciliation, and terminal closure. It is not a paired decision run and the source was dirty only because the runner forwarding repair had not yet been committed."
+}
