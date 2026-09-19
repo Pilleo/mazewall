@@ -16,6 +16,8 @@ internal class DictionaryBatchPublisher(
 ) {
     private var evidence = DictionaryTransportEvidence()
     private var publicationMetrics = SnapshotPublicationMetrics()
+
+    @Volatile
     private var terminated = false
 
     public val transportEvidence: DictionaryTransportEvidence
@@ -28,7 +30,15 @@ internal class DictionaryBatchPublisher(
         check(!terminated) { "dictionary publisher is terminated" }
         val batch = encoder.prepareBatch(maxCount) ?: return DictionaryPublicationStatus.NO_BATCH
         val started = System.nanoTime()
-        return when (val result = sink.write(batch)) {
+        val result = sink.write(batch)
+        // The sink runs outside the publisher's state transition so terminal cleanup can
+        // proceed even when a downstream write is blocked. A late successful response is
+        // not an acknowledgement for a session that has already become terminal.
+        if (terminated) {
+            encoder.rollback(batch)
+            return DictionaryPublicationStatus.TERMINAL_FAILURE
+        }
+        return when (result) {
             DictionarySinkResult.Committed -> {
                 encoder.commit(batch)
                 onCommitted(batch)

@@ -5,6 +5,9 @@ import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -138,6 +141,38 @@ class DictionaryBatchPublisherTest {
         assertEquals(1, encoder.pendingCount)
         assertEquals(0L, encoder.watermark)
         assertEquals(1L, publisher.transportEvidence.ambiguousFailures)
+        assertEquals(false, publisher.transportEvidence.complete)
+    }
+
+    @Test
+    fun `terminal cleanup rejects a late commit from a blocked sink`() {
+        val encoder = StackDictionaryStreamEncoder()
+        encoder.enqueue(definition(81L))
+        val enteredSink = CountDownLatch(1)
+        val releaseSink = CountDownLatch(1)
+        val publisher = DictionaryBatchPublisher(
+            encoder,
+            DictionaryBatchSink {
+                enteredSink.countDown()
+                check(releaseSink.await(5, TimeUnit.SECONDS)) { "test sink was not released" }
+                DictionarySinkResult.Committed
+            },
+        )
+        val result = AtomicReference<DictionaryPublicationStatus>()
+        val publisherThread = Thread {
+            result.set(publisher.publishAvailable(1))
+        }
+
+        publisherThread.start()
+        assertTrue(enteredSink.await(5, TimeUnit.SECONDS))
+        publisher.terminate()
+        releaseSink.countDown()
+        publisherThread.join(5_000)
+
+        assertEquals(DictionaryPublicationStatus.TERMINAL_FAILURE, result.get())
+        assertEquals(1, encoder.pendingCount)
+        assertEquals(0L, encoder.watermark)
+        assertEquals(1L, publisher.transportEvidence.abandonedBatches)
         assertEquals(false, publisher.transportEvidence.complete)
     }
 
