@@ -4,6 +4,7 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.ExecutionKind
 import io.mazewall.profiler.internal.attribution.ResolutionStatus
+import io.mazewall.profiler.internal.attribution.TierECaptureProfile
 import io.mazewall.profiler.internal.attribution.TierECollectorLoop
 import io.mazewall.profiler.internal.attribution.TierECollectorLoopPolicy
 import io.mazewall.profiler.internal.attribution.TierECollectorResultMode
@@ -193,11 +194,12 @@ internal object TierEKernelSmoke {
         require(benchmark || ringArgumentViewMode == TierERingArgumentViewMode.LAZY) {
             "eager ring argument views are benchmark-only"
         }
+        val captureProfile = TierECaptureProfile.fromProperty(System.getProperty("mazewall.tier-e.capture-profile", "full"))
         val benchmarkOptions = if (benchmark) {
             (if (nativePhaseTiming) ",benchmark-phases" else "") +
                 (if (System.getProperty("mazewall.tier-e.canonical-cache") == "disabled") ",canonical-cache=disabled" else "") +
                 (if (System.getProperty("mazewall.tier-e.live-publication") == "true" || lifecycleScenario in setOf("terminal_while_active", "exec_transition")) ",live-definitions" else "") +
-                captureProfileOption(System.getProperty("mazewall.tier-e.capture-profile"))
+                captureProfileOption(captureProfile)
         } else {
             ""
         }
@@ -256,6 +258,7 @@ internal object TierEKernelSmoke {
             TierEOptions(
                 emissionMode = emissionMode,
                 stackTransport = stackTransport,
+                captureProfile = captureProfile,
                 benchmarkPhases = benchmark,
                 benchmarkAllocationAccounting = benchmarkAllocationAccounting,
                 ringDecodeMode = ringDecodeMode,
@@ -772,11 +775,7 @@ internal object TierEKernelSmoke {
         return stat.substringAfterLast(") ").split(' ')[19].toLong()
     }
 
-    internal fun captureProfileOption(captureProfile: String?): String =
-        captureProfile
-            ?.takeIf { it.isNotBlank() && it != "full" }
-            ?.let { ",capture-profile=$it" }
-            .orEmpty()
+    internal fun captureProfileOption(captureProfile: TierECaptureProfile): String = captureProfile.agentOption?.let { ",$it" }.orEmpty()
 
     private fun deleteTree(root: Path) {
         Files.walk(root).use { paths ->

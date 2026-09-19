@@ -70,6 +70,8 @@ internal enum class TierECollectorResultMode {
 internal data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     val stackTransport: TierEStackTransport = TierEStackTransport.DICTIONARY,
+    /** Explicit declared capture domain; full capture remains the default. */
+    val captureProfile: TierECaptureProfile = TierECaptureProfile.Full,
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,

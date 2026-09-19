@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.TierECaptureProfile
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEReadyTransferMode
 import io.mazewall.profiler.internal.attribution.TierERingDecodeMode
@@ -380,12 +381,10 @@ class TierEMatchedBenchmarkJsonTest {
 
     @Test
     fun `default full capture profile remains an omitted native agent option`() {
-        assertEquals("", TierEKernelSmoke.captureProfileOption(null))
-        assertEquals("", TierEKernelSmoke.captureProfileOption(""))
-        assertEquals("", TierEKernelSmoke.captureProfileOption("full"))
+        assertEquals("", TierEKernelSmoke.captureProfileOption(TierECaptureProfile.Full))
         assertEquals(
             ",capture-profile=jdk25-unix-openat0",
-            TierEKernelSmoke.captureProfileOption("jdk25-unix-openat0"),
+            TierEKernelSmoke.captureProfileOption(TierECaptureProfile.fromProperty("jdk25-unix-openat0")),
         )
     }
 

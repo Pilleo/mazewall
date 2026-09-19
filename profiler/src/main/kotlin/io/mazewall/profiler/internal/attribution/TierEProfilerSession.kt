@@ -403,6 +403,9 @@ internal class TierEProfilerSession internal constructor(
         return source.readMarkerTransitionCount()
     }
 
+    /** Declared native capture scope, separate from observed attribution and evidence completeness. */
+    internal fun captureProfile(): TierECaptureProfile = options.captureProfile
+
     /** Detaches marker admission while keeping the syscall observer alive. */
     @Synchronized
     public fun detachMarker() {

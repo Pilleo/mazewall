@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.TierECaptureProfile
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -683,7 +684,7 @@ internal object TierEMatchedBenchmark {
             "\"marker_transport\":\"${markerTransportFor(result.variant).wireName}\"",
             "\"selected_marker_transport\":${result.evidence.selectedMarkerTransport?.let { "\"$it\"" } ?: "null"}",
             "\"capture_profile\":\"${captureProfileFor(result.variant).wireName}\"",
-            "\"capture_profile_domain\":\"${captureProfileFor(result.variant).domain}\"",
+            "\"capture_profile_domain\":\"${captureProfileFor(result.variant).captureDomain}\"",
             "\"native_phase_timing\":\"${nativePhaseTimingFor(result.variant).wireName}\"",
             "\"ring_decode\":\"${ringDecodeFor(result.variant).wireName}\"",
             "\"ring_submission\":\"${ringSubmissionFor(result.variant).wireName}\"",
@@ -1530,8 +1531,8 @@ internal object TierEMatchedBenchmark {
         }
         if (scope == Scope.TIER_E_CAPTURE_PROFILE) {
             val values = forks.filter { it.variant.mode == Mode.FULL_STREAM }
-            val full = values.filter { captureProfileFor(it.variant) == CaptureProfile.FULL }.associateBy { it.fork }
-            val narrowed = values.filter { captureProfileFor(it.variant) == CaptureProfile.JDK25_UNIX_OPENAT0 }.associateBy { it.fork }
+            val full = values.filter { captureProfileFor(it.variant) == TierECaptureProfile.Full }.associateBy { it.fork }
+            val narrowed = values.filter { captureProfileFor(it.variant).wireName == "jdk25-unix-openat0" }.associateBy { it.fork }
             val pairs = full.keys.intersect(narrowed.keys).sorted().map { fork ->
                 fork to (full.getValue(fork) to narrowed.getValue(fork))
             }
@@ -1825,21 +1826,6 @@ internal object TierEMatchedBenchmark {
         DISABLED("disabled", false),
     }
 
-    private enum class CaptureProfile(
-        val wireName: String,
-        val domain: String,
-    ) {
-        FULL("full", "all admitted native bindings"),
-        JDK25_UNIX_OPENAT0("jdk25-unix-openat0", "JDK 25 UnixNativeDispatcher.openat0"),
-        ;
-
-        companion object {
-            fun fromProperty(value: String): CaptureProfile =
-                entries.singleOrNull { it.wireName == value.ifBlank { FULL.wireName } }
-                ?: error("unknown Tier E capture profile: $value")
-        }
-    }
-
     private enum class RingDecode(
         val wireName: String,
     ) {
@@ -1974,7 +1960,7 @@ internal object TierEMatchedBenchmark {
         val mode: Mode,
         val cacheMode: String? = null,
         val publication: Publication = Publication.TERMINAL,
-        val captureProfile: CaptureProfile? = null,
+        val captureProfile: TierECaptureProfile? = null,
         val nativePhaseTiming: NativePhaseTiming? = null,
         val ringDecode: RingDecode? = null,
         val ringArgumentList: RingArgumentList? = null,
@@ -2033,9 +2019,9 @@ internal object TierEMatchedBenchmark {
         }
     }
 
-    private fun configuredCaptureProfile(): CaptureProfile = CaptureProfile.fromProperty(System.getProperty("mazewall.tier-e.capture-profile", "full"))
+    private fun configuredCaptureProfile(): TierECaptureProfile = TierECaptureProfile.fromProperty(System.getProperty("mazewall.tier-e.capture-profile", "full"))
 
-    private fun captureProfileFor(variant: Variant): CaptureProfile = variant.captureProfile ?: configuredCaptureProfile()
+    private fun captureProfileFor(variant: Variant): TierECaptureProfile = variant.captureProfile ?: configuredCaptureProfile()
 
     private fun nativePhaseTimingFor(variant: Variant): NativePhaseTiming = variant.nativePhaseTiming ?: NativePhaseTiming.ENABLED
 
@@ -2172,9 +2158,9 @@ internal object TierEMatchedBenchmark {
                 }
                 Scope.TIER_E_CAPTURE_PROFILE -> {
                     val profiles = if (rotation % 2 == 0) {
-                        listOf(CaptureProfile.FULL, CaptureProfile.JDK25_UNIX_OPENAT0)
+                        listOf(TierECaptureProfile.Full, TierECaptureProfile.fromProperty("jdk25-unix-openat0"))
                     } else {
-                        listOf(CaptureProfile.JDK25_UNIX_OPENAT0, CaptureProfile.FULL)
+                        listOf(TierECaptureProfile.fromProperty("jdk25-unix-openat0"), TierECaptureProfile.Full)
                     }
                     profiles.map { captureProfile -> Variant(mode, captureProfile = captureProfile) }
                 }
