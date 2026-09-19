@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <jvmti.h>
 
+#include <array>
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include "binding_manifest.hpp"
+#include "capture_profile.hpp"
 #include "capture_yield_recorder.hpp"
 #include "invocation_registry.hpp"
 #include "lifecycle_barrier.hpp"
@@ -99,9 +101,10 @@ std::atomic<bool> force_capture_failure_once{false};
 std::string capture_failure_gate_path;
 std::atomic<bool> force_exec_once{false};
 std::atomic<std::uint64_t> capture_yield_contention_drops{0};
-enum class CaptureProfile { full, jdk25_unix_openat0 };
-CaptureProfile capture_profile = CaptureProfile::full;
+mazewall::profiler::CaptureProfile capture_profile = mazewall::profiler::CaptureProfile::full();
 std::atomic<bool> capture_profile_admitted{true};
+std::array<std::atomic<std::uint64_t>, mazewall::profiler::BindingManifest::supported_bindings.size()> capture_profile_admitted_counts{};
+std::array<std::atomic<std::uint64_t>, mazewall::profiler::BindingManifest::supported_bindings.size()> capture_profile_excluded_counts{};
 std::atomic<bool> callback_suppression_probe_enabled{false};
 std::atomic<bool> callback_suppression_probe_fired{false};
 std::atomic<jclass> callback_suppression_probe_class{nullptr};
@@ -120,12 +123,20 @@ bool write_definitions(bool producer_closed = false) noexcept;
 void request_live_publication() noexcept;
 
 bool profile_admits(mazewall::profiler::BindingKind binding_kind) noexcept {
-    return capture_profile == CaptureProfile::full ||
-        (capture_profile_admitted.load(std::memory_order_acquire) && binding_kind == mazewall::profiler::BindingKind::unix_openat0);
+    if (binding_kind == mazewall::profiler::BindingKind::unsupported) return false;
+    const bool admitted = capture_profile.is_full() ||
+        (capture_profile_admitted.load(std::memory_order_acquire) && capture_profile.admits(binding_kind));
+    const auto index = mazewall::profiler::BindingManifest::index(binding_kind);
+    if (index >= mazewall::profiler::BindingManifest::supported_bindings.size()) {
+        return false;
+    }
+    auto& count = admitted ? capture_profile_admitted_counts[index] : capture_profile_excluded_counts[index];
+    count.fetch_add(1, std::memory_order_relaxed);
+    return admitted;
 }
 
 bool validate_capture_profile(JNIEnv* env) noexcept {
-    if (capture_profile == CaptureProfile::full) return true;
+    if (capture_profile.is_full()) return true;
     const auto clear_owned_exception = [env]() noexcept {
         if (!env->ExceptionCheck()) return false;
         env->ExceptionClear();
@@ -1289,7 +1300,7 @@ void JNICALL on_class_prepare(jvmtiEnv* jvmti, JNIEnv* env, jthread, jclass klas
 }
 
 void JNICALL on_vm_init(jvmtiEnv*, JNIEnv* env, jthread) noexcept {
-    if (capture_profile == CaptureProfile::full) return;
+    if (capture_profile.is_full()) return;
     if (!validate_capture_profile(env)) {
         std::fprintf(stderr, "mazewall-stack-agent: capture profile validation failed after VM initialization\\n");
         return;
@@ -1677,7 +1688,11 @@ bool parse_options(const char* options) {
         } else if (option == "benchmark-phases") {
             benchmark_phases = true;
         } else if (option == "capture-profile=jdk25-unix-openat0") {
-            capture_profile = CaptureProfile::jdk25_unix_openat0;
+            capture_profile = *mazewall::profiler::CaptureProfile::parse("jdk25-unix-openat0");
+        } else if (option.starts_with("capture-bindings=")) {
+            const auto parsed = mazewall::profiler::CaptureProfile::parse(option.substr(std::strlen("capture-bindings=")));
+            if (!parsed.has_value() || parsed->is_full()) return false;
+            capture_profile = *parsed;
         } else if (option == "canonical-cache=enabled") {
             canonical_cache_enabled = true;
         } else if (option == "canonical-cache=disabled") {
@@ -1697,8 +1712,8 @@ bool parse_options(const char* options) {
             return false;
         }
     }
-    if (capture_profile != CaptureProfile::full && !benchmark_phases) return false;
-    capture_profile_admitted.store(capture_profile == CaptureProfile::full, std::memory_order_release);
+    if (!capture_profile.is_full() && !benchmark_phases) return false;
+    capture_profile_admitted.store(capture_profile.is_full(), std::memory_order_release);
     return true;
 }
 
@@ -1754,6 +1769,18 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
         definitions_written ? "written" : "failed",
         capture_yield_status,
         static_cast<unsigned long long>(capture_yield_contention_drops.load(std::memory_order_relaxed)));
+    for (std::size_t index = 0;
+         index < mazewall::profiler::BindingManifest::supported_bindings.size();
+         ++index) {
+        const auto binding = mazewall::profiler::BindingManifest::supported_bindings[index];
+        std::fprintf(
+            stderr,
+            "mazewall-stack-agent: capture-profile-binding=%.*s admitted=%llu excluded=%llu\n",
+            static_cast<int>(mazewall::profiler::BindingManifest::name(binding).size()),
+            mazewall::profiler::BindingManifest::name(binding).data(),
+            static_cast<unsigned long long>(capture_profile_admitted_counts[index].load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(capture_profile_excluded_counts[index].load(std::memory_order_relaxed)));
+    }
     if (benchmark_phases) {
         std::fprintf(
             stderr,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <string_view>
 
 namespace mazewall::profiler {
@@ -26,6 +28,51 @@ enum class BindingKind {
  */
 class BindingManifest final {
 public:
+    static constexpr std::array<BindingKind, 12> supported_bindings{
+        BindingKind::unix_open0,
+        BindingKind::unix_openat0,
+        BindingKind::unix_close0,
+        BindingKind::unix_unlink0,
+        BindingKind::file_read0,
+        BindingKind::file_write0,
+        BindingKind::file_close_int_fd,
+        BindingKind::socket_read0,
+        BindingKind::socket_write0,
+        BindingKind::net_socket0,
+        BindingKind::net_connect0,
+        BindingKind::net_accept,
+    };
+
+    [[nodiscard]] static constexpr std::string_view name(BindingKind kind) noexcept {
+        switch (kind) {
+        case BindingKind::unix_open0: return "unix-open0";
+        case BindingKind::unix_openat0: return "unix-openat0";
+        case BindingKind::unix_close0: return "unix-close0";
+        case BindingKind::unix_unlink0: return "unix-unlink0";
+        case BindingKind::file_read0: return "file-read0";
+        case BindingKind::file_write0: return "file-write0";
+        case BindingKind::file_close_int_fd: return "file-close-int-fd";
+        case BindingKind::socket_read0: return "socket-read0";
+        case BindingKind::socket_write0: return "socket-write0";
+        case BindingKind::net_socket0: return "net-socket0";
+        case BindingKind::net_connect0: return "net-connect0";
+        case BindingKind::net_accept: return "net-accept";
+        case BindingKind::unsupported: return "";
+        }
+        return "";
+    }
+
+    [[nodiscard]] static constexpr BindingKind from_name(std::string_view value) noexcept {
+        for (const auto kind : supported_bindings) {
+            if (name(kind) == value) return kind;
+        }
+        return BindingKind::unsupported;
+    }
+
+    [[nodiscard]] static constexpr std::size_t index(BindingKind kind) noexcept {
+        return kind == BindingKind::unsupported ? supported_bindings.size() : static_cast<std::size_t>(kind) - 1;
+    }
+
     [[nodiscard]] static BindingKind classify(
         std::string_view owner,
         std::string_view name,

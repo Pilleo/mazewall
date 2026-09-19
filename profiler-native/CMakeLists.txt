@@ -39,6 +39,11 @@ target_include_directories(binding_manifest_test PRIVATE include)
 target_compile_options(binding_manifest_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME binding_manifest_test COMMAND binding_manifest_test)
 
+add_executable(capture_profile_test tests/capture_profile_test.cpp)
+target_include_directories(capture_profile_test PRIVATE include)
+target_compile_options(capture_profile_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME capture_profile_test COMMAND capture_profile_test)
+
 add_executable(capture_yield_recorder_test tests/capture_yield_recorder_test.cpp)
 target_include_directories(capture_yield_recorder_test PRIVATE include)
 target_compile_options(capture_yield_recorder_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
