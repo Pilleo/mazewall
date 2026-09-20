@@ -7,6 +7,8 @@ PILOT_RATES=${MAZEWALL_TIER_E_SUSTAINED_PILOT_RATES:-"1000 2000 4000 8000 16000 
 RUN_LEVEL=${MAZEWALL_TIER_E_SUSTAINED_RUN_LEVEL:-smoke}
 LOAD=${MAZEWALL_TIER_E_SUSTAINED_LOAD:-below_capacity}
 RECEIPT_CLOCK=${MAZEWALL_TIER_E_SUSTAINED_RECEIPT_CLOCK:-monotonic}
+STAGE_SECONDS=${MAZEWALL_TIER_E_SUSTAINED_STAGE_SECONDS:-10}
+ITERATIONS=${MAZEWALL_TIER_E_SUSTAINED_ITERATIONS:-200}
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
@@ -43,15 +45,27 @@ finish() {
 }
 trap finish EXIT
 
-event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES}"
+[[ "${STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained stage seconds: ${STAGE_SECONDS}" >&2; exit 2; }
+[[ "${ITERATIONS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained iterations: ${ITERATIONS}" >&2; exit 2; }
+
+event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS}"
 for rate in ${PILOT_RATES}; do
     [[ "${rate}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained rate: ${rate}" >&2; exit 2; }
+    total_operations=$((rate * STAGE_SECONDS))
+    (( total_operations % ITERATIONS == 0 )) || {
+        echo "sustained rate ${rate} for ${STAGE_SECONDS}s is not divisible by ${ITERATIONS} operations per batch" >&2
+        exit 2
+    }
+    batches=$((total_operations / ITERATIONS))
     stage="${ARTIFACT_DIR}/rate-${rate}"
-    event "rate-${rate}" STARTED
+    event "rate-${rate}" STARTED "batches=${batches} expected_operations=${total_operations}"
     MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector \
         MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND="${rate}" \
         MAZEWALL_TIER_E_SUSTAINED_LOAD="${LOAD}" \
         MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK="${RECEIPT_CLOCK}" \
+        MAZEWALL_TIER_E_CALIBRATION=false \
+        MAZEWALL_TIER_E_ITERATIONS="${ITERATIONS}" \
+        MAZEWALL_TIER_E_BATCHES="${batches}" \
         MAZEWALL_TIER_E_RUN_LEVEL="${RUN_LEVEL}" \
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${stage}"
     jq -e -s '
