@@ -51,10 +51,10 @@ for rate in ${PILOT_RATES}; do
         MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND="${rate}" \
         MAZEWALL_TIER_E_SUSTAINED_LOAD="${LOAD}" \
         MAZEWALL_TIER_E_RUN_LEVEL="${RUN_LEVEL}" \
-        "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${stage}"
+        bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${stage}"
     jq -e -s '
         ([.[] | select(.kind == "terminal" and .success == true)] | length == 1) and
-        ([.[] | select(.kind == "fork-output" and .sustained_collector.evidence_integrity == "COMPLETE"] | length > 0)
+        ([.[] | select(.kind == "fork-output" and .sustained_collector.evidence_integrity == "COMPLETE")] | length > 0)
     ' "${stage}/results.jsonl" > /dev/null
     event "rate-${rate}" COMPLETED
 done
