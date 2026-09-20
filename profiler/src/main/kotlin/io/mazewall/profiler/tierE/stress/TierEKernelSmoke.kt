@@ -627,6 +627,7 @@ internal object TierEKernelSmoke {
                     "ring_payload_slice_ns=${collectorPhases.ringPayloadSliceNanos} ring_decode_ns=${collectorPhases.ringDecodeNanos} ring_append_ns=${collectorPhases.ringAppendNanos} " +
                     "ring_consumer_publish_ns=${collectorPhases.ringConsumerPublishNanos} " +
                     "ring_scanned_records=${collectorPhases.ringScannedRecords} ring_ready_records=${collectorPhases.ringReadyRecords} " +
+                    "ring_batches=${collectorPhases.ringBatches} ring_max_batch_records=${collectorPhases.ringMaxBatchRecords} " +
                     "ring_reader_initialization_ns=${collectorPhases.ringReaderInitializationNanos} " +
                     "collector_join_ns=${collectorPhases.collectorJoinNanos} " +
                     "allocation_measurement_available=${if (collectorPhases.allocationMeasurementAvailable) 1 else 0} " +

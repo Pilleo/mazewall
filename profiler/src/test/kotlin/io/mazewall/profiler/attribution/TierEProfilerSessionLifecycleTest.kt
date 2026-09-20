@@ -264,7 +264,7 @@ class TierEProfilerSessionLifecycleTest {
 
     @Test
     fun `benchmark session measures ring drain and collector join separately`() {
-        val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 50L))
+        val timestamps = ArrayDeque(listOf(10L, 20L, 40L, 60L))
         val session = TierEProfilerSession(
             source = FakeTierEEventSource(events = ArrayDeque(listOf(listOf(event(1uL))))),
             processEpoch = 1,
@@ -307,7 +307,7 @@ class TierEProfilerSessionLifecycleTest {
     @Test
     fun `benchmark session counts ready records from owned decoded events without source probes`() {
         val source = FakeTierEEventSource(
-            events = ArrayDeque(listOf(listOf(event(1uL)))),
+            events = ArrayDeque(listOf(listOf(event(1uL), event(2uL)), listOf(event(3uL)))),
             drainMetrics = TierERingDrainPhaseMetrics(
                 scanNanos = 3,
                 decodeNanos = 5,
@@ -317,24 +317,26 @@ class TierEProfilerSessionLifecycleTest {
                 readyRecords = 17,
             ),
         )
-        val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 50L))
         val session = TierEProfilerSession(
             source = source,
             processEpoch = 1,
             options = TierEOptions(benchmarkPhases = true),
             definitionReader = { emptyDefinitions() },
-            nanoTime = { timestamps.removeFirst() },
+            nanoTime = { 0L },
         )
 
         session.poll()
+        session.poll()
 
         val metrics = session.benchmarkPhaseMetrics()
-        assertEquals(3, metrics.ringScanNanos)
-        assertEquals(5, metrics.ringDecodeNanos)
-        assertEquals(7, metrics.ringAppendNanos)
-        assertEquals(11, metrics.ringConsumerPublishNanos)
-        assertEquals(13, metrics.ringScannedRecords)
-        assertEquals(1, metrics.ringReadyRecords)
+        assertEquals(6, metrics.ringScanNanos)
+        assertEquals(10, metrics.ringDecodeNanos)
+        assertEquals(14, metrics.ringAppendNanos)
+        assertEquals(22, metrics.ringConsumerPublishNanos)
+        assertEquals(26, metrics.ringScannedRecords)
+        assertEquals(3, metrics.ringReadyRecords)
+        assertEquals(2, metrics.ringBatches)
+        assertEquals(2, metrics.ringMaxBatchRecords)
     }
 
     @Test

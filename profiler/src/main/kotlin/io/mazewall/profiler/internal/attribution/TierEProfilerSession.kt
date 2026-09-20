@@ -210,6 +210,8 @@ internal class TierEProfilerSession internal constructor(
     private var ringConsumerPublishNanos = 0L
     private var ringScannedRecords = 0L
     private var ringReadyRecords = 0L
+    private var ringDrainBatches = 0L
+    private var ringMaxBatchRecords = 0L
     private var ringReaderInitializationNanos = 0L
     private var collectorJoinNanos = 0L
     private var collectorPolls = 0L
@@ -284,6 +286,8 @@ internal class TierEProfilerSession internal constructor(
                 // event is an owned READY record, so this denominator is exact without adding
                 // measurement work to the record loop.
                 ringReadyRecords += drained.events.size
+                ringDrainBatches++
+                ringMaxBatchRecords = maxOf(ringMaxBatchRecords, drained.events.size.toLong())
                 ringReaderInitializationNanos += drained.metrics.readerInitializationNanos
             }.events
                 .also {
@@ -365,6 +369,8 @@ internal class TierEProfilerSession internal constructor(
         ringConsumerPublishNanos = ringConsumerPublishNanos,
         ringScannedRecords = ringScannedRecords,
         ringReadyRecords = ringReadyRecords,
+        ringBatches = ringDrainBatches,
+        ringMaxBatchRecords = ringMaxBatchRecords,
         ringReaderInitializationNanos = ringReaderInitializationNanos,
         collectorJoinNanos = collectorJoinNanos,
         polls = collectorPolls,
@@ -709,6 +715,8 @@ internal data class TierECollectorPhaseMetrics(
     val ringConsumerPublishNanos: Long = 0,
     val ringScannedRecords: Long = 0,
     val ringReadyRecords: Long = 0,
+    val ringBatches: Long = 0,
+    val ringMaxBatchRecords: Long = 0,
     val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,
