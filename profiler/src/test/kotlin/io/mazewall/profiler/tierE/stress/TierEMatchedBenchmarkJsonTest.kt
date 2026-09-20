@@ -13,6 +13,8 @@ import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
@@ -494,6 +496,25 @@ class TierEMatchedBenchmarkJsonTest {
         } finally {
             if (previous == null) System.clearProperty(property) else System.setProperty(property, previous)
         }
+    }
+
+    @Test
+    fun `operation oracle omissions make otherwise complete evidence incomplete`() {
+        assertFalse(
+            TierEMatchedBenchmark.operationOracleSupportsCompleteEvidence(
+                TierEBenchmarkContract.OperationOracle(
+                    available = true,
+                    expected = 10,
+                    matched = 9,
+                    missing = 1,
+                ),
+            ),
+        )
+        assertTrue(
+            TierEMatchedBenchmark.operationOracleSupportsCompleteEvidence(
+                TierEBenchmarkContract.OperationOracle(available = true, expected = 10, matched = 10),
+            ),
+        )
     }
 
     @Test

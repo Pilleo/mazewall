@@ -389,6 +389,21 @@ internal object TierEMatchedBenchmark {
         check(batches.size == config.batches || (execLifecycleFixture && batches.isEmpty())) {
             "${mode.jsonName} fork $fork emitted ${batches.size} measured batches"
         }
+        val operationOracle = TierEBenchmarkContract.OperationOracle(
+            available = output.contains("operation_oracle_available=true"),
+            expected = metricOrZero(output, "expected_operations"),
+            matched = metricOrZero(output, "matched_operations"),
+            representativeOnly = output.contains("operation_oracle_expectation=unique_representative"),
+            candidates = metricOrZero(output, "candidate_operations"),
+            acknowledged = metricOrZero(output, "acknowledged_operations"),
+            suppressed = metricOrZero(output, "suppressed_representatives"),
+            unresolved = metricOrZero(output, "unresolved_operations"),
+            missing = metricOrZero(output, "missing_operations"),
+            duplicates = metricOrZero(output, "duplicate_operations"),
+            wrong = metricOrZero(output, "wrong_operations"),
+            unclassified = metricOrZero(output, "unclassified_operations"),
+        )
+        val operationOracleComplete = operationOracleSupportsCompleteEvidence(operationOracle)
         val evidence = Evidence(
             metricOrZero(output, "observations"),
             metricOrZero(output, "resolved"),
@@ -406,7 +421,7 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "reconciliation_failed_invocations"),
             metricOrZero(output, "reconciliation_kernel_active_observations"),
             output.contains("workloadFrames=true"),
-            output.contains("evidence_complete=true") || output.contains("evidenceComplete=true"),
+            (output.contains("evidence_complete=true") || output.contains("evidenceComplete=true")) && operationOracleComplete,
             output.contains("producer_closed=true"),
             selectedMarkerTransport(output),
             (mode == Mode.BASELINE || output.contains("unique_edge_observer_enabled=false")) &&
@@ -420,20 +435,7 @@ internal object TierEMatchedBenchmark {
             output.contains("unique_edge_observer_enabled=false"),
             output.contains("profile_semantic_stack_complete=true"),
             semanticStackDigest(output),
-            TierEBenchmarkContract.OperationOracle(
-                available = output.contains("operation_oracle_available=true"),
-                expected = metricOrZero(output, "expected_operations"),
-                matched = metricOrZero(output, "matched_operations"),
-                representativeOnly = output.contains("operation_oracle_expectation=unique_representative"),
-                candidates = metricOrZero(output, "candidate_operations"),
-                acknowledged = metricOrZero(output, "acknowledged_operations"),
-                suppressed = metricOrZero(output, "suppressed_representatives"),
-                unresolved = metricOrZero(output, "unresolved_operations"),
-                missing = metricOrZero(output, "missing_operations"),
-                duplicates = metricOrZero(output, "duplicate_operations"),
-                wrong = metricOrZero(output, "wrong_operations"),
-                unclassified = metricOrZero(output, "unclassified_operations"),
-            ),
+            operationOracle,
             phaseMetrics(output),
             CaptureYieldMetrics(
                 metricOrZero(output, "capture_yield_records"),
@@ -1072,6 +1074,18 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "pending_observation_budget_drops"),
             metricOrZero(output, "pending_observation_queue_drops"),
         )
+
+    /** An independent operation oracle may narrow, but never widen, profiler completeness. */
+    internal fun operationOracleSupportsCompleteEvidence(oracle: TierEBenchmarkContract.OperationOracle): Boolean =
+        !oracle.available ||
+            (
+                oracle.expected == oracle.matched &&
+                    oracle.missing == 0L &&
+                    oracle.unresolved == 0L &&
+                    oracle.duplicates == 0L &&
+                    oracle.wrong == 0L &&
+                    oracle.unclassified == 0L
+                )
 
     private fun userNotifPhaseJson(phases: UserNotifPhaseMetrics): String =
         listOf(
