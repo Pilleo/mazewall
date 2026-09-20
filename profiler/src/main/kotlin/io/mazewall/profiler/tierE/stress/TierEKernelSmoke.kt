@@ -394,11 +394,15 @@ internal object TierEKernelSmoke {
                 .mapNotNull { syscall -> syscall.observation.invocationId }
                 .toSet()
             val captureYieldJoin = captureYield?.let {
-                TierECaptureYield.join(
-                    it,
-                    AgentDefinitionFile.readForInvocations(definitions, resolvedInvocationIds).invocations,
-                    resolvedInvocationIds,
-                )
+                definitions
+                    .takeIf(Files::exists)
+                    ?.let { definitionFile ->
+                        TierECaptureYield.join(
+                            it,
+                            AgentDefinitionFile.readForInvocations(definitionFile, resolvedInvocationIds).invocations,
+                            resolvedInvocationIds,
+                        )
+                    }
             }
             val terminalNanos = System.nanoTime() - terminalStarted
             val workloadNanos = System.nanoTime() - workloadStarted
@@ -630,6 +634,7 @@ internal object TierEKernelSmoke {
                 "profile_semantic_stack_complete=$semanticStackComplete " +
                 "profile_semantic_stack_records=${semanticRecords.size} " +
                 "profile_semantic_stack_digest=${semanticStackDigest ?: "unavailable"} " +
+                "capture_yield_join_available=${captureYieldJoin != null} " +
                 "capture_yield_records=${captureYield?.records?.size ?: 0} " +
                 "capture_yield_captured=${captureYield?.captured ?: 0} " +
                 "capture_yield_capture_failed=${captureYield?.captureFailed ?: 0} " +
