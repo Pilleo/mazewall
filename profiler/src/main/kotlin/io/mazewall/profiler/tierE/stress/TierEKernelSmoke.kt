@@ -307,6 +307,9 @@ internal object TierEKernelSmoke {
             val attachStarted = System.nanoTime()
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
+            // Benchmark-only synchronization point for concurrent host-noise fixtures. The marker
+            // proves attachment completed; it does not imply producer closure or collector drain.
+            println("tier-e-kernel-smoke: attachment_ready=true workload_pid=${process.pid()}")
             args.getOrNull(6)?.toInt()?.let { cpu ->
                 pinTargetToCpu(cpu, process.pid())
             }
