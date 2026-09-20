@@ -597,6 +597,16 @@ internal object TierEKernelSmoke {
                 oracle.unclassified == 0L &&
                 semanticRecords.size.toLong() == oracle.expected &&
                 semanticStackDigest != null
+            val operationOracleComplete = !operationOracleAvailable ||
+                (
+                    oracle.matched == oracle.expected &&
+                        oracle.missing == 0L &&
+                        oracle.unresolved == 0L &&
+                        oracle.duplicates == 0L &&
+                        oracle.wrong == 0L &&
+                        oracle.unclassified == 0L
+                    )
+            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
@@ -618,7 +628,7 @@ internal object TierEKernelSmoke {
                 "kernel_ring_loss=${collectorPhases.kernelRingLosses} retained_result_drops=${collectorPhases.retainedResultDrops} " +
                 "pending_observation_budget_drops=${collectorPhases.pendingObservationBudgetDrops} " +
                 "pending_observation_queue_drops=${collectorPhases.pendingObservationQueueDrops} " +
-                "failures=${profile.integrity.attributionFailures} evidence_complete=${profile.integrity.coverageComplete} " +
+                "failures=${profile.integrity.attributionFailures} evidence_complete=$effectiveEvidenceComplete " +
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
                 "missing_operations=$missingWorkloadUnlinks extra_operations=$extraWorkloadUnlinks " +
@@ -629,6 +639,7 @@ internal object TierEKernelSmoke {
                 "unresolved_operations=${oracle.unresolved} " +
                 "duplicate_operations=${oracle.duplicates} wrong_operations=${oracle.wrong} " +
                 "unclassified_operations=${oracle.unclassified} operation_oracle_available=$operationOracleAvailable " +
+                "operation_oracle_complete=$operationOracleComplete " +
                 "unique_edge_observer_enabled=$uniqueEdgeObserverEnabled " +
                 "operation_oracle_expectation=$operationOracleExpectation " +
                 "profile_semantic_stack_complete=$semanticStackComplete " +
