@@ -47,6 +47,8 @@ internal interface TierEEventSource : AutoCloseable {
 
     fun readAmbientInactiveCount(): Long = 0L
 
+    fun readExactAdmissionCount(): Long = 0L
+
     fun readContextMetrics(): Map<Long, Long> = emptyMap()
 
     fun readMarkerTransitionCount(): Long
@@ -91,6 +93,8 @@ private class NativeTierEEventSource(
     override fun readMarkerFailureCount(): Long = engine.readMarkerFailureCount()
 
     override fun readAmbientInactiveCount(): Long = engine.readAmbientInactiveCount()
+
+    override fun readExactAdmissionCount(): Long = engine.readExactAdmissionCount()
 
     override fun readContextMetrics(): Map<Long, Long> = engine.readContextMetrics()
 
@@ -213,6 +217,7 @@ internal class TierEProfilerSession internal constructor(
     private var ringDrainBatches = 0L
     private var ringMaxBatchRecords = 0L
     private var retainedResultDrops = 0L
+    private var kernelExactAdmissions = 0L
     private var ringReaderInitializationNanos = 0L
     private var collectorJoinNanos = 0L
     private var collectorPolls = 0L
@@ -379,6 +384,7 @@ internal class TierEProfilerSession internal constructor(
             retainedResultDrops = retainedResultDrops,
             pendingObservationBudgetDrops = pendingDrops.budgetDrops,
             pendingObservationQueueDrops = pendingDrops.queueDrops,
+            kernelExactAdmissions = kernelExactAdmissions,
         ringReaderInitializationNanos = ringReaderInitializationNanos,
         collectorJoinNanos = collectorJoinNanos,
         polls = collectorPolls,
@@ -528,6 +534,7 @@ internal class TierEProfilerSession internal constructor(
             kernelActiveObservations = source.readContextMetrics().values.fold(0L, Math::addExact),
             markerTransitions = source.readMarkerTransitionCount(),
         )
+        kernelExactAdmissions = source.readExactAdmissionCount()
         closeSource()
         val definitions = try {
             readDefinitions(definitionFile, collector.pendingInvocationIds())
@@ -733,6 +740,7 @@ internal data class TierECollectorPhaseMetrics(
     val retainedResultDrops: Long = 0,
     val pendingObservationBudgetDrops: Long = 0,
     val pendingObservationQueueDrops: Long = 0,
+    val kernelExactAdmissions: Long = 0,
     val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,

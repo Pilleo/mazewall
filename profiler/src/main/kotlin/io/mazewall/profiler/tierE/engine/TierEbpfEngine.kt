@@ -85,6 +85,8 @@ internal class TierEbpfEngine(
         private const val MARKER_GENERATION_OFFSET: Long = 12
         private const val MARKER_FAILURE_COUNTER_INDEX = 3
         private const val AMBIENT_INACTIVE_COUNTER_INDEX = 4
+        private const val EXACT_ADMISSION_COUNTER_INDEX = 5
+        private const val COUNTER_MAP_ENTRIES = 6
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
@@ -194,7 +196,7 @@ internal class TierEbpfEngine(
             if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
                 installed.coverageEdgeFd = createMap(MAP_LRU_HASH, keySize = 16, valueSize = 8, maxEntries = COVERAGE_EDGE_CAPACITY)
             }
-            installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = 5)
+            installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = COUNTER_MAP_ENTRIES)
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
             installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
@@ -253,6 +255,9 @@ internal class TierEbpfEngine(
 
     /** Target-process syscalls observed while marker admission was active but no invocation was active. */
     public fun readAmbientInactiveCount(): Long = readCounter(AMBIENT_INACTIVE_COUNTER_INDEX)
+
+    /** Selected target syscalls that passed marker/task-storage admission before ring reservation. */
+    public fun readExactAdmissionCount(): Long = readCounter(EXACT_ADMISSION_COUNTER_INDEX)
 
     /** Waits until all handlers admitted before marker detachment reach their completion epilogue. */
     public fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean {

@@ -26,6 +26,7 @@ internal object TierEBpfProgramBuilder {
     private const val COUNTER_MAP_INDEX: Int = 2
     private const val MARKER_FAILURE_COUNTER_INDEX: Int = 3
     private const val AMBIENT_INACTIVE_COUNTER_INDEX: Int = 4
+    private const val EXACT_ADMISSION_COUNTER_INDEX: Int = 5
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
 
     // eBPF opcodes (64-bit class)
@@ -178,8 +179,18 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(STX_W, dst = FP, src = 5, off = -48))
         }
 
+        emit(Insn(MOV_IMM, dst = 5, imm = EXACT_ADMISSION_COUNTER_INDEX))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+        ldMap(1, COUNTER_MAP_INDEX)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingExactAdmissionCounter = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
         val reserveStart = p.size
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
+        p[missingExactAdmissionCounter] = p[missingExactAdmissionCounter].copy(off = (reserveStart - missingExactAdmissionCounter - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
         p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
         val reservationFailed: Int?

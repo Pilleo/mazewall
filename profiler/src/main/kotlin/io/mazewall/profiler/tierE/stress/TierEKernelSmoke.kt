@@ -628,6 +628,7 @@ internal object TierEKernelSmoke {
                 "kernel_ring_loss=${collectorPhases.kernelRingLosses} retained_result_drops=${collectorPhases.retainedResultDrops} " +
                 "pending_observation_budget_drops=${collectorPhases.pendingObservationBudgetDrops} " +
                 "pending_observation_queue_drops=${collectorPhases.pendingObservationQueueDrops} " +
+                "kernel_exact_admissions=${collectorPhases.kernelExactAdmissions} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=$effectiveEvidenceComplete " +
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
