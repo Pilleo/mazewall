@@ -711,7 +711,12 @@ internal object TierEMatchedBenchmark {
                 evidenceComplete = result.evidence.evidenceComplete,
             ),
         )
-        val achievedRate = operationsPerSecond(achieved, result.batches.sumOf { it.workloadNanos })
+        val workloadNanos = result.batches.sumOf { it.workloadNanos }
+        val achievedRate = operationsPerSecond(achieved, workloadNanos)
+        val readyRecords = result.evidence.phases.ringReadyRecords
+        val lostRecords = result.evidence.lost
+        val attemptedRecords = readyRecords + lostRecords
+        val lossFraction = if (attemptedRecords == 0L) 0.0 else lostRecords.toDouble() / attemptedRecords.toDouble()
         return buildString {
             append("\"sustained_collector\":{\"load\":\"").append(result.sustainedLoad.wireName)
             append("\",\"requested_rate_per_second\":").append(result.sustainedRatePerSecond)
@@ -719,8 +724,13 @@ internal object TierEMatchedBenchmark {
             append(",\"requested_operations\":").append(requested)
             append(",\"achieved_operations\":").append(achieved)
             append(",\"resolved_operations\":").append(resolved)
-            append(",\"observed_ring_loss\":").append(result.evidence.lost)
-            append(",\"ready_records_total\":").append(result.evidence.phases.ringReadyRecords)
+            append(",\"observed_ring_loss\":").append(lostRecords)
+            append(",\"ready_records_total\":").append(readyRecords)
+            append(",\"attempted_ring_records_total\":").append(attemptedRecords)
+            append(",\"attempted_ring_records_per_second\":").append(operationsPerSecond(attemptedRecords, workloadNanos))
+            append(",\"delivered_ring_records_per_second\":").append(operationsPerSecond(readyRecords, workloadNanos))
+            append(",\"lost_ring_records_per_second\":").append(operationsPerSecond(lostRecords, workloadNanos))
+            append(",\"ring_loss_fraction\":").append(lossFraction)
             append(",\"records_per_drain_max\":").append(result.evidence.phases.ringMaxBatchRecords)
             append(",\"collector_polls\":").append(result.evidence.phases.collectorPolls)
             append(",\"collector_receipt_p50_upper_ns\":").append(result.evidence.phases.collectorReceiptP50UpperNanos)
