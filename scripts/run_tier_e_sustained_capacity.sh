@@ -6,6 +6,7 @@ ARTIFACT_DIR=${1:-"${REPOSITORY_DIR}/build/tier-e-sustained-capacity"}
 PILOT_RATES=${MAZEWALL_TIER_E_SUSTAINED_PILOT_RATES:-"1000 2000 4000 8000 16000 32000 64000"}
 RUN_LEVEL=${MAZEWALL_TIER_E_SUSTAINED_RUN_LEVEL:-smoke}
 LOAD=${MAZEWALL_TIER_E_SUSTAINED_LOAD:-below_capacity}
+RECEIPT_CLOCK=${MAZEWALL_TIER_E_SUSTAINED_RECEIPT_CLOCK:-monotonic}
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
@@ -50,6 +51,7 @@ for rate in ${PILOT_RATES}; do
     MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector \
         MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND="${rate}" \
         MAZEWALL_TIER_E_SUSTAINED_LOAD="${LOAD}" \
+        MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK="${RECEIPT_CLOCK}" \
         MAZEWALL_TIER_E_RUN_LEVEL="${RUN_LEVEL}" \
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${stage}"
     jq -e -s '

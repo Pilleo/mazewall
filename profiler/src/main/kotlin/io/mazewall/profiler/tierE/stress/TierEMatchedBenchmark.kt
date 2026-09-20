@@ -2343,12 +2343,9 @@ internal object TierEMatchedBenchmark {
                     policies.map { policy -> Variant(mode, pollBackoff = policy) }
                 }
                 Scope.TIER_E_SUSTAINED_COLLECTOR -> {
-                    val policies = if (rotation % 2 == 0) {
-                        listOf(PollBackoff.NONE, PollBackoff.ADAPTIVE_1_TO_50)
-                    } else {
-                        listOf(PollBackoff.ADAPTIVE_1_TO_50, PollBackoff.NONE)
-                    }
-                    policies.map { policy -> Variant(mode, pollBackoff = policy) }
+                    // Capacity evidence characterizes the production collector only. Adaptive
+                    // backoff remains an independent experimental policy in TIER_E_POLL_BACKOFF.
+                    listOf(Variant(mode, pollBackoff = PollBackoff.NONE))
                 }
                 Scope.TIER_E_RING_ARGUMENT_LIST -> {
                     val constructions = if (rotation % 2 == 0) {

@@ -190,12 +190,10 @@ class TierEMatchedBenchmarkJsonTest {
     }
 
     @Test
-    fun `sustained collector scope rotates continuous and adaptive policies without unrelated modes`() {
+    fun `sustained collector scope measures only continuous production policy`() {
         val expected = setOf(
             "dictionary_full_stream_collector_continuous",
-            "dictionary_full_stream_collector_adaptive_1us_to_50us",
             "dictionary_unique_edge_collector_continuous",
-            "dictionary_unique_edge_collector_adaptive_1us_to_50us",
         )
 
         assertEquals(expected, TierEMatchedBenchmark.sustainedCollectorVariantNames(0).toSet())
