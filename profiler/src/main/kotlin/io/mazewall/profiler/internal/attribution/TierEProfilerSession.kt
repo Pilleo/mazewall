@@ -406,6 +406,14 @@ internal class TierEProfilerSession internal constructor(
     /** Declared native capture scope, separate from observed attribution and evidence completeness. */
     internal fun captureProfile(): TierECaptureProfile = options.captureProfile
 
+    /** Typed identity used to reject a definition artifact from another live session. */
+    @Synchronized
+    internal fun currentSessionEpoch(): SessionEpoch = sessionEpoch
+
+    /** Collector ownership may start only while this session can still accept owned ring records. */
+    @Synchronized
+    internal fun isCollectorStartable(): Boolean = state == TierESessionState.Collecting && lifecycle == TierESessionLifecycleState.RUNNING
+
     /** Detaches marker admission while keeping the syscall observer alive. */
     @Synchronized
     public fun detachMarker() {
