@@ -119,7 +119,7 @@ internal class TierEDaemonService(
             }
 
             is ControlSessionEffect.PerformAttach -> {
-                finishActiveSession(TierEProducerClosure.UNPROVEN)
+                finishActiveSession()
                 val cmd = effect.command
                 val engine = engineFactory()
                 var runtime: TierECollectorRuntime? = null
@@ -166,13 +166,13 @@ internal class TierEDaemonService(
 
             is ControlSessionEffect.CloseSessionAndReply -> {
                 val reply = effect.reply.render().trimEnd()
-                finishActiveSession(TierEProducerClosure.UNPROVEN)
+                finishActiveSession()
                 reply
             }
 
             is ControlSessionEffect.CloseAndShutdown -> {
                 val reply = ControlReply.ok("shutting down").render().trimEnd()
-                finishActiveSession(TierEProducerClosure.UNPROVEN)
+                finishActiveSession()
                 stopRequested.set(true)
                 reply
             }
@@ -180,11 +180,11 @@ internal class TierEDaemonService(
 
     @Synchronized
     fun shutdown() {
-        finishActiveSession(TierEProducerClosure.UNPROVEN)
+        finishActiveSession()
         stopRequested.set(true)
     }
 
-    private fun finishActiveSession(producerClosure: TierEProducerClosure) {
+    private fun finishActiveSession() {
         val active = activeSession ?: return
         activeSession = null
         val artifact = active.artifact
@@ -192,12 +192,7 @@ internal class TierEDaemonService(
             active.runtime.close()
             return
         }
-        val closure = runCatching { artifactResolver?.readTerminal(artifact) }
-            .fold(
-                onSuccess = { TierEProducerClosure.PROVEN },
-                onFailure = { TierEProducerClosure.UNPROVEN },
-            )
-        val result = runCatching { active.runtime.finish(artifact, if (closure == TierEProducerClosure.PROVEN) producerClosure else closure) }
+        val result = runCatching { active.runtime.finish(artifact, terminalClosure(artifactResolver, artifact)) }
             .getOrNull()
         if (result != null) lastTerminalResult = deliverResult(result)
     }
@@ -211,6 +206,17 @@ internal class TierEDaemonService(
         val artifact: io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact?,
     )
 }
+
+/** A closed, session-bound MZSE artifact is the only daemon-side proof of producer closure. */
+internal fun terminalClosure(
+    resolver: TierEDaemonArtifactResolver?,
+    artifact: io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact,
+): TierEProducerClosure =
+    runCatching { requireNotNull(resolver).readTerminal(artifact) }
+        .fold(
+            onSuccess = { TierEProducerClosure.PROVEN },
+            onFailure = { TierEProducerClosure.UNPROVEN },
+        )
 
 private fun runningAsRoot(): Boolean =
     (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Number)?.toLong() == 0L ||

@@ -4,6 +4,7 @@ import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.DictionaryBatchSink
 import io.mazewall.profiler.internal.attribution.DictionarySinkResult
+import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
@@ -64,6 +65,7 @@ class TierEEndToEndIntegrationTest {
             processEpoch(process.pid()),
             TierEOptions(emissionMode),
             sink,
+            SessionEpoch(sessionTag.toLong()),
         )
         try {
             session.enableLiveDictionary(definitions)
@@ -85,6 +87,7 @@ class TierEEndToEndIntegrationTest {
                 if (publicationAttempts >= 2) return@repeat
             }
 
+            val markerTransitions = session.markerTransitionCount()
             val profile = session.finish(definitions)
             assertTrue(profile.syscalls.isNotEmpty())
             assertTrue(Files.size(definitions) > 0, "captured definitions must be published")
@@ -93,7 +96,7 @@ class TierEEndToEndIntegrationTest {
             assertContentEquals(publishedBatches[0], publishedBatches[1])
             assertEquals(0L, profile.integrity.observedLosses)
 
-            assertTrue(session.markerTransitionCount() > 0)
+            assertTrue(markerTransitions > 0)
         } finally {
             if (process.isAlive) process.destroyForcibly()
             session.close()

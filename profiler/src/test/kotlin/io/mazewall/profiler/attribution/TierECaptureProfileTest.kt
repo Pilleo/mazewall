@@ -67,4 +67,24 @@ class TierECaptureProfileTest {
         assertEquals(first.selectorDigest, second.selectorDigest)
         assertNotEquals(TierECaptureProfile.Full.selectorDigest, first.selectorDigest)
     }
+
+    @Test
+    fun `binding frame matching uses the exact native manifest signature`() {
+        assertEquals(
+            true,
+            TierECaptureBinding.NET_CONNECT0.matchesFrame(
+                "sun.nio.ch.Net",
+                "connect0",
+                "(ZLjava/io/FileDescriptor;Ljava/net/InetAddress;I)I",
+            ),
+        )
+        assertEquals(
+            false,
+            TierECaptureBinding.NET_CONNECT0.matchesFrame(
+                "sun.nio.ch.Net",
+                "connect0",
+                "(Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)I",
+            ),
+        )
+    }
 }

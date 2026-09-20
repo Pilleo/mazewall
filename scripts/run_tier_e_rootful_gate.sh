@@ -5,6 +5,7 @@ PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 IMAGE=${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}
 ENGINE=${TIER_E_CONTAINER_ENGINE:-docker}
 ARTIFACT_DIR=${TIER_E_ARTIFACT_DIR:-"${PROJECT_ROOT}/build/tier-e-evidence"}
+DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 
 if [[ "${ENGINE}" != docker ]]; then
     echo "Tier E privileged gate requires Docker; rootless runtimes are INCOMPLETE evidence." >&2
@@ -12,9 +13,11 @@ if [[ "${ENGINE}" != docker ]]; then
 fi
 
 mkdir -p "${ARTIFACT_DIR}"
-docker build -t "${IMAGE}" -f "${PROJECT_ROOT}/infra/dev/Containerfile" "${PROJECT_ROOT}"
+ARTIFACT_DIR=$(cd "${ARTIFACT_DIR}" && pwd)
+docker --host "${DOCKER_HOST}" build -t "${IMAGE}" -f "${PROJECT_ROOT}/infra/dev/Containerfile" "${PROJECT_ROOT}"
 
-docker run --rm --privileged --pid=host --network=host --userns=host \
+set +e
+docker --host "${DOCKER_HOST}" run --rm --privileged --pid=host --network=host --userns=host \
     --security-opt seccomp=unconfined \
     -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     -v "${ARTIFACT_DIR}:${ARTIFACT_DIR}" \
@@ -33,8 +36,6 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
         cmake -S profiler-native -B profiler-native/build -DCMAKE_BUILD_TYPE=Debug
         cmake --build profiler-native/build -j2
         ctest --test-dir profiler-native/build -V 2>&1 | tee "${TIER_E_ARTIFACT_DIR}/native-ctest.log"
-        ./scripts/check_tier_e_benchmark.sh profiler-native/build \
-            profiler-native/tier-e-benchmark-baseline.env "${TIER_E_ARTIFACT_DIR}/benchmark-gate.log"
         rm -rf profiler/build/test-results/integrationTestFreshJvm \
             profiler/build/reports/tests/integrationTestFreshJvm
         TIER_E_AGENT_LIBRARY="${TIER_E_AGENT_LIBRARY}" \
@@ -53,7 +54,18 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
             echo "Tier E daemon-owned native workflow fixture was skipped" >&2
             exit 1
         fi
+        if ./scripts/check_tier_e_benchmark.sh profiler-native/build \
+            profiler-native/tier-e-benchmark-baseline.env "${TIER_E_ARTIFACT_DIR}/benchmark-gate.log"; then
+            printf 'PASS\n' > "${TIER_E_ARTIFACT_DIR}/benchmark-gate-status.txt"
+        else
+            printf 'FAILED\n' > "${TIER_E_ARTIFACT_DIR}/benchmark-gate-status.txt"
+            exit 1
+        fi
     '
+GATE_STATUS=$?
+set -e
+
+BENCHMARK_GATE_STATUS=$(cat "${ARTIFACT_DIR}/benchmark-gate-status.txt" 2>/dev/null || printf 'NOT_RUN')
 
 cat > "${ARTIFACT_DIR}/run-metadata.txt" <<EOF
 commit_sha=$(git -C "${PROJECT_ROOT}" rev-parse HEAD)
@@ -64,7 +76,10 @@ transport_completeness=PASS
 attribution_coverage=PASS
 dictionary_integrity=PASS
 lifecycle_validity=PASS
+benchmark_gate_status=${BENCHMARK_GATE_STATUS}
+rootful_gate_status=${GATE_STATUS}
 rootless_podman_fixture=INCOMPLETE
 EOF
 
 echo "Tier E rootful evidence written to ${ARTIFACT_DIR}"
+exit "${GATE_STATUS}"

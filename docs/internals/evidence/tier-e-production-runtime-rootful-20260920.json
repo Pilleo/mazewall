@@ -1,0 +1,43 @@
+{
+  "kind": "tier_e_production_runtime_rootful_fixture",
+  "timestamp": "2026-09-20",
+  "environment": {
+    "runner": "local rootful Docker",
+    "image": "mazewall-tier-e-rootful:latest",
+    "privileged": true,
+    "pid_host": true,
+    "network_host": true,
+    "source_dirty": true
+  },
+  "command": "docker --host unix:///var/run/docker.sock run --rm --privileged --pid=host --network=host --userns=host --security-opt seccomp=unconfined ... ./gradlew :profiler:integrationTestFreshJvm --tests io.mazewall.profiler.api.TierEEndToEndIntegrationTest --tests io.mazewall.profiler.api.TierEDaemonNativeWorkflowIntegrationTest -Dtier.e.agent=$TIER_E_AGENT_LIBRARY -Dtier.e.workloadClasspath=$TIER_E_WORKLOAD_CLASSPATH --no-daemon --rerun-tasks --stacktrace",
+  "fixtures": {
+    "TierEEndToEndIntegrationTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "701e7839e8966bf38737443549aee9b87bd248536b4ef531ffd7a9cc95bbdfca",
+      "coverage": ["session-bound MZSE v2 dictionary admission", "retry byte identity", "full-stream", "unique-edge"]
+    },
+    "TierEDaemonNativeWorkflowIntegrationTest": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "5c8b8be2c74ef0256b9ac7d315e9e6fac78ffd61acef15914cb9171b13697ac1",
+      "coverage": ["attach", "owned collection", "status", "detach", "terminal shutdown"]
+    }
+  },
+  "raw_log_sha256": "586ef696eefc65eeb418007516532026a4c683d869aa5440ed3f50754a7276a6",
+  "dimensions": {
+    "capture_domain_validity": "complete_for_declared_domain",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete_for_fixture",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false
+}

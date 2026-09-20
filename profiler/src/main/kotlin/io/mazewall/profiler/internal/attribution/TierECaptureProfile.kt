@@ -5,20 +5,30 @@ import java.security.MessageDigest
 /** Stable names for the finite native binding manifest. */
 internal enum class TierECaptureBinding(
     val wireName: String,
+    private val ownerClassName: String,
+    private val methodName: String,
+    private val descriptor: String,
 ) {
-    UNIX_OPEN0("unix-open0"),
-    UNIX_OPENAT0("unix-openat0"),
-    UNIX_CLOSE0("unix-close0"),
-    UNIX_UNLINK0("unix-unlink0"),
-    FILE_READ0("file-read0"),
-    FILE_WRITE0("file-write0"),
-    FILE_CLOSE_INT_FD("file-close-int-fd"),
-    SOCKET_READ0("socket-read0"),
-    SOCKET_WRITE0("socket-write0"),
-    NET_SOCKET0("net-socket0"),
-    NET_CONNECT0("net-connect0"),
-    NET_ACCEPT("net-accept"),
+    UNIX_OPEN0("unix-open0", "sun.nio.fs.UnixNativeDispatcher", "open0", "(JII)I"),
+    UNIX_OPENAT0("unix-openat0", "sun.nio.fs.UnixNativeDispatcher", "openat0", "(IJII)I"),
+    UNIX_CLOSE0("unix-close0", "sun.nio.fs.UnixNativeDispatcher", "close0", "(I)V"),
+    UNIX_UNLINK0("unix-unlink0", "sun.nio.fs.UnixNativeDispatcher", "unlink0", "(J)V"),
+    FILE_READ0("file-read0", "sun.nio.ch.UnixFileDispatcherImpl", "read0", "(Ljava/io/FileDescriptor;JI)I"),
+    FILE_WRITE0("file-write0", "sun.nio.ch.UnixFileDispatcherImpl", "write0", "(Ljava/io/FileDescriptor;JI)I"),
+    FILE_CLOSE_INT_FD("file-close-int-fd", "sun.nio.ch.UnixFileDispatcherImpl", "closeIntFD", "(I)V"),
+    SOCKET_READ0("socket-read0", "sun.nio.ch.SocketDispatcher", "read0", "(Ljava/io/FileDescriptor;JI)I"),
+    SOCKET_WRITE0("socket-write0", "sun.nio.ch.SocketDispatcher", "write0", "(Ljava/io/FileDescriptor;JI)I"),
+    NET_SOCKET0("net-socket0", "sun.nio.ch.Net", "socket0", "(ZZZZ)I"),
+    NET_CONNECT0("net-connect0", "sun.nio.ch.Net", "connect0", "(ZLjava/io/FileDescriptor;Ljava/net/InetAddress;I)I"),
+    NET_ACCEPT("net-accept", "sun.nio.ch.Net", "accept", "(Ljava/io/FileDescriptor;Ljava/io/FileDescriptor;[Ljava/net/InetSocketAddress;)I"),
     ;
+
+    /** Exact JVM-level frame identity for a binding admitted by the native manifest. */
+    internal fun matchesFrame(
+        className: String,
+        methodName: String,
+        descriptor: String,
+    ): Boolean = this.ownerClassName == className && this.methodName == methodName && this.descriptor == descriptor
 
     internal companion object {
         fun fromWireName(value: String): TierECaptureBinding? = entries.singleOrNull { it.wireName == value }

@@ -3,6 +3,7 @@ package io.mazewall.profiler.tierE.daemon
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.SnapshotEnvelope
+import io.mazewall.profiler.internal.attribution.TierEProducerClosure
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -67,6 +68,27 @@ class TierEDaemonArtifactResolverTest {
             ),
         )
         assertFailsWith<IllegalArgumentException> { resolver.readTerminal(artifact) }
+    }
+
+    @Test
+    fun `only a validated closed session artifact proves producer closure`() {
+        val resolver = TierEDaemonArtifactResolver(root)
+        val artifact = resolver.resolve(AttachedSessionInfo(pid = 4242, sessionTag = 0x4d5a))
+
+        assertEquals(TierEProducerClosure.UNPROVEN, terminalClosure(resolver, artifact))
+
+        Files.write(
+            artifact.path,
+            SnapshotEnvelope.encode(
+                payload = emptyMZsd(),
+                publicationId = 1,
+                watermark = 0,
+                closed = true,
+                sessionEpoch = artifact.expectedSessionEpoch,
+            ),
+        )
+
+        assertEquals(TierEProducerClosure.PROVEN, terminalClosure(resolver, artifact))
     }
 
     private fun emptyMZsd(): ByteArray = byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), 'S'.code.toByte(), 'D'.code.toByte(), 2, 0)
