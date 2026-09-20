@@ -36,6 +36,17 @@ class TierEMatchedBenchmarkJsonTest {
     }
 
     @Test
+    fun `injected child termination takes precedence over child output classification`() {
+        assertEquals(
+            "injected_child_termination",
+            TierEMatchedBenchmark.classifiedChildFailure(
+                "definition_publication_failure=encoded_snapshot_exceeds_retained_limit",
+                injectedTermination = true,
+            ),
+        )
+    }
+
+    @Test
     fun `marker transport scope rotates all paired tier e arms with unchanged controls`() {
         val expected = setOf(
             "baseline",
@@ -131,6 +142,13 @@ class TierEMatchedBenchmarkJsonTest {
         assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("buffered_file_io"))
         assertEquals(true, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("loopback_socket"))
         assertEquals(false, TierEMatchedBenchmark.applicationWorkloadRequiresSemanticFrames("syscall_dense"))
+    }
+
+    @Test
+    fun `child termination fixture targets only a Tier E child`() {
+        assertEquals(true, TierEMatchedBenchmark.shouldTerminateChildAfterStart(afterMillis = 25, tierE = true))
+        assertEquals(false, TierEMatchedBenchmark.shouldTerminateChildAfterStart(afterMillis = 0, tierE = true))
+        assertEquals(false, TierEMatchedBenchmark.shouldTerminateChildAfterStart(afterMillis = 25, tierE = false))
     }
 
     @Test

@@ -42,6 +42,7 @@ internal object TierEMatchedBenchmark {
             dumpPerfMapAtExit = System.getProperty("mazewall.tier-e.dump-perf-map", "false").toBooleanStrictOrNull()
                 ?: error("mazewall.tier-e.dump-perf-map must be true or false"),
             childTimeoutSeconds = System.getProperty("mazewall.tier-e.child-timeout-seconds", "180").toLong(),
+            childTerminationAfterMillis = System.getProperty("mazewall.tier-e.fixture-child-termination-after-millis", "0").toLong(),
             userNotifWorkerTimeoutSeconds = System.getProperty("mazewall.tier-e.user-notif-worker-timeout-seconds", "480").toLong(),
             userNotifChildTimeoutSeconds = System.getProperty("mazewall.tier-e.user-notif-child-timeout-seconds", "540").toLong(),
             calibrationEnabled = System.getProperty("mazewall.tier-e.calibration", "false").toBooleanStrictOrNull()
@@ -59,6 +60,7 @@ internal object TierEMatchedBenchmark {
                 requestedConfig.batches > 0 &&
                 requestedConfig.forks > 0 &&
                 requestedConfig.childTimeoutSeconds > 0 &&
+                requestedConfig.childTerminationAfterMillis >= 0 &&
                 requestedConfig.userNotifWorkerTimeoutSeconds > 0 &&
                 requestedConfig.userNotifChildTimeoutSeconds > requestedConfig.userNotifWorkerTimeoutSeconds,
         ) {
@@ -343,6 +345,11 @@ internal object TierEMatchedBenchmark {
             .redirectErrorStream(true)
             .redirectOutput(outputFile.toFile())
             .start()
+        val injectedChildTermination = shouldTerminateChildAfterStart(config.childTerminationAfterMillis, mode.tierE)
+        if (injectedChildTermination) {
+            Thread.sleep(config.childTerminationAfterMillis)
+            process.destroyForcibly()
+        }
         val childTimeoutSeconds = if (mode.userNotif) {
             config.userNotifChildTimeoutSeconds
         } else {
@@ -357,7 +364,7 @@ internal object TierEMatchedBenchmark {
         val output = Files.readString(outputFile)
         val elapsedNanos = System.nanoTime() - started
         if (!completed || process.exitValue() != 0) {
-            val classifiedFailure = failureClass(output)
+            val classifiedFailure = classifiedChildFailure(output, injectedChildTermination)
             val failureClassJson = classifiedFailure?.let { ",\"failure_class\":\"$it\"" }.orEmpty()
             append(
                 config.artifact,
@@ -577,9 +584,14 @@ internal object TierEMatchedBenchmark {
     /** Classifies native fail-closed publication outcomes without treating them as usable evidence. */
     internal fun failureClass(output: String): String? =
         when {
-            output.contains("definition_publication_failure=encoded_snapshot_exceeds_retained_limit") -> "inline_snapshot_exceeds_retained_limit"
-            else -> null
+        output.contains("definition_publication_failure=encoded_snapshot_exceeds_retained_limit") -> "inline_snapshot_exceeds_retained_limit"
+        else -> null
         }
+
+    internal fun classifiedChildFailure(
+        output: String,
+        injectedTermination: Boolean,
+    ): String? = if (injectedTermination) "injected_child_termination" else failureClass(output)
 
     private fun selectedMarkerTransport(output: String): String? = Regex("tier-e-kernel-smoke: marker_transport=([^\\s]+)").find(output)?.groupValues?.get(1)
 
@@ -604,6 +616,7 @@ internal object TierEMatchedBenchmark {
             "\"calibration_target\":${calibration?.let { "\"${it.selection.status}\"" } ?: "null"}," +
             "\"calibration_artifact\":${calibration?.let { "\"${escape(it.artifact)}\"" } ?: "null"}," +
             "\"child_timeout_seconds\":${config.childTimeoutSeconds}," +
+            "\"fixture_child_termination_after_millis\":${config.childTerminationAfterMillis}," +
             "\"user_notif_worker_timeout_seconds\":${config.userNotifWorkerTimeoutSeconds}," +
             "\"user_notif_child_timeout_seconds\":${config.userNotifChildTimeoutSeconds}," +
             "\"workload\":\"${config.workload.jsonName}\",\"workload_profile\":\"${config.workload.profile.wireName}\",\"source_revision\":\"$sourceRevision\",\"source_dirty\":\"$sourceDirty\",\"java_version\":\"$javaVersion\",\"os\":\"$operatingSystem\"}"
@@ -2159,6 +2172,12 @@ internal object TierEMatchedBenchmark {
      */
     internal fun applicationWorkloadRequiresSemanticFrames(workload: String): Boolean = Workload.fromProperty(workload).kernelArgument == COMMON_WORKLOAD
 
+    /** Benchmark-only fault injection: never terminate baseline or USER_NOTIF controls. */
+    internal fun shouldTerminateChildAfterStart(
+        afterMillis: Long,
+        tierE: Boolean,
+    ): Boolean = afterMillis > 0L && tierE
+
     internal fun captureProfileVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_CAPTURE_PROFILE, rotation).map { it.jsonName(Scope.TIER_E_CAPTURE_PROFILE) }
 
     internal fun captureTimingVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_CAPTURE_TIMING, rotation).map { it.jsonName(Scope.TIER_E_CAPTURE_TIMING) }
@@ -2412,6 +2431,7 @@ internal object TierEMatchedBenchmark {
         val lifecycleScenario: String,
         val dumpPerfMapAtExit: Boolean,
         val childTimeoutSeconds: Long,
+        val childTerminationAfterMillis: Long,
         val userNotifWorkerTimeoutSeconds: Long,
         val userNotifChildTimeoutSeconds: Long,
         val calibrationEnabled: Boolean,
