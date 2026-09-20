@@ -3,7 +3,12 @@
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.profiler.internal.attribution.SessionEpoch
+import io.mazewall.profiler.internal.attribution.TierECollectorRuntime
+import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierEProducerClosure
+import io.mazewall.profiler.internal.attribution.TierEProfilerSession
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -63,9 +68,12 @@ internal fun main() {
 internal class TierEDaemonService(
     private val stopRequested: AtomicBoolean,
     private val engineFactory: () -> TierEbpfEngine = { TierEbpfEngine(RealNativeEngine) },
+    private val artifactResolver: TierEDaemonArtifactResolver? =
+        System.getenv("TIER_E_DEFINITION_ROOT")?.let { TierEDaemonArtifactResolver(Path.of(it)) },
+    private val resultSink: TierEDaemonResultSink = TierEDaemonResultSink { },
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
-    private var activeEngine: TierEbpfEngine? = null
+    private var activeSession: ActiveSession? = null
     private var activeMarkerTransport = "idle"
     private var activeMarkerFallbackReason: String? = null
 
@@ -96,54 +104,54 @@ internal class TierEDaemonService(
             is ControlSessionEffect.SendReply -> effect.reply.render().trimEnd()
 
             is ControlSessionEffect.RespondStatus -> {
-                val statusText = activeEngine?.let {
-                    val metrics = it
-                        .readContextMetrics()
-                        .entries
-                        .sortedBy { entry -> entry.key }
-                        .joinToString(",") { entry -> "${entry.key}:${entry.value}" }
+                val statusText = activeSession?.let {
+                    val metrics = it.runtime.metrics()
                     "engine=active marker_transport=$activeMarkerTransport " +
                         "marker_fallback=${activeMarkerFallbackReason ?: "none"} " +
-                        "queued=${it.drainEvents().size} lost=${it.readLossCount()} metrics=$metrics"
+                        "collector_state=${metrics.state} worker_alive=${metrics.workerAlive} " +
+                        "polls=${metrics.loop.polls} active_polls=${metrics.loop.activePolls} " +
+                        "idle_polls=${metrics.loop.idlePolls} failure=${metrics.failure ?: "none"}"
                 } ?: "engine=idle"
                 ControlReply.ok(statusText).render().trimEnd()
             }
 
             is ControlSessionEffect.PerformAttach -> {
-                activeEngine?.close()
-                activeEngine = null
+                finishActiveSession(TierEProducerClosure.UNPROVEN)
                 val cmd = effect.command
-                    val engine = engineFactory()
-                    try {
-                        engine.install(cmd.pid, cmd.sessionTag, TierEOptions(cmd.emissionMode))
-                        val markerPath = Path.of(cmd.markerPath)
-                        val selection = selectMarkerTransport(cmd.mode) {
-                            UsdtProbeNotes.findStackMarkerV1(markerPath)
-                        }
-                        when (selection.selected) {
-                            AttachMode.UPROBE -> {
-                                engine.attachMarker(cmd.pid, markerPath, cmd.markerOffset)
-                                activeMarkerTransport = "uprobe"
-                                activeMarkerFallbackReason = selection.fallbackReason
-                            }
-
-                            AttachMode.USDT -> {
-                                engine.attachUsdtMarker(cmd.pid, markerPath, requireNotNull(selection.usdtNote))
-                                activeMarkerTransport = "usdt"
-                                activeMarkerFallbackReason = null
-                            }
-
-                            AttachMode.AUTO -> error("marker transport selection must be concrete")
-                        }
-                    activeEngine = engine
+                val engine = engineFactory()
+                var runtime: TierECollectorRuntime? = null
+                try {
+                    val session = TierEProfilerSession(
+                        engine = engine,
+                        processEpoch = cmd.sessionTag.toLong(),
+                        options = TierEOptions(cmd.emissionMode),
+                        configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
+                    )
+                    runtime = TierECollectorRuntime(session)
+                    val markerPath = Path.of(cmd.markerPath)
+                    val selection = selectMarkerTransport(cmd.mode) {
+                        UsdtProbeNotes.findStackMarkerV1(markerPath)
+                    }
+                    session.installAndAttach(
+                        cmd.pid,
+                        cmd.sessionTag,
+                        markerPath,
+                        cmd.markerOffset,
+                        selection.usdtNote,
+                    )
+                    runtime.start()
+                    val attached = AttachedSessionInfo(cmd.pid, cmd.sessionTag, cmd.sessionTag.toLong())
+                    activeSession = ActiveSession(runtime, artifactResolver?.resolve(attached))
+                    activeMarkerTransport = selection.selected.name.lowercase()
+                    activeMarkerFallbackReason = selection.fallbackReason
                     val postTransition = ControlSessionMachine.evaluate(
                         sessionState,
-                        ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(cmd.pid, cmd.sessionTag)),
+                        ControlSessionEvent.AttachSucceeded(attached),
                     )
                     sessionState = postTransition.state
                     (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
                 } catch (expectedAttachFailure: Exception) {
-                    runCatching { engine.close() }
+                    runCatching { runtime?.close() ?: engine.close() }
                     val postTransition = ControlSessionMachine.evaluate(
                         sessionState,
                         ControlSessionEvent.AttachFailed(expectedAttachFailure.message ?: "attach failed"),
@@ -154,25 +162,51 @@ internal class TierEDaemonService(
             }
 
             is ControlSessionEffect.CloseSessionAndReply -> {
-                activeEngine?.close()
-                activeEngine = null
-                effect.reply.render().trimEnd()
+                val reply = effect.reply.render().trimEnd()
+                finishActiveSession(TierEProducerClosure.UNPROVEN)
+                reply
             }
 
             is ControlSessionEffect.CloseAndShutdown -> {
-                activeEngine?.close()
-                activeEngine = null
+                val reply = ControlReply.ok("shutting down").render().trimEnd()
+                finishActiveSession(TierEProducerClosure.UNPROVEN)
                 stopRequested.set(true)
-                ControlReply.ok("shutting down").render().trimEnd()
+                reply
             }
         }
 
     @Synchronized
     fun shutdown() {
-        activeEngine?.close()
-        activeEngine = null
+        finishActiveSession(TierEProducerClosure.UNPROVEN)
         stopRequested.set(true)
     }
+
+    private fun finishActiveSession(producerClosure: TierEProducerClosure) {
+        val active = activeSession ?: return
+        activeSession = null
+        val artifact = active.artifact
+        if (artifact == null) {
+            active.runtime.close()
+            return
+        }
+        val closure = runCatching { artifactResolver?.readTerminal(artifact) }
+            .fold(
+                onSuccess = { TierEProducerClosure.PROVEN },
+                onFailure = { TierEProducerClosure.UNPROVEN },
+            )
+        val result = runCatching { active.runtime.finish(artifact, if (closure == TierEProducerClosure.PROVEN) producerClosure else closure) }
+            .getOrNull()
+        if (result != null) deliverResult(result)
+    }
+
+    private fun deliverResult(result: TierECollectorRuntimeResult) {
+        runCatching { resultSink.accept(result) }
+    }
+
+    private data class ActiveSession(
+        val runtime: TierECollectorRuntime,
+        val artifact: io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact?,
+    )
 }
 
 private fun runningAsRoot(): Boolean =

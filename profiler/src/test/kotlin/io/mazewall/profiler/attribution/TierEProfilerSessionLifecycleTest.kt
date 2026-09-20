@@ -16,6 +16,18 @@ import kotlin.test.assertTrue
 
 class TierEProfilerSessionLifecycleTest {
     @Test
+    fun `configured session epoch is retained for daemon artifact admission`() {
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(),
+            processEpoch = 1,
+            configuredSessionEpoch = SessionEpoch(0x4d5a),
+            definitionReader = { emptyDefinitions() },
+        )
+
+        assertEquals(SessionEpoch(0x4d5a), session.currentSessionEpoch())
+    }
+
+    @Test
     fun `finish is cached and polling after finish fails`() {
         val source = FakeTierEEventSource()
         var definitionReads = 0

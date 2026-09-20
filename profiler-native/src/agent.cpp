@@ -1540,8 +1540,9 @@ bool write_definitions(bool producer_closed) noexcept {
         if (live_definitions.load(std::memory_order_acquire)) {
             std::vector<std::uint8_t> envelope;
             envelope.insert(envelope.end(), {'M', 'Z', 'S', 'E'});
-            append_le<std::uint16_t>(envelope, 1);
+            append_le<std::uint16_t>(envelope, 2);
             append_le<std::uint16_t>(envelope, producer_closed ? 1 : 0);
+            append_le<std::uint64_t>(envelope, session_tag);
             append_le<std::uint64_t>(envelope, next_publication_id.fetch_add(1, std::memory_order_relaxed));
             append_le<std::uint64_t>(envelope, committed_watermark);
             append_le<std::uint64_t>(envelope, static_cast<std::uint64_t>(encoded.size()));

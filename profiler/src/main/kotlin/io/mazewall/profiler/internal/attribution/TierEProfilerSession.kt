@@ -128,6 +128,7 @@ internal class TierEProfilerSession internal constructor(
     private val nanoTime: () -> Long = System::nanoTime,
     private val allocationCounter: TierEAllocationCounter = TierEAllocationCounter { TierEAllocationCounters.currentThreadAllocatedBytes() },
     private val selectiveDefinitionReader: (Path, Set<InvocationId>) -> AgentDefinitionFile.Contents = AgentDefinitionFile::readForInvocations,
+    configuredSessionEpoch: SessionEpoch? = null,
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -156,7 +157,19 @@ internal class TierEProfilerSession internal constructor(
         uniqueEdgeDecisionObserver,
     )
 
-    private val sessionEpoch = SessionEpoch(NEXT_SESSION_EPOCH.incrementAndGet())
+    internal constructor(
+        engine: TierEbpfEngine,
+        processEpoch: Long,
+        options: TierEOptions,
+        configuredSessionEpoch: SessionEpoch,
+    ) : this(
+        NativeTierEEventSource(engine),
+        processEpoch,
+        options,
+        configuredSessionEpoch = configuredSessionEpoch,
+    )
+
+    private val sessionEpoch = configuredSessionEpoch ?: SessionEpoch(NEXT_SESSION_EPOCH.incrementAndGet())
     private val processIncarnation = ProcessIncarnationId(processEpoch)
     private val retainedBudget = TierERetainedStateBudget(options.maxRetainedBytes)
     private val collector = AttributionCollector(
@@ -209,6 +222,7 @@ internal class TierEProfilerSession internal constructor(
     private var lastTaskIdentity: TaskIdentity? = null
 
     init {
+        require(sessionEpoch.value > 0) { "session epoch must be positive" }
         collector.attachRetainedBudget(retainedBudget)
     }
 
@@ -502,7 +516,7 @@ internal class TierEProfilerSession internal constructor(
         closeSource()
         val definitions = try {
             readDefinitions(definitionFile, collector.pendingInvocationIds())
-        } catch (_: DefinitionRecordBudgetExceededException) {
+        } catch (_: Exception) {
             collector.recordDictionaryConflict()
             AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
         }
