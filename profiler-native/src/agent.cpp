@@ -1706,6 +1706,20 @@ bool parse_options(const char* options) {
         if (end == std::string::npos) break;
         start = end + 1;
     }
+    if (!definitions_path.empty()) {
+        const auto replace = [](std::string& value, const std::string& needle, const std::string& replacement) {
+            std::size_t position = 0;
+            while ((position = value.find(needle, position)) != std::string::npos) {
+                value.replace(position, needle.size(), replacement);
+                position += replacement.size();
+            }
+        };
+        replace(definitions_path, "%p", std::to_string(::getpid()));
+        char session_hex[9]{};
+        std::snprintf(session_hex, sizeof(session_hex), "%x", session_tag);
+        replace(definitions_path, "%s", session_hex);
+        if (definitions_path.find('%') != std::string::npos) return false;
+    }
     if (!capture_yield_path.empty()) {
         try {
             capture_yield_recorder = std::make_unique<mazewall::profiler::CaptureYieldRecorder>(65'536);

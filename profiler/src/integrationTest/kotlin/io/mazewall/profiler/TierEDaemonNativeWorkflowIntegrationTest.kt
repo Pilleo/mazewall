@@ -23,13 +23,16 @@ class TierEDaemonNativeWorkflowIntegrationTest {
         requireNotNull(workloadClasspath)
 
         val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
-        val definitions = Files.createTempFile("tier-e-daemon-workflow", ".mzsd")
+        val definitionRoot = Files.createTempDirectory("tier-e-daemon-workflow")
         val daemon = ProcessBuilder(
             java,
             "-cp",
             System.getProperty("java.class.path"),
             "io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonMain",
-        ).redirectErrorStream(true).start()
+        ).redirectErrorStream(true)
+            .also { process ->
+            process.environment()["TIER_E_DEFINITION_ROOT"] = definitionRoot.toString()
+        }.start()
         val transcript = StringBuilder()
         val daemonReader = daemon.inputStream.bufferedReader()
         val firstLine = daemonReader.readLine() ?: error("daemon exited before announcing a port")
@@ -44,7 +47,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
         val markerOffset = ElfSymbolOffset.resolve(agent, "mazewall_stack_marker")
         val workload = ProcessBuilder(
             java,
-            "-agentpath:$agent=definitions=$definitions,live-definitions,session=4d5a,mode=full-stream",
+            "-agentpath:$agent=definitions=$definitionRoot/tier-e-%p-%s.mzse,live-definitions,session=4d5a,mode=full-stream",
             "-cp",
             workloadClasspath,
             "AgentWorkload",
@@ -57,6 +60,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
             "4d5a",
         ).redirectErrorStream(true).start()
 
+        val definitionFile = definitionRoot.resolve("tier-e-${workload.pid()}-4d5a.mzse")
         try {
             val workloadOutput = workload.inputStream.bufferedReader().readText()
             val workloadStatus = workload.waitFor()
@@ -71,13 +75,14 @@ class TierEDaemonNativeWorkflowIntegrationTest {
             assertTrue(workloadOutput.contains("tier-e-workflow: shutdown"), workloadOutput)
             assertTrue(Regex("stack-captures=[1-9][0-9]*").containsMatchIn(workloadOutput), workloadOutput)
             assertTrue(
-                Files.readAllBytes(definitions).let { it.size > 32 && it.copyOfRange(0, 4).contentEquals(byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), 'S'.code.toByte(), 'E'.code.toByte())) },
+                Files.readAllBytes(definitionFile).let { it.size > 40 && it.copyOfRange(0, 4).contentEquals(byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), 'S'.code.toByte(), 'E'.code.toByte())) },
             )
         } finally {
             if (workload.isAlive) workload.destroyForcibly()
             if (daemon.isAlive) daemon.destroyForcibly()
             daemon.waitFor(5, TimeUnit.SECONDS)
-            Files.deleteIfExists(definitions)
+            Files.deleteIfExists(definitionFile)
+            Files.deleteIfExists(definitionRoot)
         }
     }
 }
