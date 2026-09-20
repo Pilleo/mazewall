@@ -1,5 +1,7 @@
 package io.mazewall.profiler.internal.attribution
 
+import java.security.MessageDigest
+
 /** Stable names for the finite native binding manifest. */
 internal enum class TierECaptureBinding(
     val wireName: String,
@@ -29,6 +31,12 @@ internal sealed class TierECaptureProfile {
     abstract val wireName: String
     abstract val captureDomain: String
 
+    /** Stable evidence label; admission configuration never alters attribution identity. */
+    abstract val profileId: String
+
+    /** SHA-256 over the normalized selector manifest for evidence correlation. */
+    abstract val selectorDigest: String
+
     /** The full, compatibility-preserving default has no native-agent option. */
     abstract val agentOption: String?
 
@@ -36,6 +44,8 @@ internal sealed class TierECaptureProfile {
         override val bindings: List<TierECaptureBinding> = emptyList()
         override val wireName: String = "full"
         override val captureDomain: String = "all admitted native bindings"
+        override val profileId: String = "full-boundaries-v1"
+        override val selectorDigest: String = digest("full")
         override val agentOption: String? = null
     }
 
@@ -50,6 +60,8 @@ internal sealed class TierECaptureProfile {
             } else {
                 "selected native bindings: ${bindings.joinToString(",") { it.wireName }}"
             }
+        override val profileId: String = if (compatibilityAlias) "jdk25-unix-openat0-v1" else "selected-boundaries-v1"
+        override val selectorDigest: String = digest(bindings.joinToString("+") { it.wireName })
         override val agentOption: String =
             if (compatibilityAlias) {
                 "capture-profile=$LEGACY_OPENAT0"
@@ -61,6 +73,12 @@ internal sealed class TierECaptureProfile {
     internal companion object {
         private const val LEGACY_OPENAT0 = "jdk25-unix-openat0"
         private const val BINDINGS_PREFIX = "capture-bindings="
+
+        private fun digest(normalizedSelectors: String): String =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest("tier-e-capture-profile-v1\u0000$normalizedSelectors".encodeToByteArray())
+                .joinToString("") { "%02x".format(it) }
 
         fun selected(vararg values: TierECaptureBinding): TierECaptureProfile = selected(values.asList())
 

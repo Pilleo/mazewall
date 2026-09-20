@@ -3,6 +3,7 @@ package io.mazewall.profiler.internal.attribution
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 
 class TierECaptureProfileTest {
     @Test
@@ -55,5 +56,15 @@ class TierECaptureProfileTest {
             "capture-bindings=socket-read0+socket-write0+net-socket0+net-connect0+net-accept",
             TierECaptureProfilePreset.NETWORK_IO.profile.agentOption,
         )
+    }
+
+    @Test
+    fun `profile identity is deterministic and selector-order independent`() {
+        val first = TierECaptureProfile.selected(TierECaptureBinding.NET_CONNECT0, TierECaptureBinding.UNIX_OPENAT0)
+        val second = TierECaptureProfile.selected(TierECaptureBinding.UNIX_OPENAT0, TierECaptureBinding.NET_CONNECT0)
+
+        assertEquals(first.profileId, second.profileId)
+        assertEquals(first.selectorDigest, second.selectorDigest)
+        assertNotEquals(TierECaptureProfile.Full.selectorDigest, first.selectorDigest)
     }
 }

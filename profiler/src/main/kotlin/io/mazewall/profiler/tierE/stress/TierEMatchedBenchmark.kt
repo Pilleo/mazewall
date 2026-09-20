@@ -606,7 +606,8 @@ internal object TierEMatchedBenchmark {
         calibration: CalibrationOutcome?,
     ): String {
         val cacheMode = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
-        val captureProfile = escape(configuredCaptureProfile().wireName)
+        val configuredProfile = configuredCaptureProfile()
+        val captureProfile = escape(configuredProfile.wireName)
         val captureProfileStrategy = if (config.scope == Scope.TIER_E_CAPTURE_PROFILE) "per_variant" else "configured"
         val sourceRevision = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_REVISION") ?: "unknown")
         val sourceDirty = escape(System.getenv("MAZEWALL_BENCHMARK_SOURCE_DIRTY") ?: "unknown")
@@ -614,6 +615,7 @@ internal object TierEMatchedBenchmark {
         val operatingSystem = escape(System.getProperty("os.name") + " " + System.getProperty("os.version"))
         return "{\"kind\":\"metadata\",\"timestamp\":\"${Instant.now()}\",\"iterations\":${config.iterations}," +
             "\"warmups\":${config.warmups},\"batches\":${config.batches},\"forks\":${config.forks}," +
+            "\"capture_profile_id\":\"${configuredProfile.profileId}\",\"capture_profile_selector_digest\":\"${configuredProfile.selectorDigest}\"," +
             "\"workload_cpu\":\"${config.workloadCpu}\",\"collector_cpu\":\"${config.collectorCpu}\"," +
             "\"canonical_cache\":\"$cacheMode\",\"capture_profile\":\"$captureProfile\",\"capture_profile_strategy\":\"$captureProfileStrategy\"," +
             "\"scope\":\"${config.scope.jsonName}\"," +
@@ -761,6 +763,8 @@ internal object TierEMatchedBenchmark {
             "\"marker_transport\":\"${markerTransportFor(result.variant).wireName}\"",
             "\"selected_marker_transport\":${result.evidence.selectedMarkerTransport?.let { "\"$it\"" } ?: "null"}",
             "\"capture_profile\":\"${captureProfileFor(result.variant).wireName}\"",
+            "\"capture_profile_id\":\"${captureProfileFor(result.variant).profileId}\"",
+            "\"capture_profile_selector_digest\":\"${captureProfileFor(result.variant).selectorDigest}\"",
             "\"capture_profile_domain\":\"${captureProfileFor(result.variant).captureDomain}\"",
             "\"native_phase_timing\":\"${nativePhaseTimingFor(result.variant).wireName}\"",
             "\"ring_decode\":\"${ringDecodeFor(result.variant).wireName}\"",
