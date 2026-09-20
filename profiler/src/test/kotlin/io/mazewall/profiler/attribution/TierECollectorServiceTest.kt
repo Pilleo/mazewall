@@ -124,8 +124,28 @@ class TierECollectorServiceTest {
         assertEquals(1, source.closeCalls)
     }
 
+    @Test
+    fun `join timeout returns incomplete terminal evidence`() {
+        val source = BlockingSource()
+        val service = service(source, stopJoinMillis = 1)
+
+        service.start()
+        assertTrue(source.drainStarted.await(1, TimeUnit.SECONDS))
+
+        try {
+            val profile = service.finish(Path.of("ignored"), producerClosed = true)
+
+            assertEquals(CaptureGuarantee.INCOMPLETE, profile.integrity.guarantee)
+            assertEquals(TierECollectorServiceFailure.JOIN_TIMEOUT, service.metrics().failure)
+            assertEquals(TierECollectorServiceState.TERMINAL, service.metrics().state)
+        } finally {
+            source.release.countDown()
+        }
+    }
+
     private fun service(
         source: RecordingSource,
+        stopJoinMillis: Long = 1_000,
         onResolved: (List<ResolvedSyscall>) -> Unit = {},
     ): TierECollectorService =
         TierECollectorService(
@@ -135,7 +155,7 @@ class TierECollectorServiceTest {
                 definitionReader = { AgentDefinitionFile.Contents(emptyList(), emptyList(), 0) },
             ),
             onResolved = onResolved,
-            stopJoinMillis = 1_000,
+            stopJoinMillis = stopJoinMillis,
         )
 
     private fun event() =
@@ -151,7 +171,7 @@ class TierECollectorServiceTest {
         )
 }
 
-private class RecordingSource(
+private open class RecordingSource(
     private val events: ArrayDeque<List<SyscallInvocationEvent>> = ArrayDeque(),
     private val drainFailure: RuntimeException? = null,
 ) : TierEEventSource {
@@ -170,7 +190,7 @@ private class RecordingSource(
         markerOffset: Long,
     ) = Unit
 
-    override fun drainEvents(): List<SyscallInvocationEvent> {
+    open override fun drainEvents(): List<SyscallInvocationEvent> {
         drainStarted.countDown()
         drainFailure?.let { throw it }
         return if (events.isEmpty()) emptyList() else events.removeFirst()
@@ -186,5 +206,15 @@ private class RecordingSource(
 
     override fun close() {
         closeCalls++
+    }
+}
+
+private class BlockingSource : RecordingSource() {
+    val release = CountDownLatch(1)
+
+    override fun drainEvents(): List<SyscallInvocationEvent> {
+        drainStarted.countDown()
+        while (!release.await(10, TimeUnit.MILLISECONDS)) Unit
+        return emptyList()
     }
 }

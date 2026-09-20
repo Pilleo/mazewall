@@ -59,9 +59,11 @@ internal class TierECollectorService(
         activeWorker.join(stopJoinMillis)
         if (activeWorker.isAlive) {
             failure.compareAndSet(null, TierECollectorServiceFailure.JOIN_TIMEOUT)
-            loop.close()
+            activeWorker.interrupt()
+            val profile = incompleteJoinTimeoutProfile()
+            terminalProfile = profile
             state = TierECollectorServiceState.TERMINAL
-            throw IllegalStateException("Tier E collector service did not stop within $stopJoinMillis ms")
+            return profile
         }
         val profile = loop.finish(definitionFile, producerClosed && failure.get() == null)
         loop.close()
@@ -94,6 +96,8 @@ internal class TierECollectorService(
             if (activeWorker.isAlive) {
                 failure.compareAndSet(null, TierECollectorServiceFailure.JOIN_TIMEOUT)
                 activeWorker.interrupt()
+                state = TierECollectorServiceState.TERMINAL
+                return
             }
         }
         loop.close()
@@ -106,6 +110,8 @@ internal class TierECollectorService(
         } catch (_: Exception) {
             failure.compareAndSet(null, TierECollectorServiceFailure.COLLECTION)
             stopRequested = true
+        } finally {
+            if (failure.get() == TierECollectorServiceFailure.JOIN_TIMEOUT) loop.close()
         }
     }
 
@@ -117,6 +123,19 @@ internal class TierECollectorService(
             stopRequested = true
         }
     }
+
+    /**
+     * A collector worker that missed its bounded join cannot safely be drained or joined further.
+     * Returning no records with explicit loss and lifecycle invalidation is the only honest result.
+     */
+    private fun incompleteJoinTimeoutProfile(): TierEProfile =
+        TierEProfile(
+            emptyList(),
+            SessionIntegrity(
+                observedLosses = 1,
+                lifecycleInvalidations = 1,
+            ),
+        )
 
     private companion object {
         const val DEFAULT_STOP_JOIN_MILLIS = 1_000L
