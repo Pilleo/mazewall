@@ -310,6 +310,12 @@ internal object TierEKernelSmoke {
             // Benchmark-only synchronization point for concurrent host-noise fixtures. The marker
             // proves attachment completed; it does not imply producer closure or collector drain.
             println("tier-e-kernel-smoke: attachment_ready=true workload_pid=${process.pid()}")
+            System
+                .getProperty("mazewall.tier-e.attachment-ready-file")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { path ->
+                    Files.writeString(Path.of(path), "workload_pid=${process.pid()}\n")
+                }
             args.getOrNull(6)?.toInt()?.let { cpu ->
                 pinTargetToCpu(cpu, process.pid())
             }

@@ -229,6 +229,7 @@ internal object TierEMatchedBenchmark {
         val classpath = System.getProperty("java.class.path")
         val canonicalCache = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
         val collectorReceiptClock = System.getProperty("mazewall.tier-e.collector-receipt-clock", "disabled")
+        val attachmentReadyFile = System.getProperty("mazewall.tier-e.attachment-ready-file", "")
         val childJvmPrefix = listOf(java) +
             if (config.dumpPerfMapAtExit) {
                 listOf("-XX:+UnlockDiagnosticVMOptions", "-XX:+DumpPerfMapAtExit")
@@ -287,6 +288,7 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.idle-poll-policy=${pollPolicyFor(variant)}",
                 "-Dmazewall.tier-e.idle-poll-max-backoff-nanos=${maxPollBackoffFor(variant)}",
                 "-Dmazewall.tier-e.collector-receipt-clock=$collectorReceiptClock",
+                "-Dmazewall.tier-e.attachment-ready-file=$attachmentReadyFile",
                 "-Dmazewall.tier-e.marker-transport=${markerTransportFor(variant).wireName}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
                 "-Dmazewall.tier-e.expect-retention-exhaustion=${config.scope == Scope.TIER_E_RETENTION_EXHAUSTION}",
