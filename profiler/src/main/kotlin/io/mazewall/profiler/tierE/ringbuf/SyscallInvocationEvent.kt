@@ -74,6 +74,9 @@ internal class SyscallInvocationEvent private constructor(
         public const val ARGUMENT_COUNT: Int = 6
         public const val FLAG_VTHREAD_EXPERIMENTAL: Int = 1
         public const val FLAG_ARGUMENT_READ_FAILED: Int = 1 shl 1
+
+        /** Benchmark-only diagnostic: a target syscall had no task-storage attribution state. */
+        public const val FLAG_TASK_STORAGE_UNAVAILABLE: Int = 1 shl 2
         public const val SIZE_BYTES: Int = 88
 
         private const val OFF_KTIME: Int = 0

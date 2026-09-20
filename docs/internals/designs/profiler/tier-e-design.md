@@ -320,6 +320,10 @@ source tree:
   and verifies a failed dictionary write is retried with identical bytes before
   terminal finish. `TierEDaemonNativeWorkflowIntegrationTest` covers rootful
   daemon attach, status, detach, and shutdown around an agent-loaded workload.
+  The retained rootful fixture evidence additionally proves that session-bound
+  MZSE v2 admission, both full-stream and unique-edge dictionary retry paths,
+  and the daemon-owned lifecycle complete without skips. See
+  [tier-e-production-runtime-rootful-20260920.json](../../evidence/tier-e-production-runtime-rootful-20260920.json).
 - `lifecycle_identity_stress_fixture` repeats fork/exec identity transitions;
   Kotlin `InvocationReplayMachineTest` covers detach, exec, PID reuse, sequence
   gaps, callback suppression, and validated re-entry. These fixtures reject stale
@@ -447,6 +451,23 @@ the full baseline/Tier E/USER_NOTIF comparison, paired cache comparison, and ter
 publication comparison. Artifacts retain source revision, dirty state, JDK, OS, affinity, timeout,
 raw child output, publication and retained-state counters.
 
+For sustained collector diagnostics, non-empty ring drains additionally feed a fixed-memory
+logarithmic histogram. `records_per_drain_p50_upper`, `records_per_drain_p95_upper`, and
+`records_per_drain_p99_upper` are inclusive power-of-two bucket upper bounds, not exact order
+statistics or retained per-drain samples. The bounded summary is emitted only with benchmark
+phase accounting and never moves clocks, histogram retention, decoding, dictionary joining, or
+sink I/O onto a capture thread. A rootful unique-edge diagnostic populated `<=31`, `<=63`, and
+`<=511` records respectively, but its explicit task-storage-unavailable observations made whole
+session evidence incomplete; it is therefore diagnostic evidence rather than a capacity claim.
+See [tier-e-drain-distribution-diagnostic-20260920.json](../../evidence/tier-e-drain-distribution-diagnostic-20260920.json).
+Without that benchmark-only diagnostic option, missing task storage remains the aggregate
+`kernel_task_storage_unavailable` counter: it neither fabricates a zero-invocation observation nor
+invalidates independently reconciled admitted workload events. The rootful production-shape
+unique-edge confirmation retained complete evidence for all 10,600 declared operations while
+reporting 412 aggregate unavailable observations. This is a scoped observation about non-admitted
+ambient activity, not a claim of complete syscall-attempt coverage or a sustained-capacity ceiling.
+See [tier-e-sustained-capacity-unique-edge-confirmation-20260920.json](../../evidence/tier-e-sustained-capacity-unique-edge-confirmation-20260920.json).
+
 Calibration starts at 100 operations and doubles to at most 65,536. One shared count is selected
 for every mode in a comparison block, frozen in both benchmark metadata and the run manifest before
 decision forks start, and never shortened after measurement begins. Selection targets a 100 ms
@@ -490,6 +511,10 @@ Every rootful runner invocation also owns an immutable `run_id` shared by the ma
 transitions. The runner records `PASSED` only after it validates exactly one successful benchmark
 terminal record, exactly one summary, at least one completed fork, and a sample count equal to the
 summary count; otherwise its exit trap retains a `FAILED` or `CANCELLED` terminal event.
+Sustained-capacity decision runs additionally require a clean Git checkout before their first
+pilot stage. A source-dirty checkout records `source_dirty_decision_rejected` and exits before
+building or launching a privileged workload. Smoke and diagnostic runs retain their dirty-source
+provenance and remain usable only as scoped evidence, never as a capacity decision.
 The retained cancellation fixture sends `TERM` during bundle preparation and proves the runner
 emits `CANCELLED` after its `bundle_build:STARTED` event while leaving no Tier E container active.
 The rootful runner additionally retains a JSON manifest with the source dirty-tree fingerprint,
@@ -1466,11 +1491,24 @@ adaptive long-session behavior and cannot promote a production default. The reta
 The later sustained collector contract uses a monotonic open-loop producer: it never catches up
 in a burst after delay, records requested and achieved rate separately, and classifies an
 intentional overload as `INCOMPLETE` and performance-ineligible even when a short run happens to
-lose no records. A rootful fifteen-fork, ten-batch near-capacity run at 1,000 boundaries/s retained
+lose no records. It also rejects retained-result drops and pending-observation budget or queue
+drops independently of kernel ring loss; no dropped collector-side evidence may enter a capacity
+comparison. Each retained sustained fork records its configured ring capacity and retained-record
+limit alongside the requested and achieved rate, preventing comparisons across silently changed
+capacity settings. `run_tier_e_sustained_capacity.sh` stops its ordered pilot at the first
+ineligible stage and writes the preceding loss-free ceiling into `capacity-manifest.json`; its
+five-fork 50/75/90% decision stages are explicit opt-in work, never an implicit extension of a
+smoke run. A rootful fifteen-fork, ten-batch near-capacity run at 1,000 boundaries/s retained
 complete evidence for both continuous and bounded-adaptive collector policies. It validates the
 load generator and terminal accounting; it does not promote either policy because that matrix does
 not include the readiness-policy CPU and receipt-latency acceptance dimensions. See
 [tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json](../../evidence/tier-e-sustained-collector-load-contract-rootful-smoke-20260919.json).
+
+**Incomplete rootful evidence.** A later fresh 10-second pilot at the same nominal 1,000
+operations/s completed full-stream but missed four unique-edge operation-oracle observations despite
+zero reported ring and retained-state drops. It is explicitly excluded from capacity and performance
+claims; the runner preserves it as incomplete evidence and does not infer a loss-free ceiling. See
+[tier-e-sustained-capacity-incomplete-20260920.json](../../evidence/tier-e-sustained-capacity-incomplete-20260920.json).
 
 **Historical evidence.** A follow-up rootful fifteen-fork, ten-batch near-capacity matrix enabled
 the benchmark-only monotonic receipt clock for the same 1,000-boundaries/s producer. All four
@@ -1501,6 +1539,16 @@ not a universal per-boundary cost, application slowdown, or a default change. Fu
 the safest default. A selected profile covers only its declared binding set, and excluded bindings
 remain explicit capture-domain omissions. See
 [tier-e-capture-profile-semantic-rootful-decision-20260920.json](../../evidence/tier-e-capture-profile-semantic-rootful-decision-20260920.json).
+
+**Historical rejected experiment.** A rootful loopback-socket smoke pair evaluated the reviewed
+network binding profile against full capture. Both arms completed their declared domains with zero
+reported loss, but the normalized decoded logical-stack digests differed even after both were
+limited to the canonical network binding set. The narrowed arm excluded only 24 of 4,230 admitted
+boundaries (0.57%), below the performance decision threshold in any case. It is therefore rejected
+as neither semantically equivalent nor materially cheaper; `full` remains the production default.
+The run used a dirty source tree and one fork, so it is retained as a rejection artifact rather than
+a general performance result. See
+[tier-e-capture-profile-loopback-rejection-20260920.json](../../evidence/tier-e-capture-profile-loopback-rejection-20260920.json).
 
 The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
 operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
@@ -1973,6 +2021,18 @@ Inactive task-storage observations increment the bounded `ambientInactiveObserva
 diagnostic and exit before ring submission. They are aggregate unknown diagnostics, not
 retained per-syscall `UNKNOWN` records; retaining all inactive process traffic would
 erase Tier E's native-boundary observation limit and consume the ring with noise.
+
+**Benchmark-only correlation diagnostic.** `benchmarkEmitTaskStorageUnavailableEvents`
+is disabled by default and may be enabled only with benchmark phase accounting. For this
+diagnostic shape, a target `sys_enter` that cannot look up task storage increments the same
+bounded task-storage-unavailable counter and emits the unchanged 88-byte record with
+`invocation_id=0`, `sequence=0`, and
+`FLAG_TASK_STORAGE_UNAVAILABLE`. Userspace classifies that record as an explicit
+`NO_ACTIVE_INVOCATION` outcome. This mode exists to distinguish an oracle-visible boundary
+gap from ring loss or collector suppression; its evidence is intentionally incomplete and
+never contributes to production performance or sustained-capacity decisions. Static builder
+tests require every instruction to be reachable for default, unique-edge, and this diagnostic
+program shape before a rootful verifier run.
 
 ### Symbolization generation and cache safety
 

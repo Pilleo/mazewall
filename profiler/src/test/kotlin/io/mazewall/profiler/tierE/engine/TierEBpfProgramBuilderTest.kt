@@ -58,7 +58,7 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
-    fun `active session without task storage records an ambient diagnostic before ring reservation`() {
+    fun `active session without task storage records a dedicated diagnostic before ring reservation`() {
         val program = TierEBpfProgramBuilder.buildSysEnterProgram()
         val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
         val noStorage = program[taskStorageGet + 1]
@@ -66,10 +66,74 @@ class TierEBpfProgramBuilderTest {
 
         assertEquals(0x15, noStorage.code, "task-storage lookup result must be checked")
         assertEquals(0x18, program[noStorageTarget].code, "missing task storage must enter the diagnostic path")
-        assertEquals(2, program[noStorageTarget].imm, "ambient diagnostics must use the kernel counter map")
+        assertEquals(2, program[noStorageTarget].imm, "task-storage diagnostics must use the kernel counter map")
         assertTrue(
             reachableInstructions(program, noStorageTarget).none { index -> program[index].code == 0x85 && program[index].imm == 131 },
-            "ambient syscalls must exit before ring-buffer reservation",
+            "missing task storage must exit before ring-buffer reservation",
+        )
+    }
+
+    @Test
+    fun `benchmark diagnostic mode emits a zero invocation record for unavailable task storage`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkEmitTaskStorageUnavailableEvents = true),
+        )
+        val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
+        val noStorage = program[taskStorageGet + 1]
+        val noStorageTarget = taskStorageGet + 2 + noStorage.off
+
+        assertEquals(0x18, program[noStorageTarget].code)
+        assertEquals(2, program[noStorageTarget].imm, "diagnostic mode must retain the task-storage counter")
+        assertTrue(
+            reachableInstructions(program, noStorageTarget).any { index -> program[index].code == 0x85 && program[index].imm == 131 },
+            "diagnostic mode must publish an owned zero-invocation ring record",
+        )
+        assertTrue(
+            program.any {
+                it.code == 0xb7 && it.dst == 5 && it.imm == 4
+            },
+            "diagnostic record must carry the task-storage-unavailable flag",
+        )
+    }
+
+    @Test
+    fun `all generated sys enter instructions are reachable for every supported diagnostic shape`() {
+        listOf(
+            TierEOptions(emissionMode = TierEEmissionMode.FULL_STREAM),
+            TierEOptions(emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL),
+            TierEOptions(benchmarkPhases = true, benchmarkEmitTaskStorageUnavailableEvents = true),
+            TierEOptions(
+                emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL,
+                benchmarkPhases = true,
+                benchmarkEmitTaskStorageUnavailableEvents = true,
+            ),
+        ).forEach { options ->
+            val program = TierEBpfProgramBuilder.buildSysEnterProgram(options)
+            assertEquals(
+                program.indices.toSet(),
+                reachableInstructions(program, start = 0),
+                "every generated instruction must be reachable for $options",
+            )
+        }
+    }
+
+    @Test
+    fun `missing diagnostic context still reserves an exact ring observation`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+        val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
+        val contextIdentityLoad =
+            (taskStorageGet + 1 until program.size).first { index ->
+                program[index].code == 0x79 && program[index].dst == 5 && program[index].off.toInt() == -24
+            }
+        val noMetricContext = program[contextIdentityLoad + 1]
+        val noMetricContextTarget = contextIdentityLoad + 2 + noMetricContext.off
+
+        assertEquals(0x15, noMetricContext.code, "diagnostic-context lookup result must be checked")
+        assertEquals(0x18, program[noMetricContextTarget].code, "missing diagnostics must continue to ring reservation")
+        assertEquals(1, program[noMetricContextTarget].imm, "missing diagnostics must use the ring-buffer map")
+        assertTrue(
+            reachableInstructions(program, noMetricContextTarget).any { index -> program[index].code == 0x85 && program[index].imm == 131 },
+            "missing diagnostic context must not suppress exact ring observations",
         )
     }
 

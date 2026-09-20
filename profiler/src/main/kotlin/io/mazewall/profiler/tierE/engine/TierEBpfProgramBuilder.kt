@@ -27,6 +27,9 @@ internal object TierEBpfProgramBuilder {
     private const val MARKER_FAILURE_COUNTER_INDEX: Int = 3
     private const val AMBIENT_INACTIVE_COUNTER_INDEX: Int = 4
     private const val EXACT_ADMISSION_COUNTER_INDEX: Int = 5
+    private const val MARKER_DETACHED_COUNTER_INDEX: Int = 6
+    private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX: Int = 7
+    private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
 
     // eBPF opcodes (64-bit class)
@@ -188,7 +191,47 @@ internal object TierEBpfProgramBuilder {
         val missingExactAdmissionCounter = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val skipTaskStorageUnavailableDiagnostic = if (
+            options.benchmarkEmitTaskStorageUnavailableEvents &&
+            options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
+        ) {
+            emit(Insn(JA))
+        } else {
+            null
+        }
+        val taskStorageUnavailableDiagnostic = if (skipTaskStorageUnavailableDiagnostic != null) {
+            // Keep the normal bounded counter, but make this benchmark-only path observable as
+            // an owned zero-invocation record. It proves that a workload oracle miss is an
+            // explicit attribution gap, not a silently dropped collector decision.
+            val diagnosticStart = p.size
+            ldMap(1, COUNTER_MAP_INDEX)
+            emit(Insn(MOV_IMM, dst = 5, imm = TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -4))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingTaskStorageCounter = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            val counterComplete = emit(Insn(JA))
+            emit(Insn(MOV_IMM, dst = 5, imm = 0))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
+            emit(Insn(MOV_IMM, dst = 5, imm = SyscallInvocationEvent.FLAG_TASK_STORAGE_UNAVAILABLE))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -8))
+            TaskStorageUnavailableDiagnostic(diagnosticStart, missingTaskStorageCounter, counterComplete)
+        } else {
+            null
+        }
         val reserveStart = p.size
+        skipTaskStorageUnavailableDiagnostic?.let { index ->
+            p[index] = p[index].copy(off = (reserveStart - index - 1).toShort())
+        }
+        taskStorageUnavailableDiagnostic?.let { diagnostic ->
+            p[diagnostic.counterComplete] = p[diagnostic.counterComplete].copy(
+                off = (diagnostic.payloadSetupStart - diagnostic.counterComplete - 1).toShort(),
+            )
+        }
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
         p[missingExactAdmissionCounter] = p[missingExactAdmissionCounter].copy(off = (reserveStart - missingExactAdmissionCounter - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
@@ -307,6 +350,15 @@ internal object TierEBpfProgramBuilder {
         emitCounterAndComplete(MARKER_FAILURE_COUNTER_INDEX)
         val ambientInactiveHandler = p.size
         emitCounterAndComplete(AMBIENT_INACTIVE_COUNTER_INDEX)
+        val markerDetachedHandler = p.size
+        emitCounterAndComplete(MARKER_DETACHED_COUNTER_INDEX)
+        val taskStorageUnavailableHandler = if (taskStorageUnavailableDiagnostic == null) {
+            p.size.also { emitCounterAndComplete(TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX) }
+        } else {
+            null
+        }
+        val staleMarkerGenerationHandler = p.size
+        emitCounterAndComplete(STALE_MARKER_GENERATION_COUNTER_INDEX)
         // Map descriptors are fixed for the program lifetime, but if lookup
         // nevertheless fails we cannot prove this handler was counted. Mark
         // the run incomplete without executing the completion decrement.
@@ -329,23 +381,42 @@ internal object TierEBpfProgramBuilder {
             p[index] = p[index].copy(off = (requireNotNull(lossHandler) - index - 1).toShort())
         }
         p[noTask] = p[noTask].copy(off = (markerFailureHandler - noTask - 1).toShort())
-        p[noStorage] = p[noStorage].copy(off = (ambientInactiveHandler - noStorage - 1).toShort())
+        p[noStorage] = p[noStorage].copy(
+            off = ((taskStorageUnavailableDiagnostic?.start ?: requireNotNull(taskStorageUnavailableHandler)) - noStorage - 1).toShort(),
+        )
         p[inactiveInvocation] = p[inactiveInvocation].copy(off = (ambientInactiveHandler - inactiveInvocation - 1).toShort())
-        p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(off = (ambientInactiveHandler - staleAttachmentGeneration - 1).toShort())
-        p[noMetricContext] = p[noMetricContext].copy(off = (ambientInactiveHandler - noMetricContext - 1).toShort())
-        p[markerDetached] = p[markerDetached].copy(off = (completeActive - markerDetached - 1).toShort())
+        p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(off = (staleMarkerGenerationHandler - staleAttachmentGeneration - 1).toShort())
+        p[markerDetached] = p[markerDetached].copy(off = (markerDetachedHandler - markerDetached - 1).toShort())
         p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
         submitted?.let { index -> p[index] = p[index].copy(off = (completeActive - index - 1).toShort()) }
         missingLossCounter?.let { index ->
             p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
         }
         p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (inFlightCounterFailureHandler - missingInFlightCounter - 1).toShort())
+        taskStorageUnavailableDiagnostic?.let { diagnostic ->
+            p[diagnostic.missingCounter] = p[diagnostic.missingCounter].copy(
+                off = (inFlightCounterFailureHandler - diagnostic.missingCounter - 1).toShort(),
+            )
+        }
         p[missingCompletionCounter] = p[missingCompletionCounter].copy(off = (activeExit - missingCompletionCounter - 1).toShort())
         p[missingLossCounterForInFlightFailure] = p[missingLossCounterForInFlightFailure].copy(off = (inFlightFailureExit - missingLossCounterForInFlightFailure - 1).toShort())
         p[finishInFlightFailure] = p[finishInFlightFailure].copy(off = (inFlightFailureExit - finishInFlightFailure - 1).toShort())
         exits.forEach { index -> p[index] = p[index].copy(off = (activeExit - index - 1).toShort()) }
 
         return p.toList()
+    }
+
+    private data class TaskStorageUnavailableDiagnostic(
+        val start: Int,
+        val missingCounter: Int,
+        val counterComplete: Int,
+        val payloadSetupStart: Int,
+    ) {
+        constructor(
+            start: Int,
+            missingCounter: Int,
+            counterComplete: Int,
+        ) : this(start, missingCounter, counterComplete, counterComplete + 1)
     }
 
     /**

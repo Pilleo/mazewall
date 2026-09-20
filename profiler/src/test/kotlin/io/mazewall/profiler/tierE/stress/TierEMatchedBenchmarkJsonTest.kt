@@ -6,6 +6,7 @@ import io.mazewall.profiler.internal.attribution.StackCaptureQuality
 import io.mazewall.profiler.internal.attribution.StackDefinition
 import io.mazewall.profiler.internal.attribution.StackTraceId
 import io.mazewall.profiler.internal.attribution.TierECaptureProfile
+import io.mazewall.profiler.internal.attribution.TierECaptureProfilePreset
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEReadyTransferMode
 import io.mazewall.profiler.internal.attribution.TierERingDecodeMode
@@ -17,6 +18,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TierEMatchedBenchmarkJsonTest {
+    @Test
+    fun `targeted selection determines terminal expected fork count`() {
+        val selected = TierEMatchedBenchmark.selectVariantNames(
+            available = listOf("baseline", "dictionary_full_stream", "dictionary_unique_edge"),
+            selector = "dictionary_unique_edge",
+        )
+
+        assertEquals(1, selected.size)
+        assertEquals(5, TierEMatchedBenchmark.expectedSelectedForkCount(selected.size, forks = 5))
+        assertFailsWith<IllegalArgumentException> {
+            TierEMatchedBenchmark.expectedSelectedForkCount(selectedVariantCount = 0, forks = 1)
+        }
+    }
+
     @Test
     fun `comparable long-run scope excludes only bounded inline transports`() {
         val expected = setOf(
@@ -168,6 +183,33 @@ class TierEMatchedBenchmarkJsonTest {
                 "dictionary_full_stream_profile_jdk25_unix_openat0",
             ),
             TierEMatchedBenchmark.captureProfileVariantNames(0).toSet(),
+        )
+    }
+
+    @Test
+    fun `reviewed narrowed capture profile matches the application workload family`() {
+        assertEquals(
+            "unix-open0+unix-openat0+unix-close0+unix-unlink0+file-read0+file-write0+file-close-int-fd",
+            TierEMatchedBenchmark.reviewedCaptureProfileForWorkload("buffered_file_io").wireName,
+        )
+        assertEquals(
+            TierECaptureProfilePreset.NETWORK_IO.profile,
+            TierEMatchedBenchmark.reviewedCaptureProfileForWorkload("loopback_socket"),
+        )
+        assertEquals(
+            "jdk25-unix-openat0",
+            TierEMatchedBenchmark.reviewedCaptureProfileForWorkload("oracle").wireName,
+        )
+    }
+
+    @Test
+    fun `capture profile boundary metrics aggregate native admitted and excluded bindings`() {
+        assertEquals(
+            TierEMatchedBenchmark.CaptureProfileBoundaryMetrics(admitted = 7, rejected = 11),
+            TierEMatchedBenchmark.captureProfileBoundaryMetrics(
+                "mazewall-stack-agent: capture-profile-binding=unix-openat0 admitted=3 excluded=5\\n" +
+                    "mazewall-stack-agent: capture-profile-binding=unix-close0 admitted=4 excluded=6\\n",
+            ),
         )
     }
 
@@ -421,6 +463,20 @@ class TierEMatchedBenchmarkJsonTest {
                 wholeSessionEvidence = TierEBenchmarkContract.EvidenceState.COMPLETE,
             ),
         )
+    }
+
+    @Test
+    fun `targeted benchmark selector keeps only named generated variants and rejects typos`() {
+        val available = listOf("baseline", "dictionary_full_stream_collector_continuous", "dictionary_unique_edge_collector_continuous")
+
+        assertEquals(
+            listOf("dictionary_unique_edge_collector_continuous"),
+            TierEMatchedBenchmark.selectVariantNames(available, "dictionary_unique_edge_collector_continuous"),
+        )
+        assertEquals(available, TierEMatchedBenchmark.selectVariantNames(available, "  "))
+        assertFailsWith<IllegalArgumentException> {
+            TierEMatchedBenchmark.selectVariantNames(available, "dictionary_unique_edge_typo")
+        }
     }
 
     @Test

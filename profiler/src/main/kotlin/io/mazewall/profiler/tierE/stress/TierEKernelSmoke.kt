@@ -4,7 +4,9 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.ExecutionKind
 import io.mazewall.profiler.internal.attribution.ResolutionStatus
+import io.mazewall.profiler.internal.attribution.TierECaptureBinding
 import io.mazewall.profiler.internal.attribution.TierECaptureProfile
+import io.mazewall.profiler.internal.attribution.TierECaptureProfilePreset
 import io.mazewall.profiler.internal.attribution.TierECollectorLoop
 import io.mazewall.profiler.internal.attribution.TierECollectorLoopPolicy
 import io.mazewall.profiler.internal.attribution.TierECollectorResultMode
@@ -125,6 +127,10 @@ internal object TierEKernelSmoke {
         }
         val benchmarkAllocationAccounting = System.getProperty("mazewall.tier-e.benchmark-allocation-accounting", "false").toBooleanStrictOrNull()
             ?: error("benchmark allocation accounting must be true or false")
+        val benchmarkEmitTaskStorageUnavailableEvents = System
+            .getProperty("mazewall.tier-e.benchmark-emit-task-storage-unavailable-events", "false")
+            .toBooleanStrictOrNull()
+            ?: error("task-storage unavailable event diagnostics must be true or false")
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -158,6 +164,9 @@ internal object TierEKernelSmoke {
         require(benchmark || idlePollPolicy == "continuous") { "idle poll pacing is benchmark-only" }
         require(benchmark || receiptClockMode == "disabled") { "collector receipt clock is benchmark-only" }
         require(benchmark || !benchmarkAllocationAccounting) { "allocation accounting is benchmark-only" }
+        require(benchmark || !benchmarkEmitTaskStorageUnavailableEvents) {
+            "task-storage unavailable event diagnostics are benchmark-only"
+        }
         require(benchmark || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             "ring submission control is benchmark-only"
         }
@@ -282,6 +291,7 @@ internal object TierEKernelSmoke {
                 maxRetainedRecords = maxRetainedRecords,
                 benchmarkPhases = benchmark,
                 benchmarkAllocationAccounting = benchmarkAllocationAccounting,
+                benchmarkEmitTaskStorageUnavailableEvents = benchmarkEmitTaskStorageUnavailableEvents,
                 ringDecodeMode = ringDecodeMode,
                 ringArgumentListMode = ringArgumentListMode,
                 ringArgumentViewMode = ringArgumentViewMode,
@@ -539,11 +549,13 @@ internal object TierEKernelSmoke {
             // The shared workload declares one delete per batch. This verifies a stable
             // operation count, but path pointers are not copied from the ring record, so it
             // cannot prove a per-operation identity mapping. Keep this explicitly unverified.
+            val commonWorkloadRequiresUnlink =
+                commonWorkload && System.getProperty(TierECommonFileWorkload.APPLICATION_KIND_PROPERTY) != "loopback_socket"
             val expectedWorkloadUnlinks: Long = if (operationOracleAvailable) {
                 oracle.expected
-            } else if (commonWorkload && benchmark) {
+            } else if (commonWorkloadRequiresUnlink && benchmark) {
                 args.getOrElse(11) { "3" }.toLong() + args.getOrElse(12) { "10" }.toLong()
-            } else if (commonWorkload) {
+            } else if (commonWorkloadRequiresUnlink) {
                 1L
             } else {
                 0L
@@ -584,19 +596,37 @@ internal object TierEKernelSmoke {
             }
             val semanticSyscallNumber = if (writeOracleWorkload) SYS_WRITE else SYS_OPENAT
             val semanticArgumentIndex = if (writeOracleWorkload) 2 else 0
-            val semanticRecords = profile.syscalls.filter { syscall ->
-                syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
-                    syscall.observation.syscallNumber == semanticSyscallNumber &&
-                    syscall.observation.args[semanticArgumentIndex].toInt() in semanticExpectedOperations
-            }
+            val semanticRecords =
+                if (commonWorkload) {
+                    val semanticBindings = semanticBindings(TierECommonFileWorkload.ApplicationKind.fromSystemProperty())
+                    profile.syscalls.filter { syscall ->
+                        syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                            syscall.stackDefinition?.frames?.any { frame ->
+                                semanticBindings.any { binding ->
+                                    binding.matchesFrame(frame.className, frame.methodName, frame.descriptor)
+                                }
+                            } == true
+                    }
+                } else {
+                    profile.syscalls.filter { syscall ->
+                        syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                            syscall.observation.syscallNumber == semanticSyscallNumber &&
+                            syscall.observation.args[semanticArgumentIndex].toInt() in semanticExpectedOperations
+                    }
+                }
             val semanticStackDigest = semanticStackDigest(semanticRecords)
-            val semanticStackComplete = operationOracleAvailable &&
-                oracle.matched == oracle.expected &&
-                oracle.duplicates == 0L &&
-                oracle.wrong == 0L &&
-                oracle.unclassified == 0L &&
-                semanticRecords.size.toLong() == oracle.expected &&
-                semanticStackDigest != null
+            val semanticStackComplete =
+                if (commonWorkload) {
+                    semanticRecords.isNotEmpty() && semanticStackDigest != null
+                } else {
+                    operationOracleAvailable &&
+                        oracle.matched == oracle.expected &&
+                        oracle.duplicates == 0L &&
+                        oracle.wrong == 0L &&
+                        oracle.unclassified == 0L &&
+                        semanticRecords.size.toLong() == oracle.expected &&
+                        semanticStackDigest != null
+                }
             val operationOracleComplete = !operationOracleAvailable ||
                 (
                     oracle.matched == oracle.expected &&
@@ -629,6 +659,9 @@ internal object TierEKernelSmoke {
                 "pending_observation_budget_drops=${collectorPhases.pendingObservationBudgetDrops} " +
                 "pending_observation_queue_drops=${collectorPhases.pendingObservationQueueDrops} " +
                 "kernel_exact_admissions=${collectorPhases.kernelExactAdmissions} " +
+                "kernel_marker_detached=${collectorPhases.kernelMarkerDetached} " +
+                "kernel_task_storage_unavailable=${collectorPhases.kernelTaskStorageUnavailable} " +
+                "kernel_stale_marker_generation=${collectorPhases.kernelStaleMarkerGeneration} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=$effectiveEvidenceComplete " +
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
@@ -665,6 +698,9 @@ internal object TierEKernelSmoke {
                     "ring_consumer_publish_ns=${collectorPhases.ringConsumerPublishNanos} " +
                     "ring_scanned_records=${collectorPhases.ringScannedRecords} ring_ready_records=${collectorPhases.ringReadyRecords} " +
                     "ring_batches=${collectorPhases.ringBatches} ring_max_batch_records=${collectorPhases.ringMaxBatchRecords} " +
+                    "records_per_drain_p50_upper=${collectorPhases.ringDrainP50UpperRecords} " +
+                    "records_per_drain_p95_upper=${collectorPhases.ringDrainP95UpperRecords} " +
+                    "records_per_drain_p99_upper=${collectorPhases.ringDrainP99UpperRecords} " +
                     "ring_reader_initialization_ns=${collectorPhases.ringReaderInitializationNanos} " +
                     "collector_join_ns=${collectorPhases.collectorJoinNanos} " +
                     "allocation_measurement_available=${if (collectorPhases.allocationMeasurementAvailable) 1 else 0} " +
@@ -920,6 +956,21 @@ internal object TierEKernelSmoke {
     private fun StringBuilder.appendField(value: String) {
         append(value.length).append(':').append(value).append(';')
     }
+
+    private fun semanticBindings(applicationKind: TierECommonFileWorkload.ApplicationKind): List<TierECaptureBinding> =
+        when (applicationKind) {
+            TierECommonFileWorkload.ApplicationKind.FILESYSTEM_METADATA -> TierECaptureProfilePreset.FILESYSTEM_METADATA.profile.bindings
+            TierECommonFileWorkload.ApplicationKind.BUFFERED_FILE_IO -> listOf(
+                TierECaptureBinding.UNIX_OPEN0,
+                TierECaptureBinding.UNIX_OPENAT0,
+                TierECaptureBinding.UNIX_CLOSE0,
+                TierECaptureBinding.UNIX_UNLINK0,
+                TierECaptureBinding.FILE_READ0,
+                TierECaptureBinding.FILE_WRITE0,
+                TierECaptureBinding.FILE_CLOSE_INT_FD,
+            )
+            TierECommonFileWorkload.ApplicationKind.LOOPBACK_SOCKET -> TierECaptureProfilePreset.NETWORK_IO.profile.bindings
+        }
 
     private const val AFFINITY_TIMEOUT_SECONDS = 10L
     private const val SYS_UNLINK: Int = 87

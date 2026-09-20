@@ -1,6 +1,8 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.TierECaptureBinding
 import io.mazewall.profiler.internal.attribution.TierECaptureProfile
+import io.mazewall.profiler.internal.attribution.TierECaptureProfilePreset
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import java.nio.file.Files
 import java.nio.file.Path
@@ -80,10 +82,10 @@ internal object TierEMatchedBenchmark {
         append(config.artifact, metadata(config, calibration))
         try {
             val forks = buildList {
-                val total = variants(config.scope, 0).size * config.forks
+                val total = selectedRunVariants(config.scope, 0).size * config.forks
                 var completed = 0
                 repeat(config.forks) { fork ->
-                    variants(config.scope, fork).forEach { variant ->
+                    selectedRunVariants(config.scope, fork).forEach { variant ->
                         val result = run(variant, fork + 1, config)
                         add(result)
                         completed += 1
@@ -265,7 +267,7 @@ internal object TierEMatchedBenchmark {
                 childJvmPrefix +
                 listOf(
                 "-Dmazewall.tier-e.canonical-cache=${variant.cacheMode ?: canonicalCache}",
-                "-Dmazewall.tier-e.capture-profile=${captureProfile.wireName}",
+                "-Dmazewall.tier-e.capture-profile=${captureProfileProperty(captureProfile)}",
                 "-Dmazewall.tier-e.native-phase-timing=${nativePhaseTimingFor(variant).enabled}",
                 "-Dmazewall.tier-e.benchmark-allocation-accounting=${config.scope in setOf(
                     Scope.TIER_E_RING_DECODE,
@@ -404,11 +406,13 @@ internal object TierEMatchedBenchmark {
             unclassified = metricOrZero(output, "unclassified_operations"),
         )
         val operationOracleComplete = operationOracleSupportsCompleteEvidence(operationOracle)
+        val captureProfileBoundaries = captureProfileBoundaryMetrics(output)
         val evidence = Evidence(
             metricOrZero(output, "observations"),
             metricOrZero(output, "resolved"),
             metricOrZero(output, "workload_resolved"),
             metricOrZero(output, "workload_unlinks_resolved"),
+            config.workload.applicationKind != TierECommonFileWorkload.ApplicationKind.LOOPBACK_SOCKET,
             metricOrZero(output, "unknown_no_active"),
             metricOrZero(output, "ambient_inactive"),
             metricOrZero(output, "unknown_other"),
@@ -435,6 +439,7 @@ internal object TierEMatchedBenchmark {
             output.contains("unique_edge_observer_enabled=false"),
             output.contains("profile_semantic_stack_complete=true"),
             semanticStackDigest(output),
+            captureProfileBoundaries,
             operationOracle,
             phaseMetrics(output),
             CaptureYieldMetrics(
@@ -458,6 +463,8 @@ internal object TierEMatchedBenchmark {
                 metricOrZero(output, "user_notif_queue_ns"),
                 metricOrZero(output, "user_notif_ack_to_return_ns"),
             ),
+            metricOrZero(output, "configured_ring_capacity_bytes"),
+            metricOrZero(output, "configured_max_retained_records"),
         )
         val contractEvidence = evidence.contractEvidence()
         val applicationSemanticFrames =
@@ -531,7 +538,7 @@ internal object TierEMatchedBenchmark {
         forks: List<ForkResult>,
         config: Config,
     ) {
-        val expectedForks = variants(config.scope, 0).size * config.forks
+        val expectedForks = expectedSelectedForkCount(selectedRunVariants(config.scope, 0).size, config.forks)
         check(forks.size == expectedForks) { "expected $expectedForks forks, received ${forks.size}" }
         // The shared-file workload checksum includes a fresh temporary path per JVM. Its child-local
         // verification is authoritative; cross-process benchmark comparison uses declared operation counts.
@@ -604,6 +611,16 @@ internal object TierEMatchedBenchmark {
     private fun selectedMarkerTransport(output: String): String? = Regex("tier-e-kernel-smoke: marker_transport=([^\\s]+)").find(output)?.groupValues?.get(1)
 
     internal fun semanticStackDigest(output: String): String? = Regex("profile_semantic_stack_digest=([0-9a-f]{64})").find(output)?.groupValues?.get(1)
+
+    internal fun captureProfileBoundaryMetrics(output: String): CaptureProfileBoundaryMetrics =
+        CAPTURE_PROFILE_BINDING_PATTERN
+            .findAll(output)
+            .fold(CaptureProfileBoundaryMetrics()) { totals, match ->
+                CaptureProfileBoundaryMetrics(
+                    admitted = totals.admitted + match.groupValues[1].toLong(),
+                    rejected = totals.rejected + match.groupValues[2].toLong(),
+                )
+            }
 
     private fun metadata(
         config: Config,
@@ -711,6 +728,9 @@ internal object TierEMatchedBenchmark {
                 achievedOperations = achieved,
                 resolvedOperations = resolved,
                 observedLosses = result.evidence.lost,
+                retainedResultDrops = result.evidence.phases.retainedResultDrops,
+                pendingObservationBudgetDrops = result.evidence.phases.pendingObservationBudgetDrops,
+                pendingObservationQueueDrops = result.evidence.phases.pendingObservationQueueDrops,
                 producerClosed = result.evidence.producerClosed,
                 evidenceComplete = result.evidence.evidenceComplete,
             ),
@@ -727,6 +747,8 @@ internal object TierEMatchedBenchmark {
         return buildString {
             append("\"sustained_collector\":{\"load\":\"").append(result.sustainedLoad.wireName)
             append("\",\"requested_rate_per_second\":").append(result.sustainedRatePerSecond)
+            append(",\"configured_ring_capacity_bytes\":").append(result.evidence.configuredRingCapacityBytes)
+            append(",\"configured_max_retained_records\":").append(result.evidence.configuredMaxRetainedRecords)
             append(",\"achieved_rate_per_second\":").append(achievedRate)
             append(",\"requested_operations\":").append(requested)
             append(",\"achieved_operations\":").append(achieved)
@@ -743,6 +765,9 @@ internal object TierEMatchedBenchmark {
             append(",\"lost_ring_records_per_second\":").append(operationsPerSecond(kernelRingLosses, workloadNanos))
             append(",\"ring_loss_fraction\":").append(lossFraction)
             append(",\"records_per_drain_max\":").append(result.evidence.phases.ringMaxBatchRecords)
+            append(",\"records_per_drain_p50_upper\":").append(result.evidence.phases.ringDrainP50UpperRecords)
+            append(",\"records_per_drain_p95_upper\":").append(result.evidence.phases.ringDrainP95UpperRecords)
+            append(",\"records_per_drain_p99_upper\":").append(result.evidence.phases.ringDrainP99UpperRecords)
             append(",\"collector_polls\":").append(result.evidence.phases.collectorPolls)
             append(",\"collector_receipt_p50_upper_ns\":").append(result.evidence.phases.collectorReceiptP50UpperNanos)
             append(",\"collector_receipt_p95_upper_ns\":").append(result.evidence.phases.collectorReceiptP95UpperNanos)
@@ -850,6 +875,8 @@ internal object TierEMatchedBenchmark {
             "\"operation_oracle_representative_only\":${evidence.operationOracle.representativeOnly}",
             "\"profile_semantic_stack_complete\":${evidence.profileSemanticStackComplete}",
             "\"profile_semantic_stack_digest\":${evidence.profileSemanticStackDigest?.let { "\"$it\"" } ?: "null"}",
+            "\"capture_profile_admitted_boundaries\":${evidence.captureProfileBoundaries.admitted}",
+            "\"capture_profile_rejected_boundaries\":${evidence.captureProfileBoundaries.rejected}",
             "\"duplicate_acknowledgement_accounting\":\"unavailable\"",
             "\"evidence_complete\":${evidence.evidenceComplete}",
             "\"phases\":${phaseJson(evidence.phases)}",
@@ -973,10 +1000,17 @@ internal object TierEMatchedBenchmark {
             "\"ring_scan_passes\":${phases.ringScanPasses}",
             "\"ring_batches\":${phases.ringBatches}",
             "\"ring_max_batch_records\":${phases.ringMaxBatchRecords}",
+            "\"ring_drain_p50_upper_records\":${phases.ringDrainP50UpperRecords}",
+            "\"ring_drain_p95_upper_records\":${phases.ringDrainP95UpperRecords}",
+            "\"ring_drain_p99_upper_records\":${phases.ringDrainP99UpperRecords}",
             "\"kernel_ring_loss\":${phases.kernelRingLosses}",
             "\"retained_result_drops\":${phases.retainedResultDrops}",
             "\"pending_observation_budget_drops\":${phases.pendingObservationBudgetDrops}",
             "\"pending_observation_queue_drops\":${phases.pendingObservationQueueDrops}",
+            "\"kernel_exact_admissions\":${phases.kernelExactAdmissions}",
+            "\"kernel_marker_detached\":${phases.kernelMarkerDetached}",
+            "\"kernel_task_storage_unavailable\":${phases.kernelTaskStorageUnavailable}",
+            "\"kernel_stale_marker_generation\":${phases.kernelStaleMarkerGeneration}",
             "\"serialization_ns\":${phases.serializationNanos}",
             "\"publication_bytes\":${phases.publicationBytes}",
             "\"publication_latency_ns\":${phases.publicationLatencyNanos}",
@@ -1057,6 +1091,9 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "ring_scan_passes"),
             metricOrZero(output, "ring_batches"),
             metricOrZero(output, "ring_max_batch_records"),
+            metricOrZero(output, "records_per_drain_p50_upper"),
+            metricOrZero(output, "records_per_drain_p95_upper"),
+            metricOrZero(output, "records_per_drain_p99_upper"),
             metricOrZero(output, "serialization_ns"),
             metricOrZero(output, "publication_bytes"),
             metricOrZero(output, "publication_latency_ns"),
@@ -1073,6 +1110,10 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "retained_result_drops"),
             metricOrZero(output, "pending_observation_budget_drops"),
             metricOrZero(output, "pending_observation_queue_drops"),
+            metricOrZero(output, "kernel_exact_admissions"),
+            metricOrZero(output, "kernel_marker_detached"),
+            metricOrZero(output, "kernel_task_storage_unavailable"),
+            metricOrZero(output, "kernel_stale_marker_generation"),
         )
 
     /** An independent operation oracle may narrow, but never widen, profiler completeness. */
@@ -2200,6 +2241,27 @@ internal object TierEMatchedBenchmark {
 
     private fun configuredCaptureProfile(): TierECaptureProfile = TierECaptureProfile.fromProperty(System.getProperty("mazewall.tier-e.capture-profile", "full"))
 
+    /** Converts a typed profile to the sole accepted external configuration spelling. */
+    private fun captureProfileProperty(profile: TierECaptureProfile): String = profile.agentOption?.removePrefix("capture-profile=") ?: profile.wireName
+
+    /** Selects the reviewed narrowed profile whose bindings cover the named workload family. */
+    internal fun reviewedCaptureProfileForWorkload(workload: String): TierECaptureProfile =
+        when (workload) {
+            "filesystem_metadata" -> TierECaptureProfilePreset.FILESYSTEM_METADATA.profile
+            "application", "buffered_file_io" ->
+                TierECaptureProfile.selected(
+                    TierECaptureBinding.UNIX_OPEN0,
+                    TierECaptureBinding.UNIX_OPENAT0,
+                    TierECaptureBinding.UNIX_CLOSE0,
+                    TierECaptureBinding.UNIX_UNLINK0,
+                    TierECaptureBinding.FILE_READ0,
+                    TierECaptureBinding.FILE_WRITE0,
+                    TierECaptureBinding.FILE_CLOSE_INT_FD,
+                )
+            "loopback_socket" -> TierECaptureProfilePreset.NETWORK_IO.profile
+            else -> TierECaptureProfile.fromProperty("jdk25-unix-openat0")
+        }
+
     private fun captureProfileFor(variant: Variant): TierECaptureProfile = variant.captureProfile ?: configuredCaptureProfile()
 
     private fun nativePhaseTimingFor(variant: Variant): NativePhaseTiming = variant.nativePhaseTiming ?: NativePhaseTiming.ENABLED
@@ -2314,6 +2376,48 @@ internal object TierEMatchedBenchmark {
 
     internal fun retentionExhaustionVariantNames(rotation: Int): List<String> = variants(Scope.TIER_E_RETENTION_EXHAUSTION, rotation).map { it.jsonName(Scope.TIER_E_RETENTION_EXHAUSTION) }
 
+    /**
+     * Selects a benchmark-only subset without changing the default matrix. Targeted diagnostic
+     * experiments must name complete generated variant IDs, so a typo cannot turn a decision run
+     * into an empty or different workload.
+     */
+    internal fun selectVariantNames(
+        available: List<String>,
+        selector: String?,
+    ): List<String> {
+        val requested = selector
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.toSet()
+            .orEmpty()
+        if (requested.isEmpty()) return available
+        val unknown = requested - available.toSet()
+        require(unknown.isEmpty()) { "unknown benchmark variant selector(s): ${unknown.sorted().joinToString(",")}" }
+        return available.filter { it in requested }
+    }
+
+    internal fun expectedSelectedForkCount(
+        selectedVariantCount: Int,
+        forks: Int,
+    ): Int {
+        require(selectedVariantCount > 0) { "at least one selected variant is required" }
+        require(forks > 0) { "at least one fork is required" }
+        return Math.multiplyExact(selectedVariantCount, forks)
+    }
+
+    private fun selectedRunVariants(
+        scope: Scope,
+        rotation: Int,
+    ): List<Variant> {
+        val available = variants(scope, rotation)
+        val selected = selectVariantNames(
+            available.map { it.jsonName(scope) },
+            System.getProperty("mazewall.tier-e.benchmark-variants"),
+        ).toSet()
+        return available.filter { it.jsonName(scope) in selected }
+    }
+
     private fun variants(
         scope: Scope,
         rotation: Int,
@@ -2370,10 +2474,13 @@ internal object TierEMatchedBenchmark {
                     publications.map { publication -> Variant(mode, publication = publication) }
                 }
                 Scope.TIER_E_CAPTURE_PROFILE -> {
+                    val narrowed = reviewedCaptureProfileForWorkload(
+                        System.getProperty("mazewall.tier-e.benchmark-workload", "oracle"),
+                    )
                     val profiles = if (rotation % 2 == 0) {
-                        listOf(TierECaptureProfile.Full, TierECaptureProfile.fromProperty("jdk25-unix-openat0"))
+                        listOf(TierECaptureProfile.Full, narrowed)
                     } else {
-                        listOf(TierECaptureProfile.fromProperty("jdk25-unix-openat0"), TierECaptureProfile.Full)
+                        listOf(narrowed, TierECaptureProfile.Full)
                     }
                     profiles.map { captureProfile -> Variant(mode, captureProfile = captureProfile) }
                 }
@@ -2549,6 +2656,7 @@ internal object TierEMatchedBenchmark {
         val resolved: Long,
         val workloadResolved: Long,
         val workloadUnlinksResolved: Long,
+        val requiresUnlinkObservation: Boolean,
         val unknownNoActive: Long,
         val ambientInactive: Long,
         val unknownOther: Long,
@@ -2574,16 +2682,20 @@ internal object TierEMatchedBenchmark {
         val observerFreeUniqueEdgeMeasurement: Boolean,
         val profileSemanticStackComplete: Boolean,
         val profileSemanticStackDigest: String?,
+        val captureProfileBoundaries: CaptureProfileBoundaryMetrics,
         val operationOracle: TierEBenchmarkContract.OperationOracle,
         val phases: PhaseMetrics,
         val captureYield: CaptureYieldMetrics,
         val userNotifPhases: UserNotifPhaseMetrics,
+        val configuredRingCapacityBytes: Long,
+        val configuredMaxRetainedRecords: Long,
     ) {
         fun contractEvidence() =
             TierEBenchmarkContract.Evidence(
             observations = observations,
             workloadResolved = workloadResolved,
             workloadUnlinksResolved = workloadUnlinksResolved,
+            requiresUnlinkObservation = requiresUnlinkObservation,
             wrong = wrong,
             lost = lost,
             unknownOther = unknownOther,
@@ -2668,6 +2780,9 @@ internal object TierEMatchedBenchmark {
         val ringScanPasses: Long,
         val ringBatches: Long,
         val ringMaxBatchRecords: Long,
+        val ringDrainP50UpperRecords: Long,
+        val ringDrainP95UpperRecords: Long,
+        val ringDrainP99UpperRecords: Long,
         val serializationNanos: Long,
         val publicationBytes: Long,
         val publicationLatencyNanos: Long,
@@ -2684,6 +2799,15 @@ internal object TierEMatchedBenchmark {
         val retainedResultDrops: Long,
         val pendingObservationBudgetDrops: Long,
         val pendingObservationQueueDrops: Long,
+        val kernelExactAdmissions: Long,
+        val kernelMarkerDetached: Long,
+        val kernelTaskStorageUnavailable: Long,
+        val kernelStaleMarkerGeneration: Long,
+    )
+
+    internal data class CaptureProfileBoundaryMetrics(
+        val admitted: Long = 0,
+        val rejected: Long = 0,
     )
 
     private data class UserNotifPhaseMetrics(
@@ -2755,6 +2879,8 @@ internal object TierEMatchedBenchmark {
 
     private val BATCH_PATTERN =
         Regex("(?:tier-e-common-workload|tier-e-write-oracle|tier-e-shared-openat-oracle|user-notif-oracle)-batch: phase=(\\w+) index=(\\d+) operations=(\\d+) checksum=(-?\\d+) .*workloadNs=(\\d+)")
+    private val CAPTURE_PROFILE_BINDING_PATTERN =
+        Regex("mazewall-stack-agent: capture-profile-binding=\\S+ admitted=(\\d+) excluded=(\\d+)")
 
     private val CAPTURE_YIELD_BINDINGS_PATTERN = Regex("(?:^|\\s)capture_yield_bindings=([^\\s]*)")
 }

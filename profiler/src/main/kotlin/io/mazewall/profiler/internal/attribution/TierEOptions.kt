@@ -91,6 +91,12 @@ internal data class TierEOptions(
     val knownJoinMode: TierEKnownJoinMode = TierEKnownJoinMode.QUEUED_CONTROL,
     /** Keeps marker and task-storage work but omits ring reservation/submission for cost attribution only. */
     val ringSubmissionMode: TierERingSubmissionMode = TierERingSubmissionMode.ENABLED,
+    /**
+     * Emits a zero-invocation ring record when a target syscall has no task-storage state.
+     * This diagnostic mode is benchmark-only: normal collection accounts for the condition
+     * through its bounded kernel counter without widening the ambient event stream.
+     */
+    val benchmarkEmitTaskStorageUnavailableEvents: Boolean = false,
     /** Primitive owned argument storage is the production path; boxed lists remain benchmark-only. */
     val ownedArgumentStorage: Boolean = true,
     /** Read-only ready transfer is production behavior; copying remains a paired benchmark control. */
@@ -104,6 +110,9 @@ internal data class TierEOptions(
         require(maxRetainedBytes > 0) { "maxRetainedBytes must be positive" }
         require(benchmarkPhases || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             "ring submission may be disabled only in a benchmark-phase control"
+        }
+        require(benchmarkPhases || !benchmarkEmitTaskStorageUnavailableEvents) {
+            "task-storage unavailable event emission is benchmark-only"
         }
         require(benchmarkPhases || !benchmarkAllocationAccounting) {
             "allocation accounting may be enabled only in a benchmark-phase session"

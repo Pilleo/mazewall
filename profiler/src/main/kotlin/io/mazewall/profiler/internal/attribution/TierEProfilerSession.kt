@@ -49,6 +49,12 @@ internal interface TierEEventSource : AutoCloseable {
 
     fun readExactAdmissionCount(): Long = 0L
 
+    fun readMarkerDetachedCount(): Long = 0L
+
+    fun readTaskStorageUnavailableCount(): Long = 0L
+
+    fun readStaleMarkerGenerationCount(): Long = 0L
+
     fun readContextMetrics(): Map<Long, Long> = emptyMap()
 
     fun readMarkerTransitionCount(): Long
@@ -95,6 +101,12 @@ private class NativeTierEEventSource(
     override fun readAmbientInactiveCount(): Long = engine.readAmbientInactiveCount()
 
     override fun readExactAdmissionCount(): Long = engine.readExactAdmissionCount()
+
+    override fun readMarkerDetachedCount(): Long = engine.readMarkerDetachedCount()
+
+    override fun readTaskStorageUnavailableCount(): Long = engine.readTaskStorageUnavailableCount()
+
+    override fun readStaleMarkerGenerationCount(): Long = engine.readStaleMarkerGenerationCount()
 
     override fun readContextMetrics(): Map<Long, Long> = engine.readContextMetrics()
 
@@ -146,6 +158,22 @@ internal class TierEProfilerSession internal constructor(
         options: TierEOptions,
         dictionarySink: DictionaryBatchSink,
     ) : this(NativeTierEEventSource(engine), processEpoch, options, AgentDefinitionFile::read, dictionarySink)
+
+    /** Native-engine compatibility boundary for a session-bound dictionary sink. */
+    public constructor(
+        engine: TierEbpfEngine,
+        processEpoch: Long,
+        options: TierEOptions,
+        dictionarySink: DictionaryBatchSink,
+        configuredSessionEpoch: SessionEpoch,
+    ) : this(
+        NativeTierEEventSource(engine),
+        processEpoch,
+        options,
+        AgentDefinitionFile::read,
+        dictionarySink,
+        configuredSessionEpoch = configuredSessionEpoch,
+    )
 
     internal constructor(
         engine: TierEbpfEngine,
@@ -216,8 +244,12 @@ internal class TierEProfilerSession internal constructor(
     private var ringReadyRecords = 0L
     private var ringDrainBatches = 0L
     private var ringMaxBatchRecords = 0L
+    private val ringDrainSizes = TierEDrainSizeAccumulator()
     private var retainedResultDrops = 0L
     private var kernelExactAdmissions = 0L
+    private var kernelMarkerDetached = 0L
+    private var kernelTaskStorageUnavailable = 0L
+    private var kernelStaleMarkerGeneration = 0L
     private var ringReaderInitializationNanos = 0L
     private var collectorJoinNanos = 0L
     private var collectorPolls = 0L
@@ -295,6 +327,7 @@ internal class TierEProfilerSession internal constructor(
                 if (drained.events.isNotEmpty()) {
                     ringDrainBatches++
                     ringMaxBatchRecords = maxOf(ringMaxBatchRecords, drained.events.size.toLong())
+                    ringDrainSizes.record(drained.events.size)
                 }
                 ringReaderInitializationNanos += drained.metrics.readerInitializationNanos
             }.events
@@ -369,6 +402,7 @@ internal class TierEProfilerSession internal constructor(
     @Synchronized
     internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics {
         val pendingDrops = collector.pendingObservationDropMetrics()
+        val drainSizes = ringDrainSizes.snapshot()
         return TierECollectorPhaseMetrics(
         ringDrainNanos = ringDrainNanos,
         ringScanNanos = ringScanNanos,
@@ -380,11 +414,17 @@ internal class TierEProfilerSession internal constructor(
         ringReadyRecords = ringReadyRecords,
         ringBatches = ringDrainBatches,
         ringMaxBatchRecords = ringMaxBatchRecords,
+        ringDrainP50UpperRecords = drainSizes.p50UpperRecords,
+        ringDrainP95UpperRecords = drainSizes.p95UpperRecords,
+        ringDrainP99UpperRecords = drainSizes.p99UpperRecords,
             kernelRingLosses = reportedKernelLosses,
             retainedResultDrops = retainedResultDrops,
             pendingObservationBudgetDrops = pendingDrops.budgetDrops,
             pendingObservationQueueDrops = pendingDrops.queueDrops,
             kernelExactAdmissions = kernelExactAdmissions,
+            kernelMarkerDetached = kernelMarkerDetached,
+            kernelTaskStorageUnavailable = kernelTaskStorageUnavailable,
+            kernelStaleMarkerGeneration = kernelStaleMarkerGeneration,
         ringReaderInitializationNanos = ringReaderInitializationNanos,
         collectorJoinNanos = collectorJoinNanos,
         polls = collectorPolls,
@@ -535,6 +575,9 @@ internal class TierEProfilerSession internal constructor(
             markerTransitions = source.readMarkerTransitionCount(),
         )
         kernelExactAdmissions = source.readExactAdmissionCount()
+        kernelMarkerDetached = source.readMarkerDetachedCount()
+        kernelTaskStorageUnavailable = source.readTaskStorageUnavailableCount()
+        kernelStaleMarkerGeneration = source.readStaleMarkerGenerationCount()
         closeSource()
         val definitions = try {
             readDefinitions(definitionFile, collector.pendingInvocationIds())
@@ -736,11 +779,17 @@ internal data class TierECollectorPhaseMetrics(
     val ringReadyRecords: Long = 0,
     val ringBatches: Long = 0,
     val ringMaxBatchRecords: Long = 0,
+    val ringDrainP50UpperRecords: Long = 0,
+    val ringDrainP95UpperRecords: Long = 0,
+    val ringDrainP99UpperRecords: Long = 0,
     val kernelRingLosses: Long = 0,
     val retainedResultDrops: Long = 0,
     val pendingObservationBudgetDrops: Long = 0,
     val pendingObservationQueueDrops: Long = 0,
     val kernelExactAdmissions: Long = 0,
+    val kernelMarkerDetached: Long = 0,
+    val kernelTaskStorageUnavailable: Long = 0,
+    val kernelStaleMarkerGeneration: Long = 0,
     val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,

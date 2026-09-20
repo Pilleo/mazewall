@@ -1,0 +1,34 @@
+{
+  "kind": "tier_e_clean_revision_decision_preflight",
+  "timestamp": "2026-09-20",
+  "environment": {
+    "runner": "local workspace",
+    "source_dirty": true,
+    "run_decision": true
+  },
+  "command": "MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION=true bash scripts/run_tier_e_sustained_capacity.sh /tmp/tier-e-clean-revision-preflight-20260920",
+  "artifact": {
+    "root": "/tmp/tier-e-clean-revision-preflight-20260920",
+    "runner_events": "capacity-runner-events.jsonl",
+    "exit_code": 2
+  },
+  "result": {
+    "runner_state": "REJECTED",
+    "reason": "source_dirty_decision_rejected",
+    "dirty_entries": 28,
+    "benchmark_started": false,
+    "privileged_workload_started": false
+  },
+  "interpretation": "Decision-mode sustained capacity execution now rejects a source-dirty checkout before any rootful build or workload launch. Smoke and diagnostic runs retain dirty provenance but cannot be promoted into a capacity decision.",
+  "dimensions": {
+    "capture_domain_validity": "unverified",
+    "transport_completeness": "unverified",
+    "attribution_coverage": "unverified",
+    "dictionary_integrity": "unverified",
+    "lifecycle_validity": "unverified",
+    "runtime_overhead": "not_measured"
+  },
+  "evidence_integrity": "unverified",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false
+}

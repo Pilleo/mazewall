@@ -15,6 +15,7 @@ internal object TierEBenchmarkContract {
             if (
                 tierE &&
                 !evidence.expectedInactiveLifecycleScenario &&
+                evidence.requiresUnlinkObservation &&
                 !evidence.observerFreeUniqueEdgeMeasurement &&
                 !evidence.operationOracle.available &&
                 evidence.workloadUnlinksResolved == 0L
@@ -90,6 +91,7 @@ internal object TierEBenchmarkContract {
         val observations: Long = 0,
         val workloadResolved: Long = 0,
         val workloadUnlinksResolved: Long = 0,
+        val requiresUnlinkObservation: Boolean = true,
         val wrong: Long = 0,
         val lost: Long = 0,
         val unknownOther: Long = 0,
