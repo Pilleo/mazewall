@@ -45,13 +45,20 @@ internal object TierEOperationOracle {
         var duplicates = 0L
         var wrong = 0L
         var unclassified = 0L
+        var missing = 0L
+        val missingOperationIdSamples = ArrayList<Int>(MISSING_OPERATION_SAMPLE_LIMIT)
         expectedOperationIds.forEach { operationId ->
             val candidates = byId[operationId].orEmpty()
             if (candidates.size > 1) duplicates += candidates.size - 1L
             val candidate = candidates.singleOrNull()
             when {
                 candidate == null && candidates.isNotEmpty() -> Unit
-                candidate == null -> Unit
+                candidate == null -> {
+                    missing++
+                    if (missingOperationIdSamples.size < MISSING_OPERATION_SAMPLE_LIMIT) {
+                        missingOperationIdSamples += operationId
+                    }
+                }
                 !candidate.resolved ||
                     !candidate.hasWorkloadStack ||
                     !candidate.hasInvocationIdentity ||
@@ -60,7 +67,15 @@ internal object TierEOperationOracle {
             }
         }
         observations.filterNot { it.operationId in expectedOperationIds }.forEach { unclassified++ }
-        return Report(expectedOperationIds.size.toLong(), matched, duplicates = duplicates, wrong = wrong, unclassified = unclassified)
+        return Report(
+            expectedOperationIds.size.toLong(),
+            matched,
+            missing = missing,
+            duplicates = duplicates,
+            wrong = wrong,
+            unclassified = unclassified,
+            missingOperationIdSamples = missingOperationIdSamples.toList(),
+        )
     }
 
     /**
