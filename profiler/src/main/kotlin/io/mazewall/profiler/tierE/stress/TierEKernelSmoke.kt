@@ -112,6 +112,17 @@ internal object TierEKernelSmoke {
         require(benchmark || !expectRetentionExhaustion) {
             "retention exhaustion expectation is benchmark-only"
         }
+        val maxRetainedRecords = System
+            .getProperty(
+            "mazewall.tier-e.max-retained-records",
+            TierEOptions.DEFAULT_RECORD_LIMIT.toString(),
+        ).toInt()
+            .also { limit ->
+            require(limit > 0) { "max retained records must be positive" }
+        }
+        require(benchmark || maxRetainedRecords == TierEOptions.DEFAULT_RECORD_LIMIT) {
+            "custom retained record limits are benchmark-only"
+        }
         val benchmarkAllocationAccounting = System.getProperty("mazewall.tier-e.benchmark-allocation-accounting", "false").toBooleanStrictOrNull()
             ?: error("benchmark allocation accounting must be true or false")
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
@@ -267,6 +278,7 @@ internal object TierEKernelSmoke {
                 emissionMode = emissionMode,
                 stackTransport = stackTransport,
                 captureProfile = captureProfile,
+                maxRetainedRecords = maxRetainedRecords,
                 benchmarkPhases = benchmark,
                 benchmarkAllocationAccounting = benchmarkAllocationAccounting,
                 ringDecodeMode = ringDecodeMode,
@@ -586,6 +598,7 @@ internal object TierEKernelSmoke {
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +
+                "configured_max_retained_records=$maxRetainedRecords " +
                 "benchmark_control_evidence=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "none" else "EXPECTED_INCOMPLETE"} " +
                 "lastMarkerPidTgid=${lastMarkerPidTgid.toULong().toString(16)} " +
                 "observations=${profile.syscalls.size} resolved=$resolved workload_resolved=$workloadResolved workloadFrames=${workloadResolved > 0} " +

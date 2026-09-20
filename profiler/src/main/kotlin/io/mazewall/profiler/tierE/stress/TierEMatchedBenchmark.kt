@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.stress
 
 import io.mazewall.profiler.internal.attribution.TierECaptureProfile
+import io.mazewall.profiler.internal.attribution.TierEOptions
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -295,6 +296,7 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.lifecycle-scenario=${config.lifecycleScenario}",
                 "-Dmazewall.tier-e.capture-yield=$captureYield",
                 "-Dmazewall.tier-e.ring-capacity-bytes=${configuredBenchmarkRingCapacity()}",
+                "-Dmazewall.tier-e.max-retained-records=${configuredBenchmarkMaxRetainedRecords()}",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
                 "-D${TierECommonFileWorkload.APPLICATION_KIND_PROPERTY}=${config.workload.applicationKind.wireName}",
                 "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
@@ -2212,6 +2214,18 @@ internal object TierEMatchedBenchmark {
         System.getProperty("mazewall.tier-e.benchmark-ring-capacity-bytes", "8388608").toInt().also { capacity ->
             require(capacity >= 1 shl 20 && capacity and (capacity - 1) == 0) {
                 "mazewall.tier-e.benchmark-ring-capacity-bytes must be a power of two at least 1048576"
+            }
+        }
+
+    internal fun configuredBenchmarkMaxRetainedRecords(): Int =
+        System
+            .getProperty(
+            "mazewall.tier-e.benchmark-max-retained-records",
+            TierEOptions.DEFAULT_RECORD_LIMIT.toString(),
+        ).toInt()
+            .also { limit ->
+            require(limit > 0) {
+                "mazewall.tier-e.benchmark-max-retained-records must be positive"
             }
         }
 

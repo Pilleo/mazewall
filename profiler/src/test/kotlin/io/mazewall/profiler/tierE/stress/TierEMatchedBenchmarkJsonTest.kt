@@ -12,6 +12,7 @@ import io.mazewall.profiler.internal.attribution.TierERingDecodeMode
 import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
@@ -475,6 +476,22 @@ class TierEMatchedBenchmarkJsonTest {
         assertEquals(2, phases.ringMaxBatchRecords)
         assertEquals(5, phases.kernelRingLosses)
         assertEquals(7, phases.retainedResultDrops)
+    }
+
+    @Test
+    fun `benchmark retained record limit must be positive`() {
+        val property = "mazewall.tier-e.benchmark-max-retained-records"
+        val previous = System.getProperty(property)
+        try {
+            System.setProperty(property, "250000")
+            assertEquals(250000, TierEMatchedBenchmark.configuredBenchmarkMaxRetainedRecords())
+            System.setProperty(property, "0")
+            assertFailsWith<IllegalArgumentException> {
+                TierEMatchedBenchmark.configuredBenchmarkMaxRetainedRecords()
+            }
+        } finally {
+            if (previous == null) System.clearProperty(property) else System.setProperty(property, previous)
+        }
     }
 
     @Test

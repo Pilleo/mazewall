@@ -9,6 +9,7 @@ LOAD=${MAZEWALL_TIER_E_SUSTAINED_LOAD:-below_capacity}
 RECEIPT_CLOCK=${MAZEWALL_TIER_E_SUSTAINED_RECEIPT_CLOCK:-monotonic}
 STAGE_SECONDS=${MAZEWALL_TIER_E_SUSTAINED_STAGE_SECONDS:-10}
 ITERATIONS=${MAZEWALL_TIER_E_SUSTAINED_ITERATIONS:-200}
+MAX_RETAINED_RECORDS=${MAZEWALL_TIER_E_SUSTAINED_MAX_RETAINED_RECORDS:-100000}
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
@@ -47,8 +48,9 @@ trap finish EXIT
 
 [[ "${STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained stage seconds: ${STAGE_SECONDS}" >&2; exit 2; }
 [[ "${ITERATIONS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained iterations: ${ITERATIONS}" >&2; exit 2; }
+[[ "${MAX_RETAINED_RECORDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained max retained records: ${MAX_RETAINED_RECORDS}" >&2; exit 2; }
 
-event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS}"
+event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} max_retained_records=${MAX_RETAINED_RECORDS}"
 for rate in ${PILOT_RATES}; do
     [[ "${rate}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained rate: ${rate}" >&2; exit 2; }
     total_operations=$((rate * STAGE_SECONDS))
@@ -67,6 +69,7 @@ for rate in ${PILOT_RATES}; do
         MAZEWALL_TIER_E_ITERATIONS="${ITERATIONS}" \
         MAZEWALL_TIER_E_BATCHES="${batches}" \
         MAZEWALL_TIER_E_RUN_LEVEL="${RUN_LEVEL}" \
+        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${MAX_RETAINED_RECORDS}" \
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${stage}"
     jq -e -s '
         ([.[] | select(.kind == "terminal" and .success == true)] | length == 1) and
