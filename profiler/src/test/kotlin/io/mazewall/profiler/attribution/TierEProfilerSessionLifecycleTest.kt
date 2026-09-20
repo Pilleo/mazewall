@@ -93,10 +93,13 @@ class TierEProfilerSessionLifecycleTest {
 
         session.poll()
         session.poll()
+        val metrics = session.benchmarkPhaseMetrics()
         val profile = session.finish(Path.of("ignored"))
 
         assertEquals(1, profile.syscalls.size)
         assertEquals(1, profile.integrity.observedLosses)
+        assertEquals(0, metrics.kernelRingLosses)
+        assertEquals(1, metrics.retainedResultDrops)
         assertEquals(CaptureGuarantee.INCOMPLETE, profile.integrity.guarantee)
     }
 

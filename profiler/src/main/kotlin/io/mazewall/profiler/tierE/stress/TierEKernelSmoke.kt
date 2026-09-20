@@ -597,6 +597,7 @@ internal object TierEKernelSmoke {
                 "reconciliation_kernel_active_observations=${profile.integrity.reconciliation.kernelActiveObservations} " +
                 "kernel_active_before_detach=${kernelActiveBeforeDetach ?: -1} " +
                 "unknown_other=$unexplainedUnknown wrong=$wrong lost=${profile.integrity.observedLosses} " +
+                "kernel_ring_loss=${collectorPhases.kernelRingLosses} retained_result_drops=${collectorPhases.retainedResultDrops} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=${profile.integrity.coverageComplete} " +
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +

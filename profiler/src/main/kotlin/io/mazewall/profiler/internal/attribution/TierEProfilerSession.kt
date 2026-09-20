@@ -212,6 +212,7 @@ internal class TierEProfilerSession internal constructor(
     private var ringReadyRecords = 0L
     private var ringDrainBatches = 0L
     private var ringMaxBatchRecords = 0L
+    private var retainedResultDrops = 0L
     private var ringReaderInitializationNanos = 0L
     private var collectorJoinNanos = 0L
     private var collectorPolls = 0L
@@ -373,6 +374,8 @@ internal class TierEProfilerSession internal constructor(
         ringReadyRecords = ringReadyRecords,
         ringBatches = ringDrainBatches,
         ringMaxBatchRecords = ringMaxBatchRecords,
+        kernelRingLosses = reportedKernelLosses,
+        retainedResultDrops = retainedResultDrops,
         ringReaderInitializationNanos = ringReaderInitializationNanos,
         collectorJoinNanos = collectorJoinNanos,
         polls = collectorPolls,
@@ -615,7 +618,10 @@ internal class TierEProfilerSession internal constructor(
             retained.forEach(collector::acknowledgeEmission)
         }
         val discarded = batch.size - accepted
-        if (discarded > 0) collector.recordLoss(discarded.toLong())
+        if (discarded > 0) {
+            retainedResultDrops += discarded
+            collector.recordLoss(discarded.toLong())
+        }
     }
 
     private fun refreshLossCounters() {
@@ -719,6 +725,8 @@ internal data class TierECollectorPhaseMetrics(
     val ringReadyRecords: Long = 0,
     val ringBatches: Long = 0,
     val ringMaxBatchRecords: Long = 0,
+    val kernelRingLosses: Long = 0,
+    val retainedResultDrops: Long = 0,
     val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,
