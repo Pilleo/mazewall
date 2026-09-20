@@ -14,7 +14,10 @@ import java.util.Set;
 
 /** Minimal class-file metadata reader used to select annotated tests without class loading. */
 final class FreshJvmClassSelector {
-    private static final String FRESH_JVM_DESCRIPTOR = "Lio/mazewall/NeedsFreshJvm;";
+    private static final Set<String> FRESH_JVM_DESCRIPTORS = Set.of(
+        "Lio/mazewall/NeedsFreshJvm;",
+        "Lio/mazewall/enforcer/api/NeedsFreshJvm;"
+    );
     private static final Set<String> JUNIT_TEST_DESCRIPTORS = Set.of(
         "Lorg/junit/jupiter/api/Test;", "Lorg/junit/jupiter/api/RepeatedTest;",
         "Lorg/junit/jupiter/api/TestTemplate;", "Lorg/junit/jupiter/api/TestFactory;",
@@ -140,7 +143,7 @@ final class FreshJvmClassSelector {
             skipMembers(input, pool);
             List<MethodMetadata> methods = readMethods(input, pool);
             Set<String> annotations = classAnnotations(input, pool);
-            return new ClassMetadata(name, parent, List.copyOf(interfaces), annotations.contains(FRESH_JVM_DESCRIPTOR),
+            return new ClassMetadata(name, parent, List.copyOf(interfaces), annotations.stream().anyMatch(FRESH_JVM_DESCRIPTORS::contains),
                 annotations.contains(NESTED_DESCRIPTOR), access, List.copyOf(methods));
         }
     }
@@ -199,7 +202,7 @@ final class FreshJvmClassSelector {
                 byte[] bytes = input.readNBytes(length);
                 if (bytes.length != length) throw new IOException("Truncated member attribute");
                 if (annotationAttribute(attribute)) {
-                    freshJvm |= hasAnnotation(bytes, pool, FRESH_JVM_DESCRIPTOR);
+                    freshJvm |= hasAnyAnnotation(bytes, pool, FRESH_JVM_DESCRIPTORS);
                     for (String descriptorName : JUNIT_TEST_DESCRIPTORS) junitTest |= hasAnnotation(bytes, pool, descriptorName);
                 }
             }
@@ -217,7 +220,7 @@ final class FreshJvmClassSelector {
             byte[] bytes = input.readNBytes(length);
             if (bytes.length != length) throw new IOException("Truncated class attribute");
             if (annotationAttribute(name)) {
-                if (hasAnnotation(bytes, pool, FRESH_JVM_DESCRIPTOR)) annotations.add(FRESH_JVM_DESCRIPTOR);
+                if (hasAnyAnnotation(bytes, pool, FRESH_JVM_DESCRIPTORS)) annotations.addAll(FRESH_JVM_DESCRIPTORS);
                 if (hasAnnotation(bytes, pool, NESTED_DESCRIPTOR)) annotations.add(NESTED_DESCRIPTOR);
             }
         }
@@ -235,6 +238,13 @@ final class FreshJvmClassSelector {
             for (int index = 0; index < count; index++) found |= readAnnotation(input, pool, descriptor);
             return found;
         }
+    }
+
+    private static boolean hasAnyAnnotation(byte[] bytes, Object[] pool, Set<String> descriptors) throws IOException {
+        for (String descriptor : descriptors) {
+            if (hasAnnotation(bytes, pool, descriptor)) return true;
+        }
+        return false;
     }
 
     private static boolean readAnnotation(DataInputStream input, Object[] pool, String descriptor) throws IOException {

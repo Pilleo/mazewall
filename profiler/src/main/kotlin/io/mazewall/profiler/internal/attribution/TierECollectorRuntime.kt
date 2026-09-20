@@ -19,7 +19,15 @@ internal data class TierECollectorRuntimeResult(
     val profile: TierEProfile,
     val metrics: TierECollectorServiceMetrics,
     val terminalReason: TierETerminalReason,
-)
+) {
+    fun withTerminalDeliveryFailure(): TierECollectorRuntimeResult =
+        copy(
+            profile = TierEProfile(
+                profile.syscalls,
+                profile.integrity.copy(terminalDeliveryFailures = profile.integrity.terminalDeliveryFailures + 1),
+            ),
+        )
+}
 
 internal enum class TierETerminalReason {
     COMPLETE,

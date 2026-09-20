@@ -17,8 +17,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
         val agent = (System.getProperty("tier.e.agent") ?: System.getenv("TIER_E_AGENT_LIBRARY"))?.let(Path::of)
         val workloadClasspath = System.getProperty("tier.e.workloadClasspath")
             ?: System.getenv("TIER_E_WORKLOAD_CLASSPATH")
-        val uid = Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Int
-        assumeTrue(uid == 0 && agent != null && workloadClasspath != null, "rootful Tier E fixture environment is required")
+        assumeTrue(agent != null && workloadClasspath != null, "rootful Tier E fixture environment is required")
         requireNotNull(agent)
         requireNotNull(workloadClasspath)
 

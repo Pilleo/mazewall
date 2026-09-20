@@ -74,6 +74,7 @@ internal class TierEDaemonService(
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
+    private var lastTerminalResult: TierECollectorRuntimeResult? = null
     private var activeMarkerTransport = "idle"
     private var activeMarkerFallbackReason: String? = null
 
@@ -111,6 +112,8 @@ internal class TierEDaemonService(
                         "collector_state=${metrics.state} worker_alive=${metrics.workerAlive} " +
                         "polls=${metrics.loop.polls} active_polls=${metrics.loop.activePolls} " +
                         "idle_polls=${metrics.loop.idlePolls} failure=${metrics.failure ?: "none"}"
+                } ?: lastTerminalResult?.let { result ->
+                    "engine=idle terminal_transport_complete=${result.profile.integrity.verdictDimensions.transportComplete}"
                 } ?: "engine=idle"
                 ControlReply.ok(statusText).render().trimEnd()
             }
@@ -196,12 +199,12 @@ internal class TierEDaemonService(
             )
         val result = runCatching { active.runtime.finish(artifact, if (closure == TierEProducerClosure.PROVEN) producerClosure else closure) }
             .getOrNull()
-        if (result != null) deliverResult(result)
+        if (result != null) lastTerminalResult = deliverResult(result)
     }
 
-    private fun deliverResult(result: TierECollectorRuntimeResult) {
+    private fun deliverResult(result: TierECollectorRuntimeResult): TierECollectorRuntimeResult =
         runCatching { resultSink.accept(result) }
-    }
+            .fold(onSuccess = { result }, onFailure = { result.withTerminalDeliveryFailure() })
 
     private data class ActiveSession(
         val runtime: TierECollectorRuntime,
@@ -210,5 +213,5 @@ internal class TierEDaemonService(
 }
 
 private fun runningAsRoot(): Boolean =
-    (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Int) == 0 ||
+    (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Number)?.toLong() == 0L ||
         System.getProperty("user.name") == "root"

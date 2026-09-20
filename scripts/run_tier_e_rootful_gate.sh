@@ -48,6 +48,11 @@ docker run --rm --privileged --pid=host --network=host --userns=host \
             echo "Tier E native-backed end-to-end fixture was skipped" >&2
             exit 1
         fi
+        if grep -q 'TierEDaemonNativeWorkflowIntegrationTest' profiler/build/test-results/integrationTestFreshJvm/*.xml && \
+           grep -q 'skipped="1"' profiler/build/test-results/integrationTestFreshJvm/*TierEDaemonNativeWorkflowIntegrationTest*.xml; then
+            echo "Tier E daemon-owned native workflow fixture was skipped" >&2
+            exit 1
+        fi
     '
 
 cat > "${ARTIFACT_DIR}/run-metadata.txt" <<EOF

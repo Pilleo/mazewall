@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -70,6 +71,23 @@ class TierECollectorRuntimeTest {
         assertTrue(detach >= 0)
         assertTrue(detach < finalDrain)
         assertTrue(finalDrain < close)
+    }
+
+    @Test
+    fun `terminal sink failure makes retained result transport incomplete`() {
+        val source = RuntimeSource()
+        val session = session(source)
+        val runtime = TierECollectorRuntime(session)
+        val artifact = TierEDefinitionArtifact(Path.of("ignored"), session.currentSessionEpoch())
+        runtime.start()
+        assertTrue(source.drainStarted.await(1, TimeUnit.SECONDS))
+        val result = runtime.finish(artifact, TierEProducerClosure.PROVEN)
+
+        val incomplete = result.withTerminalDeliveryFailure()
+
+        assertEquals(1, incomplete.profile.integrity.terminalDeliveryFailures)
+        assertFalse(incomplete.profile.integrity.verdictDimensions.transportComplete)
+        assertEquals(CaptureGuarantee.INCOMPLETE, incomplete.profile.integrity.guarantee)
     }
 
     private fun session(source: RuntimeSource) =

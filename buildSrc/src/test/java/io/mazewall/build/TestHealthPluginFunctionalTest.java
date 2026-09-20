@@ -45,8 +45,8 @@ final class TestHealthPluginFunctionalTest {
                 """, StandardCharsets.UTF_8);
             write(root, "src/test/java/fixture/FirstTest.java", testSource("FirstTest"));
             write(root, "src/test/java/fixture/SecondTest.java", testSource("SecondTest"));
-            write(root, "src/test/java/io/mazewall/NeedsFreshJvm.java", """
-                package io.mazewall;
+            write(root, "src/test/java/io/mazewall/enforcer/api/NeedsFreshJvm.java", """
+                package io.mazewall.enforcer.api;
                 import java.lang.annotation.*;
                 import org.junit.jupiter.api.Tag;
                 @Inherited @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.TYPE, ElementType.METHOD})
@@ -54,7 +54,7 @@ final class TestHealthPluginFunctionalTest {
                 """);
             write(root, "src/test/java/fixture/FreshTest.java", """
                 package fixture;
-                import io.mazewall.NeedsFreshJvm;
+                import io.mazewall.enforcer.api.NeedsFreshJvm;
                 import org.junit.jupiter.api.*;
                 import org.junit.jupiter.api.extension.*;
                 import org.junit.jupiter.params.ParameterizedTest;
@@ -79,7 +79,7 @@ final class TestHealthPluginFunctionalTest {
                 """);
             write(root, "src/test/java/fixture/InheritedNestedTest.java", """
                 package fixture;
-                import io.mazewall.NeedsFreshJvm;
+                import io.mazewall.enforcer.api.NeedsFreshJvm;
                 import org.junit.jupiter.api.*;
                 abstract class AbstractNestedBase {
                     @Nested class InheritedInner {
