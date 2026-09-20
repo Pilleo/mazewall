@@ -30,7 +30,9 @@ import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Duration
+import java.util.HexFormat
 import kotlin.system.exitProcess
 
 /** Privileged end-to-end diagnostic used by the Docker kernel gate. */
@@ -553,6 +555,30 @@ internal object TierEKernelSmoke {
             } else {
                 "full_exact"
             }
+            val semanticExpectedOperations = when {
+                writeOracleWorkload -> TierEWriteOracleWorkload.expectedOperationIds(
+                    warmups = args.getOrElse(11) { "3" }.toInt(),
+                    batches = args.getOrElse(12) { "10" }.toInt(),
+                    iterations = args.getOrElse(5) { "1" }.toInt(),
+                )
+                sharedOpenatOracleWorkload -> expectedOpenatFds
+                else -> emptySet()
+            }
+            val semanticSyscallNumber = if (writeOracleWorkload) SYS_WRITE else SYS_OPENAT
+            val semanticArgumentIndex = if (writeOracleWorkload) 2 else 0
+            val semanticRecords = profile.syscalls.filter { syscall ->
+                syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                    syscall.observation.syscallNumber == semanticSyscallNumber &&
+                    syscall.observation.args[semanticArgumentIndex].toInt() in semanticExpectedOperations
+            }
+            val semanticStackDigest = semanticStackDigest(semanticRecords)
+            val semanticStackComplete = operationOracleAvailable &&
+                oracle.matched == oracle.expected &&
+                oracle.duplicates == 0L &&
+                oracle.wrong == 0L &&
+                oracle.unclassified == 0L &&
+                semanticRecords.size.toLong() == oracle.expected &&
+                semanticStackDigest != null
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
@@ -581,6 +607,9 @@ internal object TierEKernelSmoke {
                 "unclassified_operations=${oracle.unclassified} operation_oracle_available=$operationOracleAvailable " +
                 "unique_edge_observer_enabled=$uniqueEdgeObserverEnabled " +
                 "operation_oracle_expectation=$operationOracleExpectation " +
+                "profile_semantic_stack_complete=$semanticStackComplete " +
+                "profile_semantic_stack_records=${semanticRecords.size} " +
+                "profile_semantic_stack_digest=${semanticStackDigest ?: "unavailable"} " +
                 "capture_yield_records=${captureYield?.records?.size ?: 0} " +
                 "capture_yield_captured=${captureYield?.captured ?: 0} " +
                 "capture_yield_capture_failed=${captureYield?.captureFailed ?: 0} " +
@@ -811,6 +840,47 @@ internal object TierEKernelSmoke {
                     "failed to pin target to CPU $cpu: $output"
                 }
             }
+    }
+
+    /**
+     * Hashes normalized decoded frames only after the oracle selected its declared operations.
+     * The comparison is deliberately restricted to the workload-owned frame chain. Stack,
+     * invocation, class-loader instance IDs, bytecode locations, and JDK implementation frames
+     * are not stable across independent JVM compilation histories. Session dictionaries retain
+     * the complete exact stack; this benchmark proves that both profiles preserve the declared
+     * workload's decoded logical frames for every oracle-selected operation.
+     */
+    internal fun semanticStackDigest(records: List<io.mazewall.profiler.internal.attribution.ResolvedSyscall>): String? {
+        if (records.isEmpty()) return null
+        return semanticStackDefinitionDigest(
+            records.map { syscall ->
+                checkNotNull(syscall.stackDefinition) { "resolved syscall lacks a stack definition" }
+            },
+        )
+    }
+
+    internal fun semanticStackDefinitionDigest(definitions: List<io.mazewall.profiler.internal.attribution.StackDefinition>): String? {
+        if (definitions.isEmpty()) return null
+        val canonical = definitions
+            .map { definition ->
+            val workloadFrames = definition.frames.filter { it.className.startsWith("io.mazewall.profiler.tierE.stress.") }
+            check(workloadFrames.isNotEmpty()) { "oracle-selected syscall lacks a workload-owned frame" }
+            buildString {
+                appendField(definition.captureQuality.name)
+                workloadFrames.forEach { frame ->
+                    appendField(frame.className)
+                    appendField(frame.methodName)
+                    appendField(frame.descriptor)
+                    appendField(frame.kind.name)
+                }
+            }
+        }.sorted()
+            .joinToString(separator = "\n")
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical.encodeToByteArray()))
+    }
+
+    private fun StringBuilder.appendField(value: String) {
+        append(value.length).append(':').append(value).append(';')
     }
 
     private const val AFFINITY_TIMEOUT_SECONDS = 10L

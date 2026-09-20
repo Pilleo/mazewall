@@ -1,5 +1,10 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.internal.attribution.ManagedFrame
+import io.mazewall.profiler.internal.attribution.ManagedFrameKind
+import io.mazewall.profiler.internal.attribution.StackCaptureQuality
+import io.mazewall.profiler.internal.attribution.StackDefinition
+import io.mazewall.profiler.internal.attribution.StackTraceId
 import io.mazewall.profiler.internal.attribution.TierECaptureProfile
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEReadyTransferMode
@@ -556,9 +561,12 @@ class TierEMatchedBenchmarkJsonTest {
                 fullWorkloadCorrect = true,
                 fullEvidenceComplete = true,
                 fullCaptureEfficiencyValid = true,
+                fullSemanticStackComplete = true,
                 narrowedWorkloadCorrect = true,
                 narrowedEvidenceComplete = true,
                 narrowedCaptureEfficiencyValid = true,
+                narrowedSemanticStackComplete = true,
+                semanticStacksEquivalent = true,
             ),
         )
         assertEquals(
@@ -567,10 +575,48 @@ class TierEMatchedBenchmarkJsonTest {
                 fullWorkloadCorrect = true,
                 fullEvidenceComplete = true,
                 fullCaptureEfficiencyValid = true,
+                fullSemanticStackComplete = true,
                 narrowedWorkloadCorrect = true,
                 narrowedEvidenceComplete = true,
                 narrowedCaptureEfficiencyValid = false,
+                narrowedSemanticStackComplete = true,
+                semanticStacksEquivalent = true,
             ),
+        )
+        assertEquals(
+            listOf("logical_stack_content_mismatch"),
+            TierEMatchedBenchmark.captureProfilePairExclusionReasons(
+                fullWorkloadCorrect = true,
+                fullEvidenceComplete = true,
+                fullCaptureEfficiencyValid = true,
+                fullSemanticStackComplete = true,
+                narrowedWorkloadCorrect = true,
+                narrowedEvidenceComplete = true,
+                narrowedCaptureEfficiencyValid = true,
+                narrowedSemanticStackComplete = true,
+                semanticStacksEquivalent = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `capture-profile semantic digest normalizes JVM-local loader and location details`() {
+        fun definition(
+            id: Long,
+            loader: String,
+            location: Long,
+        ) = StackDefinition(
+            StackTraceId(id),
+            listOf(
+                ManagedFrame(loader, "io.mazewall.profiler.tierE.stress.Workload", "run", "()V", location, ManagedFrameKind.JAVA),
+                ManagedFrame("bootstrap", "java.nio.file.Files", "readAllBytes", "(Ljava/nio/file/Path;)[B", 88, ManagedFrameKind.JAVA),
+            ),
+            StackCaptureQuality.COMPLETE,
+        )
+
+        assertEquals(
+            TierEKernelSmoke.semanticStackDefinitionDigest(listOf(definition(1, "loader-A", 1))),
+            TierEKernelSmoke.semanticStackDefinitionDigest(listOf(definition(2, "loader-B", 999))),
         )
     }
 

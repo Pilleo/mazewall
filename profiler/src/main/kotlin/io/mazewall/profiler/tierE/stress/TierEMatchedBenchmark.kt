@@ -416,6 +416,8 @@ internal object TierEMatchedBenchmark {
             output.contains("operation_oracle_expectation=callback_suppressed_outer"),
             metricOrZero(output, "callback_probe_resolved"),
             output.contains("unique_edge_observer_enabled=false"),
+            output.contains("profile_semantic_stack_complete=true"),
+            semanticStackDigest(output),
             TierEBenchmarkContract.OperationOracle(
                 available = output.contains("operation_oracle_available=true"),
                 expected = metricOrZero(output, "expected_operations"),
@@ -596,6 +598,8 @@ internal object TierEMatchedBenchmark {
     ): String? = if (injectedTermination) "injected_child_termination" else failureClass(output)
 
     private fun selectedMarkerTransport(output: String): String? = Regex("tier-e-kernel-smoke: marker_transport=([^\\s]+)").find(output)?.groupValues?.get(1)
+
+    internal fun semanticStackDigest(output: String): String? = Regex("profile_semantic_stack_digest=([0-9a-f]{64})").find(output)?.groupValues?.get(1)
 
     private fun metadata(
         config: Config,
@@ -806,6 +810,8 @@ internal object TierEMatchedBenchmark {
             "\"unclassified_operations\":${evidence.operationOracle.unclassified}",
             "\"operation_oracle_available\":${evidence.operationOracle.available}",
             "\"operation_oracle_representative_only\":${evidence.operationOracle.representativeOnly}",
+            "\"profile_semantic_stack_complete\":${evidence.profileSemanticStackComplete}",
+            "\"profile_semantic_stack_digest\":${evidence.profileSemanticStackDigest?.let { "\"$it\"" } ?: "null"}",
             "\"duplicate_acknowledgement_accounting\":\"unavailable\"",
             "\"evidence_complete\":${evidence.evidenceComplete}",
             "\"phases\":${phaseJson(evidence.phases)}",
@@ -1130,17 +1136,23 @@ internal object TierEMatchedBenchmark {
         fullWorkloadCorrect: Boolean,
         fullEvidenceComplete: Boolean,
         fullCaptureEfficiencyValid: Boolean,
+        fullSemanticStackComplete: Boolean,
         narrowedWorkloadCorrect: Boolean,
         narrowedEvidenceComplete: Boolean,
         narrowedCaptureEfficiencyValid: Boolean,
+        narrowedSemanticStackComplete: Boolean,
+        semanticStacksEquivalent: Boolean,
     ): List<String> =
         buildList {
         if (!fullWorkloadCorrect) add("full_workload_correctness")
         if (!fullEvidenceComplete) add("full_evidence_integrity")
         if (!fullCaptureEfficiencyValid) add("full_capture_efficiency")
+        if (!fullSemanticStackComplete) add("full_logical_stack_content")
         if (!narrowedWorkloadCorrect) add("narrowed_workload_correctness")
         if (!narrowedEvidenceComplete) add("narrowed_evidence_integrity")
         if (!narrowedCaptureEfficiencyValid) add("narrowed_capture_efficiency")
+        if (!narrowedSemanticStackComplete) add("narrowed_logical_stack_content")
+        if (!semanticStacksEquivalent) add("logical_stack_content_mismatch")
     }
 
     private fun terminal(
@@ -1619,9 +1631,13 @@ internal object TierEMatchedBenchmark {
                     // long exact session ends. Session evidence and the operation oracle are the
                     // admission proof; do not turn diagnostic truncation into a false rejection.
                     fullCaptureEfficiencyValid = true,
+                    fullSemanticStackComplete = results.first.evidence.profileSemanticStackComplete,
                     narrowedWorkloadCorrect = results.second.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.PASS,
                     narrowedEvidenceComplete = results.second.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.COMPLETE,
                     narrowedCaptureEfficiencyValid = true,
+                    narrowedSemanticStackComplete = results.second.evidence.profileSemanticStackComplete,
+                    semanticStacksEquivalent = results.first.evidence.profileSemanticStackDigest != null &&
+                        results.first.evidence.profileSemanticStackDigest == results.second.evidence.profileSemanticStackDigest,
                 )
                 reasons.takeIf { it.isNotEmpty() }?.let { fork to it }
             }.toMap()
@@ -2482,6 +2498,8 @@ internal object TierEMatchedBenchmark {
         val callbackSuppressionScenario: Boolean,
         val callbackProbeResolved: Long,
         val observerFreeUniqueEdgeMeasurement: Boolean,
+        val profileSemanticStackComplete: Boolean,
+        val profileSemanticStackDigest: String?,
         val operationOracle: TierEBenchmarkContract.OperationOracle,
         val phases: PhaseMetrics,
         val captureYield: CaptureYieldMetrics,
