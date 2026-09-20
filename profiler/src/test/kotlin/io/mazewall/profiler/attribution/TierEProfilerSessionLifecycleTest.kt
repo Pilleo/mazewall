@@ -340,6 +340,27 @@ class TierEProfilerSessionLifecycleTest {
     }
 
     @Test
+    fun `benchmark drain batches exclude empty continuous polling attempts`() {
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(
+                events = ArrayDeque(listOf(emptyList(), listOf(event(1uL), event(2uL)))),
+            ),
+            processEpoch = 1,
+            options = TierEOptions(benchmarkPhases = true),
+            definitionReader = { emptyDefinitions() },
+            nanoTime = { 0L },
+        )
+
+        session.poll()
+        session.poll()
+
+        val metrics = session.benchmarkPhaseMetrics()
+        assertEquals(2, metrics.ringReadyRecords)
+        assertEquals(1, metrics.ringBatches)
+        assertEquals(2, metrics.ringMaxBatchRecords)
+    }
+
+    @Test
     fun `consecutive task identity control reuses only the same task`() {
         val session = TierEProfilerSession(
             source = FakeTierEEventSource(events = ArrayDeque(listOf(listOf(event(1uL, tid = 2u), event(2uL, tid = 2u), event(3uL, tid = 3u))))),

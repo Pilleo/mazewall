@@ -286,8 +286,10 @@ internal class TierEProfilerSession internal constructor(
                 // event is an owned READY record, so this denominator is exact without adding
                 // measurement work to the record loop.
                 ringReadyRecords += drained.events.size
-                ringDrainBatches++
-                ringMaxBatchRecords = maxOf(ringMaxBatchRecords, drained.events.size.toLong())
+                if (drained.events.isNotEmpty()) {
+                    ringDrainBatches++
+                    ringMaxBatchRecords = maxOf(ringMaxBatchRecords, drained.events.size.toLong())
+                }
                 ringReaderInitializationNanos += drained.metrics.readerInitializationNanos
             }.events
                 .also {
