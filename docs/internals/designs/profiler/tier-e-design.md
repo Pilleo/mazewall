@@ -238,10 +238,14 @@ unless that exact logical stack has been proven at the corresponding native boun
 4. **[Implemented contract] Prefer a validated lower-cost marker transport.** On x86_64 an `AUTO`
    attachment selects the verified versioned USDT marker and retains the same per-thread state
    transitions and binary/attachment verification as the plain-uprobe compatibility path.
-5. **[Required hardening] Evaluate scoped tracepoint attachment for node scale.** Per-platform-TID perf tracepoints
-   could avoid running the system-wide raw-tracepoint filter for unrelated host processes. This is
-   an operational-cost optimization only; it must correctly track JVM thread lifecycle and carrier
-   threads before it can replace the current global attachment.
+5. **[Historical evidence: rejected on the measured host] Scoped tracepoint attachment for node scale.**
+   Per-platform-TID perf tracepoints could avoid running the system-wide raw-tracepoint filter for
+   unrelated host processes, but they would need full JVM/carrier lifecycle tracking. The rootful
+   five-pair node-noise probe observed mixed unrelated-workload deltas from `-59.27%` to `+11.05%`,
+   with a `-5.17%` median. It missed the predeclared `>=15%` stable-cost gate, so the risky
+   attachment prototype is not justified on this host and the global raw tracepoint remains
+   unchanged. This does not claim zero node-wide cost on every kernel or workload. See
+   [tier-e-node-noise-rootful-decision-20260920.json](../../evidence/tier-e-node-noise-rootful-decision-20260920.json).
 6. **[Historical evidence: rejected default] Readiness-driven ring collection.** Polling the ring
    map descriptor after an empty drain preserved complete evidence and zero loss, but the
    fifteen-fork decision reached only 11.34% median collector-process CPU improvement in
@@ -1479,17 +1483,24 @@ confidence intervals, and it compares adaptive polling rather than the separatel
 readiness policy, so continuous polling remains the production default. See
 [tier-e-sustained-receipt-rootful-decision-20260920.json](../../evidence/tier-e-sustained-receipt-rootful-decision-20260920.json).
 
-**Historical evidence.** The rootful fifteen-fork capture-profile decision compared full capture
-with the opt-in `jdk25-unix-openat0` domain on the same syscall-dense application oracle. Both
-profiled arms matched all 1,300 declared operations per fork and retained complete terminal
-evidence. The full-minus-selected paired median was `392.10 us` per measured batch with a
-bootstrap interval of `30.98 us` to `778.13 us`; this is operational guidance for the declared
-capture domain, not a universal application slowdown or a default change. Full capture remains
+**Historical evidence.** A clean-source rootful fifteen-fork capture-profile decision compared
+full capture with the opt-in `jdk25-unix-openat0` domain on the same syscall-dense application
+oracle. Both arms matched all 1,300 declared operations per fork, retained complete dictionary and
+lifecycle evidence, and produced the same normalized decoded workload-frame digest in all 15
+pairs. The digest compares every oracle-selected record's complete workload-owned frame chain,
+including class, method, descriptor, kind, quality, multiplicity, and ordering. It deliberately
+normalizes stack/invocation/class-loader instance IDs, bytecode locations, and JDK implementation
+frames because those values are not reproducible across isolated JVM compilation histories; each
+session's immutable MZSD dictionary remains the authority for its complete exact stack.
+
+Full capture admitted 300 native boundaries per measured batch while the selected profile admitted
+100. The paired full-minus-selected median was `309.568 us` per batch (bootstrap 95% interval
+`293.817..340.736 us`), or approximately `1.548 us` for each of the 200 additionally admitted
+boundaries in this specific workload. This is operational guidance for the declared capture domain,
+not a universal per-boundary cost, application slowdown, or a default change. Full capture remains
 the safest default. A selected profile covers only its declared binding set, and excluded bindings
-remain explicit capture-domain omissions. The retained harness proves operation-oracle and
-admitted dictionary-join equivalence; it does not retain a cross-JVM logical-frame transcript, so
-it does not claim byte-for-byte frame equivalence across separate JVM forks. See
-[tier-e-capture-profile-rootful-decision-20260920.json](../../evidence/tier-e-capture-profile-rootful-decision-20260920.json).
+remain explicit capture-domain omissions. See
+[tier-e-capture-profile-semantic-rootful-decision-20260920.json](../../evidence/tier-e-capture-profile-semantic-rootful-decision-20260920.json).
 
 The 2026-09-18 rootful matrices retained 270 profiled forks with complete evidence, exact
 operation-oracle matching, zero observed loss, and `policy_eligibility=false`. On that host,
@@ -2299,7 +2310,7 @@ runtime_overhead
 | Native outcome preservation | proxy admission and native tests | return/exception/errno fixture | capture_domain_validity |
 | Selected `sys_enter` boundary | Tier E BPF program | denied-attempt limitation artifact | capture_domain_validity |
 | Phase-level performance | native benchmark and baseline gate | JSON baseline and warmed run | runtime_overhead |
-| JDK-qualified narrowed capture profile | `VM_INIT` admission gate, `OpenatProfileWorkload`, paired benchmark runner | clean rootful five-fork full-versus-openat0 pair with explicit exclusions; `tier-e-capture-profile-20260917.jsonl` | `capture_domain_validity`, `attribution_coverage`, `lifecycle_validity`, `runtime_overhead` |
+| JDK-qualified narrowed capture profile | `VM_INIT` admission gate, `TierEKernelSmoke.semanticStackDefinitionDigest`, paired benchmark runner | clean rootful fifteen-fork full-versus-openat0 pair, complete workload-frame semantic digests, and explicit exclusions; `tier-e-capture-profile-semantic-rootful-decision-20260920.json` | `capture_domain_validity`, `attribution_coverage`, `dictionary_integrity`, `lifecycle_validity`, `runtime_overhead` |
 
 Unimplemented hardening is marked `planned` in evidence, never `implemented`.
 Tier E remains finite, fail-closed, and ineligible as policy input until the required

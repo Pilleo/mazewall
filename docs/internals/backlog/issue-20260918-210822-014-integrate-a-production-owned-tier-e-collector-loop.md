@@ -63,6 +63,11 @@ retained only as an explicit experiment and continuous polling remains the produ
    and `docs/internals/evidence/tier-e-sustained-receipt-rootful-decision-20260920.json`.
    A sustained overload run still needs ring-capacity, maximum-ready-per-drain, and retained-state
    high-water measurements before any default-policy promotion.
+   The completion fixture set also records deliberate child termination as durable incomplete
+   JSONL evidence and rejects a late dictionary-sink commit after terminal cleanup. These prove
+   interruption and blocked-sink fail-closed behavior without treating either run as performance
+   evidence. See `docs/internals/evidence/tier-e-child-termination-rootful-20260920.json` and
+   `DictionaryBatchPublisherTest.terminal cleanup rejects a late commit from a blocked sink`.
 4. Integrate the reusable loop into the non-harness production Tier E entry point when that entry
    point is introduced, retaining explicit producer closure and all five evidence dimensions.
 

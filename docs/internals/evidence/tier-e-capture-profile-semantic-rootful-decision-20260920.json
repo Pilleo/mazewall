@@ -1,0 +1,60 @@
+{
+  "kind": "tier_e_capture_profile_semantic_rootful_decision",
+  "timestamp": "2026-09-20",
+  "implementation_commit": "c021fec6",
+  "environment": {
+    "runner": "local rootful Docker",
+    "source_revision": "a7c28c6b1604fd6bea1ba9e92b69c581193afc4d",
+    "source_dirty": false,
+    "run_level": "decision",
+    "forks": 15,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "workload": "syscall_dense"
+  },
+  "command": "env -u DOCKER_HOST MAZEWALL_TIER_E_RUN_LEVEL=decision MAZEWALL_TIER_E_CALIBRATION=false MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-capture-profile MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-capture-profile-semantic-clean-decision-rootful",
+  "artifact": "build/tier-e-capture-profile-semantic-clean-decision-rootful/results.jsonl",
+  "terminal": "success",
+  "profiles": {
+    "full": {
+      "declared_domain": "all admitted native bindings",
+      "admitted_boundaries_per_measured_batch": 300
+    },
+    "jdk25-unix-openat0": {
+      "declared_domain": "JDK 25 UnixNativeDispatcher.openat0",
+      "admitted_boundaries_per_measured_batch": 100
+    }
+  },
+  "semantic_contract": {
+    "pairs": 15,
+    "complete_pairs": 15,
+    "equal_workload_frame_digest_pairs": 15,
+    "operation_oracle_matches_per_fork": 1300,
+    "normalized_fields": ["capture_quality", "class_name", "method_name", "descriptor", "frame_kind", "multiplicity", "sorted_record_order"],
+    "excluded_cross_jvm_fields": ["stack_trace_id", "invocation_id", "class_loader_instance_identity", "bytecode_location", "jdk_implementation_frames"],
+    "interpretation": "Each session retains its complete exact MZSD dictionary. The paired digest proves equivalence of all decoded workload-owned frame chains for oracle-selected operations across isolated JVM forks; it does not claim byte-for-byte equality of JVM-local runtime frames."
+  },
+  "performance": {
+    "full_minus_selected_median_ns_per_measured_batch": 309568,
+    "paired_bootstrap_95_ci_ns": [293817, 340736],
+    "additional_admitted_boundaries_per_measured_batch": 200,
+    "derived_ns_per_additional_admitted_boundary": 1547.84,
+    "interpretation": "Host- and workload-specific operational guidance only; full capture remains the default."
+  },
+  "related_fail_closed_fixtures": {
+    "child_termination": "tier-e-child-termination-rootful-20260920.json",
+    "blocked_sink": "DictionaryBatchPublisherTest.terminal cleanup rejects a late commit from a blocked sink",
+    "retention_exhaustion": "Tier E retention-exhaustion benchmark scope"
+  },
+  "dimensions": {
+    "capture_domain_validity": "complete_for_declared_domain",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete_for_declared_domain",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "measured"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "passed_for_opt_in_scope",
+  "policy_eligibility": false
+}
