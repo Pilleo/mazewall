@@ -718,6 +718,8 @@ internal object TierEMatchedBenchmark {
         val readyRecords = result.evidence.phases.ringReadyRecords
         val kernelRingLosses = result.evidence.phases.kernelRingLosses
         val retainedResultDrops = result.evidence.phases.retainedResultDrops
+        val pendingObservationBudgetDrops = result.evidence.phases.pendingObservationBudgetDrops
+        val pendingObservationQueueDrops = result.evidence.phases.pendingObservationQueueDrops
         val attemptedRecords = readyRecords + kernelRingLosses
         val lossFraction = if (attemptedRecords == 0L) 0.0 else kernelRingLosses.toDouble() / attemptedRecords.toDouble()
         return buildString {
@@ -730,6 +732,8 @@ internal object TierEMatchedBenchmark {
             append(",\"observed_evidence_loss\":").append(result.evidence.lost)
             append(",\"observed_ring_loss\":").append(kernelRingLosses)
             append(",\"retained_result_drops\":").append(retainedResultDrops)
+            append(",\"pending_observation_budget_drops\":").append(pendingObservationBudgetDrops)
+            append(",\"pending_observation_queue_drops\":").append(pendingObservationQueueDrops)
             append(",\"ready_records_total\":").append(readyRecords)
             append(",\"attempted_ring_records_total\":").append(attemptedRecords)
             append(",\"attempted_ring_records_per_second\":").append(operationsPerSecond(attemptedRecords, workloadNanos))
@@ -969,6 +973,8 @@ internal object TierEMatchedBenchmark {
             "\"ring_max_batch_records\":${phases.ringMaxBatchRecords}",
             "\"kernel_ring_loss\":${phases.kernelRingLosses}",
             "\"retained_result_drops\":${phases.retainedResultDrops}",
+            "\"pending_observation_budget_drops\":${phases.pendingObservationBudgetDrops}",
+            "\"pending_observation_queue_drops\":${phases.pendingObservationQueueDrops}",
             "\"serialization_ns\":${phases.serializationNanos}",
             "\"publication_bytes\":${phases.publicationBytes}",
             "\"publication_latency_ns\":${phases.publicationLatencyNanos}",
@@ -1063,6 +1069,8 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "cache_misses"),
             metricOrZero(output, "kernel_ring_loss"),
             metricOrZero(output, "retained_result_drops"),
+            metricOrZero(output, "pending_observation_budget_drops"),
+            metricOrZero(output, "pending_observation_queue_drops"),
         )
 
     private fun userNotifPhaseJson(phases: UserNotifPhaseMetrics): String =
@@ -2660,6 +2668,8 @@ internal object TierEMatchedBenchmark {
         val cacheMisses: Long,
         val kernelRingLosses: Long,
         val retainedResultDrops: Long,
+        val pendingObservationBudgetDrops: Long,
+        val pendingObservationQueueDrops: Long,
     )
 
     private data class UserNotifPhaseMetrics(

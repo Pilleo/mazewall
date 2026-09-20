@@ -212,6 +212,8 @@ internal class AttributionCollector(
     private var nextCandidateId: Long = 1
     private var finished = false
     private var pendingCount: Int = 0
+    private var pendingObservationBudgetDrops = 0L
+    private var pendingObservationQueueDrops = 0L
     private var attributionLifecycleValid = true
     private var resolvedEvidenceAllocatedBytes = 0L
     private var uniqueEdgeGateAllocatedBytes = 0L
@@ -248,6 +250,9 @@ internal class AttributionCollector(
 
     /** Benchmark-only allocation split across delayed dictionary join boundaries. */
     internal fun joinerAllocationBreakdown(): JoinerAllocationBreakdown = dictionaryJoiner.allocationBreakdown()
+
+    /** Separates bounded pending-observation admission failures for benchmark evidence. */
+    internal fun pendingObservationDropMetrics(): PendingObservationDropMetrics = PendingObservationDropMetrics(pendingObservationBudgetDrops, pendingObservationQueueDrops)
 
     /** Immutable IDs whose observations still require a terminal invocation definition. */
     internal fun pendingInvocationIds(): Set<InvocationId> = dictionaryJoiner.pendingInvocationIds()
@@ -318,11 +323,13 @@ internal class AttributionCollector(
     ) {
         if (knownJoinMode == TierEKnownJoinMode.DIRECT_KNOWN && resolveKnownFullStream(observation, target)) return
         if (!retainedBudget.tryReserve(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)) {
+            pendingObservationBudgetDrops++
             recordLoss()
             return
         }
         if (!dictionaryJoiner.enqueue(observation)) {
             retainedBudget.release(TierERetainedStateBudget.Category.PENDING_OBSERVATIONS, PENDING_OBSERVATION_BYTES)
+            pendingObservationQueueDrops++
             recordLoss()
             return
         }
@@ -651,6 +658,12 @@ internal data class UniqueEdgeAllocationBreakdown(
     val suppressionDiagnosticBytes: Long = 0,
     val candidateOwnershipBytes: Long = 0,
     val candidateDiagnosticBytes: Long = 0,
+)
+
+/** Benchmark evidence for the two bounded admission stages preceding delayed dictionary joins. */
+internal data class PendingObservationDropMetrics(
+    val budgetDrops: Long,
+    val queueDrops: Long,
 )
 
 /** Benchmark-only observation of collector-owned unique-edge delivery decisions. */

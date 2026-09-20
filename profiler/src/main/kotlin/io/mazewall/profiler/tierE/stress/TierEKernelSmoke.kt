@@ -278,6 +278,7 @@ internal object TierEKernelSmoke {
                 emissionMode = emissionMode,
                 stackTransport = stackTransport,
                 captureProfile = captureProfile,
+                maxPendingRecords = maxRetainedRecords,
                 maxRetainedRecords = maxRetainedRecords,
                 benchmarkPhases = benchmark,
                 benchmarkAllocationAccounting = benchmarkAllocationAccounting,
@@ -611,6 +612,8 @@ internal object TierEKernelSmoke {
                 "kernel_active_before_detach=${kernelActiveBeforeDetach ?: -1} " +
                 "unknown_other=$unexplainedUnknown wrong=$wrong lost=${profile.integrity.observedLosses} " +
                 "kernel_ring_loss=${collectorPhases.kernelRingLosses} retained_result_drops=${collectorPhases.retainedResultDrops} " +
+                "pending_observation_budget_drops=${collectorPhases.pendingObservationBudgetDrops} " +
+                "pending_observation_queue_drops=${collectorPhases.pendingObservationQueueDrops} " +
                 "failures=${profile.integrity.attributionFailures} evidence_complete=${profile.integrity.coverageComplete} " +
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +

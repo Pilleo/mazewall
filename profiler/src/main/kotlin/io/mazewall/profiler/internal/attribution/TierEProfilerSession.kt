@@ -362,8 +362,9 @@ internal class TierEProfilerSession internal constructor(
     }
 
     @Synchronized
-    internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics =
-        TierECollectorPhaseMetrics(
+    internal fun benchmarkPhaseMetrics(): TierECollectorPhaseMetrics {
+        val pendingDrops = collector.pendingObservationDropMetrics()
+        return TierECollectorPhaseMetrics(
         ringDrainNanos = ringDrainNanos,
         ringScanNanos = ringScanNanos,
         ringPayloadSliceNanos = ringPayloadSliceNanos,
@@ -374,8 +375,10 @@ internal class TierEProfilerSession internal constructor(
         ringReadyRecords = ringReadyRecords,
         ringBatches = ringDrainBatches,
         ringMaxBatchRecords = ringMaxBatchRecords,
-        kernelRingLosses = reportedKernelLosses,
-        retainedResultDrops = retainedResultDrops,
+            kernelRingLosses = reportedKernelLosses,
+            retainedResultDrops = retainedResultDrops,
+            pendingObservationBudgetDrops = pendingDrops.budgetDrops,
+            pendingObservationQueueDrops = pendingDrops.queueDrops,
         ringReaderInitializationNanos = ringReaderInitializationNanos,
         collectorJoinNanos = collectorJoinNanos,
         polls = collectorPolls,
@@ -392,7 +395,8 @@ internal class TierEProfilerSession internal constructor(
         uniqueEdgeCandidateOwnershipAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().candidateOwnershipBytes,
         uniqueEdgeCandidateDiagnosticAllocatedBytes = collector.uniqueEdgeAllocationBreakdown().candidateDiagnosticBytes,
         batchFreezeAllocatedBytes = batchFreezeAllocatedBytes,
-    )
+        )
+    }
 
     private fun allocationBeforePhase(): Long = if (options.benchmarkAllocationAccounting) allocationCounter.currentThreadAllocatedBytes() else TierEAllocationCounters.UNAVAILABLE
 
@@ -727,6 +731,8 @@ internal data class TierECollectorPhaseMetrics(
     val ringMaxBatchRecords: Long = 0,
     val kernelRingLosses: Long = 0,
     val retainedResultDrops: Long = 0,
+    val pendingObservationBudgetDrops: Long = 0,
+    val pendingObservationQueueDrops: Long = 0,
     val ringReaderInitializationNanos: Long = 0,
     val collectorJoinNanos: Long = 0,
     val polls: Long = 0,
