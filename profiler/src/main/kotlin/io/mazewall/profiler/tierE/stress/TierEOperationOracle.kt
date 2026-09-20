@@ -21,6 +21,8 @@ internal object TierEOperationOracle {
         val duplicates: Long = 0,
         val wrong: Long = 0,
         val unclassified: Long = 0,
+        /** Bounded diagnostic aid; never substitutes for the aggregate missing count. */
+        val missingOperationIdSamples: List<Int> = emptyList(),
     )
 
     enum class UniqueDecision { CANDIDATE, ACKNOWLEDGED, SUPPRESSED }
@@ -80,6 +82,7 @@ internal object TierEOperationOracle {
         var duplicates = 0L
         var wrong = 0L
         var unclassified = 0L
+        val missingOperationIdSamples = ArrayList<Int>(MISSING_OPERATION_SAMPLE_LIMIT)
         expectedOperationIds.forEach { operationId ->
             val events = byId[operationId].orEmpty()
             val valid = events.filter { it.resolved && it.hasWorkloadStack && it.hasInvocationIdentity && it.hasExecutionIdentity }
@@ -94,7 +97,12 @@ internal object TierEOperationOracle {
             suppressed += terminals.count { it.decision == UniqueDecision.SUPPRESSED }
             when {
                 terminals.isEmpty() && operationId in unresolvedOperationIds -> unresolved++
-                terminals.isEmpty() -> missing++
+                terminals.isEmpty() -> {
+                    missing++
+                    if (missingOperationIdSamples.size < MISSING_OPERATION_SAMPLE_LIMIT) {
+                        missingOperationIdSamples += operationId
+                    }
+                }
                 terminals.size > 1 -> duplicates += terminals.size - 1L
             }
         }
@@ -111,6 +119,9 @@ internal object TierEOperationOracle {
             duplicates = duplicates,
             wrong = wrong,
             unclassified = unclassified,
+            missingOperationIdSamples = missingOperationIdSamples.toList(),
         )
     }
+
+    private const val MISSING_OPERATION_SAMPLE_LIMIT = 16
 }

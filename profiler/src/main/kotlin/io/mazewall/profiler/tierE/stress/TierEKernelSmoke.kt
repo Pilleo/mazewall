@@ -618,6 +618,7 @@ internal object TierEKernelSmoke {
                 "producer_closed=$producerClosed " +
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
                 "missing_operations=$missingWorkloadUnlinks extra_operations=$extraWorkloadUnlinks " +
+                "missing_operation_id_samples=${oracle.missingOperationIdSamples.joinToString(",").ifEmpty { "none" }} " +
                 "candidate_operations=${oracle.candidates} acknowledged_operations=${oracle.acknowledged} " +
                 "suppressed_representatives=$suppressedRepresentatives " +
                 "callback_probe_resolved=$callbackProbeResolved " +

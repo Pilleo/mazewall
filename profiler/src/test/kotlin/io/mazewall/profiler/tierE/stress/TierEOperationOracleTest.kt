@@ -74,6 +74,7 @@ class TierEOperationOracleTest {
         assertEquals(1, report.matched)
         assertEquals(1, report.missing)
         assertEquals(0, report.suppressed)
+        assertEquals(listOf(11), report.missingOperationIdSamples)
     }
 
     @Test
