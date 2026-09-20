@@ -462,7 +462,8 @@ class TierEMatchedBenchmarkJsonTest {
     fun `owned ring drain counters are retained in benchmark evidence`() {
         val phases = TierEMatchedBenchmark.phaseMetrics(
             "tier-e-kernel-smoke: ring_records_copied=3 ring_bytes_copied=264 " +
-                "ring_busy_records=1 ring_discarded_records=2 ring_scan_passes=4 ring_batches=3 ring_max_batch_records=2",
+                "ring_busy_records=1 ring_discarded_records=2 ring_scan_passes=4 ring_batches=3 ring_max_batch_records=2 " +
+                "kernel_ring_loss=5 retained_result_drops=7",
         )
 
         assertEquals(3, phases.ringRecordsCopied)
@@ -472,6 +473,8 @@ class TierEMatchedBenchmarkJsonTest {
         assertEquals(4, phases.ringScanPasses)
         assertEquals(3, phases.ringBatches)
         assertEquals(2, phases.ringMaxBatchRecords)
+        assertEquals(5, phases.kernelRingLosses)
+        assertEquals(7, phases.retainedResultDrops)
     }
 
     @Test

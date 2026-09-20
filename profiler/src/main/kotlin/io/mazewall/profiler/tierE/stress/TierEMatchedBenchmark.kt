@@ -714,9 +714,10 @@ internal object TierEMatchedBenchmark {
         val workloadNanos = result.batches.sumOf { it.workloadNanos }
         val achievedRate = operationsPerSecond(achieved, workloadNanos)
         val readyRecords = result.evidence.phases.ringReadyRecords
-        val lostRecords = result.evidence.lost
-        val attemptedRecords = readyRecords + lostRecords
-        val lossFraction = if (attemptedRecords == 0L) 0.0 else lostRecords.toDouble() / attemptedRecords.toDouble()
+        val kernelRingLosses = result.evidence.phases.kernelRingLosses
+        val retainedResultDrops = result.evidence.phases.retainedResultDrops
+        val attemptedRecords = readyRecords + kernelRingLosses
+        val lossFraction = if (attemptedRecords == 0L) 0.0 else kernelRingLosses.toDouble() / attemptedRecords.toDouble()
         return buildString {
             append("\"sustained_collector\":{\"load\":\"").append(result.sustainedLoad.wireName)
             append("\",\"requested_rate_per_second\":").append(result.sustainedRatePerSecond)
@@ -724,12 +725,14 @@ internal object TierEMatchedBenchmark {
             append(",\"requested_operations\":").append(requested)
             append(",\"achieved_operations\":").append(achieved)
             append(",\"resolved_operations\":").append(resolved)
-            append(",\"observed_ring_loss\":").append(lostRecords)
+            append(",\"observed_evidence_loss\":").append(result.evidence.lost)
+            append(",\"observed_ring_loss\":").append(kernelRingLosses)
+            append(",\"retained_result_drops\":").append(retainedResultDrops)
             append(",\"ready_records_total\":").append(readyRecords)
             append(",\"attempted_ring_records_total\":").append(attemptedRecords)
             append(",\"attempted_ring_records_per_second\":").append(operationsPerSecond(attemptedRecords, workloadNanos))
             append(",\"delivered_ring_records_per_second\":").append(operationsPerSecond(readyRecords, workloadNanos))
-            append(",\"lost_ring_records_per_second\":").append(operationsPerSecond(lostRecords, workloadNanos))
+            append(",\"lost_ring_records_per_second\":").append(operationsPerSecond(kernelRingLosses, workloadNanos))
             append(",\"ring_loss_fraction\":").append(lossFraction)
             append(",\"records_per_drain_max\":").append(result.evidence.phases.ringMaxBatchRecords)
             append(",\"collector_polls\":").append(result.evidence.phases.collectorPolls)
@@ -962,6 +965,8 @@ internal object TierEMatchedBenchmark {
             "\"ring_scan_passes\":${phases.ringScanPasses}",
             "\"ring_batches\":${phases.ringBatches}",
             "\"ring_max_batch_records\":${phases.ringMaxBatchRecords}",
+            "\"kernel_ring_loss\":${phases.kernelRingLosses}",
+            "\"retained_result_drops\":${phases.retainedResultDrops}",
             "\"serialization_ns\":${phases.serializationNanos}",
             "\"publication_bytes\":${phases.publicationBytes}",
             "\"publication_latency_ns\":${phases.publicationLatencyNanos}",
@@ -1054,6 +1059,8 @@ internal object TierEMatchedBenchmark {
             metricOrZero(output, "failed_publications"),
             metricOrZero(output, "cache_hits"),
             metricOrZero(output, "cache_misses"),
+            metricOrZero(output, "kernel_ring_loss"),
+            metricOrZero(output, "retained_result_drops"),
         )
 
     private fun userNotifPhaseJson(phases: UserNotifPhaseMetrics): String =
@@ -2637,6 +2644,8 @@ internal object TierEMatchedBenchmark {
         val failedPublications: Long,
         val cacheHits: Long,
         val cacheMisses: Long,
+        val kernelRingLosses: Long,
+        val retainedResultDrops: Long,
     )
 
     private data class UserNotifPhaseMetrics(
