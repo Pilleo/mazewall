@@ -259,8 +259,9 @@ internal object TierEKernelSmoke {
         val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = uniqueEdgeDecisions?.let { decisions ->
             { decision: UniqueEdgeDecision -> decisions.add(decision) }
         }
+        val engine = TierEbpfEngine(RealNativeEngine)
         val session = TierEProfilerSession(
-            TierEbpfEngine(RealNativeEngine),
+            engine,
             processEpoch,
             TierEOptions(
                 emissionMode = emissionMode,
@@ -584,6 +585,7 @@ internal object TierEKernelSmoke {
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
+                "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +
                 "benchmark_control_evidence=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "none" else "EXPECTED_INCOMPLETE"} " +
                 "lastMarkerPidTgid=${lastMarkerPidTgid.toULong().toString(16)} " +
                 "observations=${profile.syscalls.size} resolved=$resolved workload_resolved=$workloadResolved workloadFrames=${workloadResolved > 0} " +

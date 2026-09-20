@@ -99,6 +99,8 @@ internal class TierEbpfEngine(
         } ?: error("mazewall.tier-e.ring-capacity-bytes must be an integer")
     } ?: RING_CAPACITY
 
+    internal fun configuredRingCapacityBytes(): Int = ringCapacity
+
     /** One eBPF instruction. */
     internal data class Insn(
         val code: Int,
