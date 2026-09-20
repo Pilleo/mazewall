@@ -294,7 +294,7 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.expect-retention-exhaustion=${config.scope == Scope.TIER_E_RETENTION_EXHAUSTION}",
                 "-Dmazewall.tier-e.lifecycle-scenario=${config.lifecycleScenario}",
                 "-Dmazewall.tier-e.capture-yield=$captureYield",
-                "-Dmazewall.tier-e.ring-capacity-bytes=8388608",
+                "-Dmazewall.tier-e.ring-capacity-bytes=${configuredBenchmarkRingCapacity()}",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
                 "-D${TierECommonFileWorkload.APPLICATION_KIND_PROPERTY}=${config.workload.applicationKind.wireName}",
                 "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
@@ -2200,6 +2200,13 @@ internal object TierEMatchedBenchmark {
     private fun maxPollBackoffFor(variant: Variant): Long = variant.pollBackoff?.maxNanos ?: 0L
 
     private fun markerTransportFor(variant: Variant): MarkerTransport = variant.markerTransport ?: MarkerTransport.AUTO
+
+    private fun configuredBenchmarkRingCapacity(): Int =
+        System.getProperty("mazewall.tier-e.benchmark-ring-capacity-bytes", "8388608").toInt().also { capacity ->
+            require(capacity >= 1 shl 20 && capacity and (capacity - 1) == 0) {
+                "mazewall.tier-e.benchmark-ring-capacity-bytes must be a power of two at least 1048576"
+            }
+        }
 
     internal fun fullVariantNames(rotation: Int): List<String> = variants(Scope.FULL, rotation).map { it.jsonName(Scope.FULL) }
 
