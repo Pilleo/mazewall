@@ -696,26 +696,28 @@ internal object TierEMatchedBenchmark {
     private fun sustainedCollectorJson(result: ForkResult): String {
         if (result.scope != Scope.TIER_E_SUSTAINED_COLLECTOR) return "\"sustained_collector\":null"
         val requested = result.batches.sumOf { it.operations }
-        val resolved = result.evidence.operationOracle.matched
+        val achieved = result.evidence.operationOracle.expected
             .coerceIn(0L, requested)
+        val resolved = result.evidence.operationOracle.matched
+            .coerceIn(0L, achieved)
         val verdict = TierESustainedCollectorDecision.evaluate(
             TierESustainedCollectorDecision.Sample(
                 load = result.sustainedLoad,
                 requestedOperations = requested,
-                achievedOperations = requested,
+                achievedOperations = achieved,
                 resolvedOperations = resolved,
                 observedLosses = result.evidence.lost,
                 producerClosed = result.evidence.producerClosed,
                 evidenceComplete = result.evidence.evidenceComplete,
             ),
         )
-        val achievedRate = operationsPerSecond(requested, result.batches.sumOf { it.workloadNanos })
+        val achievedRate = operationsPerSecond(achieved, result.batches.sumOf { it.workloadNanos })
         return buildString {
             append("\"sustained_collector\":{\"load\":\"").append(result.sustainedLoad.wireName)
             append("\",\"requested_rate_per_second\":").append(result.sustainedRatePerSecond)
             append(",\"achieved_rate_per_second\":").append(achievedRate)
             append(",\"requested_operations\":").append(requested)
-            append(",\"achieved_operations\":").append(requested)
+            append(",\"achieved_operations\":").append(achieved)
             append(",\"resolved_operations\":").append(resolved)
             append(",\"evidence_integrity\":\"").append(verdict.evidenceIntegrity).append('\"')
             append(",\"performance_eligible\":").append(verdict.performanceEligible)
