@@ -26,7 +26,10 @@ trap cleanup EXIT
 [[ "${ENGINE}" == docker ]] || { echo "rootless runtimes are INCOMPLETE evidence" >&2; exit 2; }
 export DOCKER_HOST
 mkdir -p "${ARTIFACT_DIR}" "${SHARED}/definitions" "${SHARED}/evidence"
-chmod 0770 "${SHARED}" "${SHARED}/definitions" "${SHARED}/evidence"
+# Keep the mount root traversable so the unrelated-user probe reaches connect(2).
+# Definitions and operator evidence remain inaccessible outside the target group.
+chmod 0755 "${SHARED}"
+chmod 0770 "${SHARED}/definitions" "${SHARED}/evidence"
 
 "${ROOT}/gradlew" :profiler:installDist >/dev/null
 if [[ ! -f "${NATIVE_BUILD_DIR}/CMakeCache.txt" ]]; then
@@ -82,6 +85,17 @@ sed -i "s/^pid=.*/pid=${TARGET_HOST_PID}/" "${SHARED}/target.properties"
 
 for _ in $(seq 1 100); do [[ -S "${SHARED}/control.sock" ]] && break; sleep 0.1; done
 [[ -S "${SHARED}/control.sock" ]] || { "${ENGINE}" logs "${COLLECTOR}" >&2; exit 1; }
+# The target is admitted through the explicitly configured group.  A distinct unprivileged
+# identity must not even connect to the control socket; if it can, its SHUTDOWN request makes
+# the fixture fail rather than silently widening the collector boundary.
+if "${ENGINE}" run --rm --user 65534:65534 --cap-drop ALL \
+    -v "${SHARED}:/shared" "${IMAGE}" \
+    java -cp /shared/agent-test-classes AgentWorkload control /shared/control.sock shutdown \
+    > "${ARTIFACT_DIR}/unrelated-user.log" 2>&1; then
+    echo "unrelated user unexpectedly accessed Tier E control socket" >&2
+    exit 1
+fi
+grep -Eq 'Permission denied|AccessDeniedException|ConnectException' "${ARTIFACT_DIR}/unrelated-user.log"
 touch "${SHARED}/start"
 "${ENGINE}" wait "${TARGET}" >/dev/null
 for _ in $(seq 1 300); do [[ -f "${SHARED}/evidence/split-fixture-19802.tier-e.json" ]] && break; sleep 0.1; done
