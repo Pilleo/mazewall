@@ -40,7 +40,19 @@ internal class TierEbpfEngine(
     internal data class RawSysEnterAuditCount(
         val openat: Long,
         val openat2: Long,
+        val preSession: Long,
+        val noSession: Long,
+        val wrongTarget: Long,
     ) {
+        internal companion object {
+            const val OPENAT_OFFSET: Int = 0
+            const val OPENAT2_OFFSET: Int = 8
+            const val PRE_SESSION_OFFSET: Int = 16
+            const val NO_SESSION_OFFSET: Int = 24
+            const val WRONG_TARGET_OFFSET: Int = 32
+            const val VALUE_SIZE: Int = 40
+        }
+
         val total: Long get() = openat + openat2
     }
 
@@ -277,7 +289,12 @@ internal class TierEbpfEngine(
             installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
             if (options.benchmarkRawSysEnterAudit) {
-                installed.rawSysEnterAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 16, maxEntries = RAW_SYS_ENTER_AUDIT_CAPACITY)
+                installed.rawSysEnterAuditFd = createMap(
+                    MAP_HASH,
+                    keySize = 4,
+                    valueSize = RawSysEnterAuditCount.VALUE_SIZE,
+                    maxEntries = RAW_SYS_ENTER_AUDIT_CAPACITY,
+                )
             }
             if (options.benchmarkExactAdmissionAudit) {
                 installed.exactAdmissionAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 48, maxEntries = EXACT_ADMISSION_AUDIT_CAPACITY)
@@ -392,9 +409,10 @@ internal class TierEbpfEngine(
         check(!installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was already configured" }
         Arena.ofConfined().use { arena ->
             expectedDirectoryFds.forEach { descriptor ->
-                val value = arena.allocate(16, 8)
-                value.set(ValueLayout.JAVA_LONG, 0, 0)
-                value.set(ValueLayout.JAVA_LONG, 8, 0)
+                val value = arena.allocate(RawSysEnterAuditCount.VALUE_SIZE.toLong(), 8)
+                repeat(RawSysEnterAuditCount.VALUE_SIZE / Long.SIZE_BYTES) { index ->
+                    value.set(ValueLayout.JAVA_LONG, index.toLong() * Long.SIZE_BYTES, 0)
+                }
                 updateElem(arena, installed.requireRawSysEnterAuditFd().value, intSeg(arena, descriptor), value)
             }
         }
@@ -425,15 +443,18 @@ internal class TierEbpfEngine(
         check(installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was not configured" }
         return Arena.ofConfined().use { arena ->
             expectedDirectoryFds.associateWith { descriptor ->
-                val value = arena.allocate(16, 8)
+                val value = arena.allocate(RawSysEnterAuditCount.VALUE_SIZE.toLong(), 8)
                 val attr = arena.allocate(24)
                 attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireRawSysEnterAuditFd().value)
                 attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
                 attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
                 bpfCall(H_LOOKUP.toLong(), attr, 24)
                 RawSysEnterAuditCount(
-                    openat = value.get(ValueLayout.JAVA_LONG, 0),
-                    openat2 = value.get(ValueLayout.JAVA_LONG, 8),
+                    openat = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.OPENAT_OFFSET.toLong()),
+                    openat2 = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.OPENAT2_OFFSET.toLong()),
+                    preSession = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.PRE_SESSION_OFFSET.toLong()),
+                    noSession = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.NO_SESSION_OFFSET.toLong()),
+                    wrongTarget = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.WRONG_TARGET_OFFSET.toLong()),
                 )
             }
         }

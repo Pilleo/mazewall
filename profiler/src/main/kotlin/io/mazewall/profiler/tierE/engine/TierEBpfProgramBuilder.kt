@@ -32,6 +32,11 @@ internal object TierEBpfProgramBuilder {
     private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX: Int = 7
     private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
     private const val RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX: Int = 9
+    private const val RAW_AUDIT_OPENAT_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.OPENAT_OFFSET
+    private const val RAW_AUDIT_OPENAT2_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.OPENAT2_OFFSET
+    private const val RAW_AUDIT_PRE_SESSION_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.PRE_SESSION_OFFSET
+    private const val RAW_AUDIT_NO_SESSION_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.NO_SESSION_OFFSET
+    private const val RAW_AUDIT_WRONG_TARGET_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.WRONG_TARGET_OFFSET
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
     private const val EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET: Int = 0
@@ -101,18 +106,6 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
 
-        // The dynamic tracepoint attachment is global, so scope the audit to the current
-        // session target before inspecting syscall arguments or audit state.
-        loadMap(1, 1)
-        emit(Insn(MOV_REG, dst = 2, src = FP))
-        emit(Insn(ADD_IMM, dst = 2, imm = -4))
-        emit(Insn(CALL, imm = H_LOOKUP))
-        val noSession = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
-        emit(Insn(MOV_REG, dst = 5, src = 8))
-        emit(Insn(RSH_IMM, dst = 5, imm = 32))
-        val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
-
         // raw_syscalls/sys_enter: syscall id is u64@8 and args[0] is u64@16.
         emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
         val openat = emit(Insn(JEQ_IMM, dst = 5, imm = 257))
@@ -144,12 +137,41 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
         emit(Insn(CALL, imm = H_LOOKUP))
         val undeclaredDescriptor = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_REG, dst = 7, src = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_PRE_SESSION_OFFSET.toShort()))
+
+        // Audit the session gate only after finding a declared descriptor. The benchmark
+        // can now distinguish a syscall the raw tracepoint never matched from one rejected
+        // by the global attachment's session filter.
+        loadMap(1, 1)
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -12))
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -12))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val noSession = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
+        emit(Insn(MOV_REG, dst = 5, src = 8))
+        emit(Insn(RSH_IMM, dst = 5, imm = 32))
+        val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
+
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         val isOpenat = emit(Insn(JEQ_IMM, dst = 6))
-        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 8))
+        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT2_OFFSET.toShort()))
         val incrementedOpenat2 = emit(Insn(JA))
         val incrementOpenat = program.size
-        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 0))
+        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT_OFFSET.toShort()))
+
+        val complete = emit(Insn(JA))
+        val noSessionHandler = program.size
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_NO_SESSION_OFFSET.toShort()))
+        val completedNoSession = emit(Insn(JA))
+        val wrongTargetHandler = program.size
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_WRONG_TARGET_OFFSET.toShort()))
+        val completedWrongTarget = emit(Insn(JA))
 
         val exit = program.size
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
@@ -172,9 +194,11 @@ internal object TierEBpfProgramBuilder {
         } else {
             null
         }
-        listOf(noSession, wrongTarget, nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2).forEach { index ->
+        listOf(nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2, complete, completedNoSession, completedWrongTarget).forEach { index ->
             program[index] = program[index].copy(off = (exit - index - 1).toShort())
         }
+        program[noSession] = program[noSession].copy(off = (noSessionHandler - noSession - 1).toShort())
+        program[wrongTarget] = program[wrongTarget].copy(off = (wrongTargetHandler - wrongTarget - 1).toShort())
         program[isOpenat] = program[isOpenat].copy(off = (incrementOpenat - isOpenat - 1).toShort())
         rawArgumentReadFailure?.let { index ->
             program[index] = program[index].copy(off = (requireNotNull(rawArgumentReadFailureHandler) - index - 1).toShort())

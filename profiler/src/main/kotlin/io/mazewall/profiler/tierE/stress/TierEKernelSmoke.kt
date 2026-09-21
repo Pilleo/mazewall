@@ -469,6 +469,9 @@ internal object TierEKernelSmoke {
             }
             val rawSysEnterAuditMissing = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }.keys
             val rawSysEnterAuditObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.total }
+            val rawSysEnterAuditPreSessionObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.preSession }
+            val rawSysEnterAuditNoSession = rawSysEnterAuditCounts.values.sumOf { count -> count.noSession }
+            val rawSysEnterAuditWrongTarget = rawSysEnterAuditCounts.values.sumOf { count -> count.wrongTarget }
             val rawSysEnterAuditNonSingletons = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }
             val rawSysEnterAuditOpenat2 = rawSysEnterAuditCounts.filterValues { count -> count.openat2 > 0L }
             val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count.admitted != 1L }
@@ -729,6 +732,9 @@ internal object TierEKernelSmoke {
                 "raw_sys_enter_audit=${if (benchmarkRawSysEnterAudit) "enabled" else "disabled"} " +
                 "raw_sys_enter_audit_expected_operations=${rawSysEnterAuditCounts.size} " +
                 "raw_sys_enter_audit_observed_operations=$rawSysEnterAuditObserved " +
+                "raw_sys_enter_audit_pre_session_operations=$rawSysEnterAuditPreSessionObserved " +
+                "raw_sys_enter_audit_no_session_operations=$rawSysEnterAuditNoSession " +
+                "raw_sys_enter_audit_wrong_target_operations=$rawSysEnterAuditWrongTarget " +
                 "raw_sys_enter_audit_non_singleton_operations=${rawSysEnterAuditNonSingletons.size} " +
                 "raw_sys_enter_audit_openat2_operations=${rawSysEnterAuditOpenat2.size} " +
                 "raw_audit_argument_read_failures=$rawAuditArgumentReadFailures " +

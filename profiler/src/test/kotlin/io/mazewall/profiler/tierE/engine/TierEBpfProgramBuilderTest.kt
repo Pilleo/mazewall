@@ -318,11 +318,20 @@ class TierEBpfProgramBuilderTest {
         assertEquals(0x95, program.last().code)
         assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 0 }, "audit must load its descriptor-count map")
         assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 1 }, "audit must load the session map")
+        assertTrue(
+            program.any { it.code == 0x63 && it.dst == 10 && it.off.toInt() == -12 } &&
+                program.any { it.code == 0x07 && it.dst == 2 && it.imm == -12 },
+            "audit must use a dedicated zero-valued stack key for session lookup after reusing the descriptor key",
+        )
         assertTrue(program.any { it.code == 0x61 && it.src == 9 && it.off.toInt() == 8 }, "audit must read the raw syscall id")
         assertTrue(program.any { it.code == 0x15 && it.imm == 257 }, "audit must admit openat")
         assertTrue(program.any { it.code == 0x55 && it.imm == 437 }, "audit must reject every syscall outside the openat family")
         assertTrue(program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 16 }, "audit must key by openat directory descriptor")
-        assertEquals(setOf(0, 8), program.filter { it.code == 0xdb && it.dst == 0 }.map { it.off.toInt() }.toSet(), "audit must retain separate openat and openat2 counters")
+        assertEquals(
+            setOf(0, 8, 16, 24, 32),
+            program.filter { it.code == 0xdb && it.dst == 7 }.map { it.off.toInt() }.toSet(),
+            "audit must retain pre-session, session-filter, and separate openat-family counters",
+        )
         assertTrue(program.none { it.code == 0x85 && it.imm in setOf(131, 132) }, "audit must never reserve or submit ring records")
         assertEquals(program.indices.toSet(), reachableInstructions(program, 0), "every audit instruction must be reachable")
     }
