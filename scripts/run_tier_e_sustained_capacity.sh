@@ -9,7 +9,10 @@ LOAD=${MAZEWALL_TIER_E_SUSTAINED_LOAD:-below_capacity}
 RECEIPT_CLOCK=${MAZEWALL_TIER_E_SUSTAINED_RECEIPT_CLOCK:-monotonic}
 STAGE_SECONDS=${MAZEWALL_TIER_E_SUSTAINED_STAGE_SECONDS:-10}
 ITERATIONS=${MAZEWALL_TIER_E_SUSTAINED_ITERATIONS:-200}
-MAX_RETAINED_RECORDS=${MAZEWALL_TIER_E_SUSTAINED_MAX_RETAINED_RECORDS:-100000}
+# Zero derives a bounded diagnostic limit for each stage; a positive value is an operator override.
+MAX_RETAINED_RECORDS=${MAZEWALL_TIER_E_SUSTAINED_MAX_RETAINED_RECORDS:-0}
+RECORDS_PER_OPERATION_UPPER_BOUND=${MAZEWALL_TIER_E_SUSTAINED_RECORDS_PER_OPERATION_UPPER_BOUND:-3}
+WARMUPS=${MAZEWALL_TIER_E_WARMUPS:-3}
 RETAINED_BUDGET_BYTES=${MAZEWALL_TIER_E_SUSTAINED_RETAINED_BUDGET_BYTES:-67108864}
 RUN_DECISION=${MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION:-false}
 DECISION_FORKS=${MAZEWALL_TIER_E_SUSTAINED_DECISION_FORKS:-5}
@@ -57,7 +60,9 @@ trap finish EXIT
 
 [[ "${STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained stage seconds: ${STAGE_SECONDS}" >&2; exit 2; }
 [[ "${ITERATIONS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained iterations: ${ITERATIONS}" >&2; exit 2; }
-[[ "${MAX_RETAINED_RECORDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained max retained records: ${MAX_RETAINED_RECORDS}" >&2; exit 2; }
+[[ "${MAX_RETAINED_RECORDS}" =~ ^[0-9]+$ ]] || { echo "invalid sustained max retained records: ${MAX_RETAINED_RECORDS}" >&2; exit 2; }
+[[ "${RECORDS_PER_OPERATION_UPPER_BOUND}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained records per operation upper bound: ${RECORDS_PER_OPERATION_UPPER_BOUND}" >&2; exit 2; }
+[[ "${WARMUPS}" =~ ^[0-9]+$ ]] || { echo "invalid sustained warmups: ${WARMUPS}" >&2; exit 2; }
 [[ "${RETAINED_BUDGET_BYTES}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained retained budget: ${RETAINED_BUDGET_BYTES}" >&2; exit 2; }
 [[ "${DECISION_FORKS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained decision forks: ${DECISION_FORKS}" >&2; exit 2; }
 [[ "${DECISION_STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained decision stage seconds: ${DECISION_STAGE_SECONDS}" >&2; exit 2; }
@@ -79,19 +84,31 @@ eligible_stage() {
     ' "${results}" > /dev/null
 }
 
+stage_max_retained_records() {
+    local rate=$1
+    local seconds=$2
+    if (( MAX_RETAINED_RECORDS > 0 )); then
+        printf '%s\n' "${MAX_RETAINED_RECORDS}"
+    else
+        printf '%s\n' "$(((rate * seconds + WARMUPS * ITERATIONS) * RECORDS_PER_OPERATION_UPPER_BOUND))"
+    fi
+}
+
 run_stage() {
     local rate=$1
     local seconds=$2
     local forks=$3
     local label=$4
     local total_operations=$((rate * seconds))
+    local stage_record_limit
+    stage_record_limit=$(stage_max_retained_records "${rate}" "${seconds}")
     (( total_operations % ITERATIONS == 0 )) || {
         echo "sustained rate ${rate} for ${seconds}s is not divisible by ${ITERATIONS} operations per batch" >&2
         return 2
     }
     local batches=$((total_operations / ITERATIONS))
     STAGE_PATH="${ARTIFACT_DIR}/${label}-rate-${rate}"
-    event "${label}-rate-${rate}" STARTED "forks=${forks} batches=${batches} expected_operations=${total_operations}"
+    event "${label}-rate-${rate}" STARTED "forks=${forks} batches=${batches} expected_operations=${total_operations} max_retained_records=${stage_record_limit}"
     MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector \
         MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND="${rate}" \
         MAZEWALL_TIER_E_SUSTAINED_LOAD="${LOAD}" \
@@ -101,7 +118,7 @@ run_stage() {
         MAZEWALL_TIER_E_BATCHES="${batches}" \
         MAZEWALL_TIER_E_FORKS="${forks}" \
         MAZEWALL_TIER_E_RUN_LEVEL=custom \
-        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${MAX_RETAINED_RECORDS}" \
+        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${stage_record_limit}" \
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${STAGE_PATH}"
 }
 
@@ -110,6 +127,8 @@ run_shadow_stage() {
     local seconds=$2
     local label=$3
     local total_operations=$((rate * seconds))
+    local stage_record_limit
+    stage_record_limit=$(stage_max_retained_records "${rate}" "${seconds}")
     (( total_operations % ITERATIONS == 0 )) || return 2
     local batches=$((total_operations / ITERATIONS))
     local shadow_path="${ARTIFACT_DIR}/${label}-rate-${rate}-shadow"
@@ -123,7 +142,7 @@ run_shadow_stage() {
         MAZEWALL_TIER_E_BATCHES="${batches}" \
         MAZEWALL_TIER_E_FORKS=1 \
         MAZEWALL_TIER_E_RUN_LEVEL=custom \
-        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${MAX_RETAINED_RECORDS} -Dmazewall.tier-e.benchmark-strace-output=/artifacts/strace-shadow.log" \
+        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${stage_record_limit} -Dmazewall.tier-e.benchmark-strace-output=/artifacts/strace-shadow.log" \
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${shadow_path}"; then
         event "${label}-rate-${rate}-shadow" COMPLETED "diagnostic_replay=true artifact=${shadow_path}"
     else
@@ -131,7 +150,7 @@ run_shadow_stage() {
     fi
 }
 
-event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} max_retained_records=${MAX_RETAINED_RECORDS} retained_budget_bytes=${RETAINED_BUDGET_BYTES} run_decision=${RUN_DECISION} shadow_on_failure=${SHADOW_ON_FAILURE}"
+event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} warmups=${WARMUPS} max_retained_records_override=${MAX_RETAINED_RECORDS} records_per_operation_upper_bound=${RECORDS_PER_OPERATION_UPPER_BOUND} retained_budget_bytes=${RETAINED_BUDGET_BYTES} run_decision=${RUN_DECISION} shadow_on_failure=${SHADOW_ON_FAILURE}"
 if [[ "${RUN_DECISION}" == true ]]; then
     source_state=$(bash "${REPOSITORY_DIR}/scripts/tier_e_benchmark_source_state.sh" "${REPOSITORY_DIR}")
     benchmark_input_dirty_count=$(jq -r '.benchmark_input_dirty_count' <<< "${source_state}")
