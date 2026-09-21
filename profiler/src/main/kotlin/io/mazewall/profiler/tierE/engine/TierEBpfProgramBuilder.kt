@@ -591,7 +591,10 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
 
-        fun emitExactAdmissionAuditRejection(reasonOffset: Int, continuation: Int): Int {
+        fun emitExactAdmissionAuditRejection(
+            reasonOffset: Int,
+            continuation: Int,
+        ): Int {
             if (!options.benchmarkExactAdmissionAudit) return continuation
             val start = p.size
             loadSyscallNumber()

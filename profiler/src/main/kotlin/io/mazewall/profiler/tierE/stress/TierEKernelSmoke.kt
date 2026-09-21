@@ -738,8 +738,16 @@ internal object TierEKernelSmoke {
                 "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sumOf { it.admitted }} " +
                 "exact_admission_audit_rejected_operations=$exactAdmissionAuditRejections " +
                 "exact_admission_audit_non_singleton_operations=${exactAdmissionAuditMissing.size} " +
-                "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:${count.admitted}" }.ifEmpty { "none" }} " +
-                "exact_admission_audit_rejection_samples=${exactAdmissionAuditCounts.filterValues { it.rejected > 0L }.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:detached=${count.markerDetached},no_task=${count.markerStateUnavailable},no_storage=${count.taskStorageUnavailable},inactive=${count.inactiveInvocation},stale_generation=${count.staleMarkerGeneration}" }.ifEmpty { "none" }} " +
+                "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(
+                    16,
+                ).joinToString(",") { (fd, count) -> "$fd:${count.admitted}" }.ifEmpty { "none" }} " +
+                "exact_admission_audit_rejection_samples=${exactAdmissionAuditCounts.filterValues { it.rejected > 0L }.toSortedMap().entries.take(
+                    16,
+                ).joinToString(
+                    ",",
+                ) { (fd, count) ->
+                    "$fd:detached=${count.markerDetached},no_task=${count.markerStateUnavailable},no_storage=${count.taskStorageUnavailable},inactive=${count.inactiveInvocation},stale_generation=${count.staleMarkerGeneration}"
+                }.ifEmpty { "none" }} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +
