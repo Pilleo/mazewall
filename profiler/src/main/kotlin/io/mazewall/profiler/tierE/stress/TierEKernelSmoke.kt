@@ -361,11 +361,12 @@ internal object TierEKernelSmoke {
             } else {
                 emptySet()
             }
+            val auditExpectedOpenatFds = boundedAuditSample(expectedOpenatFds)
             val attachStarted = System.nanoTime()
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
-            if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(expectedOpenatFds)
-            if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(expectedOpenatFds)
+            if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(auditExpectedOpenatFds)
+            if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(auditExpectedOpenatFds)
             straceOutputPath?.let { output ->
                 output.parent?.let(Files::createDirectories)
                 Files.deleteIfExists(output)
@@ -453,7 +454,7 @@ internal object TierEKernelSmoke {
             }
             check(process.waitFor() == 0) { "agent workload failed" }
             val rawSysEnterAuditCounts = if (benchmarkRawSysEnterAudit) {
-                engine.readRawSysEnterAuditCounts(expectedOpenatFds)
+                engine.readRawSysEnterAuditCounts(auditExpectedOpenatFds)
             } else {
                 emptyMap()
             }
@@ -463,7 +464,7 @@ internal object TierEKernelSmoke {
                 0L
             }
             val exactAdmissionAuditCounts = if (benchmarkExactAdmissionAudit) {
-                engine.readExactAdmissionAuditCounts(expectedOpenatFds)
+                engine.readExactAdmissionAuditCounts(auditExpectedOpenatFds)
             } else {
                 emptyMap()
             }
@@ -731,6 +732,9 @@ internal object TierEKernelSmoke {
                     "strace_output=${straceOutputPath ?: "none"} " +
                 "raw_sys_enter_audit=${if (benchmarkRawSysEnterAudit) "enabled" else "disabled"} " +
                 "raw_sys_enter_audit_expected_operations=${rawSysEnterAuditCounts.size} " +
+                "raw_sys_enter_audit_population_operations=${expectedOpenatFds.size} " +
+                "raw_sys_enter_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
+                "raw_sys_enter_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
                 "raw_sys_enter_audit_observed_operations=$rawSysEnterAuditObserved " +
                 "raw_sys_enter_audit_pre_session_operations=$rawSysEnterAuditPreSessionObserved " +
                 "raw_sys_enter_audit_no_session_operations=$rawSysEnterAuditNoSession " +
@@ -747,6 +751,9 @@ internal object TierEKernelSmoke {
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
                 "exact_admission_audit_expected_operations=${exactAdmissionAuditCounts.size} " +
+                "exact_admission_audit_population_operations=${expectedOpenatFds.size} " +
+                "exact_admission_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
+                "exact_admission_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
                 "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sumOf { it.admitted }} " +
                 "exact_admission_audit_rejected_operations=$exactAdmissionAuditRejections " +
                 "exact_admission_audit_non_singleton_operations=${exactAdmissionAuditMissing.size} " +
@@ -1093,6 +1100,25 @@ internal object TierEKernelSmoke {
             captureFlags and SyscallInvocationEvent.FLAG_MARKER_STATE_UNAVAILABLE != 0 -> TierEOperationOracle.MarkerLossReason.MARKER_STATE_UNAVAILABLE
             else -> null
         }
+
+    internal fun boundedAuditSample(
+        descriptors: Set<Int>,
+        limit: Int = TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS,
+    ): Set<Int> {
+        require(limit > 0) { "audit sample limit must be positive" }
+        if (descriptors.size <= limit) return descriptors
+        val sorted = descriptors.sorted()
+        return buildSet(limit) {
+            repeat(limit) { index ->
+                add(sorted[(index.toLong() * sorted.size / limit).toInt()])
+            }
+        }
+    }
+
+    private fun auditSamplingLabel(
+        population: Set<Int>,
+        sample: Set<Int>,
+    ): String = if (population.size == sample.size) "full" else "deterministic_uniform"
 
     private fun semanticBindings(applicationKind: TierECommonFileWorkload.ApplicationKind): List<TierECaptureBinding> =
         when (applicationKind) {

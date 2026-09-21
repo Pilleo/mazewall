@@ -114,7 +114,8 @@ internal class TierEbpfEngine(
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
-        private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = 1 shl 16
+        internal const val BENCHMARK_AUDIT_MAX_DESCRIPTORS: Int = 1 shl 16
+        private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = BENCHMARK_AUDIT_MAX_DESCRIPTORS
         private const val EXACT_ADMISSION_AUDIT_CAPACITY: Int = RAW_SYS_ENTER_AUDIT_CAPACITY
         private const val SESSION_TAG_OFFSET: Long = 0
         private const val TARGET_TGID_OFFSET: Long = 4
