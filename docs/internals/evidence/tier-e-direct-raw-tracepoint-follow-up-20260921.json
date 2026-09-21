@@ -45,6 +45,17 @@
       "raw_audit_operations": 30600,
       "retained_result_drops": 10254,
       "interpretation": "marker-loss event publication changed retained volume and is not capacity evidence"
+    },
+    {
+      "artifact": "/tmp/tier-e-admission-audit-rootful-20260921",
+      "source_revision": "42a50700",
+      "benchmark_input_dirty_count": 0,
+      "rate_per_second": 500,
+      "duration_seconds": 60,
+      "result": "diagnostic_pass",
+      "full_stream": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "exact_admission_operations": 30600, "ring_loss": 0},
+      "unique_edge": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "exact_admission_operations": 30600, "ring_loss": 0},
+      "interpretation": "the benchmark-only post-marker denominator is ready to classify a future reproducible gap"
     }
   ],
   "verdict_dimensions": {
@@ -56,5 +67,5 @@
     "runtime_overhead": "not_measured",
     "policy_eligibility": false
   },
-  "next_required_evidence": "Correlate each raw-audit operation with main-program admission or an explicit marker-loss reason without expanding normal retained evidence."
+  "next_required_evidence": "Repeat the clean multi-fork workload until the intermittent gap is either absent with bounded confidence or reproduced with raw-entry versus exact-admission correlation; do not promote capacity from single-fork diagnostics."
 }

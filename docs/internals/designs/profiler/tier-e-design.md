@@ -110,6 +110,15 @@ until the remaining marker/admission-side gap is deterministically classified. E
 fail-closed. See [tier-e-perf-tracepoint-sampling-loss-20260921.json](../../evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json)
 and [tier-e-direct-raw-tracepoint-follow-up-20260921.json](../../evidence/tier-e-direct-raw-tracepoint-follow-up-20260921.json).
 
+**Implemented benchmark diagnostic.** For a declared `openat` workload, a bounded benchmark-only
+map now counts each expected directory descriptor only after the main program has validated the
+target, marker attachment, task storage, nonzero invocation, and attachment generation. It is read
+alongside the independent raw-entry denominator: a raw count without an exact-admission count is a
+marker/admission gap; equal counts with a later missing operation localize the defect downstream.
+The map is absent from normal sessions and is not evidence of capacity by itself. One clean
+60-second 500/s run retained all 30,600 raw entries and all 30,600 exact-admission entries in both
+dictionary modes. It is a diagnostic confirmation, not a multi-fork capacity promotion.
+
 Only events delivered to the current tracepoint program can reserve a ring record for a validated
 active invocation. Syscalls outside a native
 boundary are counted in a bounded kernel `ambient_inactive` diagnostic rather than being emitted

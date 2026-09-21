@@ -34,6 +34,7 @@ Rootful sustained runs proved openat calls present in strace but absent from bot
 - See `docs/internals/evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json` and the retained raw artifacts under `/tmp/tier-e-sustained-capacity-fast-master-20260921` and `/tmp/tier-e-sustained-500-audit-20260921`.
 - Commit `6bd706cb30863ce6e6730afc01567f8515c77360` adds the x86_64 direct `BPF_RAW_TRACEPOINT_OPEN` backend while preserving the explicit perf compatibility path. Its focused static suite and rootful kernel smoke passed.
 - A rootful diagnostic at `/tmp/tier-e-raw-tracepoint-500-audit-20260921` reconciled all 30,600 declared operations and raw-audit counts in both modes. The clean repeat at `/tmp/tier-e-raw-tracepoint-500-clean-20260921` passed full-stream but unique-edge missed four operations despite a complete 30,600-operation raw audit and zero reported ring loss. This is a distinct unclassified admission/marker gap, so this issue remains open.
+- Commit `42a50700` adds a benchmark-only per-descriptor post-marker admission audit. Its clean rootful run at `/tmp/tier-e-admission-audit-rootful-20260921` recorded all 30,600 raw entries and all 30,600 exact-admission entries in both dictionary modes. It establishes the classifier but does not reproduce or close the intermittent unique-edge gap.
 
 **Acceptance:**
 1. A rootful 60-second 500/s and 1,000/s run has zero oracle/raw-audit/strace disagreement in both full-stream and unique-edge modes.
