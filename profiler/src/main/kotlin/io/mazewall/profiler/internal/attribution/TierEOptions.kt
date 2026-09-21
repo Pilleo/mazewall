@@ -66,12 +66,26 @@ internal enum class TierECollectorResultMode {
     APPEND_TARGET,
 }
 
+/** Attachment mechanism for the selected `raw_syscalls/sys_enter` program. */
+internal enum class TierESysEnterAttachmentBackend {
+    /** Direct raw tracepoint on x86_64; compatibility perf attachment elsewhere. */
+    AUTO,
+
+    /** Direct raw tracepoint; avoids CPU-global perf sampling. */
+    DIRECT_RAW_TRACEPOINT,
+
+    /** Legacy CPU-global perf tracepoint attachment for explicit compatibility use. */
+    PERF_TRACEPOINT_COMPAT,
+}
+
 /** Explicit Tier E session configuration. The full stream remains the safe default. */
 internal data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
     val stackTransport: TierEStackTransport = TierEStackTransport.DICTIONARY,
     /** Explicit declared capture domain; full capture remains the default. */
     val captureProfile: TierECaptureProfile = TierECaptureProfile.Full,
+    /** Direct raw tracepoint attachment is selected automatically on supported x86_64 hosts. */
+    val sysEnterAttachmentBackend: TierESysEnterAttachmentBackend = TierESysEnterAttachmentBackend.AUTO,
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,

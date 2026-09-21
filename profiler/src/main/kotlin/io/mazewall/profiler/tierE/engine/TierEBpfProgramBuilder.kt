@@ -18,6 +18,7 @@ internal object TierEBpfProgramBuilder {
     private const val H_UPDATE: Int = 2
     private const val H_KTIME: Int = 5
     private const val H_PID_TGID: Int = 14
+    private const val H_PROBE_READ_KERNEL: Int = 113
     private const val H_RB_RESERVE: Int = 131
     private const val H_RB_SUBMIT: Int = 132
     private const val H_TASK_STORAGE_GET: Int = 156
@@ -56,12 +57,21 @@ internal object TierEBpfProgramBuilder {
     private const val PSEUDO_FD: Int = 1
     private const val FP: Int = 10
 
+    // struct pt_regs offsets on the supported x86_64 raw-tracepoint ABI.
+    private const val X86_64_PT_REGS_DI_OFFSET: Int = 112
+    private val X86_64_SYSCALL_ARGUMENT_OFFSETS: IntArray = intArrayOf(112, 104, 96, 56, 72, 64)
+
     /**
      * Builds a benchmark-only raw-syscalls audit program. Map 0 contains declared directory
      * descriptors as keys with separate observed `openat` and `openat2` counts as values; map 1 is the normal
      * session configuration. The program never reserves or submits a ring record.
      */
-    public fun buildRawSysEnterAuditProgram(): List<Insn> {
+    public fun buildRawSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = false)
+
+    /** x86_64 raw-tracepoint audit with `pt_regs *` argument extraction. */
+    public fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = true)
+
+    private fun buildSysEnterAuditProgram(rawTracepoint: Boolean): List<Insn> {
         val program = mutableListOf<Insn>()
 
         fun emit(instruction: Insn): Int {
@@ -106,7 +116,17 @@ internal object TierEBpfProgramBuilder {
         val descriptorLookup = program.size
         program[openat] = program[openat].copy(off = (openatCounter - openat - 1).toShort())
         program[openatFamily] = program[openatFamily].copy(off = (descriptorLookup - openatFamily - 1).toShort())
-        emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+        if (rawTracepoint) {
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 0)) // raw args[0] = pt_regs *
+            emit(Insn(ADD_IMM, dst = 3, imm = X86_64_PT_REGS_DI_OFFSET))
+            emit(Insn(MOV_REG, dst = 1, src = FP))
+            emit(Insn(ADD_IMM, dst = 1, imm = -8))
+            emit(Insn(MOV_IMM, dst = 2, imm = 8))
+            emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -8))
+        } else {
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+        }
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
         loadMap(1, 0)
         emit(Insn(MOV_REG, dst = 2, src = FP))
@@ -133,7 +153,15 @@ internal object TierEBpfProgramBuilder {
     /**
      * Builds the tracepoint/raw_syscalls/sys_enter eBPF program for capturing syscall events with active invocation state.
      */
-    public fun buildSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> {
+    public fun buildSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = false)
+
+    /** x86_64 raw-tracepoint program with the same 88-byte ring record. */
+    public fun buildRawTracepointSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true)
+
+    private fun buildSysEnterProgram(
+        options: TierEOptions,
+        rawTracepoint: Boolean,
+    ): List<Insn> {
         val p = mutableListOf<Insn>()
 
         fun emit(i: Insn): Int {
@@ -153,6 +181,25 @@ internal object TierEBpfProgramBuilder {
 
         fun exitIfZero(reg: Int) {
             exits.add(emit(Insn(JEQ_IMM, dst = reg)))
+        }
+
+        fun loadSyscallNumber(destination: Int = 5) {
+            // Both raw tracepoint and typed tracepoint contexts have id at +8.
+            emit(Insn(LDX_DW, dst = destination, src = 9, off = 8))
+        }
+
+        fun loadArgument(index: Int) {
+            if (!rawTracepoint) {
+                emit(Insn(LDX_DW, dst = 5, src = 9, off = (16 + index * 8).toShort()))
+                return
+            }
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 0)) // raw args[0] = pt_regs *
+            emit(Insn(ADD_IMM, dst = 3, imm = X86_64_SYSCALL_ARGUMENT_OFFSETS[index]))
+            emit(Insn(MOV_REG, dst = 1, src = FP))
+            emit(Insn(ADD_IMM, dst = 1, imm = -96))
+            emit(Insn(MOV_IMM, dst = 2, imm = 8))
+            emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
         }
 
         emit(Insn(MOV_REG, dst = 9, src = 1))
@@ -247,7 +294,7 @@ internal object TierEBpfProgramBuilder {
         // suppresses ring-buffer observations. The collector owns suppression
         // because only it can commit an edge after downstream acknowledgement.
         if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
-            emit(Insn(LDX_DW, dst = 5, src = 9, off = 8))
+            loadSyscallNumber()
             emit(Insn(STX_W, dst = FP, src = 5, off = -40))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
             emit(Insn(STX_DW, dst = FP, src = 5, off = -56))
@@ -382,7 +429,7 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(RSH_IMM, dst = 5, imm = 32))
             emit(Insn(STX_W, dst = 7, src = 5, off = 8))
             emit(Insn(STX_W, dst = 7, src = 8, off = 12))
-            emit(Insn(LDX_DW, dst = 5, src = 9, off = 8))
+            loadSyscallNumber()
             emit(Insn(STX_W, dst = 7, src = 5, off = 16))
             emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
             emit(Insn(STX_W, dst = 7, src = 5, off = 20))
@@ -390,11 +437,8 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(STX_DW, dst = 7, src = 5, off = 24))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
             emit(Insn(STX_DW, dst = 7, src = 5, off = 32))
-            // tracepoint/raw_syscalls/sys_enter exposes syscall arguments directly
-            // in its typed context: id at +8 and args[6] at +16. This avoids using
-            // architecture-specific pt_regs offsets through a raw tracepoint.
             repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
-                emit(Insn(LDX_DW, dst = 5, src = 9, off = (16 + index * 8).toShort()))
+                loadArgument(index)
                 emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
             }
         }

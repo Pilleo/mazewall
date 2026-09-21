@@ -5,7 +5,9 @@ import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
+import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import org.junit.jupiter.api.Test
 import java.util.ArrayDeque
 import kotlin.test.assertEquals
@@ -174,6 +176,44 @@ class TierEBpfProgramBuilderTest {
         assertTrue(
             program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 16 },
             "program must read the first syscall argument from raw_syscalls/sys_enter args[0]",
+        )
+    }
+
+    @Test
+    fun `raw tracepoint sys enter program preserves full record emission while reading x86 regs safely`() {
+        TierEEmissionMode.entries.forEach { emissionMode ->
+            val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+                TierEOptions(emissionMode = emissionMode),
+            )
+
+            assertEquals(0x95, program.last().code)
+            assertTrue(program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 0 })
+            assertTrue(
+                program.count { it.code == 0x85 && it.imm == 113 } >= SyscallInvocationEvent.ARGUMENT_COUNT,
+                "raw tracepoint arguments must be copied through the kernel-read helper",
+            )
+            assertEquals(
+                SyscallInvocationEvent.ARGUMENT_COUNT,
+                program.count { it.code == 0x7b && it.dst == 7 && it.off.toInt() in 40..80 },
+                "raw tracepoint must retain the unchanged six-argument event payload",
+            )
+            assertEquals(program.indices.toSet(), reachableInstructions(program, 0))
+        }
+    }
+
+    @Test
+    fun `automatic attachment selects direct raw tracepoint only for its supported ABI`() {
+        assertEquals(
+            TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,
+            TierEbpfEngine.selectSysEnterAttachmentBackend(TierESysEnterAttachmentBackend.AUTO, "x86_64"),
+        )
+        assertEquals(
+            TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT,
+            TierEbpfEngine.selectSysEnterAttachmentBackend(TierESysEnterAttachmentBackend.AUTO, "aarch64"),
+        )
+        assertEquals(
+            TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT,
+            TierEbpfEngine.selectSysEnterAttachmentBackend(TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT, "x86_64"),
         )
     }
 

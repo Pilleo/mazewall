@@ -17,6 +17,7 @@ import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierERingDrainPhaseMetrics
 import io.mazewall.profiler.internal.attribution.TierERingEventDrain
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
 import io.mazewall.profiler.tierE.daemon.UsdtProbeNote
 import io.mazewall.profiler.tierE.ringbuf.BpfRingBufferReader
 import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
@@ -68,6 +69,7 @@ internal class TierEbpfEngine(
         private const val BPF_MAP_UPDATE_ELEM: Long = 2
         private const val BPF_MAP_GET_NEXT_KEY: Long = 4
         private const val BPF_PROG_LOAD: Long = 5
+        private const val BPF_RAW_TRACEPOINT_OPEN: Long = 17
         private const val BPF_BTF_LOAD: Long = 18
 
         private const val MAP_ARRAY: Int = 2
@@ -78,6 +80,7 @@ internal class TierEbpfEngine(
         private const val MAP_TASK_STORAGE: Int = 29
         private const val PROG_TRACEPOINT: Int = 5
         private const val PROG_KPROBE: Int = 2
+        private const val PROG_RAW_TRACEPOINT: Int = 17
         private const val BPF_F_NO_PREALLOC: Int = 1
 
         // eBPF helper IDs (uapi/linux/bpf.h)
@@ -112,6 +115,18 @@ internal class TierEbpfEngine(
             return parseCpuList(allowedCpuList).filter(online::contains).also { cpus ->
                 check(cpus.isNotEmpty()) { "collector has no online CPUs available for Tier E tracepoint attachment" }
             }
+        }
+
+        internal fun selectSysEnterAttachmentBackend(
+            configured: TierESysEnterAttachmentBackend,
+            architecture: String = System.getProperty("os.arch"),
+        ): TierESysEnterAttachmentBackend =
+            when (configured) {
+            TierESysEnterAttachmentBackend.AUTO -> when (architecture.lowercase()) {
+                "amd64", "x86_64" -> TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+                else -> TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT
+            }
+            else -> configured
         }
 
         private fun parseCpuList(cpuList: String): List<Int> =
@@ -165,10 +180,13 @@ internal class TierEbpfEngine(
         var execProgFd: BpfFd? = null
         val syscallPerfFds = mutableListOf<BpfFd>()
         val rawSysEnterAuditPerfFds = mutableListOf<BpfFd>()
+        var syscallRawTracepointFd: BpfFd? = null
+        var rawSysEnterAuditRawTracepointFd: BpfFd? = null
         val markerPerfFds = mutableListOf<BpfFd>()
         val execPerfFds = mutableListOf<BpfFd>()
         var ringReader: BpfRingBufferReader? = null
         var rawSysEnterAuditConfigured = false
+        var sysEnterAttachmentBackend: TierESysEnterAttachmentBackend? = null
 
         fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
 
@@ -219,6 +237,8 @@ internal class TierEbpfEngine(
         }
         try {
             this.options = options
+            val sysEnterAttachmentBackend = selectSysEnterAttachmentBackend(options.sysEnterAttachmentBackend)
+            installed.sysEnterAttachmentBackend = sysEnterAttachmentBackend
             installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
             installed.invocationStorageFd = createMap(
             type = MAP_TASK_STORAGE,
@@ -254,7 +274,11 @@ internal class TierEbpfEngine(
             installed.execProgFd =
                 loadProg(buildProcessExecProgram(), listOf(installed.requireInvocationStorageFd().value, -1, installed.requireSessionFd().value), PROG_TRACEPOINT, "tier_e_exec")
             installed.progFd = loadProg(
-                buildProgram(),
+                if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                    buildRawTracepointProgram()
+                } else {
+                    buildProgram()
+                },
                 listOf(
                 installed.requireInvocationStorageFd().value,
                 installed.requireRingFd().value,
@@ -264,19 +288,31 @@ internal class TierEbpfEngine(
                 installed.requireContextMetricFd().value,
                 installed.requireInFlightFd().value,
                 ),
-                PROG_TRACEPOINT,
+                if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                    PROG_RAW_TRACEPOINT
+                } else {
+                    PROG_TRACEPOINT
+                },
                 "tier_e_syscall",
             )
             if (options.benchmarkRawSysEnterAudit) {
                 installed.rawSysEnterAuditProgFd = loadProg(
-                    buildRawSysEnterAuditProgram(),
+                    if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                        buildRawTracepointSysEnterAuditProgram()
+                    } else {
+                        buildRawSysEnterAuditProgram()
+                    },
                     listOf(installed.requireRawSysEnterAuditFd().value, installed.requireSessionFd().value),
-                    PROG_TRACEPOINT,
+                    if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                        PROG_RAW_TRACEPOINT
+                    } else {
+                        PROG_TRACEPOINT
+                    },
                     "tier_e_audit",
                 )
             }
-            attachSysEnter(installed)
-            if (options.benchmarkRawSysEnterAudit) attachRawSysEnterAudit(installed)
+            attachSysEnter(installed, sysEnterAttachmentBackend)
+            if (options.benchmarkRawSysEnterAudit) attachRawSysEnterAudit(installed, sysEnterAttachmentBackend)
             attachProcessExec(installed)
             synchronized(lifecycleLock) {
                 resources = installed
@@ -660,6 +696,8 @@ internal class TierEbpfEngine(
         val rawAuditPerfFds = installed.rawSysEnterAuditPerfFds.toList()
         installed.rawSysEnterAuditPerfFds.clear()
         rawAuditPerfFds.asReversed().forEach { close(it) {} }
+        close(installed.syscallRawTracepointFd) { installed.syscallRawTracepointFd = null }
+        close(installed.rawSysEnterAuditRawTracepointFd) { installed.rawSysEnterAuditRawTracepointFd = null }
         close(installed.progFd) { installed.progFd = null }
         close(installed.rawSysEnterAuditProgFd) { installed.rawSysEnterAuditProgFd = null }
         close(installed.markerProgFd) { installed.markerProgFd = null }
@@ -680,7 +718,11 @@ internal class TierEbpfEngine(
 
     internal fun buildProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildSysEnterProgram(options)
 
+    internal fun buildRawTracepointProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options)
+
     internal fun buildRawSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram()
+
+    internal fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram()
 
     /** x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`. */
     internal fun buildMarkerProgram(): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram()
@@ -781,7 +823,14 @@ internal class TierEbpfEngine(
         }
     }
 
-    private fun attachSysEnter(installed: Resources) {
+    private fun attachSysEnter(
+        installed: Resources,
+        backend: TierESysEnterAttachmentBackend,
+    ) {
+        if (backend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+            installed.syscallRawTracepointFd = openRawTracepoint("sys_enter", installed.requireProgFd())
+            return
+        }
         val tracepoint = RawSyscallTracepoint.discover()
         Arena.ofConfined().use {
             // A perf tracepoint descriptor is CPU-local. Attach on every CPU available to
@@ -835,7 +884,17 @@ internal class TierEbpfEngine(
         }
     }
 
-    private fun attachRawSysEnterAudit(installed: Resources) {
+    private fun attachRawSysEnterAudit(
+        installed: Resources,
+        backend: TierESysEnterAttachmentBackend,
+    ) {
+        if (backend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+            installed.rawSysEnterAuditRawTracepointFd = openRawTracepoint(
+                "sys_enter",
+                installed.requireRawSysEnterAuditProgFd(),
+            )
+            return
+        }
         val tracepoint = RawSyscallTracepoint.discover()
         Arena.ofConfined().use { arena ->
             traceAttachmentCpus().forEach { cpu ->
@@ -858,6 +917,23 @@ internal class TierEbpfEngine(
                 rawIoctl(fd.value, PERF_EVENT_IOC_SET_BPF, installed.requireRawSysEnterAuditProgFd().value.toLong())
                 rawIoctl(fd.value, PERF_EVENT_IOC_ENABLE, 0)
             }
+        }
+    }
+
+    private fun openRawTracepoint(
+        name: String,
+        program: BpfFd,
+    ): BpfFd =
+        Arena.ofConfined().use { arena ->
+        val attr = arena.allocate(BpfRawTracepointOpenLayout.SIZE, 8)
+        attr.set(ValueLayout.ADDRESS, BpfRawTracepointOpenLayout.NAME, arena.allocateFrom(name))
+        attr.set(ValueLayout.JAVA_INT, BpfRawTracepointOpenLayout.PROGRAM_FD, program.value)
+        when (val result = bpfResult(BPF_RAW_TRACEPOINT_OPEN, attr, BpfRawTracepointOpenLayout.SIZE)) {
+            is SyscallResult.Success ->
+                result
+                .recordDescriptorAcquisition()
+                .getFdOrThrow("BPF_RAW_TRACEPOINT_OPEN($name)", FileDescriptorRole.Bpf)
+            is SyscallResult.Error -> error("BPF_RAW_TRACEPOINT_OPEN($name) failed: $result")
         }
     }
 
@@ -954,6 +1030,13 @@ internal object BpfBtfLoadLayout {
     const val BTF_SIZE: Long = 16
     const val LOG_SIZE: Long = 20
     const val LOG_LEVEL: Long = 24
+}
+
+/** Native layout of the `raw_tracepoint` arm of `union bpf_attr`. */
+internal object BpfRawTracepointOpenLayout {
+    const val SIZE: Long = 24
+    const val NAME: Long = 0
+    const val PROGRAM_FD: Long = 8
 }
 
 /** BTF-related fields in the `BPF_MAP_CREATE` arm of `union bpf_attr`. */
