@@ -146,6 +146,10 @@ internal object TierEKernelSmoke {
             .getProperty("mazewall.tier-e.benchmark-raw-sys-enter-audit", "false")
             .toBooleanStrictOrNull()
             ?: error("raw sys_enter audit must be true or false")
+        val benchmarkExactAdmissionAudit = System
+            .getProperty("mazewall.tier-e.benchmark-exact-admission-audit", "false")
+            .toBooleanStrictOrNull()
+            ?: error("exact-admission audit must be true or false")
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -185,6 +189,9 @@ internal object TierEKernelSmoke {
         require(benchmark || !benchmarkRawSysEnterAudit) { "raw sys_enter audit is benchmark-only" }
         require(!benchmarkRawSysEnterAudit || sharedOpenatOracleWorkload) {
             "raw sys_enter audit requires the shared openat operation oracle"
+        }
+        require(!benchmarkExactAdmissionAudit || sharedOpenatOracleWorkload) {
+            "exact-admission audit requires the shared openat operation oracle"
         }
         require(benchmark || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             "ring submission control is benchmark-only"
@@ -313,6 +320,7 @@ internal object TierEKernelSmoke {
                 benchmarkEmitTaskStorageUnavailableEvents = benchmarkEmitTaskStorageUnavailableEvents,
                 benchmarkEmitMarkerLossEvents = benchmarkEmitMarkerLossEvents,
                 benchmarkRawSysEnterAudit = benchmarkRawSysEnterAudit,
+                benchmarkExactAdmissionAudit = benchmarkExactAdmissionAudit,
                 ringDecodeMode = ringDecodeMode,
                 ringArgumentListMode = ringArgumentListMode,
                 ringArgumentViewMode = ringArgumentViewMode,
@@ -357,6 +365,7 @@ internal object TierEKernelSmoke {
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
             if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(expectedOpenatFds)
+            if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(expectedOpenatFds)
             straceOutputPath?.let { output ->
                 output.parent?.let(Files::createDirectories)
                 Files.deleteIfExists(output)
@@ -448,10 +457,16 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
+            val exactAdmissionAuditCounts = if (benchmarkExactAdmissionAudit) {
+                engine.readExactAdmissionAuditCounts(expectedOpenatFds)
+            } else {
+                emptyMap()
+            }
             val rawSysEnterAuditMissing = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }.keys
             val rawSysEnterAuditObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.total }
             val rawSysEnterAuditNonSingletons = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }
             val rawSysEnterAuditOpenat2 = rawSysEnterAuditCounts.filterValues { count -> count.openat2 > 0L }
+            val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count != 1L }
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -717,6 +732,11 @@ internal object TierEKernelSmoke {
                 "raw_sys_enter_audit_openat2_samples=${rawSysEnterAuditOpenat2.toSortedMap().entries.take(
                     16,
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
+                "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
+                "exact_admission_audit_expected_operations=${exactAdmissionAuditCounts.size} " +
+                "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sum()} " +
+                "exact_admission_audit_non_singleton_operations=${exactAdmissionAuditMissing.size} " +
+                "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:$count" }.ifEmpty { "none" }} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +

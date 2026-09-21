@@ -121,6 +121,8 @@ internal data class TierEOptions(
      * operation descriptors. It emits no ring records and is excluded from capacity evidence.
      */
     val benchmarkRawSysEnterAudit: Boolean = false,
+    /** Counts declared openat descriptors after exact marker/task-storage admission; benchmark-only. */
+    val benchmarkExactAdmissionAudit: Boolean = false,
     /** Primitive owned argument storage is the production path; boxed lists remain benchmark-only. */
     val ownedArgumentStorage: Boolean = true,
     /** Read-only ready transfer is production behavior; copying remains a paired benchmark control. */
@@ -143,6 +145,9 @@ internal data class TierEOptions(
         }
         require(benchmarkPhases || !benchmarkRawSysEnterAudit) {
             "raw sys_enter auditing is benchmark-only"
+        }
+        require(benchmarkPhases || !benchmarkExactAdmissionAudit) {
+            "exact-admission auditing is benchmark-only"
         }
         require(benchmarkPhases || !benchmarkAllocationAccounting) {
             "allocation accounting may be enabled only in a benchmark-phase session"

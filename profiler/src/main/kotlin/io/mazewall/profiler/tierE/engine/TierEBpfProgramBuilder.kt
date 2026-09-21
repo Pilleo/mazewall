@@ -32,6 +32,7 @@ internal object TierEBpfProgramBuilder {
     private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX: Int = 7
     private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
+    private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
 
     // eBPF opcodes (64-bit class)
     private const val ADD_IMM: Int = 0x07
@@ -264,6 +265,30 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(LDX_W, dst = 5, src = 6, off = 20))
         emit(Insn(LDX_W, dst = 4, src = FP, off = -36))
         val staleAttachmentGeneration = emit(Insn(JNE_REG, dst = 5, src = 4))
+
+        val exactAdmissionAuditDone: Int?
+        val exactAdmissionAuditMissingEntry: Int?
+        if (options.benchmarkExactAdmissionAudit) {
+            loadSyscallNumber()
+            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
+            loadArgument(0)
+            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
+            ldMap(1, EXACT_ADMISSION_AUDIT_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -88))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            exactAdmissionAuditMissingEntry = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            exactAdmissionAuditDone = p.size
+            p[notOpenat] = p[notOpenat].copy(off = (exactAdmissionAuditDone - notOpenat - 1).toShort())
+            p[exactAdmissionAuditMissingEntry] = p[exactAdmissionAuditMissingEntry].copy(
+                off = (exactAdmissionAuditDone - exactAdmissionAuditMissingEntry - 1).toShort(),
+            )
+        } else {
+            exactAdmissionAuditDone = null
+            exactAdmissionAuditMissingEntry = null
+        }
 
         // Diagnostic counts are keyed by active invocation, bounded by the
         // map's LRU capacity, and never participate in attribution.
@@ -575,6 +600,7 @@ internal object TierEBpfProgramBuilder {
         p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(
             off = ((staleMarkerGenerationDiagnostic?.start ?: requireNotNull(staleMarkerGenerationHandler)) - staleAttachmentGeneration - 1).toShort(),
         )
+        check((exactAdmissionAuditDone == null) == (exactAdmissionAuditMissingEntry == null))
         p[markerDetached] = p[markerDetached].copy(
             off = ((markerDetachedDiagnostic?.start ?: requireNotNull(markerDetachedHandler)) - markerDetached - 1).toShort(),
         )

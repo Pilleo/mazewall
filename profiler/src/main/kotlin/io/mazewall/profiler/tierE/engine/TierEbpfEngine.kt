@@ -91,6 +91,7 @@ internal class TierEbpfEngine(
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
         private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = 1 shl 16
+        private const val EXACT_ADMISSION_AUDIT_CAPACITY: Int = RAW_SYS_ENTER_AUDIT_CAPACITY
         private const val SESSION_TAG_OFFSET: Long = 0
         private const val TARGET_TGID_OFFSET: Long = 4
         private const val MARKER_ATTACHED_OFFSET: Long = 8
@@ -174,6 +175,7 @@ internal class TierEbpfEngine(
         var sessionFd: BpfFd? = null
         var coverageEdgeFd: BpfFd? = null
         var rawSysEnterAuditFd: BpfFd? = null
+        var exactAdmissionAuditFd: BpfFd? = null
         var progFd: BpfFd? = null
         var rawSysEnterAuditProgFd: BpfFd? = null
         var markerProgFd: BpfFd? = null
@@ -186,6 +188,7 @@ internal class TierEbpfEngine(
         val execPerfFds = mutableListOf<BpfFd>()
         var ringReader: BpfRingBufferReader? = null
         var rawSysEnterAuditConfigured = false
+        var exactAdmissionAuditConfigured = false
         var sysEnterAttachmentBackend: TierESysEnterAttachmentBackend? = null
 
         fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
@@ -203,6 +206,8 @@ internal class TierEbpfEngine(
         fun requireSessionFd(): BpfFd = requireNotNull(sessionFd) { "session descriptor was not acquired" }
 
         fun requireRawSysEnterAuditFd(): BpfFd = requireNotNull(rawSysEnterAuditFd) { "raw sys_enter audit descriptor was not acquired" }
+
+        fun requireExactAdmissionAuditFd(): BpfFd = requireNotNull(exactAdmissionAuditFd) { "exact-admission audit descriptor was not acquired" }
 
         fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
 
@@ -261,6 +266,9 @@ internal class TierEbpfEngine(
             if (options.benchmarkRawSysEnterAudit) {
                 installed.rawSysEnterAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 16, maxEntries = RAW_SYS_ENTER_AUDIT_CAPACITY)
             }
+            if (options.benchmarkExactAdmissionAudit) {
+                installed.exactAdmissionAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 8, maxEntries = EXACT_ADMISSION_AUDIT_CAPACITY)
+            }
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
@@ -287,6 +295,7 @@ internal class TierEbpfEngine(
                 installed.coverageEdgeFd?.value ?: -1,
                 installed.requireContextMetricFd().value,
                 installed.requireInFlightFd().value,
+                installed.exactAdmissionAuditFd?.value ?: -1,
                 ),
                 if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                     PROG_RAW_TRACEPOINT
@@ -372,6 +381,23 @@ internal class TierEbpfEngine(
         installed.rawSysEnterAuditConfigured = true
     }
 
+    /** Configures the benchmark-only post-marker exact-admission denominator. */
+    internal fun configureExactAdmissionAudit(expectedDirectoryFds: Set<Int>) {
+        check(options.benchmarkExactAdmissionAudit) { "exact-admission audit is not enabled" }
+        require(expectedDirectoryFds.size <= EXACT_ADMISSION_AUDIT_CAPACITY) { "exact-admission audit descriptor count exceeds capacity" }
+        require(expectedDirectoryFds.all { it >= 0 }) { "exact-admission audit descriptors must be non-negative" }
+        val installed = requireInstalled()
+        check(!installed.exactAdmissionAuditConfigured) { "exact-admission audit was already configured" }
+        Arena.ofConfined().use { arena ->
+            expectedDirectoryFds.forEach { descriptor ->
+                val value = arena.allocate(8, 8)
+                value.set(ValueLayout.JAVA_LONG, 0, 0)
+                updateElem(arena, installed.requireExactAdmissionAuditFd().value, intSeg(arena, descriptor), value)
+            }
+        }
+        installed.exactAdmissionAuditConfigured = true
+    }
+
     /** Reads only the declared descriptors; absent entries are a configuration failure. */
     internal fun readRawSysEnterAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, RawSysEnterAuditCount> {
         check(options.benchmarkRawSysEnterAudit) { "raw sys_enter audit is not enabled" }
@@ -389,6 +415,24 @@ internal class TierEbpfEngine(
                     openat = value.get(ValueLayout.JAVA_LONG, 0),
                     openat2 = value.get(ValueLayout.JAVA_LONG, 8),
                 )
+            }
+        }
+    }
+
+    /** Reads the post-marker exact-admission count for each declared descriptor. */
+    internal fun readExactAdmissionAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, Long> {
+        check(options.benchmarkExactAdmissionAudit) { "exact-admission audit is not enabled" }
+        val installed = requireInstalled()
+        check(installed.exactAdmissionAuditConfigured) { "exact-admission audit was not configured" }
+        return Arena.ofConfined().use { arena ->
+            expectedDirectoryFds.associateWith { descriptor ->
+                val value = arena.allocate(8, 8)
+                val attr = arena.allocate(24)
+                attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireExactAdmissionAuditFd().value)
+                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
+                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
+                bpfCall(H_LOOKUP.toLong(), attr, 24)
+                value.get(ValueLayout.JAVA_LONG, 0)
             }
         }
     }
@@ -709,6 +753,7 @@ internal class TierEbpfEngine(
         close(installed.sessionFd) { installed.sessionFd = null }
         close(installed.coverageEdgeFd) { installed.coverageEdgeFd = null }
         close(installed.rawSysEnterAuditFd) { installed.rawSysEnterAuditFd = null }
+        close(installed.exactAdmissionAuditFd) { installed.exactAdmissionAuditFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
         close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }

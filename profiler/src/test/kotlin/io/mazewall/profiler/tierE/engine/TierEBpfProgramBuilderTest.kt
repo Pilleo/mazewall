@@ -202,6 +202,21 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `exact admission audit runs only after marker and task storage validation`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
+        )
+        val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
+        val auditMapLoad = program.indexOfFirst { it.code == 0x18 && it.src == 1 && it.imm == 7 }
+
+        assertTrue(auditMapLoad > taskStorageGet, "exact-admission audit must follow task-storage validation")
+        assertTrue(
+            program.take(auditMapLoad).any { it.code == 0x85 && it.imm == 113 },
+            "raw exact-admission audit must read the declared descriptor through the kernel-read helper",
+        )
+    }
+
+    @Test
     fun `automatic attachment selects direct raw tracepoint only for its supported ABI`() {
         assertEquals(
             TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,
