@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_direct_raw_tracepoint_follow_up",
+  "generated_at": "2026-09-21T01:30:00Z",
+  "implementation_commit": "6bd706cb30863ce6e6730afc01567f8515c77360",
+  "environment": {
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "rootful": true
+  },
+  "implementation": {
+    "backend": "BPF_RAW_TRACEPOINT_OPEN(sys_enter)",
+    "program_type": "BPF_PROG_TYPE_RAW_TRACEPOINT",
+    "architecture": "x86_64",
+    "legacy_perf_backend": "explicit compatibility only"
+  },
+  "runs": [
+    {
+      "artifact": "/tmp/tier-e-raw-tracepoint-500-audit-20260921",
+      "source_revision": "88bcc7839286400be0658ef2fdb03a1a5e1d03bd",
+      "benchmark_input_dirty_count": 4,
+      "rate_per_second": 500,
+      "duration_seconds": 60,
+      "result": "diagnostic_pass",
+      "full_stream": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "ring_loss": 0},
+      "unique_edge": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "ring_loss": 0}
+    },
+    {
+      "artifact": "/tmp/tier-e-raw-tracepoint-500-clean-20260921",
+      "source_revision": "6bd706cb30863ce6e6730afc01567f8515c77360",
+      "benchmark_input_dirty_count": 0,
+      "rate_per_second": 500,
+      "duration_seconds": 60,
+      "result": "incomplete",
+      "full_stream": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "ring_loss": 0},
+      "unique_edge": {"expected_operations": 30600, "matched_operations": 30596, "missing_operation_id_samples": [17702, 17703, 17704, 17705], "raw_audit_operations": 30600, "ring_loss": 0, "kernel_exact_admissions": 91792}
+    },
+    {
+      "artifact": "/tmp/tier-e-raw-tracepoint-marker-diagnostic-20260921",
+      "source_revision": "6bd706cb30863ce6e6730afc01567f8515c77360",
+      "result": "diagnostic_over_budget",
+      "operation_oracle_matched_operations": 30600,
+      "raw_audit_operations": 30600,
+      "retained_result_drops": 10254,
+      "interpretation": "marker-loss event publication changed retained volume and is not capacity evidence"
+    }
+  ],
+  "verdict_dimensions": {
+    "capture_domain_validity": "incomplete",
+    "transport_completeness": "complete_for_passing_diagnostic_only",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "not_implicated_by_raw_audit_mismatch",
+    "lifecycle_validity": "unclassified_marker_or_admission_gap",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false
+  },
+  "next_required_evidence": "Correlate each raw-audit operation with main-program admission or an explicit marker-loss reason without expanding normal retained evidence."
+}

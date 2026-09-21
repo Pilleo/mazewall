@@ -91,22 +91,24 @@ time, TGID/TID, syscall number, six arguments, invocation ID, sequence, and flag
 the event to the agent dictionary by ID only. Timestamp-nearest correlation and reuse of a previous
 stack are forbidden.
 
-**Implemented contract, with a known sustained-load limitation.** Both system-wide BPF entry points
-compare the current TGID with the immutable session target before reading or writing task storage.
-The current `perf_event_open` tracepoint descriptors are CPU-local, so Tier E attaches each program
-on every CPU in the collector process's `Cpus_allowed_list`; restricting attachment to CPU 0 is
-incorrect because pinning a JVM process's leader does not pin every carrier thread. One CPU-local
-descriptor handles hits executing on that CPU; sibling descriptors do not replay the same hit.
+**Implemented contract, not yet capacity-qualified.** Both system-wide BPF entry points compare the
+current TGID with the immutable session target before reading or writing task storage. On x86_64,
+`AUTO` installs `BPF_PROG_TYPE_RAW_TRACEPOINT` programs through `BPF_RAW_TRACEPOINT_OPEN` for
+`sys_enter`; the raw context supplies `(pt_regs *, syscall_number)`, and the program copies the six
+arguments through the kernel-read helper using the supported x86_64 register layout. This avoids the
+CPU-global `perf_event_open` sampling gate before the BPF TGID filter. The legacy per-CPU perf
+tracepoint path remains an explicit compatibility mode, not a sustained-capacity backend.
 
-This is **not** a proof that every selected target `sys_enter` reaches BPF. A perf tracepoint
-descriptor samples all host syscalls on its CPU before the BPF TGID filter runs. On the retained
-rootful host, `perf_event_max_sample_rate=25,750`; a clean 60-second 500/s target workload lost
-three `openat` calls in both the collector and an independent counter-only tracepoint program, while
-the `strace` shadow proved that those calls executed. Consequently any mismatch is fail-closed and
-capacity evidence is `INCOMPLETE`; the current attachment is not a production sustained-capacity
-guarantee. Required hardening replaces this CPU-global sampling path with target-lifecycle-scoped
-observation and explicit incomplete treatment for an unadmitted thread. See
-[tier-e-perf-tracepoint-sampling-loss-20260921.json](../../evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json).
+The earlier perf defect is retained evidence: with `perf_event_max_sample_rate=25,750`, a clean
+60-second 500/s target workload lost three `openat` calls in both the collector and an independent
+counter-only tracepoint program, while `strace` proved the calls executed. A direct-raw diagnostic
+run subsequently reconciled all 30,600 declared operations and all 30,600 independent audit entries
+in both dictionary modes. A clean repeat also completed full-stream, but unique-edge missed four
+operations while its raw audit remained complete and ring loss stayed zero. Therefore the global perf
+sampling cause is removed, but direct raw attachment is still `INCOMPLETE` for capacity promotion
+until the remaining marker/admission-side gap is deterministically classified. Every mismatch remains
+fail-closed. See [tier-e-perf-tracepoint-sampling-loss-20260921.json](../../evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json)
+and [tier-e-direct-raw-tracepoint-follow-up-20260921.json](../../evidence/tier-e-direct-raw-tracepoint-follow-up-20260921.json).
 
 Only events delivered to the current tracepoint program can reserve a ring record for a validated
 active invocation. Syscalls outside a native
