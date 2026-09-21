@@ -19,7 +19,10 @@ now_ms() {
 
 fingerprint() {
     local repository=$1 usdt=$2
-    [[ -d "${repository}/.git" ]] || { echo "repository must be a git checkout" >&2; return 2; }
+    [[ "$(git -C "${repository}" rev-parse --is-inside-work-tree 2>/dev/null || true)" == "true" ]] || {
+        echo "repository must be a git checkout" >&2
+        return 2
+    }
     [[ "${usdt}" == "true" || "${usdt}" == "false" ]] || { echo "usdt must be true or false" >&2; return 2; }
 
     (
