@@ -77,6 +77,18 @@ internal class SyscallInvocationEvent private constructor(
 
         /** Benchmark-only diagnostic: a target syscall had no task-storage attribution state. */
         public const val FLAG_TASK_STORAGE_UNAVAILABLE: Int = 1 shl 2
+
+        /** Benchmark-only diagnostic: marker attachment was removed before sys_enter. */
+        public const val FLAG_MARKER_DETACHED: Int = 1 shl 3
+
+        /** Benchmark-only diagnostic: task storage belongs to a stale marker attachment generation. */
+        public const val FLAG_STALE_MARKER_GENERATION: Int = 1 shl 4
+
+        /** Benchmark-only diagnostic: task storage existed but held no active invocation. */
+        public const val FLAG_INACTIVE_INVOCATION: Int = 1 shl 5
+
+        /** Benchmark-only diagnostic: BPF could not obtain the current task marker state. */
+        public const val FLAG_MARKER_STATE_UNAVAILABLE: Int = 1 shl 6
         public const val SIZE_BYTES: Int = 88
 
         private const val OFF_KTIME: Int = 0

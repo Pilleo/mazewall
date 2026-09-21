@@ -14,6 +14,7 @@ RETAINED_BUDGET_BYTES=${MAZEWALL_TIER_E_SUSTAINED_RETAINED_BUDGET_BYTES:-6710886
 RUN_DECISION=${MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION:-false}
 DECISION_FORKS=${MAZEWALL_TIER_E_SUSTAINED_DECISION_FORKS:-5}
 DECISION_STAGE_SECONDS=${MAZEWALL_TIER_E_SUSTAINED_DECISION_STAGE_SECONDS:-60}
+SHADOW_ON_FAILURE=${MAZEWALL_TIER_E_SUSTAINED_SHADOW_ON_FAILURE:-true}
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
@@ -61,6 +62,7 @@ trap finish EXIT
 [[ "${DECISION_FORKS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained decision forks: ${DECISION_FORKS}" >&2; exit 2; }
 [[ "${DECISION_STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained decision stage seconds: ${DECISION_STAGE_SECONDS}" >&2; exit 2; }
 [[ "${RUN_DECISION}" == true || "${RUN_DECISION}" == false ]] || { echo "MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION must be true or false" >&2; exit 2; }
+[[ "${SHADOW_ON_FAILURE}" == true || "${SHADOW_ON_FAILURE}" == false ]] || { echo "MAZEWALL_TIER_E_SUSTAINED_SHADOW_ON_FAILURE must be true or false" >&2; exit 2; }
 
 eligible_stage() {
     local results=$1
@@ -103,7 +105,33 @@ run_stage() {
         bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${STAGE_PATH}"
 }
 
-event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} max_retained_records=${MAX_RETAINED_RECORDS} retained_budget_bytes=${RETAINED_BUDGET_BYTES} run_decision=${RUN_DECISION}"
+run_shadow_stage() {
+    local rate=$1
+    local seconds=$2
+    local label=$3
+    local total_operations=$((rate * seconds))
+    (( total_operations % ITERATIONS == 0 )) || return 2
+    local batches=$((total_operations / ITERATIONS))
+    local shadow_path="${ARTIFACT_DIR}/${label}-rate-${rate}-shadow"
+    event "${label}-rate-${rate}-shadow" STARTED "diagnostic_replay=true forks=1 batches=${batches} expected_operations=${total_operations}"
+    if MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-sustained-collector \
+        MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND="${rate}" \
+        MAZEWALL_TIER_E_SUSTAINED_LOAD="${LOAD}" \
+        MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK="${RECEIPT_CLOCK}" \
+        MAZEWALL_TIER_E_CALIBRATION=false \
+        MAZEWALL_TIER_E_ITERATIONS="${ITERATIONS}" \
+        MAZEWALL_TIER_E_BATCHES="${batches}" \
+        MAZEWALL_TIER_E_FORKS=1 \
+        MAZEWALL_TIER_E_RUN_LEVEL=custom \
+        MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS="${MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS:-} -Dmazewall.tier-e.benchmark-max-retained-records=${MAX_RETAINED_RECORDS} -Dmazewall.tier-e.benchmark-strace-output=/artifacts/strace-shadow.log" \
+        bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${shadow_path}"; then
+        event "${label}-rate-${rate}-shadow" COMPLETED "diagnostic_replay=true artifact=${shadow_path}"
+    else
+        event "${label}-rate-${rate}-shadow" INCOMPLETE "diagnostic_replay=true artifact=${shadow_path}"
+    fi
+}
+
+event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} max_retained_records=${MAX_RETAINED_RECORDS} retained_budget_bytes=${RETAINED_BUDGET_BYTES} run_decision=${RUN_DECISION} shadow_on_failure=${SHADOW_ON_FAILURE}"
 if [[ "${RUN_DECISION}" == true ]]; then
     dirty_count=$(git -C "${REPOSITORY_DIR}" status --porcelain --untracked-files=normal | awk 'NF { count++ } END { print count + 0 }')
     if (( dirty_count > 0 )); then
@@ -116,6 +144,7 @@ ceiling_rate=0
 for rate in ${PILOT_RATES}; do
     [[ "${rate}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained rate: ${rate}" >&2; exit 2; }
     if ! run_stage "${rate}" "${STAGE_SECONDS}" 1 pilot; then
+        [[ "${SHADOW_ON_FAILURE}" == true ]] && run_shadow_stage "${rate}" "${STAGE_SECONDS}" pilot
         event "pilot-rate-${rate}" INCOMPLETE "runner_failure; ceiling_rate=${ceiling_rate}"
         break
     fi
@@ -123,6 +152,7 @@ for rate in ${PILOT_RATES}; do
         ceiling_rate=${rate}
         event "pilot-rate-${rate}" COMPLETED "eligible=true"
     else
+        [[ "${SHADOW_ON_FAILURE}" == true ]] && run_shadow_stage "${rate}" "${STAGE_SECONDS}" pilot
         event "pilot-rate-${rate}" INCOMPLETE "eligible=false; ceiling_rate=${ceiling_rate}"
         break
     fi
@@ -134,7 +164,8 @@ jq -n \
     --argjson retained_budget_fraction 0.75 \
     --argjson stage_seconds "${STAGE_SECONDS}" \
     --argjson max_retained_records "${MAX_RETAINED_RECORDS}" \
-    '{kind:"tier_e_sustained_capacity_pilot", generated_at:$generated_at, loss_free_ceiling_rate_per_second:$ceiling_rate_per_second, retained_budget_bytes:$retained_budget_bytes, retained_budget_fraction:$retained_budget_fraction, stage_seconds:$stage_seconds, max_retained_records:$max_retained_records}' \
+    --argjson shadow_on_failure "${SHADOW_ON_FAILURE}" \
+    '{kind:"tier_e_sustained_capacity_pilot", generated_at:$generated_at, loss_free_ceiling_rate_per_second:$ceiling_rate_per_second, retained_budget_bytes:$retained_budget_bytes, retained_budget_fraction:$retained_budget_fraction, stage_seconds:$stage_seconds, max_retained_records:$max_retained_records, shadow_on_failure:$shadow_on_failure}' \
     > "${ARTIFACT_DIR}/capacity-manifest.json"
 
 if [[ "${RUN_DECISION}" == true && "${ceiling_rate}" -gt 0 ]]; then

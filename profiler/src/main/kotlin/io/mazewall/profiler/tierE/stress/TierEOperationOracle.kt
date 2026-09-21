@@ -8,6 +8,7 @@ internal object TierEOperationOracle {
         val hasWorkloadStack: Boolean,
         val hasInvocationIdentity: Boolean,
         val hasExecutionIdentity: Boolean,
+        val markerLossReason: MarkerLossReason? = null,
     )
 
     data class Report(
@@ -23,7 +24,12 @@ internal object TierEOperationOracle {
         val unclassified: Long = 0,
         /** Bounded diagnostic aid; never substitutes for the aggregate missing count. */
         val missingOperationIdSamples: List<Int> = emptyList(),
+        /** Bounded diagnostic aid for observed zero-attribution marker-loss records. */
+        val wrongOperationIdSamples: List<Int> = emptyList(),
+        val markerLossReasons: Map<MarkerLossReason, Long> = emptyMap(),
     )
+
+    enum class MarkerLossReason { TASK_STORAGE_UNAVAILABLE, DETACHED, STALE_GENERATION, INACTIVE_INVOCATION, MARKER_STATE_UNAVAILABLE }
 
     enum class UniqueDecision { CANDIDATE, ACKNOWLEDGED, SUPPRESSED }
 
@@ -47,6 +53,8 @@ internal object TierEOperationOracle {
         var unclassified = 0L
         var missing = 0L
         val missingOperationIdSamples = ArrayList<Int>(MISSING_OPERATION_SAMPLE_LIMIT)
+        val wrongOperationIdSamples = ArrayList<Int>(MISSING_OPERATION_SAMPLE_LIMIT)
+        val markerLossReasons = linkedMapOf<MarkerLossReason, Long>()
         expectedOperationIds.forEach { operationId ->
             val candidates = byId[operationId].orEmpty()
             if (candidates.size > 1) duplicates += candidates.size - 1L
@@ -62,7 +70,15 @@ internal object TierEOperationOracle {
                 !candidate.resolved ||
                     !candidate.hasWorkloadStack ||
                     !candidate.hasInvocationIdentity ||
-                    !candidate.hasExecutionIdentity -> wrong++
+                    !candidate.hasExecutionIdentity -> {
+                    wrong++
+                    if (wrongOperationIdSamples.size < MISSING_OPERATION_SAMPLE_LIMIT) {
+                        wrongOperationIdSamples += operationId
+                    }
+                    candidate.markerLossReason?.let { reason ->
+                        markerLossReasons[reason] = (markerLossReasons[reason] ?: 0L) + 1L
+                    }
+                }
                 else -> matched++
             }
         }
@@ -75,6 +91,8 @@ internal object TierEOperationOracle {
             wrong = wrong,
             unclassified = unclassified,
             missingOperationIdSamples = missingOperationIdSamples.toList(),
+            wrongOperationIdSamples = wrongOperationIdSamples.toList(),
+            markerLossReasons = markerLossReasons.toMap(),
         )
     }
 

@@ -40,6 +40,7 @@ internal object TierEBpfProgramBuilder {
     private const val STX_DW: Int = 0x7b
     private const val JEQ_IMM: Int = 0x15
     private const val JA: Int = 0x05
+    private const val JNE_IMM: Int = 0x55
     private const val JNE_REG: Int = 0x5d
     private const val OR_IMM: Int = 0x47
     private const val RSH_IMM: Int = 0x77
@@ -54,6 +55,80 @@ internal object TierEBpfProgramBuilder {
 
     private const val PSEUDO_FD: Int = 1
     private const val FP: Int = 10
+
+    /**
+     * Builds a benchmark-only raw-syscalls audit program. Map 0 contains declared directory
+     * descriptors as keys with separate observed `openat` and `openat2` counts as values; map 1 is the normal
+     * session configuration. The program never reserves or submits a ring record.
+     */
+    public fun buildRawSysEnterAuditProgram(): List<Insn> {
+        val program = mutableListOf<Insn>()
+
+        fun emit(instruction: Insn): Int {
+            program += instruction
+            return program.lastIndex
+        }
+
+        fun loadMap(
+            destination: Int,
+            index: Int,
+        ) {
+            emit(Insn(LD_MAP_FD, dst = destination, src = PSEUDO_FD, imm = index))
+            emit(Insn(code = 0x00))
+        }
+
+        emit(Insn(MOV_REG, dst = 9, src = 1))
+        emit(Insn(CALL, imm = H_PID_TGID))
+        emit(Insn(MOV_REG, dst = 8, src = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+
+        // The dynamic tracepoint attachment is global, so scope the audit to the current
+        // session target before inspecting syscall arguments or audit state.
+        loadMap(1, 1)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val noSession = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
+        emit(Insn(MOV_REG, dst = 5, src = 8))
+        emit(Insn(RSH_IMM, dst = 5, imm = 32))
+        val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
+
+        // raw_syscalls/sys_enter: syscall id is u64@8 and args[0] is u64@16.
+        emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
+        val openat = emit(Insn(JEQ_IMM, dst = 5, imm = 257))
+        val nonOpenatFamily = emit(Insn(JNE_IMM, dst = 5, imm = 437))
+        emit(Insn(MOV_IMM, dst = 6, imm = 8))
+        val openatFamily = emit(Insn(JA))
+        val openatCounter = program.size
+        emit(Insn(MOV_IMM, dst = 6, imm = 0))
+        val descriptorLookup = program.size
+        program[openat] = program[openat].copy(off = (openatCounter - openat - 1).toShort())
+        program[openatFamily] = program[openatFamily].copy(off = (descriptorLookup - openatFamily - 1).toShort())
+        emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+        loadMap(1, 0)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -4))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val undeclaredDescriptor = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        val isOpenat = emit(Insn(JEQ_IMM, dst = 6))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 8))
+        val incrementedOpenat2 = emit(Insn(JA))
+        val incrementOpenat = program.size
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 0))
+
+        val exit = program.size
+        emit(Insn(MOV_IMM, dst = 0, imm = 0))
+        emit(Insn(EXIT))
+        listOf(noSession, wrongTarget, nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2).forEach { index ->
+            program[index] = program[index].copy(off = (exit - index - 1).toShort())
+        }
+        program[isOpenat] = program[isOpenat].copy(off = (incrementOpenat - isOpenat - 1).toShort())
+        return program.toList()
+    }
 
     /**
      * Builds the tracepoint/raw_syscalls/sys_enter eBPF program for capturing syscall events with active invocation state.
@@ -191,45 +266,95 @@ internal object TierEBpfProgramBuilder {
         val missingExactAdmissionCounter = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-        val skipTaskStorageUnavailableDiagnostic = if (
-            options.benchmarkEmitTaskStorageUnavailableEvents &&
-            options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
-        ) {
+        val emitTaskStorageUnavailableDiagnostic =
+            (options.benchmarkEmitTaskStorageUnavailableEvents || options.benchmarkEmitMarkerLossEvents) &&
+                options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
+        val emitMarkerLossDiagnostics =
+            options.benchmarkEmitMarkerLossEvents && options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
+        val skipMarkerLossDiagnostics = if (emitTaskStorageUnavailableDiagnostic || emitMarkerLossDiagnostics) {
             emit(Insn(JA))
         } else {
             null
         }
-        val taskStorageUnavailableDiagnostic = if (skipTaskStorageUnavailableDiagnostic != null) {
-            // Keep the normal bounded counter, but make this benchmark-only path observable as
-            // an owned zero-invocation record. It proves that a workload oracle miss is an
-            // explicit attribution gap, not a silently dropped collector decision.
-            val diagnosticStart = p.size
+
+        fun emitMarkerLossDiagnostic(
+            counterIndex: Int,
+            flag: Int,
+        ): MarkerLossDiagnostic {
+            // The unchanged 88-byte record carries the raw syscall arguments while zeroing
+            // attribution. This is diagnostic-only and lets an operation oracle distinguish
+            // marker-state loss from ring reservation or collector loss.
+            val start = p.size
             ldMap(1, COUNTER_MAP_INDEX)
-            emit(Insn(MOV_IMM, dst = 5, imm = TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX))
+            emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
             emit(Insn(STX_W, dst = FP, src = 5, off = -4))
             emit(Insn(MOV_REG, dst = 2, src = FP))
             emit(Insn(ADD_IMM, dst = 2, imm = -4))
             emit(Insn(CALL, imm = H_LOOKUP))
-            val missingTaskStorageCounter = emit(Insn(JEQ_IMM, dst = 0))
+            val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
             emit(Insn(MOV_IMM, dst = 5, imm = 1))
             emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-            val counterComplete = emit(Insn(JA))
             emit(Insn(MOV_IMM, dst = 5, imm = 0))
             emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
             emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
-            emit(Insn(MOV_IMM, dst = 5, imm = SyscallInvocationEvent.FLAG_TASK_STORAGE_UNAVAILABLE))
+            emit(Insn(MOV_IMM, dst = 5, imm = flag))
             emit(Insn(STX_W, dst = FP, src = 5, off = -8))
-            TaskStorageUnavailableDiagnostic(diagnosticStart, missingTaskStorageCounter, counterComplete)
+            return MarkerLossDiagnostic(start, missingCounter, emit(Insn(JA)))
+        }
+
+        val taskStorageUnavailableDiagnostic = if (emitTaskStorageUnavailableDiagnostic) {
+            emitMarkerLossDiagnostic(
+                TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX,
+                SyscallInvocationEvent.FLAG_TASK_STORAGE_UNAVAILABLE,
+            )
+        } else {
+            null
+        }
+        val markerDetachedDiagnostic = if (emitMarkerLossDiagnostics) {
+            emitMarkerLossDiagnostic(
+                MARKER_DETACHED_COUNTER_INDEX,
+                SyscallInvocationEvent.FLAG_MARKER_DETACHED,
+            )
+        } else {
+            null
+        }
+        val staleMarkerGenerationDiagnostic = if (emitMarkerLossDiagnostics) {
+            emitMarkerLossDiagnostic(
+                STALE_MARKER_GENERATION_COUNTER_INDEX,
+                SyscallInvocationEvent.FLAG_STALE_MARKER_GENERATION,
+            )
+        } else {
+            null
+        }
+        val inactiveInvocationDiagnostic = if (emitMarkerLossDiagnostics) {
+            emitMarkerLossDiagnostic(
+                AMBIENT_INACTIVE_COUNTER_INDEX,
+                SyscallInvocationEvent.FLAG_INACTIVE_INVOCATION,
+            )
+        } else {
+            null
+        }
+        val markerStateUnavailableDiagnostic = if (emitMarkerLossDiagnostics) {
+            emitMarkerLossDiagnostic(
+                MARKER_FAILURE_COUNTER_INDEX,
+                SyscallInvocationEvent.FLAG_MARKER_STATE_UNAVAILABLE,
+            )
         } else {
             null
         }
         val reserveStart = p.size
-        skipTaskStorageUnavailableDiagnostic?.let { index ->
+        skipMarkerLossDiagnostics?.let { index ->
             p[index] = p[index].copy(off = (reserveStart - index - 1).toShort())
         }
-        taskStorageUnavailableDiagnostic?.let { diagnostic ->
-            p[diagnostic.counterComplete] = p[diagnostic.counterComplete].copy(
-                off = (diagnostic.payloadSetupStart - diagnostic.counterComplete - 1).toShort(),
+        listOfNotNull(
+            taskStorageUnavailableDiagnostic,
+            markerDetachedDiagnostic,
+            staleMarkerGenerationDiagnostic,
+            inactiveInvocationDiagnostic,
+            markerStateUnavailableDiagnostic,
+        ).forEach { diagnostic ->
+            p[diagnostic.skipToReserve] = p[diagnostic.skipToReserve].copy(
+                off = (reserveStart - diagnostic.skipToReserve - 1).toShort(),
             )
         }
         p[noMetricContext] = p[noMetricContext].copy(off = (reserveStart - noMetricContext - 1).toShort())
@@ -309,6 +434,8 @@ internal object TierEBpfProgramBuilder {
         val missingLossCounter: Int?
         if (options.ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             lossHandler = p.size
+            emit(Insn(MOV_IMM, dst = 5, imm = 0))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -4))
             ldMap(1, 2)
             emit(Insn(MOV_REG, dst = 2, src = FP))
             emit(Insn(ADD_IMM, dst = 2, imm = -4))
@@ -346,19 +473,31 @@ internal object TierEBpfProgramBuilder {
             p[missingCounter] = p[missingCounter].copy(off = (completeActive - missingCounter - 1).toShort())
             p[complete] = p[complete].copy(off = (completeActive - complete - 1).toShort())
         }
-        val markerFailureHandler = p.size
-        emitCounterAndComplete(MARKER_FAILURE_COUNTER_INDEX)
-        val ambientInactiveHandler = p.size
-        emitCounterAndComplete(AMBIENT_INACTIVE_COUNTER_INDEX)
-        val markerDetachedHandler = p.size
-        emitCounterAndComplete(MARKER_DETACHED_COUNTER_INDEX)
+        val markerFailureHandler = if (markerStateUnavailableDiagnostic == null) {
+            p.size.also { emitCounterAndComplete(MARKER_FAILURE_COUNTER_INDEX) }
+        } else {
+            null
+        }
+        val ambientInactiveHandler = if (inactiveInvocationDiagnostic == null) {
+            p.size.also { emitCounterAndComplete(AMBIENT_INACTIVE_COUNTER_INDEX) }
+        } else {
+            null
+        }
+        val markerDetachedHandler = if (markerDetachedDiagnostic == null) {
+            p.size.also { emitCounterAndComplete(MARKER_DETACHED_COUNTER_INDEX) }
+        } else {
+            null
+        }
         val taskStorageUnavailableHandler = if (taskStorageUnavailableDiagnostic == null) {
             p.size.also { emitCounterAndComplete(TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX) }
         } else {
             null
         }
-        val staleMarkerGenerationHandler = p.size
-        emitCounterAndComplete(STALE_MARKER_GENERATION_COUNTER_INDEX)
+        val staleMarkerGenerationHandler = if (staleMarkerGenerationDiagnostic == null) {
+            p.size.also { emitCounterAndComplete(STALE_MARKER_GENERATION_COUNTER_INDEX) }
+        } else {
+            null
+        }
         // Map descriptors are fixed for the program lifetime, but if lookup
         // nevertheless fails we cannot prove this handler was counted. Mark
         // the run incomplete without executing the completion decrement.
@@ -380,20 +519,34 @@ internal object TierEBpfProgramBuilder {
         reservationFailed?.let { index ->
             p[index] = p[index].copy(off = (requireNotNull(lossHandler) - index - 1).toShort())
         }
-        p[noTask] = p[noTask].copy(off = (markerFailureHandler - noTask - 1).toShort())
+        p[noTask] = p[noTask].copy(
+            off = ((markerStateUnavailableDiagnostic?.start ?: requireNotNull(markerFailureHandler)) - noTask - 1).toShort(),
+        )
         p[noStorage] = p[noStorage].copy(
             off = ((taskStorageUnavailableDiagnostic?.start ?: requireNotNull(taskStorageUnavailableHandler)) - noStorage - 1).toShort(),
         )
-        p[inactiveInvocation] = p[inactiveInvocation].copy(off = (ambientInactiveHandler - inactiveInvocation - 1).toShort())
-        p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(off = (staleMarkerGenerationHandler - staleAttachmentGeneration - 1).toShort())
-        p[markerDetached] = p[markerDetached].copy(off = (markerDetachedHandler - markerDetached - 1).toShort())
+        p[inactiveInvocation] = p[inactiveInvocation].copy(
+            off = ((inactiveInvocationDiagnostic?.start ?: requireNotNull(ambientInactiveHandler)) - inactiveInvocation - 1).toShort(),
+        )
+        p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(
+            off = ((staleMarkerGenerationDiagnostic?.start ?: requireNotNull(staleMarkerGenerationHandler)) - staleAttachmentGeneration - 1).toShort(),
+        )
+        p[markerDetached] = p[markerDetached].copy(
+            off = ((markerDetachedDiagnostic?.start ?: requireNotNull(markerDetachedHandler)) - markerDetached - 1).toShort(),
+        )
         p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
         submitted?.let { index -> p[index] = p[index].copy(off = (completeActive - index - 1).toShort()) }
         missingLossCounter?.let { index ->
             p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
         }
         p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (inFlightCounterFailureHandler - missingInFlightCounter - 1).toShort())
-        taskStorageUnavailableDiagnostic?.let { diagnostic ->
+        listOfNotNull(
+            taskStorageUnavailableDiagnostic,
+            markerDetachedDiagnostic,
+            staleMarkerGenerationDiagnostic,
+            inactiveInvocationDiagnostic,
+            markerStateUnavailableDiagnostic,
+        ).forEach { diagnostic ->
             p[diagnostic.missingCounter] = p[diagnostic.missingCounter].copy(
                 off = (inFlightCounterFailureHandler - diagnostic.missingCounter - 1).toShort(),
             )
@@ -406,18 +559,11 @@ internal object TierEBpfProgramBuilder {
         return p.toList()
     }
 
-    private data class TaskStorageUnavailableDiagnostic(
+    private data class MarkerLossDiagnostic(
         val start: Int,
         val missingCounter: Int,
-        val counterComplete: Int,
-        val payloadSetupStart: Int,
-    ) {
-        constructor(
-            start: Int,
-            missingCounter: Int,
-            counterComplete: Int,
-        ) : this(start, missingCounter, counterComplete, counterComplete + 1)
-    }
+        val skipToReserve: Int,
+    )
 
     /**
      * Builds the x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`.

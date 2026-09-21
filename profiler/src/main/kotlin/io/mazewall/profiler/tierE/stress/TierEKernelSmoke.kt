@@ -29,12 +29,15 @@ import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import io.mazewall.profiler.tierE.daemon.UsdtProbeNotes
 import io.mazewall.profiler.tierE.daemon.selectMarkerTransport
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
+import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.HexFormat
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /** Privileged end-to-end diagnostic used by the Docker kernel gate. */
@@ -65,6 +68,10 @@ internal object TierEKernelSmoke {
         val usdtNote = markerSelection.usdtNote
         val definitions = Path.of(args[3]).toAbsolutePath()
         val captureYieldPath = System.getProperty("mazewall.tier-e.capture-yield")?.let(Path::of)?.toAbsolutePath()
+        val straceOutputPath = System
+            .getProperty("mazewall.tier-e.benchmark-strace-output")
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
         val lifecycleScenario = System.getProperty("mazewall.tier-e.lifecycle-scenario", "normal")
         require(lifecycleScenario in setOf("normal", "detach_while_active", "callback_suppression", "terminal_while_active", "capture_failure", "exec_transition")) {
             "unknown Tier E lifecycle scenario: $lifecycleScenario"
@@ -131,6 +138,14 @@ internal object TierEKernelSmoke {
             .getProperty("mazewall.tier-e.benchmark-emit-task-storage-unavailable-events", "false")
             .toBooleanStrictOrNull()
             ?: error("task-storage unavailable event diagnostics must be true or false")
+        val benchmarkEmitMarkerLossEvents = System
+            .getProperty("mazewall.tier-e.benchmark-emit-marker-loss-events", "false")
+            .toBooleanStrictOrNull()
+            ?: error("marker-loss event diagnostics must be true or false")
+        val benchmarkRawSysEnterAudit = System
+            .getProperty("mazewall.tier-e.benchmark-raw-sys-enter-audit", "false")
+            .toBooleanStrictOrNull()
+            ?: error("raw sys_enter audit must be true or false")
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -164,8 +179,12 @@ internal object TierEKernelSmoke {
         require(benchmark || idlePollPolicy == "continuous") { "idle poll pacing is benchmark-only" }
         require(benchmark || receiptClockMode == "disabled") { "collector receipt clock is benchmark-only" }
         require(benchmark || !benchmarkAllocationAccounting) { "allocation accounting is benchmark-only" }
-        require(benchmark || !benchmarkEmitTaskStorageUnavailableEvents) {
-            "task-storage unavailable event diagnostics are benchmark-only"
+        require(benchmark || !(benchmarkEmitTaskStorageUnavailableEvents || benchmarkEmitMarkerLossEvents)) {
+            "marker-loss event diagnostics are benchmark-only"
+        }
+        require(benchmark || !benchmarkRawSysEnterAudit) { "raw sys_enter audit is benchmark-only" }
+        require(!benchmarkRawSysEnterAudit || sharedOpenatOracleWorkload) {
+            "raw sys_enter audit requires the shared openat operation oracle"
         }
         require(benchmark || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             "ring submission control is benchmark-only"
@@ -292,6 +311,8 @@ internal object TierEKernelSmoke {
                 benchmarkPhases = benchmark,
                 benchmarkAllocationAccounting = benchmarkAllocationAccounting,
                 benchmarkEmitTaskStorageUnavailableEvents = benchmarkEmitTaskStorageUnavailableEvents,
+                benchmarkEmitMarkerLossEvents = benchmarkEmitMarkerLossEvents,
+                benchmarkRawSysEnterAudit = benchmarkRawSysEnterAudit,
                 ringDecodeMode = ringDecodeMode,
                 ringArgumentListMode = ringArgumentListMode,
                 ringArgumentViewMode = ringArgumentViewMode,
@@ -321,6 +342,8 @@ internal object TierEKernelSmoke {
         var kernelActiveBeforeDetach: Long? = null
         var terminalProfile: TierEProfile? = null
         var terminalLastMarkerPidTgid: Long? = null
+        var strace: Process? = null
+        val straceMessages = LinkedBlockingQueue<String>()
         try {
             val expectedOpenatFds = if (sharedOpenatOracleWorkload) {
                 while (!Files.exists(oracleManifest) || Files.size(oracleManifest) == 0L) Thread.sleep(1)
@@ -333,6 +356,36 @@ internal object TierEKernelSmoke {
             val attachStarted = System.nanoTime()
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
+            if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(expectedOpenatFds)
+            straceOutputPath?.let { output ->
+                output.parent?.let(Files::createDirectories)
+                Files.deleteIfExists(output)
+                val tracer = ProcessBuilder(
+                    "strace",
+                    "-f",
+                    "-e",
+                    "trace=openat,openat2,close",
+                    "-o",
+                    output.toString(),
+                    "-p",
+                    process.pid().toString(),
+                ).start()
+                strace = tracer
+                Thread.startVirtualThread {
+                    tracer.errorStream.bufferedReader().useLines { lines ->
+                        lines.forEach(straceMessages::offer)
+                    }
+                }
+                val attachmentDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                var attached = false
+                while (!attached && System.nanoTime() < attachmentDeadline) {
+                    val message = straceMessages.poll(25, TimeUnit.MILLISECONDS) ?: continue
+                    attached = message.contains("Process ${process.pid()} attached")
+                }
+                check(attached && tracer.isAlive) {
+                    "strace shadow oracle exited before workload release"
+                }
+            }
             // Benchmark-only synchronization point for concurrent host-noise fixtures. The marker
             // proves attachment completed; it does not imply producer closure or collector drain.
             println("tier-e-kernel-smoke: attachment_ready=true workload_pid=${process.pid()}")
@@ -390,6 +443,15 @@ internal object TierEKernelSmoke {
                 }
             }
             check(process.waitFor() == 0) { "agent workload failed" }
+            val rawSysEnterAuditCounts = if (benchmarkRawSysEnterAudit) {
+                engine.readRawSysEnterAuditCounts(expectedOpenatFds)
+            } else {
+                emptyMap()
+            }
+            val rawSysEnterAuditMissing = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }.keys
+            val rawSysEnterAuditObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.total }
+            val rawSysEnterAuditNonSingletons = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }
+            val rawSysEnterAuditOpenat2 = rawSysEnterAuditCounts.filterValues { count -> count.openat2 > 0L }
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -531,6 +593,7 @@ internal object TierEKernelSmoke {
                                 hasWorkloadStack = syscall.stackDefinition?.frames?.any { it.className == workloadClassName } == true,
                                 hasInvocationIdentity = syscall.observation.invocationId != null,
                                 hasExecutionIdentity = syscall.executionContext != null,
+                                markerLossReason = markerLossReason(syscall.observation.captureFlags),
                             )
                         },
                 )
@@ -640,6 +703,20 @@ internal object TierEKernelSmoke {
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
+                    "strace_shadow_oracle=${if (straceOutputPath == null) "disabled" else "enabled"} " +
+                    "strace_output=${straceOutputPath ?: "none"} " +
+                "raw_sys_enter_audit=${if (benchmarkRawSysEnterAudit) "enabled" else "disabled"} " +
+                "raw_sys_enter_audit_expected_operations=${rawSysEnterAuditCounts.size} " +
+                "raw_sys_enter_audit_observed_operations=$rawSysEnterAuditObserved " +
+                "raw_sys_enter_audit_non_singleton_operations=${rawSysEnterAuditNonSingletons.size} " +
+                "raw_sys_enter_audit_openat2_operations=${rawSysEnterAuditOpenat2.size} " +
+                "raw_sys_enter_audit_missing_fd_samples=${rawSysEnterAuditMissing.sorted().take(16).joinToString(",").ifEmpty { "none" }} " +
+                "raw_sys_enter_audit_non_singleton_samples=${rawSysEnterAuditNonSingletons.toSortedMap().entries.take(
+                    16,
+                ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
+                "raw_sys_enter_audit_openat2_samples=${rawSysEnterAuditOpenat2.toSortedMap().entries.take(
+                    16,
+                ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +
@@ -667,6 +744,8 @@ internal object TierEKernelSmoke {
                 "expected_operations=$expectedWorkloadUnlinks matched_operations=$matchedOperations " +
                 "missing_operations=$missingWorkloadUnlinks extra_operations=$extraWorkloadUnlinks " +
                 "missing_operation_id_samples=${oracle.missingOperationIdSamples.joinToString(",").ifEmpty { "none" }} " +
+                "wrong_operation_id_samples=${oracle.wrongOperationIdSamples.joinToString(",").ifEmpty { "none" }} " +
+                "marker_loss_reasons=${oracle.markerLossReasons.entries.joinToString(",") { (reason, count) -> "${reason.name.lowercase()}:$count" }.ifEmpty { "none" }} " +
                 "candidate_operations=${oracle.candidates} acknowledged_operations=${oracle.acknowledged} " +
                 "suppressed_representatives=$suppressedRepresentatives " +
                 "callback_probe_resolved=$callbackProbeResolved " +
@@ -877,6 +956,11 @@ internal object TierEKernelSmoke {
             System.err.print(expectedFailure.stackTraceToString())
             exitProcess(1)
         } finally {
+            strace?.let { tracer ->
+                if (tracer.isAlive) tracer.destroy()
+                tracer.waitFor(5, TimeUnit.SECONDS)
+                if (tracer.isAlive) tracer.destroyForcibly()
+            }
             receiptClock?.close()
             session.close()
             child.close()
@@ -956,6 +1040,16 @@ internal object TierEKernelSmoke {
     private fun StringBuilder.appendField(value: String) {
         append(value.length).append(':').append(value).append(';')
     }
+
+    private fun markerLossReason(captureFlags: Int): TierEOperationOracle.MarkerLossReason? =
+        when {
+            captureFlags and SyscallInvocationEvent.FLAG_TASK_STORAGE_UNAVAILABLE != 0 -> TierEOperationOracle.MarkerLossReason.TASK_STORAGE_UNAVAILABLE
+            captureFlags and SyscallInvocationEvent.FLAG_MARKER_DETACHED != 0 -> TierEOperationOracle.MarkerLossReason.DETACHED
+            captureFlags and SyscallInvocationEvent.FLAG_STALE_MARKER_GENERATION != 0 -> TierEOperationOracle.MarkerLossReason.STALE_GENERATION
+            captureFlags and SyscallInvocationEvent.FLAG_INACTIVE_INVOCATION != 0 -> TierEOperationOracle.MarkerLossReason.INACTIVE_INVOCATION
+            captureFlags and SyscallInvocationEvent.FLAG_MARKER_STATE_UNAVAILABLE != 0 -> TierEOperationOracle.MarkerLossReason.MARKER_STATE_UNAVAILABLE
+            else -> null
+        }
 
     private fun semanticBindings(applicationKind: TierECommonFileWorkload.ApplicationKind): List<TierECaptureBinding> =
         when (applicationKind) {

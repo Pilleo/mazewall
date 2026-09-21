@@ -97,6 +97,16 @@ internal data class TierEOptions(
      * through its bounded kernel counter without widening the ambient event stream.
      */
     val benchmarkEmitTaskStorageUnavailableEvents: Boolean = false,
+    /**
+     * Emits zero-invocation records for every marker-state loss branch. This is a benchmark-only
+     * correlation probe; production keeps these conditions as bounded aggregate counters.
+     */
+    val benchmarkEmitMarkerLossEvents: Boolean = false,
+    /**
+     * Attaches a second counter-only raw-syscalls program for a declared set of benchmark
+     * operation descriptors. It emits no ring records and is excluded from capacity evidence.
+     */
+    val benchmarkRawSysEnterAudit: Boolean = false,
     /** Primitive owned argument storage is the production path; boxed lists remain benchmark-only. */
     val ownedArgumentStorage: Boolean = true,
     /** Read-only ready transfer is production behavior; copying remains a paired benchmark control. */
@@ -113,6 +123,12 @@ internal data class TierEOptions(
         }
         require(benchmarkPhases || !benchmarkEmitTaskStorageUnavailableEvents) {
             "task-storage unavailable event emission is benchmark-only"
+        }
+        require(benchmarkPhases || !benchmarkEmitMarkerLossEvents) {
+            "marker-loss event emission is benchmark-only"
+        }
+        require(benchmarkPhases || !benchmarkRawSysEnterAudit) {
+            "raw sys_enter auditing is benchmark-only"
         }
         require(benchmarkPhases || !benchmarkAllocationAccounting) {
             "allocation accounting may be enabled only in a benchmark-phase session"

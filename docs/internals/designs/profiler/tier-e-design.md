@@ -92,11 +92,12 @@ the event to the agent dictionary by ID only. Timestamp-nearest correlation and 
 stack are forbidden.
 
 Both system-wide BPF entry points compare the current TGID with the immutable session target
-before reading or writing task storage. The dynamic uprobe PMU uses libbpf's single global event
-form (CPU 0, PID -1); experimentally, opening the local trace-uprobe event on every CPU duplicated
-every hit. TGID filtering in the BPF program rejects other processes even if they map the same
-agent library and use the same session tag. The kernel gate pins the target away from CPU 0 to
-verify that this dynamic-probe form still observes migrated execution.
+before reading or writing task storage. `perf_event_open` tracepoint and dynamic-uprobe descriptors
+are CPU-local: Tier E attaches each program on every online CPU in the collector process's
+`Cpus_allowed_list`. TGID filtering in the BPF program rejects other processes even if they map the
+same agent library and use the same session tag. One CPU-local descriptor handles hits executing on
+that CPU; sibling descriptors do not replay the same hit. Restricting attachment to CPU 0 is
+incorrect because pinning a JVM process's leader does not pin every carrier thread.
 
 The raw tracepoint evaluates every selected `sys_enter` event made by the target after attachment,
 but only reserves a ring record for a validated active invocation. Syscalls outside a native
@@ -1510,6 +1511,20 @@ zero reported ring and retained-state drops. It is explicitly excluded from capa
 claims; the runner preserves it as incomplete evidence and does not infer a loss-free ceiling. See
 [tier-e-sustained-capacity-incomplete-20260920.json](../../evidence/tier-e-sustained-capacity-incomplete-20260920.json).
 
+**Implemented correction, diagnostic evidence.** The incomplete pilot ran in a two-CPU (`0,2`)
+container while Tier E had attached its marker and tracepoint programs only to CPU 0. A
+counter-only, benchmark-only second `raw_syscalls/sys_enter` program was added to count each
+declared shared-`openat` directory descriptor without emitting ring records. It independently
+reproduced the same missing contiguous descriptor groups as the primary path, and ruled out
+`openat2` as an alternate syscall. The engine now attaches the marker, selected `sys_enter`, exec,
+and audit programs on every allowed online CPU. A subsequent source-dirty rootful five-fork,
+10-second, 1,000-operations/s confirmation retained all 106,000 declared audit observations and
+all 106,000 attributed operations across dictionary/full-stream and dictionary/unique-edge, with
+zero audit duplicates and zero `openat2` substitutions. This diagnostic establishes repeatability
+and the failure mechanism but is not a capacity decision; clean multi-fork evidence is still
+required. See
+[tier-e-cpu-local-attachment-diagnostic-20260921.json](../../evidence/tier-e-cpu-local-attachment-diagnostic-20260921.json).
+
 **Historical evidence.** A follow-up rootful fifteen-fork, ten-batch near-capacity matrix enabled
 the benchmark-only monotonic receipt clock for the same 1,000-boundaries/s producer. All four
 dictionary policy/mode arms retained complete evidence for 15,000 operations each. Adaptive
@@ -2033,6 +2048,55 @@ gap from ring loss or collector suppression; its evidence is intentionally incom
 never contributes to production performance or sustained-capacity decisions. Static builder
 tests require every instruction to be reachable for default, unique-edge, and this diagnostic
 program shape before a rootful verifier run.
+
+**Expanded marker-loss diagnostic.** The benchmark-only marker-loss switch is also disabled by
+default. It emits otherwise unchanged zero-attribution records for the bounded, post-target-gate
+paths `TASK_STORAGE_UNAVAILABLE`, `DETACHED`, `STALE_GENERATION`, `INACTIVE_INVOCATION`, and
+`MARKER_STATE_UNAVAILABLE`. These records carry observed syscall arguments so the independent
+operation oracle can determine whether a declared workload operation reached a known
+post-admission loss branch. They intentionally produce incomplete session evidence and therefore
+are not capacity, correctness, or performance evidence for the production shape. A rootful
+15-fork diagnostic run on 2026-09-21 reconciled all 159,000 declared operations while retaining
+this intentionally incomplete evidence. That result narrows the earlier intermittent missing
+operation to a path before those diagnostic branches or to timing altered by the diagnostic
+program; it does not establish a root cause or justify a production behavior change.
+
+**Ring-loss accounting.** Every ring reservation failure increments the dedicated loss-counter
+slot, never the exact-admission slot. The two counters answer different questions: lower exact
+admissions indicate that no exact ring record was admitted, while nonzero loss indicates that an
+otherwise eligible record could not reserve ring capacity. Capacity evidence must retain both
+values and may not infer one from the other.
+
+**Diagnostic shadow oracle.** Rootful benchmark fixtures may attach `strace` to the paused target
+after Tier E attachment and before workload release, recording `openat`, `openat2`, and `close`
+to a retained artifact. This facility is benchmark-only and intentionally excluded from timing,
+capacity, and production evidence: ptrace changes scheduling and syscall cost. It is used only to
+separate an application operation oracle from an independently observed kernel syscall trace.
+The trace attachment itself has a start-up boundary, so a trace count is not accepted as an exact
+operation denominator unless the fixture proves that its post-attach phase began after tracer
+readiness. In particular, a mismatch between declared application operations and traced opens is
+evidence that the workload oracle requires stronger phase synchronization, not proof of BPF loss.
+The readiness-proven 2026-09-21 rootful 1,000-operations/s sustained diagnostic retained all
+10,600 payload opens, 31,800 exact admissions, zero ring loss, and complete evidence in both
+dictionary emission modes. It is a passing diagnostic sample, not a capacity certification: earlier
+intermittent samples without the shadow oracle missed declared operations before exact admission,
+so a capacity ceiling remains unproven until the shadow oracle captures a failing cluster or an
+independent deterministic cause is established.
+
+The sustained-capacity runner therefore measures normal samples without ptrace. If a pilot runner
+fails or produces ineligible evidence, it may automatically perform one separately labelled
+one-fork shadow replay with the same rate, duration, retention limit, collector policy, and
+workload configuration. The replay is retained under a `-shadow` artifact path and records its
+own terminal result; it never advances the loss-free capacity ceiling, even if it passes. Operators
+may disable this diagnostic replay with `MAZEWALL_TIER_E_SUSTAINED_SHADOW_ON_FAILURE=false` when
+ptrace is unavailable.
+
+The first automated run on 2026-09-21 exercised that distinction: its ordinary untraced
+unique-edge sample missed 30 declared operations before exact admission, with zero ring loss and
+no marker-loss classification. Its subsequent readiness-proven shadow replay completed both
+dictionary modes and traced all 10,600 payload opens. A passing replay cannot retroactively
+validate the failed normal sample, so the runner retained `loss_free_ceiling_rate_per_second=0`.
+This is the required fail-closed result while the discrepancy remains timing-sensitive.
 
 ### Symbolization generation and cache safety
 

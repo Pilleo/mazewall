@@ -97,6 +97,32 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `benchmark marker-loss diagnostics preserve every causal branch in the ring record`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkEmitMarkerLossEvents = true),
+        )
+
+        assertTrue(
+            setOf(4, 8, 16, 32, 64).all { expectedFlag ->
+                program.any { it.code == 0xb7 && it.dst == 5 && it.imm == expectedFlag }
+            },
+            "diagnostic records must distinguish unavailable storage, detached marker, and stale generation",
+        )
+        setOf(4, 8, 16, 32, 64).forEach { expectedFlag ->
+            val diagnosticStart = program.indexOfFirst { it.code == 0xb7 && it.dst == 5 && it.imm == expectedFlag }
+            assertTrue(
+                reachableInstructions(program, diagnosticStart).any { index -> program[index].code == 0x85 && program[index].imm == 131 },
+                "marker-loss flag $expectedFlag must reach the shared ring-record reservation path",
+            )
+        }
+        assertEquals(
+            program.indices.toSet(),
+            reachableInstructions(program, start = 0),
+            "all marker-loss diagnostic blocks must be reachable",
+        )
+    }
+
+    @Test
     fun `all generated sys enter instructions are reachable for every supported diagnostic shape`() {
         listOf(
             TierEOptions(emissionMode = TierEEmissionMode.FULL_STREAM),
@@ -178,6 +204,52 @@ class TierEBpfProgramBuilderTest {
         assertTrue(
             program.count { it.code == 0xdb } >= 3,
             "in-flight admission and completion must both be atomic",
+        )
+    }
+
+    @Test
+    fun `ring reservation failure increments the loss counter rather than the exact admission counter`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram()
+        val reserve = program.indexOfFirst { it.code == 0x85 && it.imm == 131 }
+        val reservationFailed = program[reserve + 1]
+        val lossHandler = reserve + 2 + reservationFailed.off
+
+        assertEquals(0x15, reservationFailed.code)
+        assertTrue(
+            program.drop(lossHandler).take(8).windowed(2).any { (first, second) ->
+                first.code == 0xb7 &&
+                    first.dst == 5 &&
+                    first.imm == 0 &&
+                    second.code == 0x63 &&
+                    second.dst == 10 &&
+                    second.src == 5 &&
+                    second.off.toInt() == -4
+            },
+            "ring reservation failure must reset the counter-map key to loss slot zero",
+        )
+    }
+
+    @Test
+    fun `raw sys enter audit splits declared target openat family descriptors without ring submission`() {
+        val program = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram()
+
+        assertEquals(0x95, program.last().code)
+        assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 0 }, "audit must load its descriptor-count map")
+        assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 1 }, "audit must load the session map")
+        assertTrue(program.any { it.code == 0x61 && it.src == 9 && it.off.toInt() == 8 }, "audit must read the raw syscall id")
+        assertTrue(program.any { it.code == 0x15 && it.imm == 257 }, "audit must admit openat")
+        assertTrue(program.any { it.code == 0x55 && it.imm == 437 }, "audit must reject every syscall outside the openat family")
+        assertTrue(program.any { it.code == 0x79 && it.src == 9 && it.off.toInt() == 16 }, "audit must key by openat directory descriptor")
+        assertEquals(setOf(0, 8), program.filter { it.code == 0xdb && it.dst == 0 }.map { it.off.toInt() }.toSet(), "audit must retain separate openat and openat2 counters")
+        assertTrue(program.none { it.code == 0x85 && it.imm in setOf(131, 132) }, "audit must never reserve or submit ring records")
+        assertEquals(program.indices.toSet(), reachableInstructions(program, 0), "every audit instruction must be reachable")
+    }
+
+    @Test
+    fun `tracepoint attachment covers every allowed online cpu including non contiguous sets`() {
+        assertEquals(
+            listOf(0, 2),
+            TierEbpfEngine.selectTraceAttachmentCpus(onlineCpuList = "0-3", allowedCpuList = "0,2"),
         )
     }
 

@@ -41,7 +41,76 @@ class TierEOperationOracleTest {
             ),
         )
 
-        assertEquals(TierEOperationOracle.Report(2, 0, duplicates = 1, wrong = 1, unclassified = 1), report)
+        assertEquals(
+            TierEOperationOracle.Report(
+                2,
+                0,
+                duplicates = 1,
+                wrong = 1,
+                unclassified = 1,
+                wrongOperationIdSamples = listOf(4097),
+            ),
+            report,
+        )
+    }
+
+    @Test
+    fun `reports the causal marker-loss reason for an observed but unresolved operation`() {
+        val report = TierEOperationOracle.evaluate(
+            setOf(4096),
+            listOf(
+                TierEOperationOracle.Observation(
+                    operationId = 4096,
+                    resolved = false,
+                    hasWorkloadStack = false,
+                    hasInvocationIdentity = false,
+                    hasExecutionIdentity = false,
+                    markerLossReason = TierEOperationOracle.MarkerLossReason.DETACHED,
+                ),
+            ),
+        )
+
+        assertEquals(1, report.wrong)
+        assertEquals(listOf(4096), report.wrongOperationIdSamples)
+        assertEquals(mapOf(TierEOperationOracle.MarkerLossReason.DETACHED to 1L), report.markerLossReasons)
+    }
+
+    @Test
+    fun `reports inactive invocation records independently of detached marker records`() {
+        val report = TierEOperationOracle.evaluate(
+            setOf(4096),
+            listOf(
+                TierEOperationOracle.Observation(
+                    operationId = 4096,
+                    resolved = false,
+                    hasWorkloadStack = false,
+                    hasInvocationIdentity = false,
+                    hasExecutionIdentity = false,
+                    markerLossReason = TierEOperationOracle.MarkerLossReason.INACTIVE_INVOCATION,
+                ),
+            ),
+        )
+
+        assertEquals(mapOf(TierEOperationOracle.MarkerLossReason.INACTIVE_INVOCATION to 1L), report.markerLossReasons)
+    }
+
+    @Test
+    fun `reports unavailable marker state independently of task-storage absence`() {
+        val report = TierEOperationOracle.evaluate(
+            setOf(4096),
+            listOf(
+                TierEOperationOracle.Observation(
+                    operationId = 4096,
+                    resolved = false,
+                    hasWorkloadStack = false,
+                    hasInvocationIdentity = false,
+                    hasExecutionIdentity = false,
+                    markerLossReason = TierEOperationOracle.MarkerLossReason.MARKER_STATE_UNAVAILABLE,
+                ),
+            ),
+        )
+
+        assertEquals(mapOf(TierEOperationOracle.MarkerLossReason.MARKER_STATE_UNAVAILABLE to 1L), report.markerLossReasons)
     }
 
     @Test

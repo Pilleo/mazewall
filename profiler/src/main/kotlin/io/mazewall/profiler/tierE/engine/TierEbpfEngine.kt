@@ -36,6 +36,13 @@ import java.nio.file.Path
 internal class TierEbpfEngine(
     private val native: RawSyscallOperations,
 ) : AutoCloseable {
+    internal data class RawSysEnterAuditCount(
+        val openat: Long,
+        val openat2: Long,
+    ) {
+        val total: Long get() = openat + openat2
+    }
+
     private val readinessPoller = TierERingReadinessPoller(native)
 
     public companion object {
@@ -64,6 +71,7 @@ internal class TierEbpfEngine(
         private const val BPF_BTF_LOAD: Long = 18
 
         private const val MAP_ARRAY: Int = 2
+        private const val MAP_HASH: Int = 1
         private const val MAP_PERCPU_ARRAY: Int = 6
         private const val MAP_LRU_HASH: Int = 9
         private const val MAP_RINGBUF: Int = 27
@@ -79,6 +87,7 @@ internal class TierEbpfEngine(
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
+        private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = 1 shl 16
         private const val SESSION_TAG_OFFSET: Long = 0
         private const val TARGET_TGID_OFFSET: Long = 4
         private const val MARKER_ATTACHED_OFFSET: Long = 8
@@ -94,6 +103,24 @@ internal class TierEbpfEngine(
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
         private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
+
+        internal fun selectTraceAttachmentCpus(
+            onlineCpuList: String,
+            allowedCpuList: String,
+        ): List<Int> {
+            val online = parseCpuList(onlineCpuList).toSet()
+            return parseCpuList(allowedCpuList).filter(online::contains).also { cpus ->
+                check(cpus.isNotEmpty()) { "collector has no online CPUs available for Tier E tracepoint attachment" }
+            }
+        }
+
+        private fun parseCpuList(cpuList: String): List<Int> =
+            cpuList
+                .split(',')
+                .flatMap { range ->
+                    val endpoints = range.split('-', limit = 2).map(String::toInt)
+                    if (endpoints.size == 1) listOf(endpoints[0]) else (endpoints[0]..endpoints[1]).toList()
+                }
     }
 
     private val ringCapacity: Int = System.getProperty("mazewall.tier-e.ring-capacity-bytes")?.let { configured ->
@@ -131,13 +158,17 @@ internal class TierEbpfEngine(
         var inFlightFd: BpfFd? = null
         var sessionFd: BpfFd? = null
         var coverageEdgeFd: BpfFd? = null
+        var rawSysEnterAuditFd: BpfFd? = null
         var progFd: BpfFd? = null
+        var rawSysEnterAuditProgFd: BpfFd? = null
         var markerProgFd: BpfFd? = null
         var execProgFd: BpfFd? = null
         val syscallPerfFds = mutableListOf<BpfFd>()
+        val rawSysEnterAuditPerfFds = mutableListOf<BpfFd>()
         val markerPerfFds = mutableListOf<BpfFd>()
         val execPerfFds = mutableListOf<BpfFd>()
         var ringReader: BpfRingBufferReader? = null
+        var rawSysEnterAuditConfigured = false
 
         fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
 
@@ -153,9 +184,13 @@ internal class TierEbpfEngine(
 
         fun requireSessionFd(): BpfFd = requireNotNull(sessionFd) { "session descriptor was not acquired" }
 
+        fun requireRawSysEnterAuditFd(): BpfFd = requireNotNull(rawSysEnterAuditFd) { "raw sys_enter audit descriptor was not acquired" }
+
         fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
 
         fun requireMarkerProgFd(): BpfFd = requireNotNull(markerProgFd) { "marker program descriptor was not acquired" }
+
+        fun requireRawSysEnterAuditProgFd(): BpfFd = requireNotNull(rawSysEnterAuditProgFd) { "raw sys_enter audit program descriptor was not acquired" }
     }
 
     private typealias BpfFd = FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned>
@@ -203,6 +238,9 @@ internal class TierEbpfEngine(
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
             installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
+            if (options.benchmarkRawSysEnterAudit) {
+                installed.rawSysEnterAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 16, maxEntries = RAW_SYS_ENTER_AUDIT_CAPACITY)
+            }
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
@@ -229,7 +267,16 @@ internal class TierEbpfEngine(
                 PROG_TRACEPOINT,
                 "tier_e_syscall",
             )
+            if (options.benchmarkRawSysEnterAudit) {
+                installed.rawSysEnterAuditProgFd = loadProg(
+                    buildRawSysEnterAuditProgram(),
+                    listOf(installed.requireRawSysEnterAuditFd().value, installed.requireSessionFd().value),
+                    PROG_TRACEPOINT,
+                    "tier_e_audit",
+                )
+            }
             attachSysEnter(installed)
+            if (options.benchmarkRawSysEnterAudit) attachRawSysEnterAudit(installed)
             attachProcessExec(installed)
             synchronized(lifecycleLock) {
                 resources = installed
@@ -270,6 +317,45 @@ internal class TierEbpfEngine(
 
     /** Target syscalls rejected because marker state belongs to an older attachment generation. */
     public fun readStaleMarkerGenerationCount(): Long = readCounter(STALE_MARKER_GENERATION_COUNTER_INDEX)
+
+    /** Configures the benchmark-only audit map before the gated workload is released. */
+    internal fun configureRawSysEnterAudit(expectedDirectoryFds: Set<Int>) {
+        check(options.benchmarkRawSysEnterAudit) { "raw sys_enter audit is not enabled" }
+        require(expectedDirectoryFds.size <= RAW_SYS_ENTER_AUDIT_CAPACITY) { "raw sys_enter audit descriptor count exceeds capacity" }
+        require(expectedDirectoryFds.all { it >= 0 }) { "raw sys_enter audit descriptors must be non-negative" }
+        val installed = requireInstalled()
+        check(!installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was already configured" }
+        Arena.ofConfined().use { arena ->
+            expectedDirectoryFds.forEach { descriptor ->
+                val value = arena.allocate(16, 8)
+                value.set(ValueLayout.JAVA_LONG, 0, 0)
+                value.set(ValueLayout.JAVA_LONG, 8, 0)
+                updateElem(arena, installed.requireRawSysEnterAuditFd().value, intSeg(arena, descriptor), value)
+            }
+        }
+        installed.rawSysEnterAuditConfigured = true
+    }
+
+    /** Reads only the declared descriptors; absent entries are a configuration failure. */
+    internal fun readRawSysEnterAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, RawSysEnterAuditCount> {
+        check(options.benchmarkRawSysEnterAudit) { "raw sys_enter audit is not enabled" }
+        val installed = requireInstalled()
+        check(installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was not configured" }
+        return Arena.ofConfined().use { arena ->
+            expectedDirectoryFds.associateWith { descriptor ->
+                val value = arena.allocate(16, 8)
+                val attr = arena.allocate(24)
+                attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireRawSysEnterAuditFd().value)
+                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
+                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
+                bpfCall(H_LOOKUP.toLong(), attr, 24)
+                RawSysEnterAuditCount(
+                    openat = value.get(ValueLayout.JAVA_LONG, 0),
+                    openat2 = value.get(ValueLayout.JAVA_LONG, 8),
+                )
+            }
+        }
+    }
 
     /** Waits until all handlers admitted before marker detachment reach their completion epilogue. */
     public fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean {
@@ -380,11 +466,11 @@ internal class TierEbpfEngine(
             attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.SIZE_FIELD, PerfEventAttrLayout.SIZE.toInt())
             attr.set(ValueLayout.ADDRESS, PerfEventAttrLayout.UPROBE_PATH, strSeg(arena, agentLibrary.toAbsolutePath().toString(), 4096))
             attr.set(ValueLayout.JAVA_LONG, PerfEventAttrLayout.UPROBE_OFFSET, markerOffset)
-            // Dynamic uprobe PMUs use the single global event form implemented
-            // by libbpf: pid=-1, cpu=0. Unlike ordinary hardware counters,
-            // opening this local trace-uprobe event on every CPU duplicates
-            // each probe hit. The BPF TGID guard isolates the target.
-            for (cpu in onlineCpus().take(1)) {
+            // perf_event_open binds this trace-uprobe event to one CPU. The target JVM may
+            // run carrier threads on every CPU allowed to this collector, so each CPU needs
+            // one attachment. A tracepoint hit belongs to its executing CPU and is not replayed
+            // through sibling CPU descriptors.
+            for (cpu in traceAttachmentCpus()) {
                 val fd = native
                     .syscall(
                     SYS_PERF_EVENT_OPEN,
@@ -571,7 +657,11 @@ internal class TierEbpfEngine(
         val syscallPerfFds = installed.syscallPerfFds.toList()
         installed.syscallPerfFds.clear()
         syscallPerfFds.asReversed().forEach { close(it) {} }
+        val rawAuditPerfFds = installed.rawSysEnterAuditPerfFds.toList()
+        installed.rawSysEnterAuditPerfFds.clear()
+        rawAuditPerfFds.asReversed().forEach { close(it) {} }
         close(installed.progFd) { installed.progFd = null }
+        close(installed.rawSysEnterAuditProgFd) { installed.rawSysEnterAuditProgFd = null }
         close(installed.markerProgFd) { installed.markerProgFd = null }
         close(installed.execProgFd) { installed.execProgFd = null }
         close(installed.ringFd) { installed.ringFd = null }
@@ -580,6 +670,7 @@ internal class TierEbpfEngine(
         close(installed.inFlightFd) { installed.inFlightFd = null }
         close(installed.sessionFd) { installed.sessionFd = null }
         close(installed.coverageEdgeFd) { installed.coverageEdgeFd = null }
+        close(installed.rawSysEnterAuditFd) { installed.rawSysEnterAuditFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
         close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }
@@ -588,6 +679,8 @@ internal class TierEbpfEngine(
     // ── program construction ────────────────────────────────────────────────
 
     internal fun buildProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildSysEnterProgram(options)
+
+    internal fun buildRawSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram()
 
     /** x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`. */
     internal fun buildMarkerProgram(): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram()
@@ -691,10 +784,9 @@ internal class TierEbpfEngine(
     private fun attachSysEnter(installed: Resources) {
         val tracepoint = RawSyscallTracepoint.discover()
         Arena.ofConfined().use {
-            // The system-wide tracepoint event already captures every CPU.
-            // Attaching one perf event per CPU replays each hit through every
-            // attachment and creates duplicate ring observations.
-            onlineCpus().take(1).forEach { cpu ->
+            // A perf tracepoint descriptor is CPU-local. Attach on every CPU available to
+            // this collector so migration cannot create an unobserved raw-syscall window.
+            traceAttachmentCpus().forEach { cpu ->
                 val attr = it.allocate(PerfEventAttrLayout.SIZE)
                 attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.TYPE, PERF_TYPE_TRACEPOINT)
                 attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.SIZE_FIELD, PerfEventAttrLayout.SIZE.toInt())
@@ -720,7 +812,7 @@ internal class TierEbpfEngine(
     private fun attachProcessExec(installed: Resources) {
         val tracepoint = SchedProcessExecTracepoint.discover()
         Arena.ofConfined().use {
-            onlineCpus().take(1).forEach { cpu ->
+            traceAttachmentCpus().forEach { cpu ->
                 val attr = it.allocate(PerfEventAttrLayout.SIZE)
                 attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.TYPE, PERF_TYPE_TRACEPOINT)
                 attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.SIZE_FIELD, PerfEventAttrLayout.SIZE.toInt())
@@ -738,6 +830,32 @@ internal class TierEbpfEngine(
                     .getFdOrThrow("perf_event_open(sched/sched_process_exec,cpu=$cpu)", FileDescriptorRole.Bpf)
                 installed.execPerfFds += fd
                 rawIoctl(fd.value, PERF_EVENT_IOC_SET_BPF, requireNotNull(installed.execProgFd).value.toLong())
+                rawIoctl(fd.value, PERF_EVENT_IOC_ENABLE, 0)
+            }
+        }
+    }
+
+    private fun attachRawSysEnterAudit(installed: Resources) {
+        val tracepoint = RawSyscallTracepoint.discover()
+        Arena.ofConfined().use { arena ->
+            traceAttachmentCpus().forEach { cpu ->
+                val attr = arena.allocate(PerfEventAttrLayout.SIZE)
+                attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.TYPE, PERF_TYPE_TRACEPOINT)
+                attr.set(ValueLayout.JAVA_INT, PerfEventAttrLayout.SIZE_FIELD, PerfEventAttrLayout.SIZE.toInt())
+                attr.set(ValueLayout.JAVA_LONG, PerfEventAttrLayout.CONFIG, tracepoint.id.toLong())
+                attr.set(ValueLayout.JAVA_LONG, PerfEventAttrLayout.SAMPLE_PERIOD, 1)
+                val fd = native
+                    .syscall(
+                        SYS_PERF_EVENT_OPEN,
+                        NativeArg.MemoryArg(ConfinedSegment(attr)),
+                        NativeArg.LongArg(-1),
+                        NativeArg.LongArg(cpu.toLong()),
+                        NativeArg.LongArg(-1),
+                        NativeArg.LongArg(PERF_FLAG_FD_CLOEXEC),
+                    ).recordDescriptorAcquisition()
+                    .getFdOrThrow("perf_event_open(raw_syscalls/sys_enter audit,cpu=$cpu)", FileDescriptorRole.Bpf)
+                installed.rawSysEnterAuditPerfFds += fd
+                rawIoctl(fd.value, PERF_EVENT_IOC_SET_BPF, installed.requireRawSysEnterAuditProgFd().value.toLong())
                 rawIoctl(fd.value, PERF_EVENT_IOC_ENABLE, 0)
             }
         }
@@ -775,17 +893,23 @@ internal class TierEbpfEngine(
 
     private fun onlineCpus(): List<Int> = cpusFrom(Path.of("/sys/devices/system/cpu/online"))
 
+    /** CPUs this collector process may legally attach to under its current affinity/cgroup. */
+    private fun traceAttachmentCpus(): List<Int> {
+        val allowed = Files
+            .readAllLines(Path.of("/proc/self/status"))
+            .firstOrNull { it.startsWith("Cpus_allowed_list:") }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.let(::cpusFrom)
+            ?: error("/proc/self/status has no Cpus_allowed_list")
+        return selectTraceAttachmentCpus(Files.readString(Path.of("/sys/devices/system/cpu/online")).trim(), allowed.joinToString(","))
+    }
+
     private fun possibleCpus(): List<Int> = cpusFrom(Path.of("/sys/devices/system/cpu/possible"))
 
-    private fun cpusFrom(path: Path): List<Int> =
-        Files
-            .readString(path)
-        .trim()
-        .split(',')
-        .flatMap { range ->
-            val endpoints = range.split('-', limit = 2).map(String::toInt)
-            if (endpoints.size == 1) listOf(endpoints[0]) else (endpoints[0]..endpoints[1]).toList()
-        }
+    private fun cpusFrom(path: Path): List<Int> = cpusFrom(Files.readString(path).trim())
+
+    private fun cpusFrom(cpuList: String): List<Int> = parseCpuList(cpuList)
 
     private fun rawIoctl(
         fd: Int,
