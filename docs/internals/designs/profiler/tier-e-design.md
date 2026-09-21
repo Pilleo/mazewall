@@ -91,16 +91,25 @@ time, TGID/TID, syscall number, six arguments, invocation ID, sequence, and flag
 the event to the agent dictionary by ID only. Timestamp-nearest correlation and reuse of a previous
 stack are forbidden.
 
-Both system-wide BPF entry points compare the current TGID with the immutable session target
-before reading or writing task storage. `perf_event_open` tracepoint and dynamic-uprobe descriptors
-are CPU-local: Tier E attaches each program on every online CPU in the collector process's
-`Cpus_allowed_list`. TGID filtering in the BPF program rejects other processes even if they map the
-same agent library and use the same session tag. One CPU-local descriptor handles hits executing on
-that CPU; sibling descriptors do not replay the same hit. Restricting attachment to CPU 0 is
-incorrect because pinning a JVM process's leader does not pin every carrier thread.
+**Implemented contract, with a known sustained-load limitation.** Both system-wide BPF entry points
+compare the current TGID with the immutable session target before reading or writing task storage.
+The current `perf_event_open` tracepoint descriptors are CPU-local, so Tier E attaches each program
+on every CPU in the collector process's `Cpus_allowed_list`; restricting attachment to CPU 0 is
+incorrect because pinning a JVM process's leader does not pin every carrier thread. One CPU-local
+descriptor handles hits executing on that CPU; sibling descriptors do not replay the same hit.
 
-The raw tracepoint evaluates every selected `sys_enter` event made by the target after attachment,
-but only reserves a ring record for a validated active invocation. Syscalls outside a native
+This is **not** a proof that every selected target `sys_enter` reaches BPF. A perf tracepoint
+descriptor samples all host syscalls on its CPU before the BPF TGID filter runs. On the retained
+rootful host, `perf_event_max_sample_rate=25,750`; a clean 60-second 500/s target workload lost
+three `openat` calls in both the collector and an independent counter-only tracepoint program, while
+the `strace` shadow proved that those calls executed. Consequently any mismatch is fail-closed and
+capacity evidence is `INCOMPLETE`; the current attachment is not a production sustained-capacity
+guarantee. Required hardening replaces this CPU-global sampling path with target-lifecycle-scoped
+observation and explicit incomplete treatment for an unadmitted thread. See
+[tier-e-perf-tracepoint-sampling-loss-20260921.json](../../evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json).
+
+Only events delivered to the current tracepoint program can reserve a ring record for a validated
+active invocation. Syscalls outside a native
 boundary are counted in a bounded kernel `ambient_inactive` diagnostic rather than being emitted
 as fabricated `InvocationId=0` records. This prevents ordinary JVM background activity from
 consuming ring capacity or being misclassified as an attribution failure. A missing task pointer,
@@ -239,13 +248,13 @@ unless that exact logical stack has been proven at the corresponding native boun
 4. **[Implemented contract] Prefer a validated lower-cost marker transport.** On x86_64 an `AUTO`
    attachment selects the verified versioned USDT marker and retains the same per-thread state
    transitions and binary/attachment verification as the plain-uprobe compatibility path.
-5. **[Historical evidence: rejected on the measured host] Scoped tracepoint attachment for node scale.**
-   Per-platform-TID perf tracepoints could avoid running the system-wide raw-tracepoint filter for
-   unrelated host processes, but they would need full JVM/carrier lifecycle tracking. The rootful
-   five-pair node-noise probe observed mixed unrelated-workload deltas from `-59.27%` to `+11.05%`,
-   with a `-5.17%` median. It missed the predeclared `>=15%` stable-cost gate, so the risky
-   attachment prototype is not justified on this host and the global raw tracepoint remains
-   unchanged. This does not claim zero node-wide cost on every kernel or workload. See
+5. **[Required hardening: correctness supersedes historical cost rejection] Scoped tracepoint attachment.**
+   Per-platform-TID perf tracepoints require full JVM/carrier lifecycle tracking, and the prior
+   rootful five-pair node-noise probe observed mixed unrelated-workload deltas from `-59.27%` to
+   `+11.05%`, with a `-5.17%` median. That result rejected the change as a performance optimization,
+   not as a correctness repair. The later `strace`-proven upstream sampling loss means the
+   CPU-global path is no longer eligible as a production sustained-capacity backend; lifecycle-scoped
+   attachment must now be evaluated for correctness first. See
    [tier-e-node-noise-rootful-decision-20260920.json](../../evidence/tier-e-node-noise-rootful-decision-20260920.json).
 6. **[Historical evidence: rejected default] Readiness-driven ring collection.** Polling the ring
    map descriptor after an empty drain preserved complete evidence and zero loss, but the
@@ -512,10 +521,12 @@ Every rootful runner invocation also owns an immutable `run_id` shared by the ma
 transitions. The runner records `PASSED` only after it validates exactly one successful benchmark
 terminal record, exactly one summary, at least one completed fork, and a sample count equal to the
 summary count; otherwise its exit trap retains a `FAILED` or `CANCELLED` terminal event.
-Sustained-capacity decision runs additionally require a clean Git checkout before their first
-pilot stage. A source-dirty checkout records `source_dirty_decision_rejected` and exits before
-building or launching a privileged workload. Smoke and diagnostic runs retain their dirty-source
-provenance and remain usable only as scoped evidence, never as a capacity decision.
+Sustained-capacity decision runs additionally require zero dirty **benchmark inputs** before their
+first pilot stage: runtime/native/build files and the benchmark harness itself. Unrelated document
+edits remain separately counted in the manifest but do not invalidate a content-addressed bundle.
+A dirty benchmark input records `benchmark_input_dirty_decision_rejected` and exits before building
+or launching a privileged workload. Smoke and diagnostic runs retain their provenance and remain
+usable only as scoped evidence, never as a capacity decision.
 The retained cancellation fixture sends `TERM` during bundle preparation and proves the runner
 emits `CANCELLED` after its `bundle_build:STARTED` event while leaving no Tier E container active.
 The rootful runner additionally retains a JSON manifest with the source dirty-tree fingerprint,
