@@ -53,6 +53,9 @@ add_executable(capture_yield_file_test tests/capture_yield_file_test.cpp)
 target_include_directories(capture_yield_file_test PRIVATE include)
 target_compile_options(capture_yield_file_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 
+add_executable(session_bound_definition_file_test tests/session_bound_definition_file_test.cpp)
+target_compile_options(session_bound_definition_file_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+
 add_executable(marker_export_test tests/marker_export_test.cpp)
 target_compile_options(marker_export_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(marker_export_test PRIVATE ${CMAKE_DL_LIBS})
@@ -165,6 +168,17 @@ add_test(
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,live-definitions,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-full-live.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
 set_tests_properties(agent_phase_benchmark_full_live PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* raw_hash_ns=[1-9][0-9]* raw_equality_ns=[1-9][0-9]* generation_validation_ns=[1-9][0-9]* guard_validation_ns=[1-9][0-9]* canonical_cache_lock_wait_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* .*serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_session_bound_definitions
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,session=2a,session-bound-definitions,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-session-bound.mzse" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 10
+)
+set_tests_properties(agent_session_bound_definitions PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary")
+add_test(
+    NAME session_bound_definition_file_test
+    COMMAND session_bound_definition_file_test "${CMAKE_CURRENT_BINARY_DIR}/tier-e-session-bound.mzse" 2a
+)
+set_tests_properties(session_bound_definition_file_test PROPERTIES DEPENDS agent_session_bound_definitions)
 
 add_test(
     NAME agent_phase_benchmark_unique_live

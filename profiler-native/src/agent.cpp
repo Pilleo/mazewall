@@ -79,6 +79,9 @@ std::atomic<std::size_t> native_retained_bytes{0};
 std::atomic<std::uint32_t> next_invocation_id{1};
 std::atomic<bool> invocation_ids_exhausted{false};
 std::atomic<bool> live_definitions{false};
+// Emits the closed MZSE v2 artifact for a collector-owned session without
+// enabling the live publisher or its periodic snapshots.
+std::atomic<bool> session_bound_definitions{false};
 std::atomic<bool> live_publisher_stop{false};
 std::atomic<std::uint64_t> live_publication_requests{0};
 std::atomic<std::uint64_t> next_publication_id{1};
@@ -1537,7 +1540,8 @@ bool write_definitions(bool producer_closed) noexcept {
         append_le<std::uint64_t>(encoded, virtual_pinned_nanos.load(std::memory_order_relaxed));
         finish_record(encoded, stats_record);
         if (!snapshot.invocations.empty()) committed_watermark = snapshot.invocations.back().id;
-        if (live_definitions.load(std::memory_order_acquire)) {
+        if (live_definitions.load(std::memory_order_acquire) ||
+            session_bound_definitions.load(std::memory_order_acquire)) {
             std::vector<std::uint8_t> envelope;
             envelope.insert(envelope.end(), {'M', 'Z', 'S', 'E'});
             append_le<std::uint16_t>(envelope, 2);
@@ -1700,6 +1704,8 @@ bool parse_options(const char* options) {
             canonical_cache_enabled = false;
         } else if (option == "live-definitions") {
             live_definitions.store(true, std::memory_order_release);
+        } else if (option == "session-bound-definitions") {
+            session_bound_definitions.store(true, std::memory_order_release);
         } else {
             return false;
         }

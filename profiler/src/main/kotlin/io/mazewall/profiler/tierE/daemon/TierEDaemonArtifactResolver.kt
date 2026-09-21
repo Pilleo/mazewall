@@ -3,9 +3,11 @@ package io.mazewall.profiler.tierE.daemon
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact
+import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 /**
  * Resolves definition artifacts from daemon-owned configuration and an attached session.
@@ -34,7 +36,14 @@ internal class TierEDaemonArtifactResolver(
         return TierEDefinitionArtifact(path, epoch)
     }
 
-    /** Reads a closed v2 envelope only after checking the path has not become a symlink. */
+    /** Registered deployments use the operator-approved artifact name, never a namespace PID convention. */
+    fun resolve(target: TierERegisteredTarget): TierEDefinitionArtifact {
+        val path = root.resolve(target.artifactFileName).normalize()
+        require(path.parent == root) { "Tier E registered artifact escaped its configured root" }
+        return TierEDefinitionArtifact(path, target.sessionEpoch)
+    }
+
+    /** Reads and validates a terminal artifact through one no-follow descriptor. */
     fun readTerminal(artifact: TierEDefinitionArtifact): AgentDefinitionFile.Contents {
         val path = artifact.path.toAbsolutePath().normalize()
         require(path.parent == root) { "Tier E definition artifact is outside its configured root" }
@@ -42,9 +51,11 @@ internal class TierEDaemonArtifactResolver(
         require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
             "Tier E definition artifact must be an existing regular file"
         }
-        return AgentDefinitionFile.readForSession(path, artifact.expectedSessionEpoch).also { contents ->
-            require(contents.publication?.closed == true) {
-                "Tier E definition artifact must acknowledge producer closure"
+        return FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { channel ->
+            AgentDefinitionFile.readForSession(channel, artifact.expectedSessionEpoch).also { contents ->
+                require(contents.publication?.closed == true) {
+                    "Tier E definition artifact must acknowledge producer closure"
+                }
             }
         }
     }

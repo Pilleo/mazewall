@@ -46,6 +46,17 @@ internal class TierECollectorService(
     fun finish(
         definitionFile: Path,
         producerClosed: Boolean,
+    ): TierEProfile = finishInternal(producerClosed) { loop.finish(definitionFile, it) }
+
+    @Synchronized
+    fun finish(
+        definitions: AgentDefinitionFile.Contents,
+        producerClosed: Boolean,
+    ): TierEProfile = finishInternal(producerClosed) { loop.finish(definitions, it) }
+
+    private fun finishInternal(
+        producerClosed: Boolean,
+        finishLoop: (Boolean) -> TierEProfile,
     ): TierEProfile {
         terminalProfile?.let { return it }
         check(state == TierECollectorServiceState.RUNNING) {
@@ -65,7 +76,7 @@ internal class TierECollectorService(
             state = TierECollectorServiceState.TERMINAL
             return profile
         }
-        val profile = loop.finish(definitionFile, producerClosed && failure.get() == null)
+        val profile = finishLoop(producerClosed && failure.get() == null)
         loop.close()
         terminalProfile = profile
         state = TierECollectorServiceState.TERMINAL

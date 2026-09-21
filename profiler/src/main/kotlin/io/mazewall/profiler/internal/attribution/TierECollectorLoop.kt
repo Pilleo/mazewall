@@ -108,6 +108,15 @@ internal class TierECollectorLoop(
     }
 
     @Synchronized
+    fun finish(
+        definitions: AgentDefinitionFile.Contents,
+        producerClosed: Boolean,
+    ): TierEProfile {
+        check(!terminal) { "Tier E collector loop is terminal" }
+        return session.finish(definitions, producerClosed).also { terminal = true }
+    }
+
+    @Synchronized
     fun metrics(): TierECollectorLoopMetrics =
         TierECollectorLoopMetrics(
             polls = polls,

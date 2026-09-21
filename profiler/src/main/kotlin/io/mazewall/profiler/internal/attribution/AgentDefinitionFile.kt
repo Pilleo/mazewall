@@ -8,6 +8,7 @@ import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 
 internal class DefinitionRecordBudgetExceededException : IllegalArgumentException("agent definition file exceeds decoded record budget")
 
@@ -24,6 +25,10 @@ internal object AgentDefinitionFile {
         public val virtualPinnedNanos: Long = 0,
         /** Optional live-publication identity; null means legacy raw MZSD input. */
         public val publication: SnapshotPublication? = null,
+        /** Byte length of the single bounded artifact image admitted by this decoder. */
+        public val sourceByteLength: Long = 0,
+        /** SHA-256 of the same immutable artifact image; never computed by reopening its path. */
+        public val sourceSha256: String? = null,
     ) {
         public val stacks: List<StackDefinition> = java.util.List.copyOf(stacks)
         public val invocations: List<InvocationDefinition> = java.util.List.copyOf(invocations)
@@ -40,13 +45,34 @@ internal object AgentDefinitionFile {
     public fun readForSession(
         path: Path,
         expectedSessionEpoch: SessionEpoch,
-    ): Contents = decodeForSession(readBounded(path), expectedSessionEpoch)
+    ): Contents =
+        FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+        readForSession(channel, expectedSessionEpoch)
+    }
+
+    /**
+     * Decodes one session-bound snapshot from the caller-owned descriptor.
+     *
+     * The daemon uses this overload after opening the artifact with `NOFOLLOW_LINKS`, so pathname
+     * replacement cannot make validation and parsing observe different files.
+     */
+    internal fun readForSession(
+        channel: FileChannel,
+        expectedSessionEpoch: SessionEpoch,
+        invocationIds: Set<InvocationId>? = null,
+    ): Contents = decodeForSession(readBounded(channel), expectedSessionEpoch, invocationIds)
 
     public fun decodeForSession(
         bytes: ByteArray,
         expectedSessionEpoch: SessionEpoch,
+    ): Contents = decodeForSession(bytes, expectedSessionEpoch, null)
+
+    private fun decodeForSession(
+        bytes: ByteArray,
+        expectedSessionEpoch: SessionEpoch,
+        invocationIds: Set<InvocationId>?,
     ): Contents {
-        val contents = decode(bytes)
+        val contents = decode(bytes, invocationIds)
         val publication = requireNotNull(contents.publication) {
             "session-bound publication is required for live session admission"
         }
@@ -175,6 +201,8 @@ internal object AgentDefinitionFile {
             virtualPinnedScopes = virtualPinnedScopes,
             virtualPinnedNanos = virtualPinnedNanos,
             publication = envelope?.publication,
+            sourceByteLength = bytes.size.toLong(),
+            sourceSha256 = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) },
         )
     }
 
@@ -275,23 +303,24 @@ internal object AgentDefinitionFile {
     private const val MAX_DECODED_BYTES = TierERetainedStateBudget.DEFAULT_LIMIT_BYTES
     private val MAGIC = "MZSD".toByteArray(StandardCharsets.US_ASCII)
 
-    private fun readBounded(path: Path): ByteArray =
-        FileChannel.open(path, StandardOpenOption.READ).use { channel ->
-            require(channel.size() <= MAX_DECODED_BYTES) { "agent definition file exceeds retained-state limit" }
-            val output = ByteArrayOutputStream(channel.size().toInt())
-            val buffer = ByteBuffer.allocate(READ_BUFFER_BYTES)
-            while (true) {
-                val read = channel.read(buffer)
-                if (read < 0) break
-                if (read == 0) continue
-                buffer.flip()
-                val count = buffer.remaining()
-                require(output.size().toLong() + count <= MAX_DECODED_BYTES) {
-                    "agent definition file exceeds retained-state limit"
-                }
-                output.write(buffer.array(), buffer.position(), count)
-                buffer.clear()
+    private fun readBounded(path: Path): ByteArray = FileChannel.open(path, StandardOpenOption.READ).use(::readBounded)
+
+    private fun readBounded(channel: FileChannel): ByteArray {
+        require(channel.size() <= MAX_DECODED_BYTES) { "agent definition file exceeds retained-state limit" }
+        val output = ByteArrayOutputStream(channel.size().toInt())
+        val buffer = ByteBuffer.allocate(READ_BUFFER_BYTES)
+        while (true) {
+            val read = channel.read(buffer)
+            if (read < 0) break
+            if (read == 0) continue
+            buffer.flip()
+            val count = buffer.remaining()
+            require(output.size().toLong() + count <= MAX_DECODED_BYTES) {
+                "agent definition file exceeds retained-state limit"
             }
-            output.toByteArray()
+            output.write(buffer.array(), buffer.position(), count)
+            buffer.clear()
         }
+        return output.toByteArray()
+    }
 }

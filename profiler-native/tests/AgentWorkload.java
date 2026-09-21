@@ -3,9 +3,17 @@ import java.nio.file.Path;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.net.Socket;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.SocketChannel;
 
 public final class AgentWorkload {
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("control")) {
+            runTerminalControl(args);
+            return;
+        }
         if (args.length > 0 && args[0].equals("benchmark")) {
             runBenchmark(args);
             return;
@@ -55,23 +63,54 @@ public final class AgentWorkload {
     }
 
     private static void runDaemonWorkflow(String[] args, int iterations) throws Exception {
-        int port = Integer.parseInt(args[3]);
+        String socketPath = args[3];
         String markerPath = args[4];
         String markerOffset = args[5];
         String sessionTag = args[6];
-        try (Socket socket = new Socket("127.0.0.1", port)) {
-            var input = new DataInputStream(socket.getInputStream());
-            var output = new DataOutputStream(socket.getOutputStream());
-            String attach = rpc(output, input, "ATTACH " + ProcessHandle.current().pid() + " uprobe " + markerPath + " " + markerOffset + " " + sessionTag);
+        boolean deferTerminalControl = args.length > 7 && args[7].equals("defer-terminal");
+        long registeredPid = args.length > 8
+            ? Long.parseLong(Files.readString(Path.of(args[8])).trim())
+            : ProcessHandle.current().pid();
+        try (SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            socket.connect(UnixDomainSocketAddress.of(socketPath));
+            var input = new DataInputStream(Channels.newInputStream(socket));
+            var output = new DataOutputStream(Channels.newOutputStream(socket));
+            String attach = rpc(output, input, "ATTACH " + registeredPid + " uprobe " + markerPath + " " + markerOffset + " " + sessionTag);
             checkReply("attach", attach);
             System.out.println("tier-e-workflow: " + attach.trim());
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
             exercise(iterations);
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
+            if (deferTerminalControl) {
+                System.out.println("tier-e-workflow: capture complete; terminal control deferred");
+                return;
+            }
             checkReply("detach", rpc(output, input, "DETACH"));
             System.out.println("tier-e-workflow: detached");
             checkReply("shutdown", rpc(output, input, "SHUTDOWN"));
             System.out.println("tier-e-workflow: shutdown");
+        }
+        if (!deferTerminalControl && args.length > 7) {
+            Path terminalGate = Path.of(args[7]);
+            while (!Files.exists(terminalGate)) Thread.sleep(1);
+            System.out.println("tier-e-workflow: terminal release");
+        }
+    }
+
+    private static void runTerminalControl(String[] args) throws Exception {
+        if (args.length != 2 && (args.length != 3 || !args[2].equals("shutdown"))) {
+            throw new IllegalArgumentException("usage: control <unix-socket> [shutdown]");
+        }
+        try (SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            socket.connect(UnixDomainSocketAddress.of(args[1]));
+            var input = new DataInputStream(Channels.newInputStream(socket));
+            var output = new DataOutputStream(Channels.newOutputStream(socket));
+            if (args.length == 2) {
+                checkReply("detach", rpc(output, input, "DETACH"));
+                System.out.println("tier-e-control: detached");
+            }
+            checkReply("shutdown", rpc(output, input, "SHUTDOWN"));
+            System.out.println("tier-e-control: shutdown");
         }
     }
 

@@ -467,7 +467,21 @@ internal class TierEProfilerSession internal constructor(
         producerClosed: Boolean = false,
     ): TierEProfile =
         when (val current = state) {
-            TierESessionState.Collecting -> finishCollecting(definitionFile, producerClosed)
+            TierESessionState.Collecting -> finishCollecting(producerClosed) { pendingInvocationIds ->
+                readDefinitions(definitionFile, pendingInvocationIds)
+            }
+            is TierESessionState.Finished -> current.profile
+            TierESessionState.Closed -> error("Tier E profiler session is closed")
+        }
+
+    /** Finishes from contents already read through an integration-owned trusted descriptor. */
+    @Synchronized
+    internal fun finish(
+        definitions: AgentDefinitionFile.Contents,
+        producerClosed: Boolean,
+    ): TierEProfile =
+        when (val current = state) {
+            TierESessionState.Collecting -> finishCollecting(producerClosed) { definitions }
             is TierESessionState.Finished -> current.profile
             TierESessionState.Closed -> error("Tier E profiler session is closed")
         }
@@ -545,8 +559,8 @@ internal class TierEProfilerSession internal constructor(
     }
 
     private fun finishCollecting(
-        definitionFile: Path,
         producerClosed: Boolean,
+        definitionSupplier: (Set<InvocationId>?) -> AgentDefinitionFile.Contents,
     ): TierEProfile {
         lifecycle = TierESessionLifecycleState.CLOSING
         // Stop marker admission before the final drain. A caller that cannot prove producer
@@ -580,7 +594,7 @@ internal class TierEProfilerSession internal constructor(
         kernelStaleMarkerGeneration = source.readStaleMarkerGenerationCount()
         closeSource()
         val definitions = try {
-            readDefinitions(definitionFile, collector.pendingInvocationIds())
+            definitionSupplier(collector.pendingInvocationIds())
         } catch (_: Exception) {
             collector.recordDictionaryConflict()
             AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)

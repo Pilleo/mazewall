@@ -90,6 +90,33 @@ class TierECollectorRuntimeTest {
         assertEquals(CaptureGuarantee.INCOMPLETE, incomplete.profile.integrity.guarantee)
     }
 
+    @Test
+    fun `runtime can finish from a prevalidated artifact without reopening its path`() {
+        val source = RuntimeSource()
+        val session = TierEProfilerSession(
+            source = source,
+            processEpoch = 1,
+            definitionReader = { error("prevalidated artifact must not reopen its path") },
+            configuredSessionEpoch = SessionEpoch(1),
+        )
+        val runtime = TierECollectorRuntime(session)
+
+        runtime.start()
+        assertTrue(source.drainStarted.await(1, TimeUnit.SECONDS))
+
+        val result = runtime.finish(
+            AgentDefinitionFile.Contents(
+                emptyList(),
+                emptyList(),
+                0,
+                publication = SnapshotPublication(1, 0, closed = true, sessionEpoch = SessionEpoch(1)),
+            ),
+            TierEProducerClosure.PROVEN,
+        )
+
+        assertEquals(CaptureGuarantee.FULL_STREAM, result.profile.integrity.guarantee)
+    }
+
     private fun session(source: RuntimeSource) =
         TierEProfilerSession(
             source = source,

@@ -100,6 +100,38 @@ internal class TierECollectorRuntime(
         }
     }
 
+    /**
+     * Completes from terminal contents which an integration already admitted through one trusted
+     * descriptor. This avoids reopening a cross-container artifact path after validation.
+     */
+    @Synchronized
+    fun finish(
+        definitions: AgentDefinitionFile.Contents,
+        producerClosure: TierEProducerClosure,
+    ): TierECollectorRuntimeResult {
+        val request = TierETerminalRequest(null, producerClosure)
+        terminalResult?.let { existing ->
+            check(terminalRequest == request) { "Tier E collector runtime already has a different terminal request" }
+            return existing
+        }
+        check(state == TierECollectorRuntimeState.RUNNING) {
+            "Tier E collector runtime must be running before finish"
+        }
+        val artifactMatchesSession = definitions.publication?.sessionEpoch == session.currentSessionEpoch()
+        val completeLifecycle = producerClosure == TierEProducerClosure.PROVEN && artifactMatchesSession
+        val profile = service.finish(definitions, completeLifecycle)
+        val reason = when {
+            !artifactMatchesSession -> TierETerminalReason.ARTIFACT_SESSION_MISMATCH
+            producerClosure == TierEProducerClosure.UNPROVEN -> TierETerminalReason.PRODUCER_CLOSURE_UNPROVEN
+            else -> TierETerminalReason.COMPLETE
+        }
+        return TierECollectorRuntimeResult(profile, service.metrics(), reason).also {
+            terminalRequest = request
+            terminalResult = it
+            state = TierECollectorRuntimeState.TERMINAL
+        }
+    }
+
     @Synchronized
     fun metrics(): TierECollectorServiceMetrics = service.metrics()
 
@@ -122,6 +154,6 @@ private enum class TierECollectorRuntimeState {
 }
 
 private data class TierETerminalRequest(
-    val artifact: TierEDefinitionArtifact,
+    val artifact: TierEDefinitionArtifact?,
     val producerClosure: TierEProducerClosure,
 )
