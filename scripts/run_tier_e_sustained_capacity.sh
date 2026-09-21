@@ -133,12 +133,15 @@ run_shadow_stage() {
 
 event runner STARTED "run_level=${RUN_LEVEL} load=${LOAD} rates=${PILOT_RATES} stage_seconds=${STAGE_SECONDS} iterations=${ITERATIONS} max_retained_records=${MAX_RETAINED_RECORDS} retained_budget_bytes=${RETAINED_BUDGET_BYTES} run_decision=${RUN_DECISION} shadow_on_failure=${SHADOW_ON_FAILURE}"
 if [[ "${RUN_DECISION}" == true ]]; then
-    dirty_count=$(git -C "${REPOSITORY_DIR}" status --porcelain --untracked-files=normal | awk 'NF { count++ } END { print count + 0 }')
-    if (( dirty_count > 0 )); then
-        event runner REJECTED "source_dirty_decision_rejected; dirty_entries=${dirty_count}"
+    source_state=$(bash "${REPOSITORY_DIR}/scripts/tier_e_benchmark_source_state.sh" "${REPOSITORY_DIR}")
+    benchmark_input_dirty_count=$(jq -r '.benchmark_input_dirty_count' <<< "${source_state}")
+    all_dirty_count=$(jq -r '.all_dirty_count' <<< "${source_state}")
+    if (( benchmark_input_dirty_count > 0 )); then
+        event runner REJECTED "benchmark_input_dirty_decision_rejected; benchmark_input_dirty_entries=${benchmark_input_dirty_count}; all_dirty_entries=${all_dirty_count}"
         terminal=true
         exit 2
     fi
+    event runner PROVENANCE "benchmark_input_dirty_entries=0; unrelated_dirty_entries=$((all_dirty_count - benchmark_input_dirty_count))"
 fi
 ceiling_rate=0
 for rate in ${PILOT_RATES}; do

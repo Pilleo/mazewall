@@ -3,7 +3,7 @@
 [![CI](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml/badge.svg)](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml)
 [![JitPack](https://jitpack.io/v/Pilleo/mazewall.svg)](https://jitpack.io/#Pilleo/mazewall)
 
-**Linux kernel-enforced syscall and filesystem restrictions for selected JVM worker threads.**
+**Linux kernel-enforced syscall and filesystem restrictions for process and thread self restriction from inside an app.**
 
 > [!NOTE]
 > **Pre-Alpha.** Core enforcement and profiling work end-to-end. API is unstable and known issues are actively tracked. If you're evaluating this for your stack or want to contribute, [open a discussion](https://github.com/Pilleo/mazewall/discussions).
