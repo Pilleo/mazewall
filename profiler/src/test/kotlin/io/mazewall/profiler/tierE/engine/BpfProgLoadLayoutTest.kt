@@ -165,6 +165,18 @@ class BpfProgLoadLayoutTest {
         assertTrue(program.any { it.code == 0x85 && it.imm == 156 }, "marker must create/read task storage")
     }
 
+    @Test
+    fun `program-info query layouts match the stable linux uapi prefix`() {
+        assertEquals(16L, BpfObjGetInfoLayout.SIZE)
+        assertEquals(0L, BpfObjGetInfoLayout.BPF_FD)
+        assertEquals(4L, BpfObjGetInfoLayout.INFO_LEN)
+        assertEquals(8L, BpfObjGetInfoLayout.INFO)
+        assertEquals(4L, BpfProgramInfoLayout.ID)
+        assertEquals(20L, BpfProgramInfoLayout.XLATED_PROGRAM_LENGTH)
+        assertEquals(192L, BpfProgramInfoLayout.RUN_TIME_NANOS)
+        assertEquals(200L, BpfProgramInfoLayout.RUN_COUNT)
+    }
+
     private fun assertVerifierReachable(program: List<TierEbpfEngine.Insn>) {
         val reachable = mutableSetOf<Int>()
         val pending = ArrayDeque<Int>()

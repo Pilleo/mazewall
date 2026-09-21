@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.638Z" hostname="leanid-nitroanv1541" time="0.02">
+  <properties/>
+  <testcase name="raw diagnostic saturation makes USER NOTIF operation identity unverified()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.004"/>
+  <testcase name="reports unavailable marker state independently of task-storage absence()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.007"/>
+  <testcase name="reports the causal marker-loss reason for an observed but unresolved operation()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.001"/>
+  <testcase name="matches complete uniquely identified resolved operations()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.001"/>
+  <testcase name="unique accounting reports observed resolution failure separately from missing()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.001"/>
+  <testcase name="unique accounting requires explicit collector suppression rather than inferred absence()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.0"/>
+  <testcase name="unique accounting does not call a missing operation suppressed()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.0"/>
+  <testcase name="reports duplicate wrong and unclassified records()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.0"/>
+  <testcase name="shared openat oracle uses directory fd from syscall argument zero()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.0"/>
+  <testcase name="reports inactive invocation records independently of detached marker records()" classname="io.mazewall.profiler.tierE.stress.TierEOperationOracleTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -56,6 +56,10 @@ internal object TierEMatchedBenchmark {
             ),
             sustainedRatePerSecond = System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0").toLong(),
         )
+        if (requestedConfig.scope == Scope.TIER_E_COVERAGE_DISCOVERY) {
+            require(requestedConfig.workload == Workload.ORACLE && !requestedConfig.calibrationEnabled)
+            TierECoverageOracle.schedule(Math.multiplyExact(requestedConfig.batches, requestedConfig.iterations), 1L)
+        }
         require(Files.isRegularFile(requestedConfig.agent)) { "missing agent: ${requestedConfig.agent}" }
         require(
             requestedConfig.iterations > 0 &&
@@ -233,7 +237,18 @@ internal object TierEMatchedBenchmark {
         val canonicalCache = System.getProperty("mazewall.tier-e.canonical-cache", "enabled")
         val collectorReceiptClock = System.getProperty("mazewall.tier-e.collector-receipt-clock", "disabled")
         val attachmentReadyFile = System.getProperty("mazewall.tier-e.attachment-ready-file", "")
-        val childJvmPrefix = listOf(java) +
+        val coverageDiscovery = config.scope == Scope.TIER_E_COVERAGE_DISCOVERY
+        val coverageManifest = config.artifact.parent
+            .resolve("coverage-manifests")
+            .resolve("${variant.jsonName(config.scope)}-fork-$fork.txt")
+        if (coverageDiscovery) Files.createDirectories(coverageManifest.parent)
+        val childJvmPrefix = listOf(
+            java,
+            "-D${TierECoverageOracle.ENABLED_PROPERTY}=$coverageDiscovery",
+            "-D${TierECoverageOracle.SEED_PROPERTY}=$fork",
+            "-Dmazewall.tier-e.coverage-collector-cpu=${config.collectorCpu}",
+            "-Dmazewall.tier-e.coverage-manifest-output=${if (coverageDiscovery) coverageManifest else ""}",
+        ) +
             if (config.dumpPerfMapAtExit) {
                 listOf("-XX:+UnlockDiagnosticVMOptions", "-XX:+DumpPerfMapAtExit")
             } else {
@@ -291,6 +306,9 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.idle-poll-policy=${pollPolicyFor(variant)}",
                 "-Dmazewall.tier-e.idle-poll-max-backoff-nanos=${maxPollBackoffFor(variant)}",
                 "-Dmazewall.tier-e.collector-receipt-clock=$collectorReceiptClock",
+                "-Dmazewall.tier-e.attachment-diagnostic=${config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC}",
+                "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC}",
+                "-Dmazewall.tier-e.benchmark-exact-admission-audit=false",
                 "-Dmazewall.tier-e.attachment-ready-file=$attachmentReadyFile",
                 "-Dmazewall.tier-e.marker-transport=${markerTransportFor(variant).wireName}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
@@ -298,7 +316,14 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.lifecycle-scenario=${config.lifecycleScenario}",
                 "-Dmazewall.tier-e.capture-yield=$captureYield",
                 "-Dmazewall.tier-e.ring-capacity-bytes=${configuredBenchmarkRingCapacity()}",
-                "-Dmazewall.tier-e.max-retained-records=${configuredBenchmarkMaxRetainedRecords()}",
+                "-Dmazewall.tier-e.max-retained-records=${if (coverageDiscovery) {
+                    Math.multiplyExact(
+                        Math.multiplyExact(config.warmups + config.batches, config.iterations),
+                        4,
+                    )
+                } else {
+                    configuredBenchmarkMaxRetainedRecords()
+                }}",
                 "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${config.workload.profile.wireName}",
                 "-D${TierECommonFileWorkload.APPLICATION_KIND_PROPERTY}=${config.workload.applicationKind.wireName}",
                 "-D${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}=${config.sustainedRatePerSecond}",
@@ -340,7 +365,13 @@ internal object TierEMatchedBenchmark {
                 config.userNotifWorkerTimeoutSeconds.toString(),
             )
         }
-        val cpu = if (mode.tierE) config.collectorCpu else config.workloadCpu
+        val cpu = if (coverageDiscovery && mode.tierE) {
+            "${config.collectorCpu},${config.workloadCpu}"
+        } else if (mode.tierE) {
+            config.collectorCpu
+        } else {
+            config.workloadCpu
+        }
         append(config.artifact, "{\"kind\":\"fork-start\",\"variant\":\"${variant.jsonName(config.scope)}\",\"fork\":$fork}")
         val childLogs = config.artifact.resolveSibling("child-logs")
         childLogs.createDirectories()
@@ -480,11 +511,11 @@ internal object TierEMatchedBenchmark {
             },
             requiresOperationOracle = mode.userNotif && userNotifOperationOracleRequired(config.workload.jsonName),
         )
-        val verdict = if (variant.isBenchmarkControl) {
+        val verdict = if (variant.isBenchmarkControl || config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC) {
             TierEBenchmarkContract.Verdict(
                 workloadCorrectness = TierEBenchmarkContract.CorrectnessState.UNVERIFIED,
                 wholeSessionEvidence = TierEBenchmarkContract.EvidenceState.INCOMPLETE,
-                failures = listOf("benchmark_ring_submission_disabled"),
+                failures = if (variant.isBenchmarkControl) listOf("benchmark_ring_submission_disabled") else emptyList(),
             )
         } else {
             evaluatedVerdict
@@ -528,6 +559,13 @@ internal object TierEMatchedBenchmark {
             telemetry.peakRssBytes,
         )
         append(config.artifact, forkJson(result, output))
+        if (coverageDiscovery && mode.tierE) {
+            val coverage = output
+                .lineSequence()
+                .singleOrNull { it.startsWith("tier-e-coverage: ") }
+                ?.removePrefix("tier-e-coverage: ") ?: error("coverage child did not emit a coverage verdict")
+            append(config.artifact, "{\"kind\":\"coverage\",\"variant\":\"${variant.jsonName(config.scope)}\",\"fork\":$fork,\"seed\":$fork,\"report\":$coverage}")
+        }
         batches.forEach { batch -> append(config.artifact, sampleJson(variant, config.scope, config.workload.profile, fork, batch)) }
         Files.deleteIfExists(definitions)
         captureYield?.let(Files::deleteIfExists)
@@ -562,6 +600,16 @@ internal object TierEMatchedBenchmark {
                 }
                 return@forEach
             }
+            if (config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC) {
+                check(result.verdict.workloadCorrectness == TierEBenchmarkContract.CorrectnessState.UNVERIFIED) {
+                    "${result.variant.jsonName(config.scope)} diagnostic must not claim attribution correctness"
+                }
+                check(result.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.INCOMPLETE) {
+                    "${result.variant.jsonName(config.scope)} diagnostic must remain policy-ineligible"
+                }
+                return@forEach
+            }
+            if (config.scope == Scope.TIER_E_COVERAGE_DISCOVERY) return@forEach
             if (config.scope == Scope.TIER_E_RETENTION_EXHAUSTION) {
                 check(result.verdict.wholeSessionEvidence == TierEBenchmarkContract.EvidenceState.INCOMPLETE) {
                     "${result.variant.jsonName(config.scope)} must expose bounded-retention incompleteness"
@@ -1987,6 +2035,8 @@ internal object TierEMatchedBenchmark {
         TIER_E_LIFECYCLE("tier-e-lifecycle"),
         TIER_E_PRODUCTION_SELECTION("tier-e-production-selection"),
         TIER_E_SUSTAINED_COLLECTOR("tier-e-sustained-collector"),
+        TIER_E_ATTACHMENT_DIAGNOSTIC("tier-e-attachment-diagnostic"),
+        TIER_E_COVERAGE_DISCOVERY("tier-e-coverage-discovery"),
         ;
 
         companion object {
@@ -2198,7 +2248,7 @@ internal object TierEMatchedBenchmark {
 
         fun jsonName(scope: Scope): String =
             when (scope) {
-            Scope.FULL, Scope.TIER_E_COMPARABLE, Scope.TIER_E_CALIBRATION, Scope.TIER_E_CACHE_AB -> mode.jsonName
+            Scope.FULL, Scope.TIER_E_COVERAGE_DISCOVERY, Scope.TIER_E_COMPARABLE, Scope.TIER_E_CALIBRATION, Scope.TIER_E_CACHE_AB -> mode.jsonName
             Scope.TIER_E_CACHE_PAIRED -> if (mode.tierE) "${mode.jsonName}_cache_$cacheMode" else mode.jsonName
             Scope.TIER_E_PUBLICATION, Scope.TIER_E_DICTIONARY_PUBLICATION -> if (mode.tierE) "${mode.jsonName}_publication_${publication.jsonName}" else mode.jsonName
             Scope.TIER_E_CAPTURE_PROFILE ->
@@ -2215,6 +2265,7 @@ internal object TierEMatchedBenchmark {
             Scope.TIER_E_READINESS -> if (mode.tierE) "${mode.jsonName}_collector_${requireNotNull(pollBackoff).wireName}" else mode.jsonName
             Scope.TIER_E_SUSTAINED_COLLECTOR ->
                 "${mode.jsonName}_collector_${requireNotNull(pollBackoff).takeIf { it != PollBackoff.NONE }?.wireName ?: "continuous"}"
+            Scope.TIER_E_ATTACHMENT_DIAGNOSTIC -> "${mode.jsonName}_attachment_diagnostic"
             Scope.TIER_E_RING_ARGUMENT_LIST ->
                 if (mode.tierE) "${mode.jsonName}_ring_arguments_${ringArgumentList?.wireName?.replace('-', '_') ?: RingArgumentList.IMMUTABLE_FACTORY.wireName.replace('-', '_')}" else mode.jsonName
             Scope.TIER_E_RING_ARGUMENT_VIEW ->
@@ -2444,6 +2495,8 @@ internal object TierEMatchedBenchmark {
             )
             Scope.TIER_E_LIFECYCLE -> listOf(Mode.FULL_STREAM, Mode.UNIQUE_EDGE)
             Scope.TIER_E_SUSTAINED_COLLECTOR -> listOf(Mode.FULL_STREAM, Mode.UNIQUE_EDGE)
+            Scope.TIER_E_ATTACHMENT_DIAGNOSTIC -> listOf(Mode.FULL_STREAM)
+            Scope.TIER_E_COVERAGE_DISCOVERY -> allModes.filter { it == Mode.BASELINE || it.tierE }
             Scope.TIER_E_PRODUCTION_SELECTION -> listOf(Mode.BASELINE, Mode.FULL_STREAM)
             Scope.TIER_E_COMPARABLE -> listOf(
                 Mode.BASELINE,
@@ -2514,6 +2567,7 @@ internal object TierEMatchedBenchmark {
                     // backoff remains an independent experimental policy in TIER_E_POLL_BACKOFF.
                     listOf(Variant(mode, pollBackoff = PollBackoff.NONE))
                 }
+                Scope.TIER_E_ATTACHMENT_DIAGNOSTIC -> listOf(Variant(mode, pollBackoff = PollBackoff.NONE))
                 Scope.TIER_E_RING_ARGUMENT_LIST -> {
                     val constructions = if (rotation % 2 == 0) {
                         listOf(RingArgumentList.IMMUTABLE_FACTORY, RingArgumentList.LAMBDA_COPY)

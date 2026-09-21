@@ -16,7 +16,11 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Eliminate Tier E CPU-global perf tracepoint sampling loss
 
 **Context:**
-Rootful sustained runs proved openat calls present in strace but absent from both the collector and independent raw-sys_enter audit because CPU-global perf tracepoint descriptors are subject to the host perf_event_max_sample_rate before target filtering.
+Rootful sustained runs found openat calls present in strace but absent from both the collector and
+the raw-sys_enter audit. Perf sampling limits are one possible cause; the retained observations do
+not establish that explanation conclusively. Later direct-raw-tracepoint controls also had count
+discrepancies, and unavailable runtime counters and unverified workload-thread affinity limit
+causal conclusions. Keep this issue open and preserve fail-closed event accounting.
 
 **Needed:**
 1. Replace CPU-global perf sampling with target-lifecycle-scoped syscall observation that cannot be consumed by unrelated host traffic and remains fail-closed for unadmitted threads.
@@ -27,6 +31,20 @@ Rootful sustained runs proved openat calls present in strace but absent from bot
 6. Require an independent raw observation denominator and `strace` shadow proof for any future sustained-capacity promotion.
 
 **Evidence:**
+- The completed [2026-09-21 coverage matrix](../evidence/tier-e-coverage-discovery-20260921/report.md)
+  retains five seeds per configuration, baseline, full oracle schedules and raw logs. Both
+  dictionary modes recovered all 72 paths in every seed, with zero expected-operation gaps and
+  zero ring loss; full decoded stack comparisons passed. Inline publication exceeded its encoded
+  size bound before serialization and remained INCOMPLETE. No attachment policy change follows
+  from these results, and no earlier host/kernel cause is declared proven. The image and source
+  fingerprint, explicit dirty-source provenance, CPU affinity, tests and verdict dimensions are
+  linked in the report. This issue remains open.
+- The coverage-discovery follow-up evaluates recovery of declared stack/syscall paths separately
+  from full event retention. Missing repetitions are acceptable for that explicit discovery use
+  case; missing singleton paths, wrong attribution, and dictionary/lifecycle failures remain
+  visible. See the coverage-discovery contract in `docs/internals/designs/profiler/tier-e-design.md`
+  and the saved `scripts/run_tier_e_coverage_benchmark.sh` experiment. No attachment default is
+  changed by this benchmark scope.
 - Clean rootful source revision `267f701709e33f8bd34f3c10ee7ec2c7bb8e21d3`, kernel `7.2.4-x64v3-xanmod1`, and CPU set `0,2` passed the 10-second 1,000/s pilot but failed at 2,000/s.
 - A 60-second 500/s raw-audit replay expected 30,600 declared `openat` operations and observed 30,597. The collector missed the exact same directory descriptors `17315`, `17316`, and `17317`; no `openat2` fallback occurred.
 - The retained 2,000/s `strace` shadow shows the original missing descriptors did execute `openat`, ruling out workload-oracle error and collector/dictionary loss.

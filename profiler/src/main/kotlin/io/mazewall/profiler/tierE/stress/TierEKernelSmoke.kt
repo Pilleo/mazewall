@@ -11,6 +11,7 @@ import io.mazewall.profiler.internal.attribution.TierECollectorLoop
 import io.mazewall.profiler.internal.attribution.TierECollectorLoopPolicy
 import io.mazewall.profiler.internal.attribution.TierECollectorResultMode
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEKnownJoinMode
 import io.mazewall.profiler.internal.attribution.TierELinuxMonotonicClock
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -22,6 +23,8 @@ import io.mazewall.profiler.internal.attribution.TierERingArgumentViewMode
 import io.mazewall.profiler.internal.attribution.TierERingDecodeMode
 import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import io.mazewall.profiler.internal.attribution.TierEStackTransport
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentShape
 import io.mazewall.profiler.internal.attribution.TierETaskIdentityMode
 import io.mazewall.profiler.internal.attribution.UniqueEdgeDecision
 import io.mazewall.profiler.tierE.daemon.AttachMode
@@ -33,6 +36,7 @@ import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
 import io.mazewall.profiler.triage.ManagedProcessCapture
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.HexFormat
@@ -150,6 +154,20 @@ internal object TierEKernelSmoke {
             .getProperty("mazewall.tier-e.benchmark-exact-admission-audit", "false")
             .toBooleanStrictOrNull()
             ?: error("exact-admission audit must be true or false")
+        val coverageDiscovery = System.getProperty(TierECoverageOracle.ENABLED_PROPERTY, "false").toBooleanStrict()
+        val attachmentDiagnostic = System
+            .getProperty("mazewall.tier-e.attachment-diagnostic", "false")
+            .toBooleanStrictOrNull()
+            ?: error("attachment diagnostic must be true or false")
+        val configuredSysEnterAttachmentBackend = sysEnterAttachmentBackend(
+            System.getProperty("mazewall.tier-e.sys-enter-attachment-backend", "auto"),
+        )
+        val configuredKernelCoverageMode = kernelCoverageMode(
+            System.getProperty("mazewall.tier-e.kernel-coverage-mode", "diagnostic-update"),
+        )
+        val configuredAttachmentShape = sysEnterAttachmentShape(
+            System.getProperty("mazewall.tier-e.sys-enter-attachment-shape", "main-plus-audit"),
+        )
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -192,6 +210,21 @@ internal object TierEKernelSmoke {
         }
         require(!benchmarkExactAdmissionAudit || sharedOpenatOracleWorkload) {
             "exact-admission audit requires the shared openat operation oracle"
+        }
+        require(!attachmentDiagnostic || benchmarkRawSysEnterAudit) {
+            "attachment diagnostic requires raw sys_enter auditing"
+        }
+        require(!attachmentDiagnostic || !benchmarkExactAdmissionAudit) {
+            "attachment diagnostic does not install exact-admission auditing"
+        }
+        require(benchmark || configuredSysEnterAttachmentBackend == TierESysEnterAttachmentBackend.AUTO) {
+            "explicit sys_enter attachment backend selection is benchmark-only"
+        }
+        require(benchmark || configuredKernelCoverageMode == TierEKernelCoverageMode.DIAGNOSTIC_UPDATE) {
+            "kernel coverage variants are benchmark-only"
+        }
+        require(benchmark || configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT) {
+            "sys_enter attachment shapes are benchmark-only"
         }
         require(benchmark || ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             "ring submission control is benchmark-only"
@@ -270,6 +303,8 @@ internal object TierEKernelSmoke {
         val execTransitionOption = if (lifecycleScenario == "exec_transition") ",force-exec-once" else ""
         val command = mutableListOf(
             java,
+            "-D${TierECoverageOracle.ENABLED_PROPERTY}=$coverageDiscovery",
+            "-D${TierECoverageOracle.SEED_PROPERTY}=${System.getProperty(TierECoverageOracle.SEED_PROPERTY, "1").toLong()}",
             "-agentpath:$agent=definitions=$definitions,session=${sessionTag.toString(
                 16,
             )},mode=${args.getOrElse(
@@ -295,7 +330,8 @@ internal object TierEKernelSmoke {
                 addAll(listOf("gate:$gate", args.getOrElse(4) { "platform" }, args.getOrElse(5) { "1" }))
             }
         }
-        val child = ManagedProcessCapture.start(ProcessBuilder(command).inheritIO())
+        val launchCommand = if (coverageDiscovery) listOf("taskset", "-c", requireNotNull(args.getOrNull(6))) + command else command
+        val child = ManagedProcessCapture.start(ProcessBuilder(launchCommand).inheritIO())
         val process = child.process
         val processEpoch = runCatching { processEpoch(process.pid()) }
             .getOrElse { failure ->
@@ -313,6 +349,9 @@ internal object TierEKernelSmoke {
                 emissionMode = emissionMode,
                 stackTransport = stackTransport,
                 captureProfile = captureProfile,
+                sysEnterAttachmentBackend = configuredSysEnterAttachmentBackend,
+                kernelCoverageMode = configuredKernelCoverageMode,
+                benchmarkSysEnterAttachmentShape = configuredAttachmentShape,
                 maxPendingRecords = maxRetainedRecords,
                 maxRetainedRecords = maxRetainedRecords,
                 benchmarkPhases = benchmark,
@@ -334,6 +373,9 @@ internal object TierEKernelSmoke {
             uniqueEdgeDecisionObserver = uniqueEdgeDecisionObserver,
         )
         val receiptClock = if (receiptClockMode == "monotonic") TierELinuxMonotonicClock() else null
+        var coverageStartedNanos = 0L
+        var coverageExpected = emptyMap<Int, Int>()
+        val coverageFirstSeen = mutableMapOf<Int, Long>()
         val collectorLoop = TierECollectorLoop(
             session = session,
             policy = when (idlePollPolicy) {
@@ -344,6 +386,23 @@ internal object TierEKernelSmoke {
                 else -> error("unreachable idle poll policy")
             },
             receiptClock = receiptClock,
+            onResolved = { batch ->
+                if (coverageDiscovery && coverageStartedNanos != 0L) {
+                    val elapsed = System.nanoTime() - coverageStartedNanos
+                    batch.forEach { syscall ->
+                        val path = coverageExpected[syscall.observation.args[0].toInt()]
+                        if (path != null &&
+                            syscall.observation.syscallNumber == SYS_OPENAT &&
+                            syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                            syscall.stackDefinition?.frames?.any {
+                                it.className == TierECoveragePaths::class.java.name && it.methodName == "path${path.toString().padStart(2, '0')}"
+                            } == true
+                        ) {
+                            coverageFirstSeen.putIfAbsent(path, elapsed)
+                        }
+                    }
+                }
+            },
         )
         var oracleRoot: Path? = null
         var lifecycleFaultApplied = false
@@ -356,15 +415,24 @@ internal object TierEKernelSmoke {
             val expectedOpenatFds = if (sharedOpenatOracleWorkload) {
                 while (!Files.exists(oracleManifest) || Files.size(oracleManifest) == 0L) Thread.sleep(1)
                 val manifest = Files.readAllLines(oracleManifest)
+                if (coverageDiscovery) {
+                    coverageExpected = manifest
+                        .filter { it.startsWith("coverage=") }
+                        .map { it.removePrefix("coverage=").split(',') }
+                        .filter { it[1].toInt() >= 0 }
+                        .associate { it[0].toInt() to it[1].toInt() }
+                }
                 oracleRoot = manifest.first { it.startsWith("root=") }.removePrefix("root=").let(Path::of)
                 manifest.filter { it.startsWith("fd=") }.map { it.removePrefix("fd=").toInt() }.toSet()
             } else {
                 emptySet()
             }
             val auditExpectedOpenatFds = boundedAuditSample(expectedOpenatFds)
+            if (coverageDiscovery) pinTargetToCpu(args[6].toInt(), ProcessHandle.current().pid())
             val attachStarted = System.nanoTime()
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
             val attachNanos = System.nanoTime() - attachStarted
+            val (effectiveSysEnterAttachmentBackend, sysEnterAttachmentCpus) = engine.sysEnterAttachmentEvidence()
             if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(auditExpectedOpenatFds)
             if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(auditExpectedOpenatFds)
             straceOutputPath?.let { output ->
@@ -408,7 +476,28 @@ internal object TierEKernelSmoke {
             args.getOrNull(6)?.toInt()?.let { cpu ->
                 pinTargetToCpu(cpu, process.pid())
             }
+            if (coverageDiscovery) {
+                val collectorCpu = System.getProperty("mazewall.tier-e.coverage-collector-cpu").toInt()
+                val pin = ProcessBuilder("taskset", "-apc", collectorCpu.toString(), ProcessHandle.current().pid().toString())
+                    .redirectErrorStream(true)
+                    .start()
+                val output = pin.inputStream.bufferedReader().readText()
+                check(pin.waitFor() == 0) { "collector affinity failed: $output" }
+                val targetAffinity = Files
+                    .readAllLines(Path.of("/proc/${process.pid()}/status"))
+                    .single { it.startsWith("Cpus_allowed_list:") }
+                    .substringAfter(':')
+                    .trim()
+                val collectorAffinity = Files
+                    .readAllLines(Path.of("/proc/self/status"))
+                    .single { it.startsWith("Cpus_allowed_list:") }
+                    .substringAfter(':')
+                    .trim()
+                check(targetAffinity == args[6] && collectorAffinity == collectorCpu.toString())
+                println("tier-e-coverage-affinity: workload=$targetAffinity collector=$collectorAffinity launched_pinned=true")
+            }
             val workloadStarted = System.nanoTime()
+            coverageStartedNanos = workloadStarted
             Files.writeString(gate, "go")
             while (process.isAlive) {
                 if (terminalProfile == null) {
@@ -458,6 +547,12 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
+            val rawSysEnterAuditCpuCounts = if (benchmarkRawSysEnterAudit) {
+                engine.readRawSysEnterAuditCpuCounts()
+            } else {
+                emptyMap()
+            }
+            val sysEnterProgramExecutionEvidence = engine.readSysEnterProgramExecutionEvidence()
             val rawAuditArgumentReadFailures = if (benchmarkRawSysEnterAudit) {
                 engine.readRawAuditArgumentReadFailureCount()
             } else {
@@ -468,6 +563,16 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
+            val exactAdmissionAuditArgumentReadFailures = if (benchmarkExactAdmissionAudit) {
+                engine.readExactAdmissionAuditArgumentReadFailureCount()
+            } else {
+                0L
+            }
+            val exactAdmissionAuditLookupFailures = if (benchmarkExactAdmissionAudit) {
+                engine.readExactAdmissionAuditLookupFailureCount()
+            } else {
+                0L
+            }
             val rawSysEnterAuditMissing = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }.keys
             val rawSysEnterAuditObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.total }
             val rawSysEnterAuditPreSessionObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.preSession }
@@ -475,7 +580,18 @@ internal object TierEKernelSmoke {
             val rawSysEnterAuditWrongTarget = rawSysEnterAuditCounts.values.sumOf { count -> count.wrongTarget }
             val rawSysEnterAuditNonSingletons = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }
             val rawSysEnterAuditOpenat2 = rawSysEnterAuditCounts.filterValues { count -> count.openat2 > 0L }
-            val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count.admitted != 1L }
+            val rawSysEnterAuditCpuTotal = rawSysEnterAuditCpuCounts.values.sum()
+            val attachmentDiagnosticDescriptorComplete =
+                configuredAttachmentShape in setOf(
+                    TierESysEnterAttachmentShape.MINIMAL_COUNTER_ONLY,
+                    TierESysEnterAttachmentShape.MINIMAL_AUDIT_ONLY,
+                ) ||
+                    rawSysEnterAuditCounts.values.all { it.total == 1L }
+            val attachmentDiagnosticComplete = attachmentDiagnostic &&
+                rawAuditArgumentReadFailures == 0L &&
+                rawSysEnterAuditCpuTotal == expectedOpenatFds.size.toLong() &&
+                attachmentDiagnosticDescriptorComplete
+            val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count.submitted != 1L }
             val exactAdmissionAuditRejections = exactAdmissionAuditCounts.values.sumOf { count -> count.rejected }
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
@@ -486,6 +602,77 @@ internal object TierEKernelSmoke {
             // finish deliberately refuses to infer from an empty final ring drain.
             val producerClosed = terminalProfile == null && lifecycleScenario != "exec_transition"
             val profile = terminalProfile ?: session.finish(definitions, producerClosed = producerClosed)
+            if (coverageDiscovery) {
+                val expectedCoverage = Files
+                    .readAllLines(oracleManifest)
+                    .filter { it.startsWith("coverage=") }
+                    .map { it.removePrefix("coverage=").split(',') }
+                    .filter { it[1].toInt() >= 0 }
+                    .associate { it[0].toInt() to it[1].toInt() }
+                val coverageObservations = profile.syscalls
+                    .asSequence()
+                    .filter { it.observation.syscallNumber == SYS_OPENAT && it.observation.args[0].toInt() in expectedCoverage }
+                    .map { syscall ->
+                        TierECoverageOracle.Observation(
+                            operationId = syscall.observation.args[0].toInt(),
+                            actualPaths = syscall.stackDefinition
+                                ?.frames
+                                .orEmpty()
+                                .filter { it.className == TierECoveragePaths::class.java.name && it.methodName.matches(Regex("path[0-9]{2}")) }
+                                .map { it.methodName.removePrefix("path").toInt() },
+                            exact = syscall.resolutionStatus == ResolutionStatus.RESOLVED &&
+                                syscall.stackDefinition?.captureQuality == io.mazewall.profiler.internal.attribution.StackCaptureQuality.COMPLETE,
+                            // TierEProfilerSession retains first, then acknowledges these exact records.
+                            acknowledged = true,
+                            elapsedNanos = coverageFirstSeen[expectedCoverage[syscall.observation.args[0].toInt()]]
+                                ?: (System.nanoTime() - coverageStartedNanos),
+                        )
+                    }.asIterable()
+                println(
+                    "tier-e-coverage: " +
+                    TierECoverageOracle
+                        .evaluate(expectedCoverage, coverageObservations)
+                        .json()
+                    .dropLast(1) +
+                    ",\"discovery_clock\":\"collector_elapsed_since_workload_gate\"}",
+                )
+                System.getProperty("mazewall.tier-e.coverage-manifest-output")?.let { target ->
+                    Files.copy(oracleManifest, Path.of(target), StandardCopyOption.REPLACE_EXISTING)
+                    val stacks = profile.syscalls
+                        .filter {
+                        it.observation.syscallNumber == SYS_OPENAT &&
+                            it.observation.args[0].toInt() in expectedCoverage &&
+                            it.resolutionStatus == ResolutionStatus.RESOLVED
+                    }.groupBy { expectedCoverage.getValue(it.observation.args[0].toInt()) }
+                    val canonical = stacks.entries.sortedBy { it.key }.joinToString(",") { (path, records) ->
+                        val definitions = records
+                            .map { record ->
+                            val definition = requireNotNull(record.stackDefinition)
+                            listOf(
+                                record.observation.syscallNumber.toString(),
+                                record.observation.captureFlags.toString(),
+                                definition.captureQuality.name,
+                            ) +
+                                definition.frames.flatMap { frame ->
+                                listOf(
+                                    frame.classLoaderIdentity,
+                                    frame.className,
+                                    frame.methodName,
+                                    frame.descriptor,
+                                    frame.bytecodeLocation.toString(),
+                                    frame.kind.name,
+                                )
+                            }
+                        }.distinct()
+                            .sortedBy { it.joinToString(";") }
+                            .joinToString(",", "[", "]") { fields ->
+                            fields.joinToString(",", "[", "]") { field -> "\"" + TierEMatchedBenchmark.escape(field) + "\"" }
+                        }
+                        "\"$path\":$definitions"
+                    }
+                    Files.writeString(Path.of("$target.stacks.json"), "{$canonical}")
+                }
+            }
             val resolvedInvocationIds = profile.syscalls
                 .filter { syscall -> syscall.resolutionStatus == ResolutionStatus.RESOLVED }
                 .mapNotNull { syscall -> syscall.observation.invocationId }
@@ -725,8 +912,19 @@ internal object TierEKernelSmoke {
                         oracle.unclassified == 0L
                     )
             val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete
+            val sysEnterProgramEvidence = engine.sysEnterProgramEvidence()
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
+                    "sys_enter_backend_configured=${configuredSysEnterAttachmentBackend.name.lowercase()} " +
+                    "sys_enter_backend_effective=${effectiveSysEnterAttachmentBackend.name.lowercase()} " +
+                    "sys_enter_attachment_cpus=${sysEnterAttachmentCpus.joinToString(",").ifEmpty { "system-wide" }} " +
+                    "kernel_coverage_mode=${sysEnterProgramEvidence.kernelCoverageMode.name.lowercase()} " +
+                    "sys_enter_attachment_shape=${configuredAttachmentShape.name.lowercase()} " +
+                    "sys_enter_program_instruction_count=${sysEnterProgramEvidence.instructionCount} " +
+                    "sys_enter_main_program_execution=${sysEnterProgramExecutionEvidence.getValue("main")} " +
+                    "sys_enter_audit_program_execution=${sysEnterProgramExecutionEvidence.getValue("audit")} " +
+                    "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
+                    "sys_enter_program_update_helper_calls=${sysEnterProgramEvidence.updateHelperCalls} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
                     "strace_shadow_oracle=${if (straceOutputPath == null) "disabled" else "enabled"} " +
                     "strace_output=${straceOutputPath ?: "none"} " +
@@ -736,6 +934,11 @@ internal object TierEKernelSmoke {
                 "raw_sys_enter_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
                 "raw_sys_enter_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
                 "raw_sys_enter_audit_observed_operations=$rawSysEnterAuditObserved " +
+                    "raw_sys_enter_audit_cpu_counts=${rawSysEnterAuditCpuCounts.entries.joinToString(",") { (cpu, count) -> "$cpu:$count" }.ifEmpty { "none" }} " +
+                    "raw_sys_enter_audit_cpu_total=$rawSysEnterAuditCpuTotal " +
+                    "attachment_diagnostic=$attachmentDiagnostic " +
+                    "attachment_diagnostic_descriptor_complete=$attachmentDiagnosticDescriptorComplete " +
+                    "attachment_diagnostic_verdict=${if (attachmentDiagnosticComplete) "PASS" else "INCOMPLETE"} " +
                 "raw_sys_enter_audit_pre_session_operations=$rawSysEnterAuditPreSessionObserved " +
                 "raw_sys_enter_audit_no_session_operations=$rawSysEnterAuditNoSession " +
                 "raw_sys_enter_audit_wrong_target_operations=$rawSysEnterAuditWrongTarget " +
@@ -754,18 +957,28 @@ internal object TierEKernelSmoke {
                 "exact_admission_audit_population_operations=${expectedOpenatFds.size} " +
                 "exact_admission_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
                 "exact_admission_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
-                "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sumOf { it.admitted }} " +
+                "exact_admission_audit_handler_entered=${exactAdmissionAuditCounts.values.sumOf { it.handlerEntered }} " +
+                "exact_admission_audit_session_matched=${exactAdmissionAuditCounts.values.sumOf { it.sessionMatched }} " +
+                "exact_admission_audit_in_flight_admitted=${exactAdmissionAuditCounts.values.sumOf { it.inFlightAdmitted }} " +
+                "exact_admission_audit_marker_attached=${exactAdmissionAuditCounts.values.sumOf { it.markerAttached }} " +
+                "exact_admission_audit_task_storage_available=${exactAdmissionAuditCounts.values.sumOf { it.taskStorageAvailable }} " +
+                "exact_admission_audit_active_invocation=${exactAdmissionAuditCounts.values.sumOf { it.activeInvocation }} " +
+                "exact_admission_audit_generation_validated=${exactAdmissionAuditCounts.values.sumOf { it.generationValidated }} " +
+                "exact_admission_audit_ring_reserved=${exactAdmissionAuditCounts.values.sumOf { it.ringReserved }} " +
+                "exact_admission_audit_submitted=${exactAdmissionAuditCounts.values.sumOf { it.submitted }} " +
                 "exact_admission_audit_rejected_operations=$exactAdmissionAuditRejections " +
+                "exact_admission_audit_argument_read_failures=$exactAdmissionAuditArgumentReadFailures " +
+                "exact_admission_audit_lookup_failures=$exactAdmissionAuditLookupFailures " +
                 "exact_admission_audit_non_singleton_operations=${exactAdmissionAuditMissing.size} " +
                 "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(
                     16,
-                ).joinToString(",") { (fd, count) -> "$fd:${count.admitted}" }.ifEmpty { "none" }} " +
+                ).joinToString(",") { (fd, count) -> "$fd:${count.submitted}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit_rejection_samples=${exactAdmissionAuditCounts.filterValues { it.rejected > 0L }.toSortedMap().entries.take(
                     16,
                 ).joinToString(
                     ",",
                 ) { (fd, count) ->
-                    "$fd:detached=${count.markerDetached},no_task=${count.markerStateUnavailable},no_storage=${count.taskStorageUnavailable},inactive=${count.inactiveInvocation},stale_generation=${count.staleMarkerGeneration}"
+                    "$fd:session_unavailable=${count.sessionUnavailable},wrong_target=${count.wrongTarget},in_flight_unavailable=${count.inFlightUnavailable},detached=${count.markerDetached},no_task=${count.markerStateUnavailable},no_storage=${count.taskStorageUnavailable},inactive=${count.inactiveInvocation},stale_generation=${count.staleMarkerGeneration},ring_reservation_failed=${count.ringReservationFailed}"
                 }.ifEmpty { "none" }} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
@@ -928,7 +1141,7 @@ internal object TierEKernelSmoke {
                     "retention exhaustion must remain explicit incomplete evidence: ${profile.integrity}"
                 }
                 check(resolved > 0) { "retention exhaustion control did not retain any resolved observations" }
-            } else {
+            } else if (!attachmentDiagnostic && !coverageDiscovery) {
                 check(profile.integrity.observedLosses == 0L) { "Tier E lost observations: ${profile.integrity}" }
                 if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
                     check(resolved > 0) { "no syscall received a logical Java stack" }
@@ -966,7 +1179,10 @@ internal object TierEKernelSmoke {
                 "$wronglyAttributedUnlinks unlink syscalls were assigned a non-deletion stack"
             }
             if (
-                ringSubmissionMode == TierERingSubmissionMode.ENABLED &&
+                !attachmentDiagnostic &&
+                    !coverageDiscovery &&
+                    configuredAttachmentShape != TierESysEnterAttachmentShape.DESCRIPTOR_AUDIT_ONLY &&
+                    ringSubmissionMode == TierERingSubmissionMode.ENABLED &&
                 lifecycleScenario !in setOf("detach_while_active", "callback_suppression", "terminal_while_active", "capture_failure", "exec_transition") &&
                 operationOracleAvailable &&
                 !expectRetentionExhaustion
@@ -1114,6 +1330,31 @@ internal object TierEKernelSmoke {
             }
         }
     }
+
+    internal fun sysEnterAttachmentBackend(value: String): TierESysEnterAttachmentBackend =
+        when (value) {
+            "auto" -> TierESysEnterAttachmentBackend.AUTO
+            "direct-raw-tracepoint" -> TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+            "perf-tracepoint-compat" -> TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT
+            else -> error("unknown Tier E sys_enter attachment backend: $value")
+        }
+
+    internal fun kernelCoverageMode(value: String): TierEKernelCoverageMode =
+        when (value) {
+            "none" -> TierEKernelCoverageMode.NONE
+            "diagnostic-lookup" -> TierEKernelCoverageMode.DIAGNOSTIC_LOOKUP
+            "diagnostic-update" -> TierEKernelCoverageMode.DIAGNOSTIC_UPDATE
+            else -> error("unknown Tier E kernel coverage mode: $value")
+        }
+
+    internal fun sysEnterAttachmentShape(value: String): TierESysEnterAttachmentShape =
+        when (value) {
+            "main-plus-audit" -> TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
+            "descriptor-audit-only" -> TierESysEnterAttachmentShape.DESCRIPTOR_AUDIT_ONLY
+            "minimal-audit-only" -> TierESysEnterAttachmentShape.MINIMAL_AUDIT_ONLY
+            "minimal-counter-only" -> TierESysEnterAttachmentShape.MINIMAL_COUNTER_ONLY
+            else -> error("unknown Tier E sys_enter attachment shape: $value")
+        }
 
     private fun auditSamplingLabel(
         population: Set<Int>,

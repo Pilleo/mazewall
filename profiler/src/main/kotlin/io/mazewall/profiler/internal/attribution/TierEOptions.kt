@@ -78,6 +78,38 @@ internal enum class TierESysEnterAttachmentBackend {
     PERF_TRACEPOINT_COMPAT,
 }
 
+/**
+ * Benchmark-only control for the optional kernel diagnostic coverage map.
+ *
+ * The map never owns unique-edge suppression: acknowledgement and deduplication
+ * remain collector-authoritative. Production preserves the existing update path.
+ */
+internal enum class TierEKernelCoverageMode {
+    /** Omit coverage-map allocation and all coverage-map helper calls. */
+    NONE,
+
+    /** Retain only the coverage-map lookup, without changing map state. */
+    DIAGNOSTIC_LOOKUP,
+
+    /** Retain the existing bounded diagnostic map update. */
+    DIAGNOSTIC_UPDATE,
+}
+
+/** Benchmark-only sys_enter attachment set used to isolate pre-admission omissions. */
+internal enum class TierESysEnterAttachmentShape {
+    /** The existing Tier E program plus the descriptor audit program. */
+    MAIN_PLUS_AUDIT,
+
+    /** Descriptor-keyed audit program without the main Tier E sys_enter program. */
+    DESCRIPTOR_AUDIT_ONLY,
+
+    /** Counter-only audit program without the main Tier E sys_enter program. */
+    MINIMAL_AUDIT_ONLY,
+
+    /** The main Tier E program plus a target-gated counter audit without descriptor mutation. */
+    MINIMAL_COUNTER_ONLY,
+}
+
 /** Explicit Tier E session configuration. The full stream remains the safe default. */
 internal data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
@@ -86,6 +118,10 @@ internal data class TierEOptions(
     val captureProfile: TierECaptureProfile = TierECaptureProfile.Full,
     /** Direct raw tracepoint attachment is selected automatically on supported x86_64 hosts. */
     val sysEnterAttachmentBackend: TierESysEnterAttachmentBackend = TierESysEnterAttachmentBackend.AUTO,
+    /** Optional kernel-only unique-edge diagnostic work; update preserves production behavior. */
+    val kernelCoverageMode: TierEKernelCoverageMode = TierEKernelCoverageMode.DIAGNOSTIC_UPDATE,
+    /** Attachment diagnostic control; production always installs the normal main program. */
+    val benchmarkSysEnterAttachmentShape: TierESysEnterAttachmentShape = TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT,
     val maxPendingRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedRecords: Int = DEFAULT_RECORD_LIMIT,
     val maxRetainedBytes: Long = DEFAULT_RETAINED_BYTES,
@@ -148,6 +184,12 @@ internal data class TierEOptions(
         }
         require(benchmarkPhases || !benchmarkExactAdmissionAudit) {
             "exact-admission auditing is benchmark-only"
+        }
+        require(benchmarkPhases || kernelCoverageMode == TierEKernelCoverageMode.DIAGNOSTIC_UPDATE) {
+            "kernel coverage variants are benchmark-only"
+        }
+        require(benchmarkPhases || benchmarkSysEnterAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT) {
+            "sys_enter attachment shapes are benchmark-only"
         }
         require(benchmarkPhases || !benchmarkAllocationAccounting) {
             "allocation accounting may be enabled only in a benchmark-phase session"

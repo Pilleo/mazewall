@@ -4,6 +4,7 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
@@ -50,12 +51,61 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `benchmark coverage variants change only optional diagnostic map work`() {
+        fun uniqueProgram(mode: TierEKernelCoverageMode) =
+            TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(
+                emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL,
+                benchmarkPhases = true,
+                kernelCoverageMode = mode,
+            ),
+        )
+
+        val none = uniqueProgram(TierEKernelCoverageMode.NONE)
+        val lookup = uniqueProgram(TierEKernelCoverageMode.DIAGNOSTIC_LOOKUP)
+        val update = uniqueProgram(TierEKernelCoverageMode.DIAGNOSTIC_UPDATE)
+
+        fun ringSubmits(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x85 && it.imm == 132 }
+
+        fun coverageMapLoads(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x18 && it.src == 1 && it.imm == 4 }
+
+        fun lookupCalls(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x85 && it.imm == 1 }
+
+        fun updateCalls(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x85 && it.imm == 2 }
+
+        assertEquals(0, coverageMapLoads(none))
+        assertEquals(1, coverageMapLoads(lookup))
+        assertEquals(2, coverageMapLoads(update))
+        assertEquals(lookupCalls(none) + 1, lookupCalls(lookup))
+        assertEquals(lookupCalls(lookup), lookupCalls(update))
+        assertEquals(updateCalls(none), updateCalls(lookup))
+        assertEquals(updateCalls(lookup) + 1, updateCalls(update))
+        assertEquals(ringSubmits(none), ringSubmits(lookup))
+        assertEquals(ringSubmits(lookup), ringSubmits(update))
+    }
+
+    @Test
     fun `sys enter program reserves a bounded per-context metric map slot`() {
         val program = TierEBpfProgramBuilder.buildSysEnterProgram()
 
         assertTrue(
             program.any { it.code == 0x18 && it.src == 1 && it.imm == 5 },
             "program must reference the dedicated per-context metrics map",
+        )
+    }
+
+    @Test
+    fun `minimal sys enter audit preserves target and descriptor lookup while omitting descriptor mutations`() {
+        val descriptorAudit = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram()
+        val minimalAudit = TierEBpfProgramBuilder.buildMinimalSysEnterAuditProgram()
+
+        assertTrue(minimalAudit.any { it.code == 0x85 && it.imm == 14 }, "minimal audit must retain target identity")
+        assertTrue(minimalAudit.any { it.code == 0x85 && it.imm == 8 }, "minimal audit must retain bounded CPU accounting")
+        assertTrue(minimalAudit.any { it.code == 0x18 && it.src == 1 && it.imm == 0 }, "minimal audit must retain declared-descriptor lookup")
+        assertTrue(minimalAudit.any { it.code == 0x18 && it.src == 1 && it.imm == 1 }, "minimal audit must retain session lookup")
+        assertTrue(
+            minimalAudit.size < descriptorAudit.size,
+            "minimal audit must omit the descriptor-count mutation path",
         )
     }
 
@@ -135,6 +185,7 @@ class TierEBpfProgramBuilderTest {
                 benchmarkPhases = true,
                 benchmarkEmitTaskStorageUnavailableEvents = true,
             ),
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
         ).forEach { options ->
             val program = TierEBpfProgramBuilder.buildSysEnterProgram(options)
             assertEquals(
@@ -202,14 +253,14 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
-    fun `exact admission audit runs only after marker and task storage validation`() {
+    fun `exact admission audit starts before target filtering and preserves raw argument validation`() {
         val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
             TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
         )
         val taskStorageGet = program.indexOfFirst { it.code == 0x85 && it.imm == 156 }
         val auditMapLoad = program.indexOfFirst { it.code == 0x18 && it.src == 1 && it.imm == 7 }
 
-        assertTrue(auditMapLoad > taskStorageGet, "exact-admission audit must follow task-storage validation")
+        assertTrue(auditMapLoad < taskStorageGet, "exact-admission audit must account for target and marker rejection paths")
         assertTrue(
             program.take(auditMapLoad).any { it.code == 0x85 && it.imm == 113 },
             "raw exact-admission audit must read the declared descriptor through the kernel-read helper",
@@ -224,11 +275,50 @@ class TierEBpfProgramBuilderTest {
 
         val auditWrites = program
             .filter { instruction ->
-            instruction.code == 0xdb && instruction.off.toInt() in setOf(0, 8, 16, 24, 32, 40)
+            instruction.code == 0xdb && instruction.off.toInt() in setOf(72, 80, 88, 96, 104, 112, 120, 128, 136)
         }.map { it.off.toInt() }
             .toSet()
 
-        assertEquals(setOf(0, 8, 16, 24, 32, 40), auditWrites)
+        assertEquals(setOf(72, 80, 88, 96, 104, 112, 120, 128, 136), auditWrites)
+    }
+
+    @Test
+    fun `benchmark admission audit accounts for every boundary through ring submission`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
+        )
+
+        val stageOffsets = program
+            .filter { instruction -> instruction.code == 0xdb }
+            .map { instruction -> instruction.off.toInt() }
+            .toSet()
+
+        assertTrue(
+            setOf(0, 8, 16, 24, 32, 40, 48, 56, 64).all(stageOffsets::contains),
+            "audit must retain handler, session, in-flight, marker, task, invocation, generation, reservation, and submission stages",
+        )
+    }
+
+    @Test
+    fun `audit-disabled program does not reference the benchmark admission map`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions())
+
+        assertTrue(
+            program.none { instruction -> instruction.code == 0x18 && instruction.src == 1 && instruction.imm == 7 },
+            "production programs must not access the benchmark-only admission map",
+        )
+    }
+
+    @Test
+    fun `audit failure accounting uses isolated scratch storage`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
+        )
+
+        assertTrue(
+            program.any { instruction -> instruction.code == 0x07 && instruction.dst == 2 && instruction.imm == -120 },
+            "benchmark audit failures must not overwrite the session-map key at stack offset -4",
+        )
     }
 
     @Test
@@ -318,6 +408,8 @@ class TierEBpfProgramBuilderTest {
         assertEquals(0x95, program.last().code)
         assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 0 }, "audit must load its descriptor-count map")
         assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 1 }, "audit must load the session map")
+        assertTrue(program.any { it.code == 0x18 && it.src == 1 && it.imm == 3 }, "audit must load the benchmark-only per-cpu counter map")
+        assertTrue(program.any { it.code == 0x85 && it.imm == 8 }, "audit must identify the executing CPU")
         assertTrue(
             program.any { it.code == 0x63 && it.dst == 10 && it.off.toInt() == -12 } &&
                 program.any { it.code == 0x07 && it.dst == 2 && it.imm == -12 },

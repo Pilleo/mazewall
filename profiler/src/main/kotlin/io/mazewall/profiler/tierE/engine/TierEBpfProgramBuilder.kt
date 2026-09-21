@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.engine
 
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine.Insn
@@ -17,6 +18,7 @@ internal object TierEBpfProgramBuilder {
     private const val H_LOOKUP: Int = 1
     private const val H_UPDATE: Int = 2
     private const val H_KTIME: Int = 5
+    private const val H_SMP_PROCESSOR_ID: Int = 8
     private const val H_PID_TGID: Int = 14
     private const val H_PROBE_READ_KERNEL: Int = 113
     private const val H_RB_RESERVE: Int = 131
@@ -32,6 +34,10 @@ internal object TierEBpfProgramBuilder {
     private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX: Int = 7
     private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
     private const val RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX: Int = 9
+    private const val EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX: Int =
+        TierEbpfEngine.EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX
+    private const val EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX: Int =
+        TierEbpfEngine.EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX
     private const val RAW_AUDIT_OPENAT_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.OPENAT_OFFSET
     private const val RAW_AUDIT_OPENAT2_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.OPENAT2_OFFSET
     private const val RAW_AUDIT_PRE_SESSION_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.PRE_SESSION_OFFSET
@@ -39,12 +45,24 @@ internal object TierEBpfProgramBuilder {
     private const val RAW_AUDIT_WRONG_TARGET_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.WRONG_TARGET_OFFSET
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
-    private const val EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET: Int = 0
-    private const val EXACT_ADMISSION_AUDIT_MARKER_DETACHED_OFFSET: Int = 8
-    private const val EXACT_ADMISSION_AUDIT_MARKER_STATE_UNAVAILABLE_OFFSET: Int = 16
-    private const val EXACT_ADMISSION_AUDIT_TASK_STORAGE_UNAVAILABLE_OFFSET: Int = 24
-    private const val EXACT_ADMISSION_AUDIT_INACTIVE_INVOCATION_OFFSET: Int = 32
-    private const val EXACT_ADMISSION_AUDIT_STALE_GENERATION_OFFSET: Int = 40
+    private const val EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.HANDLER_ENTERED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_SESSION_MATCHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.SESSION_MATCHED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.IN_FLIGHT_ADMITTED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_MARKER_ATTACHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.MARKER_ATTACHED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_TASK_STORAGE_AVAILABLE_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.TASK_STORAGE_AVAILABLE_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_ACTIVE_INVOCATION_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.ACTIVE_INVOCATION_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_GENERATION_VALIDATED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.GENERATION_VALIDATED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_RING_RESERVED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.RING_RESERVED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_SUBMITTED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.SUBMITTED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_SESSION_UNAVAILABLE_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.SESSION_UNAVAILABLE_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_WRONG_TARGET_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.WRONG_TARGET_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_IN_FLIGHT_UNAVAILABLE_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.IN_FLIGHT_UNAVAILABLE_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_MARKER_DETACHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.MARKER_DETACHED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_MARKER_STATE_UNAVAILABLE_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.MARKER_STATE_UNAVAILABLE_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_TASK_STORAGE_UNAVAILABLE_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.TASK_STORAGE_UNAVAILABLE_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_INACTIVE_INVOCATION_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.INACTIVE_INVOCATION_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_STALE_GENERATION_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.STALE_MARKER_GENERATION_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_RING_RESERVATION_FAILED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.RING_RESERVATION_FAILED_OFFSET
 
     // eBPF opcodes (64-bit class)
     private const val ADD_IMM: Int = 0x07
@@ -79,12 +97,25 @@ internal object TierEBpfProgramBuilder {
      * descriptors as keys with separate observed `openat` and `openat2` counts as values; map 1 is the normal
      * session configuration. The program never reserves or submits a ring record.
      */
-    public fun buildRawSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = false)
+    public fun buildRawSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = false, descriptorCounts = true)
 
     /** x86_64 raw-tracepoint audit with `pt_regs *` argument extraction. */
-    public fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = true)
+    public fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = true, descriptorCounts = true)
 
-    private fun buildSysEnterAuditProgram(rawTracepoint: Boolean): List<Insn> {
+    /**
+     * Minimal benchmark-only denominator: validates a declared directory descriptor and
+     * target TGID, then increments only the bounded CPU counter. It intentionally performs
+     * no per-descriptor map mutation.
+     */
+    public fun buildMinimalSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = false, descriptorCounts = false)
+
+    /** x86_64 raw-tracepoint form of the minimal benchmark-only audit. */
+    public fun buildMinimalRawTracepointSysEnterAuditProgram(): List<Insn> = buildSysEnterAuditProgram(rawTracepoint = true, descriptorCounts = false)
+
+    private fun buildSysEnterAuditProgram(
+        rawTracepoint: Boolean,
+        descriptorCounts: Boolean,
+    ): List<Insn> {
         val program = mutableListOf<Insn>()
 
         fun emit(instruction: Insn): Int {
@@ -156,13 +187,37 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
 
+        // The bounded per-CPU array is diagnostic-only and counts only target
+        // workload syscalls that have passed the session gate.
+        emit(Insn(STX_DW, dst = FP, src = 7, off = -24))
+        emit(Insn(CALL, imm = H_SMP_PROCESSOR_ID))
+        emit(Insn(STX_W, dst = FP, src = 0, off = -16))
+        loadMap(1, 3)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -16))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val noCpuCounter = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
-        val isOpenat = emit(Insn(JEQ_IMM, dst = 6))
-        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT2_OFFSET.toShort()))
-        val incrementedOpenat2 = emit(Insn(JA))
-        val incrementOpenat = program.size
-        emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT_OFFSET.toShort()))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val restoreDescriptorCounter = program.size
+        emit(Insn(LDX_DW, dst = 7, src = FP, off = -24))
+        program[noCpuCounter] = program[noCpuCounter].copy(off = (restoreDescriptorCounter - noCpuCounter - 1).toShort())
 
+        val incrementedOpenat2: Int?
+        val isOpenat: Int?
+        val incrementOpenat: Int?
+        if (descriptorCounts) {
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            isOpenat = emit(Insn(JEQ_IMM, dst = 6))
+            emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT2_OFFSET.toShort()))
+            incrementedOpenat2 = emit(Insn(JA))
+            incrementOpenat = program.size
+            emit(Insn(ATOMIC_ADD_DW, dst = 7, src = 5, off = RAW_AUDIT_OPENAT_OFFSET.toShort()))
+        } else {
+            incrementedOpenat2 = null
+            isOpenat = null
+            incrementOpenat = null
+        }
         val complete = emit(Insn(JA))
         val noSessionHandler = program.size
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
@@ -194,12 +249,14 @@ internal object TierEBpfProgramBuilder {
         } else {
             null
         }
-        listOf(nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2, complete, completedNoSession, completedWrongTarget).forEach { index ->
+        listOfNotNull(nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2, complete, completedNoSession, completedWrongTarget).forEach { index ->
             program[index] = program[index].copy(off = (exit - index - 1).toShort())
         }
         program[noSession] = program[noSession].copy(off = (noSessionHandler - noSession - 1).toShort())
         program[wrongTarget] = program[wrongTarget].copy(off = (wrongTargetHandler - wrongTarget - 1).toShort())
-        program[isOpenat] = program[isOpenat].copy(off = (incrementOpenat - isOpenat - 1).toShort())
+        if (isOpenat != null && incrementOpenat != null) {
+            program[isOpenat] = program[isOpenat].copy(off = (incrementOpenat - isOpenat - 1).toShort())
+        }
         rawArgumentReadFailure?.let { index ->
             program[index] = program[index].copy(off = (requireNotNull(rawArgumentReadFailureHandler) - index - 1).toShort())
         }
@@ -219,6 +276,8 @@ internal object TierEBpfProgramBuilder {
         rawTracepoint: Boolean,
     ): List<Insn> {
         val p = mutableListOf<Insn>()
+        val kernelCoverageMode =
+            if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) options.kernelCoverageMode else TierEKernelCoverageMode.NONE
 
         fun emit(i: Insn): Int {
             p += i
@@ -258,11 +317,83 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
         }
 
+        fun emitAuditFailureCounter(counterIndex: Int) {
+            emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -120))
+            ldMap(1, COUNTER_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -120))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            val complete = p.size
+            p[missingCounter] = p[missingCounter].copy(off = (complete - missingCounter - 1).toShort())
+        }
+
+        fun emitExactAdmissionAuditCounter(offset: Int) {
+            if (!options.benchmarkExactAdmissionAudit) return
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -100))
+            val notEligible = emit(Insn(JEQ_IMM, dst = 5))
+            ldMap(1, EXACT_ADMISSION_AUDIT_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -88))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingEntry = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = offset.toShort()))
+            val counted = emit(Insn(JA))
+            val missingEntryHandler = p.size
+            emitAuditFailureCounter(EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX)
+            val complete = p.size
+            p[notEligible] = p[notEligible].copy(off = (complete - notEligible - 1).toShort())
+            p[missingEntry] = p[missingEntry].copy(off = (missingEntryHandler - missingEntry - 1).toShort())
+            p[counted] = p[counted].copy(off = (complete - counted - 1).toShort())
+        }
+
         emit(Insn(MOV_REG, dst = 9, src = 1))
         emit(Insn(CALL, imm = H_PID_TGID))
         emit(Insn(MOV_REG, dst = 8, src = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+
+        if (options.benchmarkExactAdmissionAudit) {
+            emit(Insn(STX_W, dst = FP, src = 5, off = -100))
+            loadSyscallNumber()
+            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
+            val argumentReadFailure: Int?
+            if (rawTracepoint) {
+                emit(Insn(LDX_DW, dst = 3, src = 9, off = 0))
+                emit(Insn(ADD_IMM, dst = 3, imm = X86_64_SYSCALL_ARGUMENT_OFFSETS[0]))
+                emit(Insn(MOV_REG, dst = 1, src = FP))
+                emit(Insn(ADD_IMM, dst = 1, imm = -96))
+                emit(Insn(MOV_IMM, dst = 2, imm = 8))
+                emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+                argumentReadFailure = emit(Insn(JNE_IMM, dst = 0))
+                emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+            } else {
+                argumentReadFailure = null
+                emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+            }
+            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -100))
+            emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET)
+            val auditSetupComplete = if (rawTracepoint) emit(Insn(JA)) else null
+            val readFailureHandler = if (rawTracepoint) {
+                p.size.also { emitAuditFailureCounter(EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX) }
+            } else {
+                null
+            }
+            val afterAuditSetup = p.size
+            p[notOpenat] = p[notOpenat].copy(off = (afterAuditSetup - notOpenat - 1).toShort())
+            auditSetupComplete?.let { complete ->
+                p[complete] = p[complete].copy(off = (afterAuditSetup - complete - 1).toShort())
+            }
+            argumentReadFailure?.let { failure ->
+                p[failure] = p[failure].copy(off = (requireNotNull(readFailureHandler) - failure - 1).toShort())
+            }
+        }
 
         // Reject every process except the configured target before consulting
         // task storage. This is required because both the raw tracepoint and
@@ -271,18 +402,20 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
         emit(Insn(CALL, imm = H_LOOKUP))
-        exitIfZero(0)
+        val missingSession = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
         emit(Insn(MOV_REG, dst = 5, src = 8))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
-        exits.add(emit(Insn(JNE_REG, dst = 5, src = 4)))
+        val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
+        emit(Insn(MOV_REG, dst = 7, src = 0))
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_SESSION_MATCHED_OFFSET)
 
         // Count before reading marker attachment. Otherwise a handler could
         // read the old attached state, be preempted during detach, and start
         // producing only after userspace observed an empty counter.
         // bpf_map_lookup_elem returns through r0, so retain the session-map
         // value in callee-saved r7 until marker state has been read.
-        emit(Insn(MOV_REG, dst = 7, src = 0))
+        emit(Insn(STX_DW, dst = FP, src = 7, off = -112))
         ldMap(1, IN_FLIGHT_MAP_INDEX)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
@@ -290,6 +423,8 @@ internal object TierEBpfProgramBuilder {
         val missingInFlightCounter = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET)
+        emit(Insn(LDX_DW, dst = 7, src = FP, off = -112))
         emit(Insn(LDX_W, dst = 5, src = 7, off = 8))
         val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
         val markerAttached = emit(Insn(JA))
@@ -298,6 +433,8 @@ internal object TierEBpfProgramBuilder {
         // detached marker never reads task storage, so an old state cannot
         // leak into a later session.
         val activeMarkerObservation = p.size
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_MARKER_ATTACHED_OFFSET)
+        emit(Insn(LDX_DW, dst = 7, src = FP, off = -112))
         emit(Insn(LDX_W, dst = 5, src = 7, off = 12))
         emit(Insn(STX_W, dst = FP, src = 5, off = -36))
         ldMap(6, 0)
@@ -310,9 +447,11 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_TASK_STORAGE_GET))
         val noStorage = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_REG, dst = 6, src = 0))
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_TASK_STORAGE_AVAILABLE_OFFSET)
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
         val inactiveInvocation = emit(Insn(JEQ_IMM, dst = 5))
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_ACTIVE_INVOCATION_OFFSET)
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 8))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
         emit(Insn(LDX_W, dst = 5, src = 6, off = 16))
@@ -320,30 +459,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(LDX_W, dst = 5, src = 6, off = 20))
         emit(Insn(LDX_W, dst = 4, src = FP, off = -36))
         val staleAttachmentGeneration = emit(Insn(JNE_REG, dst = 5, src = 4))
-
-        val exactAdmissionAuditDone: Int?
-        val exactAdmissionAuditMissingEntry: Int?
-        if (options.benchmarkExactAdmissionAudit) {
-            loadSyscallNumber()
-            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
-            loadArgument(0)
-            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
-            ldMap(1, EXACT_ADMISSION_AUDIT_MAP_INDEX)
-            emit(Insn(MOV_REG, dst = 2, src = FP))
-            emit(Insn(ADD_IMM, dst = 2, imm = -88))
-            emit(Insn(CALL, imm = H_LOOKUP))
-            exactAdmissionAuditMissingEntry = emit(Insn(JEQ_IMM, dst = 0))
-            emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET.toShort()))
-            exactAdmissionAuditDone = p.size
-            p[notOpenat] = p[notOpenat].copy(off = (exactAdmissionAuditDone - notOpenat - 1).toShort())
-            p[exactAdmissionAuditMissingEntry] = p[exactAdmissionAuditMissingEntry].copy(
-                off = (exactAdmissionAuditDone - exactAdmissionAuditMissingEntry - 1).toShort(),
-            )
-        } else {
-            exactAdmissionAuditDone = null
-            exactAdmissionAuditMissingEntry = null
-        }
+        emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_GENERATION_VALIDATED_OFFSET)
 
         // Diagnostic counts are keyed by active invocation, bounded by the
         // map's LRU capacity, and never participate in attribution.
@@ -373,7 +489,7 @@ internal object TierEBpfProgramBuilder {
         // Unique-edge mode keeps a bounded kernel observation map, but never
         // suppresses ring-buffer observations. The collector owns suppression
         // because only it can commit an edge after downstream acknowledgement.
-        if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
+        if (kernelCoverageMode != TierEKernelCoverageMode.NONE) {
             loadSyscallNumber()
             emit(Insn(STX_W, dst = FP, src = 5, off = -40))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
@@ -503,6 +619,7 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(CALL, imm = H_RB_RESERVE))
             reservationFailed = emit(Insn(JEQ_IMM, dst = 0))
             emit(Insn(MOV_REG, dst = 7, src = 0))
+            emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_RING_RESERVED_OFFSET)
             emit(Insn(CALL, imm = H_KTIME))
             emit(Insn(STX_DW, dst = 7, src = 0, off = 0))
             emit(Insn(MOV_REG, dst = 5, src = 8))
@@ -522,7 +639,7 @@ internal object TierEBpfProgramBuilder {
                 emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
             }
         }
-        if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) {
+        if (kernelCoverageMode != TierEKernelCoverageMode.NONE) {
             // Do not turn a malformed observation into a covered edge. A later
             // syscall from the same stack must be allowed to provide the first
             // valid representative instead of being suppressed by this one.
@@ -537,18 +654,25 @@ internal object TierEBpfProgramBuilder {
             ldMap(1, 4)
             emit(Insn(MOV_REG, dst = 2, src = FP))
             emit(Insn(ADD_IMM, dst = 2, imm = -56))
-            emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(STX_DW, dst = FP, src = 5, off = -64))
-            emit(Insn(MOV_REG, dst = 3, src = FP))
-            emit(Insn(ADD_IMM, dst = 3, imm = -64))
-            emit(Insn(MOV_IMM, dst = 4, imm = 0))
-            emit(Insn(CALL, imm = H_UPDATE))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            if (kernelCoverageMode == TierEKernelCoverageMode.DIAGNOSTIC_UPDATE) {
+                ldMap(1, 4)
+                emit(Insn(MOV_REG, dst = 2, src = FP))
+                emit(Insn(ADD_IMM, dst = 2, imm = -56))
+                emit(Insn(MOV_IMM, dst = 5, imm = 1))
+                emit(Insn(STX_DW, dst = FP, src = 5, off = -64))
+                emit(Insn(MOV_REG, dst = 3, src = FP))
+                emit(Insn(ADD_IMM, dst = 3, imm = -64))
+                emit(Insn(MOV_IMM, dst = 4, imm = 0))
+                emit(Insn(CALL, imm = H_UPDATE))
+            }
             val afterCoverageUpdate = p.size
             p[argumentsWereRead] = p[argumentsWereRead].copy(off = (coverageUpdateStart - argumentsWereRead - 1).toShort())
             p[noContextForUpdate] = p[noContextForUpdate].copy(off = (afterCoverageUpdate - noContextForUpdate - 1).toShort())
             p[skipInvalidCoverageUpdate] = p[skipInvalidCoverageUpdate].copy(off = (afterCoverageUpdate - skipInvalidCoverageUpdate - 1).toShort())
         }
         if (options.ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
+            emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_SUBMITTED_OFFSET)
             emit(Insn(MOV_REG, dst = 1, src = 7))
             emit(Insn(MOV_IMM, dst = 2, imm = 0))
             emit(Insn(CALL, imm = H_RB_SUBMIT))
@@ -646,20 +770,8 @@ internal object TierEBpfProgramBuilder {
         ): Int {
             if (!options.benchmarkExactAdmissionAudit) return continuation
             val start = p.size
-            loadSyscallNumber()
-            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
-            loadArgument(0)
-            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
-            ldMap(1, EXACT_ADMISSION_AUDIT_MAP_INDEX)
-            emit(Insn(MOV_REG, dst = 2, src = FP))
-            emit(Insn(ADD_IMM, dst = 2, imm = -88))
-            emit(Insn(CALL, imm = H_LOOKUP))
-            val missingEntry = emit(Insn(JEQ_IMM, dst = 0))
-            emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = reasonOffset.toShort()))
+            emitExactAdmissionAuditCounter(reasonOffset)
             val complete = emit(Insn(JA))
-            p[notOpenat] = p[notOpenat].copy(off = (continuation - notOpenat - 1).toShort())
-            p[missingEntry] = p[missingEntry].copy(off = (continuation - missingEntry - 1).toShort())
             p[complete] = p[complete].copy(off = (continuation - complete - 1).toShort())
             return start
         }
@@ -669,15 +781,24 @@ internal object TierEBpfProgramBuilder {
         val inactiveTarget = inactiveInvocationDiagnostic?.start ?: requireNotNull(ambientInactiveHandler)
         val staleGenerationTarget = staleMarkerGenerationDiagnostic?.start ?: requireNotNull(staleMarkerGenerationHandler)
         val detachedTarget = markerDetachedDiagnostic?.start ?: requireNotNull(markerDetachedHandler)
+        val missingSessionAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_SESSION_UNAVAILABLE_OFFSET, activeExit)
+        val wrongTargetAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_WRONG_TARGET_OFFSET, activeExit)
+        val missingInFlightAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_IN_FLIGHT_UNAVAILABLE_OFFSET, inFlightCounterFailureHandler)
         val noTaskAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_MARKER_STATE_UNAVAILABLE_OFFSET, markerFailureTarget)
         val noStorageAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_TASK_STORAGE_UNAVAILABLE_OFFSET, taskStorageTarget)
         val inactiveAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_INACTIVE_INVOCATION_OFFSET, inactiveTarget)
         val staleAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_STALE_GENERATION_OFFSET, staleGenerationTarget)
         val detachedAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_MARKER_DETACHED_OFFSET, detachedTarget)
+        val reservationAuditTarget = emitExactAdmissionAuditRejection(
+            EXACT_ADMISSION_AUDIT_RING_RESERVATION_FAILED_OFFSET,
+            lossHandler ?: activeExit,
+        )
 
         reservationFailed?.let { index ->
-            p[index] = p[index].copy(off = (requireNotNull(lossHandler) - index - 1).toShort())
+            p[index] = p[index].copy(off = (reservationAuditTarget - index - 1).toShort())
         }
+        p[missingSession] = p[missingSession].copy(off = (missingSessionAuditTarget - missingSession - 1).toShort())
+        p[wrongTarget] = p[wrongTarget].copy(off = (wrongTargetAuditTarget - wrongTarget - 1).toShort())
         p[noTask] = p[noTask].copy(
             off = (noTaskAuditTarget - noTask - 1).toShort(),
         )
@@ -690,7 +811,6 @@ internal object TierEBpfProgramBuilder {
         p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(
             off = (staleAuditTarget - staleAttachmentGeneration - 1).toShort(),
         )
-        check((exactAdmissionAuditDone == null) == (exactAdmissionAuditMissingEntry == null))
         p[markerDetached] = p[markerDetached].copy(
             off = (detachedAuditTarget - markerDetached - 1).toShort(),
         )
@@ -699,7 +819,7 @@ internal object TierEBpfProgramBuilder {
         missingLossCounter?.let { index ->
             p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
         }
-        p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (inFlightCounterFailureHandler - missingInFlightCounter - 1).toShort())
+        p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (missingInFlightAuditTarget - missingInFlightCounter - 1).toShort())
         listOfNotNull(
             taskStorageUnavailableDiagnostic,
             markerDetachedDiagnostic,

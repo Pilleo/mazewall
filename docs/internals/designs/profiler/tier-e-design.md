@@ -99,14 +99,15 @@ arguments through the kernel-read helper using the supported x86_64 register lay
 CPU-global `perf_event_open` sampling gate before the BPF TGID filter. The legacy per-CPU perf
 tracepoint path remains an explicit compatibility mode, not a sustained-capacity backend.
 
-The earlier perf defect is retained evidence: with `perf_event_max_sample_rate=25,750`, a clean
+The earlier perf discrepancy is retained evidence: with `perf_event_max_sample_rate=25,750`, a clean
 60-second 500/s target workload lost three `openat` calls in both the collector and an independent
 counter-only tracepoint program, while `strace` proved the calls executed. A direct-raw diagnostic
 run subsequently reconciled all 30,600 declared operations and all 30,600 independent audit entries
 in both dictionary modes. A clean repeat also completed full-stream, but unique-edge missed four
-operations while its raw audit remained complete and ring loss stayed zero. Therefore the global perf
-sampling cause is removed, but direct raw attachment is still `INCOMPLETE` for capacity promotion
-until the remaining marker/admission-side gap is deterministically classified. Every mismatch remains
+operations while its raw audit remained complete and ring loss stayed zero. Direct raw attachment
+bypasses the perf sampling mechanism, but these observations alone do not prove that sampling
+caused the earlier omissions. Direct raw attachment remains `INCOMPLETE` for capacity promotion
+until the remaining gap is classified with reliable attachment and workload-affinity evidence. Every mismatch remains
 fail-closed. See [tier-e-perf-tracepoint-sampling-loss-20260921.json](../../evidence/tier-e-perf-tracepoint-sampling-loss-20260921.json)
 and [tier-e-direct-raw-tracepoint-follow-up-20260921.json](../../evidence/tier-e-direct-raw-tracepoint-follow-up-20260921.json).
 
@@ -403,6 +404,83 @@ This mode is a unique-edge coverage report: arguments are representative of the 
 observation, event counts are unavailable, and it must not claim `FULL_STREAM` completeness.
 Unmarked syscalls, failed stack capture, argument-read failures, and ring loss remain explicit
 incomplete evidence.  It is never an enforcement or policy-generation input.
+
+**Implemented contract: benchmark coverage discovery.** The additive
+`tier-e-coverage-discovery` scope evaluates a workload-declared corpus independently of event
+completeness. `TierECoverageOracle` declares 72 named call paths into `openat`: 24 common paths
+executed 3,000 times each, 24 infrequent paths executed 124 times each, and 24 singleton paths.
+The total is 75,000 measured operations. Seeded schedules are identical across flavours in a
+fork and change between forks. Singletons span the measured interval, including its endpoints.
+Warm-up operations have separate descriptors and do not execute the measured named paths.
+
+The child atomically publishes the descriptor-to-path schedule before its workload gate opens.
+Only complete, exactly resolved records in the session's acknowledged retained output recover
+coverage. Missing repetitions can coexist with `coverage_verdict=PASS`; missing paths produce
+`INCOMPLETE`, incorrect attribution produces `FAILED`, and unavailable oracle evidence produces
+`UNVERIFIED`. Existing operation-oracle and whole-session verdicts remain unchanged. Coverage
+results never establish completeness for an unknown application's future paths or arguments,
+and `policy_eligibility` remains false.
+
+`bash scripts/run_tier_e_coverage_benchmark.sh smoke` runs a reduced corpus retaining all 72
+paths. The `full` argument runs five rotated forks of baseline, dictionary/full-stream,
+dictionary/unique-edge, inline/full-stream, and inline/unique-edge at 1,250 operations/s. The
+workload JVM starts on its assigned CPU; benchmark attachment setup targets that CPU before
+the collector moves to its separate CPU. Effective affinities are recorded. This corrects the
+older benchmark's leader-only post-start pinning, which did not establish Java-thread affinity.
+Record-count capacity is derived from declared operation bounds; the existing retained-byte
+budget remains enforced.
+
+Artifacts retain per-fork coverage and event verdicts, frequency-specific recall, discovery
+observation times measured from workload-gate release (including warm-up and any dictionary
+publication delay), full decoded stacks, manifests, logs, and checksums. Discovery is observed
+after retention; records first resolved during terminal finish use the subsequent report time
+as an upper bound. These are not exact syscall timestamps or exact acknowledgement timestamps.
+The paced workload duration is not an unpaced application-slowdown measurement. Child CPU and
+peak RSS cover the baseline JVM or the Tier E collector JVM, not the combined Tier E process
+tree. Native definition accounting, encoded publication bytes, and process RSS remain separate.
+Failed preflight publication is reported from its explicit diagnostic even when the legacy
+`failed_publications` counter, which only counts exceptions, remains zero.
+Stack comparisons preserve every
+frame, descriptor, BCI, capture quality, and capture flag, while normalizing process-local
+loader tags and hidden-class address suffixes without merging distinct identities within a
+run. Version qualification is the identical immutable bundle and JDK for this workload, which
+does not perform redefinition. It is not a general cross-redefinition identity guarantee.
+
+**Historical evidence correction.** The earlier minimal attachment controls counted
+74,930/75,000 operations with perf compatibility and 74,955/75,000 with direct raw tracepoints.
+These discrepancies do not conclusively establish a host/kernel delivery defect. Runtime
+counters were unavailable, marker instrumentation and collector activity remained present,
+and workload-thread affinity was not proven by leader-only pinning. Those runs remain
+incomplete diagnostic evidence, not grounds for changing production attachment defaults.
+
+**Historical host evidence: coverage selection, 2026-09-21.** The retained five-seed matrix
+completed all 25 children. Both dictionary modes recovered 72/72 paths, including every
+singleton, in every seed, with matching decoded stacks, zero missing expected operations and
+zero ring loss. Dictionary/unique-edge reduced child-process peak RSS by a paired mean 12.97%
+(95% bootstrap interval 9.93--15.12% lower); its CPU interval included zero. It is an appropriate
+coverage-only option for this corpus, not a demonstrated CPU optimization. Dictionary/full-stream
+remains the default. Both inline modes passed the small smoke but recovered 0/72 paths in every
+full-corpus fork: their proposed terminal encoded snapshot exceeded 64 MiB before serialization,
+leaving ring observations unresolved. Collector deduplication cannot repair that upstream
+publication failure. These are workload-specific results, not unknown-application completeness
+or unpaced slowdown claims. See the [retained coverage report](../../evidence/tier-e-coverage-discovery-20260921/report.md)
+for raw artifacts, per-fork verdict dimensions, resource limitations and exact commands.
+
+**Required hardening: bounded inline publication.** Do not qualify inline for this session size
+or increase its limit from this result. A future change must preserve bounded memory and
+dependency-complete acknowledged publication. Kernel aggregation remains deferred: any proposal must first
+demonstrate ring-transport loss of distinct edges and specify bounded map exhaustion, canonical
+identity, retry ordering, acknowledgement, and terminal closure. It cannot recover observations
+absent before its handler runs.
+
+**Deferred design decision: kernel aggregation.** Do not replace the ring for the coverage
+experiment. Any future aggregate must distinguish canonical stack identity from per-invocation
+identity, retain unresolved identity dependencies until an exact userspace join, and mark
+bounded-map exhaustion as incomplete rather than evicting unseen edges silently. Aggregation
+must not suppress an unacknowledged representative: failed delivery requires an eligible retry,
+and terminal closure requires both producer quiescence and acknowledged dependency-complete
+output. The current independent oracle must demonstrate better rare-path recovery before this
+additional protocol is considered. Collector-owned acknowledgement remains authoritative.
 
 The userspace collector treats a resolved unique edge as an **emission candidate**, not as an
 already emitted record. The candidate has three legal states: `CANDIDATE` (eligible for output),

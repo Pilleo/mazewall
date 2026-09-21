@@ -31,6 +31,18 @@ now attaches marker, syscall, exec, and benchmark-audit programs on every allowe
    ceiling from source-dirty smoke evidence.
 
 **Evidence:**
+- Coverage-discovery follow-up: `TierECoverageOracleTest` verifies declared frequencies,
+  singleton placement, retry/acknowledgement semantics, wrong attribution, and missing-path
+  verdicts. `scripts/run_tier_e_coverage_benchmark.sh` saves a separate coverage comparison;
+  its coverage verdict never upgrades incomplete operation accounting. The completed five-seed
+  matrix is retained in [the coverage report](../evidence/tier-e-coverage-discovery-20260921/report.md):
+  both dictionary modes recovered 72/72 paths in all forks with zero missing expected operations
+  and zero ring loss. Both inline modes failed terminal publication at the 64 MiB encoded-size
+  bound and remained INCOMPLETE. This issue remains open: the new corpus, disabled audits and
+  corrected affinity do not establish the cause of every previous discrepancy.
+- The coverage harness now launches the workload JVM pinned from startup and records effective
+  affinities. The older leader-only `taskset -pc` operation was insufficient to establish the
+  Java workload thread's CPU. Prior performance measurements are not automatically comparable.
 - Clean rootful development evidence at `33ee8ffe59e36ac90dd2fe67186969f96151f639` is retained at
   `/tmp/tier-e-admission-audit-development-20260921`. Five 60-second 500/s forks per dictionary
   mode completed with `30600/30600` operation-oracle, raw-entry, and post-marker-admission counts

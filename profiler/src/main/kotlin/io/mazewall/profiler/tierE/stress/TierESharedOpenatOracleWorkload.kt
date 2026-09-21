@@ -94,12 +94,20 @@ internal object TierESharedOpenatOracleWorkload {
         val batches = if (benchmark) args[4].toInt() else 1
         val iterations = if (benchmark) args[5].toInt() else args[2].toInt()
         val profile = Profile.fromSystemProperty()
+        val coverage = java.lang.Boolean.getBoolean(TierECoverageOracle.ENABLED_PROPERTY)
+        val seed = java.lang.Long.getLong(TierECoverageOracle.SEED_PROPERTY, 1L)
+        val paths = if (coverage) List(warmups * iterations) { -1 } + TierECoverageOracle.schedule(batches * iterations, seed) else null
         val gate = gateArgument.takeIf { it.startsWith("gate:") }?.removePrefix("gate:")?.let(Path::of)
         val manifest = System.getProperty(MANIFEST_PROPERTY)?.let(Path::of)
         Prepared((warmups + batches) * iterations, retainRoot = manifest != null).use { prepared ->
-            manifest?.let { path -> publishManifest(path, prepared.root, prepared.directoryFds) }
+            manifest?.let { path -> publishManifest(path, prepared.root, prepared.directoryFds, paths, seed) }
+            if (manifest == null && paths != null) {
+                System.getProperty("mazewall.tier-e.coverage-manifest-output")?.takeIf { it.isNotBlank() }?.let {
+                    publishManifest(Path.of(it), prepared.root, prepared.directoryFds, paths, seed)
+                }
+            }
             while (gate != null && !Files.exists(gate)) Thread.sleep(1)
-            prepared.runBatches(warmups, batches, iterations, profile = profile).forEach { batch ->
+            prepared.runBatches(warmups, batches, iterations, profile = profile, coveragePaths = paths).forEach { batch ->
             println(
                 "tier-e-shared-openat-oracle-batch: phase=${batch.phase.name.lowercase()} index=${batch.index} operations=${batch.result.completedOperations} checksum=${batch.result.checksum} profile=${profile.wireName} verified=true workloadNs=${batch.result.workloadNanos}",
             )
@@ -181,6 +189,7 @@ internal object TierESharedOpenatOracleWorkload {
             onOperationStarted: (Int) -> Unit = {},
             onOperationReturned: (Int) -> Unit = {},
             profile: Profile,
+            coveragePaths: List<Int>? = null,
         ): List<Batch> {
             // External perf uses CLOCK_MONOTONIC. Keep clocks and output outside runRange,
             // and emit buffered windows only after all timed operations have finished.
@@ -201,6 +210,7 @@ internal object TierESharedOpenatOracleWorkload {
                             onOperationReturned,
                             profile,
                             rateController,
+                            coveragePaths,
                         )
                         if (windows != null) windows[ordinal * 2 + 1] = requireNotNull(clock).nowNanos()
                         add(Batch(phase, index, measured))
@@ -226,6 +236,7 @@ internal object TierESharedOpenatOracleWorkload {
             onOperationReturned: (Int) -> Unit = {},
             profile: Profile,
             rateController: RateController? = null,
+            coveragePaths: List<Int>? = null,
         ): Result {
             val started = System.nanoTime()
             var checksum = 0L
@@ -233,12 +244,19 @@ internal object TierESharedOpenatOracleWorkload {
                 rateController?.awaitNextOperation()
                 val operationId = FIRST_OPERATION_MODE + firstOperationOffset + offset
                 onOperationStarted(directoryFd)
-                val fileFd = openAtWithProfile(
+                val coveragePath = coveragePaths?.get(start + offset) ?: -1
+                val fileFd = if (coveragePath >= 0) {
+                    TierECoveragePaths.invoke(coveragePath) {
+                        UnixDispatcher.openAt(directoryFd, cString(entryName(start + offset)), O_RDONLY, 0)
+                    }
+                } else {
+                    openAtWithProfile(
                     profile = profile,
                     operationIndex = firstOperationOffset + offset,
                     directoryFd = directoryFd,
                     path = cString(entryName(start + offset)),
                 )
+                }
                 onOperationReturned(directoryFd)
                 UnixDispatcher.close(fileFd)
                 consumeCpu(profile.cpuRounds(firstOperationOffset + offset), operationId)
@@ -259,6 +277,8 @@ internal object TierESharedOpenatOracleWorkload {
         path: Path,
         root: Path,
         directoryFds: List<Int>,
+        coveragePaths: List<Int>? = null,
+        coverageSeed: Long = 1L,
     ) {
         val temporary = Files.createTempFile(path.parent, "${path.fileName}.", ".tmp")
         try {
@@ -267,6 +287,21 @@ internal object TierESharedOpenatOracleWorkload {
                 buildString {
                     append("root=").append(root).append('\n')
                     directoryFds.forEach { append("fd=").append(it).append('\n') }
+                    if (coveragePaths != null) {
+                        require(coveragePaths.size == directoryFds.size)
+                        append("coverage_syscall=openat,257\n")
+                        append("coverage_paths=72\n")
+                        append("coverage_seed=").append(coverageSeed).append('\n')
+                        directoryFds.forEachIndexed { index, fd ->
+                            append("coverage=")
+                                .append(fd)
+                                .append(',')
+                                .append(coveragePaths[index])
+                                .append(',')
+                                .append(index)
+                                .append('\n')
+                        }
+                    }
                 },
             )
             Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)

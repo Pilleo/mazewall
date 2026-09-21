@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" tests="23" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.230Z" hostname="leanid-nitroanv1541" time="0.109">
+  <properties/>
+  <testcase name="benchmark session reports allocation at whole drain and join boundaries()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.034"/>
+  <testcase name="configured session epoch is retained for daemon artifact admission()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.003"/>
+  <testcase name="usdt reentry uses the validated probe site after detach()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.003"/>
+  <testcase name="collector loop does not infer producer closure from an empty final drain()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.011"/>
+  <testcase name="benchmark session counts ready records from owned decoded events without source probes()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="collector loop backs off only after an actually empty ring drain and resets after activity()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.005"/>
+  <testcase name="retained overflow drops new records and marks cached result incomplete()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="terminal reconciliation retains native admission and capture outcomes()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.003"/>
+  <testcase name="finish requires explicit producer closure for a complete lifecycle claim()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="marker detach invalidates attribution without closing session()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="close is terminal and idempotent()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="collector loop caps adaptive idle delay()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="consecutive task identity control reuses only the same task()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.003"/>
+  <testcase name="live dictionary publishes definitions before session finish()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.008"/>
+  <testcase name="terminal definition record budget exhaustion is fail closed()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.001"/>
+  <testcase name="kernel quiescence makes final drain safe but does not prove producer closure()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.001"/>
+  <testcase name="usdt attach uses the validated probe site rather than the plain marker entry()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.001"/>
+  <testcase name="finish is cached and polling after finish fails()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.008"/>
+  <testcase name="collector loop records only nonnegative calibrated receipt ages()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="benchmark drain batches exclude empty continuous polling attempts()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <testcase name="benchmark session measures ring drain and collector join separately()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.001"/>
+  <testcase name="terminal replay requests only pending invocation definitions()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.003"/>
+  <testcase name="poll consumes the decoded event list()" classname="io.mazewall.profiler.internal.attribution.TierEProfilerSessionLifecycleTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
