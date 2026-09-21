@@ -18,6 +18,7 @@ RUN_DECISION=${MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION:-false}
 DECISION_FORKS=${MAZEWALL_TIER_E_SUSTAINED_DECISION_FORKS:-5}
 DECISION_STAGE_SECONDS=${MAZEWALL_TIER_E_SUSTAINED_DECISION_STAGE_SECONDS:-60}
 SHADOW_ON_FAILURE=${MAZEWALL_TIER_E_SUSTAINED_SHADOW_ON_FAILURE:-true}
+RUN_NODE_NOISE_PROBE=${MAZEWALL_TIER_E_SUSTAINED_RUN_NODE_NOISE_PROBE:-false}
 
 if [[ "${1:-}" == "--help" ]]; then
     cat <<'EOF'
@@ -68,6 +69,7 @@ trap finish EXIT
 [[ "${DECISION_STAGE_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid sustained decision stage seconds: ${DECISION_STAGE_SECONDS}" >&2; exit 2; }
 [[ "${RUN_DECISION}" == true || "${RUN_DECISION}" == false ]] || { echo "MAZEWALL_TIER_E_SUSTAINED_RUN_DECISION must be true or false" >&2; exit 2; }
 [[ "${SHADOW_ON_FAILURE}" == true || "${SHADOW_ON_FAILURE}" == false ]] || { echo "MAZEWALL_TIER_E_SUSTAINED_SHADOW_ON_FAILURE must be true or false" >&2; exit 2; }
+[[ "${RUN_NODE_NOISE_PROBE}" == true || "${RUN_NODE_NOISE_PROBE}" == false ]] || { echo "MAZEWALL_TIER_E_SUSTAINED_RUN_NODE_NOISE_PROBE must be true or false" >&2; exit 2; }
 
 eligible_stage() {
     local results=$1
@@ -206,6 +208,16 @@ if [[ "${ceiling_rate}" -eq 0 ]]; then
     event runner INCOMPLETE "no eligible pilot stage"
     terminal=true
     exit 1
+fi
+if [[ "${RUN_NODE_NOISE_PROBE}" == true ]]; then
+    node_noise_path="${ARTIFACT_DIR}/node-noise"
+    event node-noise STARTED "artifact=${node_noise_path}"
+    if bash "${REPOSITORY_DIR}/scripts/run_tier_e_node_noise_probe.sh" "${node_noise_path}"; then
+        event node-noise COMPLETED "artifact=${node_noise_path}/summary.json"
+    else
+        event node-noise INCOMPLETE "artifact=${node_noise_path}"
+        exit 1
+    fi
 fi
 event runner PASSED "loss_free_ceiling_rate=${ceiling_rate}"
 terminal=true
