@@ -30,5 +30,13 @@ now attaches marker, syscall, exec, and benchmark-audit programs on every allowe
    including the benchmark-only raw denominator as diagnostic provenance. Do not promote a capacity
    ceiling from source-dirty smoke evidence.
 
+**Evidence:**
+- Clean rootful development evidence at `33ee8ffe59e36ac90dd2fe67186969f96151f639` is retained at
+  `/tmp/tier-e-admission-audit-development-20260921`. Five 60-second 500/s forks per dictionary
+  mode completed with `30600/30600` operation-oracle, raw-entry, and post-marker-admission counts
+  in every arm and zero ring loss. This satisfies the requested clean multi-fork 500/s confirmation
+  and did not reproduce the prior gap. The issue remains open until the higher-rate capacity and
+  host-noise evidence required by the related CPU-global sampling issue is retained.
+
 ---
 <!-- id: issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa  file: issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md -->

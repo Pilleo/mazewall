@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "tier_e_direct_raw_tracepoint_follow_up",
-  "generated_at": "2026-09-21T01:30:00Z",
+  "generated_at": "2026-09-21T02:09:11Z",
   "implementation_commit": "6bd706cb30863ce6e6730afc01567f8515c77360",
   "environment": {
     "kernel_release": "7.2.4-x64v3-xanmod1",
@@ -56,16 +56,44 @@
       "full_stream": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "exact_admission_operations": 30600, "ring_loss": 0},
       "unique_edge": {"expected_operations": 30600, "matched_operations": 30600, "raw_audit_operations": 30600, "exact_admission_operations": 30600, "ring_loss": 0},
       "interpretation": "the benchmark-only post-marker denominator is ready to classify a future reproducible gap"
+    },
+    {
+      "artifact": "/tmp/tier-e-admission-audit-development-20260921",
+      "source_revision": "33ee8ffe59e36ac90dd2fe67186969f96151f639",
+      "benchmark_input_dirty_count": 0,
+      "run_level": "development",
+      "forks": 5,
+      "rate_per_second": 500,
+      "duration_seconds_per_arm": 60,
+      "result": "development_pass",
+      "full_stream": {
+        "arms": 5,
+        "expected_operations_per_arm": 30600,
+        "matched_operations_per_arm": 30600,
+        "raw_audit_operations_per_arm": 30600,
+        "exact_admission_operations_per_arm": 30600,
+        "ring_loss_per_arm": 0
+      },
+      "unique_edge": {
+        "arms": 5,
+        "expected_operations_per_arm": 30600,
+        "matched_operations_per_arm": 30600,
+        "raw_audit_operations_per_arm": 30600,
+        "exact_admission_operations_per_arm": 30600,
+        "ring_loss_per_arm": 0
+      },
+      "total_declared_operations": 306000,
+      "interpretation": "the direct raw-tracepoint path did not reproduce the prior intermittent 500/s unique-edge gap across ten clean sustained arms; this is development evidence, not a 1,000/s or host-noise capacity decision"
     }
   ],
   "verdict_dimensions": {
-    "capture_domain_validity": "incomplete",
-    "transport_completeness": "complete_for_passing_diagnostic_only",
-    "attribution_coverage": "incomplete",
+    "capture_domain_validity": "complete_for_clean_500_per_second_development_arms",
+    "transport_completeness": "complete_for_clean_500_per_second_development_arms",
+    "attribution_coverage": "complete_for_clean_500_per_second_development_arms",
     "dictionary_integrity": "not_implicated_by_raw_audit_mismatch",
-    "lifecycle_validity": "unclassified_marker_or_admission_gap",
+    "lifecycle_validity": "complete_for_clean_500_per_second_development_arms",
     "runtime_overhead": "not_measured",
     "policy_eligibility": false
   },
-  "next_required_evidence": "Repeat the clean multi-fork workload until the intermittent gap is either absent with bounded confidence or reproduced with raw-entry versus exact-admission correlation; do not promote capacity from single-fork diagnostics."
+  "next_required_evidence": "Run the required clean multi-fork 1,000/s and host-noise cases with both denominators and strace shadow proof before promoting a sustained-capacity ceiling."
 }
