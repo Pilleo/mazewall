@@ -13,6 +13,7 @@ COLLECTOR="${RUN_ID}-collector"
 CALLER_UID=$(id -u)
 CALLER_GID=$(id -g)
 NATIVE_BUILD_DIR=${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}
+NEGATIVE_ARTIFACT_CASE=${TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE:-}
 
 cleanup() {
     mkdir -p "${ARTIFACT_DIR}"
@@ -30,6 +31,21 @@ mkdir -p "${ARTIFACT_DIR}" "${SHARED}/definitions" "${SHARED}/evidence"
 # Definitions and operator evidence remain inaccessible outside the target group.
 chmod 0755 "${SHARED}"
 chmod 0770 "${SHARED}/definitions" "${SHARED}/evidence"
+
+registered_artifact_file=orders.mzse
+case "${NEGATIVE_ARTIFACT_CASE}" in
+    "") ;;
+    missing) registered_artifact_file=missing.mzse ;;
+    malformed)
+        registered_artifact_file=malformed.mzse
+        printf 'not-an-mzse-envelope' > "${SHARED}/definitions/${registered_artifact_file}"
+        ;;
+    symlink)
+        registered_artifact_file=symlink.mzse
+        ln -s orders.mzse "${SHARED}/definitions/${registered_artifact_file}"
+        ;;
+    *) echo "unknown TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE: ${NEGATIVE_ARTIFACT_CASE}" >&2; exit 2 ;;
+esac
 
 "${ROOT}/gradlew" :profiler:installDist >/dev/null
 if [[ ! -f "${NATIVE_BUILD_DIR}/CMakeCache.txt" ]]; then
@@ -51,7 +67,7 @@ session_tag=4d5a
 process_incarnation=1
 marker_path=/shared/libmazewall_stack_agent.so
 marker_offset=${MARKER_OFFSET}
-artifact_file=orders.mzse
+artifact_file=${registered_artifact_file}
 EOF
 
 # The collector's PID namespace is joined to the target. Linux reports the target JVM as PID 1.
@@ -75,6 +91,7 @@ sed -i "s/^pid=.*/pid=${TARGET_HOST_PID}/" "${SHARED}/target.properties"
     -e TIER_E_SOCKET=/shared/control.sock -e TIER_E_SOCKET_GID="${CALLER_GID}" \
     -e TIER_E_TARGET_REGISTRATION=/shared/target.properties -e TIER_E_DEFINITION_ROOT=/shared/definitions \
     -e TIER_E_EVIDENCE_ROOT=/shared/evidence \
+    -e TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS=$([[ -n "${NEGATIVE_ARTIFACT_CASE}" ]] && printf 1000 || printf 30000) \
     "${IMAGE}" bash -lc '
         mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing
         target_pid=$(sed -n "s/^pid=//p" /shared/target.properties)
@@ -112,20 +129,28 @@ if [[ "${TARGET_EXIT}" != 0 || "${COLLECTOR_EXIT}" != 0 ]]; then
 fi
 "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
 "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1
-test -s "${SHARED}/definitions/orders.mzse"
-cp "${SHARED}/definitions/orders.mzse" "${ARTIFACT_DIR}/orders.mzse"
 "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
     cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
 grep -q 'tier-e-workflow: capture complete; terminal control deferred' "${ARTIFACT_DIR}/target.log"
 grep -q 'tier-e-control: shutdown' "${ARTIFACT_DIR}/control.log"
 grep -Eq 'active_polls=[1-9][0-9]*' "${ARTIFACT_DIR}/target.log"
 grep -Eq 'resolved_syscalls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log"
-grep -q 'evidence_integrity=COMPLETE' "${ARTIFACT_DIR}/collector.log"
-grep -q 'capture_domain_validity=true' "${ARTIFACT_DIR}/collector.log"
-grep -q 'transport_completeness=true' "${ARTIFACT_DIR}/collector.log"
-grep -q 'attribution_coverage=true' "${ARTIFACT_DIR}/collector.log"
-grep -q 'dictionary_integrity=true' "${ARTIFACT_DIR}/collector.log"
-grep -q 'lifecycle_validity=true' "${ARTIFACT_DIR}/collector.log"
-grep -q '"evidence_integrity":"COMPLETE"' "${ARTIFACT_DIR}/terminal-report.json"
-printf 'evidence_integrity=COMPLETE\ncapture_domain_validity=PASS\ntransport_completeness=PASS\nattribution_coverage=PASS\ndictionary_integrity=PASS\nlifecycle_validity=PASS\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+if [[ -n "${NEGATIVE_ARTIFACT_CASE}" ]]; then
+    grep -q 'evidence_integrity=INCOMPLETE' "${ARTIFACT_DIR}/collector.log"
+    grep -q '"evidence_integrity":"INCOMPLETE"' "${ARTIFACT_DIR}/terminal-report.json"
+    grep -q '"policy_eligibility":false' "${ARTIFACT_DIR}/terminal-report.json"
+    grep -Eq '"failed_dimensions":\[[^]]+\]' "${ARTIFACT_DIR}/terminal-report.json"
+    printf 'evidence_integrity=INCOMPLETE\nnegative_artifact_case=%s\npolicy_eligibility=false\n' "${NEGATIVE_ARTIFACT_CASE}" > "${ARTIFACT_DIR}/verdict.env"
+else
+    test -s "${SHARED}/definitions/orders.mzse"
+    cp "${SHARED}/definitions/orders.mzse" "${ARTIFACT_DIR}/orders.mzse"
+    grep -q 'evidence_integrity=COMPLETE' "${ARTIFACT_DIR}/collector.log"
+    grep -q 'capture_domain_validity=true' "${ARTIFACT_DIR}/collector.log"
+    grep -q 'transport_completeness=true' "${ARTIFACT_DIR}/collector.log"
+    grep -q 'attribution_coverage=true' "${ARTIFACT_DIR}/collector.log"
+    grep -q 'dictionary_integrity=true' "${ARTIFACT_DIR}/collector.log"
+    grep -q 'lifecycle_validity=true' "${ARTIFACT_DIR}/collector.log"
+    grep -q '"evidence_integrity":"COMPLETE"' "${ARTIFACT_DIR}/terminal-report.json"
+    printf 'evidence_integrity=COMPLETE\ncapture_domain_validity=PASS\ntransport_completeness=PASS\nattribution_coverage=PASS\ndictionary_integrity=PASS\nlifecycle_validity=PASS\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+fi
 printf 'split privilege fixture artifacts: %s\n' "${ARTIFACT_DIR}"

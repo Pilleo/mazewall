@@ -45,6 +45,11 @@ internal fun main() {
     val fileReportSink = System.getenv("TIER_E_EVIDENCE_ROOT")?.let {
         TierETerminalReportFileSink(Path.of(it))
     }
+    val terminalArtifactWaitMillis = System
+        .getenv("TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS")
+        ?.toLongOrNull()
+        ?.also { require(it in 0..30_000L) { "TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS must be 0..30000" } }
+        ?: 30_000L
     val daemon = TierEDaemonService(
         stopRequested,
         registeredTargetResolver = registeredTargetResolver,
@@ -61,6 +66,7 @@ internal fun main() {
                     "policy_eligibility=${report.policyEligibility}",
             )
         },
+        terminalArtifactWaitMillis = terminalArtifactWaitMillis,
     )
     ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { server ->
         server.bind(UnixDomainSocketAddress.of(socketPath))
@@ -109,6 +115,7 @@ internal class TierEDaemonService(
     private val registeredTargetResolver: TierETargetRegistrationResolver? = null,
     private val processIdentityVerifier: TierEProcessIdentityVerifier = TierEProcessIdentityVerifier.linux,
     private val targetExitCoordinator: TierETargetExitCoordinator = TierETargetExitCoordinator(processIdentityVerifier),
+    private val terminalArtifactWaitMillis: Long = 30_000L,
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -120,6 +127,7 @@ internal class TierEDaemonService(
         require(registeredTargetResolver == null || artifactResolver != null) {
             "registered target deployment requires TIER_E_DEFINITION_ROOT"
         }
+        require(terminalArtifactWaitMillis in 0..30_000L) { "terminal artifact wait must be 0..30000ms" }
     }
 
     @Synchronized
@@ -276,7 +284,7 @@ internal class TierEDaemonService(
         artifact: io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact,
         waitForTerminalArtifact: Boolean,
     ): AgentDefinitionFile.Contents? {
-        val deadline = System.nanoTime() + if (waitForTerminalArtifact) 30_000_000_000L else 0L
+        val deadline = System.nanoTime() + if (waitForTerminalArtifact) terminalArtifactWaitMillis * 1_000_000L else 0L
         do {
             runCatching { requireNotNull(artifactResolver).readTerminal(artifact) }.getOrNull()?.let { return it }
             if (!waitForTerminalArtifact || System.nanoTime() >= deadline) return null
