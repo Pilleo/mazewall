@@ -31,6 +31,7 @@ internal object TierEBpfProgramBuilder {
     private const val MARKER_DETACHED_COUNTER_INDEX: Int = 6
     private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX: Int = 7
     private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
+    private const val RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX: Int = 9
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
     private const val EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET: Int = 0
@@ -123,6 +124,7 @@ internal object TierEBpfProgramBuilder {
         val descriptorLookup = program.size
         program[openat] = program[openat].copy(off = (openatCounter - openat - 1).toShort())
         program[openatFamily] = program[openatFamily].copy(off = (descriptorLookup - openatFamily - 1).toShort())
+        val rawArgumentReadFailure: Int?
         if (rawTracepoint) {
             emit(Insn(LDX_DW, dst = 3, src = 9, off = 0)) // raw args[0] = pt_regs *
             emit(Insn(ADD_IMM, dst = 3, imm = X86_64_PT_REGS_DI_OFFSET))
@@ -130,8 +132,10 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(ADD_IMM, dst = 1, imm = -8))
             emit(Insn(MOV_IMM, dst = 2, imm = 8))
             emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+            rawArgumentReadFailure = emit(Insn(JNE_IMM, dst = 0))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -8))
         } else {
+            rawArgumentReadFailure = null
             emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
         }
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
@@ -150,10 +154,31 @@ internal object TierEBpfProgramBuilder {
         val exit = program.size
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
+        val rawArgumentReadFailureHandler = if (rawTracepoint) {
+            program.size.also {
+                loadMap(1, 2)
+                emit(Insn(MOV_IMM, dst = 5, imm = RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX))
+                emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+                emit(Insn(MOV_REG, dst = 2, src = FP))
+                emit(Insn(ADD_IMM, dst = 2, imm = -4))
+                emit(Insn(CALL, imm = H_LOOKUP))
+                val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
+                emit(Insn(MOV_IMM, dst = 5, imm = 1))
+                emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+                val counted = emit(Insn(JA))
+                program[missingCounter] = program[missingCounter].copy(off = (exit - missingCounter - 1).toShort())
+                program[counted] = program[counted].copy(off = (exit - counted - 1).toShort())
+            }
+        } else {
+            null
+        }
         listOf(noSession, wrongTarget, nonOpenatFamily, undeclaredDescriptor, incrementedOpenat2).forEach { index ->
             program[index] = program[index].copy(off = (exit - index - 1).toShort())
         }
         program[isOpenat] = program[isOpenat].copy(off = (incrementOpenat - isOpenat - 1).toShort())
+        rawArgumentReadFailure?.let { index ->
+            program[index] = program[index].copy(off = (requireNotNull(rawArgumentReadFailureHandler) - index - 1).toShort())
+        }
         return program.toList()
     }
 

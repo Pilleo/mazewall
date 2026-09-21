@@ -232,6 +232,18 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `raw tracepoint audit counts failed pt regs reads instead of consuming scratch state`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram()
+        val probeRead = program.indexOfFirst { instruction -> instruction.code == 0x85 && instruction.imm == 113 }
+
+        assertEquals(0x55, program[probeRead + 1].code, "raw audit must branch on bpf_probe_read_kernel failure")
+        assertTrue(
+            program.any { instruction -> instruction.code == 0x18 && instruction.src == 1 && instruction.imm == 2 },
+            "raw audit must receive the loss-counter map for the read-failure diagnostic",
+        )
+    }
+
+    @Test
     fun `automatic attachment selects direct raw tracepoint only for its supported ABI`() {
         assertEquals(
             TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,

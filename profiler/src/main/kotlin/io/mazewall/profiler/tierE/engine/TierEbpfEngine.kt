@@ -114,7 +114,8 @@ internal class TierEbpfEngine(
         private const val MARKER_DETACHED_COUNTER_INDEX = 6
         private const val TASK_STORAGE_UNAVAILABLE_COUNTER_INDEX = 7
         private const val STALE_MARKER_GENERATION_COUNTER_INDEX = 8
-        private const val COUNTER_MAP_ENTRIES = 9
+        private const val RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX = 9
+        private const val COUNTER_MAP_ENTRIES = 10
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
@@ -323,7 +324,11 @@ internal class TierEbpfEngine(
                     } else {
                         buildRawSysEnterAuditProgram()
                     },
-                    listOf(installed.requireRawSysEnterAuditFd().value, installed.requireSessionFd().value),
+                    listOf(
+                        installed.requireRawSysEnterAuditFd().value,
+                        installed.requireSessionFd().value,
+                        installed.requireLossFd().value,
+                    ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
                     } else {
@@ -374,6 +379,9 @@ internal class TierEbpfEngine(
 
     /** Target syscalls rejected because marker state belongs to an older attachment generation. */
     public fun readStaleMarkerGenerationCount(): Long = readCounter(STALE_MARKER_GENERATION_COUNTER_INDEX)
+
+    /** Benchmark-only failures while the independent raw-sys_enter audit reads pt_regs arguments. */
+    internal fun readRawAuditArgumentReadFailureCount(): Long = readCounter(RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX)
 
     /** Configures the benchmark-only audit map before the gated workload is released. */
     internal fun configureRawSysEnterAudit(expectedDirectoryFds: Set<Int>) {

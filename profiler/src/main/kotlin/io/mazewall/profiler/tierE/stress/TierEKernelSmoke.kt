@@ -457,6 +457,11 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
+            val rawAuditArgumentReadFailures = if (benchmarkRawSysEnterAudit) {
+                engine.readRawAuditArgumentReadFailureCount()
+            } else {
+                0L
+            }
             val exactAdmissionAuditCounts = if (benchmarkExactAdmissionAudit) {
                 engine.readExactAdmissionAuditCounts(expectedOpenatFds)
             } else {
@@ -726,6 +731,7 @@ internal object TierEKernelSmoke {
                 "raw_sys_enter_audit_observed_operations=$rawSysEnterAuditObserved " +
                 "raw_sys_enter_audit_non_singleton_operations=${rawSysEnterAuditNonSingletons.size} " +
                 "raw_sys_enter_audit_openat2_operations=${rawSysEnterAuditOpenat2.size} " +
+                "raw_audit_argument_read_failures=$rawAuditArgumentReadFailures " +
                 "raw_sys_enter_audit_missing_fd_samples=${rawSysEnterAuditMissing.sorted().take(16).joinToString(",").ifEmpty { "none" }} " +
                 "raw_sys_enter_audit_non_singleton_samples=${rawSysEnterAuditNonSingletons.toSortedMap().entries.take(
                     16,
