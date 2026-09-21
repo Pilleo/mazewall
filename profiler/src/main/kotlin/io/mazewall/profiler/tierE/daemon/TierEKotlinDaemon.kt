@@ -288,11 +288,23 @@ internal class TierEDaemonService(
         result: TierECollectorRuntimeResult,
         target: TierERegisteredTarget?,
         contents: AgentDefinitionFile.Contents?,
-    ): TierECollectorRuntimeResult =
-        runCatching {
-            resultSink.accept(result)
-            terminalReportSink.accept(TierETerminalReport.from(result, target, contents))
-        }.fold(onSuccess = { result }, onFailure = { result.withTerminalDeliveryFailure() })
+    ): TierECollectorRuntimeResult {
+        // A failed optional in-process consumer must not suppress the durable,
+        // operator-owned terminal record of the fail-closed outcome.
+        val afterResultDelivery = if (runCatching { resultSink.accept(result) }.isSuccess) {
+            result
+        } else {
+            result.withTerminalDeliveryFailure()
+        }
+        return if (runCatching {
+                terminalReportSink.accept(TierETerminalReport.from(afterResultDelivery, target, contents))
+            }.isSuccess
+        ) {
+            afterResultDelivery
+        } else {
+            afterResultDelivery.withTerminalDeliveryFailure()
+        }
+    }
 
     private data class ActiveSession(
         val runtime: TierECollectorRuntime,

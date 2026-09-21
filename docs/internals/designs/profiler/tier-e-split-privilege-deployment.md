@@ -146,6 +146,12 @@ lifecycle dimensions all true. Active polling alone would not meet this qualific
 The fixture must prove the restrictive socket owner/group/mode admits the target UID but rejects an
 unrelated pod/container user.
 
+The independent 72-path coverage oracle is retained separately from this lifecycle fixture. It
+currently executes inside the privileged benchmark harness, where it proves exact decoded edge
+recovery across dictionary and inline transports. It is not yet a split-topology coverage result:
+that requires a collector-owned, bounded acknowledged-edge manifest at terminalization. Target-side
+operation counters and dictionary-definition counts are not sufficient substitutes.
+
 Rootless output is `INCOMPLETE`, not privileged evidence.
 
 ## Compatibility rules

@@ -39,6 +39,25 @@ class TierETerminalReportFileSinkTest {
         }
     }
 
+    @Test
+    fun `incomplete report names every failed verdict dimension`() {
+        val root = Files.createTempDirectory("tier-e-report")
+
+        TierETerminalReportFileSink(root).accept(
+            report("orders").copy(
+                evidenceIntegrity = EvidenceIntegrity.INCOMPLETE,
+                terminalReason = "MISSING_TERMINAL_ARTIFACT",
+                captureDomainValidity = false,
+                transportCompleteness = false,
+                lifecycleValidity = false,
+            ),
+        )
+
+        val json = root.resolve("orders-19802.tier-e.json").readText()
+        assertTrue(json.contains("\"failed_dimensions\":[\"capture_domain_validity\",\"transport_completeness\",\"lifecycle_validity\"]"))
+        assertTrue(json.contains("\"policy_eligibility\":false"))
+    }
+
     private fun report(registrationId: String) =
         TierETerminalReport(
         evidenceIntegrity = EvidenceIntegrity.COMPLETE,

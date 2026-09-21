@@ -50,6 +50,13 @@ internal class TierETerminalReportFileSink(
 private fun TierETerminalReport.toJson(): String {
     val artifactLength = artifactByteLength?.toString() ?: "null"
     val artifactDigest = artifactSha256?.let { "\"$it\"" } ?: "null"
+    val failedDimensions = buildList {
+        if (!captureDomainValidity) add("capture_domain_validity")
+        if (!transportCompleteness) add("transport_completeness")
+        if (!attributionCoverage) add("attribution_coverage")
+        if (!dictionaryIntegrity) add("dictionary_integrity")
+        if (!lifecycleValidity) add("lifecycle_validity")
+    }.joinToString(",", prefix = "[", postfix = "]") { "\"$it\"" }
     return """{"schema_version":1,"registration_id":"$registrationId","session_epoch":$sessionEpoch,""" +
         """"target_pid":$targetPid,"process_incarnation":$processIncarnation,""" +
         """"artifact_byte_length":$artifactLength,"artifact_sha256":$artifactDigest,""" +
@@ -57,5 +64,6 @@ private fun TierETerminalReport.toJson(): String {
         """"resolved_syscalls":$resolvedSyscalls,"capture_domain_validity":$captureDomainValidity,""" +
         """"transport_completeness":$transportCompleteness,"attribution_coverage":$attributionCoverage,""" +
         """"dictionary_integrity":$dictionaryIntegrity,"lifecycle_validity":$lifecycleValidity,""" +
+        """"failed_dimensions":$failedDimensions,""" +
         """"policy_eligibility":false}"""
 }
