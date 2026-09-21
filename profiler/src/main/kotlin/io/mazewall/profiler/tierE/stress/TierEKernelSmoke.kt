@@ -466,7 +466,8 @@ internal object TierEKernelSmoke {
             val rawSysEnterAuditObserved = rawSysEnterAuditCounts.values.sumOf { count -> count.total }
             val rawSysEnterAuditNonSingletons = rawSysEnterAuditCounts.filterValues { count -> count.total != 1L }
             val rawSysEnterAuditOpenat2 = rawSysEnterAuditCounts.filterValues { count -> count.openat2 > 0L }
-            val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count != 1L }
+            val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count.admitted != 1L }
+            val exactAdmissionAuditRejections = exactAdmissionAuditCounts.values.sumOf { count -> count.rejected }
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -734,9 +735,11 @@ internal object TierEKernelSmoke {
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
                 "exact_admission_audit_expected_operations=${exactAdmissionAuditCounts.size} " +
-                "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sum()} " +
+                "exact_admission_audit_observed_operations=${exactAdmissionAuditCounts.values.sumOf { it.admitted }} " +
+                "exact_admission_audit_rejected_operations=$exactAdmissionAuditRejections " +
                 "exact_admission_audit_non_singleton_operations=${exactAdmissionAuditMissing.size} " +
-                "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:$count" }.ifEmpty { "none" }} " +
+                "exact_admission_audit_non_singleton_samples=${exactAdmissionAuditMissing.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:${count.admitted}" }.ifEmpty { "none" }} " +
+                "exact_admission_audit_rejection_samples=${exactAdmissionAuditCounts.filterValues { it.rejected > 0L }.toSortedMap().entries.take(16).joinToString(",") { (fd, count) -> "$fd:detached=${count.markerDetached},no_task=${count.markerStateUnavailable},no_storage=${count.taskStorageUnavailable},inactive=${count.inactiveInvocation},stale_generation=${count.staleMarkerGeneration}" }.ifEmpty { "none" }} " +
                 "collector_pid=${ProcessHandle.current().pid()} workload_pid=${process.pid()} " +
                 "benchmark_ring_submission=${if (ringSubmissionMode == TierERingSubmissionMode.ENABLED) "enabled" else "disabled"} " +
                 "configured_ring_capacity_bytes=${engine.configuredRingCapacityBytes()} " +

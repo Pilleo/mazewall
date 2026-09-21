@@ -44,6 +44,18 @@ internal class TierEbpfEngine(
         val total: Long get() = openat + openat2
     }
 
+    /** Benchmark-only classification of the post-target sys_enter admission boundary. */
+    internal data class ExactAdmissionAuditCount(
+        val admitted: Long,
+        val markerDetached: Long,
+        val markerStateUnavailable: Long,
+        val taskStorageUnavailable: Long,
+        val inactiveInvocation: Long,
+        val staleMarkerGeneration: Long,
+    ) {
+        val rejected: Long get() = markerDetached + markerStateUnavailable + taskStorageUnavailable + inactiveInvocation + staleMarkerGeneration
+    }
+
     private val readinessPoller = TierERingReadinessPoller(native)
 
     public companion object {
@@ -267,7 +279,7 @@ internal class TierEbpfEngine(
                 installed.rawSysEnterAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 16, maxEntries = RAW_SYS_ENTER_AUDIT_CAPACITY)
             }
             if (options.benchmarkExactAdmissionAudit) {
-                installed.exactAdmissionAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 8, maxEntries = EXACT_ADMISSION_AUDIT_CAPACITY)
+                installed.exactAdmissionAuditFd = createMap(MAP_HASH, keySize = 4, valueSize = 48, maxEntries = EXACT_ADMISSION_AUDIT_CAPACITY)
             }
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
@@ -390,8 +402,8 @@ internal class TierEbpfEngine(
         check(!installed.exactAdmissionAuditConfigured) { "exact-admission audit was already configured" }
         Arena.ofConfined().use { arena ->
             expectedDirectoryFds.forEach { descriptor ->
-                val value = arena.allocate(8, 8)
-                value.set(ValueLayout.JAVA_LONG, 0, 0)
+                val value = arena.allocate(48, 8)
+                repeat(6) { index -> value.set(ValueLayout.JAVA_LONG, index.toLong() * Long.SIZE_BYTES, 0) }
                 updateElem(arena, installed.requireExactAdmissionAuditFd().value, intSeg(arena, descriptor), value)
             }
         }
@@ -419,20 +431,27 @@ internal class TierEbpfEngine(
         }
     }
 
-    /** Reads the post-marker exact-admission count for each declared descriptor. */
-    internal fun readExactAdmissionAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, Long> {
+    /** Reads post-marker admission and rejection reasons for each declared descriptor. */
+    internal fun readExactAdmissionAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, ExactAdmissionAuditCount> {
         check(options.benchmarkExactAdmissionAudit) { "exact-admission audit is not enabled" }
         val installed = requireInstalled()
         check(installed.exactAdmissionAuditConfigured) { "exact-admission audit was not configured" }
         return Arena.ofConfined().use { arena ->
             expectedDirectoryFds.associateWith { descriptor ->
-                val value = arena.allocate(8, 8)
+                val value = arena.allocate(48, 8)
                 val attr = arena.allocate(24)
                 attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireExactAdmissionAuditFd().value)
                 attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
                 attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
                 bpfCall(H_LOOKUP.toLong(), attr, 24)
-                value.get(ValueLayout.JAVA_LONG, 0)
+                ExactAdmissionAuditCount(
+                    admitted = value.get(ValueLayout.JAVA_LONG, 0),
+                    markerDetached = value.get(ValueLayout.JAVA_LONG, 8),
+                    markerStateUnavailable = value.get(ValueLayout.JAVA_LONG, 16),
+                    taskStorageUnavailable = value.get(ValueLayout.JAVA_LONG, 24),
+                    inactiveInvocation = value.get(ValueLayout.JAVA_LONG, 32),
+                    staleMarkerGeneration = value.get(ValueLayout.JAVA_LONG, 40),
+                )
             }
         }
     }

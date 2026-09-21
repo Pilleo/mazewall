@@ -33,6 +33,12 @@ internal object TierEBpfProgramBuilder {
     private const val STALE_MARKER_GENERATION_COUNTER_INDEX: Int = 8
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
+    private const val EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET: Int = 0
+    private const val EXACT_ADMISSION_AUDIT_MARKER_DETACHED_OFFSET: Int = 8
+    private const val EXACT_ADMISSION_AUDIT_MARKER_STATE_UNAVAILABLE_OFFSET: Int = 16
+    private const val EXACT_ADMISSION_AUDIT_TASK_STORAGE_UNAVAILABLE_OFFSET: Int = 24
+    private const val EXACT_ADMISSION_AUDIT_INACTIVE_INVOCATION_OFFSET: Int = 32
+    private const val EXACT_ADMISSION_AUDIT_STALE_GENERATION_OFFSET: Int = 40
 
     // eBPF opcodes (64-bit class)
     private const val ADD_IMM: Int = 0x07
@@ -279,7 +285,7 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(CALL, imm = H_LOOKUP))
             exactAdmissionAuditMissingEntry = emit(Insn(JEQ_IMM, dst = 0))
             emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = EXACT_ADMISSION_AUDIT_ADMITTED_OFFSET.toShort()))
             exactAdmissionAuditDone = p.size
             p[notOpenat] = p[notOpenat].copy(off = (exactAdmissionAuditDone - notOpenat - 1).toShort())
             p[exactAdmissionAuditMissingEntry] = p[exactAdmissionAuditMissingEntry].copy(
@@ -585,24 +591,56 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
 
+        fun emitExactAdmissionAuditRejection(reasonOffset: Int, continuation: Int): Int {
+            if (!options.benchmarkExactAdmissionAudit) return continuation
+            val start = p.size
+            loadSyscallNumber()
+            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
+            loadArgument(0)
+            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
+            ldMap(1, EXACT_ADMISSION_AUDIT_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -88))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingEntry = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = reasonOffset.toShort()))
+            val complete = emit(Insn(JA))
+            p[notOpenat] = p[notOpenat].copy(off = (continuation - notOpenat - 1).toShort())
+            p[missingEntry] = p[missingEntry].copy(off = (continuation - missingEntry - 1).toShort())
+            p[complete] = p[complete].copy(off = (continuation - complete - 1).toShort())
+            return start
+        }
+
+        val markerFailureTarget = markerStateUnavailableDiagnostic?.start ?: requireNotNull(markerFailureHandler)
+        val taskStorageTarget = taskStorageUnavailableDiagnostic?.start ?: requireNotNull(taskStorageUnavailableHandler)
+        val inactiveTarget = inactiveInvocationDiagnostic?.start ?: requireNotNull(ambientInactiveHandler)
+        val staleGenerationTarget = staleMarkerGenerationDiagnostic?.start ?: requireNotNull(staleMarkerGenerationHandler)
+        val detachedTarget = markerDetachedDiagnostic?.start ?: requireNotNull(markerDetachedHandler)
+        val noTaskAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_MARKER_STATE_UNAVAILABLE_OFFSET, markerFailureTarget)
+        val noStorageAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_TASK_STORAGE_UNAVAILABLE_OFFSET, taskStorageTarget)
+        val inactiveAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_INACTIVE_INVOCATION_OFFSET, inactiveTarget)
+        val staleAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_STALE_GENERATION_OFFSET, staleGenerationTarget)
+        val detachedAuditTarget = emitExactAdmissionAuditRejection(EXACT_ADMISSION_AUDIT_MARKER_DETACHED_OFFSET, detachedTarget)
+
         reservationFailed?.let { index ->
             p[index] = p[index].copy(off = (requireNotNull(lossHandler) - index - 1).toShort())
         }
         p[noTask] = p[noTask].copy(
-            off = ((markerStateUnavailableDiagnostic?.start ?: requireNotNull(markerFailureHandler)) - noTask - 1).toShort(),
+            off = (noTaskAuditTarget - noTask - 1).toShort(),
         )
         p[noStorage] = p[noStorage].copy(
-            off = ((taskStorageUnavailableDiagnostic?.start ?: requireNotNull(taskStorageUnavailableHandler)) - noStorage - 1).toShort(),
+            off = (noStorageAuditTarget - noStorage - 1).toShort(),
         )
         p[inactiveInvocation] = p[inactiveInvocation].copy(
-            off = ((inactiveInvocationDiagnostic?.start ?: requireNotNull(ambientInactiveHandler)) - inactiveInvocation - 1).toShort(),
+            off = (inactiveAuditTarget - inactiveInvocation - 1).toShort(),
         )
         p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(
-            off = ((staleMarkerGenerationDiagnostic?.start ?: requireNotNull(staleMarkerGenerationHandler)) - staleAttachmentGeneration - 1).toShort(),
+            off = (staleAuditTarget - staleAttachmentGeneration - 1).toShort(),
         )
         check((exactAdmissionAuditDone == null) == (exactAdmissionAuditMissingEntry == null))
         p[markerDetached] = p[markerDetached].copy(
-            off = ((markerDetachedDiagnostic?.start ?: requireNotNull(markerDetachedHandler)) - markerDetached - 1).toShort(),
+            off = (detachedAuditTarget - markerDetached - 1).toShort(),
         )
         p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
         submitted?.let { index -> p[index] = p[index].copy(off = (completeActive - index - 1).toShort()) }

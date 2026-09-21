@@ -217,6 +217,19 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `exact admission audit records every pre-admission rejection reason without entering the ring path`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
+        )
+
+        val auditWrites = program.filter { instruction ->
+            instruction.code == 0xdb && instruction.off.toInt() in setOf(0, 8, 16, 24, 32, 40)
+        }.map { it.off.toInt() }.toSet()
+
+        assertEquals(setOf(0, 8, 16, 24, 32, 40), auditWrites)
+    }
+
+    @Test
     fun `automatic attachment selects direct raw tracepoint only for its supported ABI`() {
         assertEquals(
             TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,
