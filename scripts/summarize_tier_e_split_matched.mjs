@@ -33,10 +33,18 @@ for (const mode of [...new Set(rows.map(row => row.mode))]) {
     draws.sort((a, b) => a - b);
   }
   const timings = group.flatMap(row => row.workload_ns);
+  const measured = key => {
+    const values = group.map(row => row[key]).filter(Number.isFinite);
+    return values.length ? median(values) : null;
+  };
   modes[mode] = {
     fork_count: group.length,
     complete_batch_forks: group.filter(row => row.status === 0 && forkMedian(row) !== null).length,
     measured_batch_median_ns: timings.length ? median(timings) : null,
+    target_cpu_median_ns: measured('target_cpu_ns'),
+    collector_cpu_median_ns: measured('collector_cpu_ns'),
+    target_peak_rss_median_kb: measured('target_peak_rss_kb'),
+    collector_peak_rss_median_kb: measured('collector_peak_rss_kb'),
     paired_fork_median_ratio_to_baseline: paired.length ? median(paired.map(row => row.ratio)) : null,
     paired_bootstrap_95pct_ratio: draws.length ? [quantile(draws, 0.025), quantile(draws, 0.975)] : null,
     runtime_overhead_verdict: 'UNVERIFIED',

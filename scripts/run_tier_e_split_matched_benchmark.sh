@@ -75,10 +75,13 @@ const target=/split-benchmark-target: mode=\S+ elapsedNs=(\d+) cpuNs=(\d+) peakR
 const userNotif=/user-notif-oracle: [^\n]*expected_operations=(\d+) matched_operations=(\d+) duplicate_operations=(\d+) wrong_operations=(\d+) unclassified_operations=(\d+)/.exec(log);
 const path=`${dir}/terminal-report.json`;
 const terminal=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):null;
+const metricsPath=`${dir}/collector-process-metrics.json`;
+const collector=fs.existsSync(metricsPath)?JSON.parse(fs.readFileSync(metricsPath)):null;
 console.log(JSON.stringify({fork:Number(fork),mode,status:Number(status),measured_batch_count:batches.length,
   measured_operations:batches.reduce((n,m)=>n+Number(m[1]),0),
   workload_ns:batches.map(m=>Number(m[2])),total_elapsed_ns:target?Number(target[1]):null,
   target_cpu_ns:target?Number(target[2]):null,target_peak_rss_kb:target?Number(target[3]):null,
+  collector_cpu_ns:collector?.cpu_ns??null,collector_peak_rss_kb:collector?.peak_rss_kb??null,
   user_notif_oracle:userNotif?{expected:Number(userNotif[1]),matched:Number(userNotif[2]),duplicates:Number(userNotif[3]),wrong:Number(userNotif[4]),unclassified:Number(userNotif[5])}:null,
   terminal_integrity:terminal?.evidence_integrity??null,policy_eligibility:false}));
 NODE

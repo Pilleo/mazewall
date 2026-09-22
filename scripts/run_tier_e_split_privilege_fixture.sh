@@ -243,6 +243,21 @@ terminal_wait_attempts=300
 [[ "${SPLIT_COVERAGE}" == 1 ]] && terminal_wait_attempts=900
 for _ in $(seq 1 "${terminal_wait_attempts}"); do [[ -f "${SHARED}/evidence/split-fixture-19802.tier-e.json" ]] && break; sleep 0.1; done
 test -f "${SHARED}/evidence/split-fixture-19802.tier-e.json"
+if [[ "${SPLIT_BENCHMARK}" == 1 ]]; then
+    collector_host_pid=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${COLLECTOR}")
+    node - "${collector_host_pid}" "$(getconf CLK_TCK)" "${ARTIFACT_DIR}/collector-process-metrics.json" <<'NODE'
+const fs=require('fs');
+const [pid,hz,out]=process.argv.slice(2);
+const status=fs.readFileSync(`/proc/${pid}/status`,'utf8');
+const stat=fs.readFileSync(`/proc/${pid}/stat`,'utf8');
+const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
+const ticks=Number(fields[11])+Number(fields[12]);
+const hwm=Number(/^VmHWM:\s+(\d+)\s+kB/m.exec(status)?.[1]??-1);
+const result={schema_version:1,collector_host_pid:Number(pid),cpu_ticks:ticks,cpu_ns:Math.round(ticks*1e9/Number(hz)),peak_rss_kb:hwm,
+  cpu_time_basis:'process_ticks_since_start',sample_boundary:'after_terminal_report_before_shutdown'};
+fs.writeFileSync(out,JSON.stringify(result)+'\n');
+NODE
+fi
 "${ENGINE}" run --rm --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL \
     -v "${SHARED}:/shared" "${IMAGE}" \
     java -cp /shared/agent-test-classes AgentWorkload control /shared/control.sock shutdown > "${ARTIFACT_DIR}/control.log" 2>&1
