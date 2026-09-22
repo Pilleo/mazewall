@@ -58,3 +58,9 @@ now attaches marker, syscall, exec, and benchmark-audit programs on every allowe
 
 ---
 <!-- id: issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa  file: issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md -->
+
+### 2026-09-22 split-privilege matched and lifecycle evidence
+
+Retained artifact: `docs/internals/evidence/tier-e-split-matched-20260922/README.md`, with raw fork/negative-fixture archives and checksums. Exact commands: `bash scripts/run_tier_e_split_matched_benchmark.sh`, `node scripts/test_verify_tier_e_split_operations.mjs`, `./gradlew :profiler:test`, and `ctest --test-dir /tmp/jseccomp-profiler-native-build --output-on-failure`. Five rotated forks per mode completed for baseline, four Tier E flavours, and USER_NOTIF with/without stacks. Full-stream dictionary and inline each recovered 2,600/2,600 declared operations in all five short forks; USER_NOTIF matched 2,600/2,600 in all ten forks. The benchmark-only collector manifest is session-bound and independent of the target's denominator. Stale attach identity, simulated active-session incarnation change, and delayed closed artifact have retained rootful fixtures. The earlier long 72-path dictionary coverage passed; inline long-session coverage remains `INCOMPLETE` at the native 64 MiB budget.
+
+Verdict for this *short* matched workload: `capture_domain_validity=PASS` for selected `sys_enter`, `transport_completeness=PASS`, `attribution_coverage=PASS`, `dictionary_integrity=PASS`, `lifecycle_validity=PASS`, `runtime_overhead=UNVERIFIED`, `policy_eligibility=false`. `calibration_target=unmet`: baseline batches were below 1 ms and the common count cannot be raised enough without exhausting bounded inline retention. The historical 25% performance gate is not passed by these timings. Real host PID reuse and a decision-quality all-seven-mode duration remain unqualified. This entry does not close the intermittent pre-admission issue.
