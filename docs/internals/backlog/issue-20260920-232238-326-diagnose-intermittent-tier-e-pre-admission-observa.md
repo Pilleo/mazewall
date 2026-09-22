@@ -31,6 +31,12 @@ now attaches marker, syscall, exec, and benchmark-audit programs on every allowe
    ceiling from source-dirty smoke evidence.
 
 **Evidence:**
+- Split-privilege coverage qualification on 2026-09-22 retained five 75,000-operation forks
+  per flavour in [the split coverage report](../evidence/tier-e-split-coverage-20260922/report.md).
+  Both dictionary modes recovered all 72 declared paths in every fork with complete terminal
+  evidence; inline exceeded its bounded native snapshot size and remained incomplete. This
+  run had attachment audits disabled, so it qualifies declared-path recovery but **does not**
+  close the pre-admission diagnostic question in this issue.
 - Coverage-discovery follow-up: `TierECoverageOracleTest` verifies declared frequencies,
   singleton placement, retry/acknowledgement semantics, wrong attribution, and missing-path
   verdicts. `scripts/run_tier_e_coverage_benchmark.sh` saves a separate coverage comparison;

@@ -421,6 +421,43 @@ coverage. Missing repetitions can coexist with `coverage_verdict=PASS`; missing 
 results never establish completeness for an unknown application's future paths or arguments,
 and `policy_eligibility` remains false.
 
+**Implemented contract: split-privilege coverage artifact.** A rootful operator-owned collector
+may enable `TIER_E_COVERAGE_MANIFEST=1` only for benchmark fixtures. After terminal dictionary
+resolution and collector-owned acknowledgement, it atomically writes
+`<registration>-<session>.tier-e-coverage.json` below `TIER_E_EVIDENCE_ROOT`. The separate
+artifact binds its registration/session identity, target-oracle checksum, canonical terminal
+report checksum, all terminal dimensions, and bounded exact acknowledged edges. Each edge is
+the normalized workload frame identity plus the oracle-selected syscall number and capture
+flags; it never uses `InvocationId`. The target writes the declarative oracle before the workload
+gate opens, but never reports recovered coverage. Missing or unreadable artifacts are
+`UNVERIFIED`; missing declared edges are `INCOMPLETE`; contradictory rows are `FAILED`. Normal
+deployments emit neither this file nor its additional collector work.
+
+`TIER_E_SPLIT_COVERAGE=1 bash scripts/run_tier_e_split_privilege_fixture.sh` is the bounded
+72-edge rootful smoke. It runs the target non-root and the collector privileged, and retains the
+target oracle, collector manifest, terminal report, dictionary envelope, logs, and verdict. The
+default smoke uses one operation per path; `TIER_E_SPLIT_COVERAGE_OPERATIONS=75000` explicitly
+selects the paced sustained stress schedule and must retain its own incomplete evidence if a
+bounded retention limit is reached.
+
+**Historical rootful split-topology evidence, 2026-09-22.** Five rotated 75,000-operation
+forks per flavour used seeds 23063–23067. Both dictionary modes recovered all 72 declared
+paths in every fork with complete terminal dimensions; dictionary/full-stream retained about
+225,000 syscall records, whereas unique-edge retained 224 representatives. The default
+100,000-record collector cap truncated the first stress attempt (59/72 paths), so the
+benchmark-only runner provisioned 250,000 records under the unchanged 64 MiB byte budget.
+Both inline flavours were incomplete in all ten sustained forks because their encoded native
+terminal snapshot exceeded the 64 MiB bound; no MZSE file was published. The terminal reason
+is `ARTIFACT_UNAVAILABLE`, with `transport_completeness=false`, not session mismatch. The
+[per-fork report](../../evidence/tier-e-split-coverage-20260922/report.md) retains raw logs,
+oracles, manifests, checksums, and every dimension. These paced results qualify observed
+coverage only; they are not an application-slowdown or full-history comparison. Production
+dictionary/full-stream, 100,000-record default, and `policy_eligibility=false` remain unchanged.
+The registered-artifact negative fixture also retains rootful missing, malformed, symlinked,
+unclosed, and wrong-session cases. Each is incomplete with failed transport, attribution, and
+lifecycle dimensions; none upgrades to policy eligibility. This does not yet establish stale-PID,
+PID-reuse, delayed-closure, or split-topology application-overhead qualifications.
+
 `bash scripts/run_tier_e_coverage_benchmark.sh smoke` runs a reduced corpus retaining all 72
 paths. The `full` argument runs five rotated forks of baseline, dictionary/full-stream,
 dictionary/unique-edge, inline/full-stream, and inline/unique-edge at 1,250 operations/s. The
