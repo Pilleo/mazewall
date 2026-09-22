@@ -3,6 +3,7 @@ import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -82,6 +83,29 @@ class TierEBpfProgramBuilderTest {
         assertEquals(updateCalls(lookup) + 1, updateCalls(update))
         assertEquals(ringSubmits(none), ringSubmits(lookup))
         assertEquals(ringSubmits(lookup), ringSubmits(update))
+    }
+
+    @Test
+    fun `disabled recovery preserves existing program without recovery accesses`() {
+        val disabled = TierEBpfProgramBuilder.buildSysEnterProgram(TierEOptions())
+        val default = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(benchmarkPhases = true),
+        )
+        assertEquals(default.size, disabled.size)
+    }
+
+    @Test
+    fun `enabled recovery fails closed until map producer is implemented`() {
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            TierEBpfProgramBuilder.buildSysEnterProgram(
+                TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.SHADOW),
+            )
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            TierEBpfProgramBuilder.buildSysEnterProgram(
+                TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.RECOVER),
+            )
+        }
     }
 
     @Test

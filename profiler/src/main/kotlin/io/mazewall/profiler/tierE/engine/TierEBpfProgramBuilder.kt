@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.engine
 
+import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -275,6 +276,9 @@ internal object TierEBpfProgramBuilder {
         options: TierEOptions,
         rawTracepoint: Boolean,
     ): List<Insn> {
+        require(options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
+            "coverage recovery map producer not yet implemented"
+        }
         val p = mutableListOf<Insn>()
         val kernelCoverageMode =
             if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) options.kernelCoverageMode else TierEKernelCoverageMode.NONE

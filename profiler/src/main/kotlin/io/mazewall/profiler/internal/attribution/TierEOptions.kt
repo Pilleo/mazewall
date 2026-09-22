@@ -110,6 +110,26 @@ internal enum class TierESysEnterAttachmentShape {
     MINIMAL_COUNTER_ONLY,
 }
 
+/**
+ * Opt-in retained-edge recovery mode.
+ *
+ * DISABLED preserves the existing generated program without coverage-recovery accesses.
+ * SHADOW resolves and compares map candidates without adding recovered coverage.
+ * RECOVER may add coverage only after successful retained-output acknowledgement.
+ */
+internal enum class CoverageRecoveryMode {
+    DISABLED,
+    SHADOW,
+    RECOVER,
+    ;
+
+    companion object {
+        const val DEFAULT_MAP_CAPACITY: Int = 4_096
+        const val MAX_SCAN_BATCH: Int = 256
+        const val DEFAULT_SCAN_INTERVAL_MILLIS: Long = 100L
+    }
+}
+
 /** Explicit Tier E session configuration. The full stream remains the safe default. */
 internal data class TierEOptions(
     val emissionMode: TierEEmissionMode = TierEEmissionMode.FULL_STREAM,
@@ -165,6 +185,14 @@ internal data class TierEOptions(
     val readyTransferMode: TierEReadyTransferMode = TierEReadyTransferMode.READ_ONLY,
     /** Session draining appends directly to its owned batch; temporary lists remain a benchmark control. */
     val collectorResultMode: TierECollectorResultMode = TierECollectorResultMode.APPEND_TARGET,
+    /**
+     * Opt-in retained-edge recovery. DISABLED preserves the existing program without
+     * coverage-recovery accesses. SHADOW/RECOVER are experimental and benchmark-only
+     * until qualified.
+     */
+    val coverageRecoveryMode: CoverageRecoveryMode = CoverageRecoveryMode.DISABLED,
+    /** Distinct-edge capacity of the retained recovery map; recorded in the manifest. */
+    val coverageRecoveryMapCapacity: Int = CoverageRecoveryMode.DEFAULT_MAP_CAPACITY,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
@@ -205,6 +233,10 @@ internal data class TierEOptions(
         }
         require(benchmarkPhases || collectorResultMode == TierECollectorResultMode.APPEND_TARGET) {
             "temporary collector results are benchmark-only"
+        }
+        require(coverageRecoveryMapCapacity > 0) { "coverageRecoveryMapCapacity must be positive" }
+        require(benchmarkPhases || coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
+            "coverage recovery is experimental benchmark-only"
         }
     }
 
