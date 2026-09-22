@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "calibration_target": "met",
+  "bootstrap_resamples": 10000,
+  "paired_unit": "fork median of ten measured batches",
+  "modes": {
+    "baseline": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 116599698,
+      "target_cpu_median_ns": 2040000000,
+      "collector_cpu_median_ns": null,
+      "target_peak_rss_median_kb": 79964,
+      "collector_peak_rss_median_kb": null,
+      "paired_fork_median_ratio_to_baseline": 1,
+      "paired_bootstrap_95pct_ratio": [
+        1,
+        1
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "dictionary-full-stream": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 138555003.5,
+      "target_cpu_median_ns": 2980000000,
+      "collector_cpu_median_ns": 5410000000,
+      "target_peak_rss_median_kb": 86432,
+      "collector_peak_rss_median_kb": 362952,
+      "paired_fork_median_ratio_to_baseline": 1.1399321934778939,
+      "paired_bootstrap_95pct_ratio": [
+        0.6416976706655664,
+        1.877622908241124
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "dictionary-unique-edge": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 132986465,
+      "target_cpu_median_ns": 2530000000,
+      "collector_cpu_median_ns": 4700000000,
+      "target_peak_rss_median_kb": 85152,
+      "collector_peak_rss_median_kb": 360900,
+      "paired_fork_median_ratio_to_baseline": 1.118600259372313,
+      "paired_bootstrap_95pct_ratio": [
+        0.6653642137012739,
+        1.2876582119612048
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "inline-full-stream": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 138038409.5,
+      "target_cpu_median_ns": 3040000000,
+      "collector_cpu_median_ns": 7370000000,
+      "target_peak_rss_median_kb": 86672,
+      "collector_peak_rss_median_kb": 546872,
+      "paired_fork_median_ratio_to_baseline": 1.1417055283901436,
+      "paired_bootstrap_95pct_ratio": [
+        0.6958124664310901,
+        2.120436937152273
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "inline-unique-edge": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 133903601.5,
+      "target_cpu_median_ns": 2780000000,
+      "collector_cpu_median_ns": 5990000000,
+      "target_peak_rss_median_kb": 86152,
+      "collector_peak_rss_median_kb": 549528,
+      "paired_fork_median_ratio_to_baseline": 1.066133049976307,
+      "paired_bootstrap_95pct_ratio": [
+        1.047103043722924,
+        1.4778538633379026
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "user-notif-no-stack": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 176182492.5,
+      "target_cpu_median_ns": 6230000000,
+      "collector_cpu_median_ns": null,
+      "target_peak_rss_median_kb": 380308,
+      "collector_peak_rss_median_kb": null,
+      "paired_fork_median_ratio_to_baseline": 1.569068048288376,
+      "paired_bootstrap_95pct_ratio": [
+        0.8723716628461881,
+        4.9667229981852445
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "user-notif-stack": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 208153455,
+      "target_cpu_median_ns": 5790000000,
+      "collector_cpu_median_ns": null,
+      "target_peak_rss_median_kb": 414356,
+      "collector_peak_rss_median_kb": null,
+      "paired_fork_median_ratio_to_baseline": 1.5463021550003704,
+      "paired_bootstrap_95pct_ratio": [
+        1.2140675013117352,
+        4.143069879154458
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    }
+  },
+  "policy_eligibility": false
+}
