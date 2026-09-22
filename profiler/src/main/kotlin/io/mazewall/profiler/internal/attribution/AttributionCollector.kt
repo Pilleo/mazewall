@@ -102,6 +102,8 @@ internal data class SessionIntegrity(
     val dictionaryTransport: DictionaryTransportEvidence = DictionaryTransportEvidence(),
     /** Failures while retaining the daemon-owned immutable terminal result. */
     val terminalDeliveryFailures: Long = 0,
+    /** The registered producer's terminal artifact was absent or could not be admitted. */
+    val artifactAdmissionFailures: Long = 0,
     /**
      * Kernel observation boundary used to capture syscall events for this session.
      * [ObservationScope.SYS_ENTER_TRACEPOINT] means only post-seccomp dispatched syscalls
@@ -134,6 +136,7 @@ internal data class SessionIntegrity(
                 lifecycleInvalidations != 0L ||
                 dictionaryIntegrityFailures != 0L ||
                 terminalDeliveryFailures != 0L ||
+                artifactAdmissionFailures != 0L ||
                 !dictionaryTransport.complete -> CaptureGuarantee.INCOMPLETE
             emissionMode == TierEEmissionMode.FULL_STREAM -> CaptureGuarantee.FULL_STREAM
             else -> CaptureGuarantee.UNIQUE_EDGES
@@ -151,7 +154,7 @@ internal data class SessionIntegrity(
     public val verdictDimensions: TierEVerdictDimensions
         get() = TierEVerdictDimensions(
             captureDomainValid = captureDomain == ObservationScope.SYS_ENTER_TRACEPOINT && outOfDomainAttempts == 0L,
-            transportComplete = dictionaryTransport.complete && terminalDeliveryFailures == 0L,
+            transportComplete = dictionaryTransport.complete && terminalDeliveryFailures == 0L && artifactAdmissionFailures == 0L,
             attributionCoverageValid = observedLosses == 0L && attributionFailures == 0L,
             dictionaryIntegrityValid = dictionaryIntegrityFailures == 0L && dictionaryTransport.complete,
             lifecycleValid = lifecycleInvalidations == 0L,

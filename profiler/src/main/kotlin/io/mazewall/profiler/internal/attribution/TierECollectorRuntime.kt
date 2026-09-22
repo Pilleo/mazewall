@@ -20,6 +20,15 @@ internal data class TierECollectorRuntimeResult(
     val metrics: TierECollectorServiceMetrics,
     val terminalReason: TierETerminalReason,
 ) {
+    fun withUnavailableArtifact(): TierECollectorRuntimeResult =
+        copy(
+            profile = TierEProfile(
+                profile.syscalls,
+                profile.integrity.copy(artifactAdmissionFailures = profile.integrity.artifactAdmissionFailures + 1),
+            ),
+            terminalReason = TierETerminalReason.ARTIFACT_UNAVAILABLE,
+        )
+
     fun withTerminalDeliveryFailure(): TierECollectorRuntimeResult =
         copy(
             profile = TierEProfile(
@@ -33,6 +42,7 @@ internal enum class TierETerminalReason {
     COMPLETE,
     PRODUCER_CLOSURE_UNPROVEN,
     ARTIFACT_SESSION_MISMATCH,
+    ARTIFACT_UNAVAILABLE,
 }
 
 /**

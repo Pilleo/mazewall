@@ -45,7 +45,30 @@ internal fun main() {
     val fileReportSink = System.getenv("TIER_E_EVIDENCE_ROOT")?.let {
         TierETerminalReportFileSink(Path.of(it))
     }
+    val coverageManifestSink = System
+        .getenv("TIER_E_COVERAGE_MANIFEST")
+        ?.takeIf { it == "1" }
+        ?.let {
+            val root = requireNotNull(System.getenv("TIER_E_EVIDENCE_ROOT")) {
+                "TIER_E_COVERAGE_MANIFEST requires TIER_E_EVIDENCE_ROOT"
+            }
+            val oracle = requireNotNull(System.getenv("TIER_E_COVERAGE_ORACLE_SHA256")) {
+                "TIER_E_COVERAGE_MANIFEST requires TIER_E_COVERAGE_ORACLE_SHA256"
+            }
+            val syscallNumber = requireNotNull(System.getenv("TIER_E_COVERAGE_SYSCALL_NUMBER")) {
+                "TIER_E_COVERAGE_MANIFEST requires TIER_E_COVERAGE_SYSCALL_NUMBER"
+            }.toIntOrNull()?.takeIf { it >= 0 } ?: error("TIER_E_COVERAGE_SYSCALL_NUMBER must be non-negative")
+            TierECoverageManifestConfiguration(TierECoverageManifestFileSink(Path.of(root)), oracle, syscallNumber)
+        }
     val terminalArtifactWaitMillis = System
+        .getenv("TIER_E_BENCHMARK_RECORD_LIMIT")
+        ?.let { raw ->
+            require(coverageManifestSink != null) { "TIER_E_BENCHMARK_RECORD_LIMIT requires coverage benchmark mode" }
+            raw.toIntOrNull()?.takeIf { it in TierEOptions.DEFAULT_RECORD_LIMIT..250_000 }
+                ?: error("TIER_E_BENCHMARK_RECORD_LIMIT must be 100000..250000")
+        }
+    val benchmarkRecordLimit = terminalArtifactWaitMillis
+    val artifactWaitMillis = System
         .getenv("TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS")
         ?.toLongOrNull()
         ?.also { require(it in 0..30_000L) { "TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS must be 0..30000" } }
@@ -66,7 +89,9 @@ internal fun main() {
                     "policy_eligibility=${report.policyEligibility}",
             )
         },
-        terminalArtifactWaitMillis = terminalArtifactWaitMillis,
+        terminalArtifactWaitMillis = artifactWaitMillis,
+        coverageManifestSink = coverageManifestSink,
+        benchmarkRecordLimit = benchmarkRecordLimit,
     )
     ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { server ->
         server.bind(UnixDomainSocketAddress.of(socketPath))
@@ -116,6 +141,8 @@ internal class TierEDaemonService(
     private val processIdentityVerifier: TierEProcessIdentityVerifier = TierEProcessIdentityVerifier.linux,
     private val targetExitCoordinator: TierETargetExitCoordinator = TierETargetExitCoordinator(processIdentityVerifier),
     private val terminalArtifactWaitMillis: Long = 30_000L,
+    private val coverageManifestSink: TierECoverageManifestConfiguration? = null,
+    private val benchmarkRecordLimit: Int? = null,
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -128,6 +155,12 @@ internal class TierEDaemonService(
             "registered target deployment requires TIER_E_DEFINITION_ROOT"
         }
         require(terminalArtifactWaitMillis in 0..30_000L) { "terminal artifact wait must be 0..30000ms" }
+        require(
+            benchmarkRecordLimit == null ||
+            (coverageManifestSink != null && benchmarkRecordLimit in TierEOptions.DEFAULT_RECORD_LIMIT..250_000),
+        ) {
+            "expanded record limit is permitted only for a bounded coverage benchmark"
+        }
     }
 
     @Synchronized
@@ -182,7 +215,11 @@ internal class TierEDaemonService(
                     val session = TierEProfilerSession(
                         engine = requireNotNull(engine),
                         processEpoch = attachment.session.processIncarnation,
-                        options = TierEOptions(cmd.emissionMode),
+                        options = TierEOptions(
+                            cmd.emissionMode,
+                            maxPendingRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
+                            maxRetainedRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
+                        ),
                         configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
                     )
                     runtime = TierECollectorRuntime(session)
@@ -277,7 +314,17 @@ internal class TierEDaemonService(
                 active.runtime.finish(artifact, producerClosure)
             }
         }.getOrNull()
-        if (result != null) lastTerminalResult = deliverResult(result, active.registeredTarget, terminalContents)
+        if (result != null) {
+            val admitted = if (active.registeredTarget != null &&
+                terminalContents == null &&
+                identityCheck != TierEProcessIdentityCheck.REUSED
+            ) {
+                result.withUnavailableArtifact()
+            } else {
+                result
+            }
+            lastTerminalResult = deliverResult(admitted, active.registeredTarget, terminalContents)
+        }
     }
 
     private fun readTerminalContents(
@@ -304,13 +351,31 @@ internal class TierEDaemonService(
         } else {
             result.withTerminalDeliveryFailure()
         }
-        return if (runCatching {
-                terminalReportSink.accept(TierETerminalReport.from(afterResultDelivery, target, contents))
+        val report = TierETerminalReport.from(afterResultDelivery, target, contents)
+        val afterCoverageManifest = if (coverageManifestSink == null ||
+            runCatching {
+                val configuration = requireNotNull(coverageManifestSink)
+                configuration.sink.accept(
+                    TierECoverageManifest.from(
+                        afterResultDelivery,
+                        report,
+                        configuration.expectedOracleSha256,
+                        configuration.expectedSyscallNumber,
+                    ),
+                )
             }.isSuccess
         ) {
             afterResultDelivery
         } else {
             afterResultDelivery.withTerminalDeliveryFailure()
+        }
+        return if (runCatching {
+                terminalReportSink.accept(TierETerminalReport.from(afterCoverageManifest, target, contents))
+            }.isSuccess
+        ) {
+            afterCoverageManifest
+        } else {
+            afterCoverageManifest.withTerminalDeliveryFailure()
         }
     }
 
@@ -321,6 +386,12 @@ internal class TierEDaemonService(
         var terminalWatch: AutoCloseable? = null,
     )
 }
+
+internal data class TierECoverageManifestConfiguration(
+    val sink: TierECoverageManifestFileSink,
+    val expectedOracleSha256: String,
+    val expectedSyscallNumber: Int,
+)
 
 /** Fully resolved attach inputs; registered deployments never derive trust from v1 control fields alone. */
 internal data class TierEDaemonAttachment(

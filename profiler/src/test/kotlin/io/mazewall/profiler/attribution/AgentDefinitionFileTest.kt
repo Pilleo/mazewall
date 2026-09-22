@@ -318,7 +318,7 @@ class AgentDefinitionFileTest {
             .apply {
                 write("MZSD".toByteArray())
                 write(byteArrayOf(2, 0))
-                repeat(100_001) { record(3, stats) }
+                repeat(300_001) { record(3, stats) }
             }.toByteArray()
 
         val failure = assertFailsWith<IllegalArgumentException> { AgentDefinitionFile.decode(file) }
@@ -336,7 +336,7 @@ class AgentDefinitionFileTest {
             .apply {
                 write("MZSD".toByteArray())
                 write(byteArrayOf(2, 0))
-                repeat(100_001) { record(3, stats) }
+                repeat(300_001) { record(3, stats) }
             }.toByteArray()
 
         val contents = AgentDefinitionFile.decodeForInvocations(file, emptySet())

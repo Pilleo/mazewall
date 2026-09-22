@@ -47,7 +47,7 @@ internal class TierETerminalReportFileSink(
     }
 }
 
-private fun TierETerminalReport.toJson(): String {
+internal fun TierETerminalReport.toJson(): String {
     val artifactLength = artifactByteLength?.toString() ?: "null"
     val artifactDigest = artifactSha256?.let { "\"$it\"" } ?: "null"
     val failedDimensions = buildList {

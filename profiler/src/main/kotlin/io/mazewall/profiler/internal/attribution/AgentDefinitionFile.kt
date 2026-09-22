@@ -295,7 +295,10 @@ internal object AgentDefinitionFile {
     private const val STATS_RECORD = 3
     private const val EXECUTION_RECORD = 4
     private const val INLINE_INVOCATION_RECORD = 5
-    private const val MAX_RECORD_COUNT = 100_000
+
+    // Long finite sessions can contain several native boundaries per workload operation. The
+    // independent 64 MiB input/decoded-byte limits still apply before and during allocation.
+    private const val MAX_RECORD_COUNT = 300_000
     private val MAX_SELECTIVE_RECORD_COUNT = MAX_DECODED_BYTES / RECORD_HEADER_SIZE
     private const val MAX_FRAME_COUNT = 129
     private const val MAX_STRING_BYTES = 65_535
