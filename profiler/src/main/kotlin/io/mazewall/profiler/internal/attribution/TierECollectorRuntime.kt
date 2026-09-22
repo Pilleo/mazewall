@@ -29,6 +29,8 @@ internal data class TierECollectorRuntimeResult(
             terminalReason = TierETerminalReason.ARTIFACT_UNAVAILABLE,
         )
 
+    fun withReusedProcessIdentity(): TierECollectorRuntimeResult = withUnavailableArtifact().copy(terminalReason = TierETerminalReason.PROCESS_IDENTITY_REUSED)
+
     fun withTerminalDeliveryFailure(): TierECollectorRuntimeResult =
         copy(
             profile = TierEProfile(
@@ -43,6 +45,7 @@ internal enum class TierETerminalReason {
     PRODUCER_CLOSURE_UNPROVEN,
     ARTIFACT_SESSION_MISMATCH,
     ARTIFACT_UNAVAILABLE,
+    PROCESS_IDENTITY_REUSED,
 }
 
 /**

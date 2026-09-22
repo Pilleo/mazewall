@@ -1,13 +1,43 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.profiler.internal.attribution.AttributionStatus
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
+import io.mazewall.profiler.internal.attribution.InvocationId
+import io.mazewall.profiler.internal.attribution.ResolutionStatus
+import io.mazewall.profiler.internal.attribution.ResolvedSyscall
+import io.mazewall.profiler.internal.attribution.SessionIntegrity
+import io.mazewall.profiler.internal.attribution.SyscallAttribution
+import io.mazewall.profiler.internal.attribution.TaskIdentity
+import io.mazewall.profiler.internal.attribution.TierEProfile
 import java.nio.file.Files
 import kotlin.io.path.readText
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class TierETerminalReportFileSinkTest {
+    @Test
+    fun `resolved count excludes unresolved retained observations`() {
+        val observation = SyscallAttribution(
+            TaskIdentity(1, 2, 3),
+            4,
+            257,
+            List(6) { 0L },
+            InvocationId(5),
+            AttributionStatus.PENDING_DICTIONARY,
+        )
+        val profile = TierEProfile(
+            listOf(
+                ResolvedSyscall(observation, null, ResolutionStatus.RESOLVED),
+                ResolvedSyscall(observation, null, ResolutionStatus.DICTIONARY_UNRESOLVED),
+            ),
+            SessionIntegrity(),
+        )
+
+        assertEquals(1, TierETerminalReport.resolvedCount(profile))
+    }
+
     @Test
     fun `writes one atomically named terminal JSON report`() {
         val root = Files.createTempDirectory("tier-e-report")

@@ -2,7 +2,9 @@ package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
+import io.mazewall.profiler.internal.attribution.ResolutionStatus
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
+import io.mazewall.profiler.internal.attribution.TierEProfile
 
 /** Platform-neutral terminal projection; Tier E evidence is never policy-eligible. */
 internal data class TierETerminalReport(
@@ -32,7 +34,7 @@ internal data class TierETerminalReport(
             return TierETerminalReport(
                 evidenceIntegrity = result.profile.integrity.evidenceIntegrity,
                 terminalReason = result.terminalReason.name,
-                resolvedSyscalls = result.profile.syscalls.size,
+                resolvedSyscalls = resolvedCount(result.profile),
                 captureDomainValidity = dimensions.captureDomainValid,
                 transportCompleteness = dimensions.transportComplete,
                 attributionCoverage = dimensions.attributionCoverageValid,
@@ -46,5 +48,7 @@ internal data class TierETerminalReport(
                 artifactSha256 = contents?.sourceSha256,
             )
         }
+
+        internal fun resolvedCount(profile: TierEProfile): Int = profile.syscalls.count { it.resolutionStatus == ResolutionStatus.RESOLVED }
     }
 }

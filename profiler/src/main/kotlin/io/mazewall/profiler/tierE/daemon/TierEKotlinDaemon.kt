@@ -4,6 +4,7 @@ package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
+import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntime
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
@@ -60,14 +61,26 @@ internal fun main() {
             }.toIntOrNull()?.takeIf { it >= 0 } ?: error("TIER_E_COVERAGE_SYSCALL_NUMBER must be non-negative")
             TierECoverageManifestConfiguration(TierECoverageManifestFileSink(Path.of(root)), oracle, syscallNumber)
         }
-    val terminalArtifactWaitMillis = System
+    val operationManifestSink = if (System.getenv("TIER_E_SPLIT_BENCHMARK") == "1") {
+        TierESplitOperationManifestFileSink(
+            Path.of(
+                requireNotNull(System.getenv("TIER_E_EVIDENCE_ROOT")) {
+                "split benchmark requires TIER_E_EVIDENCE_ROOT"
+            },
+            ),
+        )
+    } else {
+        null
+    }
+    val benchmarkRecordLimit = System
         .getenv("TIER_E_BENCHMARK_RECORD_LIMIT")
         ?.let { raw ->
-            require(coverageManifestSink != null) { "TIER_E_BENCHMARK_RECORD_LIMIT requires coverage benchmark mode" }
+            require(coverageManifestSink != null || System.getenv("TIER_E_SPLIT_BENCHMARK") == "1") {
+                "TIER_E_BENCHMARK_RECORD_LIMIT requires a benchmark fixture"
+            }
             raw.toIntOrNull()?.takeIf { it in TierEOptions.DEFAULT_RECORD_LIMIT..250_000 }
                 ?: error("TIER_E_BENCHMARK_RECORD_LIMIT must be 100000..250000")
         }
-    val benchmarkRecordLimit = terminalArtifactWaitMillis
     val artifactWaitMillis = System
         .getenv("TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS")
         ?.toLongOrNull()
@@ -75,6 +88,14 @@ internal fun main() {
         ?: 30_000L
     val daemon = TierEDaemonService(
         stopRequested,
+        processIdentityVerifier = System.getenv("TIER_E_BENCHMARK_REUSE_MARKER")?.let { marker ->
+            val path = Path.of(marker)
+            TierEProcessIdentityVerifier { pid ->
+                TierEProcessIdentityVerifier.observeLinuxIncarnation(pid)?.let { observed ->
+                    if (Files.exists(path)) observed + 1 else observed
+                }
+            }
+        } ?: TierEProcessIdentityVerifier.linux,
         registeredTargetResolver = registeredTargetResolver,
         terminalReportSink = TierETerminalReportSink { report ->
             fileReportSink?.accept(report)
@@ -91,7 +112,9 @@ internal fun main() {
         },
         terminalArtifactWaitMillis = artifactWaitMillis,
         coverageManifestSink = coverageManifestSink,
+        operationManifestSink = operationManifestSink,
         benchmarkRecordLimit = benchmarkRecordLimit,
+        benchmarkMode = System.getenv("TIER_E_SPLIT_BENCHMARK") == "1",
     )
     ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { server ->
         server.bind(UnixDomainSocketAddress.of(socketPath))
@@ -142,7 +165,9 @@ internal class TierEDaemonService(
     private val targetExitCoordinator: TierETargetExitCoordinator = TierETargetExitCoordinator(processIdentityVerifier),
     private val terminalArtifactWaitMillis: Long = 30_000L,
     private val coverageManifestSink: TierECoverageManifestConfiguration? = null,
+    private val operationManifestSink: TierESplitOperationManifestFileSink? = null,
     private val benchmarkRecordLimit: Int? = null,
+    private val benchmarkMode: Boolean = false,
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -157,9 +182,9 @@ internal class TierEDaemonService(
         require(terminalArtifactWaitMillis in 0..30_000L) { "terminal artifact wait must be 0..30000ms" }
         require(
             benchmarkRecordLimit == null ||
-            (coverageManifestSink != null && benchmarkRecordLimit in TierEOptions.DEFAULT_RECORD_LIMIT..250_000),
+            ((coverageManifestSink != null || benchmarkMode) && benchmarkRecordLimit in TierEOptions.DEFAULT_RECORD_LIMIT..250_000),
         ) {
-            "expanded record limit is permitted only for a bounded coverage benchmark"
+            "expanded record limit is permitted only for a bounded benchmark"
         }
     }
 
@@ -252,6 +277,29 @@ internal class TierEDaemonService(
                     (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
                 } catch (expectedAttachFailure: Exception) {
                     runCatching { runtime?.close() ?: engine?.close() }
+                    val rejectedTarget = runCatching { registeredTargetResolver?.resolve(cmd) }.getOrNull()
+                    if (rejectedTarget != null &&
+                        processIdentityVerifier.checkAtTerminal(rejectedTarget) != TierEProcessIdentityCheck.MATCHED
+                    ) {
+                        runCatching {
+                            terminalReportSink.accept(
+                                TierETerminalReport(
+                                    evidenceIntegrity = EvidenceIntegrity.INCOMPLETE,
+                                    terminalReason = "STALE_PROCESS_IDENTITY",
+                                    resolvedSyscalls = 0,
+                                    captureDomainValidity = false,
+                                    transportCompleteness = false,
+                                    attributionCoverage = false,
+                                    dictionaryIntegrity = false,
+                                    lifecycleValidity = false,
+                                    registrationId = rejectedTarget.registrationId,
+                                    sessionEpoch = rejectedTarget.sessionEpoch.value,
+                                    targetPid = rejectedTarget.pid,
+                                    processIncarnation = rejectedTarget.processIncarnation,
+                                ),
+                            )
+                        }
+                    }
                     val postTransition = ControlSessionMachine.evaluate(
                         sessionState,
                         ControlSessionEvent.AttachFailed(expectedAttachFailure.message ?: "attach failed"),
@@ -315,13 +363,10 @@ internal class TierEDaemonService(
             }
         }.getOrNull()
         if (result != null) {
-            val admitted = if (active.registeredTarget != null &&
-                terminalContents == null &&
-                identityCheck != TierEProcessIdentityCheck.REUSED
-            ) {
-                result.withUnavailableArtifact()
-            } else {
-                result
+            val admitted = when {
+                identityCheck == TierEProcessIdentityCheck.REUSED -> result.withReusedProcessIdentity()
+                active.registeredTarget != null && terminalContents == null -> result.withUnavailableArtifact()
+                else -> result
             }
             lastTerminalResult = deliverResult(admitted, active.registeredTarget, terminalContents)
         }
@@ -369,13 +414,25 @@ internal class TierEDaemonService(
         } else {
             afterResultDelivery.withTerminalDeliveryFailure()
         }
-        return if (runCatching {
-                terminalReportSink.accept(TierETerminalReport.from(afterCoverageManifest, target, contents))
+        val afterOperationManifest = if (operationManifestSink == null ||
+            (
+                target != null &&
+                runCatching {
+                operationManifestSink?.accept(TierESplitOperationManifest.from(afterCoverageManifest, target))
             }.isSuccess
+            )
         ) {
             afterCoverageManifest
         } else {
             afterCoverageManifest.withTerminalDeliveryFailure()
+        }
+        return if (runCatching {
+                terminalReportSink.accept(TierETerminalReport.from(afterOperationManifest, target, contents))
+            }.isSuccess
+        ) {
+            afterOperationManifest
+        } else {
+            afterOperationManifest.withTerminalDeliveryFailure()
         }
     }
 

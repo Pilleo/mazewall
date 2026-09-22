@@ -1,16 +1,50 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class TierETargetRegistrationTest {
     @TempDir
     lateinit var root: Path
+
+    @Test
+    fun `stale registered incarnation is rejected before engine creation and reported incomplete`() {
+        val target = TierERegisteredTarget(
+            registrationId = "orders",
+            pid = 4242,
+            sessionTag = 0x4d5a,
+            processIncarnation = 9_876L,
+            markerPath = Path.of("/collector/agent/libmazewall_stack_agent.so"),
+            markerOffset = 0x20,
+            artifactFileName = "orders.mzse",
+        )
+        val reports = mutableListOf<TierETerminalReport>()
+        val daemon = TierEDaemonService(
+            stopRequested = AtomicBoolean(false),
+            engineFactory = { error("engine must not be created for stale identity") },
+            artifactResolver = TierEDaemonArtifactResolver(root),
+            registeredTargetResolver = TierETargetRegistrationResolver(mapOf(target.registrationId to target)),
+            processIdentityVerifier = TierEProcessIdentityVerifier { 9_877L },
+            terminalReportSink = TierETerminalReportSink(reports::add),
+        )
+
+        val reply = daemon.executeCommand("ATTACH 4242 uprobe /collector/agent/libmazewall_stack_agent.so 20 4d5a")
+
+        assertTrue(!reply.startsWith("OK"))
+        assertEquals(1, reports.size)
+        assertEquals("STALE_PROCESS_IDENTITY", reports.single().terminalReason)
+        assertEquals(EvidenceIntegrity.INCOMPLETE, reports.single().evidenceIntegrity)
+        assertEquals(false, reports.single().policyEligibility)
+        assertEquals(false, reports.single().lifecycleValidity)
+    }
 
     @Test
     fun `registered target admits only its exact attach command`() {

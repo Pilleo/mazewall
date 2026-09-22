@@ -108,7 +108,9 @@ internal class TierEProcessIdentityVerifier(
 
     public companion object {
         /** Linux /proc starttime is stable for one PID lifetime within the current boot. */
-        public val linux: TierEProcessIdentityVerifier = TierEProcessIdentityVerifier { pid ->
+        public val linux: TierEProcessIdentityVerifier = TierEProcessIdentityVerifier(::observeLinuxIncarnation)
+
+        internal fun observeLinuxIncarnation(pid: Int): Long? =
             runCatching {
                 val stat = Files.readString(Path.of("/proc/$pid/stat"))
                 val closingParenthesis = stat.lastIndexOf(')')
@@ -116,7 +118,6 @@ internal class TierEProcessIdentityVerifier(
                 val fields = stat.substring(closingParenthesis + 1).trim().split(Regex("\\s+"))
                 fields.getOrNull(19)?.toLongOrNull()
             }.getOrNull()
-        }
     }
 }
 
