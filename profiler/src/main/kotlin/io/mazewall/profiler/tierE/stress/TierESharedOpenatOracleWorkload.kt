@@ -56,6 +56,7 @@ internal object TierESharedOpenatOracleWorkload {
         MIXED_CPU_IO("mixed_cpu_io"),
         BURSTY_IO("bursty_io"),
         CALIBRATION_CPU("calibration_cpu"),
+        CALIBRATION_CPU_HEAVY("calibration_cpu_heavy"),
         STACK_DIVERSE("stack_diverse"),
         CLASS_CHURN("class_churn"),
         ;
@@ -66,6 +67,7 @@ internal object TierESharedOpenatOracleWorkload {
                 MIXED_CPU_IO -> 256
                 BURSTY_IO -> if ((operationIndex + 1) % 32 == 0) 8_192 else 0
                 CALIBRATION_CPU -> 1_500_000
+                CALIBRATION_CPU_HEAVY -> 8_000_000
                 STACK_DIVERSE -> 0
                 CLASS_CHURN -> 0
             }

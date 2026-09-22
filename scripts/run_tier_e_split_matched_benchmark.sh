@@ -8,6 +8,7 @@ IMAGE=${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}
 OUT=${TIER_E_SPLIT_MATCHED_OUT:-"${ROOT}/build/tier-e-split-matched"}
 FORKS=${TIER_E_SPLIT_MATCHED_FORKS:-5}
 ITERATIONS=${TIER_E_SPLIT_MATCHED_ITERATIONS:-200}
+PROFILE=${TIER_E_SPLIT_WORKLOAD_PROFILE:-syscall_dense}
 WORKLOAD_CPU=${TIER_E_SPLIT_WORKLOAD_CPU:-0}
 COLLECTOR_CPU=${TIER_E_SPLIT_COLLECTOR_CPU:-1}
 MODES=(baseline dictionary-full-stream dictionary-unique-edge inline-full-stream inline-unique-edge user-notif-no-stack user-notif-stack)
@@ -21,8 +22,8 @@ if [[ -n "${TIER_E_SPLIT_MATCHED_MODES:-}" ]]; then
 fi
 "${ENGINE}" image inspect "${IMAGE}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
 uname -a > "${OUT}/kernel.txt"
-printf '{"schema_version":1,"forks":%s,"warmups":3,"measured_batches":10,"iterations_per_batch":%s,"target_cpu":"%s","collector_cpu":"%s","calibration_target":"unmet","reason":"inline native 64 MiB budget limits shared syscall-dense workload to short batches","policy_eligibility":false}\n' \
-    "${FORKS}" "${ITERATIONS}" "${WORKLOAD_CPU}" "${COLLECTOR_CPU}" > "${OUT}/run-manifest.json"
+printf '{"schema_version":1,"forks":%s,"warmups":3,"measured_batches":10,"iterations_per_batch":%s,"workload_profile":"%s","target_cpu":"%s","collector_cpu":"%s","policy_eligibility":false}\n' \
+    "${FORKS}" "${ITERATIONS}" "${PROFILE}" "${WORKLOAD_CPU}" "${COLLECTOR_CPU}" > "${OUT}/run-manifest.json"
 : > "${OUT}/fork-results.jsonl"
 failures=0
 for ((fork=0; fork<FORKS; fork++)); do
@@ -35,6 +36,7 @@ for ((fork=0; fork<FORKS; fork++)); do
         case "${mode}" in
             baseline|user-notif-no-stack|user-notif-stack)
                 "${ENGINE}" run --rm --user "$(id -u):$(id -g)" --cap-drop ALL --cpuset-cpus "${WORKLOAD_CPU}" \
+                    -e JAVA_TOOL_OPTIONS="-Dmazewall.tier-e.workload-profile=${PROFILE}" \
                     -v "${ROOT}:/workspace:ro" -w /tmp "${IMAGE}" \
                     java --add-opens=java.base/sun.nio.fs=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
                     -cp '/workspace/profiler/build/install/tier-e-daemon/lib/*' \
@@ -48,6 +50,7 @@ for ((fork=0; fork<FORKS; fork++)); do
                 [[ "${mode}" == *unique-edge ]] && emission=unique-stack-syscall
                 TIER_E_SPLIT_REUSE_BUILD=1 TIER_E_SPLIT_BENCHMARK=1 \
                     TIER_E_SPLIT_BENCH_ITERATIONS="${ITERATIONS}" \
+                    TIER_E_SPLIT_WORKLOAD_PROFILE="${PROFILE}" \
                     TIER_E_SPLIT_STACK_TRANSPORT="${transport}" TIER_E_SPLIT_EMISSION_MODE="${emission}" \
                     TIER_E_SPLIT_WORKLOAD_CPU="${WORKLOAD_CPU}" TIER_E_SPLIT_COLLECTOR_CPU="${COLLECTOR_CPU}" \
                     TIER_E_SPLIT_ARTIFACT_DIR="${fork_dir}" \
@@ -85,7 +88,10 @@ done
 node - "${OUT}" "${failures}" <<'NODE'
 const fs=require('fs'),[dir,failures]=process.argv.slice(2);
 const rows=fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-const summary={schema_version:1,forks:rows.length,failed_forks:Number(failures),calibration_target:'unmet',
+const baseline=rows.filter(r=>r.mode==='baseline').flatMap(r=>r.workload_ns).sort((a,b)=>a-b);
+const allDurations=rows.flatMap(r=>r.workload_ns);
+const calibrated=baseline.length>0&&baseline[Math.floor(baseline.length/2)]>=100000000&&allDurations.every(ns=>ns<=15000000000);
+const summary={schema_version:1,forks:rows.length,failed_forks:Number(failures),calibration_target:calibrated?'met':'unmet',
   modes:Object.fromEntries([...new Set(rows.map(r=>r.mode))].map(mode=>{
     const group=rows.filter(r=>r.mode===mode),values=group.flatMap(r=>r.workload_ns).sort((a,b)=>a-b);
     return [mode,{forks:group.length,complete_forks:group.filter(r=>r.status===0&&r.measured_batch_count===10&&

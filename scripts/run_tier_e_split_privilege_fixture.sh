@@ -154,6 +154,7 @@ fi
     -e TIER_E_MARKER_OFFSET="${MARKER_OFFSET}" \
     -e TIER_E_COVERAGE_OPERATIONS="${SPLIT_COVERAGE_OPERATIONS}" \
     -e TIER_E_COVERAGE_SEED="${TIER_E_COVERAGE_SEED:-23063}" \
+    -e JAVA_TOOL_OPTIONS="-Dmazewall.tier-e.workload-profile=${TIER_E_SPLIT_WORKLOAD_PROFILE:-syscall_dense}" \
     -e TIER_E_SPLIT_EMISSION_MODE="${SPLIT_EMISSION_MODE}" \
     -e TIER_E_AGENT_OPTIONS="${agent_options}" \
     -e TIER_E_TARGET_CLASS="${target_class}" -e TIER_E_TARGET_CLASSPATH="${target_classpath}" -e TIER_E_TARGET_ARGS="${target_args}" \

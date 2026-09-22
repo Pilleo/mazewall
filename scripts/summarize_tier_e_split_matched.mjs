@@ -42,7 +42,11 @@ for (const mode of [...new Set(rows.map(row => row.mode))]) {
     runtime_overhead_verdict: 'UNVERIFIED',
   };
 }
-const result = {schema_version: 1, calibration_target: 'unmet', bootstrap_resamples: 10000,
+const baselineBatches = rows.filter(row => row.mode === 'baseline').flatMap(row => row.workload_ns);
+const allBatches = rows.flatMap(row => row.workload_ns);
+const calibrationTarget = baselineBatches.length && median(baselineBatches) >= 100000000 &&
+  allBatches.every(value => value <= 15000000000) ? 'met' : 'unmet';
+const result = {schema_version: 1, calibration_target: calibrationTarget, bootstrap_resamples: 10000,
   paired_unit: 'fork median of ten measured batches', modes, policy_eligibility: false};
 fs.writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`);
 console.log(JSON.stringify(result));
