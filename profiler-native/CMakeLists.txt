@@ -94,10 +94,10 @@ add_test(NAME lifecycle_barrier_test COMMAND lifecycle_barrier_test)
 
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
-    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class"
+    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${AGENT_TEST_CLASSES}"
-    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java"
+    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java"
     VERBATIM
 )
 add_custom_command(
@@ -112,7 +112,15 @@ add_custom_command(
     DEPENDS "${AGENT_TEST_CLASSES}/RedefinitionAgent.class" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf"
     VERBATIM
 )
-add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
+add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
+add_test(
+    NAME agent_native_outcome_preservation
+    COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED"
+        "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-profile=jdk25-unix-openat0,force-capture-failure-once"
+        -cp "${AGENT_TEST_CLASSES}" NativeOutcomeWorkload
+)
+set_tests_properties(agent_native_outcome_preservation PROPERTIES
+    PASS_REGULAR_EXPRESSION "native-outcome-workload: return=preserved exception=preserved errno=2")
 add_test(
     NAME agent_smoke_test
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" AgentWorkload
