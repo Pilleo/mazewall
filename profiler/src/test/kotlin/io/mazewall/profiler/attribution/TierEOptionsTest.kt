@@ -35,7 +35,30 @@ class TierEOptionsTest {
         }
         assertEquals(
             CoverageRecoveryMode.SHADOW,
-            TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.SHADOW).coverageRecoveryMode,
+            TierEOptions(
+                benchmarkPhases = true,
+                markerVersion = MarkerVersion.V2,
+                coverageRecoveryMode = CoverageRecoveryMode.SHADOW,
+            ).coverageRecoveryMode,
+        )
+    }
+
+    @Test
+    fun `marker v1 is the default and v2 requires recovery`() {
+        assertEquals(MarkerVersion.V1, TierEOptions().markerVersion)
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            TierEOptions(markerVersion = MarkerVersion.V2)
+        }
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.SHADOW)
+        }
+        assertEquals(
+            MarkerVersion.V2,
+            TierEOptions(
+                benchmarkPhases = true,
+                markerVersion = MarkerVersion.V2,
+                coverageRecoveryMode = CoverageRecoveryMode.SHADOW,
+            ).markerVersion,
         )
     }
 

@@ -6,5 +6,7 @@ int main(int argc, char** argv) {
     if (library == nullptr) return 2;
     const auto marker = dlsym(library, "mazewall_stack_marker");
     if (marker == nullptr) return 3;
+    const auto marker_v2 = dlsym(library, "mazewall_stack_marker_v2");
+    if (marker_v2 == nullptr) return 4;
     dlclose(library);
 }

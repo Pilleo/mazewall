@@ -40,12 +40,17 @@ internal object UsdtProbeNotes {
     private const val SHT_NOTE = 7
     private const val NT_STAPSDT = 3
     private const val MAX_LIBRARY_BYTES = 64 * 1024 * 1024L
-    private const val EXPECTED_ARGUMENTS = "8@%rdi 4@%esi"
+    private const val EXPECTED_ARGUMENTS_V1 = "8@%rdi 4@%esi"
+    private const val EXPECTED_ARGUMENTS_V2 = "8@%rdi 8@%rsi 4@%edx"
     private const val STACK_MARKER_PROVIDER = "mazewall"
     private const val STACK_MARKER_V1 = "stack_marker_v1"
+    private const val STACK_MARKER_V2 = "stack_marker_v2"
 
     /** Finds the one versioned native marker ABI consumed by the Tier E BPF program. */
     fun findStackMarkerV1(library: Path): UsdtProbeNote = find(library, STACK_MARKER_PROVIDER, STACK_MARKER_V1)
+
+    /** Finds the v2 marker carrying `(invocationId, stackTraceId, flags)`. */
+    fun findStackMarkerV2(library: Path): UsdtProbeNote = find(library, STACK_MARKER_PROVIDER, STACK_MARKER_V2)
 
     fun find(
         library: Path,
@@ -175,7 +180,11 @@ internal object UsdtProbeNotes {
         val arguments = nulString(image, cursor, descriptorEnd, "stapsdt arguments").value
         if (provider != expectedProvider || probe != expectedProbe) return null
         require(semaphore == 0uL) { "USDT marker semaphore is unsupported" }
-        require(arguments == EXPECTED_ARGUMENTS) { "unsupported USDT marker argument contract: $arguments" }
+        val expectedArguments = when (probe) {
+            STACK_MARKER_V2 -> EXPECTED_ARGUMENTS_V2
+            else -> EXPECTED_ARGUMENTS_V1
+        }
+        require(arguments == expectedArguments) { "unsupported USDT marker argument contract: $arguments" }
         val fileOffset = loads.firstNotNullOfOrNull { load -> load.fileOffsetFor(location) }
             ?: throw IllegalArgumentException("USDT marker location is not mapped by a PT_LOAD segment")
         return UsdtProbeNote(provider, probe, arguments, location, fileOffset, semaphore)

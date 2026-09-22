@@ -51,5 +51,32 @@ the default. `policy_eligibility=false` throughout.
 - No ring suppression, no promise of lower producer CPU.
 - No default promotion without separate decision.
 
+**Implementation progress (2026-09-22, host-verified, not qualified):**
+- Stages 1–4 implemented behind experimental gates with focused host tests green
+  (`TierEOptionsTest`, `CoverageCandidateTest`, `CoverageRecoveryValidatorTest`,
+  `RecoveredEdgeLedgerTest`, `CoverageRecoveryScannerTest`,
+  `TierECoverageRecoveryFixtureTest`, `TierEBpfProgramBuilderTest`,
+  `UsdtProbeNoteTest`, `MarkerTransportSelectionTest`,
+  `TierETerminalReportFileSinkTest`; native `invocation_registry_test`,
+  `marker_export_test`, `usdt_marker_note_test`).
+- Decisive fixture passes at unit level: a deliberately ring-dropped singleton is
+  resolved, acknowledged, and covered with the ring verdict incomplete; SHADOW
+  compares without committing.
+- Normative design records the experimental status at
+  `docs/internals/designs/profiler/tier-e-design.md` §2.1.0.
+
+**Remaining before any adoption decision:**
+- Stage 5 measurement: terminal vs 100 ms live snapshot comparison with the new
+  pending-candidate consumer; incremental transport stays deferred per the
+  existing decision record unless a reopen trigger fires.
+- Stage 6 rootful qualification: correctness smoke, five rotated forks, fifteen
+  paired decision forks across v1-ring/v2-ring/v2-hybrid, 72-path oracle,
+  capacity/over-capacity workloads, and the controlled ring-drop fault fixture.
+  Exact commands: `bash scripts/run_tier_e_split_matched_benchmark.sh`,
+  `bash scripts/run_tier_e_split_coverage_matrix.sh`,
+  `./gradlew :profiler:test`, `ctest --test-dir /tmp/jseccomp-profiler-native-build`.
+- A production `benchmark-phases` split-topology export for receipt p50/p95/p99
+  and publication CPU is still pending; split fork rows retain explicit nulls.
+
 ---
 <!-- id: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas  file: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas.md -->

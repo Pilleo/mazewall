@@ -519,6 +519,49 @@ and terminal closure requires both producer quiescence and acknowledged dependen
 output. The current independent oracle must demonstrate better rare-path recovery before this
 additional protocol is considered. Collector-owned acknowledgement remains authoritative.
 
+### 2.1.0 Hybrid coverage recovery (experimental implementation, 2026-09-22)
+
+> **Status: Experimental implementation, host-verified only. Not qualified.**
+> Rootful qualification (correctness smoke, five rotated forks, fifteen paired
+> decision forks, fault fixtures, capacity workloads) is pending. No default
+> change. Dictionary/full-stream remains the default. `policy_eligibility=false`.
+
+An opt-in hybrid mode preserves an exact stack/syscall edge in a bounded kernel
+map when its ring event cannot be delivered. The ring stream is unchanged:
+every ring event is still attempted exactly as today, and recovery never
+suppresses kernel events or promises lower producer CPU.
+
+- **Marker v2.** `mazewall_stack_marker_v2(invocation_id, stack_trace_id, flags)`
+  with a versioned `stack_marker_v2` USDT probe (`8@%rdi 8@%rsi 4@%edx`).
+  One marker version is selected per session (`TierEOptions.markerVersion`,
+  default `V1`; daemon `TIER_E_MARKER_VERSION=v1|v2`, fail-closed on unknown).
+  The native scope carries the canonical stack id for nested return and
+  validated re-entry; both identities are cleared before profiler JVM work,
+  callback suppression, capture failure, detach, and exec invalidation.
+- **32-byte task storage.** The v2 value adds `stack_trace_id u64 @24` behind a
+  distinct `mazewall_invocation_state_v2` BTF type. The 88-byte ring record is
+  unchanged. Disabled sessions keep the existing 24-byte layout and program.
+- **Bounded retained-edge map.** One ordinary non-LRU hash per experimental
+  session, default 4,096 entries, keyed by session tag, canonical stack id,
+  syscall number, and capture flags. The 88-byte value mirrors the ring record.
+  Insertion runs after exact admission and before ring reservation with
+  insert-if-absent semantics; other failures increment an explicit counter.
+  No eviction or deletion exists during the session.
+- **Scanning.** Caller-driven, no threads: live sweeps start every 100 ms and
+  read at most 256 entries per batch behind the serialized collector boundary.
+  The exclusive final scan runs after producer quiescence and ring drain.
+- **Validation and acknowledgement.** Candidates become immutable
+  `CoverageCandidate` records validated against session, process incarnation,
+  and dictionary definitions without replaying task state. Ring-derived and
+  map-derived coverage share collector-owned acknowledgement: `SHADOW` compares
+  without committing, `RECOVER` commits only after retained-output retention.
+  Full-stream ring events are never suppressed by map acknowledgement.
+- **Evidence.** Additive `recovery_evidence` in session integrity and the
+  terminal report: capacity, entries, insertion failures, pending candidates,
+  recovered edges, acknowledgement retries, scan batches/latency, discovery
+  source, and dependency-relative latency. Ring transport and event-history
+  verdicts stay authoritative; a recovered singleton keeps them incomplete.
+
 The userspace collector treats a resolved unique edge as an **emission candidate**, not as an
 already emitted record. The candidate has three legal states: `CANDIDATE` (eligible for output),
 `RETRYABLE` (the downstream sink rejected or did not retain it), and `ACKNOWLEDGED` (the sink

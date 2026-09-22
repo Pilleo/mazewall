@@ -42,6 +42,8 @@ int main(int argc, char** argv) {
     const bool has_provider = contains(image, "mazewall");
     const bool has_probe = contains(image, "stack_marker_v1");
     const bool has_arguments = contains(image, "8@%rdi 4@%esi");
+    const bool has_probe_v2 = contains(image, "stack_marker_v2");
+    const bool has_arguments_v2 = contains(image, "8@%rdi 8@%rsi 4@%edx");
     if (!enabled) return has_note_name ? EXIT_FAILURE : EXIT_SUCCESS;
-    return (has_note_name && has_provider && has_probe && has_arguments) ? EXIT_SUCCESS : EXIT_FAILURE;
+    return (has_note_name && has_provider && has_probe && has_arguments && has_probe_v2 && has_arguments_v2) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

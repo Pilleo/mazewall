@@ -1,0 +1,156 @@
+package io.mazewall.profiler.internal.attribution
+
+import io.mazewall.profiler.tierE.daemon.UsdtProbeNote
+import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.file.Path
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * Controlled fault fixture: a singleton edge is retained in the bounded kernel
+ * map, its ring delivery is deliberately lost, and the collector must still
+ * resolve, acknowledge, and cover it while ring transport stays incomplete.
+ */
+class TierECoverageRecoveryFixtureTest {
+    private val sessionTag = 0x4d5a
+    private val stackId = StackTraceId(7)
+    private val invocationId = InvocationId(55)
+
+    private fun recoveryEntry(): RecoveryMapEntry {
+        val key = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+        key
+            .putInt(sessionTag)
+            .putInt(7)
+            .putInt(257)
+            .putInt(0)
+        val value = ByteBuffer.allocate(88).order(ByteOrder.LITTLE_ENDIAN)
+        value
+            .putLong(999L)
+            .putInt(100)
+            .putInt(101)
+            .putInt(257)
+            .putInt(0)
+        value.putLong(55L).putLong(2L)
+        listOf(-100L, 1L, 2L, 3L, 4L, 5L).forEach(value::putLong)
+        return RecoveryMapEntry(key.array(), value.array())
+    }
+
+    private fun definitions() =
+        AgentDefinitionFile.Contents(
+            listOf(StackDefinition(stackId, emptyList(), StackCaptureQuality.COMPLETE)),
+            listOf(
+                InvocationDefinition(
+                    invocationId = invocationId,
+                    parentInvocationId = null,
+                    stackTraceId = stackId,
+                    captureFailure = null,
+                    executionContext = null,
+                ),
+            ),
+            0,
+        )
+
+    private class FaultSource(
+        val entry: RecoveryMapEntry,
+    ) : TierEEventSource {
+        var scans = 0
+
+        override fun install(
+            targetPid: Int,
+            sessionTag: Int,
+            options: TierEOptions,
+        ) = Unit
+
+        override fun attachMarker(
+            targetPid: Int,
+            agentLibrary: Path,
+            markerOffset: Long,
+        ) = Unit
+
+        override fun detachMarker() = Unit
+
+        override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = true
+
+        // The singleton ring event never arrives: forced delivery loss.
+        override fun drainEvents(): List<SyscallInvocationEvent> = emptyList()
+
+        override fun readLossCount(): Long = 1
+
+        override fun readMarkerFailureCount(): Long = 0
+
+        override fun readMarkerTransitionCount(): Long = 0
+
+        override fun readLastMarkerPidTgid(): Long = 0
+
+        override fun readRecoveryInsertionFailureCount(): Long = 0
+
+        override fun recoveryReader(): RecoveryMapReader? =
+            RecoveryMapReader { _, _ ->
+                scans++
+                RecoveryScanPage(listOf(entry), null, complete = true)
+            }
+
+        override fun close() = Unit
+    }
+
+    private fun session(
+        mode: CoverageRecoveryMode,
+        source: FaultSource,
+    ) = TierEProfilerSession(
+        source = source,
+        processEpoch = 999,
+        options = TierEOptions(
+            benchmarkPhases = true,
+            markerVersion = MarkerVersion.V2,
+            coverageRecoveryMode = mode,
+        ),
+        definitionReader = { definitions() },
+    )
+
+    @Test
+    fun `deliberately ring dropped singleton is recovered with incomplete ring verdict`() {
+        val source = FaultSource(recoveryEntry())
+        val session = session(CoverageRecoveryMode.RECOVER, source)
+        session.installAndAttach(100, sessionTag, Path.of("ignored"), 0)
+
+        session.poll()
+        val profile = session.finish(Path.of("ignored"), producerClosed = true)
+
+        // No ring event was fabricated: the ring stream stays empty and lossy.
+        assertEquals(0, profile.syscalls.size)
+        assertEquals(1, profile.integrity.observedLosses)
+
+        val evidence = profile.integrity.recoveryEvidence
+        assertEquals(optionsCapacity(), evidence.mapCapacity)
+        assertTrue(evidence.entriesObserved >= 1)
+        assertEquals(0, evidence.insertionFailures)
+        assertEquals(0, evidence.pendingCandidates)
+        assertEquals(1, evidence.recoveredEdges)
+        assertEquals(1, evidence.mapFirstAcknowledgedEdges)
+        assertTrue(evidence.lastRecoveryLatencyNanos >= 0)
+        assertTrue(evidence.maxRecoveryLatencyNanos >= evidence.lastRecoveryLatencyNanos)
+        assertTrue(session.recoveryComplete())
+    }
+
+    @Test
+    fun `shadow resolves without committing recovered coverage`() {
+        val source = FaultSource(recoveryEntry())
+        val session = session(CoverageRecoveryMode.SHADOW, source)
+        session.installAndAttach(100, sessionTag, Path.of("ignored"), 0)
+
+        session.poll()
+        val profile = session.finish(Path.of("ignored"), producerClosed = true)
+
+        assertEquals(0, profile.syscalls.size)
+        val evidence = profile.integrity.recoveryEvidence
+        assertTrue(evidence.entriesObserved >= 1)
+        assertEquals(0, evidence.recoveredEdges)
+        assertEquals(0, evidence.mapFirstAcknowledgedEdges)
+        assertTrue(session.recoveryComplete())
+    }
+
+    private fun optionsCapacity(): Int = CoverageRecoveryMode.DEFAULT_MAP_CAPACITY
+}

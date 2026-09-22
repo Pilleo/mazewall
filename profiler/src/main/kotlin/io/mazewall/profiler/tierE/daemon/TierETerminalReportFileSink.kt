@@ -65,5 +65,18 @@ internal fun TierETerminalReport.toJson(): String {
         """"transport_completeness":$transportCompleteness,"attribution_coverage":$attributionCoverage,""" +
         """"dictionary_integrity":$dictionaryIntegrity,"lifecycle_validity":$lifecycleValidity,""" +
         """"failed_dimensions":$failedDimensions,""" +
+        """"recovery_evidence":{"map_capacity":${recoveryEvidence.mapCapacity},""" +
+        """"entries_observed":${recoveryEvidence.entriesObserved},""" +
+        """"insertion_failures":${recoveryEvidence.insertionFailures},""" +
+        """"pending_candidates":${recoveryEvidence.pendingCandidates},""" +
+        """"recovered_edges":${recoveryEvidence.recoveredEdges},""" +
+        """"acknowledgement_retries":${recoveryEvidence.acknowledgementRetries},""" +
+        """"scan_batches":${recoveryEvidence.scanBatches},""" +
+        """"overdue_sweeps":${recoveryEvidence.overdueSweeps},""" +
+        """"last_scan_latency_ns":${recoveryEvidence.lastScanLatencyNanos},""" +
+        """"map_first_acknowledged_edges":${recoveryEvidence.mapFirstAcknowledgedEdges},""" +
+        """"confirmed_ring_loss_recoveries":${recoveryEvidence.confirmedRingLossRecoveries},""" +
+        """"last_recovery_latency_ns":${recoveryEvidence.lastRecoveryLatencyNanos},""" +
+        """"max_recovery_latency_ns":${recoveryEvidence.maxRecoveryLatencyNanos}},""" +
         """"policy_eligibility":false}"""
 }

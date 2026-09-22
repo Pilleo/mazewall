@@ -88,6 +88,26 @@ class TierETerminalReportFileSinkTest {
         assertTrue(json.contains("\"policy_eligibility\":false"))
     }
 
+    @Test
+    fun `terminal report carries additive recovery evidence without touching ring verdicts`() {
+        val root = Files.createTempDirectory("tier-e-report")
+
+        TierETerminalReportFileSink(root).accept(
+            report("orders").copy(
+                recoveryEvidence = io.mazewall.profiler.internal.attribution.CoverageRecoveryEvidence(
+                    mapCapacity = 4096,
+                    recoveredEdges = 1,
+                    mapFirstAcknowledgedEdges = 1,
+                ),
+            ),
+        )
+
+        val json = root.resolve("orders-19802.tier-e.json").readText()
+        assertTrue(json.contains("\"recovery_evidence\":{\"map_capacity\":4096"))
+        assertTrue(json.contains("\"recovered_edges\":1"))
+        assertTrue(json.contains("\"policy_eligibility\":false"))
+    }
+
     private fun report(registrationId: String) =
         TierETerminalReport(
         evidenceIntegrity = EvidenceIntegrity.COMPLETE,

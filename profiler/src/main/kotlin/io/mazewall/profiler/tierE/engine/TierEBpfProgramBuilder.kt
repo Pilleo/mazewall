@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.engine
 
 import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
+import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -46,6 +47,9 @@ internal object TierEBpfProgramBuilder {
     private const val RAW_AUDIT_WRONG_TARGET_OFFSET: Int = TierEbpfEngine.RawSysEnterAuditCount.WRONG_TARGET_OFFSET
     private const val IN_FLIGHT_MAP_INDEX: Int = 6
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
+    private const val RECOVERY_MAP_INDEX: Int = 8
+    private const val BPF_NOEXIST: Int = 1
+    internal const val RECOVERY_INSERTION_FAILURE_COUNTER_INDEX: Int = 12
     private const val EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.HANDLER_ENTERED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_SESSION_MATCHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.SESSION_MATCHED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.IN_FLIGHT_ADMITTED_OFFSET
@@ -276,8 +280,10 @@ internal object TierEBpfProgramBuilder {
         options: TierEOptions,
         rawTracepoint: Boolean,
     ): List<Insn> {
-        require(options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
-            "coverage recovery map producer not yet implemented"
+        if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
+            require(options.markerVersion == MarkerVersion.V2) {
+                "coverage recovery requires marker v2"
+            }
         }
         val p = mutableListOf<Insn>()
         val kernelCoverageMode =
@@ -319,6 +325,68 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(MOV_IMM, dst = 2, imm = 8))
             emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+        }
+
+        fun emitRecoveryEdgeInsert() {
+            // Key (16B at FP-272): session_tag u32 @-272, stack u32 @-268,
+            // syscall s32 @-264, flags u32 @-260. The map handle is already
+            // session-bound; the tag binds the key to the admitting session.
+            // Value (88B at FP-256) mirrors the 88-byte ring record so a
+            // retained representative carries identical observed scalars.
+            loadSyscallNumber()
+            emit(Insn(STX_W, dst = FP, src = 5, off = -264))
+            emit(Insn(LDX_W, dst = 5, src = 7, off = 0))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -272))
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -32))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -268))
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -260))
+            emit(Insn(CALL, imm = H_KTIME))
+            emit(Insn(STX_DW, dst = FP, src = 0, off = -256))
+            emit(Insn(MOV_REG, dst = 5, src = 8))
+            emit(Insn(RSH_IMM, dst = 5, imm = 32))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -248))
+            emit(Insn(STX_W, dst = FP, src = 8, off = -244))
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -264))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -240))
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -260))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -236))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -232))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -224))
+            repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
+                loadArgument(index)
+                emit(Insn(STX_DW, dst = FP, src = 5, off = (-216 + index * 8).toShort()))
+            }
+            ldMap(1, RECOVERY_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -272))
+            emit(Insn(MOV_REG, dst = 3, src = FP))
+            emit(Insn(ADD_IMM, dst = 3, imm = -256))
+            emit(Insn(MOV_IMM, dst = 4, imm = BPF_NOEXIST))
+            emit(Insn(CALL, imm = H_UPDATE))
+            val inserted = emit(Insn(JEQ_IMM, dst = 0))
+            // BPF_NOEXIST returns -EEXIST (17) when the edge was already
+            // retained. That is normal repetition, not a failure.
+            emit(Insn(MOV_REG, dst = 5, src = 0))
+            emit(Insn(ADD_IMM, dst = 5, imm = 17))
+            val alreadyRetained = emit(Insn(JEQ_IMM, dst = 5))
+            // Other failures are explicit: count them and continue to the
+            // ring attempt exactly as today. Ring delivery is unchanged.
+            emit(Insn(MOV_IMM, dst = 5, imm = RECOVERY_INSERTION_FAILURE_COUNTER_INDEX))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+            ldMap(1, COUNTER_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -4))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missingFailureCounter = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            val recoveryDone = p.size
+            p[inserted] = p[inserted].copy(off = (recoveryDone - inserted - 1).toShort())
+            p[alreadyRetained] = p[alreadyRetained].copy(off = (recoveryDone - alreadyRetained - 1).toShort())
+            p[missingFailureCounter] = p[missingFailureCounter].copy(off = (recoveryDone - missingFailureCounter - 1).toShort())
         }
 
         fun emitAuditFailureCounter(counterIndex: Int) {
@@ -464,6 +532,13 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(LDX_W, dst = 4, src = FP, off = -36))
         val staleAttachmentGeneration = emit(Insn(JNE_REG, dst = 5, src = 4))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_GENERATION_VALIDATED_OFFSET)
+        if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
+            // Preserve canonical stack identity for the retained-edge key.
+            // Task storage holds the v2 32-byte layout; offset 24 is valid
+            // only after the v2 marker program installed the wider value.
+            emit(Insn(LDX_W, dst = 5, src = 6, off = 24))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -32))
+        }
 
         // Diagnostic counts are keyed by active invocation, bounded by the
         // map's LRU capacity, and never participate in attribution.
@@ -608,6 +683,9 @@ internal object TierEBpfProgramBuilder {
         p[missingExactAdmissionCounter] = p[missingExactAdmissionCounter].copy(off = (reserveStart - missingExactAdmissionCounter - 1).toShort())
         p[newMetricContext] = p[newMetricContext].copy(off = (metricInsert - newMetricContext - 1).toShort())
         p[metricCounted] = p[metricCounted].copy(off = (metricDone - metricCounted - 1).toShort())
+        if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
+            emitRecoveryEdgeInsert()
+        }
         val reservationFailed: Int?
         var submitted: Int? = null
         if (options.ringSubmissionMode == TierERingSubmissionMode.BENCHMARK_DISABLED) {
@@ -852,7 +930,9 @@ internal object TierEBpfProgramBuilder {
     /**
      * Builds the x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`.
      */
-    public fun buildMarkerProgram(): List<Insn> {
+    public fun buildMarkerProgram(): List<Insn> = buildMarkerProgram(TierEOptions())
+
+    public fun buildMarkerProgram(options: TierEOptions): List<Insn> {
         val program = mutableListOf<Insn>()
 
         fun emit(instruction: Insn): Int {
@@ -886,6 +966,10 @@ internal object TierEBpfProgramBuilder {
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
         emit(Insn(LDX_DW, dst = 7, src = 9, off = 112)) // pt_regs.di
         emit(Insn(LDX_DW, dst = 8, src = 9, off = 104)) // pt_regs.si
+        if (options.markerVersion == MarkerVersion.V2) {
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 96)) // pt_regs.dx (stack_trace_id)
+            emit(Insn(STX_DW, dst = FP, src = 3, off = -48))
+        }
         val clearMarker = emit(Insn(JEQ_IMM, dst = 7))
         emit(Insn(MOV_REG, dst = 5, src = 7))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
@@ -941,6 +1025,10 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_W, dst = 0, src = 8, off = 16))
         emit(Insn(LDX_W, dst = 5, src = FP, off = -44))
         emit(Insn(STX_W, dst = 0, src = 5, off = 20))
+        if (options.markerVersion == MarkerVersion.V2) {
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -48))
+            emit(Insn(STX_DW, dst = 0, src = 5, off = 24))
+        }
         val markerStored = emit(Insn(JA))
         val markerFailureHandler = program.size
         emit(Insn(MOV_IMM, dst = 5, imm = 3))
@@ -975,7 +1063,9 @@ internal object TierEBpfProgramBuilder {
      * This attaches to `sched_process_exec`, rather than execve entry: failed exec attempts
      * retain the original image and may safely continue their active native scope.
      */
-    public fun buildProcessExecProgram(): List<Insn> {
+    public fun buildProcessExecProgram(): List<Insn> = buildProcessExecProgram(TierEOptions())
+
+    public fun buildProcessExecProgram(options: TierEOptions): List<Insn> {
         val program = mutableListOf<Insn>()
 
         fun emit(instruction: Insn): Int {
@@ -1018,6 +1108,9 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_DW, dst = 0, src = 5, off = 8))
         emit(Insn(STX_W, dst = 0, src = 5, off = 16))
         emit(Insn(STX_W, dst = 0, src = 5, off = 20))
+        if (options.markerVersion == MarkerVersion.V2) {
+            emit(Insn(STX_DW, dst = 0, src = 5, off = 24))
+        }
         emit(Insn(MOV_IMM, dst = 0, imm = 0))
         emit(Insn(EXIT))
         val exit = program.lastIndex

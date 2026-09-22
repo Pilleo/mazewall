@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
+import io.mazewall.profiler.internal.attribution.CoverageRecoveryEvidence
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.ResolutionStatus
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
@@ -23,6 +24,8 @@ internal data class TierETerminalReport(
     val artifactByteLength: Long? = null,
     val artifactSha256: String? = null,
     val policyEligibility: Boolean = false,
+    /** Bounded retained-edge recovery accounting; ring verdicts stay authoritative. */
+    val recoveryEvidence: CoverageRecoveryEvidence = CoverageRecoveryEvidence(),
 ) {
     companion object {
         fun from(
@@ -46,6 +49,7 @@ internal data class TierETerminalReport(
                 processIncarnation = target?.processIncarnation,
                 artifactByteLength = contents?.sourceByteLength,
                 artifactSha256 = contents?.sourceSha256,
+                recoveryEvidence = result.profile.integrity.recoveryEvidence,
             )
         }
 

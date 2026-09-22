@@ -116,6 +116,8 @@ internal data class SessionIntegrity(
     val publicationMetrics: SnapshotPublicationMetrics = SnapshotPublicationMetrics(),
     /** Terminal native-to-kernel accounting; diagnostic until a workload supplies an independent denominator. */
     val reconciliation: TierEReconciliation = TierEReconciliation(),
+    /** Bounded retained-edge recovery accounting; ring transport verdicts stay authoritative. */
+    val recoveryEvidence: CoverageRecoveryEvidence = CoverageRecoveryEvidence(),
 ) {
     public val evidenceIntegrity: EvidenceIntegrity
         get() = when {
@@ -256,6 +258,27 @@ internal class AttributionCollector(
 
     /** Separates bounded pending-observation admission failures for benchmark evidence. */
     internal fun pendingObservationDropMetrics(): PendingObservationDropMetrics = PendingObservationDropMetrics(pendingObservationBudgetDrops, pendingObservationQueueDrops)
+
+    /**
+     * Validates a retained-edge candidate against the immutable dictionary without
+     * touching replay state. The caller owns acknowledgement and coverage accounting.
+     */
+    internal fun validateCoverageCandidate(
+        candidate: CoverageCandidate,
+        sessionEpoch: SessionEpoch,
+        processIncarnation: ProcessIncarnation,
+    ): CoverageRecoveryValidator.Result = CoverageRecoveryValidator.validate(candidate, sessionEpoch, processIncarnation, dictionaryJoiner)
+
+    /** Reports whether the ring path already acknowledged an edge (unique-edge only). */
+    internal fun isEdgeAcknowledged(edge: UniqueEdgeGate.Edge): Boolean {
+        if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL) return false
+        return !uniqueEdgeGate.canEmit(edge)
+    }
+
+    /** Publishes bounded recovery accounting without touching event-history verdicts. */
+    internal fun recordRecoveryEvidence(evidence: CoverageRecoveryEvidence) {
+        integrityAccumulator.recordRecoveryEvidence(evidence)
+    }
 
     /** Immutable IDs whose observations still require a terminal invocation definition. */
     internal fun pendingInvocationIds(): Set<InvocationId> = dictionaryJoiner.pendingInvocationIds()

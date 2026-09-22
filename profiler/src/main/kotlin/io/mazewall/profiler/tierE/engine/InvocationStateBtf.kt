@@ -14,6 +14,8 @@ internal object InvocationStateBtf {
 
     fun invocationStateTypeId(): Int = findStructTypeId(load(), "mazewall_invocation_state")
 
+    fun invocationStateV2TypeId(): Int = findStructTypeId(load(), "mazewall_invocation_state_v2")
+
     fun taskStorageKeyTypeId(): Int = findTypeId(load(), "int", BTF_KIND_INT)
 
     fun findStructTypeId(

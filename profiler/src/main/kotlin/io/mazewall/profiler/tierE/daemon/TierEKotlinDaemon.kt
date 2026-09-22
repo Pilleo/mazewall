@@ -5,6 +5,7 @@ package io.mazewall.profiler.tierE.daemon
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
+import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntime
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
@@ -168,6 +169,7 @@ internal class TierEDaemonService(
     private val operationManifestSink: TierESplitOperationManifestFileSink? = null,
     private val benchmarkRecordLimit: Int? = null,
     private val benchmarkMode: Boolean = false,
+    private val markerVersion: MarkerVersion = markerVersionFromEnvironment(),
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -244,13 +246,21 @@ internal class TierEDaemonService(
                             cmd.emissionMode,
                             maxPendingRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
                             maxRetainedRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
+                            benchmarkPhases = markerVersion == MarkerVersion.V2,
+                            markerVersion = markerVersion,
                         ),
                         configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
                     )
                     runtime = TierECollectorRuntime(session)
                     val markerPath = attachment.markerPath
-                    val selection = selectMarkerTransport(cmd.mode) {
-                        UsdtProbeNotes.findStackMarkerV1(markerPath)
+                    val selection = if (markerVersion == MarkerVersion.V2) {
+                        selectMarkerTransport(cmd.mode) {
+                            UsdtProbeNotes.findStackMarkerV2(markerPath)
+                        }
+                    } else {
+                        selectMarkerTransport(cmd.mode) {
+                            UsdtProbeNotes.findStackMarkerV1(markerPath)
+                        }
                     }
                     session.installAndAttach(
                         attachment.session.pid,
@@ -497,3 +507,10 @@ internal fun terminalClosure(
 private fun runningAsRoot(): Boolean =
     (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Number)?.toLong() == 0L ||
         System.getProperty("user.name") == "root"
+
+internal fun markerVersionFromEnvironment(env: Map<String, String> = System.getenv()): MarkerVersion =
+    when (env["TIER_E_MARKER_VERSION"]) {
+        null, "", "v1" -> MarkerVersion.V1
+        "v2" -> MarkerVersion.V2
+        else -> error("TIER_E_MARKER_VERSION must be v1 or v2")
+    }

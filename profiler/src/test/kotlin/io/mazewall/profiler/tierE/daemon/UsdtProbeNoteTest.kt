@@ -78,6 +78,29 @@ class UsdtProbeNoteTest {
     }
 
     @Test
+    fun `find stack marker v2 admits the three argument ABI`() {
+        val library = writeFixture(
+            stapsdtNote(probe = "stack_marker_v2", arguments = "8@%rdi 8@%rsi 4@%edx"),
+        )
+
+        val note = UsdtProbeNotes.findStackMarkerV2(library)
+
+        assertEquals("8@%rdi 8@%rsi 4@%edx", note.arguments)
+        assertEquals(0x180L, note.fileOffset)
+    }
+
+    @Test
+    fun `find stack marker v2 rejects v1 argument contract`() {
+        val library = writeFixture(
+            stapsdtNote(probe = "stack_marker_v2", arguments = "8@%rdi 4@%esi"),
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            UsdtProbeNotes.findStackMarkerV2(library)
+        }
+    }
+
+    @Test
     fun `validated note rejects a caller supplied offset that is not its probe site`() {
         val library = writeFixture(stapsdtNote())
         val note = UsdtProbeNotes.findStackMarkerV1(library)

@@ -4,6 +4,7 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
+import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -22,6 +23,38 @@ class TierEBpfProgramBuilderTest {
         assertTrue(program.isNotEmpty())
         assertEquals(0x95, program.last().code, "Program must end with EXIT opcode")
         assertTrue(program.size > 20, "Marker program should have instructions for map lookups and marker store")
+    }
+
+    @Test
+    fun `marker v1 preserves existing task storage layout`() {
+        val v1 = TierEBpfProgramBuilder.buildMarkerProgram(TierEOptions())
+        val default = TierEBpfProgramBuilder.buildMarkerProgram()
+        assertEquals(default.size, v1.size)
+        assertTrue(v1.none { it.code == 0x79 && it.off == 96.toShort() })
+    }
+
+    @Test
+    fun `marker v2 carries canonical stack identity in 32 byte task storage`() {
+        val v2 = TierEBpfProgramBuilder.buildMarkerProgram(
+            TierEOptions(benchmarkPhases = true, markerVersion = MarkerVersion.V2),
+        )
+        val v1 = TierEBpfProgramBuilder.buildMarkerProgram(TierEOptions())
+        assertTrue(v2.size > v1.size)
+        // Reads pt_regs.dx for stack_trace_id.
+        assertTrue(v2.any { it.code == 0x79 && it.off == 96.toShort() })
+        // Writes stack_trace_id at task-storage offset 24.
+        assertTrue(v2.any { it.code == 0x7b && it.off == 24.toShort() })
+        assertEquals(0x95, v2.last().code)
+    }
+
+    @Test
+    fun `exec program clears 32 bytes for marker v2`() {
+        val v1 = TierEBpfProgramBuilder.buildProcessExecProgram(TierEOptions())
+        val v2 = TierEBpfProgramBuilder.buildProcessExecProgram(
+            TierEOptions(benchmarkPhases = true, markerVersion = MarkerVersion.V2),
+        )
+        assertTrue(v2.size > v1.size)
+        assertTrue(v2.any { it.code == 0x7b && it.off == 24.toShort() })
     }
 
     @Test
@@ -95,17 +128,46 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
-    fun `enabled recovery fails closed until map producer is implemented`() {
-        kotlin.test.assertFailsWith<IllegalArgumentException> {
+    fun `recovery producer inserts before ring without suppressing events`() {
+        fun sysEnter(mode: CoverageRecoveryMode) =
             TierEBpfProgramBuilder.buildSysEnterProgram(
-                TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.SHADOW),
+                TierEOptions(
+                    benchmarkPhases = true,
+                    markerVersion = MarkerVersion.V2,
+                    coverageRecoveryMode = mode,
+                ),
             )
+        val disabled = sysEnter(CoverageRecoveryMode.DISABLED)
+        val shadow = sysEnter(CoverageRecoveryMode.SHADOW)
+        val recover = sysEnter(CoverageRecoveryMode.RECOVER)
+
+        fun ringSubmits(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x85 && it.imm == 132 }
+
+        fun recoveryLoads(program: List<TierEbpfEngine.Insn>) = program.count { it.code == 0x18 && it.src == 1 && it.imm == 8 }
+
+        fun noExistUpdates(program: List<TierEbpfEngine.Insn>): Int {
+            var count = 0
+            program.forEachIndexed { index, insn ->
+                if (insn.code == 0x85 && insn.imm == 2 && index >= 1) {
+                    val flag = program[index - 1]
+                    if (flag.code == 0xb7 && flag.dst == 4 && flag.imm == 1) count++
+                }
+            }
+            return count
         }
-        kotlin.test.assertFailsWith<IllegalArgumentException> {
-            TierEBpfProgramBuilder.buildSysEnterProgram(
-                TierEOptions(benchmarkPhases = true, coverageRecoveryMode = CoverageRecoveryMode.RECOVER),
-            )
-        }
+
+        assertEquals(0, recoveryLoads(disabled))
+        assertEquals(1, recoveryLoads(shadow))
+        assertEquals(1, recoveryLoads(recover))
+        assertEquals(0, noExistUpdates(disabled))
+        assertEquals(1, noExistUpdates(shadow))
+        assertEquals(1, noExistUpdates(recover))
+        // Ring attempts are unchanged; recovery never suppresses events.
+        assertEquals(ringSubmits(disabled), ringSubmits(shadow))
+        assertEquals(ringSubmits(shadow), ringSubmits(recover))
+        // No map deletion: entries are never evicted during the session.
+        assertTrue(shadow.none { it.code == 0x85 && it.imm == 3 })
+        assertTrue(recover.none { it.code == 0x85 && it.imm == 3 })
     }
 
     @Test

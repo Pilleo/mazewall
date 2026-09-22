@@ -48,4 +48,18 @@ class MarkerTransportSelectionTest {
         assertNull(selected.usdtNote)
         assertNull(selected.fallbackReason)
     }
+
+    @Test
+    fun `marker version defaults to v1 and accepts explicit v2`() {
+        assertEquals(io.mazewall.profiler.internal.attribution.MarkerVersion.V1, markerVersionFromEnvironment(emptyMap()))
+        assertEquals(io.mazewall.profiler.internal.attribution.MarkerVersion.V1, markerVersionFromEnvironment(mapOf("TIER_E_MARKER_VERSION" to "v1")))
+        assertEquals(io.mazewall.profiler.internal.attribution.MarkerVersion.V2, markerVersionFromEnvironment(mapOf("TIER_E_MARKER_VERSION" to "v2")))
+    }
+
+    @Test
+    fun `marker version rejects unknown values`() {
+        assertFailsWith<IllegalStateException> {
+            markerVersionFromEnvironment(mapOf("TIER_E_MARKER_VERSION" to "v3"))
+        }
+    }
 }

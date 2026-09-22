@@ -111,6 +111,18 @@ internal enum class TierESysEnterAttachmentShape {
 }
 
 /**
+ * Native marker ABI version selected for one session.
+ *
+ * V1 carries `(invocationId, flags)` and is the default. V2 carries
+ * `(invocationId, stackTraceId, flags)` so the kernel can key a retained edge
+ * by canonical stack identity. V2 is experimental benchmark-only until qualified.
+ */
+internal enum class MarkerVersion {
+    V1,
+    V2,
+}
+
+/**
  * Opt-in retained-edge recovery mode.
  *
  * DISABLED preserves the existing generated program without coverage-recovery accesses.
@@ -193,6 +205,8 @@ internal data class TierEOptions(
     val coverageRecoveryMode: CoverageRecoveryMode = CoverageRecoveryMode.DISABLED,
     /** Distinct-edge capacity of the retained recovery map; recorded in the manifest. */
     val coverageRecoveryMapCapacity: Int = CoverageRecoveryMode.DEFAULT_MAP_CAPACITY,
+    /** Native marker ABI version; exactly one version is active per session. */
+    val markerVersion: MarkerVersion = MarkerVersion.V1,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
@@ -237,6 +251,12 @@ internal data class TierEOptions(
         require(coverageRecoveryMapCapacity > 0) { "coverageRecoveryMapCapacity must be positive" }
         require(benchmarkPhases || coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
             "coverage recovery is experimental benchmark-only"
+        }
+        require(benchmarkPhases || markerVersion == MarkerVersion.V1) {
+            "marker v2 is experimental benchmark-only"
+        }
+        require(coverageRecoveryMode == CoverageRecoveryMode.DISABLED || markerVersion == MarkerVersion.V2) {
+            "coverage recovery requires marker v2"
         }
     }
 

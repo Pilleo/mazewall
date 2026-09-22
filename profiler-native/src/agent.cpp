@@ -37,6 +37,14 @@ extern "C" __attribute__((noinline, visibility("default"))) void mazewall_stack_
     MAZEWALL_TIER_E_USDT_MARKER(invocation_id, flags);
 }
 
+extern "C" __attribute__((noinline, visibility("default"))) void mazewall_stack_marker_v2(
+    std::uint64_t invocation_id,
+    std::uint64_t stack_trace_id,
+    std::uint32_t flags) noexcept {
+    asm volatile("" : : "r"(invocation_id), "r"(stack_trace_id), "r"(flags) : "memory");
+    MAZEWALL_TIER_E_USDT_MARKER_V2(invocation_id, stack_trace_id, flags);
+}
+
 namespace {
 
 std::atomic<std::uint64_t> native_bind_count{0};
@@ -86,6 +94,7 @@ std::atomic<bool> live_publisher_stop{false};
 std::atomic<std::uint64_t> live_publication_requests{0};
 std::atomic<std::uint64_t> next_publication_id{1};
 std::uint32_t session_tag = 1;
+std::atomic<bool> marker_version_v2{false};
 std::atomic<std::uint64_t> next_loader_id{1};
 mazewall::profiler::SymbolizationGeneration symbolization_generation;
 thread_local bool cooperative_replacement = false;
@@ -446,13 +455,22 @@ enum class MarkerTransition : std::uint8_t {
 void publish_stack_marker(
     std::uint64_t invocation_id,
     std::uint32_t flags,
-    MarkerTransition transition = MarkerTransition::generic) noexcept {
+    MarkerTransition transition = MarkerTransition::generic,
+    std::uint32_t stack_trace_id = 0) noexcept {
     if (!benchmark_phases) {
-        mazewall_stack_marker(invocation_id, flags);
+        if (marker_version_v2.load(std::memory_order_relaxed)) {
+            mazewall_stack_marker_v2(invocation_id, stack_trace_id, flags);
+        } else {
+            mazewall_stack_marker(invocation_id, flags);
+        }
         return;
     }
     const auto started = std::chrono::steady_clock::now();
-    mazewall_stack_marker(invocation_id, flags);
+    if (marker_version_v2.load(std::memory_order_relaxed)) {
+        mazewall_stack_marker_v2(invocation_id, stack_trace_id, flags);
+    } else {
+        mazewall_stack_marker(invocation_id, flags);
+    }
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - started).count();
     const auto nanos = static_cast<std::uint64_t>(elapsed);
@@ -873,7 +891,15 @@ public:
                 return;
             }
         }
-        publish_stack_marker(scope_.valid() ? scope_.id : 0, flags_, MarkerTransition::exact_set);
+        // Publish exact marker only after successful capture and admission.
+        // The canonical stack id is immutable dictionary identity; v1 keeps
+        // the existing two-argument ABI unchanged.
+        invocation_registry.set_current_stack(scope_, captured_stack_id);
+        publish_stack_marker(
+            scope_.valid() ? scope_.id : 0,
+            flags_,
+            MarkerTransition::exact_set,
+            captured_stack_id);
         invoke_callback_suppression_probe();
         if (binding_kind_ == mazewall::profiler::BindingKind::unix_openat0 && lifecycle_barrier != nullptr &&
             !lifecycle_barrier_gate_path.empty() && std::ifstream(lifecycle_barrier_gate_path).good() &&
@@ -895,7 +921,11 @@ public:
     ~InvocationScope() {
         publish_stack_marker(0, 0, MarkerTransition::exit_clear);
         if (!scope_.valid()) {
-            publish_stack_marker(invocation_registry.current_id(), flags_);
+            publish_stack_marker(
+                invocation_registry.current_id(),
+                flags_,
+                MarkerTransition::generic,
+                invocation_registry.current_stack_id());
             record_virtual_duration();
             record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
             release_current_thread();
@@ -917,7 +947,11 @@ public:
             return;
         }
         const bool restored = invocation_registry.leave(scope_);
-        publish_stack_marker(restored ? invocation_registry.current_id() : 0, flags_);
+        publish_stack_marker(
+            restored ? invocation_registry.current_id() : 0,
+            flags_,
+            MarkerTransition::generic,
+            restored ? invocation_registry.current_stack_id() : 0);
         record_virtual_duration();
         record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
     }
@@ -1678,6 +1712,10 @@ bool parse_options(const char* options) {
             emission_mode = EmissionMode::full_stream;
         } else if (option == "mode=unique-stack-syscall") {
             emission_mode = EmissionMode::unique_stack_syscall;
+        } else if (option == "marker-version=v1") {
+            marker_version_v2.store(false, std::memory_order_release);
+        } else if (option == "marker-version=v2") {
+            marker_version_v2.store(true, std::memory_order_release);
         } else if (option == "stack-transport=dictionary") {
             stack_transport = StackTransport::dictionary;
         } else if (option == "stack-transport=inline-per-invocation") {

@@ -55,6 +55,10 @@ internal interface TierEEventSource : AutoCloseable {
 
     fun readStaleMarkerGenerationCount(): Long = 0L
 
+    fun readRecoveryInsertionFailureCount(): Long = 0L
+
+    fun recoveryReader(): RecoveryMapReader? = null
+
     fun readContextMetrics(): Map<Long, Long> = emptyMap()
 
     fun readMarkerTransitionCount(): Long
@@ -68,11 +72,16 @@ internal interface TierEEventSource : AutoCloseable {
 private class NativeTierEEventSource(
     private val engine: TierEbpfEngine,
 ) : TierEEventSource {
+    private var installedOptions: TierEOptions? = null
+
     override fun install(
         targetPid: Int,
         sessionTag: Int,
         options: TierEOptions,
-    ) = engine.install(targetPid, sessionTag, options)
+    ) {
+        engine.install(targetPid, sessionTag, options)
+        installedOptions = options
+    }
 
     override fun attachMarker(
         targetPid: Int,
@@ -107,6 +116,14 @@ private class NativeTierEEventSource(
     override fun readTaskStorageUnavailableCount(): Long = engine.readTaskStorageUnavailableCount()
 
     override fun readStaleMarkerGenerationCount(): Long = engine.readStaleMarkerGenerationCount()
+
+    override fun readRecoveryInsertionFailureCount(): Long = engine.readRecoveryInsertionFailureCount()
+
+    override fun recoveryReader(): RecoveryMapReader? {
+        val options = installedOptions ?: return null
+        if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) return null
+        return RecoveryMapReader { cursor, maxEntries -> engine.scanRecoveryBatch(cursor, maxEntries) }
+    }
 
     override fun readContextMetrics(): Map<Long, Long> = engine.readContextMetrics()
 
@@ -145,6 +162,7 @@ internal class TierEProfilerSession internal constructor(
     private val allocationCounter: TierEAllocationCounter = TierEAllocationCounter { TierEAllocationCounters.currentThreadAllocatedBytes() },
     private val selectiveDefinitionReader: (Path, Set<InvocationId>) -> AgentDefinitionFile.Contents = AgentDefinitionFile::readForInvocations,
     configuredSessionEpoch: SessionEpoch? = null,
+    private val recoverySink: RecoveredEdgeSink = RecoveredEdgeSink { true },
 ) : AutoCloseable {
     public constructor(
         engine: TierEbpfEngine,
@@ -260,6 +278,22 @@ internal class TierEProfilerSession internal constructor(
     private var collectorResolutionAllocatedBytes = 0L
     private var batchFreezeAllocatedBytes = 0L
     private var lastTaskIdentity: TaskIdentity? = null
+    private var attachedSessionTag: Int? = null
+    private var recoveryScanner: CoverageRecoveryScanner? = null
+    private val recoveryLedger = RecoveredEdgeLedger()
+    private val pendingRecovery = LinkedHashMap<UniqueEdgeGate.Edge, CoverageCandidate>()
+    private val recoveryOwnedNanos = LinkedHashMap<UniqueEdgeGate.Edge, Long>()
+    private val recoveryDepsNanos = LinkedHashMap<UniqueEdgeGate.Edge, Long>()
+    private var recoveryEntriesObserved: Long = 0
+    private var recoveryInvalidCandidates: Long = 0
+    private var recoveryShadowCompared: Long = 0
+    private var recoveryMapFirst: Long = 0
+    private var recoveryAckRetries: Long = 0
+    private var recoveryScanBatches: Long = 0
+    private var recoveryLastLatencyNanos: Long = 0
+    private var recoveryMaxLatencyNanos: Long = 0
+    private var recoveryFinalScanComplete: Boolean = true
+    private var recoveryScanError: Boolean = false
 
     init {
         require(sessionEpoch.value > 0) { "session epoch must be positive" }
@@ -285,6 +319,13 @@ internal class TierEProfilerSession internal constructor(
         requireCollecting()
         lifecycle = TierESessionLifecycleState.ATTACHING
         source.install(targetPid, sessionTag, options)
+        attachedSessionTag = sessionTag
+        if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
+            val reader = requireNotNull(source.recoveryReader()) {
+                "coverage recovery requires a session-bound retained-edge map"
+            }
+            recoveryScanner = CoverageRecoveryScanner(reader, nanoTime = nanoTime)
+        }
         if (usdtNote == null) {
             source.attachMarker(targetPid, agentLibrary, markerOffset)
         } else {
@@ -375,7 +416,186 @@ internal class TierEProfilerSession internal constructor(
         }
         refreshLossCounters()
         publishLiveDefinitions()
+        pollRecovery()
         return TierECollectorPoll(retainedSnapshot, events.size, receiptAgesNanos)
+    }
+
+    /**
+     * Runs one scheduled retained-edge sweep behind the serialized collector boundary.
+     * Live sweeps are eventually consistent; candidates whose definitions have not
+     * arrived stay pending within the collector budget and are retried later.
+     */
+    private fun pollRecovery() {
+        val scanner = recoveryScanner ?: return
+        val sweep =
+            try {
+                scanner.poll()
+            } catch (_: Exception) {
+                recoveryScanError = true
+                publishRecoveryEvidence()
+                return
+            }
+        recoveryScanBatches++
+        for (entry in sweep.entries) ingestRecoveryEntry(entry)
+        if (pendingRecovery.isNotEmpty()) {
+            for (candidate in pendingRecovery.values.toList()) settleRecoveryCandidate(candidate)
+        }
+        publishRecoveryEvidence()
+    }
+
+    private fun ingestRecoveryEntry(entry: RecoveryMapEntry) {
+        recoveryEntriesObserved++
+        val tag = attachedSessionTag
+        if (tag == null) {
+            recoveryInvalidCandidates++
+            return
+        }
+        if (decodeRecoveryKey(entry.key).sessionTag != tag) {
+            recoveryInvalidCandidates++
+            return
+        }
+        val candidate =
+            entry.toCandidate(sessionEpoch, ProcessIncarnation(processEpoch))
+            ?: run {
+                recoveryInvalidCandidates++
+                return
+            }
+        recoveryOwnedNanos.putIfAbsent(candidate.edge(), nanoTime())
+        settleRecoveryCandidate(candidate)
+    }
+
+    private fun settleRecoveryCandidate(candidate: CoverageCandidate) {
+        when (
+            val validation =
+                collector.validateCoverageCandidate(candidate, sessionEpoch, ProcessIncarnation(processEpoch))
+        ) {
+            is CoverageRecoveryValidator.Result.Valid -> {
+                recoveryDepsNanos.putIfAbsent(candidate.edge(), nanoTime())
+                if (options.coverageRecoveryMode == CoverageRecoveryMode.SHADOW) {
+                    recoveryShadowCompared++
+                    pendingRecovery.remove(candidate.edge())
+                    return
+                }
+                settleRecoveredEdge(candidate.edge(), candidate)
+            }
+            is CoverageRecoveryValidator.Result.Invalid -> {
+                when (validation.reason) {
+                    CoverageRecoveryValidator.Reason.UNKNOWN_INVOCATION,
+                    CoverageRecoveryValidator.Reason.UNKNOWN_STACK,
+                    -> retainPendingRecovery(candidate)
+                    else -> recoveryInvalidCandidates++
+                }
+            }
+        }
+    }
+
+    private fun settleRecoveredEdge(
+        edge: UniqueEdgeGate.Edge,
+        candidate: CoverageCandidate,
+    ) {
+        if (recoveryLedger.contains(edge)) {
+            pendingRecovery.remove(edge)
+            return
+        }
+        val ringAcked = collector.isEdgeAcknowledged(edge)
+        val token = recoveryLedger.propose(edge) ?: return
+        val retained =
+            try {
+                recoverySink.retain(edge)
+            } catch (_: Exception) {
+                false
+            }
+        if (!retained) {
+            recoveryAckRetries++
+            retainPendingRecovery(candidate)
+            return
+        }
+        recoveryLedger.acknowledge(token)
+        pendingRecovery.remove(edge)
+        val owned = recoveryOwnedNanos.remove(edge)
+        val deps = recoveryDepsNanos.remove(edge)
+        if (owned != null && deps != null) {
+            val acknowledgedAt = nanoTime()
+            val latency = acknowledgedAt - maxOf(owned, deps)
+            if (latency >= 0) {
+                recoveryLastLatencyNanos = latency
+                recoveryMaxLatencyNanos = maxOf(recoveryMaxLatencyNanos, latency)
+            }
+        }
+        if (!ringAcked) recoveryMapFirst++
+    }
+
+    private fun retainPendingRecovery(candidate: CoverageCandidate) {
+        val edge = candidate.edge()
+        if (recoveryLedger.contains(edge)) return
+        if (pendingRecovery.size >= options.coverageRecoveryMapCapacity) return
+        pendingRecovery[edge] = candidate
+    }
+
+    private fun publishRecoveryEvidence() {
+        if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) return
+        val insertionFailures =
+            try {
+                source.readRecoveryInsertionFailureCount()
+            } catch (_: Exception) {
+                recoveryScanError = true
+                0L
+            }
+        collector.recordRecoveryEvidence(
+            CoverageRecoveryEvidence(
+                mapCapacity = options.coverageRecoveryMapCapacity,
+                entriesObserved = recoveryEntriesObserved,
+                insertionFailures = insertionFailures,
+                pendingCandidates = pendingRecovery.size.toLong(),
+                recoveredEdges = recoveryLedger.acknowledgedCount().toLong(),
+                acknowledgementRetries = recoveryAckRetries,
+                scanBatches = recoveryScanBatches,
+                overdueSweeps = recoveryScanner?.overdueSweeps ?: 0,
+                lastScanLatencyNanos = recoveryScanner?.lastLatencyNanos ?: 0,
+                mapFirstAcknowledgedEdges = recoveryMapFirst,
+                confirmedRingLossRecoveries = 0,
+                lastRecoveryLatencyNanos = recoveryLastLatencyNanos,
+                maxRecoveryLatencyNanos = recoveryMaxLatencyNanos,
+            ),
+        )
+    }
+
+    /**
+     * Runs the exclusive final scan while the source is still open. Live scanning
+     * stops first: the scanner takes no further sweeps after this call.
+     */
+    private fun finishRecoveryScan(): List<RecoveryMapEntry> {
+        val scanner = recoveryScanner ?: return emptyList()
+        recoveryScanner = null
+        return try {
+            val sweep = scanner.scanFinal(options.coverageRecoveryMapCapacity)
+            recoveryScanBatches++
+            sweep.entries
+        } catch (_: Exception) {
+            recoveryFinalScanComplete = false
+            emptyList()
+        }
+    }
+
+    /** Settles final-scan and pending candidates after dictionary definitions arrive. */
+    private fun settleRecoveryEntries(entries: List<RecoveryMapEntry>) {
+        if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) return
+        for (entry in entries) ingestRecoveryEntry(entry)
+        if (pendingRecovery.isNotEmpty()) {
+            for (candidate in pendingRecovery.values.toList()) settleRecoveryCandidate(candidate)
+        }
+        publishRecoveryEvidence()
+    }
+
+    /** Bounded-domain recovery verdict; ring and event-history verdicts stay authoritative. */
+    internal fun recoveryComplete(): Boolean {
+        if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) return true
+        val evidence = collector.integrity.recoveryEvidence
+        return !recoveryScanError &&
+            recoveryFinalScanComplete &&
+            evidence.insertionFailures == 0L &&
+            recoveryInvalidCandidates == 0L &&
+            pendingRecovery.isEmpty()
     }
 
     /** Preserves event order while avoiding the intermediate collections created by [Iterable.flatMap]. */
@@ -581,6 +801,10 @@ internal class TierEProfilerSession internal constructor(
             collector.recordLoss()
             collector.invalidateAttribution()
         }
+        // Terminal order: producers are quiescent above, the ring is drained, and the
+        // source is still open, so the exclusive final map scan runs exactly here.
+        // Dictionary settlement and retained-coverage acknowledgement follow below.
+        val recoveryRaw = finishRecoveryScan()
         val reconciliation = TierEReconciliation(
             admittedInvocations = 0L,
             exactInvocations = 0L,
@@ -614,6 +838,7 @@ internal class TierEProfilerSession internal constructor(
             collector.recordDictionaryTransport(dictionaryPublisher.transportEvidence)
         }
         definitions.invocations.forEach { retain(collector.accept(it)) }
+        settleRecoveryEntries(recoveryRaw)
         collector.recordReconciliation(
             reconciliation.copy(
                 admittedInvocations = definitions.invocations.size.toLong(),

@@ -12,6 +12,7 @@ internal class TierEIntegrityAccumulator {
     private var dictionaryIntegrityFailures: Long = 0L
     private var dictionaryTransport = DictionaryTransportEvidence()
     private var reconciliation = TierEReconciliation()
+    private var recoveryEvidence = CoverageRecoveryEvidence()
 
     fun recordLoss(count: Long) {
         require(count > 0) { "loss count must be positive" }
@@ -60,6 +61,10 @@ internal class TierEIntegrityAccumulator {
         reconciliation = value
     }
 
+    fun recordRecoveryEvidence(evidence: CoverageRecoveryEvidence) {
+        recoveryEvidence = evidence
+    }
+
     fun snapshot(
         emissionMode: TierEEmissionMode,
         captureDomain: ObservationScope,
@@ -77,5 +82,6 @@ internal class TierEIntegrityAccumulator {
             dictionaryTransport = dictionaryTransport,
             dictionaryIntegrityFailures = dictionaryIntegrityFailures,
             reconciliation = reconciliation,
+            recoveryEvidence = recoveryEvidence,
         )
 }

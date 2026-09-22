@@ -13,6 +13,8 @@ import io.mazewall.platform.native.bpf
 import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.platform.native.openDescriptor
 import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
+import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEKernelCoverageMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
@@ -177,6 +179,8 @@ internal class TierEbpfEngine(
         public const val EVENT_SIZE: Int = 88
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
+        internal const val RECOVERY_EDGE_KEY_SIZE: Int = 16
+        internal const val RECOVERY_EDGE_VALUE_SIZE: Int = 88
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
         internal const val BENCHMARK_AUDIT_MAX_DESCRIPTORS: Int = 1 shl 17
         private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = BENCHMARK_AUDIT_MAX_DESCRIPTORS
@@ -195,7 +199,7 @@ internal class TierEbpfEngine(
         private const val RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX = 9
         internal const val EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX = 10
         internal const val EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX = 11
-        private const val COUNTER_MAP_ENTRIES = 12
+        private const val COUNTER_MAP_ENTRIES = 13
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
@@ -267,6 +271,7 @@ internal class TierEbpfEngine(
         var inFlightFd: BpfFd? = null
         var sessionFd: BpfFd? = null
         var coverageEdgeFd: BpfFd? = null
+        var recoveryEdgeFd: BpfFd? = null
         var rawSysEnterAuditFd: BpfFd? = null
         var rawSysEnterAuditCpuFd: BpfFd? = null
         var exactAdmissionAuditFd: BpfFd? = null
@@ -343,15 +348,16 @@ internal class TierEbpfEngine(
             val sysEnterAttachmentBackend = selectSysEnterAttachmentBackend(options.sysEnterAttachmentBackend)
             installed.sysEnterAttachmentBackend = sysEnterAttachmentBackend
             installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
+            val taskStorageV2 = options.markerVersion == MarkerVersion.V2
             installed.invocationStorageFd = createMap(
             type = MAP_TASK_STORAGE,
             keySize = 4,
-            valueSize = 24,
+            valueSize = if (taskStorageV2) 32 else 24,
             maxEntries = 0,
             mapFlags = BPF_F_NO_PREALLOC,
             btfFd = installed.requireInvocationBtfFd().value,
             btfKeyTypeId = InvocationStateBtf.taskStorageKeyTypeId(),
-            btfValueTypeId = InvocationStateBtf.invocationStateTypeId(),
+            btfValueTypeId = if (taskStorageV2) InvocationStateBtf.invocationStateV2TypeId() else InvocationStateBtf.invocationStateTypeId(),
         )
             installed.ringFd = createMap(MAP_RINGBUF, keySize = 0, valueSize = 0, maxEntries = ringCapacity)
             if (
@@ -359,6 +365,17 @@ internal class TierEbpfEngine(
                     options.kernelCoverageMode != TierEKernelCoverageMode.NONE
             ) {
                 installed.coverageEdgeFd = createMap(MAP_LRU_HASH, keySize = 16, valueSize = 8, maxEntries = COVERAGE_EDGE_CAPACITY)
+            }
+            if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
+                check(options.markerVersion == MarkerVersion.V2) {
+                    "coverage recovery requires marker v2"
+                }
+                installed.recoveryEdgeFd = createMap(
+                    MAP_HASH,
+                    keySize = RECOVERY_EDGE_KEY_SIZE,
+                    valueSize = RECOVERY_EDGE_VALUE_SIZE,
+                    maxEntries = options.coverageRecoveryMapCapacity,
+                )
             }
             installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = COUNTER_MAP_ENTRIES)
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
@@ -398,10 +415,15 @@ internal class TierEbpfEngine(
                 updateElem(arena, installed.requireSessionFd().value, intSeg(arena, 0), configuration)
             }
             installed.markerProgFd =
-                loadProg(buildMarkerProgram(), listOf(installed.requireInvocationStorageFd().value, installed.requireLossFd().value, installed.requireSessionFd().value), PROG_KPROBE, "tier_e_marker")
+                loadProg(
+                buildMarkerProgram(options),
+                listOf(installed.requireInvocationStorageFd().value, installed.requireLossFd().value, installed.requireSessionFd().value),
+                PROG_KPROBE,
+                "tier_e_marker",
+            )
             installed.execProgFd =
                 loadProg(
-                    buildProcessExecProgram(),
+                    buildProcessExecProgram(options),
                     listOf(installed.requireInvocationStorageFd().value, -1, installed.requireSessionFd().value),
                     PROG_RAW_TRACEPOINT,
                     "tier_e_exec",
@@ -422,6 +444,7 @@ internal class TierEbpfEngine(
                         installed.requireContextMetricFd().value,
                         installed.requireInFlightFd().value,
                         installed.exactAdmissionAuditFd?.value ?: -1,
+                        installed.recoveryEdgeFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -507,6 +530,9 @@ internal class TierEbpfEngine(
 
     /** Target syscalls rejected because marker state belongs to an older attachment generation. */
     public fun readStaleMarkerGenerationCount(): Long = readCounter(STALE_MARKER_GENERATION_COUNTER_INDEX)
+
+    /** Retained-edge insertions that failed for reasons other than normal repetition. */
+    public fun readRecoveryInsertionFailureCount(): Long = readCounter(TierEBpfProgramBuilder.RECOVERY_INSERTION_FAILURE_COUNTER_INDEX)
 
     /** Benchmark-only failures while the independent raw-sys_enter audit reads pt_regs arguments. */
     internal fun readRawAuditArgumentReadFailureCount(): Long = readCounter(RAW_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX)
@@ -695,15 +721,87 @@ internal class TierEbpfEngine(
 
     private fun readCounter(index: Int): Long =
         Arena.ofConfined().use { arena ->
-        val installed = requireInstalled()
-        val key = intSeg(arena, index)
-        val value = arena.allocate(8, 8)
-        val attr = arena.allocate(24)
-        attr.set(ValueLayout.JAVA_INT, 0, installed.requireLossFd().value)
-        attr.set(ValueLayout.ADDRESS, 8, key)
-        attr.set(ValueLayout.ADDRESS, 16, value)
-        bpfCall(H_LOOKUP.toLong(), attr, 24)
-        value.get(ValueLayout.JAVA_LONG, 0)
+            val installed = requireInstalled()
+            val key = intSeg(arena, index)
+            val value = arena.allocate(8, 8)
+            val attr = arena.allocate(24)
+            attr.set(ValueLayout.JAVA_INT, 0, installed.requireLossFd().value)
+            attr.set(ValueLayout.ADDRESS, 8, key)
+            attr.set(ValueLayout.ADDRESS, 16, value)
+            bpfCall(H_LOOKUP.toLong(), attr, 24)
+            value.get(ValueLayout.JAVA_LONG, 0)
+        }
+
+    /**
+     * Reads one bounded page of the session-bound retained-edge map.
+     * Root-only: requires an installed recovery map. Entries are immutable
+     * first-observation representatives; an existing key is never rewritten.
+     */
+    public fun scanRecoveryBatch(
+        cursor: ByteArray?,
+        maxEntries: Int,
+    ): io.mazewall.profiler.internal.attribution.RecoveryScanPage {
+        require(maxEntries in 1..io.mazewall.profiler.internal.attribution.CoverageRecoveryMode.MAX_SCAN_BATCH) {
+            "scan batch must be bounded"
+        }
+        if (cursor != null) require(cursor.size == RECOVERY_EDGE_KEY_SIZE) { "recovery cursor must be 16 bytes" }
+        return Arena.ofConfined().use { arena ->
+            val installed = requireInstalled()
+            val mapFd = installed.recoveryEdgeFd?.value
+                ?: throw IllegalStateException("recovery map is not installed")
+            val entries = ArrayList<io.mazewall.profiler.internal.attribution.RecoveryMapEntry>(maxEntries)
+            var currentKey: MemorySegment? = cursor?.let { bytes ->
+                val seg = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4)
+                MemorySegment.copy(bytes, 0, seg, ValueLayout.JAVA_BYTE, 0, RECOVERY_EDGE_KEY_SIZE)
+                seg
+            }
+            val nextKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4)
+            val value = arena.allocate(RECOVERY_EDGE_VALUE_SIZE.toLong(), 8)
+            while (entries.size < maxEntries) {
+                val nextAttr = arena.allocate(32)
+                nextAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, mapFd)
+                nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, currentKey ?: MemorySegment.NULL)
+                nextAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, nextKey)
+                when (val result = bpfResult(BPF_MAP_GET_NEXT_KEY, nextAttr, 32)) {
+                    is SyscallResult.Error -> {
+                        if (result.errno == io.mazewall.ffi.NativeConstants.ENOENT) break
+                        result.throwErrno("bpf(BPF_MAP_GET_NEXT_KEY)")
+                    }
+                    is SyscallResult.Success -> Unit
+                }
+                val keyBytes = ByteArray(RECOVERY_EDGE_KEY_SIZE)
+                MemorySegment.copy(nextKey, ValueLayout.JAVA_BYTE, 0, keyBytes, 0, RECOVERY_EDGE_KEY_SIZE)
+                val lookupAttr = arena.allocate(32)
+                lookupAttr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, mapFd)
+                lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, nextKey)
+                lookupAttr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
+                when (val result = bpfResult(BPF_MAP_LOOKUP_ELEM, lookupAttr, 32)) {
+                    is SyscallResult.Success -> {
+                        val valueBytes = ByteArray(RECOVERY_EDGE_VALUE_SIZE)
+                        MemorySegment.copy(value, ValueLayout.JAVA_BYTE, 0, valueBytes, 0, RECOVERY_EDGE_VALUE_SIZE)
+                        entries.add(
+                            io.mazewall.profiler.internal.attribution
+                            .RecoveryMapEntry(keyBytes, valueBytes),
+                        )
+                    }
+                    is SyscallResult.Error -> {
+                        // A concurrent final-scan race cannot occur after quiescence;
+                        // any other disappearance is an explicit incomplete outcome
+                        // for the caller to account, not a silent skip.
+                        if (result.errno != io.mazewall.ffi.NativeConstants.ENOENT) result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM)")
+                    }
+                }
+                currentKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4).also { seg ->
+                    MemorySegment.copy(nextKey, ValueLayout.JAVA_BYTE, 0, seg, ValueLayout.JAVA_BYTE, 0, RECOVERY_EDGE_KEY_SIZE.toLong())
+                }
+            }
+            val done = entries.size < maxEntries
+            io.mazewall.profiler.internal.attribution.RecoveryScanPage(
+                entries = entries,
+                nextCursor = if (done || entries.isEmpty()) null else entries.last().key,
+                complete = done,
+            )
+        }
     }
 
     private fun readInFlightCount(): Long =
@@ -978,6 +1076,7 @@ internal class TierEbpfEngine(
         close(installed.inFlightFd) { installed.inFlightFd = null }
         close(installed.sessionFd) { installed.sessionFd = null }
         close(installed.coverageEdgeFd) { installed.coverageEdgeFd = null }
+        close(installed.recoveryEdgeFd) { installed.recoveryEdgeFd = null }
         close(installed.rawSysEnterAuditFd) { installed.rawSysEnterAuditFd = null }
         close(installed.rawSysEnterAuditCpuFd) { installed.rawSysEnterAuditCpuFd = null }
         close(installed.exactAdmissionAuditFd) { installed.exactAdmissionAuditFd = null }
@@ -997,10 +1096,10 @@ internal class TierEbpfEngine(
     internal fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram()
 
     /** x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`. */
-    internal fun buildMarkerProgram(): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram()
+    internal fun buildMarkerProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram(options)
 
     /** Tracepoint program that invalidates task storage after a successful exec. */
-    internal fun buildProcessExecProgram(): List<Insn> = TierEBpfProgramBuilder.buildProcessExecProgram()
+    internal fun buildProcessExecProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildProcessExecProgram(options)
 
     internal fun pack(i: Insn): Long = BpfProgLoadRequestEncoder.pack(i)
 
