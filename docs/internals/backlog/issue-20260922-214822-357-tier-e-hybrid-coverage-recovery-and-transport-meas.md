@@ -103,7 +103,11 @@ the default. `policy_eligibility=false` throughout.
 - Long matched v1/v2 ring-only controls were not rerun alongside the 40 long
   hybrid forks; sustained hybrid correctness does not establish long-workload
   comparative overhead.
-- Real host PID reuse remains unqualified. Existing 100 ms native MZSE live
+- Real host PID reuse remains unqualified. A bounded 256-lifetime read-only
+  host probe saw no reuse (`pid_max=4194304`), retained separately from the
+  rootful simulated active-incarnation fixture at
+  `docs/internals/evidence/tier-e-source-lifecycle-20260923/README.md`.
+  Existing 100 ms native MZSE live
   snapshot admission is now measured; it is not an incremental receiver
   protocol, and only a closed terminal artifact after producer closure proves
   terminal dictionary completeness.
@@ -114,8 +118,11 @@ the default. `policy_eligibility=false` throughout.
   proof negatives fail before workload; v1 compatibility and v2 USDT/uprobe
   positives pass. The file is diagnostic self-attestation, not a cryptographic
   claim against a malicious target UID.
-- Source-state fingerprinting of all pre-fork inputs and a separate profiler-only
-  CPU denominator remain follow-up measurement hardening. Preserve the
+- The split coverage, matched, fault, and live-comparison runners now hash
+  tracked and untracked runtime source before and after forks, separately
+  from native/JAR and image IDs. Earlier archives cannot retroactively gain
+  this evidence. A separate profiler-only CPU denominator remains follow-up
+  measurement hardening. Preserve the
   operator's rejection decision and `policy_eligibility=false` until addressed.
 - The earlier Detekt gate is resolved using the same-toolchain pre-hybrid
   baseline (`docs/internals/evidence/tier-e-detekt-pre-hybrid-20260923.json`).

@@ -41,6 +41,11 @@ artifact_file=orders.mzse
 match before installation and checks it again at terminalization. An absent PID means the target
 exited; a different start-time means PID reuse and makes evidence incomplete. This is a current-boot
 identity. Persisted registrations must be bound to host boot ID before reuse.
+The 2026-09-23 bounded host probe did not observe host PID reuse in 256 real
+process lifetimes (`pid_max=4194304`); the separate rootful test forces a
+**simulated** observed-incarnation change while its original JVM is alive.
+Neither result qualifies actual host PID reuse. See the
+[source/lifecycle evidence](../../evidence/tier-e-source-lifecycle-20260923/README.md).
 
 For experimental marker v2 only, registration `version=2` adds a safe sibling
 `marker_proof_file=orders.marker-proof`. The native agent's launch plan adds

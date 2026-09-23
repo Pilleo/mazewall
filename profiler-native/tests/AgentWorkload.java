@@ -81,7 +81,12 @@ public final class AgentWorkload {
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
             exercise(iterations);
             String simulatedReuseMarker = System.getenv("TIER_E_SPLIT_SIMULATE_PID_REUSE_MARKER");
-            if (simulatedReuseMarker != null) Files.writeString(Path.of(simulatedReuseMarker), "reused");
+            if (simulatedReuseMarker != null) {
+                Files.writeString(Path.of(simulatedReuseMarker), "reused");
+                // The collector's 100 ms lifetime watcher must see the
+                // simulated new incarnation while this JVM is still alive.
+                Thread.sleep(250L);
+            }
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
             if (deferTerminalControl) {
                 System.out.println("tier-e-workflow: capture complete; terminal control deferred");

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kernel": "7.2.4-x64v3-xanmod1",
+  "pid_max": 4194304,
+  "ns_last_pid": 202304,
+  "original": {
+    "pid": 202032,
+    "starttime": 102287889
+  },
+  "attempts": 256,
+  "replacement": null,
+  "host_pid_reuse_verdict": "UNVERIFIED",
+  "policy_eligibility": false,
+  "probe_contract": "real host PIDs and /proc starttime; no sysctl or ns_last_pid mutation"
+}

@@ -6,6 +6,14 @@ export DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 OUTPUT=${1:-"${ROOT}/build/tier-e-split-coverage-matrix"}
 FORKS=${TIER_E_SPLIT_COVERAGE_FORKS:-1}
 mkdir -p "${OUTPUT}"
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUTPUT}/source-state-before.json"
+terminal_report() {
+    status=$?
+    if [[ ! -f "${OUTPUT}/terminal.json" ]]; then
+        printf '{"schema_version":1,"success":false,"runner_exit":%s,"policy_eligibility":false}\n' "${status}" > "${OUTPUT}/terminal.json"
+    fi
+}
+trap terminal_report EXIT
 
 declare -a variants=(
     'dictionary-full-stream:dictionary:full-stream'
@@ -76,3 +84,6 @@ for variant in "${variants[@]}"; do
         ' "${artifact}" "$([[ "${transport}" == inline-per-invocation && "${TIER_E_SPLIT_COVERAGE_OPERATIONS:-72}" -gt 72 ]] && printf 1 || printf 0)"
     done
 done
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUTPUT}/source-state-before.json" > "${OUTPUT}/source-state-after.json"
+printf '{"schema_version":1,"success":true,"forks":%s,"arms":%s,"source_state_unchanged":true,"policy_eligibility":false}\n' \
+    "${FORKS}" "${#variants[@]}" > "${OUTPUT}/terminal.json"

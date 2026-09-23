@@ -15,6 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 "${TIER_E_CONTAINER_ENGINE:-docker}" image inspect "${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
 sha256sum "${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so" \
     "${ROOT}"/profiler/build/install/tier-e-daemon/lib/*.jar > "${OUT}/bundle-sha256.txt" || exit 1
 git -C "${ROOT}" diff --binary | sha256sum | awk '{print $1}' > "${OUT}/source-diff-sha256.txt"
@@ -70,11 +71,13 @@ NODE
         done
     done
 done
-node - "${OUT}" "${failed}" <<'NODE'
-const fs=require('fs'),[dir,failed]=process.argv.slice(2);
+source_changed=0
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
+node - "${OUT}" "${failed}" "${source_changed}" <<'NODE'
+const fs=require('fs'),[dir,failed,sourceChanged]=process.argv.slice(2);
 const rows=fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 const median=items=>{const ordered=[...items].sort((a,b)=>a-b);return ordered.length?ordered[Math.floor(ordered.length/2)]:null;};
-const summary={schema_version:1,completed:rows.length,failed_forks:Number(failed),
+const summary={schema_version:1,completed:rows.length,failed_forks:Number(failed),source_state_unchanged:Number(sourceChanged)===0,
   modes:Object.fromEntries([...new Set(rows.map(r=>`${r.profile}:${r.mode}:${r.live?'live':'terminal'}`))].map(key=>{
     const group=rows.filter(r=>`${r.profile}:${r.mode}:${r.live?'live':'terminal'}`===key);
     return [key,{forks:group.length,complete:group.filter(r=>r.fork_complete).length,
@@ -85,5 +88,5 @@ const summary={schema_version:1,completed:rows.length,failed_forks:Number(failed
   })),policy_eligibility:false};
 fs.writeFileSync(`${dir}/summary.json`,JSON.stringify(summary,null,2)+'\n');
 console.log(JSON.stringify(summary));
-if(Number(failed)>0||rows.length===0)process.exitCode=1;
+if(Number(failed)>0||rows.length===0||!summary.source_state_unchanged)process.exitCode=1;
 NODE

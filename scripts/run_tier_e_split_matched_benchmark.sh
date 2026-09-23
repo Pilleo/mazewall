@@ -39,6 +39,7 @@ cleanup_matched() {
 trap cleanup_matched EXIT INT TERM
 "${ENGINE}" image inspect "${IMAGE}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
 "${ENGINE}" image inspect "${IMAGE}" --format '{{json .RepoDigests}}' > "${OUT}/image-digest.txt" || exit 1
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
 uname -a > "${OUT}/kernel.txt"
 NATIVE_SO="${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so"
 NATIVE_HASH=$(sha256sum "${NATIVE_SO}" 2>/dev/null | awk '{print $1}')
@@ -111,8 +112,10 @@ for ((fork=0; fork<FORKS; fork++)); do
             node "${ROOT}/scripts/summarize_tier_e_split_fork.mjs" "${fork}" "${mode}" "${status}" "${fork_dir}" "${OUT}/fork-results.jsonl" || failures=$((failures+1))
     done
 done
-node - "${OUT}" "${failures}" <<'NODE'
-const fs=require('fs'),[dir,failures]=process.argv.slice(2);
+source_changed=0
+python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
+node - "${OUT}" "${failures}" "${source_changed}" <<'NODE'
+const fs=require('fs'),[dir,failures,sourceChanged]=process.argv.slice(2);
 const raw=fs.existsSync(`${dir}/fork-results.jsonl`)?fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim():'';
 let rows;
 try {
@@ -125,7 +128,7 @@ try {
 const baseline=rows.filter(r=>r.mode==='baseline').flatMap(r=>r.workload_ns).sort((a,b)=>a-b);
 const allDurations=rows.flatMap(r=>r.workload_ns);
 const calibrated=baseline.length>0&&baseline[Math.floor(baseline.length/2)]>=100000000&&allDurations.every(ns=>ns<=15000000000);
-const terminal={success:rows.length>0&&rows.every(r=>r.fork_complete===true),failed_forks:Number(failures),
+const terminal={success:rows.length>0&&Number(sourceChanged)===0&&rows.every(r=>r.fork_complete===true),source_state_unchanged:Number(sourceChanged)===0,failed_forks:Number(failures),
   incomplete_forks:rows.filter(r=>!r.fork_complete).map(r=>({fork:r.fork,mode:r.mode,reason:r.incomplete_reason}))};
 // Workload medians use uninstrumented rows only; instrumented rows carry phase
 // counters whose clock reads perturb timing. Phase summaries come from
@@ -161,4 +164,4 @@ fs.writeFileSync(`${dir}/summary.json`,JSON.stringify(summary)+'\n');
 console.log(JSON.stringify(summary));
 if(!terminal.success) process.exitCode=1;
 NODE
-[[ "${failures}" == 0 ]]
+[[ "${failures}" == 0 && "${source_changed}" == 0 ]]
