@@ -67,29 +67,39 @@ internal data class TierECoverageManifest(
             expectedOracleSha256: String,
             expectedSyscallNumber: Int,
         ): TierECoverageManifest {
-            val edges = result.profile.syscalls
+            val ringEdges = result.profile.syscalls
                 .asSequence()
                 .filter { it.resolutionStatus == ResolutionStatus.RESOLVED }
                 .filter { it.stackDefinition?.captureQuality == StackCaptureQuality.COMPLETE }
                 .filter { it.observation.syscallNumber == expectedSyscallNumber }
                 .mapNotNull { syscall ->
                     val definition = requireNotNull(syscall.stackDefinition)
-                    val path = definition.frames
-                        .asReversed()
-                        .firstOrNull { frame ->
-                            (frame.className.endsWith("AgentCoverageWorkload") || frame.className.endsWith("TierECoveragePaths")) &&
-                                frame.methodName.matches(Regex("path[0-9]{2}"))
-                        }?.methodName
-                        ?.removePrefix("path")
-                        ?.toIntOrNull()
-                        ?: return@mapNotNull null
+                     val path = workloadPath(definition) ?: return@mapNotNull null
                     TierECoverageEdge(
                         workloadPath = path,
                         syscallNumber = syscall.observation.syscallNumber,
                         captureFlags = syscall.observation.captureFlags,
                         acknowledgedCount = 1,
                     )
-                }.groupBy { it.key }
+                 }.toList()
+            val mapEdges = result.profile.recoveredCoverage
+                .asSequence()
+                .filter { it.stackDefinition.captureQuality == StackCaptureQuality.COMPLETE }
+                .filter { it.candidate.syscallNumber == expectedSyscallNumber }
+                .mapNotNull { recovered ->
+                    val path = workloadPath(recovered.stackDefinition) ?: return@mapNotNull null
+                    TierECoverageEdge(
+                        workloadPath = path,
+                        syscallNumber = recovered.candidate.syscallNumber,
+                         captureFlags = recovered.candidate.captureFlags,
+                         acknowledgedCount = 1,
+                         discoverySource = "map",
+                    )
+                }.toList()
+            // A map representative does not add a second ring observation.
+            val ringKeys = ringEdges.mapTo(HashSet()) { it.key }
+            val edges = (ringEdges + mapEdges.filter { it.key !in ringKeys })
+                .groupBy { it.key }
                 .map { (_, values) -> values.first().copy(acknowledgedCount = values.size.toLong()) }
                 .sortedBy { it.key }
                 .toList()
@@ -108,11 +118,21 @@ internal data class TierECoverageManifest(
             )
         }
 
+        private fun workloadPath(definition: io.mazewall.profiler.internal.attribution.StackDefinition): Int? =
+            definition.frames
+                .asReversed()
+                .firstOrNull { frame ->
+                    (frame.className.endsWith("AgentCoverageWorkload") || frame.className.endsWith("TierECoveragePaths")) &&
+                        frame.methodName.matches(Regex("path[0-9]{2}"))
+                }?.methodName
+                ?.removePrefix("path")
+                ?.toIntOrNull()
+
         internal fun sha256(bytes: ByteArray): String =
             MessageDigest
                 .getInstance("SHA-256")
             .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(java.util.Locale.ROOT, it) }
     }
 }
 
@@ -121,17 +141,19 @@ internal data class TierECoverageEdge(
     val syscallNumber: Int,
     val captureFlags: Int,
     val acknowledgedCount: Long,
+    val discoverySource: String = "ring",
 ) {
     init {
         require(workloadPath in 0..71) { "coverage workload path must be in 0..71" }
         require(acknowledgedCount > 0L) { "coverage acknowledgement count must be positive" }
+        require(discoverySource == "ring" || discoverySource == "map") { "unknown discovery source" }
     }
 
     val key: String get() = "$workloadPath:$syscallNumber:$captureFlags"
 
     fun toJson(): String =
         "{\"workload_path\":$workloadPath,\"syscall_number\":$syscallNumber," +
-        "\"capture_flags\":$captureFlags,\"acknowledged_count\":$acknowledgedCount}"
+        "\"capture_flags\":$captureFlags,\"acknowledged_count\":$acknowledgedCount,\"discovery_source\":\"$discoverySource\"}"
 }
 
 internal fun TierETerminalReport.jsonBytes(): ByteArray = toJson().toByteArray(StandardCharsets.UTF_8)

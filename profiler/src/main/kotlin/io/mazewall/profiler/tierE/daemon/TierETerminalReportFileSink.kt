@@ -77,6 +77,11 @@ internal fun TierETerminalReport.toJson(): String {
         """"map_first_acknowledged_edges":${recoveryEvidence.mapFirstAcknowledgedEdges},""" +
         """"confirmed_ring_loss_recoveries":${recoveryEvidence.confirmedRingLossRecoveries},""" +
         """"last_recovery_latency_ns":${recoveryEvidence.lastRecoveryLatencyNanos},""" +
-        """"max_recovery_latency_ns":${recoveryEvidence.maxRecoveryLatencyNanos}},""" +
+        """"max_recovery_latency_ns":${recoveryEvidence.maxRecoveryLatencyNanos},""" +
+        """"invalid_candidates":${recoveryEvidence.invalidCandidates},""" +
+        """"recovery_verdict":"${recoveryEvidence.recoveryVerdict}",""" +
+        """"discovery_samples":${recoveryEvidence.discoverySamples},""" +
+        """"discovery_p99_upper_ns":${recoveryEvidence.discoveryP99UpperNanos},""" +
+        """"dictionary_waiting_max_ns":${recoveryEvidence.dictionaryWaitingMaxNanos}},""" +
         """"policy_eligibility":false}"""
 }

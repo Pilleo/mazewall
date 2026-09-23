@@ -156,7 +156,7 @@ internal data class SessionIntegrity(
     public val verdictDimensions: TierEVerdictDimensions
         get() = TierEVerdictDimensions(
             captureDomainValid = captureDomain == ObservationScope.SYS_ENTER_TRACEPOINT && outOfDomainAttempts == 0L,
-            transportComplete = dictionaryTransport.complete && terminalDeliveryFailures == 0L && artifactAdmissionFailures == 0L,
+            transportComplete = observedLosses == 0L && dictionaryTransport.complete && terminalDeliveryFailures == 0L && artifactAdmissionFailures == 0L,
             attributionCoverageValid = observedLosses == 0L && attributionFailures == 0L,
             dictionaryIntegrityValid = dictionaryIntegrityFailures == 0L && dictionaryTransport.complete,
             lifecycleValid = lifecycleInvalidations == 0L,
@@ -208,10 +208,12 @@ internal class AttributionCollector(
     private val knownJoinMode: TierEKnownJoinMode = TierEKnownJoinMode.QUEUED_CONTROL,
     private val uniqueEdgeDecisionObserver: ((UniqueEdgeDecision) -> Unit)? = null,
     private val allocationCounter: TierEAllocationCounter? = null,
+    private val recoveryMode: CoverageRecoveryMode = CoverageRecoveryMode.DISABLED,
 ) {
     private val dictionaryJoiner = InvocationDictionaryJoiner(maxPendingRecords, readyTransferMode, allocationCounter)
     private val integrityAccumulator = TierEIntegrityAccumulator()
     private val uniqueEdgeGate = UniqueEdgeGate()
+    private val recoveredCoverageLedger = if (recoveryMode == CoverageRecoveryMode.DISABLED) null else RecoveredEdgeLedger()
     private var retainedBudget = TierERetainedStateBudget(maxRetainedBytes)
     private val tokensByResult = java.util.IdentityHashMap<ResolvedSyscall, EmissionToken>()
     private var nextCandidateId: Long = 1
@@ -271,8 +273,22 @@ internal class AttributionCollector(
 
     /** Reports whether the ring path already acknowledged an edge (unique-edge only). */
     internal fun isEdgeAcknowledged(edge: UniqueEdgeGate.Edge): Boolean {
-        if (emissionMode != TierEEmissionMode.UNIQUE_STACK_SYSCALL) return false
-        return !uniqueEdgeGate.canEmit(edge)
+        return recoveredCoverageLedger?.contains(edge) ?: false
+    }
+
+    internal fun proposeRecoveredCoverage(edge: UniqueEdgeGate.Edge): EmissionToken? = recoveredCoverageLedger?.propose(edge)
+
+    internal fun acknowledgeRecoveredCoverage(token: EmissionToken) = requireNotNull(recoveredCoverageLedger).acknowledge(token)
+
+    internal fun recoveredCoverageCount(): Int = recoveredCoverageLedger?.acknowledgedCount() ?: 0
+
+    internal fun acknowledgeRetainedRingCoverage(resolved: ResolvedSyscall) {
+        val ledger = recoveredCoverageLedger ?: return
+        if (resolved.resolutionStatus != ResolutionStatus.RESOLVED) return
+        val stack = resolved.stackDefinition ?: return
+        ledger.acknowledgeRing(
+            UniqueEdgeGate.Edge(stack.stackTraceId, resolved.observation.syscallNumber, resolved.observation.captureFlags),
+        )
     }
 
     /** Publishes bounded recovery accounting without touching event-history verdicts. */

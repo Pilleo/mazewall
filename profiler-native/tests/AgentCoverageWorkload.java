@@ -33,7 +33,11 @@ public final class AgentCoverageWorkload {
             DataInputStream input = new DataInputStream(Channels.newInputStream(socket));
             DataOutputStream output = new DataOutputStream(Channels.newOutputStream(socket));
             String emissionMode = System.getenv().getOrDefault("TIER_E_SPLIT_EMISSION_MODE", "full-stream");
-            String attach = rpc(output, input, "ATTACH " + pid + " uprobe " + args[3] + " " + args[4] + " " + args[5] + " " + emissionMode);
+            String markerBackend = System.getenv().getOrDefault("TIER_E_SPLIT_MARKER_BACKEND", "uprobe");
+            if (!markerBackend.equals("uprobe") && !markerBackend.equals("usdt")) {
+                throw new IllegalArgumentException("unsupported marker backend: " + markerBackend);
+            }
+            String attach = rpc(output, input, "ATTACH " + pid + " " + markerBackend + " " + args[3] + " " + args[4] + " " + args[5] + " " + emissionMode);
             if (!attach.startsWith("OK")) throw new IllegalStateException("attach failed: " + attach);
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
             Path file = Files.createTempFile("mazewall-coverage", ".txt");

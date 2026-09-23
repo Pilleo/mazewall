@@ -26,6 +26,7 @@ internal object TierEMatchedBenchmark {
     )
 
     @JvmStatic
+    @Suppress("TooGenericExceptionCaught")
     fun main(args: Array<String>) {
         require(args.size in 1..8) {
             "usage: <agent.so> [iterations] [warmups] [batches] [forks] [workload-cpu] [collector-cpu] [results.jsonl]"
@@ -1982,7 +1983,7 @@ internal object TierEMatchedBenchmark {
                 '\n' -> append("\\n")
                 '\r' -> append("\\r")
                 '\t' -> append("\\t")
-                else -> if (character.code < 0x20) append("\\u%04x".format(character.code)) else append(character)
+                else -> if (character.code < 0x20) append("\\u%04x".format(java.util.Locale.ROOT, character.code)) else append(character)
             }
         }
     }
@@ -2469,6 +2470,7 @@ internal object TierEMatchedBenchmark {
         return available.filter { it.jsonName(scope) in selected }
     }
 
+    @Suppress("ElseCaseInsteadOfExhaustiveWhen")
     private fun variants(
         scope: Scope,
         rotation: Int,

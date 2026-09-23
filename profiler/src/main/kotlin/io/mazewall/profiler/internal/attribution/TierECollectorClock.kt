@@ -65,6 +65,7 @@ internal class TierELinuxMonotonicClock(
 /** Bounded logarithmic receipt-age summary; percentile values are inclusive upper bounds. */
 internal class TierEReceiptAgeAccumulator {
     private val buckets = LongArray(BUCKET_COUNT)
+    private val fineBuckets = LongArray(FINE_BUCKET_COUNT + 1)
     private var samples = 0L
     private var totalNanos = 0L
     private var minNanos = Long.MAX_VALUE
@@ -86,6 +87,7 @@ internal class TierEReceiptAgeAccumulator {
                 p50UpperBoundNanos = percentileUpperBound(50),
                 p95UpperBoundNanos = percentileUpperBound(95),
                 p99UpperBoundNanos = percentileUpperBound(99),
+                p99FineUpperBoundNanos = finePercentileUpperBound(99),
             )
         }
 
@@ -96,6 +98,20 @@ internal class TierEReceiptAgeAccumulator {
         minNanos = minOf(minNanos, ageNanos)
         maxNanos = maxOf(maxNanos, ageNanos)
         buckets[bucketFor(ageNanos)] = Math.addExact(buckets[bucketFor(ageNanos)], 1)
+        val fineIndex = minOf(ageNanos / FINE_BUCKET_WIDTH_NANOS, FINE_BUCKET_COUNT.toLong()).toInt()
+        fineBuckets[fineIndex] = Math.addExact(fineBuckets[fineIndex], 1)
+    }
+
+    private fun finePercentileUpperBound(percentile: Int): Long {
+        val rank = ((samples * percentile) + 99) / 100
+        var cumulative = 0L
+        fineBuckets.forEachIndexed { index, count ->
+            cumulative += count
+            if (cumulative >= rank) {
+                return if (index == FINE_BUCKET_COUNT) Long.MAX_VALUE else (index + 1L) * FINE_BUCKET_WIDTH_NANOS - 1
+            }
+        }
+        return Long.MAX_VALUE
     }
 
     private fun percentileUpperBound(percentile: Int): Long {
@@ -121,6 +137,8 @@ internal class TierEReceiptAgeAccumulator {
 
     private companion object {
         private const val BUCKET_COUNT = Long.SIZE_BITS
+        private const val FINE_BUCKET_WIDTH_NANOS = 100_000L
+        private const val FINE_BUCKET_COUNT = 10_000
     }
 }
 
@@ -132,6 +150,7 @@ internal data class TierEReceiptAgeMetrics(
     val p50UpperBoundNanos: Long,
     val p95UpperBoundNanos: Long,
     val p99UpperBoundNanos: Long,
+    val p99FineUpperBoundNanos: Long = 0,
 ) {
     internal companion object {
         val EMPTY = TierEReceiptAgeMetrics(0, 0, 0, 0, 0, 0, 0)

@@ -4,11 +4,13 @@ package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
+import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntime
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
+import io.mazewall.profiler.internal.attribution.TierELinuxMonotonicClock
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEProducerClosure
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
@@ -170,6 +172,11 @@ internal class TierEDaemonService(
     private val benchmarkRecordLimit: Int? = null,
     private val benchmarkMode: Boolean = false,
     private val markerVersion: MarkerVersion = markerVersionFromEnvironment(),
+    private val benchmarkPhases: Boolean = System.getenv("TIER_E_BENCHMARK_PHASES") == "1",
+    private val receiptClockMode: String = receiptClockModeFromEnvironment(),
+    private val recoveryMode: CoverageRecoveryMode = coverageRecoveryModeFromEnvironment(),
+    private val recoveryMapCapacity: Int = recoveryMapCapacityFromEnvironment(),
+    private val benchmarkDropRingSyscallNumber: Int? = benchmarkDropRingSyscallFromEnvironment(),
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -187,6 +194,19 @@ internal class TierEDaemonService(
             ((coverageManifestSink != null || benchmarkMode) && benchmarkRecordLimit in TierEOptions.DEFAULT_RECORD_LIMIT..250_000),
         ) {
             "expanded record limit is permitted only for a bounded benchmark"
+        }
+        require(receiptClockMode in setOf("disabled", "monotonic")) { "TIER_E_COLLECTOR_RECEIPT_CLOCK must be disabled or monotonic" }
+        require(benchmarkMode || coverageManifestSink != null || receiptClockMode == "disabled") {
+            "collector receipt clock is benchmark-only"
+        }
+        require(benchmarkMode || coverageManifestSink != null || recoveryMode == CoverageRecoveryMode.DISABLED) {
+            "coverage recovery is benchmark-only"
+        }
+        require(benchmarkMode || coverageManifestSink != null || markerVersion == MarkerVersion.V1) {
+            "marker v2 is benchmark-only"
+        }
+        require(benchmarkMode || coverageManifestSink != null || !benchmarkPhases) {
+            "phase timing is benchmark-only"
         }
     }
 
@@ -246,12 +266,19 @@ internal class TierEDaemonService(
                             cmd.emissionMode,
                             maxPendingRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
                             maxRetainedRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
-                            benchmarkPhases = markerVersion == MarkerVersion.V2,
+                            benchmarkPhases = benchmarkPhases,
+                            experimentalCoverage = markerVersion == MarkerVersion.V2,
                             markerVersion = markerVersion,
+                            coverageRecoveryMode = recoveryMode,
+                            coverageRecoveryMapCapacity = recoveryMapCapacity,
+                            benchmarkDropRingSyscallNumber = benchmarkDropRingSyscallNumber,
                         ),
                         configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
                     )
-                    runtime = TierECollectorRuntime(session)
+                    runtime = TierECollectorRuntime(
+                        session,
+                        receiptClock = if (receiptClockMode == "monotonic") TierELinuxMonotonicClock() else null,
+                    )
                     val markerPath = attachment.markerPath
                     val selection = if (markerVersion == MarkerVersion.V2) {
                         selectMarkerTransport(cmd.mode) {
@@ -407,6 +434,23 @@ internal class TierEDaemonService(
             result.withTerminalDeliveryFailure()
         }
         val report = TierETerminalReport.from(afterResultDelivery, target, contents)
+        val receipt = afterResultDelivery.metrics.loop.receiptAge
+        System.out.println(
+            "tier-e-collector-metrics: polls=${afterResultDelivery.metrics.loop.polls} " +
+                "failure=${afterResultDelivery.metrics.failure ?: "none"} " +
+                "active_polls=${afterResultDelivery.metrics.loop.activePolls} " +
+                "idle_polls=${afterResultDelivery.metrics.loop.idlePolls} " +
+                "receipt_samples=${receipt.samples} receipt_min_ns=${receipt.minNanos} " +
+                "receipt_mean_ns=${receipt.meanNanos} receipt_max_ns=${receipt.maxNanos} " +
+                "receipt_p50_upper_ns=${receipt.p50UpperBoundNanos} " +
+                "receipt_p95_upper_ns=${receipt.p95UpperBoundNanos} " +
+                "receipt_p99_upper_ns=${receipt.p99UpperBoundNanos} " +
+                "receipt_p99_fine_upper_ns=${receipt.p99FineUpperBoundNanos} " +
+                "marker_transitions=${afterResultDelivery.profile.integrity.reconciliation.markerTransitions} " +
+                "kernel_active_observations=${afterResultDelivery.profile.integrity.reconciliation.kernelActiveObservations} " +
+                "ambient_inactive=${afterResultDelivery.profile.integrity.ambientInactiveObservations} " +
+                "ring_loss=${afterResultDelivery.profile.integrity.observedLosses}",
+        )
         val afterCoverageManifest = if (coverageManifestSink == null ||
             runCatching {
                 val configuration = requireNotNull(coverageManifestSink)
@@ -514,3 +558,34 @@ internal fun markerVersionFromEnvironment(env: Map<String, String> = System.gete
         "v2" -> MarkerVersion.V2
         else -> error("TIER_E_MARKER_VERSION must be v1 or v2")
     }
+
+internal fun receiptClockModeFromEnvironment(env: Map<String, String> = System.getenv()): String =
+    when (val mode = env["TIER_E_COLLECTOR_RECEIPT_CLOCK"]) {
+        null, "", "disabled" -> "disabled"
+        "monotonic" -> "monotonic"
+        else -> error("TIER_E_COLLECTOR_RECEIPT_CLOCK must be disabled or monotonic")
+    }
+
+internal fun coverageRecoveryModeFromEnvironment(env: Map<String, String> = System.getenv()): CoverageRecoveryMode =
+    when (env["TIER_E_COVERAGE_RECOVERY_MODE"]) {
+        null, "", "disabled" -> CoverageRecoveryMode.DISABLED
+        "shadow" -> CoverageRecoveryMode.SHADOW
+        "recover" -> CoverageRecoveryMode.RECOVER
+        else -> error("TIER_E_COVERAGE_RECOVERY_MODE must be disabled, shadow, or recover")
+    }
+
+internal fun recoveryMapCapacityFromEnvironment(env: Map<String, String> = System.getenv()): Int =
+    env["TIER_E_RECOVERY_MAP_CAPACITY"]?.toIntOrNull()?.takeIf { it in 1..4_096 }
+        ?: if (env.containsKey("TIER_E_RECOVERY_MAP_CAPACITY")) {
+            error("TIER_E_RECOVERY_MAP_CAPACITY must be 1..4096")
+        } else {
+            CoverageRecoveryMode.DEFAULT_MAP_CAPACITY
+        }
+
+internal fun benchmarkDropRingSyscallFromEnvironment(env: Map<String, String> = System.getenv()): Int? =
+    env["TIER_E_BENCHMARK_DROP_RING_SYSCALL"]?.toIntOrNull()?.takeIf { it >= 0 }
+        ?: if (env.containsKey("TIER_E_BENCHMARK_DROP_RING_SYSCALL")) {
+            error("TIER_E_BENCHMARK_DROP_RING_SYSCALL must be a nonnegative syscall number")
+        } else {
+            null
+        }

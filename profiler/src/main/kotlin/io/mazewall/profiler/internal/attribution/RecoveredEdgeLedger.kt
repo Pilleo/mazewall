@@ -35,6 +35,11 @@ internal class RecoveredEdgeLedger {
 
     fun contains(edge: UniqueEdgeGate.Edge): Boolean = edge in acknowledged
 
+    /** Ring output has already passed its existing collector retention boundary. */
+    fun acknowledgeRing(edge: UniqueEdgeGate.Edge) {
+        acknowledged.add(edge)
+    }
+
     fun pendingCount(): Int = outstanding.size
 
     fun acknowledgedCount(): Int = acknowledged.size

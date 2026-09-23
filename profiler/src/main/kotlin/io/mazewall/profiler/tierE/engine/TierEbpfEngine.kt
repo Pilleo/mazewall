@@ -179,8 +179,8 @@ internal class TierEbpfEngine(
         public const val EVENT_SIZE: Int = 88
         private const val RING_CAPACITY: Int = 1 shl 20
         private const val COVERAGE_EDGE_CAPACITY: Int = 1 shl 16
-        internal const val RECOVERY_EDGE_KEY_SIZE: Int = 16
-        internal const val RECOVERY_EDGE_VALUE_SIZE: Int = 88
+        internal const val RECOVERY_EDGE_KEY_SIZE: Int = 24
+        internal const val RECOVERY_EDGE_VALUE_SIZE: Int = 96
         private const val CONTEXT_METRIC_CAPACITY: Int = 1 shl 14
         internal const val BENCHMARK_AUDIT_MAX_DESCRIPTORS: Int = 1 shl 17
         private const val RAW_SYS_ENTER_AUDIT_CAPACITY: Int = BENCHMARK_AUDIT_MAX_DESCRIPTORS
@@ -224,7 +224,9 @@ internal class TierEbpfEngine(
                 "amd64", "x86_64" -> TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
                 else -> TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT
             }
-            else -> configured
+            TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,
+            TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT,
+            -> configured
         }
 
         private fun parseCpuList(cpuList: String): List<Int> =
@@ -377,7 +379,12 @@ internal class TierEbpfEngine(
                     maxEntries = options.coverageRecoveryMapCapacity,
                 )
             }
-            installed.lossFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 8, maxEntries = COUNTER_MAP_ENTRIES)
+            installed.lossFd = createMap(
+                MAP_ARRAY,
+                keySize = 4,
+                valueSize = 8,
+                maxEntries = if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) COUNTER_MAP_ENTRIES - 1 else COUNTER_MAP_ENTRIES,
+            )
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
             installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
             installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
@@ -785,10 +792,10 @@ internal class TierEbpfEngine(
                         )
                     }
                     is SyscallResult.Error -> {
-                        // A concurrent final-scan race cannot occur after quiescence;
-                        // any other disappearance is an explicit incomplete outcome
-                        // for the caller to account, not a silent skip.
-                        if (result.errno != io.mazewall.ffi.NativeConstants.ENOENT) result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM)")
+                        // Entries in this map are never deleted. A next-key
+                        // lookup followed by ENOENT is an incomplete scan,
+                        // including during live collection: do not skip it.
+                        result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM recovery)")
                     }
                 }
                 currentKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4).also { seg ->

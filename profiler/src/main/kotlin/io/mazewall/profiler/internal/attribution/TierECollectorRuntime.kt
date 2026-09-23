@@ -25,6 +25,7 @@ internal data class TierECollectorRuntimeResult(
             profile = TierEProfile(
                 profile.syscalls,
                 profile.integrity.copy(artifactAdmissionFailures = profile.integrity.artifactAdmissionFailures + 1),
+                profile.recoveredCoverage,
             ),
             terminalReason = TierETerminalReason.ARTIFACT_UNAVAILABLE,
         )
@@ -36,6 +37,7 @@ internal data class TierECollectorRuntimeResult(
             profile = TierEProfile(
                 profile.syscalls,
                 profile.integrity.copy(terminalDeliveryFailures = profile.integrity.terminalDeliveryFailures + 1),
+                profile.recoveredCoverage,
             ),
         )
 }
@@ -60,6 +62,7 @@ internal class TierECollectorRuntime(
     policy: TierECollectorLoopPolicy = TierECollectorLoopPolicy.CONTINUOUS,
     onResolved: (List<ResolvedSyscall>) -> Unit = {},
     stopJoinMillis: Long = DEFAULT_STOP_JOIN_MILLIS,
+    receiptClock: TierECollectorClock? = null,
     threadFactory: (Runnable) -> Thread = { runnable ->
         Thread(runnable, "mazewall-tier-e-collector").apply { isDaemon = true }
     },
@@ -69,6 +72,7 @@ internal class TierECollectorRuntime(
         policy = policy,
         onResolved = onResolved,
         stopJoinMillis = stopJoinMillis,
+        receiptClock = receiptClock,
         threadFactory = threadFactory,
     )
 

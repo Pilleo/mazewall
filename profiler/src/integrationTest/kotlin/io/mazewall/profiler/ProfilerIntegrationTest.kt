@@ -156,7 +156,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                     future.get(5, TimeUnit.SECONDS)
                 }
             assertTrue(ex.cause is IllegalStateException)
-            assertTrue(ex.cause?.message?.contains("virtual threads") == true)
+            assertTrue(ex.cause?.message?.contains("virtual thread") == true)
         } finally {
             vExecutor.shutdownNow()
         }

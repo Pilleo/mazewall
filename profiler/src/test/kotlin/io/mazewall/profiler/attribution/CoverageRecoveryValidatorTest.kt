@@ -42,6 +42,7 @@ class CoverageRecoveryValidatorTest {
         markerSequence = 2,
         args = listOf(-100, 1, 2, 3, 4, 5),
         processIncarnation = processIncarnation,
+        attachmentGeneration = 1,
     )
 
     @Test

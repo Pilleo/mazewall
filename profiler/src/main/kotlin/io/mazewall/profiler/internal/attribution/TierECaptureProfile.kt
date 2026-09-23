@@ -88,7 +88,7 @@ internal sealed class TierECaptureProfile {
             MessageDigest
                 .getInstance("SHA-256")
                 .digest("tier-e-capture-profile-v1\u0000$normalizedSelectors".encodeToByteArray())
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(java.util.Locale.ROOT, it) }
 
         fun selected(vararg values: TierECaptureBinding): TierECaptureProfile = selected(values.asList())
 

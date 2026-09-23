@@ -62,4 +62,31 @@ class MarkerTransportSelectionTest {
             markerVersionFromEnvironment(mapOf("TIER_E_MARKER_VERSION" to "v3"))
         }
     }
+
+    @Test
+    fun `receipt clock mode defaults to disabled and accepts monotonic`() {
+        assertEquals("disabled", receiptClockModeFromEnvironment(emptyMap()))
+        assertEquals("disabled", receiptClockModeFromEnvironment(mapOf("TIER_E_COLLECTOR_RECEIPT_CLOCK" to "disabled")))
+        assertEquals("monotonic", receiptClockModeFromEnvironment(mapOf("TIER_E_COLLECTOR_RECEIPT_CLOCK" to "monotonic")))
+    }
+
+    @Test
+    fun `receipt clock mode rejects unknown values`() {
+        assertFailsWith<IllegalStateException> {
+            receiptClockModeFromEnvironment(mapOf("TIER_E_COLLECTOR_RECEIPT_CLOCK" to "wall"))
+        }
+    }
+
+    @Test
+    fun `recovery mode and map capacity reject unsupported configurations`() {
+        assertEquals(io.mazewall.profiler.internal.attribution.CoverageRecoveryMode.DISABLED, coverageRecoveryModeFromEnvironment(emptyMap()))
+        assertEquals(
+            io.mazewall.profiler.internal.attribution.CoverageRecoveryMode.SHADOW,
+            coverageRecoveryModeFromEnvironment(mapOf("TIER_E_COVERAGE_RECOVERY_MODE" to "shadow")),
+        )
+        assertEquals(4096, recoveryMapCapacityFromEnvironment(emptyMap()))
+        assertEquals(8, recoveryMapCapacityFromEnvironment(mapOf("TIER_E_RECOVERY_MAP_CAPACITY" to "8")))
+        assertFailsWith<IllegalStateException> { coverageRecoveryModeFromEnvironment(mapOf("TIER_E_COVERAGE_RECOVERY_MODE" to "unknown")) }
+        assertFailsWith<IllegalStateException> { recoveryMapCapacityFromEnvironment(mapOf("TIER_E_RECOVERY_MAP_CAPACITY" to "4097")) }
+    }
 }

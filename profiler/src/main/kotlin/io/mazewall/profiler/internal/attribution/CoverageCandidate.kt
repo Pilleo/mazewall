@@ -8,7 +8,7 @@ package io.mazewall.profiler.internal.attribution
  * replay state. Coverage membership commits only through the shared
  * collector-owned acknowledgement boundary.
  */
-internal data class CoverageCandidate(
+internal class CoverageCandidate(
     val sessionEpoch: SessionEpoch,
     val canonicalStackTraceId: StackTraceId,
     val syscallNumber: Int,
@@ -18,9 +18,12 @@ internal data class CoverageCandidate(
     val tid: Int,
     val invocationId: InvocationId,
     val markerSequence: Long,
-    val args: List<Long>,
+    args: List<Long>,
     val processIncarnation: ProcessIncarnation,
+    val attachmentGeneration: Int = 0,
 ) {
+    val args: List<Long> = java.util.List.copyOf(args)
+
     init {
         require(sessionEpoch.value > 0) { "session epoch must be positive" }
         require(syscallNumber >= 0) { "syscall number must be non-negative" }
@@ -37,5 +40,21 @@ internal data class CoverageCandidate(
             stackTraceId = canonicalStackTraceId,
             syscallNumber = syscallNumber,
             captureFlags = captureFlags,
+        )
+
+    fun copy(args: List<Long> = this.args): CoverageCandidate =
+        CoverageCandidate(
+            sessionEpoch,
+            canonicalStackTraceId,
+            syscallNumber,
+            captureFlags,
+            observedKtimeNanos,
+            tgid,
+            tid,
+            invocationId,
+            markerSequence,
+            args,
+            processIncarnation,
+            attachmentGeneration,
         )
 }

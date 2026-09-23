@@ -63,6 +63,17 @@ class TierEOptionsTest {
     }
 
     @Test
+    fun `experimental v2 recovery does not force intrusive benchmark phase timing`() {
+        val options = TierEOptions(
+            markerVersion = MarkerVersion.V2,
+            coverageRecoveryMode = CoverageRecoveryMode.RECOVER,
+            experimentalCoverage = true,
+        )
+        assertEquals(false, options.benchmarkPhases)
+        assertEquals(CoverageRecoveryMode.RECOVER, options.coverageRecoveryMode)
+    }
+
+    @Test
     fun `full stream is the default and is the only full-trace guarantee`() {
         assertEquals(TierEEmissionMode.FULL_STREAM, TierEOptions().emissionMode)
 

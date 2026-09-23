@@ -3,19 +3,24 @@ package io.mazewall.profiler.internal.attribution
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** One raw retained-edge map entry: a 16-byte key and an 88-byte value. */
-internal data class RecoveryMapEntry(
-    val key: ByteArray,
-    val value: ByteArray,
+/** One raw retained-edge map entry: a 24-byte key and a 96-byte value. */
+internal class RecoveryMapEntry(
+    key: ByteArray,
+    value: ByteArray,
 ) {
+    private val keyBytes = key.copyOf()
+    private val valueBytes = value.copyOf()
+    val key: ByteArray get() = keyBytes.copyOf()
+    val value: ByteArray get() = valueBytes.copyOf()
+
     init {
-        require(key.size == 16) { "recovery key must be 16 bytes" }
-        require(value.size == 88) { "recovery value must be 88 bytes" }
+        require(keyBytes.size == 24) { "recovery key must be 24 bytes" }
+        require(valueBytes.size == 96) { "recovery value must be 96 bytes" }
     }
 
-    override fun equals(other: Any?): Boolean = other is RecoveryMapEntry && key.contentEquals(other.key) && value.contentEquals(other.value)
+    override fun equals(other: Any?): Boolean = other is RecoveryMapEntry && keyBytes.contentEquals(other.keyBytes) && valueBytes.contentEquals(other.valueBytes)
 
-    override fun hashCode(): Int = 31 * key.contentHashCode() + value.contentHashCode()
+    override fun hashCode(): Int = 31 * keyBytes.contentHashCode() + valueBytes.contentHashCode()
 }
 
 /** One bounded page of a map scan. */
@@ -36,19 +41,19 @@ internal fun interface RecoveryMapReader {
 
 /** Decoded key fields of a retained-edge entry. */
 internal data class RecoveryEdgeKey(
-    val sessionTag: Int,
+    val sessionEpoch: Long,
     val stackTraceId: Long,
     val syscallNumber: Int,
     val captureFlags: Int,
 )
 
-/** Decodes the 16-byte little-endian key: session_tag u32, stack u32, syscall s32, flags u32. */
+/** Decodes the 24-byte little-endian key: epoch u64, stack u64, syscall s32, flags u32. */
 internal fun decodeRecoveryKey(key: ByteArray): RecoveryEdgeKey {
-    require(key.size == 16) { "recovery key must be 16 bytes" }
+    require(key.size == 24) { "recovery key must be 24 bytes" }
     val buffer = ByteBuffer.wrap(key).order(ByteOrder.LITTLE_ENDIAN)
     return RecoveryEdgeKey(
-        sessionTag = buffer.int,
-        stackTraceId = buffer.int.toLong() and 0xffff_ffffL,
+        sessionEpoch = buffer.long,
+        stackTraceId = buffer.long,
         syscallNumber = buffer.int,
         captureFlags = buffer.int,
     )
@@ -73,8 +78,11 @@ internal fun RecoveryMapEntry.toCandidate(
     val invocation = buffer.long
     val sequence = buffer.long
     val args = List(6) { buffer.long }
+    val generation = buffer.int
+    val reserved = buffer.int
     if (syscall != decodedKey.syscallNumber || flags != decodedKey.captureFlags) return null
-    if (invocation <= 0 || sequence <= 0 || tgid <= 0 || tid <= 0) return null
+    if (invocation <= 0 || sequence <= 0 || tgid <= 0 || tid <= 0 || generation <= 0 || reserved != 0) return null
+    if (decodedKey.sessionEpoch != sessionEpoch.value) return null
     return CoverageCandidate(
         sessionEpoch = sessionEpoch,
         canonicalStackTraceId = StackTraceId(decodedKey.stackTraceId),
@@ -87,5 +95,6 @@ internal fun RecoveryMapEntry.toCandidate(
         markerSequence = sequence,
         args = args,
         processIncarnation = processIncarnation,
+        attachmentGeneration = generation,
     )
 }

@@ -202,7 +202,7 @@ internal object AgentDefinitionFile {
             virtualPinnedNanos = virtualPinnedNanos,
             publication = envelope?.publication,
             sourceByteLength = bytes.size.toLong(),
-            sourceSha256 = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) },
+            sourceSha256 = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(java.util.Locale.ROOT, it.toInt() and 0xff) },
         )
     }
 

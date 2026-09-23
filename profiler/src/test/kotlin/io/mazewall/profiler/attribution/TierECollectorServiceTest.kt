@@ -143,6 +143,47 @@ class TierECollectorServiceTest {
         }
     }
 
+    @Test
+    fun `receipt clock flows from service to loop receipt summaries`() {
+        val loop =
+            TierECollectorLoop(
+                session =
+                    TierEProfilerSession(
+                        source = RecordingSource(events = ArrayDeque(listOf(listOf(event())))),
+                        processEpoch = 1,
+                        definitionReader = { AgentDefinitionFile.Contents(emptyList(), emptyList(), 0) },
+                    ),
+                receiptClock = TierECollectorClock { 1_000L },
+            )
+
+        loop.pollOnce()
+
+        val receipt = loop.metrics().receiptAge
+        assertEquals(1, receipt.samples)
+        assertEquals(999, receipt.minNanos)
+        assertEquals(999, receipt.maxNanos)
+        loop.close()
+    }
+
+    @Test
+    fun `service accepts a receipt clock and reaches terminal state`() {
+        val service =
+            TierECollectorService(
+                session =
+                    TierEProfilerSession(
+                        source = RecordingSource(),
+                        processEpoch = 1,
+                        definitionReader = { AgentDefinitionFile.Contents(emptyList(), emptyList(), 0) },
+                    ),
+                receiptClock = TierECollectorClock { 1_000L },
+            )
+
+        service.start()
+        service.finish(Path.of("ignored"), producerClosed = true)
+
+        assertEquals(TierECollectorServiceState.TERMINAL, service.metrics().state)
+    }
+
     private fun service(
         source: RecordingSource,
         stopJoinMillis: Long = 1_000,

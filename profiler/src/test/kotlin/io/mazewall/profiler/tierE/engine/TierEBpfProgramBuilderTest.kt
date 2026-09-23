@@ -40,8 +40,17 @@ class TierEBpfProgramBuilderTest {
         )
         val v1 = TierEBpfProgramBuilder.buildMarkerProgram(TierEOptions())
         assertTrue(v2.size > v1.size)
-        // Reads pt_regs.dx for stack_trace_id.
-        assertTrue(v2.any { it.code == 0x79 && it.off == 96.toShort() })
+        // The marker ABI is RDI=invocation, RSI=stack, RDX=flags.
+        val stackRead = v2.indexOfFirst { it.code == 0x79 && it.src == 9 && it.dst == 3 && it.off == 104.toShort() }
+        val flagsRead = v2.indexOfFirst { it.code == 0x79 && it.src == 9 && it.dst == 8 && it.off == 96.toShort() }
+        assertTrue(stackRead >= 0 && flagsRead > stackRead)
+        val storedStack = v2.indexOfFirst { it.code == 0x7b && it.dst == 10 && it.src == 3 && it.off == (-48).toShort() }
+        val storedGeneration = v2.indexOfFirst { it.code == 0x63 && it.dst == 10 && it.off == (-44).toShort() }
+        assertTrue(storedStack >= 0 && storedGeneration > storedStack, "generation must not be overwritten by stack storage")
+        assertTrue(v2.any { it.code == 0x61 && it.src == 10 && it.off == (-48).toShort() }, "stack ID must be zero-extended before storing in task state")
+        // The v2 creation helper receives a fully zero-initialized 32-byte
+        // stack region starting at FP-32, not the old FP-24 v1 initializer.
+        assertTrue(v2.any { it.code == 0x07 && it.dst == 3 && it.imm == -32 })
         // Writes stack_trace_id at task-storage offset 24.
         assertTrue(v2.any { it.code == 0x7b && it.off == 24.toShort() })
         assertEquals(0x95, v2.last().code)
@@ -171,6 +180,24 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `benchmark ring fault branches after retained map insertion`() {
+        val options = TierEOptions(
+            benchmarkPhases = true,
+            markerVersion = MarkerVersion.V2,
+            coverageRecoveryMode = CoverageRecoveryMode.RECOVER,
+            benchmarkDropRingSyscallNumber = 257,
+        )
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram(options)
+        val insertion = program.indexOfFirst { it.code == 0x18 && it.src == 1 && it.imm == 8 }
+        val fault = (insertion + 1 until program.size).first { index ->
+            program[index].code == 0x15 && program[index].dst == 5 && program[index].imm == 257
+        }
+        val reservation = program.indexOfFirst { it.code == 0x85 && it.imm == 131 }
+        assertTrue(insertion >= 0 && fault > insertion && reservation > fault)
+        assertEquals(1, program.count { it.code == 0x85 && it.imm == 131 }, "normal ring reservation stays present")
+    }
+
+    @Test
     fun `sys enter program reserves a bounded per-context metric map slot`() {
         val program = TierEBpfProgramBuilder.buildSysEnterProgram()
 
@@ -280,6 +307,19 @@ class TierEBpfProgramBuilderTest {
                 "every generated instruction must be reachable for $options",
             )
         }
+    }
+
+    @Test
+    fun `in flight completion resets key after diagnostic rejection`() {
+        val program = TierEBpfProgramBuilder.buildSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkEmitMarkerLossEvents = true),
+        )
+        val completionMap = program.indexOfLast { it.code == 0x18 && it.src == 1 && it.imm == 6 }
+        assertTrue(completionMap >= 2)
+        assertEquals(0xb7, program[completionMap - 2].code)
+        assertEquals(0, program[completionMap - 2].imm)
+        assertEquals(0x63, program[completionMap - 1].code)
+        assertEquals((-4).toShort(), program[completionMap - 1].off)
     }
 
     @Test

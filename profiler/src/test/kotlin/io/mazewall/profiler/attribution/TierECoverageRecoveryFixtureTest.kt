@@ -20,13 +20,13 @@ class TierECoverageRecoveryFixtureTest {
     private val invocationId = InvocationId(55)
 
     private fun recoveryEntry(): RecoveryMapEntry {
-        val key = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+        val key = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
         key
-            .putInt(sessionTag)
-            .putInt(7)
+            .putLong(sessionTag.toLong())
+            .putLong(7)
             .putInt(257)
             .putInt(0)
-        val value = ByteBuffer.allocate(88).order(ByteOrder.LITTLE_ENDIAN)
+        val value = ByteBuffer.allocate(96).order(ByteOrder.LITTLE_ENDIAN)
         value
             .putLong(999L)
             .putInt(100)
@@ -35,6 +35,7 @@ class TierECoverageRecoveryFixtureTest {
             .putInt(0)
         value.putLong(55L).putLong(2L)
         listOf(-100L, 1L, 2L, 3L, 4L, 5L).forEach(value::putLong)
+        value.putInt(1).putInt(0)
         return RecoveryMapEntry(key.array(), value.array())
     }
 
@@ -81,7 +82,9 @@ class TierECoverageRecoveryFixtureTest {
 
         override fun readMarkerFailureCount(): Long = 0
 
-        override fun readMarkerTransitionCount(): Long = 0
+        override fun readMarkerTransitionCount(): Long = 1
+
+        override fun readExactAdmissionCount(): Long = 1
 
         override fun readLastMarkerPidTgid(): Long = 0
 
@@ -108,6 +111,8 @@ class TierECoverageRecoveryFixtureTest {
             coverageRecoveryMode = mode,
         ),
         definitionReader = { definitions() },
+        selectiveDefinitionReader = { _, _ -> definitions() },
+        configuredSessionEpoch = SessionEpoch(sessionTag.toLong()),
     )
 
     @Test
@@ -122,6 +127,19 @@ class TierECoverageRecoveryFixtureTest {
         // No ring event was fabricated: the ring stream stays empty and lossy.
         assertEquals(0, profile.syscalls.size)
         assertEquals(1, profile.integrity.observedLosses)
+        assertEquals(1, profile.recoveredCoverage.size)
+        assertEquals(
+            stackId,
+            profile.recoveredCoverage
+            .single()
+            .stackDefinition.stackTraceId,
+        )
+        assertEquals(
+            invocationId,
+            profile.recoveredCoverage
+            .single()
+            .candidate.invocationId,
+        )
 
         val evidence = profile.integrity.recoveryEvidence
         assertEquals(optionsCapacity(), evidence.mapCapacity)
@@ -145,6 +163,7 @@ class TierECoverageRecoveryFixtureTest {
         val profile = session.finish(Path.of("ignored"), producerClosed = true)
 
         assertEquals(0, profile.syscalls.size)
+        assertTrue(profile.recoveredCoverage.isEmpty())
         val evidence = profile.integrity.recoveryEvidence
         assertTrue(evidence.entriesObserved >= 1)
         assertEquals(0, evidence.recoveredEdges)

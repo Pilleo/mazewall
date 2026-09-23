@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <mutex>
 #include <memory>
@@ -77,6 +78,7 @@ std::atomic<std::uint64_t> benchmark_metadata_cache_misses{0};
 std::atomic<std::uint64_t> benchmark_serialization_nanos{0};
 std::atomic<std::uint64_t> benchmark_publication_bytes{0};
 std::atomic<std::uint64_t> benchmark_publication_latency_nanos{0};
+std::atomic<std::uint64_t> benchmark_publication_cpu_nanos{0};
 std::atomic<std::uint64_t> benchmark_definition_lock_wait_nanos{0};
 std::atomic<std::uint64_t> benchmark_peak_retained_bytes{0};
 std::atomic<std::uint64_t> benchmark_publication_count{0};
@@ -129,6 +131,17 @@ std::uint64_t elapsed_nanos(std::chrono::steady_clock::time_point started) noexc
 
 std::chrono::steady_clock::time_point benchmark_started() noexcept {
     return benchmark_phases ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+}
+
+// Thread-CPU counterpart of benchmark_started: measures CPU consumed by
+// publication itself, separately from elapsed (wall-clock) publication latency
+// which also covers filesystem and scheduling waits.
+std::uint64_t thread_cpu_nanos() noexcept {
+    if (!benchmark_phases) return 0;
+    struct timespec current{};
+    if (::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &current) != 0) return 0;
+    return static_cast<std::uint64_t>(current.tv_sec) * 1'000'000'000ull +
+        static_cast<std::uint64_t>(current.tv_nsec);
 }
 
 bool write_definitions(bool producer_closed = false) noexcept;
@@ -894,6 +907,16 @@ public:
         // Publish exact marker only after successful capture and admission.
         // The canonical stack id is immutable dictionary identity; v1 keeps
         // the existing two-argument ABI unchanged.
+        if (capture_failure != 0 && marker_version_v2.load(std::memory_order_relaxed)) {
+            // A failed or truncated capture is recorded in the dictionary, but
+            // it must never become exact v2 admission: no valid canonical stack
+            // exists to key a retained edge. v1 keeps its historical behavior
+            // and reports the failure through userspace resolution instead.
+            publish_stack_marker(0, 0);
+            invocation_registry.invalidate();
+            scope_ = {};
+            return;
+        }
         invocation_registry.set_current_stack(scope_, captured_stack_id);
         publish_stack_marker(
             scope_.valid() ? scope_.id : 0,
@@ -1507,6 +1530,7 @@ bool write_definitions(bool producer_closed) noexcept {
     if (definitions_path.empty()) return true;
     try {
         const auto publication_started = benchmark_started();
+        const auto publication_cpu_started = thread_cpu_nanos();
         const auto snapshot = snapshot_definitions();
         std::lock_guard publication_lock(publication_mutex);
         if ((!producer_closed && snapshot.generation <= last_published_generation) ||
@@ -1606,6 +1630,10 @@ bool write_definitions(bool producer_closed) noexcept {
         if (benchmark_phases) {
             benchmark_publication_count.fetch_add(1, std::memory_order_relaxed);
             benchmark_publication_latency_nanos.fetch_add(elapsed_nanos(publication_started), std::memory_order_relaxed);
+            const auto publication_cpu_now = thread_cpu_nanos();
+            if (publication_cpu_now >= publication_cpu_started) {
+                benchmark_publication_cpu_nanos.fetch_add(publication_cpu_now - publication_cpu_started, std::memory_order_relaxed);
+            }
         }
         return true;
     } catch (const std::exception& failure) {
@@ -1843,7 +1871,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     if (benchmark_phases) {
         std::fprintf(
             stderr,
-            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu raw_hash_ns=%llu raw_equality_ns=%llu generation_validation_ns=%llu guard_validation_ns=%llu canonical_cache_lock_wait_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu marker_admission_clear_ns=%llu marker_exact_set_ns=%llu marker_exit_clear_ns=%llu marker_admission_clear_count=%llu marker_exact_set_count=%llu marker_exit_clear_count=%llu\n",
+            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu raw_hash_ns=%llu raw_equality_ns=%llu generation_validation_ns=%llu guard_validation_ns=%llu canonical_cache_lock_wait_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu publication_cpu_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu marker_admission_clear_ns=%llu marker_exact_set_ns=%llu marker_exit_clear_ns=%llu marker_admission_clear_count=%llu marker_exact_set_count=%llu marker_exit_clear_count=%llu\n",
             stack_transport == StackTransport::dictionary ? "dictionary" : "inline-per-invocation",
             static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
@@ -1858,6 +1886,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
             static_cast<unsigned long long>(benchmark_serialization_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_publication_bytes.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_publication_latency_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_publication_cpu_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_definition_lock_wait_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_peak_retained_bytes.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(native_retained_bytes.load(std::memory_order_relaxed)),

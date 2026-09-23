@@ -328,17 +328,22 @@ internal object TierEBpfProgramBuilder {
         }
 
         fun emitRecoveryEdgeInsert() {
-            // Key (16B at FP-272): session_tag u32 @-272, stack u32 @-268,
-            // syscall s32 @-264, flags u32 @-260. The map handle is already
-            // session-bound; the tag binds the key to the admitting session.
-            // Value (88B at FP-256) mirrors the 88-byte ring record so a
-            // retained representative carries identical observed scalars.
+            // Key (24B at FP-280): session epoch u64 @-280, stack u64 @-272,
+            // syscall s32 @-264, flags u32 @-260. The current session epoch
+            // is the zero-extended session tag configured before admission.
+            // Value (96B at FP-256) mirrors the 88-byte ring record plus
+            // attachment generation and reserved zero at offsets 88/92.
+            // Zero-invocation diagnostic records (benchmark-only marker-loss
+            // probes) never become retained edges; they fall through to the
+            // unchanged ring path below.
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
+            val noRecoveryContext = emit(Insn(JEQ_IMM, dst = 5))
             loadSyscallNumber()
             emit(Insn(STX_W, dst = FP, src = 5, off = -264))
             emit(Insn(LDX_W, dst = 5, src = 7, off = 0))
-            emit(Insn(STX_W, dst = FP, src = 5, off = -272))
-            emit(Insn(LDX_W, dst = 5, src = FP, off = -32))
-            emit(Insn(STX_W, dst = FP, src = 5, off = -268))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -280))
+            emit(Insn(LDX_DW, dst = 5, src = 6, off = 24))
+            emit(Insn(STX_DW, dst = FP, src = 5, off = -272))
             emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
             emit(Insn(STX_W, dst = FP, src = 5, off = -260))
             emit(Insn(CALL, imm = H_KTIME))
@@ -359,9 +364,13 @@ internal object TierEBpfProgramBuilder {
                 loadArgument(index)
                 emit(Insn(STX_DW, dst = FP, src = 5, off = (-216 + index * 8).toShort()))
             }
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -36))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -168))
+            emit(Insn(MOV_IMM, dst = 5, imm = 0))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -164))
             ldMap(1, RECOVERY_MAP_INDEX)
             emit(Insn(MOV_REG, dst = 2, src = FP))
-            emit(Insn(ADD_IMM, dst = 2, imm = -272))
+            emit(Insn(ADD_IMM, dst = 2, imm = -280))
             emit(Insn(MOV_REG, dst = 3, src = FP))
             emit(Insn(ADD_IMM, dst = 3, imm = -256))
             emit(Insn(MOV_IMM, dst = 4, imm = BPF_NOEXIST))
@@ -387,6 +396,7 @@ internal object TierEBpfProgramBuilder {
             p[inserted] = p[inserted].copy(off = (recoveryDone - inserted - 1).toShort())
             p[alreadyRetained] = p[alreadyRetained].copy(off = (recoveryDone - alreadyRetained - 1).toShort())
             p[missingFailureCounter] = p[missingFailureCounter].copy(off = (recoveryDone - missingFailureCounter - 1).toShort())
+            p[noRecoveryContext] = p[noRecoveryContext].copy(off = (recoveryDone - noRecoveryContext - 1).toShort())
         }
 
         fun emitAuditFailureCounter(counterIndex: Int) {
@@ -686,6 +696,10 @@ internal object TierEBpfProgramBuilder {
         if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
             emitRecoveryEdgeInsert()
         }
+        val intentionalRingDrop = options.benchmarkDropRingSyscallNumber?.let { syscall ->
+            loadSyscallNumber()
+            emit(Insn(JEQ_IMM, dst = 5, imm = syscall))
+        }
         val reservationFailed: Int?
         var submitted: Int? = null
         if (options.ringSubmissionMode == TierERingSubmissionMode.BENCHMARK_DISABLED) {
@@ -764,6 +778,9 @@ internal object TierEBpfProgramBuilder {
         val missingLossCounter: Int?
         if (options.ringSubmissionMode == TierERingSubmissionMode.ENABLED) {
             lossHandler = p.size
+            intentionalRingDrop?.let { index ->
+                p[index] = p[index].copy(off = (lossHandler - index - 1).toShort())
+            }
             emit(Insn(MOV_IMM, dst = 5, imm = 0))
             emit(Insn(STX_W, dst = FP, src = 5, off = -4))
             ldMap(1, 2)
@@ -778,6 +795,11 @@ internal object TierEBpfProgramBuilder {
             missingLossCounter = null
         }
         val completeActive = p.size
+        // Rejection handlers reuse FP-4 for their diagnostic counter key.
+        // Restore the sole in-flight map key (zero) before every completion
+        // decrement, including inactive, detached and failed-reservation paths.
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -4))
         ldMap(1, IN_FLIGHT_MAP_INDEX)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
@@ -960,15 +982,27 @@ internal object TierEBpfProgramBuilder {
         val noTargetConfig = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
         emit(Insn(LDX_W, dst = 5, src = 0, off = 12))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -44))
+        if (options.markerVersion == MarkerVersion.V2) {
+            emit(Insn(STX_W, dst = FP, src = 5, off = -56))
+        } else {
+            emit(Insn(STX_W, dst = FP, src = 5, off = -44))
+        }
         emit(Insn(MOV_REG, dst = 5, src = 6))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
-        emit(Insn(LDX_DW, dst = 7, src = 9, off = 112)) // pt_regs.di
-        emit(Insn(LDX_DW, dst = 8, src = 9, off = 104)) // pt_regs.si
+        emit(Insn(LDX_DW, dst = 7, src = 9, off = 112)) // pt_regs.di (invocation_id, both versions)
         if (options.markerVersion == MarkerVersion.V2) {
-            emit(Insn(LDX_DW, dst = 3, src = 9, off = 96)) // pt_regs.dx (stack_trace_id)
+            // Native v2 ABI is (invocation_id, stack_trace_id, flags):
+            // RDI=invocation, RSI=stack, RDX=flags.
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 104)) // pt_regs.si (stack_trace_id)
             emit(Insn(STX_DW, dst = FP, src = 3, off = -48))
+            emit(Insn(LDX_DW, dst = 8, src = 9, off = 96)) // pt_regs.dx (flags)
+            // FP-44 overlaps the upper half of FP-48. Store generation after
+            // the stack ID; its low 32 bits remain at FP-48 for the map key.
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -56))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -44))
+        } else {
+            emit(Insn(LDX_DW, dst = 8, src = 9, off = 104)) // pt_regs.si (flags)
         }
         val clearMarker = emit(Insn(JEQ_IMM, dst = 7))
         emit(Insn(MOV_REG, dst = 5, src = 7))
@@ -1009,13 +1043,23 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -8))
+        // The creation buffer below must cover the whole map value: 24 bytes
+        // for v1, 32 bytes for v2. FP-32 still holds the session tag here, but
+        // its last read was the session check above, so v2 may reuse the slot.
+        val taskStorageInitOff: Int =
+            if (options.markerVersion == MarkerVersion.V2) {
+                emit(Insn(STX_DW, dst = FP, src = 5, off = -32))
+                -32
+            } else {
+                -24
+            }
         loadMap(6, 0)
         emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
         val noTask = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_REG, dst = 1, src = 6))
         emit(Insn(MOV_REG, dst = 2, src = 0))
         emit(Insn(MOV_REG, dst = 3, src = FP))
-        emit(Insn(ADD_IMM, dst = 3, imm = -24))
+        emit(Insn(ADD_IMM, dst = 3, imm = taskStorageInitOff))
         emit(Insn(MOV_IMM, dst = 4, imm = 1))
         emit(Insn(CALL, imm = H_TASK_STORAGE_GET))
         val noStorage = emit(Insn(JEQ_IMM, dst = 0))
@@ -1026,7 +1070,10 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(LDX_W, dst = 5, src = FP, off = -44))
         emit(Insn(STX_W, dst = 0, src = 5, off = 20))
         if (options.markerVersion == MarkerVersion.V2) {
-            emit(Insn(LDX_DW, dst = 5, src = FP, off = -48))
+            // FP-44 holds attachment generation, so only the low 32 bits of
+            // the canonical stack ID at FP-48 belong in task storage. The
+            // 32-bit load zero-extends before the 64-bit store.
+            emit(Insn(LDX_W, dst = 5, src = FP, off = -48))
             emit(Insn(STX_DW, dst = 0, src = 5, off = 24))
         }
         val markerStored = emit(Insn(JA))

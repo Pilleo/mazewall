@@ -6,7 +6,7 @@ ENGINE=${TIER_E_CONTAINER_ENGINE:-docker}
 DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 IMAGE=${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}
 ARTIFACT_DIR=${TIER_E_SPLIT_ARTIFACT_DIR:-"${ROOT}/build/tier-e-split-privilege"}
-RUN_ID="tier-e-split-$$"
+RUN_ID="${TIER_E_SPLIT_RUN_ID:-tier-e-split-$$}"
 SHARED=$(mktemp -d)
 TARGET="${RUN_ID}-target"
 COLLECTOR="${RUN_ID}-collector"
@@ -28,6 +28,9 @@ SPLIT_SOCKET_ACCESS=${TIER_E_SPLIT_SOCKET_ACCESS:-group}
 BENCH_WARMUPS=${TIER_E_SPLIT_BENCH_WARMUPS:-3}
 BENCH_BATCHES=${TIER_E_SPLIT_BENCH_BATCHES:-10}
 BENCH_ITERATIONS=${TIER_E_SPLIT_BENCH_ITERATIONS:-100}
+SPLIT_MARKER_VERSION=${TIER_E_SPLIT_MARKER_VERSION:-v1}
+SPLIT_MARKER_BACKEND=${TIER_E_SPLIT_MARKER_BACKEND:-uprobe}
+SPLIT_RECOVERY_MODE=${TIER_E_SPLIT_RECOVERY_MODE:-disabled}
 
 cleanup() {
     mkdir -p "${ARTIFACT_DIR}"
@@ -44,6 +47,18 @@ trap cleanup EXIT
 }
 [[ "${SPLIT_STACK_TRANSPORT}" == dictionary || "${SPLIT_STACK_TRANSPORT}" == inline-per-invocation ]] || {
     echo "unknown TIER_E_SPLIT_STACK_TRANSPORT: ${SPLIT_STACK_TRANSPORT}" >&2; exit 2;
+}
+[[ "${SPLIT_MARKER_VERSION}" == v1 || "${SPLIT_MARKER_VERSION}" == v2 ]] || {
+    echo "unknown TIER_E_SPLIT_MARKER_VERSION: ${SPLIT_MARKER_VERSION}" >&2; exit 2;
+}
+[[ "${SPLIT_MARKER_BACKEND}" == uprobe || "${SPLIT_MARKER_BACKEND}" == usdt ]] || {
+    echo "unknown TIER_E_SPLIT_MARKER_BACKEND: ${SPLIT_MARKER_BACKEND}" >&2; exit 2;
+}
+[[ "${SPLIT_RECOVERY_MODE}" == disabled || "${SPLIT_RECOVERY_MODE}" == shadow || "${SPLIT_RECOVERY_MODE}" == recover ]] || {
+    echo "unknown TIER_E_SPLIT_RECOVERY_MODE: ${SPLIT_RECOVERY_MODE}" >&2; exit 2;
+}
+[[ "${SPLIT_RECOVERY_MODE}" == disabled || "${SPLIT_MARKER_VERSION}" == v2 ]] || {
+    echo "coverage recovery requires marker v2" >&2; exit 2;
 }
 [[ "${SPLIT_SOCKET_ACCESS}" == group || "${SPLIT_SOCKET_ACCESS}" == owner ]] || {
     echo "unknown TIER_E_SPLIT_SOCKET_ACCESS: ${SPLIT_SOCKET_ACCESS}" >&2; exit 2;
@@ -99,8 +114,10 @@ else
     test -f "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so"
     test -x "${ROOT}/profiler/build/install/tier-e-daemon/bin/tier-e-daemon"
 fi
-MARKER_OFFSET_RAW=$(nm -D --defined-only "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so" | awk '$3 == "mazewall_stack_marker" { print $1; exit }')
-[[ -n "${MARKER_OFFSET_RAW}" ]] || { echo "missing mazewall_stack_marker symbol" >&2; exit 1; }
+marker_symbol=mazewall_stack_marker
+[[ "${SPLIT_MARKER_VERSION}" == v2 ]] && marker_symbol=mazewall_stack_marker_v2
+MARKER_OFFSET_RAW=$(nm -D --defined-only "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so" | awk -v symbol="${marker_symbol}" '$3 == symbol { print $1; exit }')
+[[ -n "${MARKER_OFFSET_RAW}" ]] || { echo "missing ${marker_symbol} symbol" >&2; exit 1; }
 MARKER_OFFSET=$(printf '0x%x' "$((16#${MARKER_OFFSET_RAW}))")
 if [[ "${REUSE_BUILD}" != 1 ]]; then
     "${ENGINE}" build -t "${IMAGE}" -f "${ROOT}/infra/dev/Containerfile" "${ROOT}" >/dev/null
@@ -124,7 +141,16 @@ EOF
 # The collector's PID namespace is joined to the target. Linux reports the target JVM as PID 1.
 # The fixture rewrites process_incarnation after start with its in-namespace /proc starttime.
 agent_options="session=4d5a,session-bound-definitions,definitions=/shared/definitions/orders.mzse"
+agent_marker_version=${TIER_E_SPLIT_AGENT_MARKER_VERSION:-${SPLIT_MARKER_VERSION}}
+[[ "${agent_marker_version}" == v1 || "${agent_marker_version}" == v2 ]] || exit 2
+[[ "${agent_marker_version}" == v2 ]] && agent_options+=",marker-version=v2"
 [[ "${SPLIT_STACK_TRANSPORT}" == inline-per-invocation ]] && agent_options+=",stack-transport=inline-per-invocation"
+# Instrumented forks export native phase counters (including publication CPU);
+# uninstrumented forks keep workload timing free of phase-clock overhead.
+if [[ "${TIER_E_SPLIT_BENCHMARK_PHASES:-0}" == 1 ]]; then
+    agent_options+=",benchmark-phases"
+fi
+[[ "${TIER_E_SPLIT_LIVE_DEFINITIONS:-0}" == 1 ]] && agent_options+=",live-definitions"
 target_class=AgentWorkload
 target_classpath=/shared/agent-test-classes
 target_args="gate:/shared/start platform 100 /shared/control.sock /shared/libmazewall_stack_agent.so $MARKER_OFFSET 4d5a defer-terminal /shared/target-host-pid"
@@ -156,6 +182,7 @@ fi
     -e TIER_E_COVERAGE_SEED="${TIER_E_COVERAGE_SEED:-23063}" \
     -e JAVA_TOOL_OPTIONS="-Dmazewall.tier-e.workload-profile=${TIER_E_SPLIT_WORKLOAD_PROFILE:-syscall_dense}" \
     -e TIER_E_SPLIT_EMISSION_MODE="${SPLIT_EMISSION_MODE}" \
+    -e TIER_E_SPLIT_MARKER_BACKEND="${SPLIT_MARKER_BACKEND}" \
     -e TIER_E_AGENT_OPTIONS="${agent_options}" \
     -e TIER_E_TARGET_CLASS="${target_class}" -e TIER_E_TARGET_CLASSPATH="${target_classpath}" -e TIER_E_TARGET_ARGS="${target_args}" \
     "${reuse_target_options[@]}" \
@@ -190,6 +217,12 @@ fi
     -e TIER_E_SPLIT_NEGATIVE_IDENTITY_CASE="${NEGATIVE_IDENTITY_CASE}" \
     -e TIER_E_EVIDENCE_ROOT=/shared/evidence \
     -e TIER_E_SPLIT_BENCHMARK="${SPLIT_BENCHMARK}" \
+    -e TIER_E_BENCHMARK_PHASES="${TIER_E_SPLIT_BENCHMARK_PHASES:-0}" \
+    -e TIER_E_MARKER_VERSION="${SPLIT_MARKER_VERSION}" \
+    -e TIER_E_COVERAGE_RECOVERY_MODE="${SPLIT_RECOVERY_MODE}" \
+    -e TIER_E_RECOVERY_MAP_CAPACITY="${TIER_E_SPLIT_RECOVERY_MAP_CAPACITY:-4096}" \
+    ${TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL:+-e TIER_E_BENCHMARK_DROP_RING_SYSCALL="${TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL}"} \
+    -e TIER_E_COLLECTOR_RECEIPT_CLOCK=$([[ "${TIER_E_SPLIT_BENCHMARK_PHASES:-0}" == 1 ]] && printf monotonic || printf disabled) \
     "${reuse_collector_options[@]}" \
     ${COVERAGE_ORACLE_SHA256:+-e TIER_E_COVERAGE_MANIFEST=1 -e TIER_E_COVERAGE_ORACLE_SHA256="${COVERAGE_ORACLE_SHA256}" -e TIER_E_COVERAGE_SYSCALL_NUMBER=257} \
     -e TIER_E_TERMINAL_ARTIFACT_WAIT_MILLIS=$([[ -n "${NEGATIVE_ARTIFACT_CASE}" ]] && printf 1000 || printf 30000) \
@@ -317,11 +350,38 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
             [[ "${ALLOW_INCOMPLETE}" == 1 ]] || exit 1
         }
 fi
+if [[ "${agent_marker_version}" != "${SPLIT_MARKER_VERSION}" ]]; then
+    node - "${ARTIFACT_DIR}" <<'NODE'
+const fs=require('fs'),dir=process.argv[2];
+const t=JSON.parse(fs.readFileSync(`${dir}/terminal-report.json`));
+const c=JSON.parse(fs.readFileSync(`${dir}/coverage-verdict.json`));
+if(t.evidence_integrity!=='INCOMPLETE'||t.lifecycle_validity!==false||
+   c.coverage_verdict==='PASS'||t.policy_eligibility!==false)process.exit(1);
+NODE
+    printf 'marker_mismatch=REJECTED\nevidence_integrity=INCOMPLETE\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+    exit 0
+fi
 grep -q 'tier-e-workflow: capture complete; terminal control deferred' "${ARTIFACT_DIR}/target.log"
 grep -q 'tier-e-control: shutdown' "${ARTIFACT_DIR}/control.log"
-grep -Eq 'active_polls=[1-9][0-9]*' "${ARTIFACT_DIR}/target.log"
+grep -Eq 'active_polls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log" "${ARTIFACT_DIR}/target.log"
 grep -Eq 'resolved_syscalls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log"
-if [[ "${ALLOW_INCOMPLETE}" == 1 ]]; then
+if [[ -n "${TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL:-}" ]]; then
+    node - "${ARTIFACT_DIR}" <<'NODE'
+const fs=require('fs'),dir=process.argv[2];
+const terminal=JSON.parse(fs.readFileSync(`${dir}/terminal-report.json`));
+const coverage=JSON.parse(fs.readFileSync(`${dir}/coverage-verdict.json`));
+const manifest=JSON.parse(fs.readFileSync(`${dir}/coverage-manifest.json`));
+const singletons=manifest.edges.filter(edge=>edge.workload_path>=48 && edge.workload_path<=71);
+if (terminal.evidence_integrity!=='INCOMPLETE' || terminal.transport_completeness!==false ||
+    terminal.attribution_coverage!==false || terminal.lifecycle_validity!==true ||
+    terminal.recovery_evidence?.insertion_failures!==0 || terminal.recovery_evidence?.recovered_edges<24 ||
+    terminal.recovery_evidence?.confirmed_ring_loss_recoveries<24 ||
+    coverage.coverage_verdict!=='PASS' || coverage.wrong_edges?.length ||
+    singletons.length!==24 || singletons.some(edge=>edge.discovery_source!=='map') ||
+    terminal.policy_eligibility!==false) process.exit(1);
+NODE
+    printf 'evidence_integrity=INCOMPLETE\ncoverage_verdict=PASS\nring_transport=INCOMPLETE\nsingleton_source=MAP\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+elif [[ "${ALLOW_INCOMPLETE}" == 1 ]]; then
     node -e '
         const fs=require("fs"), p=process.argv[1];
         const terminal=JSON.parse(fs.readFileSync(`${p}/terminal-report.json`));

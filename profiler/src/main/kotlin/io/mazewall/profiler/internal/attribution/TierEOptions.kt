@@ -207,6 +207,10 @@ internal data class TierEOptions(
     val coverageRecoveryMapCapacity: Int = CoverageRecoveryMode.DEFAULT_MAP_CAPACITY,
     /** Native marker ABI version; exactly one version is active per session. */
     val markerVersion: MarkerVersion = MarkerVersion.V1,
+    /** Experimental admission is distinct from benchmark phase instrumentation. */
+    val experimentalCoverage: Boolean = false,
+    /** Controlled fault: drop selected ring events after retained-map insertion. Benchmark only. */
+    val benchmarkDropRingSyscallNumber: Int? = null,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
@@ -248,16 +252,22 @@ internal data class TierEOptions(
         require(benchmarkPhases || collectorResultMode == TierECollectorResultMode.APPEND_TARGET) {
             "temporary collector results are benchmark-only"
         }
-        require(coverageRecoveryMapCapacity > 0) { "coverageRecoveryMapCapacity must be positive" }
-        require(benchmarkPhases || coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
+        require(coverageRecoveryMapCapacity in 1..CoverageRecoveryMode.DEFAULT_MAP_CAPACITY) {
+            "coverageRecoveryMapCapacity must be 1..${CoverageRecoveryMode.DEFAULT_MAP_CAPACITY}"
+        }
+        require(benchmarkPhases || experimentalCoverage || coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
             "coverage recovery is experimental benchmark-only"
         }
-        require(benchmarkPhases || markerVersion == MarkerVersion.V1) {
+        require(benchmarkPhases || experimentalCoverage || markerVersion == MarkerVersion.V1) {
             "marker v2 is experimental benchmark-only"
         }
         require(coverageRecoveryMode == CoverageRecoveryMode.DISABLED || markerVersion == MarkerVersion.V2) {
             "coverage recovery requires marker v2"
         }
+        require(
+            benchmarkDropRingSyscallNumber == null ||
+            ((benchmarkPhases || experimentalCoverage) && coverageRecoveryMode != CoverageRecoveryMode.DISABLED && benchmarkDropRingSyscallNumber >= 0),
+        ) { "ring fault injection requires an experimental recovery session and a nonnegative syscall" }
     }
 
     public companion object {

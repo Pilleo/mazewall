@@ -30,6 +30,11 @@ internal data class CoverageRecoveryEvidence(
      */
     val lastRecoveryLatencyNanos: Long = 0,
     val maxRecoveryLatencyNanos: Long = 0,
+    val invalidCandidates: Long = 0,
+    val recoveryVerdict: String = "DISABLED",
+    val discoverySamples: Long = 0,
+    val discoveryP99UpperNanos: Long = 0,
+    val dictionaryWaitingMaxNanos: Long = 0,
 ) {
     init {
         require(mapCapacity >= 0) { "map capacity must be non-negative" }
@@ -51,5 +56,8 @@ internal data class CoverageRecoveryEvidence(
         require(confirmedRingLossRecoveries <= mapFirstAcknowledgedEdges) {
             "confirmed ring-loss recoveries cannot exceed map-first acknowledgements"
         }
+        require(invalidCandidates >= 0) { "invalid candidate count must be non-negative" }
+        require(recoveryVerdict in setOf("DISABLED", "COMPLETE", "INCOMPLETE")) { "invalid recovery verdict" }
+        require(discoverySamples >= 0 && discoveryP99UpperNanos >= 0 && dictionaryWaitingMaxNanos >= 0)
     }
 }

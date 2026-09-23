@@ -9,6 +9,7 @@ internal class TierECollectorService(
     private val policy: TierECollectorLoopPolicy = TierECollectorLoopPolicy.CONTINUOUS,
     private val onResolved: (List<ResolvedSyscall>) -> Unit = {},
     private val stopJoinMillis: Long = DEFAULT_STOP_JOIN_MILLIS,
+    private val receiptClock: TierECollectorClock? = null,
     private val threadFactory: (Runnable) -> Thread = { runnable ->
         Thread(runnable, "mazewall-tier-e-collector").apply { isDaemon = true }
     },
@@ -17,7 +18,7 @@ internal class TierECollectorService(
         require(stopJoinMillis > 0) { "collector stop join timeout must be positive" }
     }
 
-    private val loop = TierECollectorLoop(session, policy, onResolved = ::deliver)
+    private val loop = TierECollectorLoop(session, policy, onResolved = ::deliver, receiptClock = receiptClock)
     private val failure = AtomicReference<TierECollectorServiceFailure?>(null)
 
     @Volatile
@@ -78,6 +79,7 @@ internal class TierECollectorService(
         }
         val profile = finishLoop(producerClosed && failure.get() == null)
         loop.close()
+        closeReceiptClock()
         terminalProfile = profile
         state = TierECollectorServiceState.TERMINAL
         return profile
@@ -112,13 +114,24 @@ internal class TierECollectorService(
             }
         }
         loop.close()
+        closeReceiptClock()
         state = TierECollectorServiceState.TERMINAL
     }
 
+    private var receiptClockClosed = false
+
+    private fun closeReceiptClock() {
+        if (receiptClockClosed) return
+        receiptClockClosed = true
+        runCatching { (receiptClock as? AutoCloseable)?.close() }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
     private fun collect() {
         try {
             while (!stopRequested) loop.pollOnce()
-        } catch (_: Exception) {
+        } catch (cause: Exception) {
+            System.err.println("tier-e-collector-failure: ${cause.javaClass.simpleName}: ${cause.message}")
             failure.compareAndSet(null, TierECollectorServiceFailure.COLLECTION)
             stopRequested = true
         } finally {

@@ -16,13 +16,13 @@ class CoverageRecoveryScannerTest {
         invocation: Long = 55,
         sequence: Long = 2,
     ): RecoveryMapEntry {
-        val key = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+        val key = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
         key
-            .putInt(tag)
-            .putInt(stack)
+            .putLong(tag.toLong())
+            .putLong(stack.toLong())
             .putInt(syscall)
             .putInt(flags)
-        val value = ByteBuffer.allocate(88).order(ByteOrder.LITTLE_ENDIAN)
+        val value = ByteBuffer.allocate(96).order(ByteOrder.LITTLE_ENDIAN)
         value
             .putLong(123L)
             .putInt(100)
@@ -31,6 +31,7 @@ class CoverageRecoveryScannerTest {
             .putInt(flags)
         value.putLong(invocation).putLong(sequence)
         repeat(6) { value.putLong(it.toLong()) }
+        value.putInt(1).putInt(0)
         return RecoveryMapEntry(key.array(), value.array())
     }
 
@@ -96,7 +97,7 @@ class CoverageRecoveryScannerTest {
     fun `key value mismatch never becomes a candidate`() {
         val good = entry()
         val decoded = decodeRecoveryKey(good.key)
-        assertEquals(0x4d5a, decoded.sessionTag)
+        assertEquals(0x4d5aL, decoded.sessionEpoch)
         assertEquals(7L, decoded.stackTraceId)
 
         val candidate = good.toCandidate(SessionEpoch(19802), ProcessIncarnation(999))
@@ -104,5 +105,23 @@ class CoverageRecoveryScannerTest {
 
         val corrupt = RecoveryMapEntry(good.key, good.value.copyOf().also { it[16] = 99 })
         assertEquals(null, corrupt.toCandidate(SessionEpoch(19802), ProcessIncarnation(999)))
+    }
+
+    @Test
+    fun `raw entries and candidates own immutable copies`() {
+        val key = entry().key
+        val value = entry().value
+        val raw = RecoveryMapEntry(key, value)
+        key[0] = 0
+        value[0] = 0
+        assertEquals(0x4d5aL, decodeRecoveryKey(raw.key).sessionEpoch)
+        assertEquals(123L, raw.toCandidate(SessionEpoch(19802), ProcessIncarnation(999))?.observedKtimeNanos)
+        val ownedKey = raw.key
+        ownedKey[0] = 0
+        assertEquals(0x4d5aL, decodeRecoveryKey(raw.key).sessionEpoch)
+        val args = mutableListOf(0L, 1L, 2L, 3L, 4L, 5L)
+        val candidate = raw.toCandidate(SessionEpoch(19802), ProcessIncarnation(999))!!.copy(args)
+        args[0] = 99L
+        assertEquals(0L, candidate.args[0])
     }
 }

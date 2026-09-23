@@ -38,6 +38,9 @@ internal object CoverageRecoveryValidator {
     ): Result {
         if (candidate.sessionEpoch != expectedSession) return Result.Invalid(Reason.SESSION_MISMATCH)
         if (candidate.processIncarnation != expectedIncarnation) return Result.Invalid(Reason.INCARNATION_MISMATCH)
+        if (candidate.attachmentGeneration <= 0 || candidate.captureFlags and 1.inv() != 0) {
+            return Result.Invalid(Reason.STALE_DEFINITION)
+        }
         val invocation = joiner.knownInvocation(candidate.invocationId)
             ?: return Result.Invalid(Reason.UNKNOWN_INVOCATION)
         if (invocation.captureFailure != null) return Result.Invalid(Reason.CAPTURE_FAILED)

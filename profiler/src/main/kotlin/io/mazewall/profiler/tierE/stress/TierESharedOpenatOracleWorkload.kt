@@ -75,7 +75,7 @@ internal object TierESharedOpenatOracleWorkload {
         internal fun callDepth(operationIndex: Int): Int =
             when (this) {
                 STACK_DIVERSE -> operationIndex % 16
-                else -> 0
+                SYSCALL_DENSE, MIXED_CPU_IO, BURSTY_IO, CALIBRATION_CPU, CALIBRATION_CPU_HEAVY, CLASS_CHURN -> 0
             }
 
         internal fun usesFreshProxy(operationIndex: Int): Boolean = this == CLASS_CHURN && operationIndex % 64 == 0

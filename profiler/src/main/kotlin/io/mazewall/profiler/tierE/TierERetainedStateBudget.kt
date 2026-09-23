@@ -65,6 +65,9 @@ internal class TierERetainedStateBudget(
         EMISSION_TOKENS,
         SNAPSHOT_BUFFERS,
         METADATA_CACHE,
+        RECOVERED_COVERAGE,
+        RECOVERY_CANDIDATES,
+        RECOVERY_SCAN_BUFFERS,
     }
 
     companion object {
