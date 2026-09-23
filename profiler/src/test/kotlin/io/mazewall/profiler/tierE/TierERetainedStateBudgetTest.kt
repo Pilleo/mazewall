@@ -36,8 +36,10 @@ class TierERetainedStateBudgetTest {
         budget.release(category, 6)
 
         assertEquals(4, budget.usedBytes())
+        assertEquals(10, budget.peakUsedBytes())
         assertEquals(6, budget.remainingBytes())
         assertTrue(budget.tryReserve(TierERetainedStateBudget.Category.DICTIONARY_STAGING, 6))
+        assertEquals(10, budget.peakUsedBytes())
         assertTrue(budget.wasExhausted())
     }
 }

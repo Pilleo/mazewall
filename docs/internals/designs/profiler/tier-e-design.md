@@ -1919,6 +1919,30 @@ bounded coalescing reduces repeated full rewrites while retaining an explicit fi
 publication. Dictionary batches retain their opaque identity across retries, and failed or
 ambiguous delivery never advances the watermark.
 
+**Experimental native live admission, 2026-09-23.** In an opt-in v2 hybrid
+session (`TIER_E_LIVE_SNAPSHOT_ADMISSION=1`), the split collector also opens
+the agent's existing MZSE v2 snapshot every 100 ms via one bounded no-follow
+descriptor. Absence before the first publication is normal; disappearance
+after admission, foreign sessions, publication-id or watermark regression,
+same-ID content conflict, omitted stack dependencies, and definition collisions
+mark dictionary/recovery evidence incomplete. A complete prefix is validated
+before its new immutable definitions join the serialized collector; identical
+snapshots are idempotent. The reader charges bounded transient snapshot bytes
+and retained stack/invocation state to the collector budget, independently
+from the native and kernel-map budgets. Even a live snapshot marked closed is
+not an independently proven process-closure barrier. Terminal target-exit,
+quiescence, and closed-artifact checks remain mandatory.
+
+Five rootful matched forks for repeated-stack, stack-diverse, and class-churn
+profiles passed in both dictionary emission modes for terminal and opt-in live
+native admission. Five further sustained, controlled ring-drop forks per mode
+compared live admission to terminal-only dictionary resolution: all recovered
+72/72 paths with complete recovery evidence, while event history remained
+incomplete. Live median maximum dictionary waiting was 0.25 s (full-stream)
+and 0.24 s (unique-edge), compared with 62.34 s and 62.41 s for terminal-only;
+dependency-relative p99 discovery stayed well under 500 ms in both arms.
+See [live admission evidence](../../evidence/tier-e-native-live-admission-20260923/README.md).
+
 ### D.2 Symbol lifetime and epochs
 
 > **Status: Implemented contract.** `SymbolizationGeneration` brackets supported replacement,

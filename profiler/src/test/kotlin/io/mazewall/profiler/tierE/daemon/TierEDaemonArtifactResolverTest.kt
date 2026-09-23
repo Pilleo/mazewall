@@ -10,6 +10,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 
 class TierEDaemonArtifactResolverTest {
     @TempDir
@@ -89,6 +90,26 @@ class TierEDaemonArtifactResolverTest {
         )
 
         assertEquals(TierEProducerClosure.PROVEN, terminalClosure(resolver, artifact))
+    }
+
+    @Test
+    fun `live reader accepts one bounded open snapshot but never mistakes it for closure`() {
+        val resolver = TierEDaemonArtifactResolver(root)
+        val artifact = resolver.resolve(AttachedSessionInfo(pid = 4242, sessionTag = 0x4d5a))
+        assertNull(resolver.readLive(artifact, maxBytes = 1024))
+        Files.write(
+            artifact.path,
+            SnapshotEnvelope.encode(emptyMZsd(), publicationId = 1, watermark = 0, closed = false, sessionEpoch = artifact.expectedSessionEpoch),
+        )
+
+        val live = resolver.readLive(artifact, maxBytes = 1024)!!
+        assertEquals(false, live.publication?.closed)
+        assertEquals(TierEProducerClosure.UNPROVEN, terminalClosure(resolver, artifact))
+        assertFailsWith<IllegalArgumentException> { resolver.readLive(artifact, maxBytes = 1) }
+        Files.delete(artifact.path)
+        val target = Files.createTempFile("tier-e-live-symlink", ".mzse")
+        Files.createSymbolicLink(artifact.path, target)
+        assertFailsWith<IllegalArgumentException> { resolver.readLive(artifact, maxBytes = 1024) }
     }
 
     private fun emptyMZsd(): ByteArray = byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), 'S'.code.toByte(), 'D'.code.toByte(), 2, 0)

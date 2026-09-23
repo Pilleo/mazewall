@@ -15,27 +15,29 @@ internal class SnapshotReplayAdmission {
     private val stacks = mutableMapOf<StackTraceId, StackDefinition>()
     private val invocations = mutableMapOf<InvocationId, InvocationDefinition>()
 
-    fun admit(definition: StackDefinition): DefinitionAdmission {
-        val previous = stacks[definition.stackTraceId]
-        return if (previous == null) {
-            stacks[definition.stackTraceId] = definition
-            DefinitionAdmission.NEW
-        } else if (previous == definition) {
-            DefinitionAdmission.DUPLICATE_IDENTICAL
-        } else {
-            DefinitionAdmission.CONFLICTING
+    fun inspect(definition: StackDefinition): DefinitionAdmission =
+        when (stacks[definition.stackTraceId]) {
+            null -> DefinitionAdmission.NEW
+            definition -> DefinitionAdmission.DUPLICATE_IDENTICAL
+            else -> DefinitionAdmission.CONFLICTING
         }
+
+    fun inspect(definition: InvocationDefinition): DefinitionAdmission =
+        when (invocations[definition.invocationId]) {
+            null -> DefinitionAdmission.NEW
+            definition -> DefinitionAdmission.DUPLICATE_IDENTICAL
+            else -> DefinitionAdmission.CONFLICTING
+        }
+
+    fun admit(definition: StackDefinition): DefinitionAdmission {
+        val result = inspect(definition)
+        if (result == DefinitionAdmission.NEW) stacks[definition.stackTraceId] = definition
+        return result
     }
 
     fun admit(definition: InvocationDefinition): DefinitionAdmission {
-        val previous = invocations[definition.invocationId]
-        return if (previous == null) {
-            invocations[definition.invocationId] = definition
-            DefinitionAdmission.NEW
-        } else if (previous == definition) {
-            DefinitionAdmission.DUPLICATE_IDENTICAL
-        } else {
-            DefinitionAdmission.CONFLICTING
-        }
+        val result = inspect(definition)
+        if (result == DefinitionAdmission.NEW) invocations[definition.invocationId] = definition
+        return result
     }
 }

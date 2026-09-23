@@ -176,6 +176,7 @@ internal class TierEDaemonService(
     private val receiptClockMode: String = receiptClockModeFromEnvironment(),
     private val recoveryMode: CoverageRecoveryMode = coverageRecoveryModeFromEnvironment(),
     private val recoveryMapCapacity: Int = recoveryMapCapacityFromEnvironment(),
+    private val nativeLiveSnapshotAdmission: Boolean = nativeLiveSnapshotAdmissionFromEnvironment(),
     private val benchmarkDropRingSyscallNumber: Int? = benchmarkDropRingSyscallFromEnvironment(),
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
@@ -202,6 +203,10 @@ internal class TierEDaemonService(
         require(benchmarkMode || coverageManifestSink != null || recoveryMode == CoverageRecoveryMode.DISABLED) {
             "coverage recovery is benchmark-only"
         }
+        require(
+            !nativeLiveSnapshotAdmission ||
+            ((benchmarkMode || coverageManifestSink != null) && recoveryMode != CoverageRecoveryMode.DISABLED && markerVersion == MarkerVersion.V2),
+        ) { "native live snapshot admission requires an experimental v2 hybrid session" }
         require(benchmarkMode || coverageManifestSink != null || markerVersion == MarkerVersion.V1) {
             "marker v2 is benchmark-only"
         }
@@ -307,6 +312,11 @@ internal class TierEDaemonService(
                         attachment.markerOffset,
                         selection.usdtNote,
                     )
+                    if (nativeLiveSnapshotAdmission) {
+                        val artifact = requireNotNull(attachment.artifact) { "native live snapshot admission requires registered artifact" }
+                        val resolver = requireNotNull(artifactResolver) { "native live snapshot admission requires artifact root" }
+                        session.enableNativeLiveSnapshots { maxBytes -> resolver.readLive(artifact, maxBytes) }
+                    }
                     runtime.start()
                     val active = ActiveSession(runtime, attachment.artifact, attachment.registeredTarget)
                     activeSession = active
@@ -618,6 +628,13 @@ internal fun benchmarkDropRingSyscallFromEnvironment(env: Map<String, String> = 
         } else {
             null
         }
+
+internal fun nativeLiveSnapshotAdmissionFromEnvironment(env: Map<String, String> = System.getenv()): Boolean =
+    when (env["TIER_E_LIVE_SNAPSHOT_ADMISSION"]) {
+        null, "", "0" -> false
+        "1" -> true
+        else -> error("TIER_E_LIVE_SNAPSHOT_ADMISSION must be 0 or 1")
+    }
 
 private class TierEMarkerVersionMismatch(
     cause: IllegalArgumentException,

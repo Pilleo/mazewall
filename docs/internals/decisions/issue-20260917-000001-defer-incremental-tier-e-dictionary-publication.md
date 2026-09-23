@@ -45,6 +45,26 @@ dictionary unique-edge had a paired workload-time interval excluding zero. The s
 class-churn results likewise provide no consistent, cross-mode live-publication benefit.
 
 Therefore incremental delivery remains **not implemented**. A future proposal must supply a new
-workload where terminal snapshots demonstrably constrain the required consumer behavior and must
+workload where terminal **and 100 ms live** snapshots demonstrably constrain the required consumer behavior and must
 also provide the ordered dependency, retry idempotence, bounded retention, and explicit terminal
 tail receiver contract described above. Evidence remains policy-ineligible regardless of transport.
+
+## Hybrid live-admission follow-up: 2026-09-23
+
+The opt-in hybrid collector now admits existing native MZSE v2 snapshots at the
+100 ms cadence without introducing incremental transport. Five rootful pairs
+per emission mode passed for repeated-stack, stack-diverse, and class-churn
+profiles, with no native retention exhaustion. Under five sustained ring-drop
+seeds per emission mode, live admission reduced the median maximum dictionary
+wait from approximately 62.4 seconds (terminal-only) to 0.25/0.24 seconds
+(full-stream/unique-edge), and retained 72/72 acknowledged coverage in every
+fork. See `docs/internals/evidence/tier-e-native-live-admission-20260923/README.md`.
+
+In these instrumented pairs, native live snapshot publication consumed at most
+0.34% of measured collector CPU on the three short profiles. Its repeated
+snapshot bytes and CPU cost are retained alongside transient native and
+collector peaks. Neither the measured CPU share, retention, nor
+dependency-relative 500 ms discovery target triggers an incremental protocol.
+The existing deferral therefore remains in force. A live snapshot is not a
+terminal closure acknowledgement, and this change does not add an incremental
+native-to-collector receiver.

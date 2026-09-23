@@ -250,6 +250,7 @@ internal class TierEProfilerSession internal constructor(
     private var sourceClosed = false
     private var lifecycle: TierESessionLifecycleState = TierESessionLifecycleState.RUNNING
     private var liveDefinitionFile: Path? = null
+    private var nativeLiveSnapshotConsumer: TierENativeLiveSnapshotConsumer? = null
     private val liveKnownStackIds = mutableSetOf<StackTraceId>()
     private val liveDefinitionAdmission = SnapshotReplayAdmission()
     private var ringDrainNanos = 0L
@@ -324,6 +325,31 @@ internal class TierEProfilerSession internal constructor(
         check(dictionaryPublisher != null) { "live dictionary publication requires a dictionary sink" }
         liveDefinitionFile = definitionFile
     }
+
+    /** Opt-in native MZSE prefix admission; the reader is bound to one trusted artifact. */
+    @Synchronized
+    internal fun enableNativeLiveSnapshots(reader: (Long) -> AgentDefinitionFile.Contents?) {
+        requireCollecting()
+        check(options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) { "native live admission requires hybrid recovery" }
+        check(dictionaryPublisher == null && nativeLiveSnapshotConsumer == null) { "native live snapshot owner is already configured" }
+        nativeLiveSnapshotConsumer = TierENativeLiveSnapshotConsumer(
+            session = sessionEpoch,
+            maxDefinitions = options.maxPendingRecords,
+            budget = retainedBudget,
+            read = reader,
+            acceptStack = { retain(collector.accept(it)) },
+            acceptInvocation = { retain(collector.accept(it)) },
+            onAgentLoss = collector::recordLoss,
+            onFailure = { failure ->
+                collector.recordDictionaryConflict()
+                recoveryScanError = true
+                if (options.benchmarkPhases) System.err.println("tier-e-native-live-admission-failed: ${failure.message}")
+            },
+            nowNanos = nanoTime,
+        )
+    }
+
+    internal fun nativeLivePublicationCount(): Long = nativeLiveSnapshotConsumer?.publicationCount ?: 0L
 
     @Synchronized
     public fun installAndAttach(
@@ -444,6 +470,7 @@ internal class TierEProfilerSession internal constructor(
         }
         refreshLossCounters()
         publishLiveDefinitions()
+        nativeLiveSnapshotConsumer?.poll()
         pollRecovery()
         return TierECollectorPoll(retainedSnapshot, events.size, receiptAgesNanos)
     }
@@ -632,6 +659,8 @@ internal class TierEProfilerSession internal constructor(
                 discoverySamples = discoveryLatency.sampleCount(),
                 discoveryP99UpperNanos = discoveryLatency.p99UpperNanos(),
                 dictionaryWaitingMaxNanos = recoveryDictionaryWaitingMaxNanos,
+                nativeLivePublications = nativeLivePublicationCount(),
+                collectorRetainedPeakBytes = retainedBudget.peakUsedBytes(),
             ),
         )
     }
@@ -985,7 +1014,7 @@ internal class TierEProfilerSession internal constructor(
             collector.recordDictionaryConflict()
             AgentDefinitionFile.Contents(emptyList(), emptyList(), 0)
         }
-        if (definitions.agentLosses > 0) collector.recordLoss(definitions.agentLosses)
+        recordTerminalAgentLosses(definitions.agentLosses)
         collector.recordVirtualPinnedIntervals(definitions.virtualPinnedScopes, definitions.virtualPinnedNanos)
         if (dictionaryPublisher == null) {
             definitions.stacks.forEach { retain(collector.accept(it)) }
@@ -1016,6 +1045,15 @@ internal class TierEProfilerSession internal constructor(
             // exact recovery (for example, a target still emitting v1).
             collector.invalidateAttribution()
             recoveryScanError = true
+        }
+    }
+
+    private fun recordTerminalAgentLosses(totalLosses: Long) {
+        val liveLosses = nativeLiveSnapshotConsumer?.accountedAgentLosses ?: 0L
+        if (totalLosses < liveLosses) {
+            collector.recordDictionaryConflict()
+        } else if (totalLosses > liveLosses) {
+            collector.recordLoss(totalLosses - liveLosses)
         }
     }
 

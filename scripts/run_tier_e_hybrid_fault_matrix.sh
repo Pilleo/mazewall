@@ -6,15 +6,19 @@ OUT=${1:-"${ROOT}/build/tier-e-hybrid-fault-matrix"}
 FORKS=${TIER_E_HYBRID_FAULT_FORKS:-15}
 OPERATIONS=${TIER_E_HYBRID_FAULT_OPERATIONS:-72}
 BACKEND=${TIER_E_HYBRID_FAULT_BACKEND:-uprobe}
+LIVE=${TIER_E_HYBRID_FAULT_LIVE:-0}
+PHASES=${TIER_E_HYBRID_FAULT_PHASES:-0}
 export DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 mkdir -p "${OUT}"
 [[ "${FORKS}" =~ ^[1-9][0-9]*$ && "${OPERATIONS}" =~ ^[1-9][0-9]*$ ]] || exit 2
 [[ "${BACKEND}" == uprobe || "${BACKEND}" == usdt ]] || exit 2
+[[ "${LIVE}" == 0 || "${LIVE}" == 1 ]] || exit 2
 "${TIER_E_CONTAINER_ENGINE:-docker}" image inspect "${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
 sha256sum "${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so" \
     "${ROOT}"/profiler/build/install/tier-e-daemon/lib/*.jar > "${OUT}/bundle-sha256.txt" || exit 1
-printf '{"schema_version":1,"forks":%s,"operations":%s,"seed_start":23063,"marker":"v2","backend":"%s","fault_syscall":257,"policy_eligibility":false}\n' \
-    "${FORKS}" "${OPERATIONS}" "${BACKEND}" > "${OUT}/run-manifest.json"
+git -C "${ROOT}" diff --binary | sha256sum | awk '{print $1}' > "${OUT}/source-diff-sha256.txt"
+printf '{"schema_version":2,"forks":%s,"operations":%s,"seed_start":23063,"marker":"v2","backend":"%s","fault_syscall":257,"native_live_snapshots":%s,"phase_instrumentation":%s,"policy_eligibility":false}\n' \
+    "${FORKS}" "${OPERATIONS}" "${BACKEND}" "${LIVE}" "${PHASES}" > "${OUT}/run-manifest.json"
 : > "${OUT}/fork-results.jsonl"
 failures=0
 for ((fork=0;fork<FORKS;fork++)); do
@@ -25,6 +29,8 @@ for ((fork=0;fork<FORKS;fork++)); do
         timeout --signal=TERM --kill-after=30s 600s env \
             TIER_E_SPLIT_REUSE_BUILD=1 TIER_E_SPLIT_MARKER_VERSION=v2 \
             TIER_E_SPLIT_MARKER_BACKEND="${BACKEND}" TIER_E_SPLIT_RECOVERY_MODE=recover \
+            TIER_E_SPLIT_LIVE_DEFINITIONS="${LIVE}" TIER_E_SPLIT_ADMIT_LIVE_SNAPSHOTS="${LIVE}" \
+            TIER_E_SPLIT_BENCHMARK_PHASES="${PHASES}" \
             TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL=257 TIER_E_SPLIT_COVERAGE=1 \
             TIER_E_SPLIT_COVERAGE_OPERATIONS="${OPERATIONS}" \
             TIER_E_COVERAGE_SEED="$((23063+fork))" \
@@ -42,7 +48,8 @@ const row={fork:Number(fork),mode,status:Number(status),complete,
   recovered_edges:v?.recovered_edges??null,confirmed_ring_loss_recoveries:t?.recovery_evidence?.confirmed_ring_loss_recoveries??null,
   discovery_samples:t?.recovery_evidence?.discovery_samples??null,
   discovery_p99_upper_ns:t?.recovery_evidence?.discovery_p99_upper_ns??null,
-  dictionary_waiting_max_ns:t?.recovery_evidence?.dictionary_waiting_max_ns??null,policy_eligibility:false};
+  dictionary_waiting_max_ns:t?.recovery_evidence?.dictionary_waiting_max_ns??null,
+  native_live_publications:t?.recovery_evidence?.native_live_publications??null,policy_eligibility:false};
 fs.appendFileSync(out,JSON.stringify(row)+'\n');
 if(!complete)process.exitCode=1;
 NODE

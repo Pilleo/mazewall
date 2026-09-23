@@ -82,6 +82,8 @@ internal fun TierETerminalReport.toJson(): String {
         """"recovery_verdict":"${recoveryEvidence.recoveryVerdict}",""" +
         """"discovery_samples":${recoveryEvidence.discoverySamples},""" +
         """"discovery_p99_upper_ns":${recoveryEvidence.discoveryP99UpperNanos},""" +
-        """"dictionary_waiting_max_ns":${recoveryEvidence.dictionaryWaitingMaxNanos}},""" +
+        """"dictionary_waiting_max_ns":${recoveryEvidence.dictionaryWaitingMaxNanos},""" +
+        """"native_live_publications":${recoveryEvidence.nativeLivePublications},""" +
+        """"collector_retained_peak_bytes":${recoveryEvidence.collectorRetainedPeakBytes}},""" +
         """"policy_eligibility":false}"""
 }

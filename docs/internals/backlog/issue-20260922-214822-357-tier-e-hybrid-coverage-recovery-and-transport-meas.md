@@ -78,14 +78,35 @@ the default. `policy_eligibility=false` throughout.
   measured collector CPU and did not exhaust native retention; incremental
   dictionary transport remains deferred.
 
+**Native live-admission follow-up (2026-09-23):**
+- Existing MZSE v2 snapshots now enter the opt-in hybrid collector as
+  session-bound, dependency-complete, monotonically published prefixes every
+  100 ms. Duplicate IDs retry idempotently; missing, stale, conflicting, or
+  vanished snapshots fail closed. Transient snapshot buffers and retained
+  definitions are charged separately to the finite collector budget.
+- Rootful evidence:
+  `docs/internals/evidence/tier-e-native-live-admission-20260923/README.md`.
+  Five terminal/live pairs per emission mode passed across repeated-stack,
+  stack-diverse, and class-churn profiles (60/60 short arms complete).
+  Five sustained 75,000-operation ring-drop seeds per mode passed in both
+  terminal and native-live arms (20/20 arms recovered all 72 paths). Median
+  maximum dictionary waiting dropped from 62.34/62.41 s to 0.25/0.24 s
+  (full/unique), with dependency-relative p99 discovery below 500 ms.
+- The initial 10-run live pressure matrix ended explicitly incomplete due to
+  a flat 256-byte-per-definition collector charge. Frame-aware stack and
+  128-byte invocation accounting corrected that bound; later probes recorded
+  7.7 MiB class-churn and 55.3 MiB sustained collector retained-byte peaks
+  below the 64 MiB cap. The initial failure and corrected results are both
+  retained. Incremental transport remains deferred.
+
 **Remaining scope before closing this backlog item:**
 - Long matched v1/v2 ring-only controls were not rerun alongside the 40 long
   hybrid forks; sustained hybrid correctness does not establish long-workload
   comparative overhead.
-- Real host PID reuse and class-churn/stack-diverse publication runs with
-  the new hybrid consumer remain unqualified. The split collector still reads
-  terminal definitions; native 100 ms live publication measurement does not
-  constitute live dictionary admission or an incremental receiver protocol.
+- Real host PID reuse remains unqualified. Existing 100 ms native MZSE live
+  snapshot admission is now measured; it is not an incremental receiver
+  protocol, and only a closed terminal artifact after producer closure proves
+  terminal dictionary completeness.
 - Pre-admission marker proof implemented and retained at
   `docs/internals/evidence/tier-e-marker-proof-20260923/README.md`: registered
   v2 sessions require the agent-authored, incarnation-bound selected version

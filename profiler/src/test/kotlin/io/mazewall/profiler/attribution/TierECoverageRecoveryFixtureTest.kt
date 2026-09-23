@@ -54,6 +54,16 @@ class TierECoverageRecoveryFixtureTest {
             0,
         )
 
+    private fun liveDefinitions() =
+        AgentDefinitionFile.Contents(
+        definitions().stacks,
+        definitions().invocations,
+        0,
+        publication = SnapshotPublication(1, invocationId.value, false, SessionEpoch(sessionTag.toLong())),
+        sourceByteLength = 100,
+        sourceSha256 = "a".repeat(64),
+    )
+
     private class FaultSource(
         val entry: RecoveryMapEntry,
     ) : TierEEventSource {
@@ -150,6 +160,7 @@ class TierECoverageRecoveryFixtureTest {
         assertEquals(1, evidence.mapFirstAcknowledgedEdges)
         assertTrue(evidence.lastRecoveryLatencyNanos >= 0)
         assertTrue(evidence.maxRecoveryLatencyNanos >= evidence.lastRecoveryLatencyNanos)
+        assertTrue(evidence.collectorRetainedPeakBytes > 0)
         assertTrue(session.recoveryComplete())
     }
 
@@ -169,6 +180,25 @@ class TierECoverageRecoveryFixtureTest {
         assertEquals(0, evidence.recoveredEdges)
         assertEquals(0, evidence.mapFirstAcknowledgedEdges)
         assertTrue(session.recoveryComplete())
+    }
+
+    @Test
+    fun `live native dictionary makes retained singleton resolvable before terminal publication`() {
+        val source = FaultSource(recoveryEntry())
+        val session = session(CoverageRecoveryMode.RECOVER, source)
+        session.installAndAttach(100, sessionTag, Path.of("ignored"), 0)
+        var reads = 0
+        session.enableNativeLiveSnapshots { maxBytes ->
+            assertTrue(maxBytes >= 100)
+            reads++
+            liveDefinitions()
+        }
+
+        session.poll()
+        assertEquals(1, session.nativeLivePublicationCount())
+        val profile = session.finish(Path.of("ignored"), producerClosed = true)
+        assertEquals(1, profile.recoveredCoverage.size)
+        assertEquals(1, reads)
     }
 
     private fun optionsCapacity(): Int = CoverageRecoveryMode.DEFAULT_MAP_CAPACITY

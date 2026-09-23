@@ -69,11 +69,27 @@
     {
       "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (122). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
       "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (120). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt|<error severity=\"warning\" message=\"Class &apos;TierEProfilerSession&apos; with &apos;48&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt|<error severity=\"warning\" message=\"Class &apos;TierEProfilerSession&apos; with &apos;51&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The constructor(stopRequested: AtomicBoolean, engineFactory: () -&gt; TierEbpfEngine, artifactResolver: TierEDaemonArtifactResolver?, resultSink: TierEDaemonResultSink, terminalReportSink: TierETerminalReportSink, registeredTargetResolver: TierETargetRegistrationResolver?, processIdentityVerifier: TierEProcessIdentityVerifier, targetExitCoordinator: TierETargetExitCoordinator, terminalArtifactWaitMillis: Long, coverageManifestSink: TierECoverageManifestConfiguration?, operationManifestSink: TierESplitOperationManifestFileSink?, benchmarkRecordLimit: Int?, benchmarkMode: Boolean, markerVersion: MarkerVersion, benchmarkPhases: Boolean, receiptClockMode: String, recoveryMode: CoverageRecoveryMode, recoveryMapCapacity: Int, benchmarkDropRingSyscallNumber: Int?) has too many parameters. The current maximum allowed parameters are 10.\" source=\"detekt.LongParameterList\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The constructor(stopRequested: AtomicBoolean, engineFactory: () -&gt; TierEbpfEngine, artifactResolver: TierEDaemonArtifactResolver?, resultSink: TierEDaemonResultSink, terminalReportSink: TierETerminalReportSink, registeredTargetResolver: TierETargetRegistrationResolver?, processIdentityVerifier: TierEProcessIdentityVerifier, targetExitCoordinator: TierETargetExitCoordinator, terminalArtifactWaitMillis: Long, coverageManifestSink: TierECoverageManifestConfiguration?, operationManifestSink: TierESplitOperationManifestFileSink?, benchmarkRecordLimit: Int?, benchmarkMode: Boolean, markerVersion: MarkerVersion, benchmarkPhases: Boolean, receiptClockMode: String, recoveryMode: CoverageRecoveryMode, recoveryMapCapacity: Int, nativeLiveSnapshotAdmission: Boolean, benchmarkDropRingSyscallNumber: Int?) has too many parameters. The current maximum allowed parameters are 10.\" source=\"detekt.LongParameterList\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 25). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 26). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (120). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (125). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
     }
   ],
-  "reviewed_diagnostic_update_count": 12,
+  "reviewed_diagnostic_update_count": 16,
   "inventory_rules_added": 0,
   "inventory_count_after_review": 445,
-  "inventory_fingerprint_after_review": "fcdad91db86af9066cba38dd6a163e297128b557822c9482417c7b5941c5d1ae",
+  "inventory_fingerprint_after_review": "154b57afac73fd506b708007ea8f7c0b3c5d755ce45c2786434d992bea03d260",
   "implementation_revision_at_review": "345dd5430163f2e641261566217aebc4915f3710"
 }

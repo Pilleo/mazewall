@@ -83,6 +83,10 @@ session=4d5a,session-bound-definitions,definitions=/run/mazewall/definitions/ord
 `session-bound-definitions` writes one terminal `MZSE v2` envelope at agent unload and does not
 start the live publisher. `live-definitions` remains a separate opt-in for continuous snapshots.
 The payload stays raw `MZSD v2`; existing readers remain compatible.
+When the v2 hybrid collector explicitly enables `TIER_E_LIVE_SNAPSHOT_ADMISSION=1`, it reads
+those existing 100 ms native snapshots as bounded, session-bound dictionary prefixes before
+terminalization. This does not introduce incremental wire delivery or allow a live snapshot
+to prove producer closure; the terminal artifact and lifecycle barrier remain authoritative.
 
 The target sends `ATTACH` and `DETACH` over the shared `TIER_E_SOCKET` Unix-domain socket via
 `TierETargetControlClient`. The client derives PID, session tag, marker path, marker offset, and

@@ -60,6 +60,23 @@ internal class TierEDaemonArtifactResolver(
         }
     }
 
+    /** One immutable native MZSE prefix; absence before first publication is normal. */
+    fun readLive(
+        artifact: TierEDefinitionArtifact,
+        maxBytes: Long,
+    ): AgentDefinitionFile.Contents? {
+        require(maxBytes > 0) { "collector retention cannot hold a live snapshot" }
+        val path = artifact.path.toAbsolutePath().normalize()
+        require(path.parent == root) { "Tier E live artifact escaped registered root" }
+        require(!Files.isSymbolicLink(path)) { "Tier E live artifact is a symbolic link" }
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return null
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "Tier E live artifact must be a regular file" }
+        return FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { channel ->
+            require(channel.size() in 1..maxBytes) { "Tier E live snapshot exceeds available collector retention" }
+            AgentDefinitionFile.readForSession(channel, artifact.expectedSessionEpoch)
+        }
+    }
+
     private companion object {
         const val MAX_MARKER_PROOF_BYTES = 512L
     }

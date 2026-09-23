@@ -16,6 +16,7 @@ internal class TierERetainedStateBudget(
     }
 
     private var usedBytes = 0L
+    private var peakUsedBytes = 0L
     private val categoryBytes = linkedMapOf<Category, Long>()
     private var exhausted = false
 
@@ -30,6 +31,7 @@ internal class TierERetainedStateBudget(
             return false
         }
         usedBytes += bytes
+        peakUsedBytes = maxOf(peakUsedBytes, usedBytes)
         categoryBytes[category] = (categoryBytes[category] ?: 0L) + bytes
         return true
     }
@@ -48,6 +50,9 @@ internal class TierERetainedStateBudget(
 
     @Synchronized
     fun usedBytes(): Long = usedBytes
+
+    @Synchronized
+    fun peakUsedBytes(): Long = peakUsedBytes
 
     @Synchronized
     fun remainingBytes(): Long = limitBytes - usedBytes

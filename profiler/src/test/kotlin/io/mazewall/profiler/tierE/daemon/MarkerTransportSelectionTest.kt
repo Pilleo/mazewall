@@ -89,4 +89,13 @@ class MarkerTransportSelectionTest {
         assertFailsWith<IllegalStateException> { coverageRecoveryModeFromEnvironment(mapOf("TIER_E_COVERAGE_RECOVERY_MODE" to "unknown")) }
         assertFailsWith<IllegalStateException> { recoveryMapCapacityFromEnvironment(mapOf("TIER_E_RECOVERY_MAP_CAPACITY" to "4097")) }
     }
+
+    @Test
+    fun `native live snapshot admission remains explicitly opt in`() {
+        assertEquals(false, nativeLiveSnapshotAdmissionFromEnvironment(emptyMap()))
+        assertEquals(true, nativeLiveSnapshotAdmissionFromEnvironment(mapOf("TIER_E_LIVE_SNAPSHOT_ADMISSION" to "1")))
+        assertFailsWith<IllegalStateException> {
+            nativeLiveSnapshotAdmissionFromEnvironment(mapOf("TIER_E_LIVE_SNAPSHOT_ADMISSION" to "yes"))
+        }
+    }
 }
