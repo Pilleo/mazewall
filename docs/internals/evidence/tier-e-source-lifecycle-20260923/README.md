@@ -8,6 +8,9 @@ content digest changed. Image and native/JAR identities remain separate.
 and a matched workload smoke with `source_state_unchanged=true`. The source
 fingerprint tool has a synthetic-repository test proving that tracked and
 untracked source edits change its digest while documentation-only edits do not.
+`clean-source-postcommit.tar.zst` repeats the 72-path hybrid smoke after
+commit `4eff2777`: both arms passed with `input_dirty_count=0`, 921 hashed
+runtime-input files, and `source_state_unchanged=true`.
 
 The same archive also retains a **simulated** active-session process-incarnation
 change under registered marker v2. The target was held alive through the
@@ -22,5 +25,5 @@ of its original host PID in 256 successive process lifetimes. The host
 `host_pid_reuse_verdict=UNVERIFIED`: this cannot qualify the real host-PID-reuse
 claim. Running more unrelated namespace-PID reuse is not a substitute.
 
-`SHA256SUMS` binds the archive, probe JSON, and starting source revision.
+`SHA256SUMS` binds the archives, probe JSON, and starting source revision.
 Every artifact remains `policy_eligibility=false`.
