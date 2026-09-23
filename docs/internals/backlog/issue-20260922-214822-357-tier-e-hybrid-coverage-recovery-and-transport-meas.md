@@ -86,18 +86,20 @@ the default. `policy_eligibility=false` throughout.
   the new hybrid consumer remain unqualified. The split collector still reads
   terminal definitions; native 100 ms live publication measurement does not
   constitute live dictionary admission or an incremental receiver protocol.
-- A mismatched agent emitting v1 into a collector configured for v2 is rejected
-  at terminal reconciliation (rootful negative control). Prove the selected
-  agent emission version before opening workload admission; a versioned ELF
-  symbol or note is insufficient as an agent-version attestation.
+- Pre-admission marker proof implemented and retained at
+  `docs/internals/evidence/tier-e-marker-proof-20260923/README.md`: registered
+  v2 sessions require the agent-authored, incarnation-bound selected version
+  before constructing BPF or acknowledging ATTACH. The v1-emitting/missing-
+  proof negatives fail before workload; v1 compatibility and v2 USDT/uprobe
+  positives pass. The file is diagnostic self-attestation, not a cryptographic
+  claim against a malicious target UID.
 - Source-state fingerprinting of all pre-fork inputs and a separate profiler-only
   CPU denominator remain follow-up measurement hardening. Preserve the
   operator's rejection decision and `policy_eligibility=false` until addressed.
-- `./gradlew build` is blocked by the existing Detekt warning-inventory ratchet:
-  it reports 320 newly normalized findings, including hundreds in untouched
-  profiler sources and two platform findings. `./gradlew build -x
-  detektWarningRatchet` passes. Do not silently expand the reviewed warning
-  inventory; a scoped quality decision is required before merging.
+- The earlier Detekt gate is resolved using the same-toolchain pre-hybrid
+  baseline (`docs/internals/evidence/tier-e-detekt-pre-hybrid-20260923.json`).
+  The reviewed inventory contains no new warning rules and its profiler
+  cardinality remains 445; `./gradlew build` passed before marker-proof work.
 
 ---
 <!-- id: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas  file: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas.md -->

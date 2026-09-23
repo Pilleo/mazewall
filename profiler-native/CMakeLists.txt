@@ -61,6 +61,11 @@ target_compile_options(marker_export_test PRIVATE -Wall -Wextra -Werror -UNDEBUG
 target_link_libraries(marker_export_test PRIVATE ${CMAKE_DL_LIBS})
 add_test(NAME marker_export_test COMMAND marker_export_test $<TARGET_FILE:mazewall_stack_agent>)
 
+add_executable(marker_version_proof_test tests/marker_version_proof_test.cpp)
+target_include_directories(marker_version_proof_test PRIVATE include)
+target_compile_options(marker_version_proof_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME marker_version_proof_test COMMAND marker_version_proof_test)
+
 add_executable(usdt_marker_note_test tests/usdt_marker_note_test.cpp)
 target_compile_options(usdt_marker_note_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 if(MAZEWALL_ENABLE_TIER_E_USDT)

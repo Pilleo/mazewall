@@ -20,6 +20,7 @@ internal data class TierERegisteredTarget(
     val markerPath: Path,
     val markerOffset: Long,
     val artifactFileName: String,
+    val markerProofFileName: String? = null,
 ) {
     init {
         require(registrationId.matches(REGISTRATION_ID)) { "registration id is invalid" }
@@ -29,6 +30,9 @@ internal data class TierERegisteredTarget(
         require(markerPath.isAbsolute) { "registered marker path must be absolute" }
         require(markerOffset > 0) { "registered marker offset must be positive" }
         require(artifactFileName.isSafeFileName()) { "registered artifact file name is invalid" }
+        require(markerProofFileName == null || (markerProofFileName.isSafeFileName() && markerProofFileName != artifactFileName)) {
+            "registered marker proof file name is invalid"
+        }
     }
 
     val sessionEpoch: SessionEpoch get() = SessionEpoch(sessionTag.toLong())
@@ -59,7 +63,15 @@ internal data class TierETargetLaunchPlan(
         require(path.parent == definitionDirectory.normalize()) { "definition artifact escaped its configured directory" }
     }
 
-    fun nativeAgentOptions(): String = "session=${target.sessionTag.toString(16)},session-bound-definitions,definitions=$definitionPath"
+    fun nativeAgentOptions(): String =
+        buildString {
+        append("session=${target.sessionTag.toString(16)},session-bound-definitions,definitions=$definitionPath")
+        target.markerProofFileName?.let { proofName ->
+            val proof = definitionDirectory.resolve(proofName).normalize()
+            require(proof.parent == definitionDirectory.normalize()) { "marker proof escaped definition directory" }
+            append(",marker-version=v2,marker-version-proof=$proof")
+        }
+    }
 }
 
 /** Exact-match admission boundary for legacy v1 ATTACH commands. */
@@ -123,7 +135,8 @@ internal class TierEProcessIdentityVerifier(
 
 /** Strict, dependency-free reader for one read-only operator registration file. */
 internal object TierETargetRegistrationFile {
-    private const val VERSION = "1"
+    private const val VERSION_1 = "1"
+    private const val VERSION_2 = "2"
     private val REQUIRED_KEYS = setOf(
         "version",
         "registration_id",
@@ -134,6 +147,7 @@ internal object TierETargetRegistrationFile {
         "marker_offset",
         "artifact_file",
     )
+    private val REQUIRED_KEYS_V2 = REQUIRED_KEYS + "marker_proof_file"
 
     fun read(path: Path): TierERegisteredTarget {
         require(!Files.isSymbolicLink(path)) { "target registration file must not be a symbolic link" }
@@ -147,13 +161,16 @@ internal object TierETargetRegistrationFile {
             require(separator > 0 && separator == trimmed.lastIndexOf('=')) { "invalid target registration line" }
             val key = trimmed.substring(0, separator)
             val value = trimmed.substring(separator + 1)
-            require(key in REQUIRED_KEYS && value.isNotBlank() && parsed.put(key, value) == null) {
+            require(key in REQUIRED_KEYS_V2 && value.isNotBlank() && parsed.put(key, value) == null) {
                 "invalid or duplicate target registration key"
             }
             parsed
         }
-        require(values.keys == REQUIRED_KEYS) { "target registration is incomplete" }
-        require(values.getValue("version") == VERSION) { "unsupported target registration version" }
+        val version = values["version"]
+        require(version == VERSION_1 || version == VERSION_2) { "unsupported target registration version" }
+        require(values.keys == if (version == VERSION_2) REQUIRED_KEYS_V2 else REQUIRED_KEYS) {
+            "target registration is incomplete"
+        }
         val sessionTag = values.getValue("session_tag").removePrefix("0x").toIntOrNull(16)
             ?: throw IllegalArgumentException("target registration session tag is invalid")
         return TierERegisteredTarget(
@@ -167,6 +184,7 @@ internal object TierETargetRegistrationFile {
             markerOffset = values.getValue("marker_offset").removePrefix("0x").toLongOrNull(16)
                 ?: throw IllegalArgumentException("target registration marker offset is invalid"),
             artifactFileName = values.getValue("artifact_file"),
+            markerProofFileName = values["marker_proof_file"],
         )
     }
 }

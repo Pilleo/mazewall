@@ -543,6 +543,11 @@ suppresses kernel events or promises lower producer CPU.
   with a versioned `stack_marker_v2` USDT probe (`8@%rdi 8@%rsi 4@%edx`).
   One marker version is selected per session (`TierEOptions.markerVersion`,
   default `V1`; daemon `TIER_E_MARKER_VERSION=v1|v2`, fail-closed on unknown).
+  Registered experimental v2 sessions require a bounded agent-startup proof
+  of the selected v2 version, session tag, and process start time before BPF
+  engine construction or successful ATTACH. A missing or v1-selected proof
+  rejects workload admission, separately from symbol/USDT-note validation;
+  the proof is target-authored profiling evidence, not adversarial attestation.
   The native scope carries the canonical stack id for nested return and
   validated re-entry; both identities are cleared before profiler JVM work,
   callback suppression, capture failure, detach, and exec invalidation.

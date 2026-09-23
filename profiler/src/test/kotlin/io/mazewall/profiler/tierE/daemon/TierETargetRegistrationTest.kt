@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
+import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -169,5 +170,68 @@ class TierETargetRegistrationTest {
             "session=4d5a,session-bound-definitions,definitions=/run/mazewall/definitions/tier-e-4242-4d5a.mzse",
             plan.nativeAgentOptions(),
         )
+    }
+
+    @Test
+    fun `v2 registration binds a separate marker proof to agent launch options`() {
+        val file = root.resolve("v2.properties")
+        Files.writeString(
+            file,
+            """
+            version=2
+            registration_id=orders
+            pid=4242
+            session_tag=4d5a
+            process_incarnation=9876
+            marker_path=/collector/agent/libmazewall_stack_agent.so
+            marker_offset=20
+            artifact_file=orders.mzse
+            marker_proof_file=orders.marker-proof
+            """.trimIndent(),
+        )
+
+        val target = TierETargetRegistrationFile.read(file)
+        assertEquals("orders.marker-proof", target.markerProofFileName)
+        assertEquals(
+            "session=4d5a,session-bound-definitions,definitions=/run/mazewall/definitions/orders.mzse," +
+                "marker-version=v2,marker-version-proof=/run/mazewall/definitions/orders.marker-proof",
+            TierETargetLaunchPlan(target, Path.of("/run/mazewall/definitions")).nativeAgentOptions(),
+        )
+        Files.writeString(file, Files.readString(file).replace("orders.marker-proof", "../escape"))
+        assertFailsWith<IllegalArgumentException> { TierETargetRegistrationFile.read(file) }
+    }
+
+    @Test
+    fun `mismatched native-selected v1 proof rejects v2 attach before engine creation`() {
+        val target = TierERegisteredTarget(
+            registrationId = "orders",
+            pid = 4242,
+            sessionTag = 0x4d5a,
+            processIncarnation = 9_876L,
+            markerPath = Path.of("/collector/agent/libmazewall_stack_agent.so"),
+            markerOffset = 0x20,
+            artifactFileName = "orders.mzse",
+            markerProofFileName = "orders.marker-proof",
+        )
+        Files.writeString(root.resolve("orders.marker-proof"), "version=1\nsession_tag=4d5a\nprocess_starttime=9876\nmarker_version=v1\n")
+        val reports = mutableListOf<TierETerminalReport>()
+        val daemon = TierEDaemonService(
+            stopRequested = AtomicBoolean(false),
+            engineFactory = { error("engine must not be created when the selected marker version mismatches") },
+            artifactResolver = TierEDaemonArtifactResolver(root),
+            registeredTargetResolver = TierETargetRegistrationResolver(mapOf(target.registrationId to target)),
+            processIdentityVerifier = TierEProcessIdentityVerifier { 9_876L },
+            terminalReportSink = TierETerminalReportSink(reports::add),
+            benchmarkMode = true,
+            markerVersion = MarkerVersion.V2,
+        )
+
+        val reply = daemon.executeCommand("ATTACH 4242 uprobe /collector/agent/libmazewall_stack_agent.so 20 4d5a")
+
+        assertTrue(!reply.startsWith("OK"))
+        assertEquals(1, reports.size)
+        assertEquals("MARKER_VERSION_MISMATCH", reports.single().terminalReason)
+        assertEquals(EvidenceIntegrity.INCOMPLETE, reports.single().evidenceIntegrity)
+        assertEquals(false, reports.single().policyEligibility)
     }
 }

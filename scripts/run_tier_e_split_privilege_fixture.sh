@@ -127,8 +127,10 @@ fi
 
 cp "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so" "${SHARED}/libmazewall_stack_agent.so"
 cp -R "${NATIVE_BUILD_DIR}/agent-test-classes" "${SHARED}/agent-test-classes"
+registration_version=1
+[[ "${SPLIT_MARKER_VERSION}" == v2 ]] && registration_version=2
 cat > "${SHARED}/target.properties" <<EOF
-version=1
+version=${registration_version}
 registration_id=split-fixture
 pid=1
 session_tag=4d5a
@@ -137,6 +139,7 @@ marker_path=/shared/libmazewall_stack_agent.so
 marker_offset=${MARKER_OFFSET}
 artifact_file=${registered_artifact_file}
 EOF
+[[ "${SPLIT_MARKER_VERSION}" == v2 ]] && printf 'marker_proof_file=orders.marker-proof\n' >> "${SHARED}/target.properties"
 
 # The collector's PID namespace is joined to the target. Linux reports the target JVM as PID 1.
 # The fixture rewrites process_incarnation after start with its in-namespace /proc starttime.
@@ -144,6 +147,9 @@ agent_options="session=4d5a,session-bound-definitions,definitions=/shared/defini
 agent_marker_version=${TIER_E_SPLIT_AGENT_MARKER_VERSION:-${SPLIT_MARKER_VERSION}}
 [[ "${agent_marker_version}" == v1 || "${agent_marker_version}" == v2 ]] || exit 2
 [[ "${agent_marker_version}" == v2 ]] && agent_options+=",marker-version=v2"
+if [[ "${SPLIT_MARKER_VERSION}" == v2 && "${TIER_E_SPLIT_DISABLE_MARKER_PROOF:-0}" != 1 ]]; then
+    agent_options+=",marker-version-proof=/shared/definitions/orders.marker-proof"
+fi
 [[ "${SPLIT_STACK_TRANSPORT}" == inline-per-invocation ]] && agent_options+=",stack-transport=inline-per-invocation"
 # Instrumented forks export native phase counters (including publication CPU);
 # uninstrumented forks keep workload timing free of phase-clock overhead.
@@ -297,7 +303,26 @@ fi
 "${ENGINE}" wait "${COLLECTOR}" >/dev/null
 TARGET_EXIT=$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${TARGET}")
 COLLECTOR_EXIT=$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${COLLECTOR}")
+if [[ -f "${SHARED}/definitions/orders.marker-proof" ]]; then
+    cp "${SHARED}/definitions/orders.marker-proof" "${ARTIFACT_DIR}/marker-version-proof.txt"
+fi
 if [[ "${TARGET_EXIT}" != 0 || "${COLLECTOR_EXIT}" != 0 ]]; then
+    if [[ "${SPLIT_MARKER_VERSION}" == v2 && "${COLLECTOR_EXIT}" == 0 && "${TARGET_EXIT}" != 0 &&
+          ( "${agent_marker_version}" != v2 || "${TIER_E_SPLIT_DISABLE_MARKER_PROOF:-0}" == 1 ) ]]; then
+        "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
+        "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1
+        "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
+            cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
+        node - "${ARTIFACT_DIR}" <<'NODE'
+const fs=require('fs'),d=process.argv[2],r=JSON.parse(fs.readFileSync(`${d}/terminal-report.json`));
+const target=fs.readFileSync(`${d}/target.log`,'utf8');
+if (r.terminal_reason!=='MARKER_VERSION_MISMATCH'||r.evidence_integrity!=='INCOMPLETE'||
+    r.resolved_syscalls!==0||r.lifecycle_validity!==false||r.policy_eligibility!==false||
+    !target.includes('attach failed')||target.includes('tier-e-coverage-target: operations=')) process.exit(1);
+NODE
+        printf 'marker_mismatch=REJECTED_BEFORE_WORKLOAD\nevidence_integrity=INCOMPLETE\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+        exit 0
+    fi
     if [[ "${NEGATIVE_IDENTITY_CASE}" == stale && "${TARGET_EXIT}" != 0 && "${COLLECTOR_EXIT}" == 0 ]]; then
         "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
         "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1

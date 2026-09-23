@@ -258,6 +258,17 @@ internal class TierEDaemonService(
                 try {
                     val attachment = resolveDaemonAttachment(cmd, registeredTargetResolver, artifactResolver)
                     attachment.registeredTarget?.let(processIdentityVerifier::requireCurrent)
+                    if (markerVersion == MarkerVersion.V2) {
+                        val target = requireNotNull(attachment.registeredTarget) {
+                            "experimental marker v2 requires registered target and selected-version proof"
+                        }
+                        try {
+                            requireNotNull(artifactResolver).readMarkerProof(target).requireSelectedV2(target)
+                        } catch (failure: IllegalArgumentException) {
+                            throw TierEMarkerVersionMismatch(failure)
+                        }
+                        processIdentityVerifier.requireCurrent(target)
+                    }
                     engine = engineFactory()
                     val session = TierEProfilerSession(
                         engine = requireNotNull(engine),
@@ -312,6 +323,13 @@ internal class TierEDaemonService(
                     )
                     sessionState = postTransition.state
                     (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
+                } catch (versionFailure: TierEMarkerVersionMismatch) {
+                    runCatching { runtime?.close() ?: engine?.close() }
+                    val rejectedTarget = requireNotNull(registeredTargetResolver?.resolve(cmd)) {
+                        "marker-version mismatch requires a registered target"
+                    }
+                    reportRejectedAttach(rejectedTarget, "MARKER_VERSION_MISMATCH")
+                    completeAttachFailure(versionFailure)
                 } catch (expectedAttachFailure: Exception) {
                     runCatching { runtime?.close() ?: engine?.close() }
                     val rejectedTarget = runCatching { registeredTargetResolver?.resolve(cmd) }.getOrNull()
@@ -319,30 +337,10 @@ internal class TierEDaemonService(
                         processIdentityVerifier.checkAtTerminal(rejectedTarget) != TierEProcessIdentityCheck.MATCHED
                     ) {
                         runCatching {
-                            terminalReportSink.accept(
-                                TierETerminalReport(
-                                    evidenceIntegrity = EvidenceIntegrity.INCOMPLETE,
-                                    terminalReason = "STALE_PROCESS_IDENTITY",
-                                    resolvedSyscalls = 0,
-                                    captureDomainValidity = false,
-                                    transportCompleteness = false,
-                                    attributionCoverage = false,
-                                    dictionaryIntegrity = false,
-                                    lifecycleValidity = false,
-                                    registrationId = rejectedTarget.registrationId,
-                                    sessionEpoch = rejectedTarget.sessionEpoch.value,
-                                    targetPid = rejectedTarget.pid,
-                                    processIncarnation = rejectedTarget.processIncarnation,
-                                ),
-                            )
+                            reportRejectedAttach(rejectedTarget, "STALE_PROCESS_IDENTITY")
                         }
                     }
-                    val postTransition = ControlSessionMachine.evaluate(
-                        sessionState,
-                        ControlSessionEvent.AttachFailed(expectedAttachFailure.message ?: "attach failed"),
-                    )
-                    sessionState = postTransition.state
-                    (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
+                    completeAttachFailure(expectedAttachFailure)
                 }
             }
 
@@ -359,6 +357,37 @@ internal class TierEDaemonService(
                 reply
             }
         }
+
+    private fun completeAttachFailure(failure: Exception): String {
+        val transition = ControlSessionMachine.evaluate(
+            sessionState,
+            ControlSessionEvent.AttachFailed(failure.message ?: "attach failed"),
+        )
+        sessionState = transition.state
+        return (transition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
+    }
+
+    private fun reportRejectedAttach(
+        target: TierERegisteredTarget,
+        reason: String,
+    ) {
+        terminalReportSink.accept(
+            TierETerminalReport(
+                evidenceIntegrity = EvidenceIntegrity.INCOMPLETE,
+                terminalReason = reason,
+                resolvedSyscalls = 0,
+                captureDomainValidity = false,
+                transportCompleteness = false,
+                attributionCoverage = false,
+                dictionaryIntegrity = false,
+                lifecycleValidity = false,
+                registrationId = target.registrationId,
+                sessionEpoch = target.sessionEpoch.value,
+                targetPid = target.pid,
+                processIncarnation = target.processIncarnation,
+            ),
+        )
+    }
 
     @Synchronized
     fun shutdown() {
@@ -589,3 +618,7 @@ internal fun benchmarkDropRingSyscallFromEnvironment(env: Map<String, String> = 
         } else {
             null
         }
+
+private class TierEMarkerVersionMismatch(
+    cause: IllegalArgumentException,
+) : IllegalArgumentException("selected marker v2 proof was not admitted: ${cause.message}", cause)

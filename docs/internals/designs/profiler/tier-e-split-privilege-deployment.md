@@ -42,6 +42,22 @@ match before installation and checks it again at terminalization. An absent PID 
 exited; a different start-time means PID reuse and makes evidence incomplete. This is a current-boot
 identity. Persisted registrations must be bound to host boot ID before reuse.
 
+For experimental marker v2 only, registration `version=2` adds a safe sibling
+`marker_proof_file=orders.marker-proof`. The native agent's launch plan adds
+`marker-version=v2,marker-version-proof=/run/mazewall/definitions/orders.marker-proof`.
+At startup, after native bind setup, the agent atomically writes a bounded format-v1
+proof containing its selected marker version, session tag, and `/proc/self/stat`
+start time. The collector reads it once with `NOFOLLOW_LINKS`, verifies v2 and
+the registered session/process incarnation, and rechecks live identity before
+constructing the BPF engine. Missing, stale, malformed, symlinked, or v1-selected
+proofs reject `ATTACH` with an incomplete `MARKER_VERSION_MISMATCH` terminal
+report **before** declared workload admission. Existing registration v1 remains
+unchanged. See [retained rootful proof fixtures](../../evidence/tier-e-marker-proof-20260923/README.md).
+
+This is an agent-authored diagnostic selection proof, not authentication against
+a malicious target that can forge files under its own UID. Tier E remains
+`policy_eligibility=false`.
+
 `pid` is the host PID, not the container-local PID. `bpf_get_current_pid_tgid()` reports the
 host-global identity, so the privileged collector must resolve `/proc/<host-pid>` from the host
 PID namespace and the target control client must use that same registered value. A container-local

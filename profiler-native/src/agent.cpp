@@ -28,6 +28,7 @@
 #include "capture_yield_recorder.hpp"
 #include "invocation_registry.hpp"
 #include "lifecycle_barrier.hpp"
+#include "marker_version_proof.hpp"
 #include "symbolization_generation.hpp"
 #include "tier_e_usdt_marker.hpp"
 
@@ -104,6 +105,7 @@ std::atomic<jmethodID> thread_is_virtual{nullptr};
 std::atomic<jmethodID> thread_id{nullptr};
 jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
+std::string marker_version_proof_path;
 std::string capture_yield_path;
 std::mutex capture_yield_mutex;
 std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
@@ -1693,6 +1695,7 @@ void stop_live_publisher() noexcept {
 bool parse_options(const char* options) {
     if (options == nullptr || *options == '\0') return true;
     std::string remaining(options);
+    bool selected_marker_version = false;
     std::size_t start = 0;
     while (start <= remaining.size()) {
         const auto end = remaining.find(',', start);
@@ -1741,9 +1744,17 @@ bool parse_options(const char* options) {
         } else if (option == "mode=unique-stack-syscall") {
             emission_mode = EmissionMode::unique_stack_syscall;
         } else if (option == "marker-version=v1") {
+            if (selected_marker_version) return false;
+            selected_marker_version = true;
             marker_version_v2.store(false, std::memory_order_release);
         } else if (option == "marker-version=v2") {
+            if (selected_marker_version) return false;
+            selected_marker_version = true;
             marker_version_v2.store(true, std::memory_order_release);
+        } else if (option.starts_with("marker-version-proof=")) {
+            if (!marker_version_proof_path.empty()) return false;
+            marker_version_proof_path = option.substr(std::strlen("marker-version-proof="));
+            if (marker_version_proof_path.empty() || marker_version_proof_path.front() != '/') return false;
         } else if (option == "stack-transport=dictionary") {
             stack_transport = StackTransport::dictionary;
         } else if (option == "stack-transport=inline-per-invocation") {
@@ -1800,6 +1811,7 @@ bool parse_options(const char* options) {
         }
     }
     if (!capture_profile.is_full() && !benchmark_phases) return false;
+    if (!marker_version_proof_path.empty() && !session_bound_definitions.load(std::memory_order_acquire)) return false;
     capture_profile_admitted.store(capture_profile.is_full(), std::memory_order_release);
     return true;
 }
@@ -1833,6 +1845,21 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
     if (!configure_native_bind_events(jvmti)) {
         std::fprintf(stderr, "mazewall-stack-agent: load rejected native bind configuration\\n");
         return JNI_ERR;
+    }
+    if (!marker_version_proof_path.empty()) {
+        std::ifstream stat_file("/proc/self/stat");
+        std::string stat;
+        if (!std::getline(stat_file, stat)) {
+            std::fprintf(stderr, "mazewall-stack-agent: cannot read process incarnation for marker-version proof\n");
+            return JNI_ERR;
+        }
+        const auto starttime = mazewall::profiler::marker_proof::process_starttime(stat);
+        if (!starttime || !mazewall::profiler::marker_proof::write_atomic(
+                marker_version_proof_path,
+                mazewall::profiler::marker_proof::format(session_tag, *starttime, marker_version_v2.load(std::memory_order_acquire)))) {
+            std::fprintf(stderr, "mazewall-stack-agent: cannot publish selected marker-version proof\n");
+            return JNI_ERR;
+        }
     }
     start_live_publisher();
     return JNI_OK;

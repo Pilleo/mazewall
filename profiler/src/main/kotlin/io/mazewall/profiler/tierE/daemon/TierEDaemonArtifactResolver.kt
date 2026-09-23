@@ -3,6 +3,7 @@ package io.mazewall.profiler.tierE.daemon
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact
+import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -41,6 +42,26 @@ internal class TierEDaemonArtifactResolver(
         val path = root.resolve(target.artifactFileName).normalize()
         require(path.parent == root) { "Tier E registered artifact escaped its configured root" }
         return TierEDefinitionArtifact(path, target.sessionEpoch)
+    }
+
+    /** Reads the agent-selected version before BPF installation, with one bounded no-follow FD. */
+    fun readMarkerProof(target: TierERegisteredTarget): TierEMarkerVersionProof {
+        val name = requireNotNull(target.markerProofFileName) { "registered v2 target lacks marker proof file" }
+        val path = root.resolve(name).normalize()
+        require(path.parent == root && !Files.isSymbolicLink(path) && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            "marker-version proof must be a regular file under the registered artifact root"
+        }
+        return FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { channel ->
+            val size = channel.size()
+            require(size in 1..MAX_MARKER_PROOF_BYTES) { "marker-version proof exceeds bounded size" }
+            val bytes = ByteBuffer.allocate(size.toInt())
+            while (bytes.hasRemaining()) check(channel.read(bytes) > 0) { "marker-version proof changed while reading" }
+            TierEMarkerVersionProof.decode(bytes.array().toString(Charsets.UTF_8))
+        }
+    }
+
+    private companion object {
+        const val MAX_MARKER_PROOF_BYTES = 512L
     }
 
     /** Reads and validates a terminal artifact through one no-follow descriptor. */

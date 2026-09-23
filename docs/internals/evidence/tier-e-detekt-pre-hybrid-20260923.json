@@ -61,11 +61,19 @@
     {
       "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install is too long (148). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
       "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install is too long (171). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 22). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 25). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (122). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (120). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
     }
   ],
-  "reviewed_diagnostic_update_count": 10,
+  "reviewed_diagnostic_update_count": 12,
   "inventory_rules_added": 0,
   "inventory_count_after_review": 445,
-  "inventory_fingerprint_after_review": "337faa860041edbbfb242de1bce46866d3b7d61382f7178ece13305c14c4c930",
+  "inventory_fingerprint_after_review": "fcdad91db86af9066cba38dd6a163e297128b557822c9482417c7b5941c5d1ae",
   "implementation_revision_at_review": "345dd5430163f2e641261566217aebc4915f3710"
 }
