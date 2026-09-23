@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 12 | *Total Resolved Issues:* 632
+*Total Active Issues:* 18 | *Total Resolved Issues:* 632
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,12 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop](issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop.md) | Integrate a production-owned Tier E collector loop | high | profiler |
+| [issue-20260919-120622-331-establish-allocation-safe-evidence-for-remaining-t](issue-20260919-120622-331-establish-allocation-safe-evidence-for-remaining-t.md) | Establish allocation-safe Tier E evidence | high | profiler |
+| [issue-20260919-222031-545-evaluate-tier-e-scoped-tracepoint-attachment-after](issue-20260919-222031-545-evaluate-tier-e-scoped-tracepoint-attachment-after.md) | Evaluate Tier E scoped tracepoint attachment | high | profiler |
+| [issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa](issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md) | Diagnose intermittent Tier E pre-admission observations | high | profiler |
+| [issue-20260921-005549-084-eliminate-tier-e-cpu-global-perf-tracepoint-sampli](issue-20260921-005549-084-eliminate-tier-e-cpu-global-perf-tracepoint-sampli.md) | Eliminate Tier E CPU-global perf tracepoint sampling | high | profiler |
+| [issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas](issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas.md) | Tier E hybrid coverage recovery and transport measurement | high | profiler |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](code_health/issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | low | orchestrator |
 | [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | low | testing |

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "modes": {
+    "full-stream": {
+      "paired_unit": "fork median of 10 measured batches",
+      "pairs": {
+        "workload": 15,
+        "cpu": 15,
+        "receipt_p99": 15
+      },
+      "v2_over_v1_workload_ratio_median": 1.0116896585807762,
+      "hybrid_over_v2_workload_ratio_median": 1.0007300978509899,
+      "hybrid_over_v1_workload_ratio_upper_95": 1.0469583724435538,
+      "hybrid_over_v1_combined_cpu_ratio_upper_95": 1.1356097560975609,
+      "receipt_p99_allowance_fraction_upper_95": 0.909091012396706,
+      "workload_gate": "PASS",
+      "combined_cpu_gate": "PASS",
+      "receipt_p99_gate": "PASS"
+    },
+    "unique-edge": {
+      "paired_unit": "fork median of 10 measured batches",
+      "pairs": {
+        "workload": 15,
+        "cpu": 15,
+        "receipt_p99": 15
+      },
+      "v2_over_v1_workload_ratio_median": 1.008377947020514,
+      "hybrid_over_v2_workload_ratio_median": 1.0040887799657896,
+      "hybrid_over_v1_workload_ratio_upper_95": 1.040691117599975,
+      "hybrid_over_v1_combined_cpu_ratio_upper_95": 1.186046511627907,
+      "receipt_p99_allowance_fraction_upper_95": 2.2222224691358297,
+      "workload_gate": "PASS",
+      "combined_cpu_gate": "PASS",
+      "receipt_p99_gate": "FAIL"
+    }
+  },
+  "recovery_p99_dependency_relative_gate": "PASS",
+  "fault_forks": 30,
+  "publication_reopening_gate": "UNVERIFIED",
+  "adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

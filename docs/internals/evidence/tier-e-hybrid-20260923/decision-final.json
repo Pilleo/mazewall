@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "modes": {
+    "full-stream": {
+      "paired_unit": "fork median of 10 measured batches",
+      "pairs": {
+        "workload": 15,
+        "cpu": 15,
+        "receipt_p99": 15
+      },
+      "v2_over_v1_workload_ratio_median": 0.9974957627879768,
+      "hybrid_over_v2_workload_ratio_median": 0.9883860073847818,
+      "hybrid_over_v1_workload_ratio_upper_95": 1.079564081719067,
+      "hybrid_over_v1_combined_cpu_ratio_upper_95": 1.2852852852852852,
+      "receipt_p99_allowance_fraction_upper_95": 2.4719103901022907,
+      "workload_gate": "PASS",
+      "combined_cpu_gate": "FAIL",
+      "receipt_p99_gate": "FAIL"
+    },
+    "unique-edge": {
+      "paired_unit": "fork median of 10 measured batches",
+      "pairs": {
+        "workload": 15,
+        "cpu": 15,
+        "receipt_p99": 15
+      },
+      "v2_over_v1_workload_ratio_median": 0.999232718589208,
+      "hybrid_over_v2_workload_ratio_median": 0.9960670544701172,
+      "hybrid_over_v1_workload_ratio_upper_95": 1.0213210709025775,
+      "hybrid_over_v1_combined_cpu_ratio_upper_95": 1.2386706948640482,
+      "receipt_p99_allowance_fraction_upper_95": 1.3414635782272657,
+      "workload_gate": "PASS",
+      "combined_cpu_gate": "PASS",
+      "receipt_p99_gate": "FAIL"
+    }
+  },
+  "recovery_p99_dependency_relative_gate": "PASS",
+  "fault_forks": 30,
+  "publication_reopening_gate": "UNVERIFIED",
+  "adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

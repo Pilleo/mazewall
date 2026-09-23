@@ -505,12 +505,12 @@ for raw artifacts, per-fork verdict dimensions, resource limitations and exact c
 
 **Required hardening: bounded inline publication.** Do not qualify inline for this session size
 or increase its limit from this result. A future change must preserve bounded memory and
-dependency-complete acknowledged publication. Kernel aggregation remains deferred: any proposal must first
+dependency-complete acknowledged publication. The historical kernel-aggregation proposal required
 demonstrate ring-transport loss of distinct edges and specify bounded map exhaustion, canonical
 identity, retry ordering, acknowledgement, and terminal closure. It cannot recover observations
 absent before its handler runs.
 
-**Deferred design decision: kernel aggregation.** Do not replace the ring for the coverage
+**Historical pre-experiment decision: kernel aggregation.** Do not replace the ring for the coverage
 experiment. Any future aggregate must distinguish canonical stack identity from per-invocation
 identity, retain unresolved identity dependencies until an exact userspace join, and mark
 bounded-map exhaustion as incomplete rather than evicting unseen edges silently. Aggregation
@@ -519,12 +519,20 @@ and terminal closure requires both producer quiescence and acknowledged dependen
 output. The current independent oracle must demonstrate better rare-path recovery before this
 additional protocol is considered. Collector-owned acknowledgement remains authoritative.
 
-### 2.1.0 Hybrid coverage recovery (experimental implementation, 2026-09-22)
+### 2.1.0 Hybrid coverage recovery (experimental implementation, 2026-09-23)
 
-> **Status: Experimental implementation, host-verified only. Not qualified.**
-> Rootful qualification (correctness smoke, five rotated forks, fifteen paired
-> decision forks, fault fixtures, capacity workloads) is pending. No default
-> change. Dictionary/full-stream remains the default. `policy_eligibility=false`.
+> **Status: Experimental, rootful correctness/fault-qualified on the 72-operation oracle;
+> default promotion rejected.** Five development and fifteen decision forks per
+> dictionary mode/marker configuration recovered 72/72 paths; fifteen paired
+> fault forks per dictionary emission mode recovered every deliberately dropped
+> singleton with ring transport and history incomplete. Final paired resource
+> gates failed: both modes' receipt-p99 bounds exceed their allowances and
+> full-stream's combined-CPU bound exceeds 1.25. The measured decision
+> therefore rejects default promotion, while preserving the experimental opt-in.
+> Forty hybrid-only sustained 75,000-operation forks recovered all 72 paths,
+> including every singleton. Long matched v1/v2 ring-only controls and a real
+> host PID-reuse scenario remain unqualified. Dictionary/full-stream remains the default and
+> `policy_eligibility=false`. See the [retained qualification evidence](../../evidence/tier-e-hybrid-20260923/README.md).
 
 An opt-in hybrid mode preserves an exact stack/syscall edge in a bounded kernel
 map when its ring event cannot be delivered. The ring stream is unchanged:
@@ -542,24 +550,29 @@ suppresses kernel events or promises lower producer CPU.
   distinct `mazewall_invocation_state_v2` BTF type. The 88-byte ring record is
   unchanged. Disabled sessions keep the existing 24-byte layout and program.
 - **Bounded retained-edge map.** One ordinary non-LRU hash per experimental
-  session, default 4,096 entries, keyed by session tag, canonical stack id,
-  syscall number, and capture flags. The 88-byte value mirrors the ring record.
+  session, default 4,096 entries, keyed by session epoch (`u64`, zero-extended
+  session tag), canonical stack id (`u64`), syscall number, and capture flags.
+  The 24-byte key binds the immutable edge; the 96-byte value extends the
+  88-byte ring fields with attachment generation and reserved zero.
   Insertion runs after exact admission and before ring reservation with
   insert-if-absent semantics; other failures increment an explicit counter.
   No eviction or deletion exists during the session.
-- **Scanning.** Caller-driven, no threads: live sweeps start every 100 ms and
-  read at most 256 entries per batch behind the serialized collector boundary.
-  The exclusive final scan runs after producer quiescence and ring drain.
+- **Scanning.** A dedicated map reader runs independently of ring draining;
+  live sweeps start every 100 ms, read at most 256 entries per batch, and
+  transfer immutable, bounded pages to the serialized collector owner.
+  Repeated keys are not requeued. The reader is joined before the exclusive
+  final scan after producer quiescence and ring drain.
 - **Validation and acknowledgement.** Candidates become immutable
-  `CoverageCandidate` records validated against session, process incarnation,
-  and dictionary definitions without replaying task state. Ring-derived and
+  `CoverageCandidate` records validated against session, target process,
+  attachment generation, accepted flags, and dictionary definitions without
+  replaying task state. Ring-derived and
   map-derived coverage share collector-owned acknowledgement: `SHADOW` compares
   without committing, `RECOVER` commits only after retained-output retention.
   Full-stream ring events are never suppressed by map acknowledgement.
 - **Evidence.** Additive `recovery_evidence` in session integrity and the
   terminal report: capacity, entries, insertion failures, pending candidates,
   recovered edges, acknowledgement retries, scan batches/latency, discovery
-  source, and dependency-relative latency. Ring transport and event-history
+  source, and bounded dependency-relative latency histograms. Ring transport and event-history
   verdicts stay authoritative; a recovered singleton keeps them incomplete.
 
 The userspace collector treats a resolved unique edge as an **emission candidate**, not as an

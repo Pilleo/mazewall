@@ -51,32 +51,53 @@ the default. `policy_eligibility=false` throughout.
 - No ring suppression, no promise of lower producer CPU.
 - No default promotion without separate decision.
 
-**Implementation progress (2026-09-22, host-verified, not qualified):**
-- Stages 1–4 implemented behind experimental gates with focused host tests green
-  (`TierEOptionsTest`, `CoverageCandidateTest`, `CoverageRecoveryValidatorTest`,
-  `RecoveredEdgeLedgerTest`, `CoverageRecoveryScannerTest`,
-  `TierECoverageRecoveryFixtureTest`, `TierEBpfProgramBuilderTest`,
-  `UsdtProbeNoteTest`, `MarkerTransportSelectionTest`,
-  `TierETerminalReportFileSinkTest`; native `invocation_registry_test`,
-  `marker_export_test`, `usdt_marker_note_test`).
-- Decisive fixture passes at unit level: a deliberately ring-dropped singleton is
-  resolved, acknowledged, and covered with the ring verdict incomplete; SHADOW
-  compares without committing.
-- Normative design records the experimental status at
-  `docs/internals/designs/profiler/tier-e-design.md` §2.1.0.
+**Rootful experimental result (2026-09-23):**
+- Marker v2 register mapping, full-width 32-byte task initializer, stack/generation
+  overlap, in-flight completion key, real retained output, and split-topology
+  configuration have been corrected. The map uses a 24-byte session/stack/syscall/flags
+  key and a 96-byte first-observation value with attachment generation.
+- Dedicated scanner queues bounded immutable pages independently of ring polling;
+  collector-owned ring/map coverage membership and acknowledgement preserve
+  full-stream event history and deduplicate coverage. Final scan requires both
+  native closure and kernel quiescence; map pressure remains explicit.
+- Retained evidence: `docs/internals/evidence/tier-e-hybrid-20260923/README.md`.
+  Six configurations each recovered 72/72 paths in five development and fifteen
+  decision forks (120/120 fault-free runs). Hybrid-only long 75,000-operation
+  coverage passed 72/72 paths in 40/40 additional development/decision forks.
+  Thirty controlled ring-drop forks
+  recovered every singleton from the map while retaining incomplete ring
+  transport and event history. The maximum per-fork dependency-relative p99
+  discovery upper bound was 2.3 ms versus a 500 ms target. A one-entry map
+  pressure run reported 223 insertion failures and still recovered 72/72 via
+  the ring; its recovery verdict remained incomplete.
+- Final calibrated paired upper 95% workload ratios were 1.080 (full) and
+  1.021 (unique); combined CPU ratios were 1.285 (full, **FAIL**) and 1.239
+  (unique); receipt-p99 fractions of the allowed increase were 2.47 (full,
+  **FAIL**) and 1.34 (unique, **FAIL**). Default promotion is rejected; mode
+  remains opt-in experimental. Live native publication stayed below 0.5% of
+  measured collector CPU and did not exhaust native retention; incremental
+  dictionary transport remains deferred.
 
-**Remaining before any adoption decision:**
-- Stage 5 measurement: terminal vs 100 ms live snapshot comparison with the new
-  pending-candidate consumer; incremental transport stays deferred per the
-  existing decision record unless a reopen trigger fires.
-- Stage 6 rootful qualification: correctness smoke, five rotated forks, fifteen
-  paired decision forks across v1-ring/v2-ring/v2-hybrid, 72-path oracle,
-  capacity/over-capacity workloads, and the controlled ring-drop fault fixture.
-  Exact commands: `bash scripts/run_tier_e_split_matched_benchmark.sh`,
-  `bash scripts/run_tier_e_split_coverage_matrix.sh`,
-  `./gradlew :profiler:test`, `ctest --test-dir /tmp/jseccomp-profiler-native-build`.
-- A production `benchmark-phases` split-topology export for receipt p50/p95/p99
-  and publication CPU is still pending; split fork rows retain explicit nulls.
+**Remaining scope before closing this backlog item:**
+- Long matched v1/v2 ring-only controls were not rerun alongside the 40 long
+  hybrid forks; sustained hybrid correctness does not establish long-workload
+  comparative overhead.
+- Real host PID reuse and class-churn/stack-diverse publication runs with
+  the new hybrid consumer remain unqualified. The split collector still reads
+  terminal definitions; native 100 ms live publication measurement does not
+  constitute live dictionary admission or an incremental receiver protocol.
+- A mismatched agent emitting v1 into a collector configured for v2 is rejected
+  at terminal reconciliation (rootful negative control). Prove the selected
+  agent emission version before opening workload admission; a versioned ELF
+  symbol or note is insufficient as an agent-version attestation.
+- Source-state fingerprinting of all pre-fork inputs and a separate profiler-only
+  CPU denominator remain follow-up measurement hardening. Preserve the
+  operator's rejection decision and `policy_eligibility=false` until addressed.
+- `./gradlew build` is blocked by the existing Detekt warning-inventory ratchet:
+  it reports 320 newly normalized findings, including hundreds in untouched
+  profiler sources and two platform findings. `./gradlew build -x
+  detektWarningRatchet` passes. Do not silently expand the reviewed warning
+  inventory; a scoped quality decision is required before merging.
 
 ---
 <!-- id: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas  file: issue-20260922-214822-357-tier-e-hybrid-coverage-recovery-and-transport-meas.md -->
