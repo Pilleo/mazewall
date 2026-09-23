@@ -36,21 +36,18 @@ internal object CoverageRecoveryValidator {
         expectedIncarnation: ProcessIncarnation,
         joiner: InvocationDictionaryJoiner,
     ): Result {
-        if (candidate.sessionEpoch != expectedSession) return Result.Invalid(Reason.SESSION_MISMATCH)
-        if (candidate.processIncarnation != expectedIncarnation) return Result.Invalid(Reason.INCARNATION_MISMATCH)
-        if (candidate.attachmentGeneration <= 0 || candidate.captureFlags and 1.inv() != 0) {
-            return Result.Invalid(Reason.STALE_DEFINITION)
-        }
         val invocation = joiner.knownInvocation(candidate.invocationId)
-            ?: return Result.Invalid(Reason.UNKNOWN_INVOCATION)
-        if (invocation.captureFailure != null) return Result.Invalid(Reason.CAPTURE_FAILED)
-        if (invocation.stackTraceId != candidate.canonicalStackTraceId) {
-            return Result.Invalid(Reason.STACK_MISMATCH)
+        val stack = invocation?.let(joiner::knownStack)
+        return when {
+            candidate.sessionEpoch != expectedSession -> Result.Invalid(Reason.SESSION_MISMATCH)
+            candidate.processIncarnation != expectedIncarnation -> Result.Invalid(Reason.INCARNATION_MISMATCH)
+            candidate.attachmentGeneration <= 0 || candidate.captureFlags and 1.inv() != 0 -> Result.Invalid(Reason.STALE_DEFINITION)
+            invocation == null -> Result.Invalid(Reason.UNKNOWN_INVOCATION)
+            invocation.captureFailure != null -> Result.Invalid(Reason.CAPTURE_FAILED)
+            invocation.stackTraceId != candidate.canonicalStackTraceId -> Result.Invalid(Reason.STACK_MISMATCH)
+            stack == null -> Result.Invalid(Reason.UNKNOWN_STACK)
+            stack.stackTraceId != candidate.canonicalStackTraceId -> Result.Invalid(Reason.STALE_DEFINITION)
+            else -> Result.Valid(stack, invocation)
         }
-        val stack = joiner.knownStack(invocation) ?: return Result.Invalid(Reason.UNKNOWN_STACK)
-        if (stack.stackTraceId != candidate.canonicalStackTraceId) {
-            return Result.Invalid(Reason.STALE_DEFINITION)
-        }
-        return Result.Valid(stack, invocation)
     }
 }

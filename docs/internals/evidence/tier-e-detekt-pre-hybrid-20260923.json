@@ -1,0 +1,71 @@
+{
+  "source_revision": "f1805c48",
+  "command": "./gradlew --no-build-cache :profiler:detektMain :platform:detektMain -x :buildSrc:verificationActionsTest",
+  "toolchain": "same host JDK/Gradle/Detekt as current branch",
+  "report_status": "Detekt emitted XML; pre-hybrid profiler detektMain reported existing error-level findings",
+  "modules": {
+    "profiler": {
+      "prior_inventory_count": 161,
+      "verified_pre_hybrid_count": 445,
+      "pre_hybrid_missing_count": 295,
+      "pre_hybrid_stale_count": 11,
+      "xml_sha256": "efedafeb80591317c1d201b6634d7bac32d6751670f27a299ccfda2ef9a157c2",
+      "reviewed_inventory_sha256": "f3233d0c2b49db7c0c4e2f52228440e9ec10f3ee56b1465c749c6a68af56c30b"
+    },
+    "platform": {
+      "prior_inventory_count": 110,
+      "verified_pre_hybrid_count": 111,
+      "pre_hybrid_missing_count": 2,
+      "pre_hybrid_stale_count": 1,
+      "xml_sha256": "c892cf4b24352c85506981fcac78662ef5b9f1dd085162e0401f07f4567917d2",
+      "reviewed_inventory_sha256": "7fbaf306cec5e377b6680c3b5835439316add34c94a919863641d0a3988c8fd7"
+    }
+  },
+  "reviewed_diagnostic_updates": [
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/AttributionCollector.kt|<error severity=\"warning\" message=\"Class &apos;AttributionCollector&apos; with &apos;37&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/AttributionCollector.kt|<error severity=\"warning\" message=\"Class &apos;AttributionCollector&apos; with &apos;44&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt|<error severity=\"warning\" message=\"Class &apos;TierEProfilerSession&apos; with &apos;31&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt|<error severity=\"warning\" message=\"Class &apos;TierEProfilerSession&apos; with &apos;48&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The constructor(stopRequested: AtomicBoolean, engineFactory: () -&gt; TierEbpfEngine, artifactResolver: TierEDaemonArtifactResolver?, resultSink: TierEDaemonResultSink, terminalReportSink: TierETerminalReportSink, registeredTargetResolver: TierETargetRegistrationResolver?, processIdentityVerifier: TierEProcessIdentityVerifier, targetExitCoordinator: TierETargetExitCoordinator, terminalArtifactWaitMillis: Long, coverageManifestSink: TierECoverageManifestConfiguration?, operationManifestSink: TierESplitOperationManifestFileSink?, benchmarkRecordLimit: Int?, benchmarkMode: Boolean) has too many parameters. The current maximum allowed parameters are 10.\" source=\"detekt.LongParameterList\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The constructor(stopRequested: AtomicBoolean, engineFactory: () -&gt; TierEbpfEngine, artifactResolver: TierEDaemonArtifactResolver?, resultSink: TierEDaemonResultSink, terminalReportSink: TierETerminalReportSink, registeredTargetResolver: TierETargetRegistrationResolver?, processIdentityVerifier: TierEProcessIdentityVerifier, targetExitCoordinator: TierETargetExitCoordinator, terminalArtifactWaitMillis: Long, coverageManifestSink: TierECoverageManifestConfiguration?, operationManifestSink: TierESplitOperationManifestFileSink?, benchmarkRecordLimit: Int?, benchmarkMode: Boolean, markerVersion: MarkerVersion, benchmarkPhases: Boolean, receiptClockMode: String, recoveryMode: CoverageRecoveryMode, recoveryMapCapacity: Int, benchmarkDropRingSyscallNumber: Int?) has too many parameters. The current maximum allowed parameters are 10.\" source=\"detekt.LongParameterList\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 20). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect appears to be too complex based on Cyclomatic Complexity (complexity: 22). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (107). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/daemon/TierEKotlinDaemon.kt|<error severity=\"warning\" message=\"The function dispatchEffect is too long (122). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt|<error severity=\"warning\" message=\"The function buildSysEnterProgram appears to be too complex based on Cyclomatic Complexity (complexity: 61). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt|<error severity=\"warning\" message=\"The function buildSysEnterProgram appears to be too complex based on Cyclomatic Complexity (complexity: 67). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt|<error severity=\"warning\" message=\"The function buildSysEnterProgram is too long (401). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt|<error severity=\"warning\" message=\"The function buildSysEnterProgram is too long (422). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"Class &apos;TierEbpfEngine&apos; with &apos;65&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"Class &apos;TierEbpfEngine&apos; with &apos;67&apos; functions detected. The maximum allowed functions per class is set to &apos;30&apos;\" source=\"detekt.TooManyFunctions\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install appears to be too complex based on Cyclomatic Complexity (complexity: 21). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install appears to be too complex based on Cyclomatic Complexity (complexity: 26). The maximum allowed complexity for methods is set to &apos;15&apos;\" source=\"detekt.CyclomaticComplexMethod\" />"
+    },
+    {
+      "previous": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install is too long (148). The maximum length is 100.\" source=\"detekt.LongMethod\" />",
+      "current": "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt|<error severity=\"warning\" message=\"The function install is too long (171). The maximum length is 100.\" source=\"detekt.LongMethod\" />"
+    }
+  ],
+  "reviewed_diagnostic_update_count": 10,
+  "inventory_rules_added": 0,
+  "inventory_count_after_review": 445,
+  "inventory_fingerprint_after_review": "337faa860041edbbfb242de1bce46866d3b7d61382f7178ece13305c14c4c930",
+  "implementation_revision_at_review": "345dd5430163f2e641261566217aebc4915f3710"
+}

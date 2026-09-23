@@ -35,12 +35,7 @@ class CoverageRecoveryValidatorTest {
         canonicalStackTraceId = stackTraceId,
         syscallNumber = 257,
         captureFlags = 0,
-        observedKtimeNanos = 123L,
-        tgid = 100,
-        tid = 101,
-        invocationId = invocationId,
-        markerSequence = 2,
-        args = listOf(-100, 1, 2, 3, 4, 5),
+        representative = CoverageRepresentative(123L, 100, 101, invocationId, 2, listOf(-100, 1, 2, 3, 4, 5)),
         processIncarnation = processIncarnation,
         attachmentGeneration = 1,
     )

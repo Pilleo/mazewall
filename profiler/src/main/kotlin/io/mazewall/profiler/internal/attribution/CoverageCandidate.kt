@@ -13,24 +13,20 @@ internal class CoverageCandidate(
     val canonicalStackTraceId: StackTraceId,
     val syscallNumber: Int,
     val captureFlags: Int,
-    val observedKtimeNanos: Long,
-    val tgid: Int,
-    val tid: Int,
-    val invocationId: InvocationId,
-    val markerSequence: Long,
-    args: List<Long>,
+    val representative: CoverageRepresentative,
     val processIncarnation: ProcessIncarnation,
     val attachmentGeneration: Int = 0,
 ) {
-    val args: List<Long> = java.util.List.copyOf(args)
+    val observedKtimeNanos: Long get() = representative.observedKtimeNanos
+    val tgid: Int get() = representative.tgid
+    val tid: Int get() = representative.tid
+    val invocationId: InvocationId get() = representative.invocationId
+    val markerSequence: Long get() = representative.markerSequence
+    val args: List<Long> get() = representative.args
 
     init {
         require(sessionEpoch.value > 0) { "session epoch must be positive" }
         require(syscallNumber >= 0) { "syscall number must be non-negative" }
-        require(markerSequence > 0) { "marker sequence must be positive" }
-        require(tgid > 0) { "tgid must be positive" }
-        require(tid > 0) { "tid must be positive" }
-        require(args.size == 6) { "coverage candidate must carry six raw syscall arguments" }
         require(processIncarnation.value > 0) { "process incarnation must be positive" }
     }
 
@@ -48,13 +44,33 @@ internal class CoverageCandidate(
             canonicalStackTraceId,
             syscallNumber,
             captureFlags,
-            observedKtimeNanos,
-            tgid,
-            tid,
-            invocationId,
-            markerSequence,
-            args,
+            representative.copyArgs(args),
             processIncarnation,
             attachmentGeneration,
         )
+}
+
+/** Kernel-observed scalars, owned without exposing mutable syscall arguments. */
+internal class CoverageRepresentative(
+    val observedKtimeNanos: Long,
+    val tgid: Int,
+    val tid: Int,
+    val invocationId: InvocationId,
+    val markerSequence: Long,
+    args: List<Long>,
+) {
+    val args: List<Long> = java.util.List.copyOf(args)
+
+    init {
+        require(markerSequence > 0) { "marker sequence must be positive" }
+        require(tgid > 0) { "tgid must be positive" }
+        require(tid > 0) { "tid must be positive" }
+        require(args.size == RAW_SYSCALL_ARGUMENTS) { "coverage candidate must carry six raw syscall arguments" }
+    }
+
+    fun copyArgs(args: List<Long>): CoverageRepresentative = CoverageRepresentative(observedKtimeNanos, tgid, tid, invocationId, markerSequence, args)
+
+    private companion object {
+        const val RAW_SYSCALL_ARGUMENTS = 6
+    }
 }

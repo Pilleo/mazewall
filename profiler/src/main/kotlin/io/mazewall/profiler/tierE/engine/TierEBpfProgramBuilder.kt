@@ -15,6 +15,7 @@ import io.mazewall.profiler.tierE.ringbuf.SyscallInvocationEvent
  * Extracted from [TierEbpfEngine] to allow unit testing and isolated verification of bytecode
  * generation without requiring root privileges or bpf(2) syscall execution.
  */
+@Suppress("LargeClass") // Keep relative jump patching and verifier-tested generated program shapes together.
 internal object TierEBpfProgramBuilder {
     // eBPF helper IDs (uapi/linux/bpf.h)
     private const val H_LOOKUP: Int = 1
@@ -954,6 +955,69 @@ internal object TierEBpfProgramBuilder {
      */
     public fun buildMarkerProgram(): List<Insn> = buildMarkerProgram(TierEOptions())
 
+    private fun emitMarkerMapLoad(
+        program: MutableList<Insn>,
+        destination: Int,
+        index: Int,
+    ) {
+        program += Insn(LD_MAP_FD, dst = destination, src = PSEUDO_FD, imm = index)
+        program += Insn(code = 0)
+    }
+
+    private fun emitMarkerArguments(
+        program: MutableList<Insn>,
+        options: TierEOptions,
+    ) {
+        if (options.markerVersion == MarkerVersion.V2) {
+            // Native ABI: RDI=invocation, RSI=stack, RDX=flags. Restore
+            // generation last: FP-44 overlaps the upper half of FP-48.
+            program += Insn(LDX_DW, dst = 3, src = 9, off = 104)
+            program += Insn(STX_DW, dst = FP, src = 3, off = -48)
+            program += Insn(LDX_DW, dst = 8, src = 9, off = 96)
+            program += Insn(LDX_W, dst = 5, src = FP, off = -56)
+            program += Insn(STX_W, dst = FP, src = 5, off = -44)
+        } else {
+            program += Insn(LDX_DW, dst = 8, src = 9, off = 104)
+        }
+    }
+
+    private fun markerInitializerOffset(
+        program: MutableList<Insn>,
+        options: TierEOptions,
+    ): Int =
+        if (options.markerVersion == MarkerVersion.V2) {
+            program += Insn(STX_DW, dst = FP, src = 5, off = V2_INITIALIZER_OFFSET.toShort())
+            V2_INITIALIZER_OFFSET
+        } else {
+            V1_INITIALIZER_OFFSET
+        }
+
+    private data class MarkerFailureHandler(
+        val start: Int,
+        val missingCounter: Int,
+        val exit: Int,
+    )
+
+    private fun emitMarkerFailureHandler(program: MutableList<Insn>): MarkerFailureHandler {
+        val start = program.size
+        program += Insn(MOV_IMM, dst = 5, imm = 3)
+        program += Insn(STX_W, dst = FP, src = 5, off = -28)
+        emitMarkerMapLoad(program, 1, 1)
+        program += Insn(MOV_REG, dst = 2, src = FP)
+        program += Insn(ADD_IMM, dst = 2, imm = -28)
+        program += Insn(CALL, imm = H_LOOKUP)
+        val missingCounter = program.size
+        program += Insn(JEQ_IMM, dst = 0)
+        program += Insn(MOV_IMM, dst = 5, imm = 1)
+        program += Insn(ATOMIC_ADD_DW, dst = 0, src = 5)
+        program += Insn(MOV_IMM, dst = 0, imm = 0)
+        program += Insn(EXIT)
+        return MarkerFailureHandler(start, missingCounter, program.lastIndex)
+    }
+
+    private const val V2_INITIALIZER_OFFSET = -32
+    private const val V1_INITIALIZER_OFFSET = -24
+
     public fun buildMarkerProgram(options: TierEOptions): List<Insn> {
         val program = mutableListOf<Insn>()
 
@@ -962,20 +1026,12 @@ internal object TierEBpfProgramBuilder {
             return program.lastIndex
         }
 
-        fun loadMap(
-            destination: Int,
-            index: Int,
-        ) {
-            emit(Insn(LD_MAP_FD, dst = destination, src = PSEUDO_FD, imm = index))
-            emit(Insn(code = 0))
-        }
-
         emit(Insn(MOV_REG, dst = 9, src = 1))
         emit(Insn(CALL, imm = H_PID_TGID))
         emit(Insn(MOV_REG, dst = 6, src = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        loadMap(1, 2)
+        emitMarkerMapLoad(program, 1, 2)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -28))
         emit(Insn(CALL, imm = H_LOOKUP))
@@ -991,26 +1047,14 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
         emit(Insn(LDX_DW, dst = 7, src = 9, off = 112)) // pt_regs.di (invocation_id, both versions)
-        if (options.markerVersion == MarkerVersion.V2) {
-            // Native v2 ABI is (invocation_id, stack_trace_id, flags):
-            // RDI=invocation, RSI=stack, RDX=flags.
-            emit(Insn(LDX_DW, dst = 3, src = 9, off = 104)) // pt_regs.si (stack_trace_id)
-            emit(Insn(STX_DW, dst = FP, src = 3, off = -48))
-            emit(Insn(LDX_DW, dst = 8, src = 9, off = 96)) // pt_regs.dx (flags)
-            // FP-44 overlaps the upper half of FP-48. Store generation after
-            // the stack ID; its low 32 bits remain at FP-48 for the map key.
-            emit(Insn(LDX_W, dst = 5, src = FP, off = -56))
-            emit(Insn(STX_W, dst = FP, src = 5, off = -44))
-        } else {
-            emit(Insn(LDX_DW, dst = 8, src = 9, off = 104)) // pt_regs.si (flags)
-        }
+        emitMarkerArguments(program, options)
         val clearMarker = emit(Insn(JEQ_IMM, dst = 7))
         emit(Insn(MOV_REG, dst = 5, src = 7))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         emit(Insn(STX_W, dst = FP, src = 5, off = -32))
         emit(Insn(MOV_IMM, dst = 4, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 4, off = -28))
-        loadMap(1, 2)
+        emitMarkerMapLoad(program, 1, 2)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -28))
         emit(Insn(CALL, imm = H_LOOKUP))
@@ -1021,7 +1065,7 @@ internal object TierEBpfProgramBuilder {
         val acceptedMarker = program.size
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        loadMap(1, 1)
+        emitMarkerMapLoad(program, 1, 1)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -28))
         emit(Insn(CALL, imm = H_LOOKUP))
@@ -1032,7 +1076,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_DW, dst = FP, src = 0, off = -40))
         emit(Insn(MOV_IMM, dst = 5, imm = 2))
         emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        loadMap(1, 1)
+        emitMarkerMapLoad(program, 1, 1)
         emit(Insn(MOV_REG, dst = 2, src = FP))
         emit(Insn(ADD_IMM, dst = 2, imm = -28))
         emit(Insn(CALL, imm = H_LOOKUP))
@@ -1046,14 +1090,8 @@ internal object TierEBpfProgramBuilder {
         // The creation buffer below must cover the whole map value: 24 bytes
         // for v1, 32 bytes for v2. FP-32 still holds the session tag here, but
         // its last read was the session check above, so v2 may reuse the slot.
-        val taskStorageInitOff: Int =
-            if (options.markerVersion == MarkerVersion.V2) {
-                emit(Insn(STX_DW, dst = FP, src = 5, off = -32))
-                -32
-            } else {
-                -24
-            }
-        loadMap(6, 0)
+        val taskStorageInitOff = markerInitializerOffset(program, options)
+        emitMarkerMapLoad(program, 6, 0)
         emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
         val noTask = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(MOV_REG, dst = 1, src = 6))
@@ -1077,19 +1115,7 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(STX_DW, dst = 0, src = 5, off = 24))
         }
         val markerStored = emit(Insn(JA))
-        val markerFailureHandler = program.size
-        emit(Insn(MOV_IMM, dst = 5, imm = 3))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        loadMap(1, 1)
-        emit(Insn(MOV_REG, dst = 2, src = FP))
-        emit(Insn(ADD_IMM, dst = 2, imm = -28))
-        emit(Insn(CALL, imm = H_LOOKUP))
-        val noFailureCounter = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(MOV_IMM, dst = 5, imm = 1))
-        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-        emit(Insn(MOV_IMM, dst = 0, imm = 0))
-        emit(Insn(EXIT))
-        val exitIndex = program.lastIndex
+        val (markerFailureHandler, noFailureCounter, exitIndex) = emitMarkerFailureHandler(program)
         program[clearMarker] = program[clearMarker].copy(off = (acceptedMarker - clearMarker - 1).toShort())
         program[noSession] = program[noSession].copy(off = (exitIndex - noSession - 1).toShort())
         program[noTargetConfig] = program[noTargetConfig].copy(off = (exitIndex - noTargetConfig - 1).toShort())

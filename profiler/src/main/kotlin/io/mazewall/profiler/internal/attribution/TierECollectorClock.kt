@@ -86,8 +86,8 @@ internal class TierEReceiptAgeAccumulator {
                 maxNanos = maxNanos,
                 p50UpperBoundNanos = percentileUpperBound(50),
                 p95UpperBoundNanos = percentileUpperBound(95),
-                p99UpperBoundNanos = percentileUpperBound(99),
-                p99FineUpperBoundNanos = finePercentileUpperBound(99),
+                p99UpperBoundNanos = percentileUpperBound(P99),
+                p99FineUpperBoundNanos = finePercentileUpperBound(P99),
             )
         }
 
@@ -103,7 +103,7 @@ internal class TierEReceiptAgeAccumulator {
     }
 
     private fun finePercentileUpperBound(percentile: Int): Long {
-        val rank = ((samples * percentile) + 99) / 100
+        val rank = ((samples * percentile) + PERCENT - 1) / PERCENT
         var cumulative = 0L
         fineBuckets.forEachIndexed { index, count ->
             cumulative += count
@@ -137,6 +137,8 @@ internal class TierEReceiptAgeAccumulator {
 
     private companion object {
         private const val BUCKET_COUNT = Long.SIZE_BITS
+        private const val P99 = 99
+        private const val PERCENT = 100
         private const val FINE_BUCKET_WIDTH_NANOS = 100_000L
         private const val FINE_BUCKET_COUNT = 10_000
     }

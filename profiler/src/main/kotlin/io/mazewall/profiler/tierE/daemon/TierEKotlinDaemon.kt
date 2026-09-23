@@ -560,7 +560,7 @@ internal fun markerVersionFromEnvironment(env: Map<String, String> = System.gete
     }
 
 internal fun receiptClockModeFromEnvironment(env: Map<String, String> = System.getenv()): String =
-    when (val mode = env["TIER_E_COLLECTOR_RECEIPT_CLOCK"]) {
+    when (env["TIER_E_COLLECTOR_RECEIPT_CLOCK"]) {
         null, "", "disabled" -> "disabled"
         "monotonic" -> "monotonic"
         else -> error("TIER_E_COLLECTOR_RECEIPT_CLOCK must be disabled or monotonic")
@@ -575,7 +575,7 @@ internal fun coverageRecoveryModeFromEnvironment(env: Map<String, String> = Syst
     }
 
 internal fun recoveryMapCapacityFromEnvironment(env: Map<String, String> = System.getenv()): Int =
-    env["TIER_E_RECOVERY_MAP_CAPACITY"]?.toIntOrNull()?.takeIf { it in 1..4_096 }
+    env["TIER_E_RECOVERY_MAP_CAPACITY"]?.toIntOrNull()?.takeIf { it in 1..CoverageRecoveryMode.DEFAULT_MAP_CAPACITY }
         ?: if (env.containsKey("TIER_E_RECOVERY_MAP_CAPACITY")) {
             error("TIER_E_RECOVERY_MAP_CAPACITY must be 1..4096")
         } else {

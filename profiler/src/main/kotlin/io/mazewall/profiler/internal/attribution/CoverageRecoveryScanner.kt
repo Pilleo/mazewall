@@ -8,7 +8,7 @@ package io.mazewall.profiler.internal.attribution
 internal class CoverageRecoveryScanner(
     private val reader: RecoveryMapReader,
     private val maxBatchEntries: Int = CoverageRecoveryMode.MAX_SCAN_BATCH,
-    private val sweepIntervalNanos: Long = CoverageRecoveryMode.DEFAULT_SCAN_INTERVAL_MILLIS * 1_000_000L,
+    private val sweepIntervalNanos: Long = CoverageRecoveryMode.DEFAULT_SCAN_INTERVAL_MILLIS * MILLIS_TO_NANOS,
     private val nanoTime: () -> Long = System::nanoTime,
 ) {
     init {
@@ -43,21 +43,20 @@ internal class CoverageRecoveryScanner(
     fun poll(): Sweep {
         val now = nanoTime()
         val start = sweepStartNanos
-        if (start == null) {
-            sweepStartNanos = now
-            return readBatch(startedAt = now, overdue = false)
-        }
-        if (cursor == null) {
-            // Previous sweep finished; start a new one only when due.
-            if (now - start < sweepIntervalNanos) {
-                return Sweep(emptyList(), 0, overdue = false, sweepComplete = true)
+        return when {
+            start == null -> {
+                sweepStartNanos = now
+                readBatch(startedAt = now, overdue = false)
             }
-            if (now - start > 2 * sweepIntervalNanos) overdueSweeps++
-            sweepStartNanos = now
-            sweepEntries = 0
-            return readBatch(startedAt = now, overdue = false)
+            cursor != null -> readBatch(startedAt = start, overdue = false)
+            now - start < sweepIntervalNanos -> Sweep(emptyList(), 0, overdue = false, sweepComplete = true)
+            else -> {
+                if (now - start > OVERDUE_INTERVALS * sweepIntervalNanos) overdueSweeps++
+                sweepStartNanos = now
+                sweepEntries = 0
+                readBatch(startedAt = now, overdue = false)
+            }
         }
-        return readBatch(startedAt = start, overdue = false)
     }
 
     /**
@@ -70,7 +69,7 @@ internal class CoverageRecoveryScanner(
         var active: ByteArray? = null
         // No eviction or deletion exists, so one pass over a quiescent map plus
         // a confirming empty page always terminates within this bound.
-        val maxBatches = maxCapacity / maxBatchEntries + 2
+        val maxBatches = maxCapacity / maxBatchEntries + FINAL_CONFIRMATION_BATCHES
         var batches = 0
         while (batches < maxBatches) {
             val page = reader.scanBatch(active, maxBatchEntries)
@@ -106,5 +105,11 @@ internal class CoverageRecoveryScanner(
             cursor = requireNotNull(page.nextCursor) { "incomplete scan page must carry a cursor" }
             Sweep(page.entries, latency, overdue, sweepComplete = false)
         }
+    }
+
+    private companion object {
+        const val MILLIS_TO_NANOS = 1_000_000L
+        const val OVERDUE_INTERVALS = 2
+        const val FINAL_CONFIRMATION_BATCHES = 2
     }
 }

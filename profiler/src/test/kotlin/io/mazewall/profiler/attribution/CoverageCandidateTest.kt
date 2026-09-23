@@ -16,12 +16,7 @@ class CoverageCandidateTest {
         canonicalStackTraceId = StackTraceId(stackTraceId),
         syscallNumber = syscallNumber,
         captureFlags = captureFlags,
-        observedKtimeNanos = 123L,
-        tgid = 100,
-        tid = 101,
-        invocationId = InvocationId(55),
-        markerSequence = markerSequence,
-        args = listOf(-100, 1, 2, 3, 4, 5),
+        representative = CoverageRepresentative(123L, 100, 101, InvocationId(55), markerSequence, listOf(-100, 1, 2, 3, 4, 5)),
         processIncarnation = ProcessIncarnation(999),
     )
 
@@ -41,12 +36,7 @@ class CoverageCandidateTest {
                 canonicalStackTraceId = StackTraceId(1),
                 syscallNumber = -1,
                 captureFlags = 0,
-                observedKtimeNanos = 1,
-                tgid = 1,
-                tid = 1,
-                invocationId = InvocationId(1),
-                markerSequence = 1,
-                args = listOf(1, 2, 3, 4, 5, 6),
+                representative = CoverageRepresentative(1, 1, 1, InvocationId(1), 1, listOf(1, 2, 3, 4, 5, 6)),
                 processIncarnation = ProcessIncarnation(1),
             )
         }

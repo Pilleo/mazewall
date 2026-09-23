@@ -14,13 +14,18 @@ internal class RecoveryMapEntry(
     val value: ByteArray get() = valueBytes.copyOf()
 
     init {
-        require(keyBytes.size == 24) { "recovery key must be 24 bytes" }
-        require(valueBytes.size == 96) { "recovery value must be 96 bytes" }
+        require(keyBytes.size == RECOVERY_KEY_BYTES) { "recovery key must be 24 bytes" }
+        require(valueBytes.size == RECOVERY_VALUE_BYTES) { "recovery value must be 96 bytes" }
     }
 
     override fun equals(other: Any?): Boolean = other is RecoveryMapEntry && keyBytes.contentEquals(other.keyBytes) && valueBytes.contentEquals(other.valueBytes)
 
     override fun hashCode(): Int = 31 * keyBytes.contentHashCode() + valueBytes.contentHashCode()
+
+    private companion object {
+        const val RECOVERY_KEY_BYTES = 24
+        const val RECOVERY_VALUE_BYTES = 96
+    }
 }
 
 /** One bounded page of a map scan. */
@@ -49,7 +54,7 @@ internal data class RecoveryEdgeKey(
 
 /** Decodes the 24-byte little-endian key: epoch u64, stack u64, syscall s32, flags u32. */
 internal fun decodeRecoveryKey(key: ByteArray): RecoveryEdgeKey {
-    require(key.size == 24) { "recovery key must be 24 bytes" }
+    require(key.size == RECOVERY_MAP_KEY_BYTES) { "recovery key must be 24 bytes" }
     val buffer = ByteBuffer.wrap(key).order(ByteOrder.LITTLE_ENDIAN)
     return RecoveryEdgeKey(
         sessionEpoch = buffer.long,
@@ -77,24 +82,34 @@ internal fun RecoveryMapEntry.toCandidate(
     val flags = buffer.int
     val invocation = buffer.long
     val sequence = buffer.long
-    val args = List(6) { buffer.long }
+    val args = List(RECOVERY_ARGUMENT_COUNT) { buffer.long }
     val generation = buffer.int
     val reserved = buffer.int
-    if (syscall != decodedKey.syscallNumber || flags != decodedKey.captureFlags) return null
-    if (invocation <= 0 || sequence <= 0 || tgid <= 0 || tid <= 0 || generation <= 0 || reserved != 0) return null
-    if (decodedKey.sessionEpoch != sessionEpoch.value) return null
-    return CoverageCandidate(
-        sessionEpoch = sessionEpoch,
-        canonicalStackTraceId = StackTraceId(decodedKey.stackTraceId),
-        syscallNumber = syscall,
-        captureFlags = flags,
-        observedKtimeNanos = ktime,
-        tgid = tgid,
-        tid = tid,
-        invocationId = InvocationId(invocation),
-        markerSequence = sequence,
-        args = args,
-        processIncarnation = processIncarnation,
-        attachmentGeneration = generation,
-    )
+    val valid =
+        syscall == decodedKey.syscallNumber &&
+            flags == decodedKey.captureFlags &&
+            invocation > 0 &&
+            sequence > 0 &&
+            tgid > 0 &&
+            tid > 0 &&
+            generation > 0 &&
+            reserved == 0 &&
+            decodedKey.sessionEpoch == sessionEpoch.value &&
+        decodedKey.stackTraceId in 1..StackTraceId.MAX_VALUE
+    return if (valid) {
+        CoverageCandidate(
+            sessionEpoch = sessionEpoch,
+            canonicalStackTraceId = StackTraceId(decodedKey.stackTraceId),
+            syscallNumber = syscall,
+            captureFlags = flags,
+            representative = CoverageRepresentative(ktime, tgid, tid, InvocationId(invocation), sequence, args),
+            processIncarnation = processIncarnation,
+            attachmentGeneration = generation,
+        )
+    } else {
+        null
+    }
 }
+
+private const val RECOVERY_MAP_KEY_BYTES = 24
+private const val RECOVERY_ARGUMENT_COUNT = 6

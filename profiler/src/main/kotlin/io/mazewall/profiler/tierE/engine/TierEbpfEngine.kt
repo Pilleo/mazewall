@@ -751,18 +751,17 @@ internal class TierEbpfEngine(
         require(maxEntries in 1..io.mazewall.profiler.internal.attribution.CoverageRecoveryMode.MAX_SCAN_BATCH) {
             "scan batch must be bounded"
         }
-        if (cursor != null) require(cursor.size == RECOVERY_EDGE_KEY_SIZE) { "recovery cursor must be 16 bytes" }
+        if (cursor != null) require(cursor.size == RECOVERY_EDGE_KEY_SIZE) { "recovery cursor must be 24 bytes" }
         return Arena.ofConfined().use { arena ->
             val installed = requireInstalled()
-            val mapFd = installed.recoveryEdgeFd?.value
-                ?: throw IllegalStateException("recovery map is not installed")
+            val mapFd = checkNotNull(installed.recoveryEdgeFd?.value) { "recovery map is not installed" }
             val entries = ArrayList<io.mazewall.profiler.internal.attribution.RecoveryMapEntry>(maxEntries)
             var currentKey: MemorySegment? = cursor?.let { bytes ->
-                val seg = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4)
+                val seg = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), Int.SIZE_BYTES.toLong())
                 MemorySegment.copy(bytes, 0, seg, ValueLayout.JAVA_BYTE, 0, RECOVERY_EDGE_KEY_SIZE)
                 seg
             }
-            val nextKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4)
+            val nextKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), Int.SIZE_BYTES.toLong())
             val value = arena.allocate(RECOVERY_EDGE_VALUE_SIZE.toLong(), 8)
             while (entries.size < maxEntries) {
                 val nextAttr = arena.allocate(32)
@@ -798,7 +797,7 @@ internal class TierEbpfEngine(
                         result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM recovery)")
                     }
                 }
-                currentKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), 4).also { seg ->
+                currentKey = arena.allocate(RECOVERY_EDGE_KEY_SIZE.toLong(), Int.SIZE_BYTES.toLong()).also { seg ->
                     MemorySegment.copy(nextKey, ValueLayout.JAVA_BYTE, 0, seg, ValueLayout.JAVA_BYTE, 0, RECOVERY_EDGE_KEY_SIZE.toLong())
                 }
             }
