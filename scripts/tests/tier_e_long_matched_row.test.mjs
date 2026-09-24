@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { buildLongMatchedRow } from '../tier_e_long_matched_row.mjs';
+
+const CLI = fileURLToPath(new URL('../tier_e_long_matched_row.mjs', import.meta.url));
 
 const META = {
   fork: 1,
@@ -115,6 +119,30 @@ test('timed-out arm keeps observed nulls and carries the exit status honestly', 
     assert.equal(row.seed, 23063);
     assert.equal(row.declared_operations, 75000);
     assert.equal(row.policy_eligibility, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
+test('CLI parses --meta/--dir and prints exactly one row', () => {
+  const dir = tempDir({
+    'coverage-oracle.json': { schema_version: 1, seed: 23063, declared_operations: 75000, paths: [] },
+    'target-cpu.json': {
+      schema_version: 1, version: 1, pid: 1, host_pid: 4242, starttime: 5,
+      sample_boundary: 'after_workload_before_exit', unit: 'ns', target_cpu_ns: 1000000000,
+    },
+    'summary.json': { schema_version: 1, mode: 'baseline', target_exit: 0, policy_eligibility: false },
+  });
+  try {
+    const result = spawnSync(process.execPath, [CLI, '--meta', JSON.stringify({ ...META, arm: 'baseline' }), '--dir', dir], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    const lines = result.stdout.split('\n').filter(Boolean);
+    assert.equal(lines.length, 1);
+    const row = JSON.parse(lines[0]);
+    assert.equal(row.arm, 'baseline');
+    assert.equal(row.target_cpu_ns, 1000000000);
+    assert.equal(row.coverage_verdict, 'NOT_APPLICABLE');
   } finally {
     fs.rmSync(dir, { recursive: true });
   }
