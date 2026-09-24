@@ -77,6 +77,23 @@ the default. `policy_eligibility=false` throughout.
   remains opt-in experimental. Live native publication stayed below 0.5% of
   measured collector CPU and did not exhaust native retention; incremental
   dictionary transport remains deferred.
+- Same-guest long matched controls (2026-09-24/25, diagnostic):
+  `docs/internals/evidence/tier-e-long-matched-controls/README.md`.
+  One clean rootful disposable guest, fifteen paired forks per emission mode
+  across seven arms (baseline plus v1/v2/hybrid profiled per emission) at
+  75,000 operations, with source/image/native/JAR identities frozen
+  (`input_dirty_count=0`) and 105/105 arms complete against the exact 72-path
+  oracle. Profiler-only incremental CPU medians: full-stream v1 75.74 s,
+  hybrid 75.40 s (hybrid/v1 1.0137, upper 95% 1.0327); unique-edge v1
+  74.18 s, hybrid 74.34 s (hybrid/v1 0.9894, upper 95% 1.0212);
+  `metrics_status=COMPLETE` with 15 pairs per variant and emission mode.
+  This evidence class is distinct from the old host 40/40 hybrid-only
+  correctness forks above, from the short host calibrated gate failures
+  above (which remain failed and are not replaced), and from the guest-host
+  PID-reuse controlled-watcher evidence below. Combined CPU ratios of
+  14.4–14.9x baseline are a collector-dominated denominator artifact and are
+  not comparable to the host 1.25 gate. Diagnostic only: the operator's
+  `REJECT_DEFAULT_PROMOTION` stands and `policy_eligibility=false`.
 
 **Native live-admission follow-up (2026-09-23):**
 - Existing MZSE v2 snapshots now enter the opt-in hybrid collector as
@@ -100,9 +117,14 @@ the default. `policy_eligibility=false` throughout.
   retained. Incremental transport remains deferred.
 
 **Remaining scope before closing this backlog item:**
-- Long matched v1/v2 ring-only controls were not rerun alongside the 40 long
-  hybrid forks; sustained hybrid correctness does not establish long-workload
-  comparative overhead.
+- Long matched v1/v2 ring-only controls were rerun alongside hybrid on one
+  clean disposable guest as diagnostic paired measurements (fifteen forks per
+  emission mode, 75,000 operations, exact 72-path oracle, profiler-only CPU
+  denominator; `docs/internals/evidence/tier-e-long-matched-controls/README.md`):
+  hybrid and v1 incremental CPU are at parity within noise in both emission
+  modes. This still does not establish long-workload comparative overhead
+  against the historical host gates, which remain failed, and it does not
+  close this item.
 - Real **guest-host** PID reuse is now qualified for a controlled watcher-pause
   window: the registered non-root target exited, another real process received
   its host PID with a different `/proc` start time, and the rootful hybrid
@@ -125,8 +147,11 @@ the default. `policy_eligibility=false` throughout.
 - The split coverage, matched, fault, and live-comparison runners now hash
   tracked and untracked runtime source before and after forks, separately
   from native/JAR and image IDs. Earlier archives cannot retroactively gain
-  this evidence. A separate profiler-only CPU denominator remains follow-up
-  measurement hardening. Preserve the
+  this evidence. The separate profiler-only CPU denominator is now measured
+  per profiled arm (target `ProcessHandle.totalCpuDuration`, collector
+  `process_ticks_since_start`) in the same-guest long matrix; its combined
+  form remains collector-dominated and needs a production-shaped denominator
+  before any gate use. Preserve the
   operator's rejection decision and `policy_eligibility=false` until addressed.
 - The earlier Detekt gate is resolved using the same-toolchain pre-hybrid
   baseline (`docs/internals/evidence/tier-e-detekt-pre-hybrid-20260923.json`).
