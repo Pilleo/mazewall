@@ -15,4 +15,4 @@ Do not read a whole source file first.
 3. For one symbol: `./scripts/adkw symbol-source <file> <symbol> --json`
 4. If Codanna is missing, continue with ADK evidence and record that impact data is incomplete.
 
-Optional: `codanna retrieve describe <Symbol>` after `./scripts/adkw doctor` reports `READY`.
+Optional: `codanna retrieve describe <Symbol>` when the Codanna index is ready.
