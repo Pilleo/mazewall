@@ -1,0 +1,4 @@
+Picked up JAVA_TOOL_OPTIONS: -Dmazewall.tier-e.workload-profile=syscall_dense
+tier-e-workflow: OK attached pid=3514
+tier-e-workflow: OK engine=active marker_transport=uprobe marker_fallback=none collector_state=RUNNING worker_alive=true polls=17 active_polls=1 idle_polls=16 failure=none
+tier-e-workflow: OK engine=active marker_transport=uprobe marker_fallback=none collector_state=RUNNING worker_alive=true polls=161 active_polls=101 idle_polls=60 failure=none

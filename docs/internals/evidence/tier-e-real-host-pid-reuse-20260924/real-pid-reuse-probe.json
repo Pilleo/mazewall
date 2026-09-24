@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kernel": "7.0.0-31-generic",
+  "pid_max": 4096,
+  "ns_last_pid": 3514,
+  "original": {
+    "pid": 3514,
+    "starttime": 133817
+  },
+  "attempts": 3121,
+  "replacement": {
+    "pid": 3514,
+    "starttime": 134936
+  },
+  "host_pid_reuse_verdict": "OBSERVED",
+  "policy_eligibility": false,
+  "probe_contract": "real guest host PIDs and /proc starttime; registered target already exited"
+}

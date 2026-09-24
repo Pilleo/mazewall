@@ -25,5 +25,9 @@ of its original host PID in 256 successive process lifetimes. The host
 `host_pid_reuse_verdict=UNVERIFIED`: this cannot qualify the real host-PID-reuse
 claim. Running more unrelated namespace-PID reuse is not a substitute.
 
+A later [disposable-VM run](../tier-e-real-host-pid-reuse-20260924/README.md)
+observed a genuinely recycled guest-host PID and the collector's rejection;
+the original normal-host probe remains unverified as recorded here.
+
 `SHA256SUMS` binds the archives, probe JSON, and starting source revision.
 Every artifact remains `policy_eligibility=false`.

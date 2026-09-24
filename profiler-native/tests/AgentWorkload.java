@@ -88,6 +88,11 @@ public final class AgentWorkload {
                 Thread.sleep(250L);
             }
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
+            String reuseReady = System.getenv("TIER_E_SPLIT_REAL_REUSE_READY");
+            if (reuseReady != null) {
+                Files.writeString(Path.of(reuseReady), "attached\n");
+                while (!Files.exists(Path.of(reuseReady + ".release"))) Thread.sleep(10);
+            }
             if (deferTerminalControl) {
                 System.out.println("tier-e-workflow: capture complete; terminal control deferred");
                 return;

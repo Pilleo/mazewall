@@ -18,6 +18,7 @@ NEGATIVE_ARTIFACT_CASE=${TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE:-}
 NEGATIVE_IDENTITY_CASE=${TIER_E_SPLIT_NEGATIVE_IDENTITY_CASE:-}
 DELAYED_ARTIFACT=${TIER_E_SPLIT_DELAYED_ARTIFACT:-0}
 SIMULATED_PID_REUSE=${TIER_E_SPLIT_SIMULATED_PID_REUSE:-0}
+REAL_PID_REUSE=${TIER_E_SPLIT_REAL_PID_REUSE:-0}
 SPLIT_COVERAGE=${TIER_E_SPLIT_COVERAGE:-0}
 SPLIT_BENCHMARK=${TIER_E_SPLIT_BENCHMARK:-0}
 SPLIT_COVERAGE_OPERATIONS=${TIER_E_SPLIT_COVERAGE_OPERATIONS:-72}
@@ -34,6 +35,10 @@ SPLIT_RECOVERY_MODE=${TIER_E_SPLIT_RECOVERY_MODE:-disabled}
 
 cleanup() {
     mkdir -p "${ARTIFACT_DIR}"
+    if [[ "${REAL_PID_REUSE}" == 1 ]]; then
+        "${ENGINE}" unpause "${COLLECTOR}" >/dev/null 2>&1 || true
+        [[ -z "${probe_pid:-}" ]] || wait "${probe_pid}" || true
+    fi
     "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1 || true
     "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1 || true
     "${ENGINE}" rm -f "${TARGET}" "${COLLECTOR}" >/dev/null 2>&1 || true
@@ -60,6 +65,13 @@ trap cleanup EXIT
 [[ "${SPLIT_RECOVERY_MODE}" == disabled || "${SPLIT_MARKER_VERSION}" == v2 ]] || {
     echo "coverage recovery requires marker v2" >&2; exit 2;
 }
+if [[ "${REAL_PID_REUSE}" == 1 ]]; then
+    [[ "${SPLIT_MARKER_VERSION}" == v2 && "${SPLIT_RECOVERY_MODE}" == recover &&
+       "${TIER_E_SPLIT_COLLECTOR_BENCHMARK_MODE:-0}" == 1 && "${SPLIT_BENCHMARK}" == 0 &&
+       "${SPLIT_COVERAGE}" == 0 && "${SIMULATED_PID_REUSE}" == 0 ]] || {
+        echo 'real PID reuse requires the v2 hybrid registered fixture' >&2; exit 2;
+    }
+fi
 [[ "${SPLIT_SOCKET_ACCESS}" == group || "${SPLIT_SOCKET_ACCESS}" == owner ]] || {
     echo "unknown TIER_E_SPLIT_SOCKET_ACCESS: ${SPLIT_SOCKET_ACCESS}" >&2; exit 2;
 }
@@ -178,6 +190,8 @@ collector_cpu_options=()
 [[ -n "${TIER_E_SPLIT_COLLECTOR_CPU:-}" ]] && collector_cpu_options=(--cpuset-cpus "${TIER_E_SPLIT_COLLECTOR_CPU}")
 reuse_target_options=()
 reuse_collector_options=()
+real_reuse_target_options=()
+[[ "${REAL_PID_REUSE}" == 1 ]] && real_reuse_target_options=(-e TIER_E_SPLIT_REAL_REUSE_READY=/shared/real-reuse-ready)
 if [[ "${SIMULATED_PID_REUSE}" == 1 ]]; then
     reuse_target_options=(-e TIER_E_SPLIT_SIMULATE_PID_REUSE_MARKER=/shared/reused)
     reuse_collector_options=(-e TIER_E_BENCHMARK_REUSE_MARKER=/shared/reused)
@@ -191,6 +205,7 @@ fi
     -e TIER_E_SPLIT_MARKER_BACKEND="${SPLIT_MARKER_BACKEND}" \
     -e TIER_E_AGENT_OPTIONS="${agent_options}" \
     -e TIER_E_TARGET_CLASS="${target_class}" -e TIER_E_TARGET_CLASSPATH="${target_classpath}" -e TIER_E_TARGET_ARGS="${target_args}" \
+    "${real_reuse_target_options[@]}" \
     "${reuse_target_options[@]}" \
     -v "${SHARED}:/shared" -v "${ROOT}:/workspace:ro" -w /shared "${IMAGE}" bash -lc '
         exec java --add-opens=java.base/sun.nio.fs=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
@@ -271,6 +286,72 @@ if [[ "${SPLIT_SOCKET_ACCESS}" == owner ]]; then
     printf 'socket_access=OWNER_ONLY\ntarget_admission=DENIED\nunrelated_user_admission=DENIED\npolicy_eligibility=false\n' \
         > "${ARTIFACT_DIR}/verdict.env"
     echo "split owner-only socket fixture artifacts: ${ARTIFACT_DIR}"
+    exit 0
+fi
+if [[ "${REAL_PID_REUSE}" == 1 ]]; then
+    # Freeze the registered collector after ATTACH, then let the real target exit.
+    # Otherwise the 100 ms watcher can observe the gap before the PID is reused.
+    touch "${SHARED}/start"
+    for _ in $(seq 1 200); do
+        [[ -s "${SHARED}/real-reuse-ready" ]] && break
+        sleep 0.05
+    done
+    test -s "${SHARED}/real-reuse-ready"
+    test "$("${ENGINE}" inspect -f '{{.State.Running}}' "${TARGET}")" == true
+    registered_start=$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")
+    test "${registered_start}" == "$(sed -n 's/^process_incarnation=//p' "${SHARED}/target.properties")"
+    "${ENGINE}" pause "${COLLECTOR}" >/dev/null
+    "${ENGINE}" kill "${TARGET}" >/dev/null
+    "${ENGINE}" wait "${TARGET}" >/dev/null
+    target_exit=$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${TARGET}")
+    test "${target_exit}" == 137
+    python3 "${ROOT}/scripts/probe_tier_e_real_pid_reuse.py" \
+        --registered-pid "${TARGET_HOST_PID}" --registered-starttime "${registered_start}" \
+        --max-attempts 8192 --deadline-seconds 75 --hold-seconds 30 \
+        --output "${ARTIFACT_DIR}/real-pid-reuse-probe.json" > "${ARTIFACT_DIR}/probe.log" 2>&1 &
+    probe_pid=$!
+    for _ in $(seq 1 1600); do
+        [[ -s "${ARTIFACT_DIR}/real-pid-reuse-probe.json" ]] && break
+        kill -0 "${probe_pid}" 2>/dev/null || break
+        sleep 0.05
+    done
+    test -s "${ARTIFACT_DIR}/real-pid-reuse-probe.json"
+    if ! node -e 'const p=require(process.argv[1]);process.exit(p.host_pid_reuse_verdict==="OBSERVED"?0:1)' \
+        "${ARTIFACT_DIR}/real-pid-reuse-probe.json"; then
+        printf 'host_pid_reuse_verdict=UNVERIFIED\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+        exit 1
+    fi
+    # Check the replacement is still the live process observed by the probe.
+    replacement_start=$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")
+    node -e 'const p=require(process.argv[1]);if(p.replacement.starttime!==Number(process.argv[2]))process.exit(1)' \
+        "${ARTIFACT_DIR}/real-pid-reuse-probe.json" "${replacement_start}"
+    "${ENGINE}" unpause "${COLLECTOR}" >/dev/null
+    for _ in $(seq 1 200); do
+        [[ -f "${SHARED}/evidence/split-fixture-19802.tier-e.json" ]] && break
+        sleep 0.1
+    done
+    test -f "${SHARED}/evidence/split-fixture-19802.tier-e.json"
+    test "$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")" == "${replacement_start}"
+    "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
+        cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
+    node -e '
+        const fs=require("fs"),r=JSON.parse(fs.readFileSync(process.argv[1]));
+        if(r.terminal_reason!=="PROCESS_IDENTITY_REUSED"||r.evidence_integrity!=="INCOMPLETE"||
+           r.lifecycle_validity!==false||r.transport_completeness!==false||r.policy_eligibility!==false)
+            process.exit(1);
+    ' "${ARTIFACT_DIR}/terminal-report.json"
+    "${ENGINE}" run --rm --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL \
+        -v "${SHARED}:/shared" "${IMAGE}" \
+        java -cp /shared/agent-test-classes AgentWorkload control /shared/control.sock shutdown \
+        > "${ARTIFACT_DIR}/control.log" 2>&1
+    "${ENGINE}" wait "${COLLECTOR}" >/dev/null
+    test "$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${COLLECTOR}")" == 0
+    wait "${probe_pid}"
+    probe_pid=
+    cp "${SHARED}/definitions/orders.marker-proof" "${ARTIFACT_DIR}/marker-version-proof.txt"
+    printf 'host_pid_reuse_verdict=OBSERVED\nterminal_reason=PROCESS_IDENTITY_REUSED\nevidence_integrity=INCOMPLETE\ntarget_exit=%s\npolicy_eligibility=false\n' \
+        "${target_exit}" > "${ARTIFACT_DIR}/verdict.env"
+    printf 'split real guest host PID-reuse fixture artifacts: %s\n' "${ARTIFACT_DIR}"
     exit 0
 fi
 touch "${SHARED}/start"

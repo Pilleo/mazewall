@@ -103,10 +103,14 @@ the default. `policy_eligibility=false` throughout.
 - Long matched v1/v2 ring-only controls were not rerun alongside the 40 long
   hybrid forks; sustained hybrid correctness does not establish long-workload
   comparative overhead.
-- Real host PID reuse remains unqualified. A bounded 256-lifetime read-only
-  host probe saw no reuse (`pid_max=4194304`), retained separately from the
-  rootful simulated active-incarnation fixture at
-  `docs/internals/evidence/tier-e-source-lifecycle-20260923/README.md`.
+- Real **guest-host** PID reuse is now qualified for a controlled watcher-pause
+  window: the registered non-root target exited, another real process received
+  its host PID with a different `/proc` start time, and the rootful hybrid
+  collector rejected it with `PROCESS_IDENTITY_REUSED`, zero resolved syscalls,
+  and incomplete evidence. Raw proof is retained at
+  `docs/internals/evidence/tier-e-real-host-pid-reuse-20260924/README.md`.
+  The 256-lifetime normal-host probe remains independently unverified; no
+  normal-host PID controls changed. Natural-race frequency is unmeasured.
   Existing 100 ms native MZSE live
   snapshot admission is now measured; it is not an incremental receiver
   protocol, and only a closed terminal artifact after producer closure proves
