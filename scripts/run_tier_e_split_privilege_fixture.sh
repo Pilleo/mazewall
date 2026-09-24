@@ -235,6 +235,14 @@ TARGET_HOST_PID=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${TARGET}")
 [[ "${TARGET_HOST_PID}" =~ ^[1-9][0-9]*$ ]] || { echo "target host pid is invalid: ${TARGET_HOST_PID}" >&2; exit 1; }
 printf '%s\n' "${TARGET_HOST_PID}" > "${SHARED}/target-host-pid"
 sed -i "s/^pid=.*/pid=${TARGET_HOST_PID}/" "${SHARED}/target.properties"
+TARGET_STARTTIME=
+if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
+    # Registration identity is captured while the target is still live; the exited target
+    # is never probed again, so the CPU sample is compared against this saved value.
+    TARGET_STARTTIME=$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")
+    [[ "${TARGET_STARTTIME}" =~ ^[1-9][0-9]*$ ]] || { echo "target starttime is invalid: ${TARGET_STARTTIME}" >&2; exit 1; }
+    sed -i "s/^process_incarnation=.*/process_incarnation=${TARGET_STARTTIME}/" "${SHARED}/target.properties"
+fi
 if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
     for _ in $(seq 1 100); do [[ -s "${SHARED}/coverage-oracle.json" ]] && break; sleep 0.1; done
     test -s "${SHARED}/coverage-oracle.json"
@@ -247,7 +255,8 @@ if [[ "${COVERAGE_BASELINE}" == 1 ]]; then
     "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
     cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
     cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
-    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" --host-pid "${TARGET_HOST_PID}"
+    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" \
+        --host-pid "${TARGET_HOST_PID}" --starttime "${TARGET_STARTTIME}"
     printf 'mode=baseline\ncoverage_verdict=NOT_APPLICABLE\nterminal=NOT_APPLICABLE\ntarget_exit=%s\npolicy_eligibility=false\n' \
         "${TARGET_EXIT}" > "${ARTIFACT_DIR}/verdict.env"
     printf '{"schema_version":1,"mode":"baseline","target_exit":%s,"policy_eligibility":false}\n' \
@@ -397,6 +406,22 @@ terminal_wait_attempts=300
 [[ "${SPLIT_COVERAGE}" == 1 ]] && terminal_wait_attempts=900
 for _ in $(seq 1 "${terminal_wait_attempts}"); do [[ -f "${SHARED}/evidence/split-fixture-19802.tier-e.json" ]] && break; sleep 0.1; done
 test -f "${SHARED}/evidence/split-fixture-19802.tier-e.json"
+if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
+    # The target has exited; only the live collector is sampled, strictly after its
+    # terminal report and before SHUTDOWN. A missing or unstable source is INCOMPLETE.
+    collector_host_pid=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${COLLECTOR}")
+    collector_running=$("${ENGINE}" inspect -f '{{.State.Running}}' "${COLLECTOR}")
+    if [[ "${collector_running}" != true || ! "${collector_host_pid}" =~ ^[1-9][0-9]*$ ]] ||
+        ! node "${ROOT}/scripts/tier_e_collector_cpu_sample.mjs" \
+            --pid "${collector_host_pid}" --hz "$(getconf CLK_TCK)" \
+            --boundary after_terminal_report_before_shutdown \
+            --out "${ARTIFACT_DIR}/collector-process-metrics.json"; then
+        printf 'collector_cpu_sample=INCOMPLETE\nevidence_integrity=INCOMPLETE\npolicy_eligibility=false\n' \
+            > "${ARTIFACT_DIR}/verdict.env"
+        echo 'collector CPU sample is INCOMPLETE' >&2
+        exit 1
+    fi
+fi
 if [[ "${SPLIT_BENCHMARK}" == 1 ]]; then
     collector_host_pid=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${COLLECTOR}")
     node - "${collector_host_pid}" "$(getconf CLK_TCK)" "${ARTIFACT_DIR}/collector-process-metrics.json" <<'NODE'
@@ -485,7 +510,8 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
     fi
     cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
     cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
-    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" --host-pid "${TARGET_HOST_PID}"
+    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" \
+        --host-pid "${TARGET_HOST_PID}" --starttime "${TARGET_STARTTIME}"
     node "${ROOT}/scripts/verify_tier_e_split_coverage.mjs" \
         "${ARTIFACT_DIR}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-manifest.json" \
         "${ARTIFACT_DIR}/terminal-report.json" "${ARTIFACT_DIR}/coverage-verdict.json" || {

@@ -10,6 +10,7 @@ const VALID = {
   version: 1,
   pid: 1,
   host_pid: 3514,
+  starttime: 133817,
   sample_boundary: 'after_workload_before_exit',
   unit: 'ns',
   target_cpu_ns: 123456789,
@@ -120,15 +121,30 @@ test('host pid binding mismatch is rejected', () => {
   assert.equal(result.reason, 'target_cpu_sample_host_pid_mismatch');
 });
 
+test('registration starttime mismatch is rejected', () => {
+  const result = validateTargetCpuSample(VALID, { expectedStarttime: 134936 });
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, 'target_cpu_sample_starttime_mismatch');
+});
+
+test('nonpositive starttime is invalid', () => {
+  const result = validateTargetCpuSample({ ...VALID, starttime: 0 });
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, 'target_cpu_sample_invalid');
+});
+
 test('read passes expectedHostPid through to validation', () => {
   const dir = writeDir({ 'target-cpu.json': JSON.stringify(VALID) });
   try {
-    const ok = readTargetCpuSample(dir, { expectedHostPid: 3514 });
+    const ok = readTargetCpuSample(dir, { expectedHostPid: 3514, expectedStarttime: 133817 });
     assert.equal(ok.valid, true);
     assert.equal(ok.reason, 'target_cpu_sample_ok');
     const bad = readTargetCpuSample(dir, { expectedHostPid: 7 });
     assert.equal(bad.valid, false);
     assert.equal(bad.reason, 'target_cpu_sample_host_pid_mismatch');
+    const badStart = readTargetCpuSample(dir, { expectedHostPid: 3514, expectedStarttime: 42 });
+    assert.equal(badStart.valid, false);
+    assert.equal(badStart.reason, 'target_cpu_sample_starttime_mismatch');
   } finally {
     fs.rmSync(dir, { recursive: true });
   }

@@ -75,6 +75,7 @@ public final class AgentCoverageWorkload {
         long pid = ProcessHandle.current().pid();
         if (pid <= 0L || hostPid <= 0L) throw new IllegalStateException("invalid target pid binding");
         String json = "{\"schema_version\":1,\"version\":1,\"pid\":" + pid + ",\"host_pid\":" + hostPid
+            + ",\"starttime\":" + selfStarttime()
             + ",\"sample_boundary\":\"after_workload_before_exit\",\"unit\":\"ns\",\"target_cpu_ns\":" + cpuNs + "}";
         Path output = Path.of(System.getenv().getOrDefault("TIER_E_TARGET_CPU_OUT", "target-cpu.json")).toAbsolutePath();
         Path temporary = Files.createTempFile(output.getParent(), ".target-cpu.", ".tmp");
@@ -84,6 +85,17 @@ public final class AgentCoverageWorkload {
         } finally {
             Files.deleteIfExists(temporary);
         }
+    }
+
+    private static long selfStarttime() throws Exception {
+        String stat = Files.readString(Path.of("/proc/self/stat"));
+        int close = stat.lastIndexOf(')');
+        if (close < 0) throw new IllegalStateException("malformed /proc/self/stat");
+        String[] fields = stat.substring(close + 1).trim().split("\\s+");
+        if (fields.length < 20) throw new IllegalStateException("short /proc/self/stat");
+        long starttime = Long.parseLong(fields[19]);
+        if (starttime <= 0L) throw new IllegalStateException("invalid target starttime: " + starttime);
+        return starttime;
     }
 
     private static void publishOracle(Path output, List<Integer> schedule, long seed) throws Exception {

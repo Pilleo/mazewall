@@ -11,6 +11,7 @@ const REQUIRED_FIELDS = [
   'version',
   'pid',
   'host_pid',
+  'starttime',
   'sample_boundary',
   'unit',
   'target_cpu_ns',
@@ -22,6 +23,7 @@ function invalid(reason, sample = null) {
 
 export function validateTargetCpuSample(value, options = {}) {
   const expectedHostPid = options.expectedHostPid ?? null;
+  const expectedStarttime = options.expectedStarttime ?? null;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return invalid('target_cpu_sample_malformed');
   }
@@ -39,6 +41,9 @@ export function validateTargetCpuSample(value, options = {}) {
   if (!Number.isInteger(value.host_pid) || value.host_pid <= 0) {
     return invalid('target_cpu_sample_invalid', value);
   }
+  if (!Number.isInteger(value.starttime) || value.starttime <= 0) {
+    return invalid('target_cpu_sample_invalid', value);
+  }
   if (value.sample_boundary !== TARGET_CPU_SAMPLE_BOUNDARY) {
     return invalid('target_cpu_sample_boundary_mismatch', value);
   }
@@ -53,6 +58,9 @@ export function validateTargetCpuSample(value, options = {}) {
   }
   if (expectedHostPid !== null && value.host_pid !== expectedHostPid) {
     return invalid('target_cpu_sample_host_pid_mismatch', value);
+  }
+  if (expectedStarttime !== null && value.starttime !== expectedStarttime) {
+    return invalid('target_cpu_sample_starttime_mismatch', value);
   }
   return { valid: true, reason: 'target_cpu_sample_ok', sample: value, target_cpu_ns: value.target_cpu_ns };
 }
@@ -82,6 +90,7 @@ function main(argv) {
   const args = argv.slice(2);
   let dir = null;
   let expectedHostPid = null;
+  let expectedStarttime = null;
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--validate') {
       dir = args[i + 1] ?? null;
@@ -89,13 +98,20 @@ function main(argv) {
     } else if (args[i] === '--host-pid') {
       expectedHostPid = Number(args[i + 1]);
       i += 1;
+    } else if (args[i] === '--starttime') {
+      expectedStarttime = Number(args[i + 1]);
+      i += 1;
     }
   }
   if (!dir) {
-    process.stderr.write('usage: tier_e_target_cpu_sample.mjs --validate <dir> [--host-pid <pid>]\n');
+    process.stderr.write(
+      'usage: tier_e_target_cpu_sample.mjs --validate <dir> [--host-pid <pid>] [--starttime <starttime>]\n',
+    );
     return 2;
   }
-  const options = Number.isInteger(expectedHostPid) && expectedHostPid > 0 ? { expectedHostPid } : {};
+  const options = {};
+  if (Number.isInteger(expectedHostPid) && expectedHostPid > 0) options.expectedHostPid = expectedHostPid;
+  if (Number.isInteger(expectedStarttime) && expectedStarttime > 0) options.expectedStarttime = expectedStarttime;
   const result = readTargetCpuSample(dir, options);
   if (result.valid) {
     process.stdout.write(
@@ -103,6 +119,7 @@ function main(argv) {
         reason: result.reason,
         pid: result.sample.pid,
         host_pid: result.sample.host_pid,
+        starttime: result.sample.starttime,
         sample_boundary: result.sample.sample_boundary,
         unit: result.sample.unit,
         target_cpu_ns: result.target_cpu_ns,
