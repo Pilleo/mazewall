@@ -28,6 +28,12 @@ public final class AgentCoverageWorkload {
         Path gate = Path.of(args[0].substring(5));
         while (!Files.exists(gate)) Thread.sleep(1L);
         long pid = Long.parseLong(Files.readString(Path.of(args[7])).trim());
+        if ("1".equals(System.getenv().getOrDefault("TIER_E_SPLIT_COVERAGE_BASELINE", "0"))) {
+            runWorkload(schedule);
+            System.out.println("tier-e-coverage-target: operations=" + schedule.size());
+            publishCpuSample(pid);
+            return;
+        }
         try (SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX)) {
             socket.connect(UnixDomainSocketAddress.of(args[2]));
             DataInputStream input = new DataInputStream(Channels.newInputStream(socket));
@@ -40,19 +46,43 @@ public final class AgentCoverageWorkload {
             String attach = rpc(output, input, "ATTACH " + pid + " " + markerBackend + " " + args[3] + " " + args[4] + " " + args[5] + " " + emissionMode);
             if (!attach.startsWith("OK")) throw new IllegalStateException("attach failed: " + attach);
             System.out.println("tier-e-workflow: " + rpc(output, input, "STATUS").trim());
-            Path file = Files.createTempFile("mazewall-coverage", ".txt");
-            try {
-                Files.writeString(file, "coverage");
-                long started = System.nanoTime();
-                for (int index = 0; index < schedule.size(); index++) {
-                    dispatch(schedule.get(index), file);
-                    pace(started, index + 1);
-                }
-            } finally {
-                Files.deleteIfExists(file);
-            }
+            runWorkload(schedule);
             System.out.println("tier-e-coverage-target: operations=" + schedule.size());
             System.out.println("tier-e-workflow: capture complete; terminal control deferred");
+        }
+        publishCpuSample(pid);
+    }
+
+    private static void runWorkload(List<Integer> schedule) throws Exception {
+        Path file = Files.createTempFile("mazewall-coverage", ".txt");
+        try {
+            Files.writeString(file, "coverage");
+            long started = System.nanoTime();
+            for (int index = 0; index < schedule.size(); index++) {
+                dispatch(schedule.get(index), file);
+                pace(started, index + 1);
+            }
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    private static void publishCpuSample(long hostPid) throws Exception {
+        long cpuNs = ProcessHandle.current().info().totalCpuDuration()
+            .orElseThrow(() -> new IllegalStateException("target process CPU duration is unavailable"))
+            .toNanos();
+        if (cpuNs < 0L) throw new IllegalStateException("negative target CPU duration: " + cpuNs);
+        long pid = ProcessHandle.current().pid();
+        if (pid <= 0L || hostPid <= 0L) throw new IllegalStateException("invalid target pid binding");
+        String json = "{\"schema_version\":1,\"version\":1,\"pid\":" + pid + ",\"host_pid\":" + hostPid
+            + ",\"sample_boundary\":\"after_workload_before_exit\",\"unit\":\"ns\",\"target_cpu_ns\":" + cpuNs + "}";
+        Path output = Path.of(System.getenv().getOrDefault("TIER_E_TARGET_CPU_OUT", "target-cpu.json")).toAbsolutePath();
+        Path temporary = Files.createTempFile(output.getParent(), ".target-cpu.", ".tmp");
+        try {
+            Files.writeString(temporary, json);
+            Files.move(temporary, output, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
         }
     }
 

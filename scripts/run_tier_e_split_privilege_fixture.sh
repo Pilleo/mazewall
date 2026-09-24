@@ -32,6 +32,7 @@ BENCH_ITERATIONS=${TIER_E_SPLIT_BENCH_ITERATIONS:-100}
 SPLIT_MARKER_VERSION=${TIER_E_SPLIT_MARKER_VERSION:-v1}
 SPLIT_MARKER_BACKEND=${TIER_E_SPLIT_MARKER_BACKEND:-uprobe}
 SPLIT_RECOVERY_MODE=${TIER_E_SPLIT_RECOVERY_MODE:-disabled}
+COVERAGE_BASELINE=${TIER_E_SPLIT_COVERAGE_BASELINE:-0}
 
 cleanup() {
     mkdir -p "${ARTIFACT_DIR}"
@@ -65,6 +66,15 @@ trap cleanup EXIT
 [[ "${SPLIT_RECOVERY_MODE}" == disabled || "${SPLIT_MARKER_VERSION}" == v2 ]] || {
     echo "coverage recovery requires marker v2" >&2; exit 2;
 }
+[[ "${COVERAGE_BASELINE}" == 0 || "${COVERAGE_BASELINE}" == 1 ]] || {
+    echo "unknown TIER_E_SPLIT_COVERAGE_BASELINE: ${COVERAGE_BASELINE}" >&2; exit 2;
+}
+if [[ "${COVERAGE_BASELINE}" == 1 ]]; then
+    [[ "${SPLIT_COVERAGE}" == 1 && "${SPLIT_BENCHMARK}" == 0 && "${REAL_PID_REUSE}" == 0 &&
+       "${SIMULATED_PID_REUSE}" == 0 ]] || {
+        echo 'coverage baseline requires the coverage fixture without reuse cases' >&2; exit 2;
+    }
+fi
 if [[ "${REAL_PID_REUSE}" == 1 ]]; then
     [[ "${SPLIT_MARKER_VERSION}" == v2 && "${SPLIT_RECOVERY_MODE}" == recover &&
        "${TIER_E_SPLIT_COLLECTOR_BENCHMARK_MODE:-0}" == 1 && "${SPLIT_BENCHMARK}" == 0 &&
@@ -169,6 +179,9 @@ if [[ "${TIER_E_SPLIT_BENCHMARK_PHASES:-0}" == 1 ]]; then
     agent_options+=",benchmark-phases"
 fi
 [[ "${TIER_E_SPLIT_LIVE_DEFINITIONS:-0}" == 1 ]] && agent_options+=",live-definitions"
+target_agent_flag="-agentpath:/shared/libmazewall_stack_agent.so=${agent_options}"
+# The baseline arm loads no JVMTI agent, installs no marker, and never touches a collector.
+[[ "${COVERAGE_BASELINE}" == 1 ]] && target_agent_flag=
 target_class=AgentWorkload
 target_classpath=/shared/agent-test-classes
 target_args="gate:/shared/start platform 100 /shared/control.sock /shared/libmazewall_stack_agent.so $MARKER_OFFSET 4d5a defer-terminal /shared/target-host-pid"
@@ -204,12 +217,15 @@ fi
     -e TIER_E_SPLIT_EMISSION_MODE="${SPLIT_EMISSION_MODE}" \
     -e TIER_E_SPLIT_MARKER_BACKEND="${SPLIT_MARKER_BACKEND}" \
     -e TIER_E_AGENT_OPTIONS="${agent_options}" \
+    -e TIER_E_AGENT_FLAG="${target_agent_flag}" \
+    -e TIER_E_SPLIT_COVERAGE_BASELINE="${COVERAGE_BASELINE}" \
+    -e TIER_E_TARGET_CPU_OUT=target-cpu.json \
     -e TIER_E_TARGET_CLASS="${target_class}" -e TIER_E_TARGET_CLASSPATH="${target_classpath}" -e TIER_E_TARGET_ARGS="${target_args}" \
     "${real_reuse_target_options[@]}" \
     "${reuse_target_options[@]}" \
     -v "${SHARED}:/shared" -v "${ROOT}:/workspace:ro" -w /shared "${IMAGE}" bash -lc '
         exec java --add-opens=java.base/sun.nio.fs=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
-          -agentpath:/shared/libmazewall_stack_agent.so="$TIER_E_AGENT_OPTIONS" \
+          ${TIER_E_AGENT_FLAG:-} \
           -cp "$TIER_E_TARGET_CLASSPATH" "$TIER_E_TARGET_CLASS" $TIER_E_TARGET_ARGS
     ' >/dev/null
 
@@ -223,6 +239,23 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
     for _ in $(seq 1 100); do [[ -s "${SHARED}/coverage-oracle.json" ]] && break; sleep 0.1; done
     test -s "${SHARED}/coverage-oracle.json"
     COVERAGE_ORACLE_SHA256=$(sha256sum "${SHARED}/coverage-oracle.json" | awk '{print $1}')
+fi
+if [[ "${COVERAGE_BASELINE}" == 1 ]]; then
+    touch "${SHARED}/start"
+    "${ENGINE}" wait "${TARGET}" >/dev/null
+    TARGET_EXIT=$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${TARGET}")
+    "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
+    cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
+    cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
+    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" --host-pid "${TARGET_HOST_PID}"
+    printf 'mode=baseline\ncoverage_verdict=NOT_APPLICABLE\nterminal=NOT_APPLICABLE\ntarget_exit=%s\npolicy_eligibility=false\n' \
+        "${TARGET_EXIT}" > "${ARTIFACT_DIR}/verdict.env"
+    printf '{"schema_version":1,"mode":"baseline","target_exit":%s,"policy_eligibility":false}\n' \
+        "${TARGET_EXIT}" > "${ARTIFACT_DIR}/summary.json"
+    grep -q 'tier-e-coverage-target: operations=' "${ARTIFACT_DIR}/target.log"
+    [[ "${TARGET_EXIT}" == 0 ]] || exit 1
+    printf 'split coverage baseline fixture artifacts: %s\n' "${ARTIFACT_DIR}"
+    exit 0
 fi
 
 socket_access_options=()
@@ -451,6 +484,8 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
             cat /shared/evidence/split-fixture-19802.tier-e-coverage.json > "${ARTIFACT_DIR}/coverage-manifest.json"
     fi
     cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
+    cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
+    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" --host-pid "${TARGET_HOST_PID}"
     node "${ROOT}/scripts/verify_tier_e_split_coverage.mjs" \
         "${ARTIFACT_DIR}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-manifest.json" \
         "${ARTIFACT_DIR}/terminal-report.json" "${ARTIFACT_DIR}/coverage-verdict.json" || {
