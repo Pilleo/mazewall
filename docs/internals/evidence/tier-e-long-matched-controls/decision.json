@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "expected_forks": 15,
+  "declared_operations": 75000,
+  "rows": 105,
+  "complete_forks": 15,
+  "incomplete": [],
+  "incomplete_reasons": [],
+  "modes": {
+    "full-stream": {
+      "pairs": {
+        "baseline": 15,
+        "v1": 15,
+        "v2": 15,
+        "hybrid": 15
+      },
+      "complete_forks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 15,
+          "median": 14.871794871794872,
+          "upper_95": 15.60754716981132,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 14.416666666666666,
+          "upper_95": 15.80952380952381,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 14.543956043956044,
+          "upper_95": 15.857988165680473,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 15,
+          "median": 75740000000,
+          "upper_95": 77370000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 74640000000,
+          "upper_95": 75670000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 75400000000,
+          "upper_95": 78480000000,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 15,
+        "median": 1.0136915525703953,
+        "upper_95": 1.0327282728272826,
+        "status": "COMPLETE",
+        "reasons": []
+      }
+    },
+    "unique-edge": {
+      "pairs": {
+        "baseline": 15,
+        "v1": 15,
+        "v2": 15,
+        "hybrid": 15
+      },
+      "complete_forks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 15,
+          "median": 14.53014184397163,
+          "upper_95": 15.771698113207547,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 14.417857142857143,
+          "upper_95": 15.116981132075471,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 14.383363471971068,
+          "upper_95": 15.294339622641509,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 15,
+          "median": 74180000000,
+          "upper_95": 76050000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 73910000000,
+          "upper_95": 74850000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 74340000000,
+          "upper_95": 75270000000,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 15,
+        "median": 0.9893563736538943,
+        "upper_95": 1.021186440677966,
+        "status": "COMPLETE",
+        "reasons": []
+      }
+    }
+  },
+  "metrics_status": "COMPLETE",
+  "existing_gates_note": "diagnostic only; does not replace the combined CPU 1.25 or receipt-p99 gates",
+  "prior_adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

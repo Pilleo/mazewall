@@ -1,0 +1,15 @@
+{"captured_at":"2026-09-24T21:59:25+02:00",
+"loadavg":"0.10 0.69 1.10 2/228 73870",
+"cpufreq_governor":"none-vm",
+"affinity":"0-3",
+"nproc":4,
+"docker_version":"29.1.3",
+"docker_driver":"overlayfs",
+"pid_max":4194304,
+"kernel":"7.0.0-31-generic",
+"git_head":"978bb68d9ad134bedf9aa3cb0248e9cdf65c9abb",
+"git_dirty_count":0,
+"memory_total_mb":8120688,
+"disk_available_gb":29,
+"cpuset":{"workload_cpu":"none","collector_cpu":"none"}
+}

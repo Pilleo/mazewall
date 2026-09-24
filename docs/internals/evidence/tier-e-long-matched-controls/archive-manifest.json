@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-25T00:10:00+02:00",
+  "archive": "tier-e-long-matched-raw.tar.zst",
+  "archive_sha256": "581ecf0b2ffc30ece0b2c709df9078ca328246c1c25799a22da427b144ea9c55",
+  "archive_bytes": 70965705,
+  "compressor": "zstd v1.5.7 (guest, -T2 -q)",
+  "created_from": {
+    "instance": "mazewall-pidtest",
+    "command": "cd /home/ubuntu/mazewall-long-matched/build && tar -cf - decision-75000-15fork diag-1fork pilot-75000-5fork | zstd -T2 -q -o /tmp/tier-e-long-matched-raw.tar.zst",
+    "transfer": "multipass exec ... cat /tmp/tier-e-long-matched-raw.tar.zst > tier-e-long-matched-raw.tar.zst (host sha256 identical to guest)"
+  },
+  "tar_entries": 2119,
+  "file_members": 1948,
+  "top_level_members": {
+    "decision-75000-15fork": 1434,
+    "diag-1fork": 33,
+    "pilot-75000-5fork": 481
+  },
+  "contained_counts": {
+    "arm_result_records": 147,
+    "profiled_terminal_reports": 120,
+    "baseline_summaries_mode_baseline": 20,
+    "baseline_collector_process_metrics": 0
+  },
+  "validation": {
+    "method": "extract to scratch1, sha256sum every file into member-sha256-index.txt, extract independently to scratch2, run sha256sum -c from scratch2 root",
+    "scratch2_verified_members": 1948,
+    "scratch2_failed_members": 0,
+    "exit_code": 0
+  },
+  "policy_eligibility": false
+}
