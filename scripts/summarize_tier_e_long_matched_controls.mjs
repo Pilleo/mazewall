@@ -134,9 +134,10 @@ function validateFork(fork, rows, incomplete) {
 
   const combined = {};
   for (const emission of EMISSIONS) {
+    combined[emission] = {};
     for (const variant of VARIANTS) {
       const row = byArm.get(`dictionary-${emission}-${variant}`);
-      combined[variant] = cpuByArm.get(row.arm).value + cpuValue(row.collector_cpu_ns).value;
+      combined[emission][variant] = cpuByArm.get(row.arm).value + cpuValue(row.collector_cpu_ns).value;
     }
   }
   return { baseline: baselineCpu.value, combined };
@@ -195,11 +196,11 @@ export function summarizeLongMatched(rows) {
     for (const fork of validForks) {
       const { baseline, combined: forkCombined } = cpuByFork.get(fork);
       for (const variant of VARIANTS) {
-        combined[variant].push(forkCombined[variant] / baseline);
-        incremental[variant].push(forkCombined[variant] - baseline);
+        combined[variant].push(forkCombined[emission][variant] / baseline);
+        incremental[variant].push(forkCombined[emission][variant] - baseline);
       }
-      const v1Incremental = forkCombined.v1 - baseline;
-      const hybridIncremental = forkCombined.hybrid - baseline;
+      const v1Incremental = forkCombined[emission].v1 - baseline;
+      const hybridIncremental = forkCombined[emission].hybrid - baseline;
       if (v1Incremental > 0) {
         hybridOverV1.push(hybridIncremental / v1Incremental);
       } else if (!v1DenominatorReasons.includes('nonpositive_v1_denominator')) {

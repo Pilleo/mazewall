@@ -209,3 +209,31 @@ test('a five-fork pilot cannot claim a decision-quality 95% bound', () => {
     run.decision.incomplete.some(entry => entry.reason === 'missing_fork'), true);
   assert.equal(run.decision.metrics_status, 'INCONCLUSIVE');
 });
+
+test('paired CPU metrics are separated per emission mode', () => {
+  const rows = makeRows(15).map(row => {
+    if (row.emission === 'unique-edge') {
+      return {
+        ...row,
+        target_cpu_ns: row.target_cpu_ns + 500,
+        collector_cpu_ns: row.collector_cpu_ns === null ? null : row.collector_cpu_ns + 50,
+      };
+    }
+    return row;
+  });
+  const run = runEstimator(rows);
+  assert.equal(run.status, 0, run.stderr);
+  const fullStream = run.decision.modes['full-stream'];
+  const uniqueEdge = run.decision.modes['unique-edge'];
+  assert.equal(fullStream.combined_cpu_ratio.v1.median, 1.5);
+  assert.equal(fullStream.incremental_cpu_ns.v1.median, 500);
+  assert.equal(fullStream.combined_cpu_ratio.hybrid.median, 2);
+  assert.equal(fullStream.incremental_cpu_ns.hybrid.median, 1000);
+  assert.equal(fullStream.hybrid_over_v1_incremental_ratio.median, 2);
+  assert.equal(uniqueEdge.combined_cpu_ratio.v1.median, 2.05);
+  assert.equal(uniqueEdge.incremental_cpu_ns.v1.median, 1050);
+  assert.equal(uniqueEdge.combined_cpu_ratio.hybrid.median, 2.55);
+  assert.equal(uniqueEdge.incremental_cpu_ns.hybrid.median, 1550);
+  assert.equal(uniqueEdge.hybrid_over_v1_incremental_ratio.median, 1550 / 1050);
+  assert.notEqual(fullStream.combined_cpu_ratio.v1.median, uniqueEdge.combined_cpu_ratio.v1.median);
+});
