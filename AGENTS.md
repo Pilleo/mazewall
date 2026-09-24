@@ -85,12 +85,8 @@ Run the merge gate once after focused checks pass:
 ./scripts/check_coverage.sh
 ```
 
-Post-edit hooks run `./scripts/adkw hook` (Kotlin syntax). Delivery uses `./scripts/adkw guard <file> --stage compile|test|delivery`.
-
-
 ## 🛠️ Agent DevKit (ADK) Universal Tooling & Hard Boundaries
 
 - Outline with `./scripts/adkw slice <file-or-class> [--json]` (or the file_structure skill) before a full source-file view.
-- Before modifying a core symbol, run `./scripts/adkw doctor` then `./scripts/adkw blast-radius <SymbolName>`.
-- After edits, hooks run `adk hook` (syntax). Delivery uses `./scripts/adkw guard <file> --stage compile|test|delivery`.
+- Before modifying a core symbol, run `./scripts/adkw blast-radius <SymbolName>`.
 - Scaffold issues with `./scripts/adkw new-issue --title "<title>"` and run `./scripts/adkw check-backlog` before completion.
