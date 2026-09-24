@@ -84,6 +84,12 @@ function validateFork(fork, rows, incomplete) {
     byArm.set(row.arm, row);
   }
   let valid = true;
+  for (const row of rows) {
+    if (!EXPECTED_ARMS.includes(row.arm)) {
+      incomplete.push({ fork, arm: row.arm, reason: 'unexpected_arm' });
+      valid = false;
+    }
+  }
   for (const arm of EXPECTED_ARMS) {
     if (!byArm.has(arm)) {
       incomplete.push({ fork, arm, reason: 'missing_arm' });
@@ -99,6 +105,11 @@ function validateFork(fork, rows, incomplete) {
     valid = false;
   }
   for (const field of IDENTITY_FIELDS) {
+    if (arms.some(row => typeof row[field] !== 'string' || !row[field].trim())) {
+      incomplete.push({ fork, reason: 'source_identity_missing', field });
+      valid = false;
+      continue;
+    }
     const values = new Set(arms.map(row => row[field]));
     if (values.size !== 1) {
       incomplete.push({ fork, reason: 'source_identity_mismatch', field });
@@ -113,6 +124,16 @@ function validateFork(fork, rows, incomplete) {
   if (arms.some(row => Number(row.status) !== 0)) {
     incomplete.push({ fork, reason: 'status_failed' });
     valid = false;
+  }
+  for (const row of arms) {
+    if (row.timed_out !== false) {
+      incomplete.push({ fork, arm: row.arm, reason: 'timed_out' });
+      valid = false;
+    }
+    if (!Array.isArray(row.artifact_errors) || row.artifact_errors.length > 0) {
+      incomplete.push({ fork, arm: row.arm, reason: 'artifact_errors' });
+      valid = false;
+    }
   }
   if (arms.some(row => row.policy_eligibility !== false)) {
     incomplete.push({ fork, reason: 'policy_eligibility_violated' });
@@ -162,6 +183,10 @@ function metric(values, explicitReasons = []) {
 export function summarizeLongMatched(rows) {
   state = 0x4d5a2026;
   const incomplete = [];
+  for (const field of IDENTITY_FIELDS) {
+    const values = new Set(rows.map(row => row[field]));
+    if (values.size > 1) incomplete.push({ reason: 'source_identity_mismatch', field });
+  }
   const byFork = new Map();
   for (const row of rows) {
     const fork = Number(row.fork);
@@ -228,6 +253,22 @@ export function summarizeLongMatched(rows) {
       },
       hybrid_over_v1_incremental_ratio: metric(hybridOverV1, v1DenominatorReasons),
     };
+  }
+
+  if (incomplete.length > 0) {
+    for (const mode of Object.values(modes)) {
+      for (const group of [mode.combined_cpu_ratio, mode.incremental_cpu_ns]) {
+        for (const value of Object.values(group)) {
+          value.status = 'INCONCLUSIVE';
+          value.upper_95 = null;
+          if (!value.reasons.includes('invalid_run')) value.reasons.push('invalid_run');
+        }
+      }
+      const value = mode.hybrid_over_v1_incremental_ratio;
+      value.status = 'INCONCLUSIVE';
+      value.upper_95 = null;
+      if (!value.reasons.includes('invalid_run')) value.reasons.push('invalid_run');
+    }
   }
 
   const metricStatuses = [];

@@ -25,6 +25,8 @@ const COMMON = {
   native_so_sha256: '7d6459afeaa340b3a53510709946c6333d9d6d4e662a299d8ce0ec265af9ed5d',
   daemon_jars_sha256: '330f65a443549f8de80ee4b1adc3c550e9582316992a9f33038c551148d74625',
   status: 0,
+  timed_out: false,
+  artifact_errors: [],
   policy_eligibility: false,
 };
 
@@ -236,4 +238,37 @@ test('paired CPU metrics are separated per emission mode', () => {
   assert.equal(uniqueEdge.incremental_cpu_ns.hybrid.median, 1550);
   assert.equal(uniqueEdge.hybrid_over_v1_incremental_ratio.median, 1550 / 1050);
   assert.notEqual(fullStream.combined_cpu_ratio.v1.median, uniqueEdge.combined_cpu_ratio.v1.median);
+});
+
+test('a whole fork with different source identity is inconclusive', () => {
+  const rows = makeRows().map(row => row.fork === 1 ? { ...row, source_digest: 'another-source' } : row);
+  const run = runEstimator(rows);
+  assert.equal(run.status, 1);
+  assert.equal(run.decision.metrics_status, 'INCONCLUSIVE');
+  assert.ok(run.decision.incomplete.some(entry => entry.reason === 'source_identity_mismatch' && entry.field === 'source_digest'));
+  assert.equal(run.decision.modes['full-stream'].combined_cpu_ratio.v1.upper_95, null);
+});
+
+test('missing identities across every fork cannot produce a complete decision', () => {
+  const fields = ['source_digest', 'image_id', 'native_so_sha256', 'daemon_jars_sha256'];
+  for (const field of fields) {
+    const rows = makeRows().map(row => ({ ...row, [field]: null }));
+    const run = runEstimator(rows);
+    assert.equal(run.status, 1, field);
+    assert.ok(run.decision.incomplete.some(entry => entry.reason === 'source_identity_missing' && entry.field === field), field);
+  }
+});
+
+test('unexpected arm, artifact error, and timeout cannot produce a complete decision', () => {
+  const mutations = [
+    { rows: [...makeRows(), { ...makeRow(1, 'baseline'), arm: 'unexpected-arm' }], reason: 'unexpected_arm' },
+    { rows: makeRows().map(row => row.fork === 1 && row.arm === 'baseline' ? { ...row, artifact_errors: ['coverage-oracle.json: unreadable'] } : row), reason: 'artifact_errors' },
+    { rows: makeRows().map(row => row.fork === 1 && row.arm === 'baseline' ? { ...row, timed_out: true } : row), reason: 'timed_out' },
+  ];
+  for (const { rows, reason } of mutations) {
+    const run = runEstimator(rows);
+    assert.equal(run.status, 1, reason);
+    assert.equal(run.decision.metrics_status, 'INCONCLUSIVE');
+    assert.ok(run.decision.incomplete.some(entry => entry.reason === reason), reason);
+  }
 });
