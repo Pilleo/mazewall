@@ -57,7 +57,7 @@ export function sampleCollectorCpu(options) {
   const match = /^VmHWM:\s+(\d+)\s+kB/m.exec(status);
   if (!match) return fail('collector_cpu_sample_invalid_counters');
   const peakRssKb = Number(match[1]);
-  const ticks = first.utime + second.stime;
+  const ticks = second.utime + second.stime;
   if (!Number.isFinite(ticks) || ticks < 0 || !Number.isFinite(peakRssKb) || peakRssKb < 0) {
     return fail('collector_cpu_sample_invalid_counters');
   }

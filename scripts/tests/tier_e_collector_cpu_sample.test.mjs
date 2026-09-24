@@ -55,6 +55,29 @@ test('valid collector sample converts ticks to nanoseconds and writes parser-com
   }
 });
 
+test('collector CPU counters come from the same second stat snapshot', () => {
+  const root = tempRoot();
+  try {
+    writeProc(root, 4321);
+    let statReads = 0;
+    const second = STAT.replace(' 40 12 0 0 20 ', ' 70 19 0 0 20 ');
+    const io = {
+      ...fs,
+      readFileSync(file, encoding) {
+        if (String(file).endsWith('/stat')) return ++statReads === 1 ? STAT : second;
+        return fs.readFileSync(file, encoding);
+      },
+    };
+    const result = sampleCollectorCpu(opts(root, { fs: io }));
+    assert.equal(result.ok, true);
+    assert.equal(statReads, 2);
+    assert.equal(result.sample.cpu_ticks, 89);
+    assert.equal(result.sample.cpu_ns, 890000000);
+  } finally {
+    fs.rmSync(root, { recursive: true });
+  }
+});
+
 test('missing /proc/<pid>/stat source fails with collector_cpu_sample_source_missing', () => {
   const root = tempRoot();
   try {
