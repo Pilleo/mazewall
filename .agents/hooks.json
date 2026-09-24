@@ -14,19 +14,5 @@
                 "timeout": 10
             }
         ]
-    },
-    "adk-guard": {
-        "PostToolUse": [
-            {
-                "matcher": "replace_file_content|multi_replace_file_content|write_to_file|Write|Edit",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "./scripts/adkw hook --harness antigravity --file \"{file}\"",
-                        "timeout": 30
-                    }
-                ]
-            }
-        ]
     }
 }
