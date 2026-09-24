@@ -195,7 +195,7 @@ not improve. The candidate is rejected as the default; the retained decision is
 - [ ] For each experiment, retain exact commands, raw artifact path, paired effect, confidence interval, normalized-evidence verdict, lifecycle verdict, memory/tail-latency gates, and final decision.
 - [ ] Remove rejected experimental code before its decision commit; explicitly state why it was rejected or inconclusive.
 - [ ] Update the design with accepted behavior only. Keep rejected alternatives in historical evidence, not normative architecture.
-- [ ] Run `./gradlew :profiler:test`, native Release CTest, `./scripts/adkw check-backlog`, and `./scripts/adkw hook`.
+- [ ] Run `./gradlew :profiler:test`, native Release CTest, and `./scripts/adkw check-backlog`.
 - [ ] Run the final rootful 15-fork seven-mode matrix and verify all retained records declare `policy_eligibility=false`.
 - [ ] Commit as `docs(tier-e): retain measured hot-path optimization decisions`.
 
