@@ -47,7 +47,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[[ "${ENGINE}" == docker ]] || { echo "rootless runtimes are INCOMPLETE evidence" >&2; exit 2; }
+case "${ENGINE}" in
+    docker)
+        case "${DOCKER_HOST}" in
+            unix://*) ;;
+            *) echo 'remote Docker cannot bind local target paths or inspect host PIDs' >&2; exit 2 ;;
+        esac
+        security_options=$(docker --host "${DOCKER_HOST}" info --format '{{json .SecurityOptions}}') || exit 2
+        [[ "${security_options}" == \[*\] && "${security_options}" != *rootless* ]] || {
+            echo 'rootless Docker cannot supply privileged Tier E evidence' >&2; exit 2;
+        }
+        ;;
+    podman)
+        case "${CONTAINER_HOST:-}" in
+            ""|unix://*) ;;
+            *) echo 'remote Podman cannot bind local target paths or inspect host PIDs' >&2; exit 2 ;;
+        esac
+        [[ "$(podman info --format '{{.Host.Security.Rootless}}')" == false ]] || {
+            echo 'rootless Podman cannot supply privileged Tier E evidence' >&2; exit 2;
+        }
+        ;;
+    *) echo "unsupported container engine: ${ENGINE}" >&2; exit 2 ;;
+esac
 [[ "${SPLIT_EMISSION_MODE}" == full-stream || "${SPLIT_EMISSION_MODE}" == unique-stack-syscall ]] || {
     echo "unknown TIER_E_SPLIT_EMISSION_MODE: ${SPLIT_EMISSION_MODE}" >&2; exit 2;
 }
