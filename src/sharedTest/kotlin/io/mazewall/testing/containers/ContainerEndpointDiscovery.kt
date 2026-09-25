@@ -1,6 +1,7 @@
 package io.mazewall.testing.containers
 
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
@@ -154,8 +155,9 @@ public fun runContainerCommand(
     command: List<String>,
     timeout: Duration = Duration.ofSeconds(5),
     environment: Map<String, String> = emptyMap(),
+    outputFile: Path? = null,
 ): ContainerCommandResult {
-    val output = Files.createTempFile("mazewall-container-probe-", ".log")
+    val output = outputFile ?: Files.createTempFile("mazewall-container-probe-", ".log")
     try {
         val process = try {
             ProcessBuilder(command)
@@ -190,6 +192,6 @@ public fun runContainerCommand(
         }
         return ContainerCommandResult(process.exitValue(), Files.readString(output).take(4096))
     } finally {
-        Files.deleteIfExists(output)
+        if (outputFile == null) Files.deleteIfExists(output)
     }
 }

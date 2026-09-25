@@ -96,8 +96,8 @@ class TierERootfulContainerEndpointIntegrationTest {
         val native = TierENativeFixtureBuild.prepare(
             root,
             System.getenv("TIER_E_SPLIT_NATIVE_BUILD_DIR")?.takeIf { it.isNotBlank() }?.let(Path::of),
-            compiler = "$compiler:${version.output.lineSequence().firstOrNull()}",
-            flags = "usdt=${System.getenv("MAZEWALL_ENABLE_TIER_E_USDT") == "true"}",
+            compiler = compiler,
+            flags = "usdt=${System.getenv("MAZEWALL_ENABLE_TIER_E_USDT") == "true"};compiler-version=${version.output.lineSequence().firstOrNull()}",
         )
         return PreparedFixture(root, native, selectedImage, endpoint.resolvedUri!!)
     }
@@ -223,7 +223,10 @@ class TierERootfulContainerEndpointIntegrationTest {
         val prepared = prepareFixture(endpoint)
         val runId = "tier-e-killed-${UUID.randomUUID()}"
         val sentinel = "tier-e-unrelated-${UUID.randomUUID()}"
-        val started = runContainerCommand(
+        var controller: Process? = null
+        var primary: Throwable? = null
+        try {
+            val started = runContainerCommand(
             endpoint.command(
             "run",
                 "-d",
@@ -237,8 +240,8 @@ class TierERootfulContainerEndpointIntegrationTest {
                 "sleep 90",
         ),
         )
-        assertEquals(0, started.exitCode, started.output)
-        val controller = ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
+            assertEquals(0, started.exitCode, started.output)
+            controller = ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
             .directory(prepared.root.toFile())
             .redirectErrorStream(true)
             .redirectOutput(destination.resolve("killed-controller.log").toFile())
@@ -260,7 +263,6 @@ class TierERootfulContainerEndpointIntegrationTest {
                     environment()["CONTAINER_HOST"] = endpoint.resolvedUri
                 }
             }.start()
-        try {
             TierEContainerRun(endpoint, runId, destination).use {
                 awaitCondition(Duration.ofSeconds(30), "target and collector registered") {
                     runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode == 0 &&
@@ -281,10 +283,36 @@ class TierERootfulContainerEndpointIntegrationTest {
                 runContainerCommand(endpoint.command("inspect", sentinel)).exitCode,
                 "Kotlin owner must not reap unrelated containers",
             )
+        } catch (failure: Throwable) {
+            primary = failure
+            throw failure
         } finally {
-            controller.destroyForcibly()
-            TierEContainerRun(endpoint, runId, destination).close()
-            runContainerCommand(endpoint.command("rm", "-f", sentinel))
+            val cleanupFailures = mutableListOf<Throwable>()
+            try {
+                controller?.destroyForcibly()
+            } catch (failure: Throwable) {
+                cleanupFailures += failure
+            }
+            try {
+                TierEContainerRun(endpoint, runId, destination).close()
+            } catch (failure: Throwable) {
+                cleanupFailures += failure
+            }
+            try {
+                val removed = runContainerCommand(endpoint.command("rm", "-f", sentinel))
+                check(removed.exitCode == 0 || removed.output.contains("no such container", ignoreCase = true)) {
+                    "Sentinel cleanup failed: ${removed.output}"
+                }
+            } catch (failure: Throwable) {
+                cleanupFailures += failure
+            }
+            if (primary != null) {
+                cleanupFailures.forEach(primary::addSuppressed)
+            } else if (cleanupFailures.isNotEmpty()) {
+                val first = cleanupFailures.first()
+                cleanupFailures.drop(1).forEach(first::addSuppressed)
+                throw first
+            }
         }
     }
 }

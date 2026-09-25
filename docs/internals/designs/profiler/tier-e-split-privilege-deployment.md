@@ -214,10 +214,14 @@ identity, and a read-only bind-mount token before preparing native code. Remote
 or unproven endpoints skip this fixture even though mount-free engine and
 caller-owned export tests may run remotely. Kotlin owns the exact per-run
 target and collector names independently of the shell controller, collects
-logs, and removes only those containers after a controller kill. Native fixture
-builds reuse only a checkout/configuration-bound cache after checking CMake
-source/build type; a foreign cache fails without deletion and concurrent
-writers serialize. Availability and image configuration are forwarded to the
+complete logs in caller-owned files (preserving any shell snapshot), and
+removes only those containers after a controller kill or interrupted command.
+Cleanup restores the caller's interrupt status and attempts each container
+independently. Native fixture builds reuse only a checkout/configuration-bound
+cache after checking actual CMake source, build type, compiler, and USDT option;
+a foreign cache fails without deletion, a validated interrupted default
+configure may publish its missing identity marker, and concurrent writers
+serialize. Availability and image configuration are forwarded to the
 JUnit worker on each invocation, so a prior skipped Gradle run cannot mask a
 newly available endpoint.
 

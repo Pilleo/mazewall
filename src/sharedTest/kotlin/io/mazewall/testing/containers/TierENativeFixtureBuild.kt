@@ -45,18 +45,52 @@ public object TierENativeFixtureBuild {
         val directory = (explicit ?: cacheDirectory(root, buildType, compiler, architecture, flags)).toAbsolutePath().normalize()
         Files.createDirectories(directory)
         val identity = "${source}\n$buildType\n$compiler\n$architecture\n$flags\n"
+        val requestedCompiler = Path.of(compiler)
+        val compilerPath = if (requestedCompiler.isAbsolute) {
+            requestedCompiler
+        } else {
+            (System.getenv("PATH") ?: "")
+                .split(':')
+                .asSequence()
+                .map { Path.of(it).resolve(compiler) }
+                .firstOrNull(Files::isExecutable)
+                ?: error("Native fixture compiler unavailable: $compiler")
+        }
+        val expectedCompiler = compilerPath.toRealPath()
+        val usdt = flags.substringBefore(';') == "usdt=true"
+
+        fun validate(cache: Path) {
+            val entries = Files
+                .readAllLines(cache)
+                .mapNotNull { line ->
+                val pair = line.split('=', limit = 2)
+                if (pair.size == 2) pair[0].substringBefore(':') to pair[1] else null
+            }.toMap()
+            check(entries["CMAKE_HOME_DIRECTORY"] == source.toString()) {
+                "CMAKE_HOME_DIRECTORY disagrees with $source in $cache"
+            }
+            check(entries["CMAKE_BUILD_TYPE"] == buildType) { "CMAKE_BUILD_TYPE disagrees with $buildType in $cache" }
+            val configured = entries["CMAKE_CXX_COMPILER"]?.let { runCatching { Path.of(it).toRealPath() }.getOrNull() }
+            check(configured == expectedCompiler) { "CMAKE_CXX_COMPILER disagrees with $expectedCompiler in $cache" }
+            val configuredUsdt = entries["MAZEWALL_ENABLE_TIER_E_USDT"]?.uppercase()
+            check(configuredUsdt in if (usdt) setOf("ON", "TRUE", "YES", "1") else setOf("OFF", "FALSE", "NO", "0")) {
+                "MAZEWALL_ENABLE_TIER_E_USDT disagrees with $usdt in $cache"
+            }
+        }
         locks.computeIfAbsent(directory) { ReentrantLock() }.withLock {
             FileChannel.open(directory.resolve(".build.lock"), CREATE, WRITE).use { channel ->
                 channel.lock().use {
                     val cache = directory.resolve("CMakeCache.txt")
                     val marker = directory.resolve(".mazewall-native-identity")
                     if (Files.exists(cache)) {
-                        val content = Files.readString(cache)
-                        check(content.lineSequence().any { it == "CMAKE_HOME_DIRECTORY:INTERNAL=$source" }) {
-                            "CMAKE_HOME_DIRECTORY disagrees with $source in $cache"
-                        }
-                        check(content.lineSequence().any { it == "CMAKE_BUILD_TYPE:STRING=$buildType" }) {
-                            "CMAKE_BUILD_TYPE disagrees with $buildType in $cache"
+                        validate(cache)
+                        // Configure can complete before the marker is published. Only a
+                        // computed default cache with verified CMake settings may be adopted.
+                        if (!Files.exists(marker) &&
+                            explicit == null &&
+                            directory == cacheDirectory(root, buildType, compiler, architecture, flags)
+                        ) {
+                            Files.writeString(marker, identity)
                         }
                         check(Files.exists(marker) && Files.readString(marker) == identity) {
                             "Native CMake cache has no matching checkout/compiler provenance: $directory"
@@ -70,20 +104,15 @@ public object TierENativeFixtureBuild {
                                 source.toString(),
                                 "-B",
                                 directory.toString(),
-                            "-DCMAKE_BUILD_TYPE=$buildType",
-                                "-DMAZEWALL_ENABLE_TIER_E_USDT=${flags == "usdt=true"}",
+                                "-DCMAKE_BUILD_TYPE=$buildType",
+                                "-DCMAKE_CXX_COMPILER=$compiler",
+                                "-DMAZEWALL_ENABLE_TIER_E_USDT=$usdt",
                             ),
-                                Duration.ofMinutes(2),
+                            Duration.ofMinutes(2),
                         )
                         check(configured.exitCode == 0) { "Native CMake configure failed: ${configured.output}" }
                         check(Files.exists(cache)) { "Native CMake configure produced no CMakeCache.txt: $directory" }
-                        val content = Files.readString(cache)
-                        check(content.contains("CMAKE_HOME_DIRECTORY:INTERNAL=$source")) {
-                            "CMAKE_HOME_DIRECTORY mismatch after configure: $directory"
-                        }
-                        check(content.contains("CMAKE_BUILD_TYPE:STRING=$buildType")) {
-                            "CMAKE_BUILD_TYPE mismatch after configure: $directory"
-                        }
+                        validate(cache)
                         Files.writeString(marker, identity)
                     }
                     val built = execute(listOf("cmake", "--build", directory.toString(), "-j2"), Duration.ofMinutes(2))
