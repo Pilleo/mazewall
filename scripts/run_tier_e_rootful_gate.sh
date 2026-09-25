@@ -29,6 +29,14 @@ esac
 
 mkdir -p "${ARTIFACT_DIR}"
 ARTIFACT_DIR=$(cd "${ARTIFACT_DIR}" && pwd)
+if ! prior_artifact=$(find "${ARTIFACT_DIR}" -mindepth 1 -maxdepth 1 -print -quit); then
+    echo "Unable to inspect Tier E artifact directory: ${ARTIFACT_DIR}" >&2
+    exit 1
+fi
+[[ -z "${prior_artifact}" ]] || {
+    echo "Tier E gate requires a fresh artifact directory; existing entry: ${prior_artifact}" >&2
+    exit 1
+}
 CONTAINERFILE_SHA=$(sha256sum "${PROJECT_ROOT}/infra/dev/Containerfile" | cut -d' ' -f1)
 image_sha=$("${ENGINE_CMD[@]}" image inspect "${IMAGE}" \
     --format '{{index .Config.Labels "io.mazewall.containerfile.sha256"}}' 2>/dev/null || true)
@@ -46,33 +54,66 @@ CACHE_VOLUME="mazewall-tier-e-rootful-gradle-jdk25-$(id -u)-${TOOLCHAIN_KEY}"
 CONTAINER="${RUN_ID}-runner"
 created_container=false
 created_workspace=false
+exported=false
 export_artifacts() {
-    local stage
-    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX")
+    local stage unsafe
+    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX") || return 1
     if ! "${ENGINE[@]}" cp "${CONTAINER}:/artifacts/." "${stage}/" 2>/dev/null; then
-        rmdir "${stage}" 2>/dev/null || true
+        echo "Tier E export copy failed; staging retained at ${stage}" >&2
         return 1
     fi
-    if [[ -n "$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit)" ]]; then
-        echo 'Tier E export contains an unsupported file type or symlink' >&2
+    if ! unsafe=$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit); then
+        echo "Tier E export validation failed; staging retained at ${stage}" >&2
         return 1
     fi
-    cp -a "${stage}/." "${ARTIFACT_DIR}/"
-    rm -rf "${stage}"
+    if [[ -n "${unsafe}" ]]; then
+        echo "Tier E export contains an unsupported file type or symlink; staging retained at ${stage}" >&2
+        return 1
+    fi
+    if ! cp -a "${stage}/." "${ARTIFACT_DIR}/"; then
+        echo "Tier E host publication failed; staging retained at ${stage}" >&2
+        return 1
+    fi
+    if ! rm -rf "${stage}"; then
+        echo "Tier E export staging cleanup failed: ${stage}" >&2
+        return 1
+    fi
+    exported=true
+    return 0
 }
 cleanup() {
     local status=$?
+    local retain=false
     trap - EXIT
     if [[ "${created_container}" == true ]]; then
-        "${ENGINE[@]}" logs "${CONTAINER}" > "${ARTIFACT_DIR}/rootful-gate.log" 2>&1 || true
-        if ! export_artifacts; then
-            echo "Tier E artifact export failed; container logs retained" >&2
+        if ! "${ENGINE[@]}" logs "${CONTAINER}" > "${ARTIFACT_DIR}/rootful-gate.log" 2>&1; then
+            echo "Tier E logs unavailable; preserving ${CONTAINER}" >&2
             status=1
+            retain=true
         fi
-        "${ENGINE[@]}" rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+        if [[ "${exported}" != true ]] && ! export_artifacts; then
+            echo "Tier E artifact export failed; preserving ${CONTAINER} and ${WORKSPACE_VOLUME}" >&2
+            status=1
+            retain=true
+        fi
+        if [[ "${retain}" == true ]]; then
+            "${ENGINE[@]}" stop -t 2 "${CONTAINER}" >/dev/null 2>&1 ||
+                "${ENGINE[@]}" kill "${CONTAINER}" >/dev/null 2>&1 || status=1
+            echo "Recovery: ${ENGINE[*]} cp ${CONTAINER}:/artifacts/. ${ARTIFACT_DIR}/" >&2
+        else
+            "${ENGINE[@]}" rm -f "${CONTAINER}" >/dev/null 2>&1 || status=1
+        fi
     fi
-    if [[ "${created_workspace}" == true ]]; then
-        "${ENGINE[@]}" volume rm "${WORKSPACE_VOLUME}" >/dev/null 2>&1 || true
+    if [[ "${created_workspace}" == true && "${retain}" != true ]]; then
+        "${ENGINE[@]}" volume rm "${WORKSPACE_VOLUME}" >/dev/null 2>&1 || status=1
+    elif [[ "${created_workspace}" == true ]]; then
+        echo "Recovery workspace retained: ${WORKSPACE_VOLUME}" >&2
+    fi
+    if [[ "${status}" -ne 0 && -f "${ARTIFACT_DIR}/run-metadata.txt" ]]; then
+        sed -i -E \
+            -e "s/^rootful_gate_status=.*/rootful_gate_status=${status}/" \
+            -e 's/^(capture_domain_validity|transport_completeness|attribution_coverage|dictionary_integrity|lifecycle_validity)=PASS/\1=INCOMPLETE/' \
+            "${ARTIFACT_DIR}/run-metadata.txt" || status=1
     fi
     exit "${status}"
 }
@@ -151,16 +192,21 @@ if [[ "${GATE_STATUS}" -eq 0 && "${BENCHMARK_GATE_STATUS}" != PASS ]]; then
     echo "Tier E benchmark gate has no passing artifact: ${BENCHMARK_GATE_STATUS}" >&2
     GATE_STATUS=1
 fi
+if [[ "${GATE_STATUS}" -eq 0 ]]; then
+    DIMENSION_STATUS=PASS
+else
+    DIMENSION_STATUS=INCOMPLETE
+fi
 
 cat > "${ARTIFACT_DIR}/run-metadata.txt" <<EOF
 commit_sha=$(git -C "${PROJECT_ROOT}" rev-parse HEAD)
 kernel=$("${ENGINE[@]}" info --format "$([[ "${TIER_E_CONTAINER_ENGINE:-docker}" == podman ]] && printf '{{.Host.Kernel}}' || printf '{{.KernelVersion}}')")
 docker_image=${IMAGE}
-capture_domain_validity=PASS
-transport_completeness=PASS
-attribution_coverage=PASS
-dictionary_integrity=PASS
-lifecycle_validity=PASS
+capture_domain_validity=${DIMENSION_STATUS}
+transport_completeness=${DIMENSION_STATUS}
+attribution_coverage=${DIMENSION_STATUS}
+dictionary_integrity=${DIMENSION_STATUS}
+lifecycle_validity=${DIMENSION_STATUS}
 benchmark_gate_status=${BENCHMARK_GATE_STATUS}
 rootful_gate_status=${GATE_STATUS}
 rootless_podman_fixture=INCOMPLETE

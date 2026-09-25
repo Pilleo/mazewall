@@ -15,6 +15,14 @@ IMAGE=${MAZEWALL_TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:perf-20260919-exte
 ARTIFACT_DIR=${1:-"${REPOSITORY_DIR}/build/tier-e-trustworthy-benchmark"}
 mkdir -p "${ARTIFACT_DIR}"
 ARTIFACT_DIR=$(cd "${ARTIFACT_DIR}" && pwd)
+if ! prior_artifact=$(find "${ARTIFACT_DIR}" -mindepth 1 -maxdepth 1 -print -quit); then
+    echo "Unable to inspect Tier E benchmark artifacts: ${ARTIFACT_DIR}" >&2
+    exit 1
+fi
+[[ -z "${prior_artifact}" ]] || {
+    echo "Tier E benchmark requires a fresh artifact directory; existing entry: ${prior_artifact}" >&2
+    exit 1
+}
 BUNDLE_DIR="${ARTIFACT_DIR}/bundle"
 BUILD_CACHE_DIR=${MAZEWALL_TIER_E_BUILD_CACHE_ROOT:-"${REPOSITORY_DIR}/build/tier-e-benchmark-cache"}
 mkdir -p "${BUILD_CACHE_DIR}"
@@ -34,22 +42,34 @@ ARTIFACT_EXPORTED=true
 DOCKER=(docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}")
 
 export_container_artifacts() {
-    local stage transfer
-    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX")
+    local stage transfer unsafe
+    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX") || return 1
     transfer="${RUN_ID}-export-$$"
     "${DOCKER[@]}" create --name "${transfer}" -v "${ARTIFACT_VOLUME}:/artifacts" "${IMAGE}" true >/dev/null || return 1
     if ! "${DOCKER[@]}" cp "${transfer}:/artifacts/." "${stage}/"; then
         "${DOCKER[@]}" rm -f "${transfer}" >/dev/null 2>&1 || true
+        echo "Benchmark copy failed; source volume ${ARTIFACT_VOLUME} and staging ${stage} retained" >&2
         return 1
     fi
     "${DOCKER[@]}" rm -f "${transfer}" >/dev/null 2>&1 || true
-    if [[ -n "$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit)" ]]; then
-        echo 'Benchmark export includes a symlink or unsupported file type' >&2
+    if ! unsafe=$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit); then
+        echo "Benchmark export validation failed; staging ${stage} retained" >&2
         return 1
     fi
-    cp -a "${stage}/." "${ARTIFACT_DIR}/"
-    rm -rf "${stage}"
+    if [[ -n "${unsafe}" ]]; then
+        echo "Benchmark export includes a symlink or unsupported file type; staging ${stage} retained" >&2
+        return 1
+    fi
+    if ! cp -a "${stage}/." "${ARTIFACT_DIR}/"; then
+        echo "Benchmark host publication failed; source volume ${ARTIFACT_VOLUME} and staging ${stage} retained" >&2
+        return 1
+    fi
+    if ! rm -rf "${stage}"; then
+        echo "Benchmark staging cleanup failed: ${stage}" >&2
+        return 1
+    fi
     ARTIFACT_EXPORTED=true
+    return 0
 }
 
 runner_event() {
@@ -81,7 +101,11 @@ runner_exit() {
         if [[ "${ARTIFACT_EXPORTED}" == false ]]; then
             export_container_artifacts || status=1
         fi
-        "${DOCKER[@]}" volume rm "${ARTIFACT_VOLUME}" >/dev/null 2>&1 || status=1
+        if [[ "${ARTIFACT_EXPORTED}" == true ]]; then
+            "${DOCKER[@]}" volume rm "${ARTIFACT_VOLUME}" >/dev/null 2>&1 || status=1
+        else
+            echo "Recovery: artifact volume ${ARTIFACT_VOLUME} retained; use ${DOCKER[*]} cp from a stopped volume-mounted container" >&2
+        fi
     fi
     if [[ "${RUNNER_TERMINAL_WRITTEN}" == "false" ]]; then
         runner_terminal "${RUNNER_FAILURE_STATE}" "runner exited with status ${status}"
@@ -507,4 +531,9 @@ jq -e -s '
     ([.[] | select(.kind == "fork-output")] | length > 0) and
     (([.[] | select(.kind == "sample")] | length) == ([.[] | select(.kind == "summary")][0].sample_count))
 ' "${ARTIFACT_DIR}/results.jsonl" > /dev/null
+if ! "${DOCKER[@]}" volume rm "${ARTIFACT_VOLUME}" >/dev/null 2>&1; then
+    echo "Benchmark artifact volume could not be retired: ${ARTIFACT_VOLUME}" >&2
+    exit 1
+fi
+ARTIFACT_VOLUME=""
 runner_terminal PASSED "benchmark artifact validated"

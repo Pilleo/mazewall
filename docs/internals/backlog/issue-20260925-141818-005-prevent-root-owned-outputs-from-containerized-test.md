@@ -16,13 +16,28 @@ target_files:
   - ".github/workflows/ci.yml"
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscovery.kt"
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/EnabledIfRootfulContainerAvailable.kt"
+  - "src/sharedTest/kotlin/io/mazewall/testing/containers/TierEContainerRun.kt"
+  - "src/sharedTest/kotlin/io/mazewall/testing/containers/TierENativeFixtureBuild.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscoveryTest.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/ContainerizedTestRunnerOwnershipTest.kt"
+  - "src/test/kotlin/io/mazewall/testing/containers/TierEContainerRunTest.kt"
+  - "src/test/kotlin/io/mazewall/testing/containers/TierENativeFixtureBuildTest.kt"
   - "profiler/build.gradle.kts"
   - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/TierERootfulContainerEndpointIntegrationTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/attribution/TierERecoveryReaderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/daemon/TierETargetExitCoordinatorTest.kt"
   - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
+  - "docs/internals/designs/profiler/tier-e-design.md"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/archived-fault-parity.json"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/rootful-docker-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/rootful-condition-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/absent-podman-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/coverage-oracle.json"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/coverage-manifest.json"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/coverage-verdict.json"
+  - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/terminal-report.json"
 target_symbols: ["ContainerEndpointDiscovery", "RootfulContainerExtension"]
 open_questions: false
 ---
@@ -50,6 +65,12 @@ Rootful containers wrote into read-write checkout and normal host Gradle cache a
 4. Update Compose, devcontainer, CI cache paths and ownership gate; replace
    after-the-fact recursive `chown` with a check that fails if root-owned
    output was produced.
+5. Give Kotlin ownership of the PID-bound split fixture's exact target and
+   collector names so a killed controller cannot leave privileged containers
+   running. Preserve the only evidence-bearing volume/container on failed
+   export, validate the oracle and terminal fault contracts independently,
+   and resolve default engine contexts before admitting a local `/proc`-bound
+   fixture.
 
 **Verification:** Rootful Docker small build and warm-cache repeat must
 leave caller-owned checkout/cache files. Rootful Podman integration execution

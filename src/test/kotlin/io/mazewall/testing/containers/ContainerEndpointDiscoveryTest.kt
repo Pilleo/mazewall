@@ -62,7 +62,7 @@ class ContainerEndpointDiscoveryTest {
         }
         val launcher = LauncherFactory.create()
         launcher.registerTestExecutionListeners(listener)
-        launcher.execute(request().selectors(selectClass(DisabledFixture::class.java)).build())
+        launcher.execute(request().selectors(selectClass(ConditionFixture::class.java)).build())
         assertTrue(reason?.contains("No usable rootful container endpoint") == true, reason)
     }
 
@@ -98,11 +98,58 @@ class ContainerEndpointDiscoveryTest {
         assertTrue(result is EndpointSelection.Ready, result.toString())
     }
 
+    @Test
+    fun `default Docker context resolves local URI without discarding selected context`() {
+        val discovery = ContainerEndpointDiscovery(
+            resolveDefault = { "unix:///var/run/docker.sock" },
+            probe = EndpointProbe { EndpointProbeResult.Rootful },
+        )
+        val endpoint = (discovery.discover(EndpointConfig()) as EndpointSelection.Ready).endpoint
+        assertEquals(ContainerEngine.DOCKER, endpoint.engine)
+        assertEquals(null, endpoint.uri, "CLI must keep using selected Docker context")
+        assertEquals("unix:///var/run/docker.sock", endpoint.resolvedUri)
+        assertEquals(listOf("docker", "info"), endpoint.command("info"))
+    }
+
+    @Test
+    fun `remote default context stays remote even when the client has a local Docker socket`() {
+        val discovery = ContainerEndpointDiscovery(
+            resolveDefault = { "ssh://operator@node.example" },
+            probe = EndpointProbe { EndpointProbeResult.Rootful },
+        )
+        val endpoint = (discovery.discover(EndpointConfig()) as EndpointSelection.Ready).endpoint
+        assertEquals("ssh://operator@node.example", endpoint.resolvedUri)
+        assertEquals(null, endpoint.uri)
+    }
+
+    @Test
+    fun `invalid explicit engine does not silently fall back to Docker`() {
+        var probes = 0
+        val discovery = ContainerEndpointDiscovery(
+            probe = EndpointProbe {
+                probes++
+                EndpointProbeResult.Rootful
+            },
+        )
+        val result = discovery.discover(EndpointConfig.fromEnvironment(mapOf("TIER_E_CONTAINER_ENGINE" to "invalid")))
+        assertTrue(result is EndpointSelection.Skipped)
+        assertTrue((result as EndpointSelection.Skipped).reason.contains("invalid"))
+        assertEquals(0, probes)
+    }
+
+    @Test
+    fun `Podman connection environment selects Podman rather than Docker`() {
+        val config = EndpointConfig.fromEnvironment(mapOf("CONTAINER_HOST" to "unix:///run/podman/podman.sock"))
+        assertEquals(ContainerEngine.PODMAN, config.engine)
+        assertEquals("unix:///run/podman/podman.sock", config.uri)
+    }
+
     @EnabledIfRootfulContainerAvailable
-    class DisabledFixture {
+    class ConditionFixture {
         @Test
-        fun test() {
-            error("fixture must be skipped when no endpoint is available")
+        fun `condition injects the admitted endpoint`(endpoint: ContainerEndpoint) {
+            assertTrue(endpoint.engine in setOf(ContainerEngine.DOCKER, ContainerEngine.PODMAN))
+            assertTrue(!endpoint.resolvedUri.isNullOrBlank())
         }
     }
 }

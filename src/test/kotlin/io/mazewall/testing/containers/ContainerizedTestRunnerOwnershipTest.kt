@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -162,12 +164,180 @@ esac
             assertTrue(commands.any { it.contains("run --rm --privileged") }, commands.toString())
             assertFalse(commands.any { it.contains("$output:/artifacts") }, commands.toString())
             assertFalse(commands.any { it.contains("${System.getProperty("user.home")}/.gradle") })
-            assertTrue(commands.any { it.contains("volume rm") }, "run-scoped artifact volume must be retired")
+            assertFalse(commands.any { it.contains("volume rm") }, "the only artifact volume must survive export failure")
+            assertTrue(
+                process.inputStream
+                .bufferedReader()
+                .readText()
+                .contains("artifact volume"),
+            )
             assertEquals(Files.getOwner(output), Files.getOwner(output.resolve("runner-events.jsonl")))
         } finally {
             scratch.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `Tier E gate export cannot report success after host copy fails`() {
+        val script = Files.readString(repo().resolve("scripts/run_tier_e_rootful_gate.sh"))
+        val function = script.substringAfter("export_artifacts() {").substringBefore("\ncleanup() {")
+        assertExportFails("export_artifacts() {$function", "if ! export_artifacts; then echo EXPORT_FAILED; else echo FALSE_SUCCESS; fi")
+    }
+
+    @Test
+    fun `a stale passing gate artifact cannot turn an empty export into success`() {
+        val root = repo()
+        val scratch = Files.createTempDirectory("tier-e-stale-gate-")
+        try {
+            val fake = scratch.resolve("docker")
+            Files.writeString(
+                fake,
+                """#!/bin/bash
+case "${'$'}*" in
+  *'info '* ) printf '["name=seccomp"]' ;;
+  *'run --rm -i'* ) cat >/dev/null ;;
+  *'volume inspect'* ) exit 1 ;;
+  *'volume create'* ) printf volume ;;
+  *'create --name'* ) printf container ;;
+  *'logs '* ) printf retained-log ;;
+esac
+""",
+            )
+            fake.toFile().setExecutable(true)
+            val output = scratch.resolve("evidence")
+            Files.createDirectories(output)
+            Files.writeString(output.resolve("benchmark-gate-status.txt"), "PASS\n")
+            val run = ProcessBuilder("bash", root.resolve("scripts/run_tier_e_rootful_gate.sh").toString())
+                .directory(root.toFile())
+                .redirectErrorStream(true)
+                .apply {
+                    environment()["PATH"] = "$scratch:${System.getenv("PATH")}"
+                    environment()["TIER_E_ARTIFACT_DIR"] = output.toString()
+                }.start()
+            assertTrue(run.waitFor(30, TimeUnit.SECONDS))
+            assertTrue(run.exitValue() != 0, "a prior PASS cannot substitute for this run's artifact")
+            assertEquals("PASS\n", Files.readString(output.resolve("benchmark-gate-status.txt")))
+        } finally {
+            scratch.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `benchmark rejects old results before starting a new privileged run`() {
+        val root = repo()
+        val scratch = Files.createTempDirectory("tier-e-stale-benchmark-")
+        try {
+            val fake = scratch.resolve("docker")
+            Files.writeString(
+                fake,
+                """#!/bin/bash
+printf '%s\n' "${'$'}*" >> "${'$'}MAZEWALL_FAKE_LOG"
+exit 0
+""",
+            )
+            fake.toFile().setExecutable(true)
+            val output = scratch.resolve("evidence")
+            Files.createDirectories(output)
+            Files.writeString(output.resolve("results.jsonl"), "old-result\n")
+            val log = scratch.resolve("commands.log")
+            val run = ProcessBuilder("bash", root.resolve("scripts/run_tier_e_trustworthy_benchmark.sh").toString(), output.toString())
+                .directory(root.toFile())
+                .redirectErrorStream(true)
+                .apply {
+                    environment()["PATH"] = "$scratch:${System.getenv("PATH")}"
+                    environment()["MAZEWALL_FAKE_LOG"] = log.toString()
+                    environment()["MAZEWALL_TIER_E_BENCHMARK_CPUS"] = "0,1"
+                }.start()
+            assertTrue(run.waitFor(30, TimeUnit.SECONDS))
+            assertTrue(run.exitValue() != 0)
+            assertFalse(Files.exists(log), "must refuse stale results before contacting the engine")
+            assertEquals("old-result\n", Files.readString(output.resolve("results.jsonl")))
+        } finally {
+            scratch.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `benchmark export cannot mark evidence published after host copy fails`() {
+        val script = Files.readString(repo().resolve("scripts/run_tier_e_trustworthy_benchmark.sh"))
+        val function = script.substringAfter("export_container_artifacts() {").substringBefore("\nrunner_event() {")
+        assertExportFails("export_container_artifacts() {$function", "export_container_artifacts || echo EXPORT_FAILED")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["staging", "engine-copy", "validation", "publication", "staging-cleanup"])
+    fun `both privileged exporters fail closed at every publication stage`(scenario: String) {
+        for ((scriptName, method) in listOf(
+            "run_tier_e_rootful_gate.sh" to "export_artifacts",
+            "run_tier_e_trustworthy_benchmark.sh" to "export_container_artifacts",
+        )) {
+            val script = Files.readString(repo().resolve("scripts/$scriptName"))
+            val suffix = if (method == "export_artifacts") "\ncleanup() {" else "\nrunner_event() {"
+            val function = "$method() {${script.substringAfter("$method() {").substringBefore(suffix)}"
+            val bootstrap = """set -euo pipefail
+SCENARIO=$scenario
+ARTIFACT_DIR=/virtual
+ARTIFACT_VOLUME=owned-volume
+ARTIFACT_EXPORTED=false
+RUN_ID=owned-run
+CONTAINER=owned-container
+IMAGE=owned-image
+ENGINE=(engine)
+DOCKER=(engine)
+engine() {
+  if [[ "${'$'}SCENARIO" == engine-copy && "${'$'}1" == cp ]]; then return 1; fi
+  return 0
+}
+mktemp() { if [[ "${'$'}SCENARIO" == staging ]]; then return 1; fi; printf '/virtual/stage\n'; }
+find() { if [[ "${'$'}SCENARIO" == validation ]]; then return 1; fi; return 0; }
+cp() { if [[ "${'$'}SCENARIO" == publication ]]; then return 1; fi; return 0; }
+rm() { if [[ "${'$'}SCENARIO" == staging-cleanup ]]; then return 1; fi; return 0; }
+rmdir() { return 0; }
+$function
+if $method; then printf 'FALSE_SUCCESS\n'; else printf 'EXPORT_FAILED\n'; fi
+"""
+            val proc = ProcessBuilder("bash").redirectErrorStream(true).start()
+            proc.outputStream.bufferedWriter().use { it.write(bootstrap) }
+            assertTrue(proc.waitFor(5, TimeUnit.SECONDS))
+            val output = proc.inputStream.bufferedReader().readText()
+            assertTrue(output.contains("EXPORT_FAILED"), "$scriptName/$scenario: $output")
+            assertFalse(output.contains("FALSE_SUCCESS"), "$scriptName/$scenario: $output")
+        }
+    }
+
+    private fun assertExportFails(
+        function: String,
+        invocation: String,
+    ) {
+        val code = """set -euo pipefail
+ARTIFACT_DIR=/virtual
+ARTIFACT_VOLUME=owned-volume
+ARTIFACT_EXPORTED=false
+RUN_ID=owned-run
+CONTAINER=owned-container
+IMAGE=owned-image
+ENGINE=(engine)
+DOCKER=(engine)
+engine() { return 0; }
+mktemp() { printf '/virtual/stage\n'; }
+find() { return 0; }
+cp() { printf 'simulated export copy failure\n' >&2; return 1; }
+rm() { return 0; }
+rmdir() { return 0; }
+$function
+$invocation
+"""
+        val run = ProcessBuilder("bash").redirectErrorStream(true).start()
+        run.outputStream.bufferedWriter().use { it.write(code) }
+        assertTrue(run.waitFor(5, TimeUnit.SECONDS))
+        val output = run.inputStream.bufferedReader().readText()
+        assertTrue(output.contains("EXPORT_FAILED"), output)
+        assertFalse(output.contains("FALSE_SUCCESS"), output)
+    }
+
+    private fun repo(): Path =
+        generateSequence(Path.of("").toAbsolutePath()) { it.parent }
+        .first { Files.exists(it.resolve("scripts/run_tier_e_rootful_gate.sh")) }
 
     private data class LaunchResult(
         val exit: Int,

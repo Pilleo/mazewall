@@ -1,0 +1,1 @@
+{"coverage_verdict":"PASS","admission_errors":[],"expected_edges":72,"recovered_edges":72,"missing_paths":[],"wrong_edges":[],"recall":{"common":{"expected":24,"recovered":24,"recall":1.0},"infrequent":{"expected":24,"recovered":24,"recall":1.0},"singleton":{"expected":24,"recovered":24,"recall":1.0}},"policy_eligibility":false}

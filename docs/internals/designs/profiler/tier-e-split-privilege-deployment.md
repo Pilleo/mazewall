@@ -174,11 +174,11 @@ lifecycle dimensions all true. Active polling alone would not meet this qualific
 The fixture must prove the restrictive socket owner/group/mode admits the target UID but rejects an
 unrelated pod/container user.
 
-The independent 72-path coverage oracle is retained separately from this lifecycle fixture. It
-currently executes inside the privileged benchmark harness, where it proves exact decoded edge
-recovery across dictionary and inline transports. It is not yet a split-topology coverage result:
-that requires a collector-owned, bounded acknowledged-edge manifest at terminalization. Target-side
-operation counters and dictionary-definition counts are not sufficient substitutes.
+The independent 72-path coverage oracle is retained separately from this lifecycle fixture. The
+split-topology short fixture now verifies the collector-owned bounded acknowledged-edge manifest
+against that oracle at terminalization. Target-side operation counters and dictionary-definition
+counts are not sufficient substitutes. Coverage `PASS` may coexist with an `INCOMPLETE` fault
+terminal; it cannot imply complete transport or policy eligibility.
 
 Rootless output is `INCOMPLETE`, not privileged evidence.
 
@@ -198,19 +198,28 @@ source through the engine into a per-run volume, builds with a persistent
 engine-owned Gradle volume, and exports inspected artifacts via the client.
 The rootful build has no writable host checkout or normal Gradle-cache mount.
 An interrupted or failing container cannot deposit root-owned build outputs
-there. Resource cleanup names only the run's own container and workspace.
+there. Publication is checked stage by stage (copy, validation, host export,
+cleanup); a failed export retains its source container or evidence volume and
+prints its recovery identifier. Fresh result preflight rejects old `PASS`
+receipts. Resource cleanup names only the run's own container and workspace.
 The Docker ownership and short rootful container tests have been exercised on
 the local rootful endpoint; runtime parity on a rootful Podman server remains
 unverified until such an endpoint is available. This change does not promote
 Tier E as a default or change `policy_eligibility=false`.
 The short annotated JUnit suite also exercises the actual 72-path non-root
-target/privileged collector fixture when the selected rootful endpoint uses a
-local `unix://` socket. The fixture inspects the registered target via local
-`/proc` and binds a local shared directory; therefore the split fixture
-skips for remote or unproven-default endpoints even though the mount-free
-engine and caller-owned artifact-export tests may run remotely. Availability
-and image configuration are forwarded to the JUnit worker on each invocation,
-so a prior skipped Gradle run cannot mask a newly available endpoint.
+target/privileged collector fixture. Endpoint discovery resolves the selected
+Docker context or Podman default connection to its server URI before admission.
+The fixture then proves a local `unix://` connection, local `/proc` PID-namespace
+identity, and a read-only bind-mount token before preparing native code. Remote
+or unproven endpoints skip this fixture even though mount-free engine and
+caller-owned export tests may run remotely. Kotlin owns the exact per-run
+target and collector names independently of the shell controller, collects
+logs, and removes only those containers after a controller kill. Native fixture
+builds reuse only a checkout/configuration-bound cache after checking CMake
+source/build type; a foreign cache fails without deletion and concurrent
+writers serialize. Availability and image configuration are forwarded to the
+JUnit worker on each invocation, so a prior skipped Gradle run cannot mask a
+newly available endpoint.
 
 ## Compatibility rules
 

@@ -421,6 +421,13 @@ coverage. Missing repetitions can coexist with `coverage_verdict=PASS`; missing 
 results never establish completeness for an unknown application's future paths or arguments,
 and `policy_eligibility` remains false.
 
+For the split fixture, an exact recovered-edge set may pass coverage even when
+the terminal report and coverage manifest consistently say `INCOMPLETE` (for
+example, deliberate ring loss). The verifier rejects unknown, duplicate,
+missing, or malformed edges and contradictory terminal/manifest dimensions.
+Coverage never upgrades transport completeness, lifecycle validity, or policy
+eligibility: whole-session acceptance still requires complete terminal evidence.
+
 **Implemented contract: split-privilege coverage artifact.** A rootful operator-owned collector
 may enable `TIER_E_COVERAGE_MANIFEST=1` only for benchmark fixtures. After terminal dictionary
 resolution and collector-owned acknowledgement, it atomically writes
@@ -2710,3 +2717,5 @@ The developer-only Kotlin tooling source set now supplies independent JSONL/full
 For offline reproduction, run `./gradlew :profiler:tierEVerifyArtifacts -PtierEArtifacts=<extracted-decision-dir>` (no container endpoint), or `./gradlew :profiler:tierELongMatchedDecision -PtierEJsonl=<fork-results.jsonl> -PtierEDecisionOutput=<scratch-decision.json>`. The regular `:profiler:test` task runs pure Kotlin contract tests. Short endpoint-gated tests run via `:profiler:rootfulContainerTest` every invocation and are also dependencies of `:profiler:integrationTest`; absent rootful endpoints produce a JUnit skip. Never put `tierELongMatchedBenchmark` under the default build/check tasks.
 
 The active long-matched row, CPU, source-fingerprint, coverage, and estimator scripts now call Kotlin tooling. Their previous four Node regression suites have Kotlin JUnit coverage. `pytest scripts/tests` discovers only the three still-active operational/fingerprint tests; the historical 75-case Python verifier suite remains runnable by explicitly naming its test file, preserving immutable evidence reproduction commands. The remaining 28 Node tests belong to other currently active Tier E protocol/transport tools and are not discarded before their callers migrate. This is a compatibility transition, not a weakening of kernel or policy evidence.
+
+The [fault-parity and short-rootful receipts](../../evidence/tier-e-kotlin-fault-and-ownership-20260925/README.md) compare the Kotlin verdict against all 30 retained ring-drop arms without changing the historical archive. A fresh 72-path rootful fault fixture also recovered 72 exact edges with coverage `PASS` and terminal `INCOMPLETE`; this is diagnostic coverage only, not a performance or promotion decision.
