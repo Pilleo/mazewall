@@ -181,7 +181,7 @@ the default. `policy_eligibility=false` throughout.
   per arm, but the specified 800 µs pacing fixes a 60-second wall-time floor
   for every 75,000-operation arm. Retire remaining compatibility scripts only
   after their exceptional/fault callers and regression coverage move to Kotlin.
-  Kotlin JUnit now owns 80 pure tooling cases; redundant long-control Node
+  Kotlin JUnit now owns the pure long-control tooling cases; redundant Node
   test suites were retired. Three operational/fingerprint Python tests remain
   in default discovery; the historical 75-case verifier suite is still
   explicitly runnable using its archived command. Other 28 Node tests are
