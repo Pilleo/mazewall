@@ -136,9 +136,22 @@ else
     test -f "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so"
     test -x "${ROOT}/profiler/build/install/tier-e-daemon/bin/tier-e-daemon"
 fi
+TOOLING_LIB="${ROOT}/profiler/build/install/tier-e-daemon/lib"
+if [[ "${SPLIT_COVERAGE}" == 1 || "${SPLIT_BENCHMARK}" == 1 ]]; then
+    compgen -G "${TOOLING_LIB}/tier-e-tools-*.jar" >/dev/null || {
+        echo 'missing Kotlin Tier E tooling distribution; run :profiler:installDist' >&2
+        exit 1
+    }
+fi
+tier_e_tools() {
+    java -cp "${TOOLING_LIB}/*" io.mazewall.profiler.tierE.tools.TierEToolsMainKt "$@"
+}
+if [[ "${SPLIT_COVERAGE}" == 1 || "${SPLIT_BENCHMARK}" == 1 ]]; then
+    [[ "$(tier_e_tools version)" == tier-e-tools-1 ]] || { echo 'Tier E Kotlin tooling distribution is stale' >&2; exit 1; }
+fi
 marker_symbol=mazewall_stack_marker
 [[ "${SPLIT_MARKER_VERSION}" == v2 ]] && marker_symbol=mazewall_stack_marker_v2
-MARKER_OFFSET_RAW=$(nm -D --defined-only "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so" | awk -v symbol="${marker_symbol}" '$3 == symbol { print $1; exit }')
+MARKER_OFFSET_RAW=$(nm -D --defined-only "${NATIVE_BUILD_DIR}/libmazewall_stack_agent.so" | awk -v symbol="${marker_symbol}" '$3 == symbol && !found { print $1; found = 1 }')
 [[ -n "${MARKER_OFFSET_RAW}" ]] || { echo "missing ${marker_symbol} symbol" >&2; exit 1; }
 MARKER_OFFSET=$(printf '0x%x' "$((16#${MARKER_OFFSET_RAW}))")
 if [[ "${REUSE_BUILD}" != 1 ]]; then
@@ -255,7 +268,7 @@ if [[ "${COVERAGE_BASELINE}" == 1 ]]; then
     "${ENGINE}" logs "${TARGET}" > "${ARTIFACT_DIR}/target.log" 2>&1
     cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
     cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
-    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" \
+    tier_e_tools target-cpu "${ARTIFACT_DIR}" \
         --host-pid "${TARGET_HOST_PID}" --starttime "${TARGET_STARTTIME}"
     printf 'mode=baseline\ncoverage_verdict=NOT_APPLICABLE\nterminal=NOT_APPLICABLE\ntarget_exit=%s\npolicy_eligibility=false\n' \
         "${TARGET_EXIT}" > "${ARTIFACT_DIR}/verdict.env"
@@ -412,7 +425,7 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
     collector_host_pid=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${COLLECTOR}")
     collector_running=$("${ENGINE}" inspect -f '{{.State.Running}}' "${COLLECTOR}")
     if [[ "${collector_running}" != true || ! "${collector_host_pid}" =~ ^[1-9][0-9]*$ ]] ||
-        ! node "${ROOT}/scripts/tier_e_collector_cpu_sample.mjs" \
+        ! tier_e_tools collector-cpu \
             --pid "${collector_host_pid}" --hz "$(getconf CLK_TCK)" \
             --boundary after_terminal_report_before_shutdown \
             --out "${ARTIFACT_DIR}/collector-process-metrics.json"; then
@@ -424,18 +437,9 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
 fi
 if [[ "${SPLIT_BENCHMARK}" == 1 ]]; then
     collector_host_pid=$("${ENGINE}" inspect -f '{{.State.Pid}}' "${COLLECTOR}")
-    node - "${collector_host_pid}" "$(getconf CLK_TCK)" "${ARTIFACT_DIR}/collector-process-metrics.json" <<'NODE'
-const fs=require('fs');
-const [pid,hz,out]=process.argv.slice(2);
-const status=fs.readFileSync(`/proc/${pid}/status`,'utf8');
-const stat=fs.readFileSync(`/proc/${pid}/stat`,'utf8');
-const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
-const ticks=Number(fields[11])+Number(fields[12]);
-const hwm=Number(/^VmHWM:\s+(\d+)\s+kB/m.exec(status)?.[1]??-1);
-const result={schema_version:1,collector_host_pid:Number(pid),cpu_ticks:ticks,cpu_ns:Math.round(ticks*1e9/Number(hz)),peak_rss_kb:hwm,
-  cpu_time_basis:'process_ticks_since_start',sample_boundary:'after_terminal_report_before_shutdown'};
-fs.writeFileSync(out,JSON.stringify(result)+'\n');
-NODE
+    tier_e_tools collector-cpu --pid "${collector_host_pid}" --hz "$(getconf CLK_TCK)" \
+        --boundary after_terminal_report_before_shutdown \
+        --out "${ARTIFACT_DIR}/collector-process-metrics.json"
 fi
 "${ENGINE}" run --rm --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL \
     -v "${SHARED}:/shared" "${IMAGE}" \
@@ -510,9 +514,9 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
     fi
     cp "${SHARED}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-oracle.json"
     cp "${SHARED}/target-cpu.json" "${ARTIFACT_DIR}/target-cpu.json"
-    node "${ROOT}/scripts/tier_e_target_cpu_sample.mjs" --validate "${ARTIFACT_DIR}" \
+    tier_e_tools target-cpu "${ARTIFACT_DIR}" \
         --host-pid "${TARGET_HOST_PID}" --starttime "${TARGET_STARTTIME}"
-    node "${ROOT}/scripts/verify_tier_e_split_coverage.mjs" \
+    tier_e_tools coverage \
         "${ARTIFACT_DIR}/coverage-oracle.json" "${ARTIFACT_DIR}/coverage-manifest.json" \
         "${ARTIFACT_DIR}/terminal-report.json" "${ARTIFACT_DIR}/coverage-verdict.json" || {
             [[ "${ALLOW_INCOMPLETE}" == 1 ]] || exit 1

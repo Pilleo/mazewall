@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "purpose": "source-dirty developer smoke only, not decision-quality evidence",
+  "archive": "kotlin-tooling-smoke.tar.zst",
+  "archive_sha256": "cc5fefc618cd96b91c868126cd56469d810d974405e5dba744d7dba1b262007f",
+  "archive_member_files": 202,
+  "short_hybrid_arms": 6,
+  "long_forks": 1,
+  "long_arms": 7,
+  "long_declared_operations_per_arm": 75000,
+  "long_source_digest": "496f77af100626dc0b22e8833b1eafc89cea06714386b18f7c3bbe68825db60b",
+  "input_dirty_count": 9,
+  "source_state_unchanged_during_run": true,
+  "terminal_success": true,
+  "policy_eligibility": false
+}

@@ -6,7 +6,19 @@ export DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 OUTPUT=${1:-"${ROOT}/build/tier-e-split-coverage-matrix"}
 FORKS=${TIER_E_SPLIT_COVERAGE_FORKS:-1}
 mkdir -p "${OUTPUT}"
-python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUTPUT}/source-state-before.json"
+TOOLING_LIB="${ROOT}/profiler/build/install/tier-e-daemon/lib"
+if [[ "${TIER_E_SPLIT_REUSE_BUILD:-0}" != 1 ]]; then
+    "${ROOT}/gradlew" :profiler:installDist >/dev/null
+fi
+compgen -G "${TOOLING_LIB}/tier-e-tools-*.jar" >/dev/null || {
+    echo 'missing Kotlin Tier E tooling distribution; run :profiler:installDist' >&2
+    exit 1
+}
+tier_e_tools() {
+    java -cp "${TOOLING_LIB}/*" io.mazewall.profiler.tierE.tools.TierEToolsMainKt "$@"
+}
+[[ "$(tier_e_tools version)" == tier-e-tools-1 ]] || { echo 'Tier E Kotlin tooling distribution is stale' >&2; exit 1; }
+tier_e_tools fingerprint "${ROOT}" > "${OUTPUT}/source-state-before.json"
 terminal_report() {
     status=$?
     if [[ ! -f "${OUTPUT}/terminal.json" ]]; then
@@ -59,7 +71,7 @@ if [[ "${LONG_MATCHED}" == 1 ]]; then
         'dictionary-unique-edge-v2:dictionary:unique-stack-syscall:v2:disabled'
         'dictionary-unique-edge-hybrid:dictionary:unique-stack-syscall:v2:recover'
     )
-    long_source_digest=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).source_digest)' "${OUTPUT}/source-state-before.json")
+    long_source_digest=$(tier_e_tools json-field "${OUTPUT}/source-state-before.json" source_digest)
     long_image_id=$("${TIER_E_CONTAINER_ENGINE:-docker}" image inspect "${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}" --format '{{.Id}}')
     long_native_sha=$(sha256sum "${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so" | awk '{print $1}')
     long_jars_sha=$(sha256sum "${ROOT}"/profiler/build/install/tier-e-daemon/lib/*.jar | LC_ALL=C sort | sha256sum | awk '{print $1}')
@@ -99,19 +111,11 @@ if [[ "${LONG_MATCHED}" != 1 ]]; then
                 TIER_E_SPLIT_RECOVERY_MODE="${recovery_mode}" \
                 bash "${ROOT}/scripts/run_tier_e_split_privilege_fixture.sh"
             export TIER_E_SPLIT_REUSE_BUILD=1
-            node -e '
-                const fs=require("fs"); const p=process.argv[1]; const coverage=JSON.parse(fs.readFileSync(`${p}/coverage-verdict.json`));
-                const terminal=JSON.parse(fs.readFileSync(`${p}/terminal-report.json`));
-                fs.writeFileSync(`${p}/summary.json`, JSON.stringify({coverage, terminal, policy_eligibility:false})+"\n");
-                const allowIncomplete=process.argv[2]==="1";
-                const complete=coverage.coverage_verdict==="PASS" && terminal.evidence_integrity==="COMPLETE";
-                const bounded=coverage.coverage_verdict==="INCOMPLETE" && terminal.evidence_integrity==="INCOMPLETE";
-                if(!complete && !(allowIncomplete && bounded)) process.exit(1);
-                if(terminal.policy_eligibility!==false) process.exit(1);
-            ' "${artifact}" "$([[ "${transport}" == inline-per-invocation && "${TIER_E_SPLIT_COVERAGE_OPERATIONS:-72}" -gt 72 ]] && printf 1 || printf 0)"
+            tier_e_tools legacy-summary "${artifact}" \
+                "$([[ "${transport}" == inline-per-invocation && "${TIER_E_SPLIT_COVERAGE_OPERATIONS:-72}" -gt 72 ]] && printf 1 || printf 0)"
         done
     done
-    python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUTPUT}/source-state-before.json" > "${OUTPUT}/source-state-after.json"
+    tier_e_tools fingerprint "${ROOT}" --verify "${OUTPUT}/source-state-before.json" > "${OUTPUT}/source-state-after.json"
     printf '{"schema_version":1,"success":true,"forks":%s,"arms":%s,"source_state_unchanged":true,"policy_eligibility":false}\n' \
         "${FORKS}" "${#variants[@]}" > "${OUTPUT}/terminal.json"
 else
@@ -152,32 +156,14 @@ else
             "${engine}" rm -f "${container}" >/dev/null 2>&1 || true
         done
         local arm_status=INCOMPLETE
-        if [[ "${fixture_exit}" -eq 0 ]]; then
-            if [[ "${baseline}" == 1 ]]; then
-                if node -e '
-                    const fs=require("fs"); const p=process.argv[1];
-                    const s=JSON.parse(fs.readFileSync(`${p}/summary.json`));
-                    if(s.mode!=="baseline"||s.policy_eligibility!==false) process.exit(1);
-                    const c=JSON.parse(fs.readFileSync(`${p}/target-cpu.json`));
-                    if(!(c.target_cpu_ns>0)) process.exit(1);
-                    if(fs.existsSync(`${p}/collector-process-metrics.json`)) process.exit(1);
-                ' "${artifact}"; then arm_status=COMPLETE; fi
-            else
-                if node -e '
-                    const fs=require("fs"); const p=process.argv[1];
-                    const coverage=JSON.parse(fs.readFileSync(`${p}/coverage-verdict.json`));
-                    const terminal=JSON.parse(fs.readFileSync(`${p}/terminal-report.json`));
-                    fs.writeFileSync(`${p}/summary.json`, JSON.stringify({coverage, terminal, policy_eligibility:false})+"\n");
-                    if(coverage.coverage_verdict!=="PASS"||terminal.evidence_integrity!=="COMPLETE") process.exit(1);
-                    if(terminal.policy_eligibility!==false) process.exit(1);
-                ' "${artifact}"; then arm_status=COMPLETE; fi
-            fi
+        if [[ "${fixture_exit}" -eq 0 ]] && tier_e_tools arm-status "${artifact}" "${baseline}"; then
+            arm_status=COMPLETE
         fi
         local meta
         meta=$(printf '{"fork":%s,"arm":"%s","status":%s,"timedOut":%s,"seed":%s,"declaredOperations":%s,"sourceDigest":"%s","imageId":"%s","nativeSoSha256":"%s","daemonJarsSha256":"%s"}' \
             "${fork}" "${arm_name}" "${fixture_exit}" "${timed_out}" "${seed}" "${LONG_OPS}" \
             "${long_source_digest}" "${long_image_id}" "${long_native_sha}" "${long_jars_sha}")
-        node "${ROOT}/scripts/tier_e_long_matched_row.mjs" --meta "${meta}" --dir "${artifact}" >> "${OUTPUT}/fork-results.jsonl"
+        tier_e_tools row "${meta}" "${artifact}" >> "${OUTPUT}/fork-results.jsonl"
         printf '{"schema_version":1,"fork":%s,"arm":"%s","status":"%s","fixture_exit":%s,"timed_out":%s,"seed":%s,"policy_eligibility":false}\n' \
             "${fork}" "${arm_name}" "${arm_status}" "${fixture_exit}" "${timed_out}" "${seed}" > "${artifact}/arm-result.json"
         if [[ "${arm_status}" != COMPLETE ]]; then
@@ -194,7 +180,7 @@ else
             long_run_arm "${fork}" "${name}" "${transport}" "${emission}" "${marker_version}" "${recovery_mode}" 0
         done
     done
-    python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUTPUT}/source-state-before.json" > "${OUTPUT}/source-state-after.json"
+    tier_e_tools fingerprint "${ROOT}" --verify "${OUTPUT}/source-state-before.json" > "${OUTPUT}/source-state-after.json"
     long_binaries_unchanged=true
     image_after=$("${TIER_E_CONTAINER_ENGINE:-docker}" image inspect "${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}" --format '{{.Id}}')
     native_after=$(sha256sum "${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so" | awk '{print $1}')

@@ -137,6 +137,37 @@ tasks.register<JavaExec>("tierESourceFingerprint") {
     }
 }
 
+// An explicit, intentionally non-cached measurement. It is never wired into
+// test, integrationTest, check, or build: 75,000 paced operations impose a
+// 60-second wall-clock floor on each of seven arms per fork.
+tasks.register<Exec>("tierELongMatchedBenchmark") {
+    group = "verification"
+    description = "Explicit long Tier E seven-arm matched benchmark (defaults to 15 forks)"
+    dependsOn("installDist")
+    val forks = providers.gradleProperty("tierEForks").orElse("15")
+    val operations = providers.gradleProperty("tierEOperations").orElse("75000")
+    val output =
+        providers.gradleProperty("tierEOutput").orElse(
+            rootProject.layout.buildDirectory
+                .dir("tier-e-long-matched")
+                .map { it.asFile.absolutePath },
+        )
+    commandLine("bash", rootProject.file("scripts/run_tier_e_split_coverage_matrix.sh"))
+    doFirst {
+        require(forks.get().toIntOrNull()?.let { it > 0 } == true) { "tierEForks must be positive" }
+        require(operations.get().toIntOrNull()?.let { it >= 72 && it % 24 == 0 } == true) {
+            "tierEOperations must be at least 72 and divisible by 24"
+        }
+        environment("TIER_E_SPLIT_COVERAGE_LONG_MATCHED", "1")
+        environment("TIER_E_SPLIT_COVERAGE_FORKS", forks.get())
+        environment("TIER_E_SPLIT_COVERAGE_OPERATIONS", operations.get())
+        environment("TIER_E_SPLIT_REUSE_BUILD", "1")
+        environment("TIER_E_SPLIT_WORKLOAD_CPU", providers.environmentVariable("TIER_E_SPLIT_WORKLOAD_CPU").orElse("0").get())
+        environment("TIER_E_SPLIT_COLLECTOR_CPU", providers.environmentVariable("TIER_E_SPLIT_COLLECTOR_CPU").orElse("1").get())
+        args(output.get())
+    }
+}
+
 val tierEToolingJar =
     tasks.register<Jar>("tierEToolingJar") {
         archiveBaseName.set("tier-e-tools")

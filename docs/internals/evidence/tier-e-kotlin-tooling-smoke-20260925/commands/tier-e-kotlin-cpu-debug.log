@@ -1,0 +1,80 @@
++ set -euo pipefail
++++ dirname scripts/run_tier_e_split_privilege_fixture.sh
+++ cd scripts/..
+++ pwd
++ ROOT=/home/leanid/Documents/code/java/jseccomp
++ ENGINE=docker
++ DOCKER_HOST=unix:///var/run/docker.sock
++ IMAGE=mazewall-tier-e-rootful:latest
++ ARTIFACT_DIR=/tmp/tier-e-kotlin-cpu-smoke
++ RUN_ID=tier-e-split-2679813
+++ mktemp -d
++ SHARED=/tmp/tmp.Du4sppEgVi
++ TARGET=tier-e-split-2679813-target
++ COLLECTOR=tier-e-split-2679813-collector
+++ id -u
++ CALLER_UID=1000
+++ id -g
++ CALLER_GID=1000
++ NATIVE_BUILD_DIR=/tmp/jseccomp-profiler-native-build
++ REUSE_BUILD=0
++ NEGATIVE_ARTIFACT_CASE=
++ NEGATIVE_IDENTITY_CASE=
++ DELAYED_ARTIFACT=0
++ SIMULATED_PID_REUSE=0
++ REAL_PID_REUSE=0
++ SPLIT_COVERAGE=1
++ SPLIT_BENCHMARK=0
++ SPLIT_COVERAGE_OPERATIONS=72
++ ALLOW_INCOMPLETE=0
++ SPLIT_EMISSION_MODE=full-stream
++ SPLIT_STACK_TRANSPORT=dictionary
++ SPLIT_SOCKET_ACCESS=group
++ BENCH_WARMUPS=3
++ BENCH_BATCHES=10
++ BENCH_ITERATIONS=100
++ SPLIT_MARKER_VERSION=v1
++ SPLIT_MARKER_BACKEND=uprobe
++ SPLIT_RECOVERY_MODE=disabled
++ COVERAGE_BASELINE=0
++ trap cleanup EXIT
++ [[ docker == docker ]]
++ [[ full-stream == full-stream ]]
++ [[ dictionary == dictionary ]]
++ [[ v1 == v1 ]]
++ [[ uprobe == uprobe ]]
++ [[ disabled == disabled ]]
++ [[ disabled == disabled ]]
++ [[ 0 == 0 ]]
++ [[ 0 == 1 ]]
++ [[ 0 == 1 ]]
++ [[ group == group ]]
++ export DOCKER_HOST
++ mkdir -p /tmp/tier-e-kotlin-cpu-smoke /tmp/tmp.Du4sppEgVi/definitions /tmp/tmp.Du4sppEgVi/evidence
++ chmod 0755 /tmp/tmp.Du4sppEgVi
++ chmod 0770 /tmp/tmp.Du4sppEgVi/definitions /tmp/tmp.Du4sppEgVi/evidence
++ registered_artifact_file=orders.mzse
++ [[ 0 == 1 ]]
++ case "${NEGATIVE_ARTIFACT_CASE}" in
++ [[ 0 != 1 ]]
++ /home/leanid/Documents/code/java/jseccomp/gradlew :profiler:installDist
++ [[ ! -f /tmp/jseccomp-profiler-native-build/CMakeCache.txt ]]
++ [[ 0 != 1 ]]
++ cmake --build /tmp/jseccomp-profiler-native-build -j2
++ TOOLING_LIB=/home/leanid/Documents/code/java/jseccomp/profiler/build/install/tier-e-daemon/lib
++ [[ 1 == 1 ]]
++ compgen -G '/home/leanid/Documents/code/java/jseccomp/profiler/build/install/tier-e-daemon/lib/tier-e-tools-*.jar'
++ marker_symbol=mazewall_stack_marker
++ [[ v1 == v2 ]]
+++ nm -D --defined-only /tmp/jseccomp-profiler-native-build/libmazewall_stack_agent.so
+++ awk -v symbol=mazewall_stack_marker '$3 == symbol { print $1; exit }'
++ MARKER_OFFSET_RAW=000000000000b3b0
++ cleanup
++ mkdir -p /tmp/tier-e-kotlin-cpu-smoke
++ [[ 0 == 1 ]]
++ docker logs tier-e-split-2679813-target
++ true
++ docker logs tier-e-split-2679813-collector
++ true
++ docker rm -f tier-e-split-2679813-target tier-e-split-2679813-collector
++ rm -rf /tmp/tmp.Du4sppEgVi

@@ -176,15 +176,7 @@ public object TierELongMatchedDirectoryVerifier {
 
         val terminal = read("terminal-report.json")
         if (terminal == null ||
-            terminal.text("evidence_integrity") != "COMPLETE" ||
-            terminal.text("terminal_reason") != "COMPLETE" ||
-            terminal.boolean("policy_eligibility") != false ||
-            dimensions.any { terminal.boolean(it) != true } ||
-            !emptyList(terminal["failed_dimensions"]) ||
-            terminal.text("registration_id").isNullOrBlank() ||
-            !positive(terminal.number("session_epoch")) ||
-            !positive(terminal.number("target_pid")) ||
-            !positive(terminal.number("process_incarnation")) ||
+            !validTerminal(terminal) ||
             terminal.text("evidence_integrity") != row.text("terminal_integrity") ||
             target?.number("host_pid") != terminal.number("target_pid") ||
             target?.number("starttime") != terminal.number("process_incarnation")
@@ -214,7 +206,18 @@ public object TierELongMatchedDirectoryVerifier {
         }
     }
 
-    private fun validOracle(paths: JsonArray): Boolean {
+    public fun validTerminal(terminal: JsonObject): Boolean =
+        terminal.text("evidence_integrity") == "COMPLETE" &&
+            terminal.text("terminal_reason") == "COMPLETE" &&
+            terminal.boolean("policy_eligibility") == false &&
+            dimensions.all { terminal.boolean(it) == true } &&
+            emptyList(terminal["failed_dimensions"]) &&
+            !terminal.text("registration_id").isNullOrBlank() &&
+            positive(terminal.number("session_epoch")) &&
+            positive(terminal.number("target_pid")) &&
+            positive(terminal.number("process_incarnation"))
+
+    public fun validOracle(paths: JsonArray): Boolean {
         if (paths.size != 72) return false
         val seen = mutableSetOf<Long>()
         for (element in paths) {

@@ -13,6 +13,70 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 1 && args[0] == "version") {
+        println("tier-e-tools-1")
+        return
+    }
+    if (args.size == 3 && args[0] == "json-field") {
+        val document = Json.parseToJsonElement(Files.readString(Path.of(args[1]))).jsonObject
+        val value = document[args[2]]?.jsonPrimitive?.takeIf { it.isString && it.content.isNotBlank() } ?: exitProcess(1)
+        println(value.content)
+        return
+    }
+    if (args.size == 3 && args[0] == "arm-status") {
+        if (args[2] !in setOf("0", "1")) exitProcess(2)
+        val result = TierELongMatchedArmStatus.complete(Path.of(args[1]), args[2] == "1")
+        if (!result) exitProcess(1)
+        return
+    }
+    if (args.size == 3 && args[0] == "legacy-summary") {
+        if (args[2] !in setOf("0", "1")) exitProcess(2)
+        val result = TierELongMatchedArmStatus.legacySummary(Path.of(args[1]), args[2] == "1")
+        if (!result) exitProcess(1)
+        return
+    }
+    if (args.size == 5 && args[0] == "coverage") {
+        val result = TierESplitCoverageVerifier.verify(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]))
+        Files.writeString(Path.of(args[4]), Json.encodeToString(JsonElement.serializer(), result) + "\n")
+        if (result.getValue("coverage_verdict").jsonPrimitive.content != "PASS") exitProcess(1)
+        return
+    }
+    if (args.isNotEmpty() && args[0] == "target-cpu") {
+        val directory = args.getOrNull(1)?.takeUnless { it.startsWith("--") } ?: exitProcess(2)
+
+        fun option(name: String): Long? = args.indexOf(name).takeIf { it >= 0 }?.let { args.getOrNull(it + 1)?.toLongOrNull() }
+        for (name in listOf("--host-pid", "--starttime")) {
+            if (name in args && option(name) == null) exitProcess(2)
+        }
+        val result = TierETargetCpuSample.validate(Path.of(directory), option("--host-pid"), option("--starttime"))
+        if (!result.valid) {
+            System.err.println(result.reason)
+            exitProcess(1)
+        }
+        println(
+            buildJsonObject {
+            put("reason", result.reason)
+            for (field in listOf("pid", "host_pid", "starttime", "sample_boundary", "unit", "target_cpu_ns")) {
+                put(field, result.sample!!.getValue(field))
+            }
+        },
+        )
+        return
+    }
+    if (args.isNotEmpty() && args[0] == "collector-cpu") {
+        fun option(name: String): String? = args.indexOf(name).takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+        val pid = option("--pid")?.toLongOrNull() ?: exitProcess(2)
+        val hz = option("--hz")?.toLongOrNull() ?: exitProcess(2)
+        val output = option("--out") ?: exitProcess(2)
+        if (option("--boundary") != "after_terminal_report_before_shutdown") exitProcess(2)
+        val result = TierECollectorCpuSample.sample(pid, hz, Path.of(option("--proc-root") ?: "/proc"), Path.of(output))
+        if (!result.valid) {
+            System.err.println(result.reason)
+            exitProcess(1)
+        }
+        println(result.sample)
+        return
+    }
     if (args.size == 3 && args[0] == "row") {
         val meta = Json.parseToJsonElement(args[1]).jsonObject
         println(Json.encodeToString(JsonElement.serializer(), TierELongMatchedRowBuilder.build(meta, Path.of(args[2]))))
@@ -58,7 +122,7 @@ public fun main(args: Array<String>) {
         )
         else -> {
             System.err.println(
-                "usage: row <meta-json> <artifact-dir> | verify-dir <decision-dir> | verify-jsonl <rows> <manifest> <before> <after> <terminal> | summarize <rows> <decision> | fingerprint <repo> [--verify <before>]",
+                "usage: json-field <file> <name> | arm-status <dir> <baseline:0|1> | legacy-summary <dir> <allow:0|1> | coverage <oracle> <manifest> <terminal> <verdict> | target-cpu <dir> [--host-pid N --starttime N] | collector-cpu --pid N --hz N --boundary after_terminal_report_before_shutdown --out FILE | row <meta-json> <artifact-dir> | verify-dir <decision-dir> | verify-jsonl <rows> <manifest> <before> <after> <terminal> | summarize <rows> <decision> | fingerprint <repo> [--verify <before>]",
             )
             exitProcess(2)
         }
