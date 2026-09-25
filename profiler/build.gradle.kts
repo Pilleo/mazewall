@@ -78,6 +78,76 @@ sourceSets {
     }
 }
 
+// Developer-only verification utilities are not part of the published profiler
+// jar. Ordinary Kotlin unit tests can exercise them without Docker/Podman.
+val toolingSourceSet =
+    sourceSets.create("tooling") {
+        compileClasspath += sourceSets.main.get().output
+        runtimeClasspath += sourceSets.main.get().output
+    }
+sourceSets.test {
+    compileClasspath += toolingSourceSet.output
+    runtimeClasspath += toolingSourceSet.output
+}
+configurations.named("toolingImplementation") {
+    extendsFrom(configurations.implementation.get())
+}
+
+tasks.register<JavaExec>("tierEVerifyArtifacts") {
+    group = "verification"
+    description = "Verify one retained 15-fork Tier E artifact directory using Kotlin, without a container endpoint"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val artifacts = providers.gradleProperty("tierEArtifacts")
+    doFirst {
+        require(artifacts.isPresent) { "Pass -PtierEArtifacts=/path/to/decision-run" }
+        args("verify-dir", artifacts.get())
+    }
+}
+
+tasks.register<JavaExec>("tierELongMatchedDecision") {
+    group = "verification"
+    description = "Generate diagnostic paired Tier E CPU statistics from retained rows using Kotlin"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val input = providers.gradleProperty("tierEJsonl")
+    val output = providers.gradleProperty("tierEDecisionOutput")
+    doFirst {
+        require(input.isPresent && output.isPresent) {
+            "Pass -PtierEJsonl=/path/to/fork-results.jsonl -PtierEDecisionOutput=/path/to/decision.json"
+        }
+        args("summarize", input.get(), output.get())
+    }
+}
+
+tasks.register<JavaExec>("tierESourceFingerprint") {
+    group = "verification"
+    description = "Content-address the current Tier E runtime source using Kotlin"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val repo = providers.gradleProperty("tierERepository")
+    val before = providers.gradleProperty("tierEPrevious")
+    doFirst {
+        require(repo.isPresent) { "Pass -PtierERepository=/path/to/repository" }
+        args("fingerprint", repo.get())
+        if (before.isPresent) args("--verify", before.get())
+    }
+}
+
+val tierEToolingJar =
+    tasks.register<Jar>("tierEToolingJar") {
+        archiveBaseName.set("tier-e-tools")
+        from(toolingSourceSet.output)
+    }
+
+tasks.named<Sync>("installDist") {
+    dependsOn(tierEToolingJar)
+    from(tierEToolingJar) { into("lib") }
+}
+
 val generateInvocationStateBtf =
     tasks.register<GenerateInvocationStateBtf>("generateInvocationStateBtf") {
         source.set(layout.projectDirectory.file("src/main/c/btf/invocation_state.c"))
@@ -110,6 +180,9 @@ kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest"
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))
+}
+kotlinCompilations.named("tooling") {
+    associateWith(kotlinCompilations.getByName("main"))
 }
 
 val integrationTestImplementation by configurations.getting {
