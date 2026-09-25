@@ -250,6 +250,12 @@ val rootfulContainerTest =
         configureIntegrationSourceSet()
         description = "Short endpoint-gated Docker/Podman rootful tests"
         useJUnitPlatform { includeTags("rootful-container") }
+        // A reused Gradle daemon can retain stale DOCKER_HOST values from a
+        // previous invocation. Forward the current operator selection into
+        // this worker, including blanks that clear stale daemon settings.
+        for (name in listOf("TIER_E_CONTAINER_ENGINE", "MAZEWALL_DOCKER_HOST", "DOCKER_HOST", "CONTAINER_HOST", "TIER_E_DOCKER_IMAGE")) {
+            environment(name, providers.environmentVariable(name).orElse("").get())
+        }
         outputs.upToDateWhen { false }
         maxParallelForks = 1
     }

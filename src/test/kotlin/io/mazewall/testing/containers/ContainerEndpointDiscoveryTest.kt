@@ -81,6 +81,23 @@ class ContainerEndpointDiscoveryTest {
         assertEquals(EndpointProbeResult.Rootful, podmanRootful.probe(ContainerEndpoint(ContainerEngine.PODMAN, null)))
     }
 
+    @Test
+    fun `Docker standard rootful security options admit the server`() {
+        val options = "[\"name=seccomp,profile=builtin\",\"name=cgroupns\"]"
+        val probe = CliEndpointProbe { _, _ -> ContainerCommandResult(0, options) }
+        assertEquals(EndpointProbeResult.Rootful, probe.probe(ContainerEndpoint(ContainerEngine.DOCKER, "unix:///var/run/docker.sock")))
+    }
+
+    @Test
+    fun `explicit rootful Docker selection reaches the same server as the integration gate`() {
+        if (System.getenv("MAZEWALL_DOCKER_HOST") != "unix:///var/run/docker.sock") return
+        val config = EndpointConfig.fromEnvironment()
+        assertEquals(ContainerEngine.DOCKER, config.engine)
+        assertEquals("unix:///var/run/docker.sock", config.uri)
+        val result = ContainerEndpointDiscovery().discover(config)
+        assertTrue(result is EndpointSelection.Ready, result.toString())
+    }
+
     @EnabledIfRootfulContainerAvailable
     class DisabledFixture {
         @Test

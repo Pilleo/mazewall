@@ -17,9 +17,11 @@ import java.util.UUID
 @EnabledIfRootfulContainerAvailable
 @Tag("rootful-container")
 class TierERootfulContainerEndpointIntegrationTest {
+    private val image: String
+        get() = System.getenv("TIER_E_DOCKER_IMAGE")?.takeIf { it.isNotBlank() } ?: "mazewall-tier-e-rootful:latest"
+
     @Test
     fun `rootful endpoint executes the Tier E image`(endpoint: ContainerEndpoint) {
-        val image = System.getenv("TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:latest"
         val container = "tier-e-endpoint-${UUID.randomUUID()}"
         val result = try {
             runContainerCommand(
@@ -38,7 +40,6 @@ class TierERootfulContainerEndpointIntegrationTest {
         endpoint: ContainerEndpoint,
         @TempDir destination: Path,
     ) {
-        val image = System.getenv("TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:latest"
         val name = "tier-e-failed-${UUID.randomUUID()}"
         val volume = "$name-workspace"
         try {
@@ -73,7 +74,6 @@ class TierERootfulContainerEndpointIntegrationTest {
 
     @Test
     fun `timeout retires only its own privileged container`(endpoint: ContainerEndpoint) {
-        val image = System.getenv("TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:latest"
         val name = "tier-e-timeout-${UUID.randomUUID()}"
         try {
             val created = runContainerCommand(

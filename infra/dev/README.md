@@ -39,6 +39,26 @@ leaving the checkout and host Gradle cache untouched even if the container
 fails. Prepared dependency caches persist between runs; only per-run workspaces
 are retired.
 
+Short Tier E endpoint tests are ordinary JUnit integration tests:
+
+```bash
+# Explicit rootful Docker server, when available:
+TIER_E_CONTAINER_ENGINE=docker MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock \
+  ./gradlew :profiler:rootfulContainerTest
+
+# Or let the condition inspect the currently selected Docker/Podman endpoint:
+./gradlew :profiler:integrationTest
+```
+
+The rootful task re-evaluates availability on every invocation, including
+when the same Gradle daemon previously saw a different endpoint. A missing
+or rootless endpoint records a JUnit skip with a reason; a fixture failure
+after admission fails. The 15-fork 75,000-operation benchmark is **only**
+run by explicitly invoking `:profiler:tierELongMatchedBenchmark` after
+preparing the native Release bundle and image. The specified 800 µs pacing
+alone imposes a 60-second wall-clock floor per arm; cache reuse cannot
+remove that measurement work.
+
 ---
 
 ## Nested Sandboxing & Seccomp Profiles

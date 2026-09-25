@@ -27,7 +27,12 @@ public data class EndpointConfig(
                 "podman" -> ContainerEngine.PODMAN
                 else -> null
             }
-            return EndpointConfig(engine, env["MAZEWALL_DOCKER_HOST"] ?: env["DOCKER_HOST"] ?: env["CONTAINER_HOST"])
+            return EndpointConfig(
+                engine,
+                env["MAZEWALL_DOCKER_HOST"]?.takeIf { it.isNotBlank() }
+                    ?: env["DOCKER_HOST"]?.takeIf { it.isNotBlank() }
+                    ?: env["CONTAINER_HOST"]?.takeIf { it.isNotBlank() },
+            )
         }
     }
 }
@@ -83,7 +88,10 @@ public class CliEndpointProbe(
     override fun probe(endpoint: ContainerEndpoint): EndpointProbeResult {
         val format = if (endpoint.engine == ContainerEngine.DOCKER) "{{json .SecurityOptions}}" else "{{.Host.Security.Rootless}}"
         val result = execute(endpoint.command("info", "--format", format), Duration.ofSeconds(5))
-        if (result.exitCode != 0) return EndpointProbeResult.Unavailable(result.output.take(256))
+        if (result.exitCode != 0) {
+            val detail = result.output.trim().takeUnless { it.isEmpty() || it == "null" }
+            return EndpointProbeResult.Unavailable("container server unreachable (exit ${result.exitCode}${detail?.let { ": ${it.take(256)}" } ?: ""})")
+        }
         val output = result.output.trim().lowercase()
         return when (endpoint.engine) {
             ContainerEngine.DOCKER -> when {

@@ -25,7 +25,10 @@ public class RootfulContainerExtension :
     override fun evaluateExecutionCondition(context: ExtensionContext): ConditionEvaluationResult =
         when (val selected = selection(context)) {
             is EndpointSelection.Ready -> ConditionEvaluationResult.enabled("Rootful ${selected.endpoint.engine} endpoint selected")
-            is EndpointSelection.Skipped -> ConditionEvaluationResult.disabled(selected.reason)
+            is EndpointSelection.Skipped -> {
+                System.err.println("Tier E rootful container tests skipped: ${selected.reason}")
+                ConditionEvaluationResult.disabled(selected.reason)
+            }
         }
 
     override fun supportsParameter(
