@@ -49,6 +49,12 @@ retains evidence and only stops currently visible containers.
   reproduced the legacy Node rows and exit codes exactly (35/35). Active
   short matched/live/fault source-fingerprint callers use the existing Kotlin
   fingerprint, with identical digest and file inventory on the same checkout.
+- The active matched, live-comparison and ring-drop fault scripts now call
+  Kotlin for per-arm rows and aggregate summaries as well. The current
+  fork-level fault parser reproduced all ten retained native-live fault rows
+  exactly, and the retained 30-arm ring-drop rows matched all historical
+  columns (the later optional `native_live_publications` field is null in
+  that older archive). These scripts still own process scheduling in Bash.
 - The rootful Docker JUnit suite executed all eight short cases. The
   unavailable Podman endpoint skipped all eight cases with a visible reason;
   actual rootful Podman runtime parity is unverified. The controlled 72-path
@@ -69,8 +75,8 @@ These are still substantive controllers, not thin launchers:
 - `scripts/run_tier_e_split_matched_benchmark.sh`,
   `scripts/run_tier_e_hybrid_live_comparison.sh`, and
   `scripts/run_tier_e_hybrid_fault_matrix.sh`: variant planning and manifests.
-  Remaining inline Node matrix summaries and live/fault fork row builders
-  still require migration with retained-artifact parity tests.
+  Their current row and summary helpers now call Kotlin, but runtime
+  sequencing, status propagation and provenance remain Bash-owned.
 - The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
   substantive Bash execution and some Node analysis. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis

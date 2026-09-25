@@ -56,6 +56,50 @@ public fun main(args: Array<String>) {
         if (row.getValue("fork_complete").toString() != "true") exitProcess(1)
         return
     }
+    if (args.size == 6 && args[0] == "fault-fork-row") {
+        val row = TierEHybridFaultRows.row(Path.of(args[1]), args[2].toInt(), args[3], args[4].toInt())
+        Files.writeString(Path.of(args[5]), row.toString() + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+        if (row.getValue("complete").toString() != "true") exitProcess(1)
+        return
+    }
+    if (args.size == 4 && args[0] == "fault-matrix-summary") {
+        val directory = Path.of(args[1])
+        val summary = TierEHybridFaultRows.summary(directory, args[2].toInt(), args[3].toInt())
+        Files.writeString(directory.resolve("summary.json"), summary.toString() + "\n")
+        println(summary)
+        if (summary.getValue("all_singletons_recovered").toString() != "true" ||
+            summary.getValue("discovery_p99_under_500ms").toString() != "true" ||
+            summary.getValue("source_state_unchanged").toString() != "true"
+        ) {
+                exitProcess(1)
+            }
+        return
+    }
+    if (args.size == 9 && args[0] == "live-fork-row") {
+        require(args[5] in listOf("0", "1")) { "live flag must be 0 or 1" }
+        val row = TierEHybridLiveRows.row(Path.of(args[1]), args[2].toInt(), args[3], args[4], args[5] == "1", args[6].toInt(), args[8].toInt())
+        Files.writeString(Path.of(args[7]), row.toString() + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+        if (row.getValue("fork_complete").toString() != "true") exitProcess(1)
+        return
+    }
+    if (args.size == 4 && args[0] == "live-matrix-summary") {
+        val dir = Path.of(args[1])
+        val failed = args[2].toInt()
+        val drift = args[3].toInt()
+        val summary = TierEHybridLiveRows.summary(dir, failed, drift)
+        Files.writeString(dir.resolve("summary.json"), summary.toString() + "\n")
+        println(summary)
+        if (failed != 0 || summary.getValue("completed").jsonPrimitive.content == "0" || drift != 0) exitProcess(1)
+        return
+    }
+    if (args.size == 4 && args[0] == "short-matched-summary") {
+        val dir = Path.of(args[1])
+        val summary = TierESplitMatchedSummary.summarize(dir, args[2].toInt(), args[3].toInt())
+        Files.writeString(dir.resolve("summary.json"), summary.toString() + "\n")
+        println(summary)
+        if ((summary.getValue("terminal") as kotlinx.serialization.json.JsonObject).getValue("success").toString() != "true") exitProcess(1)
+        return
+    }
     if (args.size == 7 && args[0] == "pid-reuse-probe") {
         val result = TierERealPidReuseProbe.run(
             args[1].toLong(),

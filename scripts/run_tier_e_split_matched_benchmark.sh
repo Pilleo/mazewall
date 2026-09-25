@@ -114,54 +114,5 @@ for ((fork=0; fork<FORKS; fork++)); do
 done
 source_changed=0
 bash "${ROOT}/scripts/tier_e_tools" fingerprint "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
-node - "${OUT}" "${failures}" "${source_changed}" <<'NODE'
-const fs=require('fs'),[dir,failures,sourceChanged]=process.argv.slice(2);
-const raw=fs.existsSync(`${dir}/fork-results.jsonl`)?fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim():'';
-let rows;
-try {
-  rows=raw?raw.split('\n').filter(Boolean).map((line,i)=>{try{return JSON.parse(line)}catch(e){throw new Error(`fork-results line ${i}: ${e.message}`)}}):[];
-} catch (e) {
-  console.error(`malformed fork results: ${e.message}`);
-  process.exitCode=1;
-  rows=[];
-}
-const baseline=rows.filter(r=>r.mode==='baseline').flatMap(r=>r.workload_ns).sort((a,b)=>a-b);
-const allDurations=rows.flatMap(r=>r.workload_ns);
-const calibrated=baseline.length>0&&baseline[Math.floor(baseline.length/2)]>=100000000&&allDurations.every(ns=>ns<=15000000000);
-const terminal={success:rows.length>0&&Number(sourceChanged)===0&&rows.every(r=>r.fork_complete===true),source_state_unchanged:Number(sourceChanged)===0,failed_forks:Number(failures),
-  incomplete_forks:rows.filter(r=>!r.fork_complete).map(r=>({fork:r.fork,mode:r.mode,reason:r.incomplete_reason}))};
-// Workload medians use uninstrumented rows only; instrumented rows carry phase
-// counters whose clock reads perturb timing. Phase summaries come from
-// instrumented rows only; a mode without instrumented rows has no phase data.
-const median=values=>{const s=[...values].sort((a,b)=>a-b);return s.length?s[Math.floor(s.length/2)]:null;};
-const phaseMedian=(group,key)=>{const v=group.filter(r=>r.instrumented).map(r=>r.native_phases?.[key]).filter(Number.isFinite);return v.length?median(v):null;};
-const receiptMedian=(group,key)=>{const v=group.filter(r=>r.instrumented).map(r=>r.collector_receipt?.[key]).filter(Number.isFinite);return v.length?median(v):null;};
-const summary={schema_version:3,forks:rows.length,failed_forks:Number(failures),terminal,calibration_target:calibrated?'met':'unmet',
-  modes:Object.fromEntries([...new Set(rows.map(r=>r.mode))].map(mode=>{
-    const group=rows.filter(r=>r.mode===mode);
-    const timing=group.filter(r=>!r.instrumented).flatMap(r=>r.workload_ns);
-    const instrumentedForks=group.filter(r=>r.instrumented&&r.fork_complete).length;
-    return [mode,{forks:group.length,complete_forks:group.filter(r=>r.fork_complete===true).length,
-      instrumented_complete_forks:instrumentedForks,
-      measured_batch_median_ns:median(group.filter(r=>!r.instrumented).flatMap(r=>r.workload_ns)),
-      target_cpu_median_ns:median(group.map(r=>r.target_cpu_ns).filter(Number.isFinite)),
-      collector_cpu_median_ns:median(group.map(r=>r.collector_cpu_ns).filter(Number.isFinite)),
-      target_peak_rss_median_kb:median(group.map(r=>r.target_peak_rss_kb).filter(Number.isFinite)),
-      collector_peak_rss_median_kb:median(group.map(r=>r.collector_peak_rss_kb).filter(Number.isFinite)),
-      publication_bytes_median:phaseMedian(group,'publication_bytes'),
-      publication_latency_ns_median:phaseMedian(group,'publication_latency_ns'),
-      publication_cpu_ns_median:phaseMedian(group,'publication_cpu_ns'),
-      serialization_ns_median:phaseMedian(group,'serialization_ns'),
-      peak_retained_bytes_median:phaseMedian(group,'peak_retained_bytes'),
-      native_retained_bytes_median:phaseMedian(group,'native_retained_bytes'),
-      receipt_p50_upper_ns_median:receiptMedian(group,'receipt_p50_upper_ns'),
-      receipt_p95_upper_ns_median:receiptMedian(group,'receipt_p95_upper_ns'),
-      receipt_p99_upper_ns_median:receiptMedian(group,'receipt_p99_upper_ns'),
-      receipt_p99_fine_upper_ns_median:receiptMedian(group,'receipt_p99_fine_upper_ns'),
-      receipt_samples_median:receiptMedian(group,'receipt_samples')}];
-  })),policy_eligibility:false};
-fs.writeFileSync(`${dir}/summary.json`,JSON.stringify(summary)+'\n');
-console.log(JSON.stringify(summary));
-if(!terminal.success) process.exitCode=1;
-NODE
+bash "${ROOT}/scripts/tier_e_tools" short-matched-summary "${OUT}" "${failures}" "${source_changed}"
 [[ "${failures}" == 0 && "${source_changed}" == 0 ]]

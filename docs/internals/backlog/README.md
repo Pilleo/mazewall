@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 21 | *Total Resolved Issues:* 632
+*Total Active Issues:* 22 | *Total Resolved Issues:* 632
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -39,6 +39,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260923-235327-744-qualify-real-tier-e-guest-host-pid-reuse-against-a](issue-20260923-235327-744-qualify-real-tier-e-guest-host-pid-reuse-against-a.md) | Qualify real Tier E guest-host PID reuse against a rootful collector | high | profiler |
 | [issue-20260923-235424-297-remove-misleading-adk-compile-and-delivery-guard-w](issue-20260923-235424-297-remove-misleading-adk-compile-and-delivery-guard-w.md) | Remove misleading ADK compile and delivery guard wiring | high | core |
 | [issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test](issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test.md) | Prevent root-owned outputs from containerized tests and Tier E gates | high | testing |
+| [issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema](issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md) | Move active Tier E experiment controllers and remaining analysis to typed Kotlin tooling | high | core |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](code_health/issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | low | orchestrator |
 | [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | low | testing |
