@@ -210,6 +210,17 @@ def test_artifact_errors_must_be_an_empty_list(bad):
     assert any('artifact_errors' in error for error in result['errors'])
 
 
+@pytest.mark.parametrize('field', ['fork', 'arm', 'artifact_errors', 'target_cpu_ns', 'collector_cpu_ns'])
+def test_missing_required_row_field_is_incomplete(field):
+    rows, manifest, before, after, terminal = _retained_documents()
+    row = next(row for row in rows if row['arm'] != 'baseline')
+    row.pop(field)
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code == 1
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any(field.split('_cpu_ns')[0] in error for error in result['errors'])
+
+
 def test_split_source_provenance_rejected():
     rows, manifest, before, after, terminal = _retained_documents()
     before = dict(before, source_digest='unrelated-source')
@@ -408,6 +419,8 @@ def _oracle_mutation(oracle, name):
         paths[0]['frequency'] = 3001
     elif name == 'wrong_singleton_frequency':
         paths[48]['frequency'] = 2
+    elif name.startswith('missing_'):
+        paths[0].pop(name.removeprefix('missing_'))
     else:
         raise AssertionError(name)
 
@@ -417,6 +430,7 @@ def _oracle_mutation(oracle, name):
     'wrong_method', 'wrong_category', 'wrong_syscall', 'missing_syscall',
     'zero_frequency', 'negative_frequency', 'boolean_frequency', 'string_frequency',
     'wrong_frequency_total', 'wrong_singleton_frequency',
+    'missing_path', 'missing_category', 'missing_frequency', 'missing_method',
 ])
 def test_invalid_oracle_inventory_is_rejected(name):
     import shutil
