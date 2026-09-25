@@ -10,6 +10,7 @@ target_files:
   - "scripts/run_containerized_tests.sh"
   - "scripts/run_tier_e_rootful_gate.sh"
   - "scripts/run_tier_e_trustworthy_benchmark.sh"
+  - "scripts/run_tier_e_split_privilege_fixture.sh"
   - "infra/dev/compose.yml"
   - "infra/dev/README.md"
   - ".devcontainer/devcontainer.json"
@@ -17,10 +18,12 @@ target_files:
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscovery.kt"
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/EnabledIfRootfulContainerAvailable.kt"
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/TierEContainerRun.kt"
+  - "src/sharedTest/kotlin/io/mazewall/testing/containers/TierEFixtureController.kt"
   - "src/sharedTest/kotlin/io/mazewall/testing/containers/TierENativeFixtureBuild.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscoveryTest.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/ContainerizedTestRunnerOwnershipTest.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/TierEContainerRunTest.kt"
+  - "src/test/kotlin/io/mazewall/testing/containers/TierEFixtureControllerTest.kt"
   - "src/test/kotlin/io/mazewall/testing/containers/TierENativeFixtureBuildTest.kt"
   - "profiler/build.gradle.kts"
   - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/TierERootfulContainerEndpointIntegrationTest.kt"
@@ -38,6 +41,10 @@ target_files:
   - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/coverage-manifest.json"
   - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/coverage-verdict.json"
   - "docs/internals/evidence/tier-e-kotlin-fault-and-ownership-20260925/short-ring-drop/terminal-report.json"
+  - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/rootful-docker-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/absent-podman-junit.xml"
 target_symbols: ["ContainerEndpointDiscovery", "RootfulContainerExtension"]
 open_questions: false
 ---

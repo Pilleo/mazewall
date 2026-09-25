@@ -1,8 +1,10 @@
 package io.mazewall.testing.containers
 
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.time.Duration
+import java.util.Comparator
 
 /** Owns the daemon-side resources even when the fixture shell is killed. */
 public class TierEContainerRun(
@@ -40,17 +42,32 @@ public class TierEContainerRun(
                 try {
                     val existing = invoke(endpoint.command("inspect", name), Duration.ofSeconds(5))
                     if (existing.exitCode != 0 && missing(existing.output)) continue
-                    if (existing.exitCode != 0) failures += "$name inspection failed: ${existing.output}"
-                    if (existing.exitCode == 0) {
-                        try {
-                            Files.createDirectories(artifacts)
-                            val log = artifacts.resolve("$suffix.owner.log")
-                            val output = if (Files.exists(log)) Files.createTempFile(artifacts, "$suffix.owner-", ".log") else log
-                            val logs = invoke(endpoint.command("logs", name), Duration.ofSeconds(5), output)
-                            if (logs.exitCode != 0) failures += "$name logs failed: ${logs.output}; retained: $output"
-                        } catch (failure: Exception) {
-                            failures += "$name log retention failed: ${failure.message}"
-                        }
+                    val stopped = invoke(endpoint.command("stop", "-t", "2", name), Duration.ofSeconds(10))
+                    if (stopped.exitCode != 0) {
+                        failures += "$name stop failed: ${stopped.output}; retained for recovery: $name"
+                        continue
+                    }
+                    val state = invoke(endpoint.command("inspect", "--format", "{{.State.Running}}", name), Duration.ofSeconds(5))
+                    if (state.exitCode != 0 || state.output.trim() != "false") {
+                        failures += "$name stop unverified: ${state.output}; retained for recovery: $name"
+                        continue
+                    }
+                    if (existing.exitCode != 0) {
+                        failures += "$name inspection failed: ${existing.output}; retained for recovery: $name"
+                        continue
+                    }
+                    val output = try {
+                        Files.createDirectories(artifacts)
+                        val log = artifacts.resolve("$suffix.owner.log")
+                        if (Files.exists(log)) Files.createTempFile(artifacts, "$suffix.owner-", ".log") else log
+                    } catch (failure: Exception) {
+                        failures += "$name log staging failed: ${failure.message}; stopped container retained for recovery: $name"
+                        continue
+                    }
+                    val logs = invoke(endpoint.command("logs", name), Duration.ofSeconds(5), output)
+                    if (logs.exitCode != 0) {
+                        failures += "$name logs failed: ${logs.output}; stopped container retained for recovery: $name; partial: $output"
+                        continue
                     }
                     val removed = invoke(endpoint.command("rm", "-f", name), Duration.ofSeconds(10))
                     if (removed.exitCode != 0 && !missing(removed.output)) failures += "$name removal failed: ${removed.output}"
@@ -61,12 +78,34 @@ public class TierEContainerRun(
                         failures += "$name removal verification failed: ${after.output}"
                     }
                 } catch (failure: Exception) {
-                    failures += "$name cleanup failed: ${failure.message}"
+                    failures += "$name cleanup failed: ${failure.message}; retained for recovery: $name"
                     try {
-                        val removed = invoke(endpoint.command("rm", "-f", name), Duration.ofSeconds(10))
-                        if (removed.exitCode != 0 && !missing(removed.output)) failures += "$name removal failed: ${removed.output}"
+                        val stopped = invoke(endpoint.command("stop", "-t", "2", name), Duration.ofSeconds(10))
+                        if (stopped.exitCode != 0 && !missing(stopped.output)) failures += "$name stop attempt failed: ${stopped.output}"
                     } catch (retry: Exception) {
-                        failures += "$name removal attempt failed: ${retry.message}"
+                        failures += "$name stop attempt failed: ${retry.message}"
+                    }
+                }
+            }
+            if (failures.isEmpty()) {
+                val marker = artifacts.resolve("$runId.shared-path")
+                if (Files.exists(marker, NOFOLLOW_LINKS)) {
+                    try {
+                        val shared = Path.of(Files.readString(marker).trim())
+                        val tempRoot = Path.of(System.getenv("TMPDIR") ?: "/tmp").toRealPath()
+                        check(
+                            !Files.isSymbolicLink(shared) &&
+                            Files.isDirectory(shared, NOFOLLOW_LINKS) &&
+                            shared.toRealPath().parent == tempRoot &&
+                            shared.fileName.toString().matches(Regex("tmp\\.[A-Za-z0-9]+")) &&
+                            Files.getOwner(shared) == Files.getOwner(artifacts),
+                        ) {
+                            "Shared scratch directory is not an owned mktemp child: $shared"
+                        }
+                        Files.walk(shared).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
+                        Files.delete(marker)
+                    } catch (failure: Exception) {
+                        failures += "Shared fixture scratch cleanup failed: ${failure.message}; recovery path: $marker"
                     }
                 }
             }

@@ -190,7 +190,12 @@ public fun runContainerCommand(
             }
             return ContainerCommandResult(-1, "container command interrupted")
         }
-        return ContainerCommandResult(process.exitValue(), Files.readString(output).take(4096))
+        val summary = Files.newBufferedReader(output).use { reader ->
+            val prefix = CharArray(4096)
+            val read = reader.read(prefix)
+            if (read < 0) "" else String(prefix, 0, read)
+        }
+        return ContainerCommandResult(process.exitValue(), summary)
     } finally {
         if (outputFile == null) Files.deleteIfExists(output)
     }

@@ -8,12 +8,20 @@ IMAGE=${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}
 ARTIFACT_DIR=${TIER_E_SPLIT_ARTIFACT_DIR:-"${ROOT}/build/tier-e-split-privilege"}
 RUN_ID="${TIER_E_SPLIT_RUN_ID:-tier-e-split-$$}"
 SHARED=$(mktemp -d)
+if [[ -n "${TIER_E_SPLIT_CREATE_LOCK:-}" ]]; then
+    mkdir -p "${ARTIFACT_DIR}"
+    printf '%s\n' "${SHARED}" > "${ARTIFACT_DIR}/${RUN_ID}.shared-path"
+fi
 TARGET="${RUN_ID}-target"
 COLLECTOR="${RUN_ID}-collector"
 CALLER_UID=$(id -u)
 CALLER_GID=$(id -g)
 NATIVE_BUILD_DIR=${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}
 REUSE_BUILD=${TIER_E_SPLIT_REUSE_BUILD:-0}
+owned_create=("${ENGINE}")
+if [[ -n "${TIER_E_SPLIT_CREATE_LOCK:-}" ]]; then
+    owned_create=(flock -x "${TIER_E_SPLIT_CREATE_LOCK}" "${ENGINE}")
+fi
 NEGATIVE_ARTIFACT_CASE=${TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE:-}
 NEGATIVE_IDENTITY_CASE=${TIER_E_SPLIT_NEGATIVE_IDENTITY_CASE:-}
 DELAYED_ARTIFACT=${TIER_E_SPLIT_DELAYED_ARTIFACT:-0}
@@ -36,6 +44,12 @@ COVERAGE_BASELINE=${TIER_E_SPLIT_COVERAGE_BASELINE:-0}
 
 cleanup() {
     mkdir -p "${ARTIFACT_DIR}"
+    if [[ -n "${TIER_E_SPLIT_CREATE_LOCK:-}" ]]; then
+        # Kotlin owns export and removal; the shell cannot delete evidence first.
+        # Retain the shared mount for recovery if export or controller settlement fails.
+        printf '%s\n' "${SHARED}" > "${ARTIFACT_DIR}/${RUN_ID}.shared-path"
+        return
+    fi
     if [[ "${REAL_PID_REUSE}" == 1 ]]; then
         "${ENGINE}" unpause "${COLLECTOR}" >/dev/null 2>&1 || true
         [[ -z "${probe_pid:-}" ]] || wait "${probe_pid}" || true
@@ -243,7 +257,7 @@ if [[ "${SIMULATED_PID_REUSE}" == 1 ]]; then
     reuse_target_options=(-e TIER_E_SPLIT_SIMULATE_PID_REUSE_MARKER=/shared/reused)
     reuse_collector_options=(-e TIER_E_BENCHMARK_REUSE_MARKER=/shared/reused)
 fi
-"${ENGINE}" run -d --name "${TARGET}" --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL "${target_cpu_options[@]}" \
+"${owned_create[@]}" run -d --name "${TARGET}" --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL "${target_cpu_options[@]}" \
     -e TIER_E_MARKER_OFFSET="${MARKER_OFFSET}" \
     -e TIER_E_COVERAGE_OPERATIONS="${SPLIT_COVERAGE_OPERATIONS}" \
     -e TIER_E_COVERAGE_SEED="${TIER_E_COVERAGE_SEED:-23063}" \
@@ -307,7 +321,7 @@ benchmark_record_options=()
 if [[ "${SPLIT_BENCHMARK}" == 1 || ( "${SPLIT_COVERAGE}" == 1 && "${SPLIT_COVERAGE_OPERATIONS}" -gt 72 ) ]]; then
     benchmark_record_options=(-e TIER_E_BENCHMARK_RECORD_LIMIT=250000)
 fi
-"${ENGINE}" run -d --name "${COLLECTOR}" --privileged --pid=host --userns=host "${collector_cpu_options[@]}" \
+"${owned_create[@]}" run -d --name "${COLLECTOR}" --privileged --pid=host --userns=host "${collector_cpu_options[@]}" \
     -v "${SHARED}:/shared" -v "${ROOT}:${ROOT}:ro" -w "${ROOT}" \
     -e TIER_E_SOCKET=/shared/control.sock "${socket_access_options[@]}" "${benchmark_record_options[@]}" \
     -e TIER_E_TARGET_REGISTRATION=/shared/target.properties -e TIER_E_DEFINITION_ROOT=/shared/definitions \

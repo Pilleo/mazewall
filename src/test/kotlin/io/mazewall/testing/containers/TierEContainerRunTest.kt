@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 class TierEContainerRunTest {
     @Test
@@ -27,6 +29,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), "owned-log-$name")
                         ContainerCommandResult(0, "owned-log-$name")
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> {
                         removed += name
                         ContainerCommandResult(0, name)
@@ -55,6 +59,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), "log")
                         ContainerCommandResult(0, "log")
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> if (name.endsWith("collector")) ContainerCommandResult(13, "permission denied") else ContainerCommandResult(0, name)
                     else -> ContainerCommandResult(2, "unexpected")
                 }
@@ -81,6 +87,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), "retained")
                         ContainerCommandResult(0, "retained")
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> {
                         removed += name
                         ContainerCommandResult(0, name)
@@ -122,6 +130,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), "full log")
                         ContainerCommandResult(0, "full log")
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> {
                         removed += name
                         ContainerCommandResult(0, name)
@@ -154,6 +164,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), "log")
                         ContainerCommandResult(0, "log")
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> {
                         removed += name
                         ContainerCommandResult(0, name)
@@ -163,7 +175,8 @@ class TierEContainerRunTest {
             }
             val error = assertThrows(IllegalStateException::class.java) { owner.close() }
             assertTrue(error.message!!.contains("inspect unavailable"))
-            assertEquals(setOf("tier-e-both-123-target", "tier-e-both-123-collector"), removed)
+            assertEquals(setOf("tier-e-both-123-collector"), removed)
+            assertTrue(error.message!!.contains("retained for recovery: tier-e-both-123-target"))
         } finally {
             directory.toFile().deleteRecursively()
         }
@@ -186,6 +199,8 @@ class TierEContainerRunTest {
                         Files.writeString(requireNotNull(logFile), full)
                         ContainerCommandResult(0, full.take(4096))
                     }
+                    "2" -> ContainerCommandResult(0, name)
+                    "{{.State.Running}}" -> ContainerCommandResult(0, "false")
                     "-f" -> {
                         removed += name
                         ContainerCommandResult(0, name)
@@ -199,6 +214,98 @@ class TierEContainerRunTest {
             assertTrue(Files.readString(directory.resolve("collector.owner.log")).endsWith(tail))
         } finally {
             directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `failed log export retains its stopped container while retiring other owned container`() {
+        val directory = Files.createTempDirectory("tier-e-export-failed-")
+        val stopped = mutableSetOf<String>()
+        val removed = mutableSetOf<String>()
+        var failTargetExport = true
+        try {
+            val runId = "tier-e-export-123"
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, directory) { command, _, output ->
+                val name = command.last()
+                when (command[1]) {
+                    "inspect" -> when {
+                        name in removed -> ContainerCommandResult(1, "No such object")
+                        "--format" in command -> ContainerCommandResult(0, if (name in stopped) "false" else "true")
+                        else -> ContainerCommandResult(0, "exists")
+                    }
+                    "stop" -> {
+                        stopped += name
+                        ContainerCommandResult(0, name)
+                    }
+                    "logs" -> {
+                        Files.writeString(requireNotNull(output), "partial log")
+                        if (name.endsWith("target") && failTargetExport) {
+                            ContainerCommandResult(1, "disk full")
+                        } else {
+                            Files.writeString(output, "full log")
+                            ContainerCommandResult(0, "full log")
+                        }
+                    }
+                    "rm" -> {
+                        removed += name
+                        ContainerCommandResult(0, name)
+                    }
+                    else -> error("unexpected command: $command")
+                }
+            }
+            val error = assertThrows(IllegalStateException::class.java) { owner.close() }
+            assertTrue(error.message!!.contains("$runId-target"))
+            assertTrue(error.message!!.contains("disk full"))
+            assertEquals(setOf("$runId-target", "$runId-collector"), stopped)
+            assertEquals(setOf("$runId-collector"), removed)
+            assertEquals("partial log", Files.readString(directory.resolve("target.owner.log")))
+            failTargetExport = false
+            owner.close()
+            assertEquals(setOf("$runId-target", "$runId-collector"), removed)
+            assertEquals("partial log", Files.readString(directory.resolve("target.owner.log")))
+            Files.list(directory).use { files ->
+                assertTrue(files.anyMatch { it.fileName.toString().startsWith("target.owner-") && Files.readString(it) == "full log" })
+            }
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `successful owned export removes its validated shared scratch directory`() {
+        val artifacts = Files.createTempDirectory("tier-e-scratch-owner-")
+        val scratch = Files.createTempDirectory("tmp.")
+        val runId = "tier-e-scratch-123"
+        try {
+            Files.writeString(scratch.resolve("evidence"), "copied")
+            Files.writeString(artifacts.resolve("$runId.shared-path"), "${scratch.toRealPath()}\n")
+            val removed = mutableSetOf<String>()
+            TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts) { command, _, output ->
+                val name = command.last()
+                when (command[1]) {
+                    "inspect" -> when {
+                        name in removed -> ContainerCommandResult(1, "No such object")
+                        "--format" in command -> ContainerCommandResult(0, "false")
+                        else -> ContainerCommandResult(0, "exists")
+                    }
+                    "stop" -> ContainerCommandResult(0, name)
+                    "logs" -> {
+                        Files.writeString(requireNotNull(output), "full log")
+                        ContainerCommandResult(0, "full log")
+                    }
+                    "rm" -> {
+                        removed += name
+                        ContainerCommandResult(0, name)
+                    }
+                    else -> error("unexpected command: $command")
+                }
+            }.close()
+            assertEquals(setOf("$runId-target", "$runId-collector"), removed)
+            assertTrue(!Files.exists(scratch))
+            assertTrue(!Files.exists(artifacts.resolve("$runId.shared-path")))
+        } finally {
+            if (Files.exists(scratch)) scratch.toFile().deleteRecursively()
+            artifacts.toFile().deleteRecursively()
         }
     }
 
@@ -221,6 +328,27 @@ class TierEContainerRunTest {
     }
 
     @Test
+    fun `large retained output fits in a small heap when reading its bounded summary`() {
+        val directory = Files.createTempDirectory("tier-e-small-heap-")
+        try {
+            val resultFile = directory.resolve("result.log")
+            val child = ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin/java").toString(),
+                "-Xmx24m",
+                "-cp",
+                System.getProperty("java.class.path"),
+                ContainerCommandBoundedHeapProbe::class.java.name,
+                resultFile.toString(),
+            ).redirectErrorStream(true).redirectOutput(directory.resolve("child.log").toFile()).start()
+            assertTrue(child.waitFor(20, TimeUnit.SECONDS), "bounded reader must finish")
+            assertEquals(0, child.exitValue(), Files.readString(directory.resolve("child.log")))
+            assertEquals(64L * 1024 * 1024, Files.size(resultFile))
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `timeout first offers owned controller a graceful TERM cleanup window`() {
         val directory = Files.createTempDirectory("tier-e-controller-term-")
         try {
@@ -232,5 +360,18 @@ class TierEContainerRunTest {
         } finally {
             directory.toFile().deleteRecursively()
         }
+    }
+}
+
+object ContainerCommandBoundedHeapProbe {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val file = Path.of(args.single())
+        val result = runContainerCommand(
+            listOf("bash", "-c", "truncate -s 67108864 \"\$1\"", "--", file.toString()),
+            Duration.ofSeconds(5),
+            outputFile = file,
+        )
+        check(result.exitCode == 0 && result.output.length <= 4096)
     }
 }

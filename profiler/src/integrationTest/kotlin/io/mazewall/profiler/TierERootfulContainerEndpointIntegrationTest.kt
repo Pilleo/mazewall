@@ -5,6 +5,7 @@ import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
 import io.mazewall.testing.containers.EnabledIfRootfulContainerAvailable
 import io.mazewall.testing.containers.TierEContainerRun
+import io.mazewall.testing.containers.TierEFixtureController
 import io.mazewall.testing.containers.TierENativeFixtureBuild
 import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -102,6 +103,77 @@ class TierERootfulContainerEndpointIntegrationTest {
         return PreparedFixture(root, native, selectedImage, endpoint.resolvedUri!!)
     }
 
+    private fun withOwnedFixture(
+        endpoint: ContainerEndpoint,
+        prepared: PreparedFixture,
+        runId: String,
+        destination: Path,
+        environmentExtra: Map<String, String> = emptyMap(),
+        extraCleanup: () -> Unit = {},
+        exercise: (Process) -> Unit,
+    ) {
+        val creationLock = destination.resolve("$runId.creation.lock")
+        val owner = TierEContainerRun(endpoint, runId, destination)
+        var controller: Process? = null
+        var primary: Throwable? = null
+        try {
+            controller = ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
+                .directory(prepared.root.toFile())
+                .redirectErrorStream(true)
+                .redirectOutput(destination.resolve("$runId.controller.log").toFile())
+                .apply {
+                    environment().putAll(
+                        mapOf(
+                        "MAZEWALL_DOCKER_HOST" to prepared.host,
+                        "TIER_E_CONTAINER_ENGINE" to endpoint.engine.name.lowercase(),
+                        "TIER_E_SPLIT_RUN_ID" to runId,
+                        "TIER_E_SPLIT_CREATE_LOCK" to creationLock.toString(),
+                        "TIER_E_SPLIT_COVERAGE" to "1",
+                        "TIER_E_SPLIT_COVERAGE_OPERATIONS" to "72",
+                        "TIER_E_SPLIT_REUSE_BUILD" to "1",
+                        "TIER_E_SPLIT_ARTIFACT_DIR" to destination.toString(),
+                        "TIER_E_DOCKER_IMAGE" to prepared.image,
+                        "TIER_E_SPLIT_NATIVE_BUILD_DIR" to prepared.native.toString(),
+                    ),
+                    )
+                    if (endpoint.engine == ContainerEngine.PODMAN && endpoint.resolvedUri != null) {
+                        environment()["CONTAINER_HOST"] = endpoint.resolvedUri
+                    }
+                    environment().putAll(environmentExtra)
+                }.start()
+            exercise(controller)
+        } catch (failure: Throwable) {
+            primary = failure
+            throw failure
+        } finally {
+            var interrupted = Thread.interrupted()
+            val cleanupFailures = mutableListOf<Throwable>()
+
+            fun attempt(block: () -> Unit) {
+                interrupted = Thread.interrupted() || interrupted
+                try {
+                    block()
+                } catch (failure: Throwable) {
+                    cleanupFailures += failure
+                }
+            }
+            try {
+                attempt { TierEFixtureController.awaitCreationQuiescence(controller, creationLock) }
+                attempt { owner.close() }
+                attempt(extraCleanup)
+            } finally {
+                if (Thread.interrupted() || interrupted) Thread.currentThread().interrupt()
+            }
+            if (primary != null) {
+                cleanupFailures.forEach(primary::addSuppressed)
+            } else if (cleanupFailures.isNotEmpty()) {
+                val first = cleanupFailures.first()
+                cleanupFailures.drop(1).forEach(first::addSuppressed)
+                throw first
+            }
+        }
+    }
+
     @Test
     fun `rootful endpoint executes the Tier E image`(endpoint: ContainerEndpoint) {
         val container = "tier-e-endpoint-${UUID.randomUUID()}"
@@ -171,6 +243,41 @@ class TierERootfulContainerEndpointIntegrationTest {
     }
 
     @Test
+    fun `failed real log export retains stopped container and its recoverable logs`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        val runId = "tier-e-log-failed-${UUID.randomUUID()}"
+        val name = "$runId-target"
+        val blockedDestination = destination.resolve("blocked")
+        Files.writeString(blockedDestination, "not a directory")
+        try {
+            val launched = runContainerCommand(
+                endpoint.command(
+                    "run",
+                    "-d",
+                    "--name",
+                    name,
+                "--entrypoint",
+                    "/bin/sh",
+                    image,
+                    "-c",
+                    "printf recovery-marker; sleep 90",
+                ),
+            )
+            assertEquals(0, launched.exitCode, launched.output)
+            val error = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
+                TierEContainerRun(endpoint, runId, blockedDestination).close()
+            }
+            assertTrue(error.message!!.contains("retained for recovery: $name"), error.message)
+            assertEquals("false", runContainerCommand(endpoint.command("inspect", "--format", "{{.State.Running}}", name)).output.trim())
+            assertTrue(runContainerCommand(endpoint.command("logs", name)).output.contains("recovery-marker"))
+        } finally {
+            runContainerCommand(endpoint.command("rm", "-f", name))
+        }
+    }
+
+    @Test
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
     fun `non-root coverage target and privileged collector recover the exact 72 paths`(
         endpoint: ContainerEndpoint,
@@ -182,28 +289,14 @@ class TierERootfulContainerEndpointIntegrationTest {
         )
         val prepared = prepareFixture(endpoint)
         val runId = "tier-e-junit-${UUID.randomUUID()}"
-        TierEContainerRun(endpoint, runId, destination).use {
-            val result = runContainerCommand(
-                listOf("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString()),
-                Duration.ofSeconds(120),
-                mapOf(
-                    "MAZEWALL_DOCKER_HOST" to prepared.host,
-                    "TIER_E_CONTAINER_ENGINE" to endpoint.engine.name.lowercase(),
-                    "TIER_E_SPLIT_RUN_ID" to runId,
-                    "TIER_E_SPLIT_COVERAGE" to "1",
-                    "TIER_E_SPLIT_COVERAGE_OPERATIONS" to "72",
-                    "TIER_E_SPLIT_REUSE_BUILD" to "1",
-                    "TIER_E_SPLIT_ARTIFACT_DIR" to destination.toString(),
-                    "TIER_E_DOCKER_IMAGE" to prepared.image,
-                    "TIER_E_SPLIT_NATIVE_BUILD_DIR" to prepared.native.toString(),
-                ) +
-                    if (endpoint.engine == ContainerEngine.PODMAN && endpoint.resolvedUri != null) {
-                        mapOf("CONTAINER_HOST" to endpoint.resolvedUri)
-                    } else {
-                        emptyMap()
-                    },
+        withOwnedFixture(endpoint, prepared, runId, destination) { controller ->
+            assertTrue(controller.waitFor(120, TimeUnit.SECONDS), "split fixture controller timed out")
+            assertEquals(0, controller.exitValue(), Files.readString(destination.resolve("$runId.controller.log")).takeLast(4096))
+            assertEquals(
+                0,
+                runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode,
+                "Kotlin owner must receive the source container before shell cleanup",
             )
-            assertEquals(0, result.exitCode, result.output)
             assertTrue(Files.readString(destination.resolve("coverage-verdict.json")).contains("\"recovered_edges\":72"))
             assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"COMPLETE\""))
             assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
@@ -223,96 +316,137 @@ class TierERootfulContainerEndpointIntegrationTest {
         val prepared = prepareFixture(endpoint)
         val runId = "tier-e-killed-${UUID.randomUUID()}"
         val sentinel = "tier-e-unrelated-${UUID.randomUUID()}"
-        var controller: Process? = null
-        var primary: Throwable? = null
-        try {
-            val started = runContainerCommand(
-            endpoint.command(
-            "run",
-                "-d",
-                "--rm",
-                "--name",
-                sentinel,
-                "--entrypoint",
-                "/bin/sh",
-                prepared.image,
-                "-c",
-                "sleep 90",
-        ),
-        )
-            assertEquals(0, started.exitCode, started.output)
-            controller = ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
-            .directory(prepared.root.toFile())
-            .redirectErrorStream(true)
-            .redirectOutput(destination.resolve("killed-controller.log").toFile())
-            .apply {
-                environment().putAll(
-                    mapOf(
-                    "MAZEWALL_DOCKER_HOST" to prepared.host,
-                    "TIER_E_CONTAINER_ENGINE" to endpoint.engine.name.lowercase(),
-                    "TIER_E_SPLIT_RUN_ID" to runId,
-                    "TIER_E_SPLIT_COVERAGE" to "1",
-                    "TIER_E_SPLIT_COVERAGE_OPERATIONS" to "72",
-                    "TIER_E_SPLIT_REUSE_BUILD" to "1",
-                    "TIER_E_SPLIT_ARTIFACT_DIR" to destination.toString(),
-                    "TIER_E_DOCKER_IMAGE" to prepared.image,
-                    "TIER_E_SPLIT_NATIVE_BUILD_DIR" to prepared.native.toString(),
-                ),
-                )
-                if (endpoint.engine == ContainerEngine.PODMAN && endpoint.resolvedUri != null) {
-                    environment()["CONTAINER_HOST"] = endpoint.resolvedUri
-                }
-            }.start()
-            TierEContainerRun(endpoint, runId, destination).use {
-                awaitCondition(Duration.ofSeconds(30), "target and collector registered") {
-                    runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode == 0 &&
-                        runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode == 0
-                }
-                controller.destroyForcibly()
-                assertTrue(controller.waitFor(2, TimeUnit.SECONDS))
-                assertEquals(
-                    0,
-                    runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode,
-                    "SIGKILL prevented the controller's EXIT trap",
-                )
+        withOwnedFixture(endpoint, prepared, runId, destination, extraCleanup = {
+            val removed = runContainerCommand(endpoint.command("rm", "-f", sentinel))
+            check(removed.exitCode == 0 || removed.output.contains("no such container", ignoreCase = true)) {
+                "Sentinel cleanup failed: ${removed.output}"
             }
-            assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode != 0)
-            assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode != 0)
+        }) { controller ->
+            val started = runContainerCommand(
+                endpoint.command("run", "-d", "--rm", "--name", sentinel, "--entrypoint", "/bin/sh", prepared.image, "-c", "sleep 90"),
+            )
+            assertEquals(0, started.exitCode, started.output)
+            awaitCondition(Duration.ofSeconds(30), "target and collector registered") {
+                runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode == 0 &&
+                    runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode == 0
+            }
+            controller.destroyForcibly()
+            assertTrue(controller.waitFor(2, TimeUnit.SECONDS))
             assertEquals(
                 0,
-                runContainerCommand(endpoint.command("inspect", sentinel)).exitCode,
-                "Kotlin owner must not reap unrelated containers",
+                runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode,
+                "SIGKILL prevented the controller's EXIT trap",
             )
-        } catch (failure: Throwable) {
-            primary = failure
-            throw failure
-        } finally {
-            val cleanupFailures = mutableListOf<Throwable>()
-            try {
-                controller?.destroyForcibly()
-            } catch (failure: Throwable) {
-                cleanupFailures += failure
-            }
-            try {
-                TierEContainerRun(endpoint, runId, destination).close()
-            } catch (failure: Throwable) {
-                cleanupFailures += failure
-            }
-            try {
-                val removed = runContainerCommand(endpoint.command("rm", "-f", sentinel))
-                check(removed.exitCode == 0 || removed.output.contains("no such container", ignoreCase = true)) {
-                    "Sentinel cleanup failed: ${removed.output}"
+            assertEquals(0, runContainerCommand(endpoint.command("inspect", sentinel)).exitCode)
+        }
+        assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode != 0)
+        assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode != 0)
+        assertTrue(runContainerCommand(endpoint.command("inspect", sentinel)).exitCode != 0)
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `startup cancellation settles an in flight real Docker creation before cleanup`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val runId = "tier-e-late-${UUID.randomUUID()}"
+        val gate = destination.resolve("gate.fifo")
+        val entered = destination.resolve("creation-entered")
+        assertEquals(0, runContainerCommand(listOf("mkfifo", gate.toString())).exitCode)
+        val bin = Files.createDirectories(destination.resolve("bin"))
+        val docker = bin.resolve("docker")
+        val realDocker = runContainerCommand(listOf("sh", "-c", "command -v docker")).output.trim()
+        assertTrue(Files.isExecutable(Path.of(realDocker)), "Docker client executable unavailable: $realDocker")
+        Files.writeString(
+            docker,
+            """#!/usr/bin/env bash
+if [[ " ${'$'}* " == *" run -d --name $runId-target "* ]]; then
+    touch "${'$'}TIER_E_TEST_CREATION_ENTERED"
+    read -r release < "${'$'}TIER_E_TEST_CREATION_GATE"
+fi
+ exec "$realDocker" "${'$'}@"
+""",
+        )
+        assertTrue(docker.toFile().setExecutable(true))
+        var releaser: Thread? = null
+        try {
+            val failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
+                withOwnedFixture(
+                    endpoint,
+                    prepared,
+                    runId,
+                    destination,
+                    environmentExtra = mapOf(
+                    "PATH" to "$bin:${System.getenv("PATH")}",
+                    "TIER_E_TEST_CREATION_ENTERED" to entered.toString(),
+                    "TIER_E_TEST_CREATION_GATE" to gate.toString(),
+                ),
+                ) { controller ->
+                    awaitCondition(Duration.ofSeconds(30), "Docker creation entered under lock") { Files.exists(entered) }
+                    releaser = Thread {
+                        awaitCondition(Duration.ofSeconds(5), "controller stopped before releasing creation") { !controller.isAlive }
+                        Files.writeString(gate, "release\n")
+                    }.also { it.start() }
+                    error("cancel during owned container creation")
                 }
-            } catch (failure: Throwable) {
-                cleanupFailures += failure
             }
-            if (primary != null) {
-                cleanupFailures.forEach(primary::addSuppressed)
-            } else if (cleanupFailures.isNotEmpty()) {
-                val first = cleanupFailures.first()
-                cleanupFailures.drop(1).forEach(first::addSuppressed)
-                throw first
+            assertTrue(failure.message!!.contains("cancel during owned container creation"))
+            releaser?.join(5_000)
+            assertTrue(releaser?.isAlive == false)
+            assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode != 0)
+            assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode != 0)
+        } finally {
+            releaser?.interrupt()
+            runContainerCommand(endpoint.command("rm", "-f", "$runId-target", "$runId-collector"))
+        }
+    }
+
+    @Test
+    fun `interrupted fixture teardown still reaps unrelated sentinel`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val runId = "tier-e-interrupt-${UUID.randomUUID()}"
+        val sentinel = "tier-e-unrelated-${UUID.randomUUID()}"
+        try {
+            val failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
+                withOwnedFixture(endpoint, prepared, runId, destination, extraCleanup = {
+                    val result = runContainerCommand(endpoint.command("rm", "-f", sentinel))
+                    check(result.exitCode == 0) { result.output }
+                }) {
+                    assertEquals(
+                        0,
+                        runContainerCommand(
+                            endpoint.command(
+                                "run",
+                                "-d",
+                                "--rm",
+                                "--name",
+                                sentinel,
+                        "--entrypoint",
+                                "/bin/sh",
+                                prepared.image,
+                                "-c",
+                                "sleep 90",
+                            ),
+                        ).exitCode,
+                    )
+                    Thread.currentThread().interrupt()
+                    error("controller interrupted")
+                }
             }
+            assertTrue(failure.message!!.contains("controller interrupted"))
+            assertTrue(Thread.currentThread().isInterrupted)
+            Thread.interrupted()
+            assertTrue(runContainerCommand(endpoint.command("inspect", sentinel)).exitCode != 0)
+        } finally {
+            Thread.interrupted()
+            runContainerCommand(endpoint.command("rm", "-f", sentinel))
         }
     }
 }

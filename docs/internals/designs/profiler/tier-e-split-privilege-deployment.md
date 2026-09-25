@@ -213,11 +213,24 @@ The fixture then proves a local `unix://` connection, local `/proc` PID-namespac
 identity, and a read-only bind-mount token before preparing native code. Remote
 or unproven endpoints skip this fixture even though mount-free engine and
 caller-owned export tests may run remotely. Kotlin owns the exact per-run
-target and collector names independently of the shell controller, collects
-complete logs in caller-owned files (preserving any shell snapshot), and
-removes only those containers after a controller kill or interrupted command.
-Cleanup restores the caller's interrupt status and attempts each container
-independently. Native fixture builds reuse only a checkout/configuration-bound
+target and collector names independently of the shell controller. In this
+JUnit mode, the shell's optional creation lock covers both `run -d` calls;
+Kotlin terminates the controller, waits for in-flight creation and acquires
+the same lock before reconciling names. Unsettled creation fails explicitly.
+The shell does not delete Kotlin-owned containers or shared scratch before
+export. Kotlin verifies each container stopped, saves its complete logs to
+caller-owned files (preserving shell snapshots), then removes it only after
+successful export. A failed export retains the stopped container and its
+shared scratch for recovery, reports the exact name, and still handles the
+other container. Verified successful cleanup also retires an owned `mktemp`
+scratch directory. The command summary reads only a bounded prefix; full
+logs remain on disk. Teardown covers the controller, both owned containers,
+and the unrelated test sentinel before restoring the caller's interrupt
+status, preserving original failures with suppressed cleanup errors. The
+[short Docker teardown receipts](../../evidence/tier-e-kotlin-teardown-20260925/README.md)
+include a delayed real creation, failed export, interrupted sentinel cleanup,
+and bounded-heap output read. Native
+fixture builds reuse only a checkout/configuration-bound
 cache after checking actual CMake source, build type, compiler, and USDT option;
 a foreign cache fails without deletion, a validated interrupted default
 configure may publish its missing identity marker, and concurrent writers
