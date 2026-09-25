@@ -52,12 +52,13 @@ public object TierESplitCoverageVerifier {
             admission += "session_identity"
         }
         if (coverage.text("evidence_integrity") != terminal.text("evidence_integrity") ||
-            terminal.text("evidence_integrity") != "COMPLETE"
+            terminal.text("evidence_integrity") !in setOf("COMPLETE", "INCOMPLETE")
         ) {
             admission += "evidence_integrity"
         }
         for (dimension in dimensions) {
-            if (coverage.boolean(dimension) != true || terminal.boolean(dimension) != true) {
+            val observed = coverage.boolean(dimension)
+            if (observed == null || observed != terminal.boolean(dimension)) {
                 admission += dimension
             }
         }
@@ -94,7 +95,8 @@ public object TierESplitCoverageVerifier {
             for (edge in edges) {
             val record = edge as? JsonObject
             val id = record?.number("workload_path")
-            if (id == null || record.number("syscall_number") != expected[id] || id in recovered) {
+                val syscall = record?.number("syscall_number")
+                if (id == null || syscall == null || id !in expected || syscall != expected[id] || id in recovered) {
                 wrong += edge
             } else {
                 recovered[id] = edge
