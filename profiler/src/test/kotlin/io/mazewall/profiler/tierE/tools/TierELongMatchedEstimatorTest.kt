@@ -1,12 +1,18 @@
 package io.mazewall.profiler.tierE.tools
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -123,6 +129,80 @@ class TierELongMatchedEstimatorTest {
                 .toString(),
             )
             assertTrue(result.getValue("incomplete_reasons").toString().contains("missing_arm"))
+        } finally {
+            Files.deleteIfExists(sample)
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+        "missing_fork", "seed_drift", "source_identity_mismatch", "operations_mismatch",
+        "coverage_failed", "terminal_incomplete", "boundary_changed", "cpu_not_finite",
+        "nonpositive_v1_denominator", "source_identity_missing", "unexpected_arm", "artifact_errors", "timed_out",
+    ],
+    )
+    fun `malformed fork rows cannot produce decision quality bounds`(reason: String) {
+        val evidence = root.resolve("docs/internals/evidence/tier-e-long-matched-controls")
+        val original = Files
+            .readAllLines(evidence.resolve("fork-results.jsonl"))
+            .map { Json.parseToJsonElement(it).jsonObject }
+            .toMutableList()
+        val baseline = original.indexOfFirst { it.getValue("fork").jsonPrimitive.content == "1" && it.getValue("arm").jsonPrimitive.content == "baseline" }
+        val profiled = original.indexOfFirst { it.getValue("fork").jsonPrimitive.content == "1" && it.getValue("arm").jsonPrimitive.content == "dictionary-full-stream-v1" }
+
+        fun change(
+            index: Int,
+            field: String,
+            value: kotlinx.serialization.json.JsonElement,
+        ) {
+            val fields = original[index].toMutableMap()
+            fields[field] = value
+            original[index] = JsonObject(fields)
+        }
+        when (reason) {
+            "missing_fork" -> original.removeAll { it.getValue("fork").jsonPrimitive.content == "15" }
+            "seed_drift" -> change(baseline, "seed", JsonPrimitive(999))
+            "source_identity_mismatch" -> change(baseline, "image_id", JsonPrimitive("another-image"))
+            "operations_mismatch" -> change(baseline, "declared_operations", JsonPrimitive(72))
+            "coverage_failed" -> change(profiled, "coverage_verdict", JsonPrimitive("FAILED"))
+            "terminal_incomplete" -> change(profiled, "terminal_integrity", JsonPrimitive("INCOMPLETE"))
+            "boundary_changed" -> change(profiled, "collector_sample_boundary", JsonPrimitive("wrong-boundary"))
+            "cpu_not_finite" -> change(profiled, "target_cpu_ns", JsonPrimitive("NaN"))
+            "nonpositive_v1_denominator" -> {
+                val base = original[baseline]
+                    .getValue("target_cpu_ns")
+                    .jsonPrimitive.content
+                    .toLong()
+                change(profiled, "target_cpu_ns", JsonPrimitive(1))
+                change(profiled, "collector_cpu_ns", JsonPrimitive(base - 1))
+            }
+            "source_identity_missing" -> for (index in original.indices) change(index, "source_digest", JsonNull)
+            "unexpected_arm" -> original += JsonObject(original[profiled] + ("arm" to JsonPrimitive("unexpected-arm")))
+            "artifact_errors" -> change(profiled, "artifact_errors", JsonArray(listOf(JsonPrimitive("unreadable"))))
+            "timed_out" -> change(profiled, "timed_out", JsonPrimitive(true))
+        }
+        val sample = Files.createTempFile("tier-e-negative-", ".jsonl")
+        try {
+            Files.write(sample, original.map(JsonObject::toString))
+            val decision = TierELongMatchedEstimator.summarize(sample)
+            assertEquals("INCONCLUSIVE", decision.getValue("metrics_status").jsonPrimitive.content, reason)
+            assertTrue(decision.getValue("incomplete_reasons").toString().contains("\"$reason\""), reason)
+            assertEquals(
+                "null",
+                decision
+                    .getValue("modes")
+                    .jsonObject
+                    .getValue("full-stream")
+                    .jsonObject
+                .getValue("combined_cpu_ratio")
+                    .jsonObject
+                    .getValue("v1")
+                    .jsonObject
+                    .getValue("upper_95")
+                    .toString(),
+                    reason,
+            )
         } finally {
             Files.deleteIfExists(sample)
         }

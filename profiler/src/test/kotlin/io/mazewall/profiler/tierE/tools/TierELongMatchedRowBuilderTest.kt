@@ -67,4 +67,47 @@ class TierELongMatchedRowBuilderTest {
             dir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `timed-out row preserves null observations and nonzero status`() {
+        val dir = Files.createTempDirectory("tier-e-row-timeout-")
+        try {
+            val meta = Json.parseToJsonElement(
+                this.meta
+                    .toString()
+                    .replace("\"status\":0", "\"status\":124")
+                .replace("\"timedOut\":false", "\"timedOut\":true"),
+            ) as kotlinx.serialization.json.JsonObject
+            val row = TierELongMatchedRowBuilder.build(meta, dir)
+            assertEquals(
+                124,
+                row
+                .getValue("status")
+                .jsonPrimitive.content
+                .toInt(),
+            )
+            assertEquals("true", row.getValue("timed_out").jsonPrimitive.content)
+            assertEquals("null", row.getValue("target_cpu_ns").toString())
+            assertEquals("null", row.getValue("collector_cpu_ns").toString())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `baseline row never fabricates collector or terminal evidence`() {
+        val dir = Files.createTempDirectory("tier-e-row-baseline-")
+        try {
+            Files.writeString(dir.resolve("summary.json"), """{"mode":"baseline","policy_eligibility":false}""")
+            Files.writeString(dir.resolve("target-cpu.json"), """{"target_cpu_ns":2000,"sample_boundary":"after_workload_before_exit"}""")
+            val fields = meta.toMutableMap()
+            fields["arm"] = kotlinx.serialization.json.JsonPrimitive("baseline")
+            val row = TierELongMatchedRowBuilder.build(kotlinx.serialization.json.JsonObject(fields), dir)
+            assertEquals("NOT_APPLICABLE", row.getValue("coverage_verdict").jsonPrimitive.content)
+            assertEquals("null", row.getValue("collector_cpu_ns").toString())
+            assertEquals("null", row.getValue("terminal_integrity").toString())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
 }

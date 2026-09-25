@@ -68,8 +68,8 @@ public fun main(args: Array<String>) {
         val pid = option("--pid")?.toLongOrNull() ?: exitProcess(2)
         val hz = option("--hz")?.toLongOrNull() ?: exitProcess(2)
         val output = option("--out") ?: exitProcess(2)
-        if (option("--boundary") != "after_terminal_report_before_shutdown") exitProcess(2)
-        val result = TierECollectorCpuSample.sample(pid, hz, Path.of(option("--proc-root") ?: "/proc"), Path.of(output))
+        val boundary = option("--boundary") ?: exitProcess(2)
+        val result = TierECollectorCpuSample.sample(pid, hz, Path.of(option("--proc-root") ?: "/proc"), Path.of(output), boundary)
         if (!result.valid) {
             System.err.println(result.reason)
             exitProcess(1)

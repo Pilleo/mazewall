@@ -56,7 +56,13 @@ public object TierELongMatchedEstimator {
             }
             val candidates = forkRows.associateBy { it.text("arm") }
             if (forkRows.size != 7 || candidates.keys != arms.toSet()) {
-                incomplete += issue("missing_arm", fork)
+                for (row in forkRows) {
+                    if (row.text("arm") !in arms) incomplete += issue("unexpected_arm", fork, row.text("arm"))
+                }
+                for (arm in arms) {
+                    if (arm !in candidates) incomplete += issue("missing_arm", fork, arm)
+                }
+                if (forkRows.size != candidates.size) incomplete += issue("duplicate_arm", fork)
                 continue
             }
             val baseline = candidates.getValue("baseline")
@@ -65,33 +71,35 @@ public object TierELongMatchedEstimator {
                 val row = candidates.getValue(arm)
                 if (row.number("seed") != 23062L + fork) localErrors += issue("seed_drift", fork, arm)
                 if (row.number("declared_operations") != OPERATIONS) localErrors += issue("operations_mismatch", fork, arm)
-                if (row.number("status") != 0L ||
-                    row.boolean("timed_out") != false ||
-                    row.boolean("policy_eligibility") != false ||
-                    row["artifact_errors"] != JsonArray(emptyList())
-                ) {
-                    localErrors += issue("arm_incomplete", fork, arm)
+                if (row.number("status") != 0L) localErrors += issue("status_failed", fork, arm)
+                if (row.boolean("timed_out") != false) localErrors += issue("timed_out", fork, arm)
+                if (row.boolean("policy_eligibility") != false) localErrors += issue("policy_eligibility_violated", fork, arm)
+                if (row["artifact_errors"] != JsonArray(emptyList())) localErrors += issue("artifact_errors", fork, arm)
+                if (row.text("target_sample_boundary") != "after_workload_before_exit") {
+                    localErrors += issue("boundary_changed", fork, arm)
                 }
-                if (row.text("target_sample_boundary") != "after_workload_before_exit" ||
-                    !positive(row.number("target_cpu_ns"))
-                ) {
-                    localErrors += issue("target_cpu_invalid", fork, arm)
+                if (!positive(row.number("target_cpu_ns"))) {
+                    localErrors += issue(cpuIssue(row["target_cpu_ns"]), fork, arm)
                 }
                 if (arm == "baseline") {
-                    if (row.text("coverage_verdict") != "NOT_APPLICABLE" ||
-                        row["collector_cpu_ns"] != JsonNull ||
+                    if (row.text("coverage_verdict") != "NOT_APPLICABLE") localErrors += issue("coverage_failed", fork, arm)
+                    if (row["collector_cpu_ns"] != JsonNull ||
                         row["collector_sample_boundary"] != JsonNull ||
                         row["terminal_integrity"] != JsonNull
                     ) {
                         localErrors += issue("baseline_collector_present", fork, arm)
                     }
-                } else if (row.text("coverage_verdict") != "PASS" ||
-                    row.number("covered_paths") != 72L ||
-                    row.text("terminal_integrity") != "COMPLETE" ||
-                    row.text("collector_sample_boundary") != "after_terminal_report_before_shutdown" ||
-                    !positive(row.number("collector_cpu_ns"))
-                ) {
-                    localErrors += issue("profiled_incomplete", fork, arm)
+                } else {
+                    if (row.text("coverage_verdict") != "PASS" || row.number("covered_paths") != 72L) {
+                        localErrors += issue("coverage_failed", fork, arm)
+                    }
+                    if (row.text("terminal_integrity") != "COMPLETE") localErrors += issue("terminal_incomplete", fork, arm)
+                    if (row.text("collector_sample_boundary") != "after_terminal_report_before_shutdown") {
+                        localErrors += issue("boundary_changed", fork, arm)
+                    }
+                    if (!positive(row.number("collector_cpu_ns"))) {
+                        localErrors += issue(cpuIssue(row["collector_cpu_ns"]), fork, arm)
+                    }
                 }
             }
             for (field in identityFields) {
@@ -267,4 +275,11 @@ public object TierELongMatchedEstimator {
     }
 
     private fun positive(number: Long?): Boolean = number != null && number in 1..9_007_199_254_740_991L
+
+    private fun cpuIssue(value: kotlinx.serialization.json.JsonElement?): String =
+        when {
+        value == null || value == JsonNull -> "cpu_missing"
+        (value as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull?.let { it < 0 } == true -> "negative_cpu"
+        else -> "cpu_not_finite"
+    }
 }

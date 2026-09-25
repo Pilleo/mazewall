@@ -73,10 +73,12 @@ public object TierECollectorCpuSample {
         hz: Long,
         procRoot: Path = Path.of("/proc"),
         output: Path,
+        boundary: String = "after_terminal_report_before_shutdown",
         reader: (Path, Int) -> String = { path, _ -> Files.readString(path) },
     ): Validation {
         if (!positive(pid)) return Validation(false, "collector_cpu_sample_pid_invalid")
         if (!positive(hz)) return Validation(false, "collector_cpu_sample_hz_invalid")
+        if (boundary != "after_terminal_report_before_shutdown") return Validation(false, "collector_cpu_sample_boundary_mismatch")
         val directory = procRoot.resolve(pid.toString())
         var statReads = 0
 
@@ -129,7 +131,9 @@ public object TierECollectorCpuSample {
         } catch (_: ArithmeticException) {
             return Validation(false, "collector_cpu_sample_invalid_counters")
         }
-        val cpu = (ticks.toDouble() * 1_000_000_000.0 / hz).let { if (it.isFinite() && it >= 0) Math.round(it) else null }
+        val cpu = (ticks.toDouble() * 1_000_000_000.0 / hz).let {
+            if (it.isFinite() && it >= 0 && it <= Long.MAX_VALUE.toDouble()) Math.round(it) else null
+        }
             ?: return Validation(false, "collector_cpu_sample_invalid_counters")
         val value = buildJsonObject {
             put("schema_version", 1)
