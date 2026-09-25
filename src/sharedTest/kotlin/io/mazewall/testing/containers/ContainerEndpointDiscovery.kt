@@ -26,12 +26,12 @@ public data class EndpointConfig(
 ) {
     public companion object {
         public fun fromEnvironment(env: Map<String, String> = System.getenv()): EndpointConfig {
-            val requested = env["TIER_E_CONTAINER_ENGINE"]?.takeIf { it.isNotBlank() }?.lowercase()
+            val requested = env["MAZEWALL_CONTAINER_ENGINE"]?.takeIf { it.isNotBlank() }?.lowercase()
             val error = requested?.takeUnless { it in setOf("docker", "podman") }
             val engine = when (requested) {
                 "docker" -> ContainerEngine.DOCKER
                 "podman" -> ContainerEngine.PODMAN
-                else -> if (env["MAZEWALL_DOCKER_HOST"].isNullOrBlank() &&
+                else -> if (env["MAZEWALL_CONTAINER_URI"].isNullOrBlank() &&
                     env["DOCKER_HOST"].isNullOrBlank() &&
                     !env["CONTAINER_HOST"].isNullOrBlank()
                 ) {
@@ -42,10 +42,10 @@ public data class EndpointConfig(
             }
             return EndpointConfig(
                 engine,
-                env["MAZEWALL_DOCKER_HOST"]?.takeIf { it.isNotBlank() }
+                env["MAZEWALL_CONTAINER_URI"]?.takeIf { it.isNotBlank() }
                     ?: env["DOCKER_HOST"]?.takeIf { it.isNotBlank() }
                     ?: env["CONTAINER_HOST"]?.takeIf { it.isNotBlank() },
-                error?.let { "invalid TIER_E_CONTAINER_ENGINE: $it" },
+                error?.let { "invalid MAZEWALL_CONTAINER_ENGINE: $it" },
             )
         }
     }

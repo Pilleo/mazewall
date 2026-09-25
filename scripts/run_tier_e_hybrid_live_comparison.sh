@@ -15,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 "${TIER_E_CONTAINER_ENGINE:-docker}" image inspect "${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
-python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
+bash "${ROOT}/scripts/tier_e_tools" fingerprint "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
 sha256sum "${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so" \
     "${ROOT}"/profiler/build/install/tier-e-daemon/lib/*.jar > "${OUT}/bundle-sha256.txt" || exit 1
 git -C "${ROOT}" diff --binary | sha256sum | awk '{print $1}' > "${OUT}/source-diff-sha256.txt"
@@ -45,7 +45,7 @@ for ((fork=0;fork<FORKS;fork++)); do
                     TIER_E_SPLIT_ARTIFACT_DIR="${dir}" \
                     bash "${ROOT}/scripts/run_tier_e_split_privilege_fixture.sh" > "${dir}/fixture.log" 2>&1 || status=$?
                 if [[ -f "${dir}/benchmark-operations.json" && -f "${dir}/terminal-report.json" ]]; then
-                    node "${ROOT}/scripts/verify_tier_e_split_operations.mjs" \
+                    bash "${ROOT}/scripts/tier_e_tools" verify-operations \
                         "${dir}/benchmark-oracle.json" "${dir}/benchmark-operations.json" \
                         "${dir}/terminal-report.json" "${dir}/operation-verdict.json" \
                         > "${dir}/operation-verifier.log" 2>&1 || true
@@ -72,7 +72,7 @@ NODE
     done
 done
 source_changed=0
-python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
+bash "${ROOT}/scripts/tier_e_tools" fingerprint "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
 node - "${OUT}" "${failed}" "${source_changed}" <<'NODE'
 const fs=require('fs'),[dir,failed,sourceChanged]=process.argv.slice(2);
 const rows=fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);

@@ -16,6 +16,8 @@ class TierEFixtureControllerTest {
         val directory = Files.createTempDirectory("tier-e-create-barrier-")
         try {
             val lock = directory.resolve("create.lock")
+            val admission = directory.resolve("create.lock.state")
+            Files.writeString(admission, "open\n")
             val entered = directory.resolve("entered")
             val release = directory.resolve("release.fifo")
             assertTrue(runContainerCommand(listOf("mkfifo", release.toString())).exitCode == 0)
@@ -46,6 +48,22 @@ class TierEFixtureControllerTest {
                 Files.writeString(release, "ready\n")
                 assertTrue(finished.await(10, TimeUnit.SECONDS))
                 assertTrue(failure.get() == null, "creation settlement failed: ${failure.get()}")
+                assertTrue(Files.readString(admission).trim() == "closed", "creation admission must stay closed after lock release")
+                val late = directory.resolve("late-created")
+                val queued = runContainerCommand(
+                    listOf(
+                        "flock",
+                        "-x",
+                        lock.toString(),
+                        "bash",
+                        "-c",
+                    "if [[ \$(cat \"\$1\") == open ]]; then touch \"\$2\"; fi",
+                        "--",
+                        admission.toString(),
+                        late.toString(),
+                    ),
+                )
+                assertTrue(queued.exitCode == 0 && !Files.exists(late), "late creator must refuse a closed run")
             } finally {
                 controller.destroyForcibly()
             }

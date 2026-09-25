@@ -252,6 +252,12 @@ test helpers; neither is part of a published runtime artifact. The
 cover unresolved creation, exact shared-path ownership, and the strengthened
 real-Docker cancellation assertion.
 
+The short fixture now resolves the [Tier E JSON smoke profile](tier-e-testing-migration.md)
+in Kotlin. Its opt-in flock protects a persistent `open`/`closed` creation
+state, so a queued creator cannot start after controller teardown closes
+admission. The remaining shell controller is still substantive; the Kotlin
+tooling migration has not yet removed its protocol and scheduling logic.
+
 ## Compatibility rules
 
 - Keep control protocol v1 and legacy monolithic artifact behavior.

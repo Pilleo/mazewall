@@ -89,6 +89,10 @@ sourceSets.test {
     compileClasspath += toolingSourceSet.output
     runtimeClasspath += toolingSourceSet.output
 }
+sourceSets.named("integrationTest") {
+    compileClasspath += toolingSourceSet.output
+    runtimeClasspath += toolingSourceSet.output
+}
 configurations.named("toolingImplementation") {
     extendsFrom(configurations.implementation.get())
 }
@@ -134,6 +138,20 @@ tasks.register<JavaExec>("tierESourceFingerprint") {
         require(repo.isPresent) { "Pass -PtierERepository=/path/to/repository" }
         args("fingerprint", repo.get())
         if (before.isPresent) args("--verify", before.get())
+    }
+}
+
+tasks.register<JavaExec>("tierEResolveConfig") {
+    group = "verification"
+    description = "Resolve a versioned Tier E JSON profile into a non-secret run configuration"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/smoke.json")
+    val output = providers.gradleProperty("tierEConfigOutput")
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEConfigOutput=/path/to/resolved-config.json" }
+        args("config", profile.get(), output.get())
     }
 }
 
@@ -255,7 +273,13 @@ val rootfulContainerTest =
         // previous invocation. Forward the current operator selection into
         // this worker, including blanks that clear stale daemon settings.
         for (name in listOf("TIER_E_CONTAINER_ENGINE", "MAZEWALL_DOCKER_HOST", "DOCKER_HOST", "CONTAINER_HOST", "TIER_E_DOCKER_IMAGE")) {
-            environment(name, providers.environmentVariable(name).orElse("").get())
+            val selected =
+                if (name == "DOCKER_HOST" && providers.environmentVariable("MAZEWALL_DOCKER_HOST").isPresent) {
+                    "" // Explicit Tier E socket overrides a stale CLI default in this worker.
+                } else {
+                    providers.environmentVariable(name).orElse("").get()
+                }
+            environment(name, selected)
         }
         outputs.upToDateWhen { false }
         maxParallelForks = 1

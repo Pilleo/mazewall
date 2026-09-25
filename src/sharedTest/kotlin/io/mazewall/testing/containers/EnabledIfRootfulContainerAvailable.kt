@@ -26,7 +26,7 @@ public class RootfulContainerExtension :
         when (val selected = selection(context)) {
             is EndpointSelection.Ready -> ConditionEvaluationResult.enabled("Rootful ${selected.endpoint.engine} endpoint selected")
             is EndpointSelection.Skipped -> {
-                System.err.println("Tier E rootful container tests skipped: ${selected.reason}")
+                System.err.println("Rootful container tests skipped: ${selected.reason}")
                 ConditionEvaluationResult.disabled(selected.reason)
             }
         }

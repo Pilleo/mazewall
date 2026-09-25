@@ -2724,3 +2724,10 @@ For offline reproduction, run `./gradlew :profiler:tierEVerifyArtifacts -PtierEA
 The active long-matched row, CPU, source-fingerprint, coverage, and estimator scripts now call Kotlin tooling. Their previous four Node regression suites have Kotlin JUnit coverage. `pytest scripts/tests` discovers only the three still-active operational/fingerprint tests; the historical 75-case Python verifier suite remains runnable by explicitly naming its test file, preserving immutable evidence reproduction commands. The remaining 28 Node tests belong to other currently active Tier E protocol/transport tools and are not discarded before their callers migrate. This is a compatibility transition, not a weakening of kernel or policy evidence.
 
 The [fault-parity and short-rootful receipts](../../evidence/tier-e-kotlin-fault-and-ownership-20260925/README.md) compare the Kotlin verdict against all 30 retained ring-drop arms without changing the historical archive. A fresh 72-path rootful fault fixture also recovered 72 exact edges with coverage `PASS` and terminal `INCOMPLETE`; this is diagnostic coverage only, not a performance or promotion decision.
+
+The [typed-configuration and active-controller migration](tier-e-testing-migration.md)
+is in progress: the short rootful fixture resolves a versioned JSON profile,
+and several active protocol/verdict, fingerprint, and fork-parser callers now
+invoke Kotlin. Its Bash fixture and benchmark matrix controllers and some
+Node matrix analyses remain substantive and active. This tooling transition
+does not revise any archived measurements or the rejected default promotion.

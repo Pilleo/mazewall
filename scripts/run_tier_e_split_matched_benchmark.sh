@@ -39,7 +39,7 @@ cleanup_matched() {
 trap cleanup_matched EXIT INT TERM
 "${ENGINE}" image inspect "${IMAGE}" --format '{{.Id}}' > "${OUT}/image-id.txt" || exit 1
 "${ENGINE}" image inspect "${IMAGE}" --format '{{json .RepoDigests}}' > "${OUT}/image-digest.txt" || exit 1
-python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
+bash "${ROOT}/scripts/tier_e_tools" fingerprint "${ROOT}" > "${OUT}/source-state-before.json" || exit 1
 uname -a > "${OUT}/kernel.txt"
 NATIVE_SO="${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-build}/libmazewall_stack_agent.so"
 NATIVE_HASH=$(sha256sum "${NATIVE_SO}" 2>/dev/null | awk '{print $1}')
@@ -95,7 +95,7 @@ for ((fork=0; fork<FORKS; fork++)); do
                     bash "${ROOT}/scripts/run_tier_e_split_privilege_fixture.sh" > "${fork_dir}/fixture.log" 2>&1 || status=$?
                 if [[ "${status}" -eq 124 ]]; then printf 'fixture_timeout_sec=%s\n' "${FIXTURE_TIMEOUT_SEC}" > "${fork_dir}/timeout.env"; fi
                 if [[ -f "${fork_dir}/benchmark-operations.json" && -f "${fork_dir}/terminal-report.json" ]]; then
-                    node "${ROOT}/scripts/verify_tier_e_split_operations.mjs" \
+                    bash "${ROOT}/scripts/tier_e_tools" verify-operations \
                         "${fork_dir}/benchmark-oracle.json" "${fork_dir}/benchmark-operations.json" \
                         "${fork_dir}/terminal-report.json" "${fork_dir}/operation-verdict.json" \
                         > "${fork_dir}/operation-verifier.log" 2>&1 || {
@@ -108,12 +108,12 @@ for ((fork=0; fork<FORKS; fork++)); do
         # A complete fork requires strict fork_complete; failures include incomplete rows.
         # Parsing and completeness live in summarize_tier_e_split_fork.mjs so the
         # exercised gate is the unit-tested implementation, not a copy.
-        TIER_E_SPLIT_EXPECTED_BATCHES=10 TIER_E_SPLIT_EXPECTED_OPERATIONS="${EXPECTED_MEASURED_OPERATIONS}" \
-            node "${ROOT}/scripts/summarize_tier_e_split_fork.mjs" "${fork}" "${mode}" "${status}" "${fork_dir}" "${OUT}/fork-results.jsonl" || failures=$((failures+1))
+        bash "${ROOT}/scripts/tier_e_tools" short-fork-row "${fork}" "${mode}" "${status}" \
+            "${fork_dir}" "${OUT}/fork-results.jsonl" 10 "${EXPECTED_MEASURED_OPERATIONS}" || failures=$((failures+1))
     done
 done
 source_changed=0
-python3 "${ROOT}/scripts/tier_e_split_source_fingerprint.py" "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
+bash "${ROOT}/scripts/tier_e_tools" fingerprint "${ROOT}" --verify "${OUT}/source-state-before.json" > "${OUT}/source-state-after.json" || source_changed=1
 node - "${OUT}" "${failures}" "${source_changed}" <<'NODE'
 const fs=require('fs'),[dir,failures,sourceChanged]=process.argv.slice(2);
 const raw=fs.existsSync(`${dir}/fork-results.jsonl`)?fs.readFileSync(`${dir}/fork-results.jsonl`,'utf8').trim():'';

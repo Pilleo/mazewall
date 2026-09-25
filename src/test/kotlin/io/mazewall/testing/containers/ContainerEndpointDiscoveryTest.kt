@@ -89,9 +89,14 @@ class ContainerEndpointDiscoveryTest {
     }
 
     @Test
-    fun `explicit rootful Docker selection reaches the same server as the integration gate`() {
+    fun `generic explicit rootful Docker selection reaches the selected server`() {
         if (System.getenv("MAZEWALL_DOCKER_HOST") != "unix:///var/run/docker.sock") return
-        val config = EndpointConfig.fromEnvironment()
+        val config = EndpointConfig.fromEnvironment(
+            mapOf(
+            "MAZEWALL_CONTAINER_ENGINE" to "docker",
+            "MAZEWALL_CONTAINER_URI" to "unix:///var/run/docker.sock",
+        ),
+        )
         assertEquals(ContainerEngine.DOCKER, config.engine)
         assertEquals("unix:///var/run/docker.sock", config.uri)
         val result = ContainerEndpointDiscovery().discover(config)
@@ -131,7 +136,7 @@ class ContainerEndpointDiscoveryTest {
                 EndpointProbeResult.Rootful
             },
         )
-        val result = discovery.discover(EndpointConfig.fromEnvironment(mapOf("TIER_E_CONTAINER_ENGINE" to "invalid")))
+        val result = discovery.discover(EndpointConfig.fromEnvironment(mapOf("MAZEWALL_CONTAINER_ENGINE" to "invalid")))
         assertTrue(result is EndpointSelection.Skipped)
         assertTrue((result as EndpointSelection.Skipped).reason.contains("invalid"))
         assertEquals(0, probes)

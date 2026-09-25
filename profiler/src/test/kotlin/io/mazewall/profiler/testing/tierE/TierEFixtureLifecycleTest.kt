@@ -12,6 +12,40 @@ import java.time.Duration
 
 class TierEFixtureLifecycleTest {
     @Test
+    fun `interruption raised during controller wait is restored after sentinel cleanup`() {
+        val artifacts = Files.createTempDirectory("tier-e-wait-interrupt-")
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-wait-123", artifacts) { command, _, _ ->
+                if (command[1] == "inspect") {
+                    ContainerCommandResult(1, "No such object")
+                } else {
+                    error("unsettled fixture cannot export")
+                }
+            }
+            var sentinelRemoved = false
+            val error = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(
+                    owner,
+                    artifacts.resolve("creation.lock"),
+                    settle = { _, _ ->
+                        Thread.currentThread().interrupt()
+                        java.util.concurrent
+                            .CountDownLatch(1)
+                            .await()
+                    },
+                    extraCleanup = { sentinelRemoved = true },
+                ).run(start = { ProcessBuilder("bash", "-c", "exit 0").start() }) { error("original failure") }
+            }
+            assertTrue(error.suppressed.any { it is InterruptedException })
+            assertTrue(sentinelRemoved)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `unresolved creation keeps source and scratch yet independently retires sentinel`() {
         val artifacts = Files.createTempDirectory("tier-e-lifecycle-")
         val runId = "tier-e-unresolved-123"

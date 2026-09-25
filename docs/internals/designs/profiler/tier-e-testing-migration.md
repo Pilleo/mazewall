@@ -1,0 +1,85 @@
+# Tier E testing configuration and execution ownership
+
+**Status (2026-09-25): In progress; not a Kotlin-only execution path.**
+
+The operator chose a Tier E-first migration: one typed, versioned JSON
+configuration and Kotlin-owned experiment and acceptance decisions. The
+historical Python/Node implementations and immutable measurement archives
+remain available for explicit reproduction. This does not change hybrid's
+opt-in experimental status, `policy_eligibility=false`, or the operator's
+`REJECT_DEFAULT_PROMOTION` decision.
+
+## Configuration contract
+
+Profiles live under `config/testing/tier-e/`. The initial v1 schema has
+container (engine, URI, image), fixture (coverage, operation count, emission,
+recovery), and measurement (fork count, two CPU selections) sections. A
+profiler-local Kotlin loader rejects unknown/missing keys, invalid schema
+versions, unsupported modes, invalid operation counts, and conflicting
+aliases for the selected engine. A sole `CONTAINER_HOST` selects Podman,
+while unrelated `DOCKER_HOST` is ignored for explicitly selected Podman;
+conflicting aliases for the same engine are rejected. Explicit overrides
+supersede a validated legacy environment adapter, which supersedes profile
+defaults. The `:profiler:tierEResolveConfig` Gradle task and the developer
+CLI `config` command use that same resolver. The short
+rootful fixture writes the resolved non-secret JSON to its artifact directory.
+Generic container endpoint discovery in root `sharedTest` no longer reads
+`TIER_E_*` names; the profiler-local condition loads the selected profile
+before passing an explicit endpoint to generic probing. Gradle forwards
+the operator's endpoint for each JUnit worker invocation.
+
+The short fixture's controller and both `run -d` requests coordinate through
+one per-run flock. Kotlin closes a persistent admission state while holding
+that lock before reconciling container names. A child queued behind the lock
+must observe `closed` and refuse creation. A mid-wait interruption is restored
+after independently attempting sentinel cleanup. An unresolved controller
+retains evidence and only stops currently visible containers.
+
+## Implemented migration slice
+
+- Short rootful JUnit fixture consumes the smoke JSON profile and exports its
+  resolved configuration; other scenario parameters in its legacy shell
+  controller still cross the compatibility environment boundary.
+- The split fixture's inline Node binary negative-envelope emitter and
+  coverage, normal, fault, identity, and marker verdict checks invoke Kotlin
+  tooling. Its registered-host-PID probe now runs Kotlin instead of the
+  operational Python probe. The Python implementation remains reproducible.
+- Active short matched/live operation verification and the short matched fork
+  parser/completeness gate use Kotlin. The short historical 35-arm archive
+  reproduced the legacy Node rows and exit codes exactly (35/35). Active
+  short matched/live/fault source-fingerprint callers use the existing Kotlin
+  fingerprint, with identical digest and file inventory on the same checkout.
+- The rootful Docker JUnit suite executed all eight short cases. The
+  unavailable Podman endpoint skipped all eight cases with a visible reason;
+  actual rootful Podman runtime parity is unverified. The controlled 72-path
+  ring-drop fault and unclosed native envelope fixtures passed with Kotlin
+  helpers. A live host-PID-reuse qualification was not run here.
+
+## Remaining active ownership
+
+These are still substantive controllers, not thin launchers:
+
+- `scripts/run_tier_e_split_privilege_fixture.sh`: creation, mount and
+  registration, start gates, PID/session handling, terminal wait and export;
+  it is still the controller used by the short JUnit test and matrices.
+- `scripts/run_tier_e_split_coverage_matrix.sh`: long seven-arm scheduling,
+  fork rotation, provenance and per-arm timeout. The explicit
+  `:profiler:tierELongMatchedBenchmark` Gradle task still invokes it as Bash;
+  it remains outside `build`/`check` because of 75,000 × 800 µs pacing.
+- `scripts/run_tier_e_split_matched_benchmark.sh`,
+  `scripts/run_tier_e_hybrid_live_comparison.sh`, and
+  `scripts/run_tier_e_hybrid_fault_matrix.sh`: variant planning and manifests.
+  Remaining inline Node matrix summaries and live/fault fork row builders
+  still require migration with retained-artifact parity tests.
+- The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
+  substantive Bash execution and some Node analysis. Standalone Python perf
+  analysis remains outside automatic runners. Historical standalone analysis
+  commands must stay reproducible but not be selected as active dependencies.
+
+Completion means no active Tier E caller depends on repository-owned Bash,
+Python, or Node for orchestration, protocol construction, verdicts, or
+measurement policy; simple external CLI launch shims may remain. Each
+replacement requires tests for malformed and incomplete evidence, preserved
+source/image/native identities, real rootful Docker checks, and separate
+Podman runtime evidence. Do not promote any historical diagnostic to a new
+performance or containment decision merely because its tools were migrated.

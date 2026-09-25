@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "container": { "engine": "docker", "uri": null, "image": "mazewall-tier-e-rootful:latest" },
+  "fixture": { "coverage": true, "operations": 72, "emission_mode": "full-stream", "recovery_mode": "disabled" },
+  "measurement": { "forks": 1, "workload_cpu": 0, "collector_cpu": 1 }
+}

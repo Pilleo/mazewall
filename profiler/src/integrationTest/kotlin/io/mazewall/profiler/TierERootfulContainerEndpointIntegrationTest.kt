@@ -1,12 +1,13 @@
 package io.mazewall.profiler
 
+import io.mazewall.profiler.testing.tierE.EnabledIfTierERootfulAvailable
 import io.mazewall.profiler.testing.tierE.TierEContainerRun
 import io.mazewall.profiler.testing.tierE.TierEFixtureLifecycle
 import io.mazewall.profiler.testing.tierE.TierENativeFixtureBuild
+import io.mazewall.profiler.tierE.tools.TierERunConfiguration
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
-import io.mazewall.testing.containers.EnabledIfRootfulContainerAvailable
 import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** Short, remote-safe rootful engine smoke; no host mounts or host PID assumptions. */
-@EnabledIfRootfulContainerAvailable
+@EnabledIfTierERootfulAvailable
 @Tag("rootful-container")
 class TierERootfulContainerEndpointIntegrationTest {
     private val image: String
@@ -34,12 +35,21 @@ class TierERootfulContainerEndpointIntegrationTest {
         val native: Path,
         val image: String,
         val host: String,
+        val configuration: TierERunConfiguration,
     )
 
     private fun prepareFixture(endpoint: ContainerEndpoint): PreparedFixture {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.exists(it.resolve("scripts/run_tier_e_split_privilege_fixture.sh")) }
-        val selectedImage = image
+        val configuration = TierERunConfiguration.load(
+            root.resolve("config/testing/tier-e/smoke.json"),
+            environment = mapOf("TIER_E_DOCKER_IMAGE" to (System.getenv("TIER_E_DOCKER_IMAGE") ?: "")),
+            overrides = mapOf(
+                "container.engine" to endpoint.engine.name.lowercase(),
+                "container.uri" to requireNotNull(endpoint.resolvedUri) { "Tier E fixture requires resolved local endpoint" },
+            ),
+        )
+        val selectedImage = configuration.container.image
         if (runContainerCommand(endpoint.command("image", "inspect", selectedImage)).exitCode != 0) {
             val imageBuild = runContainerCommand(
                 endpoint.command("build", "-t", selectedImage, "-f", root.resolve("infra/dev/Containerfile").toString(), root.toString()),
@@ -101,7 +111,7 @@ class TierERootfulContainerEndpointIntegrationTest {
             compiler = compiler,
             flags = "usdt=${System.getenv("MAZEWALL_ENABLE_TIER_E_USDT") == "true"};compiler-version=${version.output.lineSequence().firstOrNull()}",
         )
-        return PreparedFixture(root, native, selectedImage, endpoint.resolvedUri!!)
+        return PreparedFixture(root, native, selectedImage, requireNotNull(configuration.container.uri), configuration)
     }
 
     private fun withOwnedFixture(
@@ -114,6 +124,8 @@ class TierERootfulContainerEndpointIntegrationTest {
         exercise: (Process) -> Unit,
     ) {
         val creationLock = destination.resolve("$runId.creation.lock")
+        val creationState = destination.resolve("$runId.creation.lock.state")
+        Files.writeString(creationState, "open\n")
         val shared = Files.createTempDirectory("tier-e-owned-$runId-")
         val owner = TierEContainerRun(endpoint, runId, destination, ownedShared = shared)
         TierEFixtureLifecycle(owner, creationLock, extraCleanup = extraCleanup).run(start = {
@@ -128,9 +140,13 @@ class TierERootfulContainerEndpointIntegrationTest {
                         "TIER_E_CONTAINER_ENGINE" to endpoint.engine.name.lowercase(),
                         "TIER_E_SPLIT_RUN_ID" to runId,
                         "TIER_E_SPLIT_CREATE_LOCK" to creationLock.toString(),
+                        "TIER_E_SPLIT_CREATE_STATE" to creationState.toString(),
                         "TIER_E_SPLIT_SHARED_DIR" to shared.toString(),
-                        "TIER_E_SPLIT_COVERAGE" to "1",
-                        "TIER_E_SPLIT_COVERAGE_OPERATIONS" to "72",
+                        "TIER_E_SPLIT_COVERAGE" to if (prepared.configuration.fixture.coverage) "1" else "0",
+                        "TIER_E_SPLIT_COVERAGE_OPERATIONS" to prepared.configuration.fixture.operations
+                            .toString(),
+                        "TIER_E_SPLIT_EMISSION_MODE" to prepared.configuration.fixture.emissionMode,
+                        "TIER_E_SPLIT_RECOVERY_MODE" to prepared.configuration.fixture.recoveryMode,
                         "TIER_E_SPLIT_REUSE_BUILD" to "1",
                         "TIER_E_SPLIT_ARTIFACT_DIR" to destination.toString(),
                         "TIER_E_DOCKER_IMAGE" to prepared.image,
@@ -141,6 +157,8 @@ class TierERootfulContainerEndpointIntegrationTest {
                         environment()["CONTAINER_HOST"] = endpoint.resolvedUri
                     }
                     environment().putAll(environmentExtra)
+                }.also {
+                    Files.writeString(destination.resolve("$runId.resolved-config.json"), prepared.configuration.resolvedJson() + "\n")
                 }.start()
         }, exercise = exercise)
     }

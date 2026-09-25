@@ -23,6 +23,66 @@ public fun main(args: Array<String>) {
         println(value.content)
         return
     }
+    if (args.size == 3 && args[0] == "fixture-verdict") {
+        val directory = Path.of(args[2])
+        Files.writeString(directory.resolve("verdict.env"), TierEFixtureVerdict.validate(directory, args[1]))
+        return
+    }
+    if (args.size == 3 && args[0] == "fixture-envelope") {
+        Files.write(Path.of(args[2]), TierEFixtureEnvelope.create(args[1]))
+        return
+    }
+    if (args.size == 5 && args[0] == "verify-operations") {
+        val result = TierESplitOperationVerifier.verify(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]))
+        Files.writeString(Path.of(args[4]), result.toString() + "\n")
+        println(result)
+        if (result.getValue("operation_coverage_verdict").jsonPrimitive.content != "PASS" ||
+            result.getValue("terminal_evidence_integrity").jsonPrimitive.content != "COMPLETE"
+        ) {
+                exitProcess(1)
+            }
+        return
+    }
+    if (args.size == 8 && args[0] == "short-fork-row") {
+        val row = TierESplitForkRow.parse(
+            args[1].toInt(),
+            args[2],
+            args[3].toInt(),
+            Path.of(args[4]),
+            args[6].toInt(),
+            args[7].takeIf { it != "null" }?.toInt(),
+        )
+        Files.writeString(Path.of(args[5]), row.toString() + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+        if (row.getValue("fork_complete").toString() != "true") exitProcess(1)
+        return
+    }
+    if (args.size == 7 && args[0] == "pid-reuse-probe") {
+        val result = TierERealPidReuseProbe.run(
+            args[1].toLong(),
+            args[2].toLong(),
+            args[3].toInt(),
+            java.time.Duration.ofMillis((args[4].toDouble() * 1000).toLong()),
+            java.time.Duration.ofMillis((args[5].toDouble() * 1000).toLong()),
+            Path.of(args[6]),
+        )
+        println(result)
+        return
+    }
+    if (args.size == 3 && args[0] == "pid-reuse-check") {
+        val report = Json.parseToJsonElement(Files.readString(Path.of(args[1]))).jsonObject
+        val replacement = report["replacement"]?.jsonObject ?: exitProcess(1)
+        if (report["host_pid_reuse_verdict"]?.jsonPrimitive?.content != "OBSERVED" ||
+            replacement["starttime"]?.jsonPrimitive?.content != args[2]
+        ) {
+                exitProcess(1)
+            }
+        return
+    }
+    if (args.size == 3 && args[0] == "config") {
+        val config = TierERunConfiguration.load(Path.of(args[1]))
+        Files.writeString(Path.of(args[2]), config.resolvedJson() + "\n")
+        return
+    }
     if (args.size == 3 && args[0] == "arm-status") {
         if (args[2] !in setOf("0", "1")) exitProcess(2)
         val result = TierELongMatchedArmStatus.complete(Path.of(args[1]), args[2] == "1")

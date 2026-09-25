@@ -32,6 +32,7 @@ public class TierEFixtureLifecycle(
                 try {
                     block()
                 } catch (failure: Throwable) {
+                    if (failure is InterruptedException) interrupted = true
                     failures += failure
                 }
             }

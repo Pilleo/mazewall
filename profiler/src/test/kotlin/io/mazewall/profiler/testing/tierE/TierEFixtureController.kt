@@ -30,12 +30,31 @@ public object TierEFixtureController {
         if (controller != null && !controller.waitFor(2, TimeUnit.SECONDS)) {
             error("Tier E controller could not be stopped; creation unresolved: $creationLock")
         }
+        val remaining = deadline - System.nanoTime()
+        if (remaining <= 0) error("Tier E container creation lock could not be acquired: $creationLock")
+        val seconds = (TimeUnit.NANOSECONDS.toSeconds(remaining) + 1).coerceAtLeast(1)
+        val barrier = runContainerCommand(
+            listOf(
+                "flock",
+                "-x",
+                "-w",
+                seconds.toString(),
+                creationLock.toString(),
+                "bash",
+                "-c",
+                "[[ \$(cat \"\$1\") == open ]] || exit 87; printf 'closed\\n' > \"\$1\"",
+                "--",
+                creationLock.resolveSibling("${creationLock.fileName}.state").toString(),
+            ),
+            Duration.ofNanos(remaining).plusSeconds(2),
+        )
+        check(barrier.exitCode == 0) { "Tier E container creation unresolved at $creationLock: ${barrier.output}" }
         for (creator in creators) {
-            val remaining = deadline - System.nanoTime()
-            if (remaining <= 0 ||
+            val until = deadline - System.nanoTime()
+            if (until <= 0 ||
                 !creator.onExit().let { future ->
                     try {
-                        future.get(remaining, TimeUnit.NANOSECONDS)
+                        future.get(until, TimeUnit.NANOSECONDS)
                         true
                     } catch (_: java.util.concurrent.TimeoutException) {
                         false
@@ -45,13 +64,5 @@ public object TierEFixtureController {
                 error("Tier E container creation still in flight; reconcile names before cleanup: $creationLock")
             }
         }
-        val remaining = deadline - System.nanoTime()
-        if (remaining <= 0) error("Tier E container creation lock could not be acquired: $creationLock")
-        val seconds = (TimeUnit.NANOSECONDS.toSeconds(remaining) + 1).coerceAtLeast(1)
-        val barrier = runContainerCommand(
-            listOf("flock", "-x", "-w", seconds.toString(), creationLock.toString(), "true"),
-            Duration.ofNanos(remaining).plusSeconds(2),
-        )
-        check(barrier.exitCode == 0) { "Tier E container creation unresolved at $creationLock: ${barrier.output}" }
     }
 }

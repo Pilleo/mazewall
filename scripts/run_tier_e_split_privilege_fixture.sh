@@ -24,7 +24,12 @@ NATIVE_BUILD_DIR=${TIER_E_SPLIT_NATIVE_BUILD_DIR:-/tmp/jseccomp-profiler-native-
 REUSE_BUILD=${TIER_E_SPLIT_REUSE_BUILD:-0}
 owned_create=("${ENGINE}")
 if [[ -n "${TIER_E_SPLIT_CREATE_LOCK:-}" ]]; then
-    owned_create=(flock -x "${TIER_E_SPLIT_CREATE_LOCK}" "${ENGINE}")
+    : "${TIER_E_SPLIT_CREATE_STATE:?Kotlin-owned fixture requires creation admission state}"
+    owned_create=(flock -x "${TIER_E_SPLIT_CREATE_LOCK}" bash -c '
+        [[ "$(cat "$1")" == open ]] || exit 87
+        shift
+        exec "$@"
+    ' -- "${TIER_E_SPLIT_CREATE_STATE}" "${ENGINE}")
 fi
 NEGATIVE_ARTIFACT_CASE=${TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE:-}
 NEGATIVE_IDENTITY_CASE=${TIER_E_SPLIT_NEGATIVE_IDENTITY_CASE:-}
@@ -142,18 +147,6 @@ case "${NEGATIVE_ARTIFACT_CASE}" in
         ;;
     unclosed|session-mismatch)
         registered_artifact_file="${NEGATIVE_ARTIFACT_CASE}.mzse"
-        node -e '
-            const fs=require("fs"),[scenario,path]=process.argv.slice(1);
-            const payload=Buffer.from([77,90,83,68,2,0]);
-            const bytes=Buffer.alloc(40);
-            bytes.write("MZSE",0,"ascii"); bytes.writeUInt16LE(2,4);
-            bytes.writeUInt16LE(scenario==="unclosed"?0:1,6);
-            bytes.writeBigUInt64LE(scenario==="unclosed"?0x4d5an:0x4d5bn,8);
-            bytes.writeBigUInt64LE(1n,16);
-            bytes.writeBigUInt64LE(0n,24);
-            bytes.writeBigUInt64LE(BigInt(payload.length),32);
-            fs.writeFileSync(path,Buffer.concat([bytes,payload]));
-        ' "${NEGATIVE_ARTIFACT_CASE}" "${SHARED}/definitions/${registered_artifact_file}"
         ;;
     symlink)
         registered_artifact_file=symlink.mzse
@@ -176,17 +169,16 @@ else
     test -x "${ROOT}/profiler/build/install/tier-e-daemon/bin/tier-e-daemon"
 fi
 TOOLING_LIB="${ROOT}/profiler/build/install/tier-e-daemon/lib"
-if [[ "${SPLIT_COVERAGE}" == 1 || "${SPLIT_BENCHMARK}" == 1 ]]; then
-    compgen -G "${TOOLING_LIB}/tier-e-tools-*.jar" >/dev/null || {
-        echo 'missing Kotlin Tier E tooling distribution; run :profiler:installDist' >&2
-        exit 1
-    }
-fi
+compgen -G "${TOOLING_LIB}/tier-e-tools-*.jar" >/dev/null || {
+    echo 'missing Kotlin Tier E tooling distribution; run :profiler:installDist' >&2
+    exit 1
+}
 tier_e_tools() {
     java -cp "${TOOLING_LIB}/*" io.mazewall.profiler.tierE.tools.TierEToolsMainKt "$@"
 }
-if [[ "${SPLIT_COVERAGE}" == 1 || "${SPLIT_BENCHMARK}" == 1 ]]; then
-    [[ "$(tier_e_tools version)" == tier-e-tools-1 ]] || { echo 'Tier E Kotlin tooling distribution is stale' >&2; exit 1; }
+[[ "$(tier_e_tools version)" == tier-e-tools-1 ]] || { echo 'Tier E Kotlin tooling distribution is stale' >&2; exit 1; }
+if [[ "${NEGATIVE_ARTIFACT_CASE}" == unclosed || "${NEGATIVE_ARTIFACT_CASE}" == session-mismatch ]]; then
+    tier_e_tools fixture-envelope "${NEGATIVE_ARTIFACT_CASE}" "${SHARED}/definitions/${registered_artifact_file}"
 fi
 marker_symbol=mazewall_stack_marker
 [[ "${SPLIT_MARKER_VERSION}" == v2 ]] && marker_symbol=mazewall_stack_marker_v2
@@ -399,10 +391,8 @@ if [[ "${REAL_PID_REUSE}" == 1 ]]; then
     "${ENGINE}" wait "${TARGET}" >/dev/null
     target_exit=$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${TARGET}")
     test "${target_exit}" == 137
-    python3 "${ROOT}/scripts/probe_tier_e_real_pid_reuse.py" \
-        --registered-pid "${TARGET_HOST_PID}" --registered-starttime "${registered_start}" \
-        --max-attempts 8192 --deadline-seconds 75 --hold-seconds 30 \
-        --output "${ARTIFACT_DIR}/real-pid-reuse-probe.json" > "${ARTIFACT_DIR}/probe.log" 2>&1 &
+    tier_e_tools pid-reuse-probe "${TARGET_HOST_PID}" "${registered_start}" 8192 75 30 \
+        "${ARTIFACT_DIR}/real-pid-reuse-probe.json" > "${ARTIFACT_DIR}/probe.log" 2>&1 &
     probe_pid=$!
     for _ in $(seq 1 1600); do
         [[ -s "${ARTIFACT_DIR}/real-pid-reuse-probe.json" ]] && break
@@ -410,15 +400,13 @@ if [[ "${REAL_PID_REUSE}" == 1 ]]; then
         sleep 0.05
     done
     test -s "${ARTIFACT_DIR}/real-pid-reuse-probe.json"
-    if ! node -e 'const p=require(process.argv[1]);process.exit(p.host_pid_reuse_verdict==="OBSERVED"?0:1)' \
-        "${ARTIFACT_DIR}/real-pid-reuse-probe.json"; then
+    if [[ "$(tier_e_tools json-field "${ARTIFACT_DIR}/real-pid-reuse-probe.json" host_pid_reuse_verdict)" != OBSERVED ]]; then
         printf 'host_pid_reuse_verdict=UNVERIFIED\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
         exit 1
     fi
     # Check the replacement is still the live process observed by the probe.
     replacement_start=$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")
-    node -e 'const p=require(process.argv[1]);if(p.replacement.starttime!==Number(process.argv[2]))process.exit(1)' \
-        "${ARTIFACT_DIR}/real-pid-reuse-probe.json" "${replacement_start}"
+    tier_e_tools pid-reuse-check "${ARTIFACT_DIR}/real-pid-reuse-probe.json" "${replacement_start}"
     "${ENGINE}" unpause "${COLLECTOR}" >/dev/null
     for _ in $(seq 1 200); do
         [[ -f "${SHARED}/evidence/split-fixture-19802.tier-e.json" ]] && break
@@ -428,12 +416,7 @@ if [[ "${REAL_PID_REUSE}" == 1 ]]; then
     test "$(awk '{print $22}' "/proc/${TARGET_HOST_PID}/stat")" == "${replacement_start}"
     "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
         cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
-    node -e '
-        const fs=require("fs"),r=JSON.parse(fs.readFileSync(process.argv[1]));
-        if(r.terminal_reason!=="PROCESS_IDENTITY_REUSED"||r.evidence_integrity!=="INCOMPLETE"||
-           r.lifecycle_validity!==false||r.transport_completeness!==false||r.policy_eligibility!==false)
-            process.exit(1);
-    ' "${ARTIFACT_DIR}/terminal-report.json"
+    tier_e_tools fixture-verdict real-reuse "${ARTIFACT_DIR}"
     "${ENGINE}" run --rm --user "${CALLER_UID}:${CALLER_GID}" --cap-drop ALL \
         -v "${SHARED}:/shared" "${IMAGE}" \
         java -cp /shared/agent-test-classes AgentWorkload control /shared/control.sock shutdown \
@@ -496,14 +479,7 @@ if [[ "${TARGET_EXIT}" != 0 || "${COLLECTOR_EXIT}" != 0 ]]; then
         "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1
         "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
             cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
-        node - "${ARTIFACT_DIR}" <<'NODE'
-const fs=require('fs'),d=process.argv[2],r=JSON.parse(fs.readFileSync(`${d}/terminal-report.json`));
-const target=fs.readFileSync(`${d}/target.log`,'utf8');
-if (r.terminal_reason!=='MARKER_VERSION_MISMATCH'||r.evidence_integrity!=='INCOMPLETE'||
-    r.resolved_syscalls!==0||r.lifecycle_validity!==false||r.policy_eligibility!==false||
-    !target.includes('attach failed')||target.includes('tier-e-coverage-target: operations=')) process.exit(1);
-NODE
-        printf 'marker_mismatch=REJECTED_BEFORE_WORKLOAD\nevidence_integrity=INCOMPLETE\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+        tier_e_tools fixture-verdict marker-before-workload "${ARTIFACT_DIR}"
         exit 0
     fi
     if [[ "${NEGATIVE_IDENTITY_CASE}" == stale && "${TARGET_EXIT}" != 0 && "${COLLECTOR_EXIT}" == 0 ]]; then
@@ -511,12 +487,7 @@ NODE
         "${ENGINE}" logs "${COLLECTOR}" > "${ARTIFACT_DIR}/collector.log" 2>&1
         "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
             cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
-        node -e '
-            const fs=require("fs"),r=JSON.parse(fs.readFileSync(process.argv[1]));
-            if(r.evidence_integrity!=="INCOMPLETE" || r.terminal_reason!=="STALE_PROCESS_IDENTITY" ||
-               r.lifecycle_validity!==false || r.policy_eligibility!==false || r.resolved_syscalls!==0) process.exit(1);
-        ' "${ARTIFACT_DIR}/terminal-report.json"
-        printf 'evidence_integrity=INCOMPLETE\nterminal_reason=STALE_PROCESS_IDENTITY\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+        tier_e_tools fixture-verdict stale "${ARTIFACT_DIR}"
         printf 'split stale-identity fixture artifacts: %s\n' "${ARTIFACT_DIR}"
         exit 0
     fi
@@ -533,13 +504,7 @@ fi
 "${ENGINE}" run --rm -v "${SHARED}:/shared:ro" "${IMAGE}" \
     cat /shared/evidence/split-fixture-19802.tier-e.json > "${ARTIFACT_DIR}/terminal-report.json"
 if [[ "${SIMULATED_PID_REUSE}" == 1 ]]; then
-    node -e '
-        const fs=require("fs"),r=JSON.parse(fs.readFileSync(process.argv[1]));
-        if(r.evidence_integrity!=="INCOMPLETE" || r.terminal_reason!=="PROCESS_IDENTITY_REUSED" ||
-           r.lifecycle_validity!==false || r.transport_completeness!==false || r.policy_eligibility!==false)
-           process.exit(1);
-    ' "${ARTIFACT_DIR}/terminal-report.json"
-    printf 'evidence_integrity=INCOMPLETE\nterminal_reason=PROCESS_IDENTITY_REUSED\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+    tier_e_tools fixture-verdict simulated-reuse "${ARTIFACT_DIR}"
     printf 'split simulated PID-reuse fixture artifacts: %s\n' "${ARTIFACT_DIR}"
     exit 0
 fi
@@ -562,54 +527,22 @@ if [[ "${SPLIT_COVERAGE}" == 1 ]]; then
         }
 fi
 if [[ "${agent_marker_version}" != "${SPLIT_MARKER_VERSION}" ]]; then
-    node - "${ARTIFACT_DIR}" <<'NODE'
-const fs=require('fs'),dir=process.argv[2];
-const t=JSON.parse(fs.readFileSync(`${dir}/terminal-report.json`));
-const c=JSON.parse(fs.readFileSync(`${dir}/coverage-verdict.json`));
-if(t.evidence_integrity!=='INCOMPLETE'||t.lifecycle_validity!==false||
-   c.coverage_verdict==='PASS'||t.policy_eligibility!==false)process.exit(1);
-NODE
-    printf 'marker_mismatch=REJECTED\nevidence_integrity=INCOMPLETE\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+    tier_e_tools fixture-verdict marker "${ARTIFACT_DIR}"
     exit 0
 fi
 grep -q 'tier-e-workflow: capture complete; terminal control deferred' "${ARTIFACT_DIR}/target.log"
 grep -q 'tier-e-control: shutdown' "${ARTIFACT_DIR}/control.log"
 grep -Eq 'active_polls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log" "${ARTIFACT_DIR}/target.log"
-grep -Eq 'resolved_syscalls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log"
+if [[ -z "${NEGATIVE_ARTIFACT_CASE}" ]]; then
+    grep -Eq 'resolved_syscalls=[1-9][0-9]*' "${ARTIFACT_DIR}/collector.log"
+fi
 if [[ -n "${TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL:-}" ]]; then
-    node - "${ARTIFACT_DIR}" <<'NODE'
-const fs=require('fs'),dir=process.argv[2];
-const terminal=JSON.parse(fs.readFileSync(`${dir}/terminal-report.json`));
-const coverage=JSON.parse(fs.readFileSync(`${dir}/coverage-verdict.json`));
-const manifest=JSON.parse(fs.readFileSync(`${dir}/coverage-manifest.json`));
-const singletons=manifest.edges.filter(edge=>edge.workload_path>=48 && edge.workload_path<=71);
-if (terminal.evidence_integrity!=='INCOMPLETE' || terminal.transport_completeness!==false ||
-    terminal.attribution_coverage!==false || terminal.lifecycle_validity!==true ||
-    terminal.recovery_evidence?.insertion_failures!==0 || terminal.recovery_evidence?.recovered_edges<24 ||
-    terminal.recovery_evidence?.confirmed_ring_loss_recoveries<24 ||
-    coverage.coverage_verdict!=='PASS' || coverage.wrong_edges?.length ||
-    singletons.length!==24 || singletons.some(edge=>edge.discovery_source!=='map') ||
-    terminal.policy_eligibility!==false) process.exit(1);
-NODE
-    printf 'evidence_integrity=INCOMPLETE\ncoverage_verdict=PASS\nring_transport=INCOMPLETE\nsingleton_source=MAP\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+    tier_e_tools fixture-verdict fault "${ARTIFACT_DIR}"
 elif [[ "${ALLOW_INCOMPLETE}" == 1 ]]; then
-    node -e '
-        const fs=require("fs"), p=process.argv[1];
-        const terminal=JSON.parse(fs.readFileSync(`${p}/terminal-report.json`));
-        const coverage=JSON.parse(fs.readFileSync(`${p}/coverage-verdict.json`));
-        const complete=terminal.evidence_integrity === "COMPLETE" && coverage.coverage_verdict === "PASS";
-        const bounded=terminal.evidence_integrity === "INCOMPLETE" && coverage.coverage_verdict === "INCOMPLETE";
-        if (terminal.policy_eligibility !== false || (!complete && !bounded) ||
-            coverage.policy_eligibility !== false || coverage.coverage_verdict === "FAILED" ||
-            coverage.wrong_edges?.length) process.exit(1);
-    ' "${ARTIFACT_DIR}"
-    node -e 'const fs=require("fs"),p=process.argv[1],t=JSON.parse(fs.readFileSync(`${p}/terminal-report.json`)),c=JSON.parse(fs.readFileSync(`${p}/coverage-verdict.json`));fs.writeFileSync(`${p}/verdict.env`,`evidence_integrity=${t.evidence_integrity}\ncoverage_verdict=${c.coverage_verdict}\npolicy_eligibility=false\n`)' "${ARTIFACT_DIR}"
+    tier_e_tools fixture-verdict allow-incomplete "${ARTIFACT_DIR}"
 elif [[ -n "${NEGATIVE_ARTIFACT_CASE}" ]]; then
     grep -q 'evidence_integrity=INCOMPLETE' "${ARTIFACT_DIR}/collector.log"
-    grep -q '"evidence_integrity":"INCOMPLETE"' "${ARTIFACT_DIR}/terminal-report.json"
-    grep -q '"policy_eligibility":false' "${ARTIFACT_DIR}/terminal-report.json"
-    grep -Eq '"failed_dimensions":\[[^]]+\]' "${ARTIFACT_DIR}/terminal-report.json"
-    printf 'evidence_integrity=INCOMPLETE\nnegative_artifact_case=%s\npolicy_eligibility=false\n' "${NEGATIVE_ARTIFACT_CASE}" > "${ARTIFACT_DIR}/verdict.env"
+    tier_e_tools fixture-verdict "negative:${NEGATIVE_ARTIFACT_CASE}" "${ARTIFACT_DIR}"
 else
     test -s "${SHARED}/definitions/orders.mzse"
     cp "${SHARED}/definitions/orders.mzse" "${ARTIFACT_DIR}/orders.mzse"
@@ -619,8 +552,7 @@ else
     grep -q 'attribution_coverage=true' "${ARTIFACT_DIR}/collector.log"
     grep -q 'dictionary_integrity=true' "${ARTIFACT_DIR}/collector.log"
     grep -q 'lifecycle_validity=true' "${ARTIFACT_DIR}/collector.log"
-    grep -q '"evidence_integrity":"COMPLETE"' "${ARTIFACT_DIR}/terminal-report.json"
-    printf 'evidence_integrity=COMPLETE\ncapture_domain_validity=PASS\ntransport_completeness=PASS\nattribution_coverage=PASS\ndictionary_integrity=PASS\nlifecycle_validity=PASS\npolicy_eligibility=false\n' > "${ARTIFACT_DIR}/verdict.env"
+    tier_e_tools fixture-verdict normal "${ARTIFACT_DIR}"
 fi
 printf 'emission_mode=%s\nstack_transport=%s\n' "${SPLIT_EMISSION_MODE}" "${SPLIT_STACK_TRANSPORT}" >> "${ARTIFACT_DIR}/verdict.env"
 printf 'split privilege fixture artifacts: %s\n' "${ARTIFACT_DIR}"
