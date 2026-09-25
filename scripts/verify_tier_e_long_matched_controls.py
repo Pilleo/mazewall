@@ -30,6 +30,7 @@ FORKS = 15
 DECLARED_OPERATIONS = 75000
 TARGET_BOUNDARY = 'after_workload_before_exit'
 COLLECTOR_BOUNDARY = 'after_terminal_report_before_shutdown'
+MAX_SAFE_INTEGER = (1 << 53) - 1
 
 
 def _read_artifact(fork_dir, arm, fork, filename, errors):
@@ -261,7 +262,9 @@ def _reject_nonstandard_constant(value):
 
 
 def _positive_finite(value):
-    return type(value) in (int, float) and math.isfinite(value) and value > 0
+    if type(value) is int:
+        return 0 < value <= MAX_SAFE_INTEGER
+    return type(value) is float and math.isfinite(value) and 0 < value <= MAX_SAFE_INTEGER
 
 
 def _freeze(value):
@@ -290,6 +293,7 @@ def main(argv):
         after_path = os.path.join(decision_dir, 'source-state-after.json')
         terminal_path = os.path.join(decision_dir, 'terminal.json')
 
+    verification_mode = 'full-directory' if decision_dir else 'jsonl-only'
     errors = []
     rows = []
     try:
@@ -299,7 +303,8 @@ def main(argv):
                 if line:
                     rows.append(json.loads(line, parse_constant=_reject_nonstandard_constant))
     except (OSError, ValueError) as error:
-        return fail([f'jsonl_unreadable: {error}'], {'jsonl': jsonl_path})
+        return fail([f'jsonl_unreadable: {error}'],
+                    {'jsonl': jsonl_path, 'decision_dir': decision_dir})
 
     def load(path, label):
         try:
@@ -356,8 +361,34 @@ def main(argv):
                 f"after={after.get('source_file_count')} files={len(before_files)}"
             )
 
-    if len(rows) != FORKS * 7:
-        errors.append(f'row_count: expected {FORKS * 7}, observed {len(rows)}')
+    raw_row_count = len(rows)
+    if raw_row_count != FORKS * 7:
+        errors.append(f'row_count: expected {FORKS * 7}, observed {raw_row_count}')
+
+    valid_rows = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            errors.append(f'row_{index}_not_object')
+            continue
+        fork = row.get('fork')
+        arm = row.get('arm')
+        if type(fork) is not int or fork < 1 or fork > FORKS:
+            errors.append(f'row_{index}_fork_invalid: {fork!r}')
+            continue
+        if not isinstance(arm, str) or arm not in ALL_ARMS:
+            errors.append(f'row_{index}_arm_invalid: {arm!r}')
+            continue
+        if type(row.get('artifact_errors')) is not list or row['artifact_errors'] != []:
+            errors.append(f'row_{index}_artifact_errors_invalid: {row.get("artifact_errors")!r}')
+            continue
+        if not _positive_finite(row.get('target_cpu_ns')):
+            errors.append(f'row_{index}_target_cpu_invalid: {row.get("target_cpu_ns")!r}')
+            continue
+        if arm != BASELINE and not _positive_finite(row.get('collector_cpu_ns')):
+            errors.append(f'row_{index}_collector_cpu_invalid: {row.get("collector_cpu_ns")!r}')
+            continue
+        valid_rows.append(row)
+    rows = valid_rows
 
     by_fork = {}
     for row in rows:
@@ -417,7 +448,7 @@ def main(argv):
                 errors.append(f"fork_{fork}_{row.get('arm')}_status: {row.get('status')}")
             if row.get('policy_eligibility') is not False:
                 errors.append(f"fork_{fork}_{row.get('arm')}_policy_eligibility")
-            if row.get('artifact_errors'):
+            if type(row.get('artifact_errors')) is not list or row['artifact_errors'] != []:
                 errors.append(f"fork_{fork}_{row.get('arm')}_artifact_errors: {row.get('artifact_errors')}")
             if not _positive_finite(row.get('target_cpu_ns')):
                 errors.append(f"fork_{fork}_{row.get('arm')}_target_cpu")
@@ -474,7 +505,7 @@ def main(argv):
     if errors:
         return fail(errors, {
             'decision_dir': decision_dir,
-            'rows': len(rows),
+            'rows': raw_row_count,
             'baseline_rows': baseline_rows,
             'profiled_rows': profiled_rows,
             'dir_checks': dir_checks,
@@ -484,7 +515,7 @@ def main(argv):
         'schema_version': 1,
         'verdict': 'PASS',
         'verification_mode': 'full-directory' if decision_dir else 'jsonl-only',
-        'rows': len(rows),
+        'rows': raw_row_count,
         'baseline_rows': baseline_rows,
         'profiled_rows': profiled_rows,
         'forks': sorted(by_fork),

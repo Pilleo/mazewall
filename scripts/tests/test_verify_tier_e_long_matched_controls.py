@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 
+import pytest
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EVIDENCE = ROOT / 'docs/internals/evidence/tier-e-long-matched-controls'
@@ -163,6 +165,49 @@ def _retained_documents():
     after = json.loads((EVIDENCE / 'source-state-after.json').read_text())
     terminal = json.loads((EVIDENCE / 'terminal.json').read_text())
     return rows, manifest, before, after, terminal
+
+
+@pytest.mark.parametrize('fork_value', [None, [], {}, '1', True, 1.0, 0, 16])
+def test_invalid_fork_returns_structured_incomplete(fork_value):
+    rows, manifest, before, after, terminal = _retained_documents()
+    rows[0]['fork'] = fork_value
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code == 1
+    assert result['verdict'] == 'INCOMPLETE'
+    assert result['verification_mode'] == 'jsonl-only'
+    assert any('fork' in error for error in result['errors'])
+
+
+@pytest.mark.parametrize('arm_value', [None, [], {}, 1, 'unknown-arm'])
+def test_invalid_arm_returns_structured_incomplete(arm_value):
+    rows, manifest, before, after, terminal = _retained_documents()
+    rows[0]['arm'] = arm_value
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code == 1
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('arm' in error for error in result['errors'])
+
+
+def test_oversized_cpu_returns_structured_incomplete():
+    rows, manifest, before, after, terminal = _retained_documents()
+    rows[0]['target_cpu_ns'] = 10 ** 400
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code == 1
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('target_cpu' in error for error in result['errors'])
+
+
+@pytest.mark.parametrize('bad', ['absent', None, False, '', {}, ['oracle corrupt']])
+def test_artifact_errors_must_be_an_empty_list(bad):
+    rows, manifest, before, after, terminal = _retained_documents()
+    if bad == 'absent':
+        rows[0].pop('artifact_errors')
+    else:
+        rows[0]['artifact_errors'] = bad
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code == 1
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('artifact_errors' in error for error in result['errors'])
 
 
 def test_split_source_provenance_rejected():
