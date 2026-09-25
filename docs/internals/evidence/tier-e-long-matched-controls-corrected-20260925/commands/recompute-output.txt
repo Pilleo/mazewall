@@ -1,0 +1,9 @@
+full-stream v1 pairs 15 ratio 13.187214611872147 incremental_ns 77170000000
+full-stream v2 pairs 15 ratio 12.786858974358974 incremental_ns 76180000000
+full-stream hybrid pairs 15 ratio 13.2876254180602 incremental_ns 77350000000
+full-stream hybrid_over_v1 1.0023377337733774 pairs 15
+unique-edge v1 pairs 15 ratio 13.001560062402497 incremental_ns 75070000000
+unique-edge v2 pairs 15 ratio 12.770670826833074 incremental_ns 73850000000
+unique-edge hybrid pairs 15 ratio 13.41185647425897 incremental_ns 75610000000
+unique-edge hybrid_over_v1 0.9989343279605701 pairs 15
+ALL 14 CORRECTED MEDIANS MATCH decision.json EXACTLY

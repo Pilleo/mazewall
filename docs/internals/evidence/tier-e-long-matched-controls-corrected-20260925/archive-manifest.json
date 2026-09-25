@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "measurement_guest_commit": "10195e1a49b5bac7d1d86f37c36b410f1affaf25",
+  "archive": "tier-e-long-matched-corrected.tar.zst",
+  "archive_sha256": "c9539fe79cbc5f318c79807ad8db276190deb0e1312e336bf65561168557dcba",
+  "archive_bytes": 70426886,
+  "tar_entries": 2072,
+  "file_members": 1916,
+  "decision_file_members": 1434,
+  "pilot_file_members": 482,
+  "separate_extraction_member_checksum_result": "1916/1916 OK, exit 0",
+  "decision_arm_results": 105,
+  "decision_profiled_terminal_reports": 90,
+  "decision_baseline_summaries": 15,
+  "pilot_arm_results": 35,
+  "source_state_unchanged": true,
+  "policy_eligibility": false
+}

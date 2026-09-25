@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "checks": {
+    "decision_rows_105_15x7": true,
+    "decision_baseline15_profiled90": true,
+    "decision_oracle72_75000": true,
+    "decision_no_failed_arm_or_artifacts": true,
+    "decision_uniform_identities": true,
+    "decision_clean_source_before_after": true,
+    "decision_complete_policy_false": true,
+    "decision_verifier_pass": true,
+    "pilot_35_30_complete": true,
+    "archive_file_members_1916": true,
+    "archive_member_second_extract_all_ok": true,
+    "independent_medians_exact": true
+  },
+  "guest_commit": "10195e1a49b5bac7d1d86f37c36b410f1affaf25",
+  "decision_source_digest": "d859a0aab57f8243be1988d2273fef27e84baa743b68802156758d0ffa5ec25d",
+  "forks": 15,
+  "arms": 105,
+  "pilot_arms": 35,
+  "archive_files": 1916,
+  "policy_eligibility": false,
+  "verdict": "PASS"
+}
