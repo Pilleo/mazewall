@@ -57,6 +57,10 @@ only the target workload. Hybrid/v1 incremental CPU remains at parity within
 noise in both modes. Differences from the first guest run cannot be assigned
 solely to the sampler fix: these are separate runs with different source
 revisions and conditions, not fork-by-fork matched old/new sampler readings.
+During the pilot, `docker ps` briefly showed an unrelated transient container
+named `lucid_turing`; it later disappeared without fixture intervention. The
+matrix cleanup only addressed its own run-scoped target/collector names. This
+guest observation does not establish noise-free or exclusive CPU scheduling.
 Neither run is directly comparable to the historical short host calibrated
 gate; the failed combined-CPU 1.25 and receipt-p99 gates are **not replaced**.
 The operator's `REJECT_DEFAULT_PROMOTION` decision stands, hybrid stays opt-in
