@@ -58,6 +58,14 @@ run by explicitly invoking `:profiler:tierELongMatchedBenchmark` after
 preparing the native Release bundle and image. The specified 800 µs pacing
 alone imposes a 60-second wall-clock floor per arm; cache reuse cannot
 remove that measurement work.
+The short split-topology fixture requires an explicitly selected local
+`unix://` container endpoint: it binds a local shared directory and verifies
+the registered container-host PID via local `/proc`. Remote rootful endpoints
+may still run the mount-free engine and ownership tests; the split fixture
+skips with a distinct reason rather than using the wrong host PID. A rootful
+Docker server passed all four short cases here. Podman is supported by the
+engine adapter but its runtime behavior remains unverified on machines without
+a reachable rootful Podman server.
 
 ---
 

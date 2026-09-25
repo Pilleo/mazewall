@@ -203,6 +203,14 @@ The Docker ownership and short rootful container tests have been exercised on
 the local rootful endpoint; runtime parity on a rootful Podman server remains
 unverified until such an endpoint is available. This change does not promote
 Tier E as a default or change `policy_eligibility=false`.
+The short annotated JUnit suite also exercises the actual 72-path non-root
+target/privileged collector fixture when the selected rootful endpoint uses a
+local `unix://` socket. The fixture inspects the registered target via local
+`/proc` and binds a local shared directory; therefore the split fixture
+skips for remote or unproven-default endpoints even though the mount-free
+engine and caller-owned artifact-export tests may run remotely. Availability
+and image configuration are forwarded to the JUnit worker on each invocation,
+so a prior skipped Gradle run cannot mask a newly available endpoint.
 
 ## Compatibility rules
 

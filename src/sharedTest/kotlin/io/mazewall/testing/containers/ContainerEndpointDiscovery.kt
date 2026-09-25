@@ -117,11 +117,16 @@ public data class ContainerCommandResult(
 public fun runContainerCommand(
     command: List<String>,
     timeout: Duration = Duration.ofSeconds(5),
+    environment: Map<String, String> = emptyMap(),
 ): ContainerCommandResult {
     val output = Files.createTempFile("mazewall-container-probe-", ".log")
     try {
         val process = try {
-            ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start()
+            ProcessBuilder(command)
+                .apply { environment().putAll(environment) }
+                .redirectErrorStream(true)
+                .redirectOutput(output.toFile())
+                .start()
         } catch (error: java.io.IOException) {
             return ContainerCommandResult(-1, error.message.orEmpty())
         }

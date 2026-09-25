@@ -249,6 +249,7 @@ val rootfulContainerTest =
     tasks.register<Test>("rootfulContainerTest") {
         configureIntegrationSourceSet()
         description = "Short endpoint-gated Docker/Podman rootful tests"
+        dependsOn("installDist")
         useJUnitPlatform { includeTags("rootful-container") }
         // A reused Gradle daemon can retain stale DOCKER_HOST values from a
         // previous invocation. Forward the current operator selection into
