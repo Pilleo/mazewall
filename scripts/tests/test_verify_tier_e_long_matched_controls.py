@@ -129,6 +129,95 @@ def test_malformed_top_level_inputs_fail_closed():
         assert json.loads(run.stdout)['verdict'] == 'INCOMPLETE'
 
 
+def _verify_custom(rows, manifest=None, before=None, after=None, terminal=None):
+    import tempfile
+    base = EVIDENCE
+    manifest = manifest if manifest is not None else json.loads((base / 'run-manifest.json').read_text())
+    before = before if before is not None else json.loads((base / 'source-state-before.json').read_text())
+    after = after if after is not None else json.loads((base / 'source-state-after.json').read_text())
+    terminal = terminal if terminal is not None else json.loads((base / 'terminal.json').read_text())
+    with tempfile.TemporaryDirectory() as directory:
+        tmp = pathlib.Path(directory)
+        sample = tmp / 'rows.jsonl'
+        sample.write_text(''.join(json.dumps(row, allow_nan=True) + '\n' for row in rows))
+        manifest_path = tmp / 'manifest.json'
+        manifest_path.write_text(json.dumps(manifest))
+        before_path = tmp / 'before.json'
+        before_path.write_text(json.dumps(before))
+        after_path = tmp / 'after.json'
+        after_path.write_text(json.dumps(after))
+        terminal_path = tmp / 'terminal.json'
+        terminal_path.write_text(json.dumps(terminal))
+        run = subprocess.run(
+            [sys.executable, str(VERIFIER), '--jsonl-only', str(sample), str(manifest_path),
+             str(before_path), str(after_path), str(terminal_path)],
+            capture_output=True, text=True, check=False,
+        )
+        return run.returncode, json.loads(run.stdout)
+
+
+def _retained_documents():
+    rows = [json.loads(line) for line in (EVIDENCE / 'fork-results.jsonl').read_text().splitlines()]
+    manifest = json.loads((EVIDENCE / 'run-manifest.json').read_text())
+    before = json.loads((EVIDENCE / 'source-state-before.json').read_text())
+    after = json.loads((EVIDENCE / 'source-state-after.json').read_text())
+    terminal = json.loads((EVIDENCE / 'terminal.json').read_text())
+    return rows, manifest, before, after, terminal
+
+
+def test_split_source_provenance_rejected():
+    rows, manifest, before, after, terminal = _retained_documents()
+    before = dict(before, source_digest='unrelated-source')
+    after = dict(after, source_digest='unrelated-source')
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code != 0
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('source_provenance_unbound' in error for error in result['errors'])
+
+
+def test_missing_source_digest_rejected():
+    rows, manifest, before, after, terminal = _retained_documents()
+    before = {key: value for key, value in before.items() if key != 'source_digest'}
+    after = {key: value for key, value in after.items() if key != 'source_digest'}
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code != 0
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('source_provenance_unbound' in error for error in result['errors'])
+
+
+def test_source_revision_change_rejected():
+    rows, manifest, before, after, terminal = _retained_documents()
+    after = dict(after, revision='different-revision')
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code != 0
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('revision' in error for error in result['errors'])
+
+
+def test_source_file_inventory_change_rejected():
+    rows, manifest, before, after, terminal = _retained_documents()
+    files = dict(after['files'])
+    first = next(iter(files))
+    files[first] = dict(files[first], sha256='0' * 64)
+    after = dict(after, files=files)
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code != 0
+    assert result['verdict'] == 'INCOMPLETE'
+    assert any('source_files' in error for error in result['errors'])
+
+
+def test_empty_identity_rejected():
+    rows, manifest, before, after, terminal = _retained_documents()
+    rows = [dict(row, source_digest='') for row in rows]
+    manifest = dict(manifest, source_digest='')
+    before = dict(before, source_digest='')
+    after = dict(after, source_digest='')
+    code, result = _verify_custom(rows, manifest, before, after, terminal)
+    assert code != 0
+    assert result['verdict'] == 'INCOMPLETE'
+    assert result['errors']
+
+
 def test_mutated_inputs_fail_closed():
     original = [json.loads(line) for line in (EVIDENCE / 'fork-results.jsonl').read_text().splitlines()]
     mutations = {

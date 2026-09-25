@@ -124,9 +124,25 @@ def main(argv):
             errors.append('source_digest_drift')
         if after.get('unchanged') is not True:
             errors.append('source_state_unchanged_false')
-        if before.get('input_dirty_count') != 0 or after.get('input_dirty_count') != 0:
+        for label, state in (('before', before), ('after', after)):
+            if type(state.get('input_dirty_count')) is not int or state.get('input_dirty_count') != 0:
+                errors.append(f"input_dirty_count_not_zero: {label}={state.get('input_dirty_count')!r}")
+        if not before.get('revision') or not after.get('revision'):
+            errors.append('source_revision_missing')
+        elif before.get('revision') != after.get('revision'):
             errors.append(
-                f"input_dirty_count: before={before.get('input_dirty_count')} after={after.get('input_dirty_count')}"
+                f"source_revision_mismatch: before={before.get('revision')} after={after.get('revision')}"
+            )
+        before_files = before.get('files')
+        after_files = after.get('files')
+        if not isinstance(before_files, dict) or not isinstance(after_files, dict):
+            errors.append('source_files_invalid')
+        elif before_files != after_files:
+            errors.append('source_files_drift')
+        elif before.get('source_file_count') != len(before_files) or after.get('source_file_count') != len(after_files):
+            errors.append(
+                f"source_file_count_mismatch: before={before.get('source_file_count')} "
+                f"after={after.get('source_file_count')} files={len(before_files)}"
             )
 
     if len(rows) != FORKS * 7:
@@ -144,6 +160,21 @@ def main(argv):
     for field, values in identity_values.items():
         if len(values) != 1 or None in values:
             errors.append(f'identity_not_uniform: {field}={sorted(map(str, values))}')
+        else:
+            raw = next(row.get(field) for row in rows if isinstance(row, dict))
+            if not (isinstance(raw, str) and raw.strip()):
+                errors.append(f'identity_invalid: {field}={raw!r}')
+    if before is not None and after is not None and manifest is not None and rows:
+        chain_raw = [
+            before.get('source_digest'),
+            after.get('source_digest'),
+            manifest.get('source_digest'),
+        ]
+        chain_raw.extend(row.get('source_digest') for row in rows if isinstance(row, dict))
+        if len({_freeze(value) for value in chain_raw}) != 1 or not all(
+            isinstance(value, str) and value.strip() for value in chain_raw
+        ):
+            errors.append('source_provenance_unbound: before/after source-state, manifest, and rows disagree')
     if manifest is not None and rows and isinstance(rows[0], dict):
         for field in identity_fields:
             if manifest.get(field) != rows[0].get(field):
