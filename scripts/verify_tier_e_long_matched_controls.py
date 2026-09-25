@@ -31,6 +31,10 @@ DECLARED_OPERATIONS = 75000
 TARGET_BOUNDARY = 'after_workload_before_exit'
 COLLECTOR_BOUNDARY = 'after_terminal_report_before_shutdown'
 MAX_SAFE_INTEGER = (1 << 53) - 1
+TERMINAL_DIMENSIONS = (
+    'capture_domain_validity', 'transport_completeness', 'attribution_coverage',
+    'dictionary_integrity', 'lifecycle_validity',
+)
 
 
 def _valid_oracle_paths(paths):
@@ -184,6 +188,13 @@ def _verify_fork_dir(arm, fork, fork_dir, row, errors, counters):
             and type(terminal.get('process_incarnation')) is int
             and terminal.get('process_incarnation') > 0
         )
+        for dimension in TERMINAL_DIMENSIONS:
+            if terminal.get(dimension) is not True:
+                errors.append(f'terminal_dimension_invalid: {rel("terminal-report.json")} {dimension}')
+                terminal_ok = False
+        if type(terminal.get('failed_dimensions')) is not list or terminal['failed_dimensions'] != []:
+            errors.append(f'terminal_failed_dimensions_invalid: {rel("terminal-report.json")}')
+            terminal_ok = False
         if not terminal_ok:
             errors.append(f'terminal_mismatch: {rel("terminal-report.json")}')
         if row.get('terminal_integrity') != terminal.get('evidence_integrity'):

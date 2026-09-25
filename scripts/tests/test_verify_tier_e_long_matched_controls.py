@@ -309,6 +309,12 @@ def _write_run_tree(root, rows, manifest, before, after, terminal):
                 'schema_version': 1, 'registration_id': 'split-fixture', 'session_epoch': 19802,
                 'target_pid': host_pid, 'process_incarnation': starttime,
                 'evidence_integrity': 'COMPLETE', 'terminal_reason': 'COMPLETE',
+                'capture_domain_validity': True,
+                'transport_completeness': True,
+                'attribution_coverage': True,
+                'dictionary_integrity': True,
+                'lifecycle_validity': True,
+                'failed_dimensions': [],
                 'policy_eligibility': False,
             }
             (arm_dir / 'coverage-verdict.json').write_text(json.dumps(coverage))
@@ -440,6 +446,61 @@ def test_valid_oracle_order_is_not_significant():
         oracle_path.write_text(json.dumps(oracle))
         code, result = _verify_tree(tree)
         assert code == 0, result.get('errors')
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+
+
+TERMINAL_DIMENSIONS = [
+    'capture_domain_validity', 'transport_completeness', 'attribution_coverage',
+    'dictionary_integrity', 'lifecycle_validity',
+]
+
+
+@pytest.mark.parametrize('dimension', TERMINAL_DIMENSIONS)
+@pytest.mark.parametrize('bad', [False, 1, 'absent'])
+def test_terminal_dimension_must_be_exact_true(dimension, bad):
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    tree = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        fork_dir = tree / 'dictionary-full-stream-v1' / 'fork-1'
+        report = json.loads((fork_dir / 'terminal-report.json').read_text())
+        if bad == 'absent':
+            report.pop(dimension)
+        else:
+            report[dimension] = bad
+        (fork_dir / 'terminal-report.json').write_text(json.dumps(report))
+        summary = json.loads((fork_dir / 'summary.json').read_text())
+        summary['terminal'] = report
+        (fork_dir / 'summary.json').write_text(json.dumps(summary))
+        code, result = _verify_tree(tree)
+        assert code == 1, (dimension, bad)
+        assert result['verdict'] == 'INCOMPLETE'
+        assert any(dimension in error and 'terminal-report.json' in error for error in result['errors'])
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+
+
+@pytest.mark.parametrize('bad', [None, 'dictionary_integrity', {}, ['dictionary_integrity'], 'absent'])
+def test_failed_dimensions_must_be_empty_list(bad):
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    tree = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        fork_dir = tree / 'dictionary-full-stream-v1' / 'fork-1'
+        report = json.loads((fork_dir / 'terminal-report.json').read_text())
+        if bad == 'absent':
+            report.pop('failed_dimensions')
+        else:
+            report['failed_dimensions'] = bad
+        (fork_dir / 'terminal-report.json').write_text(json.dumps(report))
+        summary = json.loads((fork_dir / 'summary.json').read_text())
+        summary['terminal'] = report
+        (fork_dir / 'summary.json').write_text(json.dumps(summary))
+        code, result = _verify_tree(tree)
+        assert code == 1, bad
+        assert result['verdict'] == 'INCOMPLETE'
+        assert any('failed_dimensions' in error and 'terminal-report.json' in error for error in result['errors'])
     finally:
         shutil.rmtree(tree, ignore_errors=True)
 
