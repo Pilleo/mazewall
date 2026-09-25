@@ -1,0 +1,16 @@
+{
+  "context": {
+    "baseline_rows": 15,
+    "decision_dir": null,
+    "dir_checks": null,
+    "profiled_rows": 90,
+    "rows": 105
+  },
+  "errors": [
+    "source_provenance_unbound: before/after source-state, manifest, and rows disagree"
+  ],
+  "policy_eligibility": false,
+  "schema_version": 1,
+  "verdict": "INCOMPLETE",
+  "verification_mode": "jsonl-only"
+}

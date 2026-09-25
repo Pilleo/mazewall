@@ -1,0 +1,487 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "expected_forks": 15,
+  "declared_operations": 75000,
+  "rows": 105,
+  "complete_forks": 0,
+  "incomplete": [
+    {
+      "fork": 1,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 1,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 1,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 1,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 2,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 2,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 2,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 2,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 3,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 3,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 3,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 3,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 4,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 4,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 4,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 4,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 5,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 5,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 5,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 5,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 6,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 6,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 6,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 6,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 7,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 7,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 7,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 7,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 8,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 8,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 8,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 8,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 9,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 9,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 9,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 9,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 10,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 10,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 10,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 10,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 11,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 11,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 11,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 11,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 12,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 12,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 12,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 12,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 13,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 13,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 13,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 13,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 14,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 14,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 14,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 14,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    },
+    {
+      "fork": 15,
+      "reason": "source_identity_missing",
+      "field": "source_digest"
+    },
+    {
+      "fork": 15,
+      "reason": "source_identity_missing",
+      "field": "image_id"
+    },
+    {
+      "fork": 15,
+      "reason": "source_identity_missing",
+      "field": "native_so_sha256"
+    },
+    {
+      "fork": 15,
+      "reason": "source_identity_missing",
+      "field": "daemon_jars_sha256"
+    }
+  ],
+  "incomplete_reasons": [
+    "source_identity_missing"
+  ],
+  "modes": {
+    "full-stream": {
+      "pairs": {
+        "baseline": 0,
+        "v1": 0,
+        "v2": 0,
+        "hybrid": 0
+      },
+      "complete_forks": [],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 0,
+        "median": null,
+        "upper_95": null,
+        "status": "INCONCLUSIVE",
+        "reasons": [
+          "insufficient_pairs",
+          "invalid_run"
+        ]
+      }
+    },
+    "unique-edge": {
+      "pairs": {
+        "baseline": 0,
+        "v1": 0,
+        "v2": 0,
+        "hybrid": 0
+      },
+      "complete_forks": [],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 0,
+          "median": null,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 0,
+        "median": null,
+        "upper_95": null,
+        "status": "INCONCLUSIVE",
+        "reasons": [
+          "insufficient_pairs",
+          "invalid_run"
+        ]
+      }
+    }
+  },
+  "metrics_status": "INCONCLUSIVE",
+  "existing_gates_note": "diagnostic only; does not replace the combined CPU 1.25 or receipt-p99 gates",
+  "prior_adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

@@ -1,0 +1,20 @@
+{
+  "context": {
+    "baseline_rows": 14,
+    "decision_dir": null,
+    "dir_checks": null,
+    "profiled_rows": 84,
+    "rows": 104
+  },
+  "errors": [
+    "row_count: expected 105, observed 104",
+    "fork_1_arms: ['dictionary-full-stream-hybrid', 'dictionary-full-stream-v1', 'dictionary-full-stream-v2', 'dictionary-unique-edge-hybrid', 'dictionary-unique-edge-v1', 'dictionary-unique-edge-v2']",
+    "fork_coverage: forks=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] lengths={1: 6, 2: 7, 3: 7, 4: 7, 5: 7, 6: 7, 7: 7, 8: 7, 9: 7, 10: 7, 11: 7, 12: 7, 13: 7, 14: 7, 15: 7}",
+    "baseline_count: 14",
+    "profiled_count: 84"
+  ],
+  "policy_eligibility": false,
+  "schema_version": 1,
+  "verdict": "INCOMPLETE",
+  "verification_mode": "jsonl-only"
+}

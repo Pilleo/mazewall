@@ -1,0 +1,34 @@
+{
+  "baseline_rows": 15,
+  "dir_checks": null,
+  "forks": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "identities": {
+    "daemon_jars_sha256": "b05a493f3c3c89df03dc238f154617e39b5d78ea14ecb6f9d0ad0ee4b412be04",
+    "image_id": "sha256:00f840c947b3d56a45cc1d94d4d2e9e1a79d5ef45057932e577c9a0bcc8a1afa",
+    "native_so_sha256": "7d6459afeaa340b3a53510709946c6333d9d6d4e662a299d8ce0ec265af9ed5d",
+    "source_digest": "3f1e88d7cceeb122d740f9898d1f1d1bab813b4b62a795b7bcc3af5962a8c8c4"
+  },
+  "input_dirty_count": 0,
+  "policy_eligibility": false,
+  "profiled_rows": 90,
+  "rows": 105,
+  "schema_version": 1,
+  "verdict": "PASS",
+  "verification_mode": "jsonl-only"
+}

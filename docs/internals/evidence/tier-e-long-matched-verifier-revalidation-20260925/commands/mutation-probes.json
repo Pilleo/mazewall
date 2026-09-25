@@ -1,0 +1,42 @@
+{
+  "estimator_cross_fork_drift": {
+    "exit": 1,
+    "metrics_status": "INCONCLUSIVE",
+    "reasons": [
+      "source_identity_mismatch"
+    ]
+  },
+  "estimator_missing_identity": {
+    "exit": 1,
+    "metrics_status": "INCONCLUSIVE",
+    "reasons": [
+      "source_identity_missing"
+    ]
+  },
+  "estimator_extra_arm": {
+    "exit": 1,
+    "metrics_status": "INCONCLUSIVE",
+    "reasons": [
+      "unexpected_arm"
+    ]
+  },
+  "estimator_artifact_errors": {
+    "exit": 1,
+    "metrics_status": "INCONCLUSIVE",
+    "reasons": [
+      "artifact_errors"
+    ]
+  },
+  "verifier_nan_cpu": {
+    "exit": 1,
+    "verdict": "INCOMPLETE"
+  },
+  "verifier_split_source": {
+    "exit": 1,
+    "verdict": "INCOMPLETE"
+  },
+  "verifier_missing_row": {
+    "exit": 1,
+    "verdict": "INCOMPLETE"
+  }
+}
