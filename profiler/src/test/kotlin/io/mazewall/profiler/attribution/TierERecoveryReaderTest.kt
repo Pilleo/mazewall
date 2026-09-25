@@ -2,6 +2,9 @@ package io.mazewall.profiler.internal.attribution
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -34,8 +37,11 @@ class TierERecoveryReaderTest {
     @Test
     fun `independent reader transfers bounded pages without joining dictionary`() {
         val entries = listOf(entry(1), entry(2))
+        val scans = AtomicInteger()
+        val repeatedSweep = CountDownLatch(1)
         val scanner = CoverageRecoveryScanner(
             RecoveryMapReader { cursor, _ ->
+                if (scans.incrementAndGet() >= 3) repeatedSweep.countDown()
                 val index = if (cursor == null) 0 else 1
                 RecoveryScanPage(listOf(entries[index]), if (index == 0) entries[0].key else null, index == 1)
             },
@@ -48,11 +54,11 @@ class TierERecoveryReaderTest {
             var pages = emptyList<List<RecoveryMapEntry>>()
             while (pages.size < 2 && System.nanoTime() < deadline) {
                 pages = pages + reader.takeReady()
-                Thread.sleep(1)
+                Thread.onSpinWait()
             }
             assertEquals(2, pages.size)
             assertEquals(listOf(1L, 2L), pages.flatMap { it }.map { decodeRecoveryKey(it.key).stackTraceId })
-            Thread.sleep(150)
+            assertTrue(repeatedSweep.await(2, TimeUnit.SECONDS), "reader should attempt a later sweep")
             assertTrue(reader.takeReady().isEmpty(), "repeated sweeps must not requeue retained entries")
         } finally {
             assertTrue(reader.stopAndJoin())

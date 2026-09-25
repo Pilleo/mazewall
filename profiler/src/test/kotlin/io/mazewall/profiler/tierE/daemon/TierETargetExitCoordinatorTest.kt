@@ -40,13 +40,18 @@ class TierETargetExitCoordinatorTest {
     @Test
     fun `matched target is not finalized while watch is active`() {
         val notifications = AtomicInteger()
+        val checked = CountDownLatch(1)
         val coordinator = TierETargetExitCoordinator(
-            TierEProcessIdentityVerifier { target.processIncarnation },
+            TierEProcessIdentityVerifier {
+                checked.countDown()
+                target.processIncarnation
+            },
             pollIntervalMillis = 1,
         )
 
         coordinator.watch(target) { notifications.incrementAndGet() }.use {
-            Thread.sleep(20)
+            assertTrue(checked.await(1, TimeUnit.SECONDS), "watcher should check the live target")
+            assertFalse(notifications.get() > 0)
         }
 
         assertFalse(notifications.get() > 0)
