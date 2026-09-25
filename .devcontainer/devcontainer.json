@@ -1,16 +1,21 @@
 {
   "name": "jseccomp Dev Environment",
   "build": {
-    "dockerfile": "../Containerfile",
+    "dockerfile": "../infra/dev/Containerfile",
     "context": "..",
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "runArgs": [
-    "--annotation=io.podman.annotations.seccomp=/workspace/podman-seccomp.json",
+    "--userns=keep-id",
+    "--user=${localEnv:MAZEWALL_UID}:${localEnv:MAZEWALL_GID}",
+    "--mount=source=${localEnv:MAZEWALL_CONTAINER_CACHE_DIR},target=/container-gradle-home,type=bind",
+    "--security-opt=seccomp=${localWorkspaceFolder}/infra/dev/podman-seccomp.json",
   ],
   "remoteEnv": {
     "JAVA_HOME": "/opt/java/openjdk",
+    "HOME": "/tmp",
+    "GRADLE_USER_HOME": "/container-gradle-home",
   },
   "customizations": {
     "vscode": {

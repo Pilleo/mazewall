@@ -18,10 +18,39 @@ ARTIFACT_DIR=$(cd "${ARTIFACT_DIR}" && pwd)
 BUNDLE_DIR="${ARTIFACT_DIR}/bundle"
 BUILD_CACHE_DIR=${MAZEWALL_TIER_E_BUILD_CACHE_ROOT:-"${REPOSITORY_DIR}/build/tier-e-benchmark-cache"}
 mkdir -p "${BUILD_CACHE_DIR}"
+[[ -O "${BUILD_CACHE_DIR}" && -O "${REPOSITORY_DIR}" ]] || {
+    echo 'Benchmark checkout and build cache must be caller-owned' >&2; exit 1;
+}
+case "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" in
+    unix://*) ;;
+    *) echo 'Benchmark bundle requires a local Docker socket; remote bind mounts are not admitted' >&2; exit 2 ;;
+esac
 RUN_ID=${MAZEWALL_TIER_E_RUN_ID:-"tier-e-$(date -u +%Y%m%dT%H%M%SZ)-$$"}
 RUNNER_EVENTS="${ARTIFACT_DIR}/runner-events.jsonl"
 RUNNER_TERMINAL_WRITTEN=false
 RUNNER_FAILURE_STATE=FAILED
+ARTIFACT_VOLUME=""
+ARTIFACT_EXPORTED=true
+DOCKER=(docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}")
+
+export_container_artifacts() {
+    local stage transfer
+    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX")
+    transfer="${RUN_ID}-export-$$"
+    "${DOCKER[@]}" create --name "${transfer}" -v "${ARTIFACT_VOLUME}:/artifacts" "${IMAGE}" true >/dev/null || return 1
+    if ! "${DOCKER[@]}" cp "${transfer}:/artifacts/." "${stage}/"; then
+        "${DOCKER[@]}" rm -f "${transfer}" >/dev/null 2>&1 || true
+        return 1
+    fi
+    "${DOCKER[@]}" rm -f "${transfer}" >/dev/null 2>&1 || true
+    if [[ -n "$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit)" ]]; then
+        echo 'Benchmark export includes a symlink or unsupported file type' >&2
+        return 1
+    fi
+    cp -a "${stage}/." "${ARTIFACT_DIR}/"
+    rm -rf "${stage}"
+    ARTIFACT_EXPORTED=true
+}
 
 runner_event() {
     local stage=$1
@@ -48,6 +77,12 @@ runner_terminal() {
 runner_exit() {
     local status=$?
     trap - EXIT
+    if [[ -n "${ARTIFACT_VOLUME}" ]]; then
+        if [[ "${ARTIFACT_EXPORTED}" == false ]]; then
+            export_container_artifacts || status=1
+        fi
+        "${DOCKER[@]}" volume rm "${ARTIFACT_VOLUME}" >/dev/null 2>&1 || status=1
+    fi
     if [[ "${RUNNER_TERMINAL_WRITTEN}" == "false" ]]; then
         runner_terminal "${RUNNER_FAILURE_STATE}" "runner exited with status ${status}"
     fi
@@ -230,14 +265,36 @@ if (( USER_NOTIF_CHILD_TIMEOUT_SECONDS <= USER_NOTIF_WORKER_TIMEOUT_SECONDS )); 
     exit 2
 fi
 
+# Only a verified caller UID may write to the checkout/build cache. The root
+# benchmark itself receives an engine-owned volume, never a host artifact bind.
+ownership_probe=$(mktemp -d)
+"${DOCKER[@]}" run --rm --userns host --user "${CALLER_UID}:${CALLER_GID}" \
+    -v "${ownership_probe}:/ownership-probe" --entrypoint /bin/sh "${IMAGE}" \
+    -c 'printf owned > /ownership-probe/owned'
+if [[ ! -f "${ownership_probe}/owned" || "$(stat -c %u:%g "${ownership_probe}/owned")" != "${CALLER_UID}:${CALLER_GID}" ]]; then
+    echo 'Benchmark build UID does not map to caller; refusing writable mounts' >&2
+    exit 1
+fi
+rm -rf "${ownership_probe}"
+ARTIFACT_VOLUME="${RUN_ID}-artifacts"
+if "${DOCKER[@]}" volume inspect "${ARTIFACT_VOLUME}" >/dev/null 2>&1; then
+    echo "Refusing to reuse a prior benchmark artifact volume: ${ARTIFACT_VOLUME}" >&2
+    ARTIFACT_VOLUME=""
+    exit 1
+fi
+"${DOCKER[@]}" volume create "${ARTIFACT_VOLUME}" >/dev/null
+"${DOCKER[@]}" run --rm -v "${ARTIFACT_VOLUME}:/artifacts" --entrypoint /bin/sh "${IMAGE}" \
+    -c "chown ${CALLER_UID}:${CALLER_GID} /artifacts"
+
 runner_event bundle_build STARTED
+ARTIFACT_EXPORTED=false
 docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --privileged --pid=host --userns=host --cpuset-cpus="${CPU_SET}" --security-opt seccomp=unconfined \
     --user "${CALLER_UID}:${CALLER_GID}" \
     -e "WORKLOAD_CPU=${WORKLOAD_CPU}" -e "COLLECTOR_CPU=${COLLECTOR_CPU}" \
     -e "CAPTURE_PROFILE=${CAPTURE_PROFILE}" -e "VERIFY_BUILD=${VERIFY_BUILD}" -e "USDT_MARKER_ARTIFACT=${USDT_MARKER_ARTIFACT}" \
     -e "MAZEWALL_TIER_E_NATIVE_BUILD_TYPE=${NATIVE_BUILD_TYPE}" \
     -e "MAZEWALL_TIER_E_REPOSITORY_DIR=${REPOSITORY_DIR}" -e MAZEWALL_TIER_E_BUILD_CACHE_ROOT=/benchmark-cache \
-    -v "${REPOSITORY_DIR}:${REPOSITORY_DIR}" -v "${ARTIFACT_DIR}:/artifacts" -v "${BUILD_CACHE_DIR}:/benchmark-cache" -w "${REPOSITORY_DIR}" "${IMAGE}" bash -lc '
+    -v "${REPOSITORY_DIR}:${REPOSITORY_DIR}" -v "${ARTIFACT_VOLUME}:/artifacts" -v "${BUILD_CACHE_DIR}:/benchmark-cache" -w "${REPOSITORY_DIR}" "${IMAGE}" bash -lc '
         set -euo pipefail
         {
             bash scripts/build_tier_e_benchmark_bundle.sh /artifacts/bundle "${USDT_MARKER_ARTIFACT}"
@@ -246,6 +303,7 @@ docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --
             fi
         } 2>&1 | tee /artifacts/build.log
     '
+export_container_artifacts
 runner_event bundle_build COMPLETED
 
 runner_event bundle_verify STARTED
@@ -300,9 +358,10 @@ jq --arg run_level "${RUN_LEVEL}" --argjson calibration "${CALIBRATION}" \
 mv "${manifest_tmp}" "${ARTIFACT_DIR}/manifest.json"
 
 runner_event benchmark STARTED
+ARTIFACT_EXPORTED=false
 docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --privileged --pid=host --userns=host --cpuset-cpus="${CPU_SET}" --security-opt seccomp=unconfined \
     -e REPOSITORY_DIR=/bundle -e "WORKLOAD_CPU=${WORKLOAD_CPU}" -e "COLLECTOR_CPU=${COLLECTOR_CPU}" -e "CALLER_UID=${CALLER_UID}" -e "CALLER_GID=${CALLER_GID}" -e "CANONICAL_CACHE=${CANONICAL_CACHE}" -e "CAPTURE_PROFILE=${CAPTURE_PROFILE}" -e "COLLECTOR_RECEIPT_CLOCK=${COLLECTOR_RECEIPT_CLOCK}" -e "BENCHMARK_SCOPE=${BENCHMARK_SCOPE}" -e "SUSTAINED_LOAD=${SUSTAINED_LOAD}" -e "SUSTAINED_RATE_PER_SECOND=${SUSTAINED_RATE_PER_SECOND}" -e "SYS_ENTER_ATTACHMENT_BACKEND=${SYS_ENTER_ATTACHMENT_BACKEND}" -e "KERNEL_COVERAGE_MODE=${KERNEL_COVERAGE_MODE}" -e "SYS_ENTER_ATTACHMENT_SHAPE=${SYS_ENTER_ATTACHMENT_SHAPE}" -e "BENCHMARK_WORKLOAD=${BENCHMARK_WORKLOAD}" -e "LIFECYCLE_SCENARIO=${LIFECYCLE_SCENARIO}" -e "CHILD_TIMEOUT_SECONDS=${CHILD_TIMEOUT_SECONDS}" -e "FIXTURE_CHILD_TERMINATION_AFTER_MILLIS=${FIXTURE_CHILD_TERMINATION_AFTER_MILLIS}" -e "USER_NOTIF_WORKER_TIMEOUT_SECONDS=${USER_NOTIF_WORKER_TIMEOUT_SECONDS}" -e "USER_NOTIF_CHILD_TIMEOUT_SECONDS=${USER_NOTIF_CHILD_TIMEOUT_SECONDS}" -e "ITERATIONS=${ITERATIONS}" -e "WARMUPS=${WARMUPS}" -e "BATCHES=${BATCHES}" -e "FORKS=${FORKS}" -e "RUN_LEVEL=${RUN_LEVEL}" -e "CALIBRATION=${CALIBRATION}" -e "PERF_RECORD=${PERF_RECORD}" -e "PERF_JIT_MAP=${PERF_JIT_MAP}" -e "ALLOCATION_RECORD=${ALLOCATION_RECORD}" -e "PERF_CALL_GRAPH=${PERF_CALL_GRAPH}" -e "BENCHMARK_JAVA_OPTIONS=${BENCHMARK_JAVA_OPTIONS}" -e "MAZEWALL_TIER_E_NATIVE_BUILD_TYPE=${NATIVE_BUILD_TYPE}" -e "MAZEWALL_BENCHMARK_SOURCE_REVISION=${SOURCE_REVISION}" -e "MAZEWALL_BENCHMARK_SOURCE_DIRTY=${SOURCE_DIRTY}" -e "MAZEWALL_BENCHMARK_IMAGE_ID=${IMAGE_ID}" \
-    -v "${BUNDLE_DIR}:/bundle:ro" -v "${ARTIFACT_DIR}:/artifacts" -w /tmp "${IMAGE}" bash -lc '
+    -v "${BUNDLE_DIR}:/bundle:ro" -v "${ARTIFACT_VOLUME}:/artifacts" -w /tmp "${IMAGE}" bash -lc '
         set -euo pipefail
         mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing
         classpath="/bundle/runtime/*"
@@ -312,7 +371,6 @@ docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --
             if [[ "${allocation_probe_active}" == "true" ]]; then
                 perf probe --del probe_libc:malloc >/dev/null 2>&1 || true
             fi
-            chown "${CALLER_UID}:${CALLER_GID}" /artifacts/results.jsonl /artifacts/calibration-results.jsonl /artifacts/benchmark.log /artifacts/allocation.data 2>/dev/null || true
             return "${status}"
         }
         trap cleanup_benchmark EXIT
@@ -348,6 +406,7 @@ docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --
             "${benchmark_java[@]}" 2>&1 | tee /artifacts/benchmark.log
         fi
     '
+export_container_artifacts
 runner_event benchmark COMPLETED
 
 selected_iterations="$(jq -r 'select(.kind == "metadata") | .iterations' "${ARTIFACT_DIR}/results.jsonl")"
@@ -374,8 +433,9 @@ fi
 
 if [[ "${PERF_RECORD}" == "true" ]]; then
     runner_event perf_analysis STARTED
+    ARTIFACT_EXPORTED=false
     docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm \
-        -v "${ARTIFACT_DIR}:/artifacts" "${IMAGE}" bash -lc '
+        -v "${ARTIFACT_VOLUME}:/artifacts" "${IMAGE}" bash -lc '
             set -euo pipefail
             if [[ -d /artifacts/perf-maps ]]; then
                 cp /artifacts/perf-maps/perf-*.map /tmp/ 2>/dev/null || true
@@ -384,8 +444,8 @@ if [[ "${PERF_RECORD}" == "true" ]]; then
             perf report --stdio --no-children -i /artifacts/perf.data > /artifacts/perf-report.txt
             perf script -F comm,pid,tid,event,ip,sym,dso -i /artifacts/perf.data > /artifacts/perf-pid-tid-samples.txt
             perf script --ns -F comm,pid,tid,time,event,ip,sym,dso -i /artifacts/perf.data > /artifacts/perf-timed-samples.txt
-            chown "'"${CALLER_UID}:${CALLER_GID}"'" /artifacts/perf-report.txt /artifacts/perf-pid-tid-samples.txt
         '
+    export_container_artifacts
     jq -s '[.[] | select(.kind == "fork-output") | (.output | capture("collector_pid=(?<collector_pid>[0-9]+) workload_pid=(?<workload_pid>[0-9]+)")) as $p | {variant, fork, collector_pid: ($p.collector_pid | tonumber), workload_pid: ($p.workload_pid | tonumber)}]' "${ARTIFACT_DIR}/results.jsonl" > "${ARTIFACT_DIR}/perf-processes.json"
     awk '/^[^[:space:]]+[[:space:]]+[0-9]+\/[0-9]+[[:space:]]/ { split($2, ids, "/"); samples[ids[1]]++ } END { print "["; separator = ""; for (pid in samples) { printf "%s{\"pid\":%s,\"samples\":%s}", separator, pid, samples[pid]; separator = "," } print "]" }' "${ARTIFACT_DIR}/perf-pid-tid-samples.txt" | jq -S . > "${ARTIFACT_DIR}/perf-pid-sample-counts.json"
     jq -n --slurpfile processes "${ARTIFACT_DIR}/perf-processes.json" --slurpfile samples "${ARTIFACT_DIR}/perf-pid-sample-counts.json" '
@@ -407,15 +467,16 @@ fi
 
 if [[ "${ALLOCATION_RECORD}" == "true" ]]; then
     runner_event allocation_analysis STARTED
+    ARTIFACT_EXPORTED=false
     docker --host "${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}" run --rm --privileged --security-opt seccomp=unconfined \
-        -v "${ARTIFACT_DIR}:/artifacts" "${IMAGE}" bash -lc '
+        -v "${ARTIFACT_VOLUME}:/artifacts" "${IMAGE}" bash -lc '
             set -euo pipefail
             cleanup_allocation_probe() { perf probe --del probe_libc:malloc >/dev/null 2>&1 || true; }
             trap cleanup_allocation_probe EXIT
             perf probe -x /usr/lib/x86_64-linux-gnu/libc.so.6 "malloc size=%di:s64"
             perf script -f -i /artifacts/allocation.data > /artifacts/allocation-events.txt
-            chown "'"${CALLER_UID}:${CALLER_GID}"'" /artifacts/allocation-events.txt
         '
+    export_container_artifacts
     sed -nE 's/^[[:space:]]*[^[:space:]]+[[:space:]]+([0-9]+).*size=([0-9]+).*/\1 \2/p' "${ARTIFACT_DIR}/allocation-events.txt" |
         awk 'BEGIN { print "["; first = 1 } { count[$1]++; bytes[$1] += $2 } END { for (pid in count) { if (!first) printf ",\n"; printf "{\"pid\":%s,\"allocation_count\":%s,\"requested_bytes\":%.0f}", pid, count[pid], bytes[pid]; first = 0 } print "\n]" }' |
         jq -S . > "${ARTIFACT_DIR}/allocation-by-pid.json"

@@ -66,6 +66,21 @@ class ContainerEndpointDiscoveryTest {
         assertTrue(reason?.contains("No usable rootful container endpoint") == true, reason)
     }
 
+    @Test
+    fun `unrecognized Docker security response cannot prove rootfulness`() {
+        val probe = CliEndpointProbe { _, _ -> ContainerCommandResult(0, "null") }
+        val result = probe.probe(ContainerEndpoint(ContainerEngine.DOCKER, "unix:///var/run/docker.sock"))
+        assertTrue(result is EndpointProbeResult.Unavailable)
+    }
+
+    @Test
+    fun `server rootless status is checked for both engines`() {
+        val dockerRootless = CliEndpointProbe { _, _ -> ContainerCommandResult(0, "[\"name=rootless\"]") }
+        assertEquals(EndpointProbeResult.Rootless, dockerRootless.probe(ContainerEndpoint(ContainerEngine.DOCKER, null)))
+        val podmanRootful = CliEndpointProbe { _, _ -> ContainerCommandResult(0, "false") }
+        assertEquals(EndpointProbeResult.Rootful, podmanRootful.probe(ContainerEndpoint(ContainerEngine.PODMAN, null)))
+    }
+
     @EnabledIfRootfulContainerAvailable
     class DisabledFixture {
         @Test

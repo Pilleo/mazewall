@@ -132,8 +132,21 @@ val integrationTest =
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
+            excludeTags("rootful-container")
         }
+        dependsOn("rootfulContainerTest")
         forkEvery = 0
+        maxParallelForks = 1
+    }
+
+// Availability is external mutable state: a previously skipped rootful test
+// cannot be reused when an endpoint appears (or disappears) at the same URI.
+val rootfulContainerTest =
+    tasks.register<Test>("rootfulContainerTest") {
+        configureIntegrationSourceSet()
+        description = "Short endpoint-gated Docker/Podman rootful tests"
+        useJUnitPlatform { includeTags("rootful-container") }
+        outputs.upToDateWhen { false }
         maxParallelForks = 1
     }
 

@@ -7,30 +7,105 @@ ENGINE=${TIER_E_CONTAINER_ENGINE:-docker}
 ARTIFACT_DIR=${TIER_E_ARTIFACT_DIR:-"${PROJECT_ROOT}/build/tier-e-evidence"}
 DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 
-if [[ "${ENGINE}" != docker ]]; then
-    echo "Tier E privileged gate requires Docker; rootless runtimes are INCOMPLETE evidence." >&2
-    exit 2
-fi
+case "${ENGINE}" in
+    docker)
+        ENGINE_CMD=(docker --host "${DOCKER_HOST}")
+        security_options=$("${ENGINE_CMD[@]}" info --format '{{json .SecurityOptions}}') || exit 2
+        [[ "${security_options}" == \[*\] && "${security_options}" != *rootless* ]] || {
+            echo 'Tier E privileged gate requires a rootful Docker server' >&2; exit 2;
+        }
+        ;;
+    podman)
+        ENGINE_CMD=(podman)
+        if [[ -n "${MAZEWALL_CONTAINER_HOST:-}" ]]; then
+            ENGINE_CMD=(podman --url "${MAZEWALL_CONTAINER_HOST}")
+        fi
+        [[ "$("${ENGINE_CMD[@]}" info --format '{{.Host.Security.Rootless}}')" == false ]] || {
+            echo 'Tier E privileged gate requires a rootful Podman server' >&2; exit 2;
+        }
+        ;;
+    *) echo "Unsupported TIER_E_CONTAINER_ENGINE: ${ENGINE}" >&2; exit 2 ;;
+esac
 
 mkdir -p "${ARTIFACT_DIR}"
 ARTIFACT_DIR=$(cd "${ARTIFACT_DIR}" && pwd)
-docker --host "${DOCKER_HOST}" build -t "${IMAGE}" -f "${PROJECT_ROOT}/infra/dev/Containerfile" "${PROJECT_ROOT}"
+CONTAINERFILE_SHA=$(sha256sum "${PROJECT_ROOT}/infra/dev/Containerfile" | cut -d' ' -f1)
+image_sha=$("${ENGINE_CMD[@]}" image inspect "${IMAGE}" \
+    --format '{{index .Config.Labels "io.mazewall.containerfile.sha256"}}' 2>/dev/null || true)
+if [[ "${image_sha}" != "${CONTAINERFILE_SHA}" ]]; then
+    "${ENGINE_CMD[@]}" build --label "io.mazewall.containerfile.sha256=${CONTAINERFILE_SHA}" \
+        -t "${IMAGE}" -f "${PROJECT_ROOT}/infra/dev/Containerfile" "${PROJECT_ROOT}"
+fi
 
-set +e
-docker --host "${DOCKER_HOST}" run --rm --privileged --pid=host --network=host --userns=host \
+ENGINE=("${ENGINE_CMD[@]}")
+RUN_ID="tier-e-rootful-gate-$(id -u)-$(date +%s%N)-$$"
+WORKSPACE_VOLUME="${RUN_ID}-workspace"
+TOOLCHAIN_KEY=$(sha256sum "${PROJECT_ROOT}/gradle/wrapper/gradle-wrapper.properties" \
+    "${PROJECT_ROOT}/infra/dev/Containerfile" | sha256sum | cut -c1-12)
+CACHE_VOLUME="mazewall-tier-e-rootful-gradle-jdk25-$(id -u)-${TOOLCHAIN_KEY}"
+CONTAINER="${RUN_ID}-runner"
+created_container=false
+created_workspace=false
+export_artifacts() {
+    local stage
+    stage=$(mktemp -d "${ARTIFACT_DIR}/.tier-e-export.XXXXXX")
+    if ! "${ENGINE[@]}" cp "${CONTAINER}:/artifacts/." "${stage}/" 2>/dev/null; then
+        rmdir "${stage}" 2>/dev/null || true
+        return 1
+    fi
+    if [[ -n "$(find "${stage}" \( -type l -o \( ! -type f -a ! -type d \) \) -print -quit)" ]]; then
+        echo 'Tier E export contains an unsupported file type or symlink' >&2
+        return 1
+    fi
+    cp -a "${stage}/." "${ARTIFACT_DIR}/"
+    rm -rf "${stage}"
+}
+cleanup() {
+    local status=$?
+    trap - EXIT
+    if [[ "${created_container}" == true ]]; then
+        "${ENGINE[@]}" logs "${CONTAINER}" > "${ARTIFACT_DIR}/rootful-gate.log" 2>&1 || true
+        if ! export_artifacts; then
+            echo "Tier E artifact export failed; container logs retained" >&2
+            status=1
+        fi
+        "${ENGINE[@]}" rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+    fi
+    if [[ "${created_workspace}" == true ]]; then
+        "${ENGINE[@]}" volume rm "${WORKSPACE_VOLUME}" >/dev/null 2>&1 || true
+    fi
+    exit "${status}"
+}
+trap cleanup EXIT
+if "${ENGINE[@]}" volume inspect "${WORKSPACE_VOLUME}" >/dev/null 2>&1; then
+    echo "Refusing to reuse a prior Tier E workspace: ${WORKSPACE_VOLUME}" >&2
+    exit 1
+fi
+"${ENGINE[@]}" volume create "${WORKSPACE_VOLUME}" >/dev/null
+created_workspace=true
+"${ENGINE[@]}" volume create "${CACHE_VOLUME}" >/dev/null
+# Send the caller's tracked and untracked source files, including local edits,
+# through the engine API. The privileged build has no writable checkout mount.
+(cd "${PROJECT_ROOT}" && git ls-files -z --cached --others --exclude-standard -- \
+    gradle buildSrc enforcer platform profiler profiler-native portals demos infra config scripts src docs \
+    gradlew build.gradle.kts settings.gradle.kts gradle.properties) |
+    tar -C "${PROJECT_ROOT}" -cf - --null -T - |
+    "${ENGINE[@]}" run --rm -i -v "${WORKSPACE_VOLUME}:/workspace" --entrypoint tar "${IMAGE}" -C /workspace -xf -
+
+"${ENGINE[@]}" create --name "${CONTAINER}" --privileged --pid=host --network=host --userns=host \
     --security-opt seccomp=unconfined \
-    -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
-    -v "${ARTIFACT_DIR}:${ARTIFACT_DIR}" \
-    -v "${HOME}/.gradle:${HOME}/.gradle" \
-    -e GRADLE_USER_HOME="${HOME}/.gradle" \
-    -e TIER_E_ARTIFACT_DIR="${ARTIFACT_DIR}" \
-    -e TIER_E_AGENT_LIBRARY="${PROJECT_ROOT}/profiler-native/build/libmazewall_stack_agent.so" \
-    -e TIER_E_WORKLOAD_CLASSPATH="${PROJECT_ROOT}/profiler-native/build/agent-test-classes" \
+    -v "${WORKSPACE_VOLUME}:/workspace" \
+    -v "${CACHE_VOLUME}:/container-gradle-home" \
+    -e GRADLE_USER_HOME=/container-gradle-home \
+    -e TIER_E_ARTIFACT_DIR=/artifacts \
+    -e TIER_E_AGENT_LIBRARY=/workspace/profiler-native/build/libmazewall_stack_agent.so \
+    -e TIER_E_WORKLOAD_CLASSPATH=/workspace/profiler-native/build/agent-test-classes \
     -e CI="${CI:-false}" \
     -e MAZEWALL_IN_CONTAINER=true \
-    -w "${PROJECT_ROOT}" \
+    -w /workspace \
     "${IMAGE}" bash -lc '
         set -euo pipefail
+        mkdir -p /artifacts
         mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing
         mkdir -p profiler-native/build
         cmake -S profiler-native -B profiler-native/build -DCMAKE_BUILD_TYPE=Debug
@@ -61,15 +136,25 @@ docker --host "${DOCKER_HOST}" run --rm --privileged --pid=host --network=host -
             printf 'FAILED\n' > "${TIER_E_ARTIFACT_DIR}/benchmark-gate-status.txt"
             exit 1
         fi
-    '
+    ' >/dev/null
+created_container=true
+set +e
+"${ENGINE[@]}" start -a "${CONTAINER}"
 GATE_STATUS=$?
 set -e
+# Export before parsing status: the container can fail halfway through work.
+"${ENGINE[@]}" logs "${CONTAINER}" > "${ARTIFACT_DIR}/rootful-gate.log" 2>&1 || true
+export_artifacts || GATE_STATUS=1
 
 BENCHMARK_GATE_STATUS=$(cat "${ARTIFACT_DIR}/benchmark-gate-status.txt" 2>/dev/null || printf 'NOT_RUN')
+if [[ "${GATE_STATUS}" -eq 0 && "${BENCHMARK_GATE_STATUS}" != PASS ]]; then
+    echo "Tier E benchmark gate has no passing artifact: ${BENCHMARK_GATE_STATUS}" >&2
+    GATE_STATUS=1
+fi
 
 cat > "${ARTIFACT_DIR}/run-metadata.txt" <<EOF
 commit_sha=$(git -C "${PROJECT_ROOT}" rev-parse HEAD)
-kernel=$(uname -srvm)
+kernel=$("${ENGINE[@]}" info --format "$([[ "${TIER_E_CONTAINER_ENGINE:-docker}" == podman ]] && printf '{{.Host.Kernel}}' || printf '{{.KernelVersion}}')")
 docker_image=${IMAGE}
 capture_domain_validity=PASS
 transport_completeness=PASS

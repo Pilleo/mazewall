@@ -182,6 +182,28 @@ operation counters and dictionary-definition counts are not sufficient substitut
 
 Rootless output is `INCOMPLETE`, not privileged evidence.
 
+## Container build ownership and bounded exports
+
+Local developer container builds run as the caller's UID/GID only after a
+write-and-stat probe proves that bind-mount ownership maps back to that caller.
+They use a project/toolchain-keyed container-specific Gradle cache and a
+separate NVD database, never the host's ordinary `~/.gradle`. Rootless Podman
+uses `keep-id`; an unverified or remote checkout mapping fails before the
+writable checkout mount is admitted. Short JUnit rootful endpoint tests are
+enabled on a reachable rootful Docker or Podman server and skipped otherwise;
+rootless development containers remain distinct from privileged evidence.
+
+The explicit Tier E rootful gate stages the current tracked and untracked
+source through the engine into a per-run volume, builds with a persistent
+engine-owned Gradle volume, and exports inspected artifacts via the client.
+The rootful build has no writable host checkout or normal Gradle-cache mount.
+An interrupted or failing container cannot deposit root-owned build outputs
+there. Resource cleanup names only the run's own container and workspace.
+The Docker ownership and short rootful container tests have been exercised on
+the local rootful endpoint; runtime parity on a rootful Podman server remains
+unverified until such an endpoint is available. This change does not promote
+Tier E as a default or change `policy_eligibility=false`.
+
 ## Compatibility rules
 
 - Keep control protocol v1 and legacy monolithic artifact behavior.

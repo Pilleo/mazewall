@@ -63,7 +63,9 @@ jobs:
             - name: Restore Gradle Build Cache
               uses: actions/cache/restore@v4
               with:
-                  path: ~/.gradle/build-cache
+                  path: |
+                      ~/.gradle/build-cache
+                      ~/.cache/mazewall/container-gradle
                   key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
                   restore-keys: |
                       gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-
@@ -140,7 +142,7 @@ jobs:
               with:
                   path: |
                       ~/.gradle/dependency-check-data
-                      ${{ github.workspace }}/.gradle/dependency-check-data
+                      ~/.cache/mazewall/nvd-db
                   key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
                   restore-keys: |
                       nvd-database-${{ runner.os }}-
@@ -149,24 +151,33 @@ jobs:
               run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-            - name: Fix Cache Permissions
+            - name: Verify Workspace and Cache Ownership
               if: always()
               run: |
-                  sudo chown -R $USER:$USER ~/.gradle || true
-                  sudo chown -R $USER:$USER ${{ github.workspace }} || true
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned build output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
             - name: Save NVD Database Cache (Always)
               uses: actions/cache/save@v4
               if: always()
               with:
                   path: |
                       ~/.gradle/dependency-check-data
-                      ${{ github.workspace }}/.gradle/dependency-check-data
+                      ~/.cache/mazewall/nvd-db
                   key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
             - name: Save Gradle Build Cache (Master Only)
               uses: actions/cache/save@v4
               if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               with:
-                  path: ~/.gradle/build-cache
+                  path: |
+                      ~/.gradle/build-cache
+                      ~/.cache/mazewall/container-gradle
                   key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')

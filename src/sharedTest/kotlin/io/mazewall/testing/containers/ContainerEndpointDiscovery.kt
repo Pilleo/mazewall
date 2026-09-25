@@ -77,17 +77,20 @@ public class ContainerEndpointDiscovery(
     }
 }
 
-public class CliEndpointProbe : EndpointProbe {
+public class CliEndpointProbe(
+    private val execute: (List<String>, Duration) -> ContainerCommandResult = ::runContainerCommand,
+) : EndpointProbe {
     override fun probe(endpoint: ContainerEndpoint): EndpointProbeResult {
         val format = if (endpoint.engine == ContainerEngine.DOCKER) "{{json .SecurityOptions}}" else "{{.Host.Security.Rootless}}"
-        val result = runContainerCommand(endpoint.command("info", "--format", format))
+        val result = execute(endpoint.command("info", "--format", format), Duration.ofSeconds(5))
         if (result.exitCode != 0) return EndpointProbeResult.Unavailable(result.output.take(256))
         val output = result.output.trim().lowercase()
         return when (endpoint.engine) {
             ContainerEngine.DOCKER -> when {
+                !output.matches(Regex("""\["name=[^"\\]*"(,"name=[^"\\]*")*]""")) && output != "[]" ->
+                    EndpointProbeResult.Unavailable("unrecognized Docker security options")
                 output.contains("rootless") -> EndpointProbeResult.Rootless
-                output.startsWith("[") || output == "null" -> EndpointProbeResult.Rootful
-                else -> EndpointProbeResult.Unavailable("unrecognized Docker security options")
+                else -> EndpointProbeResult.Rootful
             }
             ContainerEngine.PODMAN -> when (output) {
                 "true" -> EndpointProbeResult.Rootless
@@ -115,8 +118,9 @@ public fun runContainerCommand(
             return ContainerCommandResult(-1, error.message.orEmpty())
         }
         if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            process.descendants().forEach { it.destroyForcibly() }
             process.destroyForcibly()
-            process.waitFor()
+            process.waitFor(2, TimeUnit.SECONDS)
             return ContainerCommandResult(-1, "container endpoint probe timed out")
         }
         return ContainerCommandResult(process.exitValue(), Files.readString(output).take(4096))

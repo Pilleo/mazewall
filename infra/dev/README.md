@@ -16,11 +16,28 @@ The most reliable way to develop and test `mazewall` is using the provided **Pod
 
 ```bash
 # From the project root
+export MAZEWALL_UID="$(id -u)" MAZEWALL_GID="$(id -g)"
+export MAZEWALL_CONTAINER_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/mazewall/container-gradle/dev-$(id -u)"
+mkdir -p "$MAZEWALL_CONTAINER_CACHE_DIR"
 podman compose -f infra/dev/compose.yml up -d
 
 # Enter the container
 podman compose -f infra/dev/compose.yml exec mazewall bash
 ```
+
+The dev container and Compose setup use Podman `keep-id`, the caller UID/GID,
+and a separate caller-owned Gradle cache. Export the same three variables
+before opening the VS Code devcontainer. This rootless Podman configuration
+must not be run through rootful Docker, whose user namespace does not support
+`keep-id`; use `scripts/run_containerized_tests.sh` for local rootful Docker.
+Build containers must never mount the host's ordinary `~/.gradle` writable.
+The runner verifies UID mapping with an owned-file probe before allowing a
+writable checkout bind; if the endpoint is remote or mapping is uncertain it
+fails before any build writes occur. Privileged Tier E gates stage source into
+engine-managed volumes and export artifacts with the client Docker command,
+leaving the checkout and host Gradle cache untouched even if the container
+fails. Prepared dependency caches persist between runs; only per-run workspaces
+are retired.
 
 ---
 
