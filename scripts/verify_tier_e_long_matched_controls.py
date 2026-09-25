@@ -33,6 +33,33 @@ COLLECTOR_BOUNDARY = 'after_terminal_report_before_shutdown'
 MAX_SAFE_INTEGER = (1 << 53) - 1
 
 
+def _valid_oracle_paths(paths):
+    if not isinstance(paths, list) or len(paths) != 72:
+        return False
+    observed = set()
+    total = 0
+    for entry in paths:
+        if not isinstance(entry, dict):
+            return False
+        index = entry.get('path')
+        if type(index) is not int or index not in range(72) or index in observed:
+            return False
+        observed.add(index)
+        category = 'common' if index < 24 else 'infrequent' if index < 48 else 'singleton'
+        frequency = 3000 if index < 24 else 124 if index < 48 else 1
+        if (
+            entry.get('category') != category
+            or entry.get('method') != f'path{index:02d}'
+            or type(entry.get('syscall_number')) is not int
+            or entry['syscall_number'] != 257
+            or type(entry.get('frequency')) is not int
+            or entry['frequency'] != frequency
+        ):
+            return False
+        total += entry['frequency']
+    return observed == set(range(72)) and total == DECLARED_OPERATIONS
+
+
 def _read_artifact(fork_dir, arm, fork, filename, errors):
     rel = f'{arm}/fork-{fork}/{filename}'
     try:
@@ -80,8 +107,7 @@ def _verify_fork_dir(arm, fork, fork_dir, row, errors, counters):
         if (
             oracle.get('seed') != expected_seed
             or oracle.get('declared_operations') != DECLARED_OPERATIONS
-            or not isinstance(paths, list)
-            or len(paths) != 72
+            or not _valid_oracle_paths(paths)
         ):
             errors.append(f'oracle_mismatch: {rel("coverage-oracle.json")}')
         if row.get('seed') != oracle.get('seed') or row.get('declared_operations') != oracle.get(

@@ -278,7 +278,16 @@ def _write_run_tree(root, rows, manifest, before, after, terminal):
         }))
         (arm_dir / 'coverage-oracle.json').write_text(json.dumps({
             'schema_version': 1, 'seed': row['seed'], 'declared_operations': 75000,
-            'paths': [{'path': i} for i in range(72)],
+            'paths': [
+                {
+                    'path': i,
+                    'category': 'common' if i < 24 else 'infrequent' if i < 48 else 'singleton',
+                    'frequency': 3000 if i < 24 else 124 if i < 48 else 1,
+                    'method': f'path{i:02d}',
+                    'syscall_number': 257,
+                }
+                for i in range(72)
+            ],
         }))
         (arm_dir / 'target-cpu.json').write_text(json.dumps({
             'schema_version': 1, 'version': 1, 'pid': 1, 'host_pid': host_pid,
@@ -361,6 +370,78 @@ def _rewrite_json(path, updates):
     data = json.loads(path.read_text())
     data.update(updates)
     path.write_text(json.dumps(data))
+
+
+def _oracle_mutation(oracle, name):
+    paths = oracle['paths']
+    if name == 'null_entries':
+        oracle['paths'] = [None] * 72
+    elif name == 'duplicate_entries':
+        oracle['paths'] = [paths[0]] * 72
+    elif name == 'missing_expected_path':
+        paths[-1]['path'] = 72
+    elif name == 'nonobject_entry':
+        paths[0] = []
+    elif name == 'wrong_method':
+        paths[0]['method'] = 'path71'
+    elif name == 'wrong_category':
+        paths[0]['category'] = 'singleton'
+    elif name == 'wrong_syscall':
+        paths[0]['syscall_number'] = 999
+    elif name == 'missing_syscall':
+        paths[0].pop('syscall_number')
+    elif name == 'zero_frequency':
+        paths[0]['frequency'] = 0
+    elif name == 'negative_frequency':
+        paths[0]['frequency'] = -1
+    elif name == 'boolean_frequency':
+        paths[0]['frequency'] = True
+    elif name == 'string_frequency':
+        paths[0]['frequency'] = '3000'
+    elif name == 'wrong_frequency_total':
+        paths[0]['frequency'] = 3001
+    elif name == 'wrong_singleton_frequency':
+        paths[48]['frequency'] = 2
+    else:
+        raise AssertionError(name)
+
+
+@pytest.mark.parametrize('name', [
+    'null_entries', 'duplicate_entries', 'missing_expected_path', 'nonobject_entry',
+    'wrong_method', 'wrong_category', 'wrong_syscall', 'missing_syscall',
+    'zero_frequency', 'negative_frequency', 'boolean_frequency', 'string_frequency',
+    'wrong_frequency_total', 'wrong_singleton_frequency',
+])
+def test_invalid_oracle_inventory_is_rejected(name):
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    tree = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        oracle_path = tree / 'baseline' / 'fork-1' / 'coverage-oracle.json'
+        oracle = json.loads(oracle_path.read_text())
+        _oracle_mutation(oracle, name)
+        oracle_path.write_text(json.dumps(oracle, allow_nan=True))
+        code, result = _verify_tree(tree)
+        assert code == 1, name
+        assert result['verdict'] == 'INCOMPLETE', name
+        assert any('oracle_mismatch:' in error for error in result['errors']), (name, result['errors'])
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+
+
+def test_valid_oracle_order_is_not_significant():
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    tree = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        oracle_path = tree / 'baseline' / 'fork-1' / 'coverage-oracle.json'
+        oracle = json.loads(oracle_path.read_text())
+        oracle['paths'].reverse()
+        oracle_path.write_text(json.dumps(oracle))
+        code, result = _verify_tree(tree)
+        assert code == 0, result.get('errors')
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
 
 
 def _swap_files(first, second):
