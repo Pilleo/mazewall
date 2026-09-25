@@ -46,8 +46,13 @@ public object TierESplitCoverageVerifier {
         }
         if (coverage.text("expected_oracle_sha256") != oracleBytes.sha256()) admission += "oracle_checksum"
         if (coverage.text("terminal_report_sha256") != terminalBytes.sha256()) admission += "terminal_checksum"
-        if (coverage.text("registration_id") != terminal.text("registration_id") ||
-            coverage.number("session_epoch") != terminal.number("session_epoch")
+        val registration = coverage.text("registration_id")
+        val epoch = coverage.number("session_epoch")
+        if (registration.isNullOrBlank() ||
+            registration != terminal.text("registration_id") ||
+            epoch == null ||
+            epoch <= 0L ||
+            epoch != terminal.number("session_epoch")
         ) {
             admission += "session_identity"
         }

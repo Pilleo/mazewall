@@ -216,14 +216,20 @@ caller-owned export tests may run remotely. Kotlin owns the exact per-run
 target and collector names independently of the shell controller. In this
 JUnit mode, the shell's optional creation lock covers both `run -d` calls;
 Kotlin terminates the controller, waits for in-flight creation and acquires
-the same lock before reconciling names. Unsettled creation fails explicitly.
+the same lock before reconciling names. Unsettled creation fails explicitly;
+it only attempts to stop currently visible names, retaining containers and
+shared scratch without export or removal so a later creation cannot be
+mistaken for completed cleanup.
 The shell does not delete Kotlin-owned containers or shared scratch before
 export. Kotlin verifies each container stopped, saves its complete logs to
 caller-owned files (preserving shell snapshots), then removes it only after
 successful export. A failed export retains the stopped container and its
 shared scratch for recovery, reports the exact name, and still handles the
-other container. Verified successful cleanup also retires an owned `mktemp`
-scratch directory. The command summary reads only a bounded prefix; full
+other container. Kotlin allocates the run's exact shared directory before
+starting the shell and passes it via `TIER_E_SPLIT_SHARED_DIR`; the shell's
+path marker must match that allocation. Verified successful cleanup retires
+only that directory, never another same-user `tmp.*` directory named in a
+mutable marker. The command summary reads only a bounded prefix; full
 logs remain on disk. Teardown covers the controller, both owned containers,
 and the unrelated test sentinel before restoring the caller's interrupt
 status, preserving original failures with suppressed cleanup errors. The
@@ -237,6 +243,14 @@ configure may publish its missing identity marker, and concurrent writers
 serialize. Availability and image configuration are forwarded to the
 JUnit worker on each invocation, so a prior skipped Gradle run cannot mask a
 newly available endpoint.
+
+The run owner, controller coordinator, and native fixture builder live in the
+profiler test source set, shared with its integration tests. Generic endpoint
+probing and bounded container-command execution remain in the root common
+test helpers; neither is part of a published runtime artifact. The
+[profiler-local lifecycle receipts](../../evidence/tier-e-kotlin-boundary-20260925/README.md)
+cover unresolved creation, exact shared-path ownership, and the strengthened
+real-Docker cancellation assertion.
 
 ## Compatibility rules
 

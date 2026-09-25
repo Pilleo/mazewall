@@ -1,5 +1,9 @@
-package io.mazewall.testing.containers
+package io.mazewall.profiler.testing.tierE
 
+import io.mazewall.testing.containers.ContainerCommandResult
+import io.mazewall.testing.containers.ContainerEndpoint
+import io.mazewall.testing.containers.ContainerEngine
+import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -10,6 +14,35 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 class TierEContainerRunTest {
+    @Test
+    fun `unresolved creation stops visible containers without exporting deleting or trusting shared marker`() {
+        val artifacts = Files.createTempDirectory("tier-e-unsettled-")
+        val unrelated = Files.createTempDirectory("tmp.")
+        val runId = "tier-e-unsettled-123"
+        val stopped = mutableSetOf<String>()
+        try {
+            Files.writeString(artifacts.resolve("$runId.shared-path"), "${unrelated.toRealPath()}\n")
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts) { command, _, _ ->
+                val name = command.last()
+                when (command[1]) {
+                    "inspect" -> ContainerCommandResult(0, "exists")
+                    "stop" -> {
+                        stopped += name
+                        ContainerCommandResult(0, name)
+                    }
+                    else -> error("Unsettled creation cannot export or remove containers: $command")
+                }
+            }
+            owner.stopForRecovery()
+            assertEquals(setOf("$runId-target", "$runId-collector"), stopped)
+            assertTrue(Files.exists(unrelated))
+            assertTrue(Files.exists(artifacts.resolve("$runId.shared-path")))
+        } finally {
+            unrelated.toFile().deleteRecursively()
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `controller cleanup targets only its allocated target and collector`() {
         val commands = mutableListOf<List<String>>()
@@ -274,13 +307,13 @@ class TierEContainerRunTest {
     @Test
     fun `successful owned export removes its validated shared scratch directory`() {
         val artifacts = Files.createTempDirectory("tier-e-scratch-owner-")
-        val scratch = Files.createTempDirectory("tmp.")
         val runId = "tier-e-scratch-123"
+        val scratch = Files.createTempDirectory("tier-e-owned-$runId-")
         try {
             Files.writeString(scratch.resolve("evidence"), "copied")
             Files.writeString(artifacts.resolve("$runId.shared-path"), "${scratch.toRealPath()}\n")
             val removed = mutableSetOf<String>()
-            TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts) { command, _, output ->
+            TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts, ownedShared = scratch) { command, _, output ->
                 val name = command.last()
                 when (command[1]) {
                     "inspect" -> when {
@@ -306,6 +339,32 @@ class TierEContainerRunTest {
         } finally {
             if (Files.exists(scratch)) scratch.toFile().deleteRecursively()
             artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `forged marker cannot redirect deletion to another same user scratch directory`() {
+        val artifacts = Files.createTempDirectory("tier-e-scratch-binding-")
+        val owned = Files.createTempDirectory("tier-e-owned-tier-e-binding-123-")
+        val unrelated = Files.createTempDirectory("tmp.")
+        val runId = "tier-e-binding-123"
+        try {
+            Files.writeString(artifacts.resolve("$runId.shared-path"), "${unrelated.toRealPath()}\n")
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts, ownedShared = owned) { command, _, _ ->
+                if (command[1] == "inspect") {
+                    ContainerCommandResult(1, "No such object")
+                } else {
+                    error("no container to remove")
+                }
+            }
+            val failure = assertThrows(IllegalStateException::class.java) { owner.close() }
+            assertTrue(failure.message!!.contains("shared"))
+            assertTrue(Files.exists(owned))
+            assertTrue(Files.exists(unrelated))
+        } finally {
+            artifacts.toFile().deleteRecursively()
+            owned.toFile().deleteRecursively()
+            unrelated.toFile().deleteRecursively()
         }
     }
 

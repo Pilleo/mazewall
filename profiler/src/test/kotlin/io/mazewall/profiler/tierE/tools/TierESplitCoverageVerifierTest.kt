@@ -86,6 +86,29 @@ class TierESplitCoverageVerifierTest {
         return dir
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["registration_id", "session_epoch"])
+    fun `matching missing identities cannot admit coverage`(field: String) {
+        val dir = faultFixture()
+        try {
+            val terminal = dir.resolve("terminal.json")
+            val manifest = dir.resolve("manifest.json")
+            val terminalFields = (Json.parseToJsonElement(Files.readString(terminal)) as JsonObject).toMutableMap()
+            terminalFields.remove(field)
+            Files.writeString(terminal, JsonObject(terminalFields).toString())
+            val manifestFields = (Json.parseToJsonElement(Files.readString(manifest)) as JsonObject).toMutableMap()
+            manifestFields.remove(field)
+            manifestFields["terminal_report_sha256"] = JsonPrimitive(
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(terminal)).joinToString("") { "%02x".format(it) },
+            )
+            Files.writeString(manifest, JsonObject(manifestFields).toString())
+            val result = TierESplitCoverageVerifier.verify(dir.resolve("oracle.json"), manifest, terminal)
+            assertEquals("UNVERIFIED", result.getValue("coverage_verdict").jsonPrimitive.content)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `exact ring-drop recovery passes coverage while transport and terminal remain incomplete`() {
         val dir = faultFixture()

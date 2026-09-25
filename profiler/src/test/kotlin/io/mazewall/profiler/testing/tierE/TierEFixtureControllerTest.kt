@@ -1,6 +1,7 @@
-package io.mazewall.testing.containers
+package io.mazewall.profiler.testing.tierE
 
 import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files

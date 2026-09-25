@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "retained_archive": "docs/internals/evidence/tier-e-hybrid-20260923/fault-fifteen-discovery.tar.zst",
+  "sha256": "2d7554a16517ec5142f9f84b09725dc09d89c637e64a1fb9c7e50120277f3b23",
+  "kotlin_verdict_matches": 30,
+  "expected_arms": 30,
+  "policy_eligibility": false
+}

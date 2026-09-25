@@ -425,6 +425,11 @@ For the split fixture, an exact recovered-edge set may pass coverage even when
 the terminal report and coverage manifest consistently say `INCOMPLETE` (for
 example, deliberate ring loss). The verifier rejects unknown, duplicate,
 missing, or malformed edges and contradictory terminal/manifest dimensions.
+Both files must independently contain a nonblank registration ID and positive
+session epoch before their session identities can match; two absent values
+never establish a bound session. The
+[Kotlin identity replay receipt](../../evidence/tier-e-kotlin-boundary-20260925/README.md)
+preserves all 30 retained fault-arm coverage verdicts after this check.
 Coverage never upgrades transport completeness, lifecycle validity, or policy
 eligibility: whole-session acceptance still requires complete terminal evidence.
 

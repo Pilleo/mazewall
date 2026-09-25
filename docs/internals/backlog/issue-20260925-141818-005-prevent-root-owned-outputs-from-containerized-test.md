@@ -27,6 +27,15 @@ target_files:
   - "src/test/kotlin/io/mazewall/testing/containers/TierENativeFixtureBuildTest.kt"
   - "profiler/build.gradle.kts"
   - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/TierERootfulContainerEndpointIntegrationTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEContainerRun.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureController.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureLifecycle.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierENativeFixtureBuild.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEContainerRunTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureControllerTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureLifecycleTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierENativeFixtureBuildTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEContainerizedRunnerOwnershipTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/attribution/TierERecoveryReaderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/daemon/TierETargetExitCoordinatorTest.kt"
   - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
@@ -45,6 +54,11 @@ target_files:
   - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/SHA256SUMS"
   - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/rootful-docker-junit.xml"
   - "docs/internals/evidence/tier-e-kotlin-teardown-20260925/absent-podman-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-boundary-20260925/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-boundary-20260925/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-boundary-20260925/rootful-docker-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-boundary-20260925/absent-podman-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-boundary-20260925/fault-replay.json"
 target_symbols: ["ContainerEndpointDiscovery", "RootfulContainerExtension"]
 open_questions: false
 ---

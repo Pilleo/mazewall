@@ -1,12 +1,12 @@
 package io.mazewall.profiler
 
+import io.mazewall.profiler.testing.tierE.TierEContainerRun
+import io.mazewall.profiler.testing.tierE.TierEFixtureLifecycle
+import io.mazewall.profiler.testing.tierE.TierENativeFixtureBuild
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
 import io.mazewall.testing.containers.EnabledIfRootfulContainerAvailable
-import io.mazewall.testing.containers.TierEContainerRun
-import io.mazewall.testing.containers.TierEFixtureController
-import io.mazewall.testing.containers.TierENativeFixtureBuild
 import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -20,6 +20,7 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /** Short, remote-safe rootful engine smoke; no host mounts or host PID assumptions. */
 @EnabledIfRootfulContainerAvailable
@@ -113,11 +114,10 @@ class TierERootfulContainerEndpointIntegrationTest {
         exercise: (Process) -> Unit,
     ) {
         val creationLock = destination.resolve("$runId.creation.lock")
-        val owner = TierEContainerRun(endpoint, runId, destination)
-        var controller: Process? = null
-        var primary: Throwable? = null
-        try {
-            controller = ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
+        val shared = Files.createTempDirectory("tier-e-owned-$runId-")
+        val owner = TierEContainerRun(endpoint, runId, destination, ownedShared = shared)
+        TierEFixtureLifecycle(owner, creationLock, extraCleanup = extraCleanup).run(start = {
+            ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
                 .directory(prepared.root.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(destination.resolve("$runId.controller.log").toFile())
@@ -128,6 +128,7 @@ class TierERootfulContainerEndpointIntegrationTest {
                         "TIER_E_CONTAINER_ENGINE" to endpoint.engine.name.lowercase(),
                         "TIER_E_SPLIT_RUN_ID" to runId,
                         "TIER_E_SPLIT_CREATE_LOCK" to creationLock.toString(),
+                        "TIER_E_SPLIT_SHARED_DIR" to shared.toString(),
                         "TIER_E_SPLIT_COVERAGE" to "1",
                         "TIER_E_SPLIT_COVERAGE_OPERATIONS" to "72",
                         "TIER_E_SPLIT_REUSE_BUILD" to "1",
@@ -141,37 +142,7 @@ class TierERootfulContainerEndpointIntegrationTest {
                     }
                     environment().putAll(environmentExtra)
                 }.start()
-            exercise(controller)
-        } catch (failure: Throwable) {
-            primary = failure
-            throw failure
-        } finally {
-            var interrupted = Thread.interrupted()
-            val cleanupFailures = mutableListOf<Throwable>()
-
-            fun attempt(block: () -> Unit) {
-                interrupted = Thread.interrupted() || interrupted
-                try {
-                    block()
-                } catch (failure: Throwable) {
-                    cleanupFailures += failure
-                }
-            }
-            try {
-                attempt { TierEFixtureController.awaitCreationQuiescence(controller, creationLock) }
-                attempt { owner.close() }
-                attempt(extraCleanup)
-            } finally {
-                if (Thread.interrupted() || interrupted) Thread.currentThread().interrupt()
-            }
-            if (primary != null) {
-                cleanupFailures.forEach(primary::addSuppressed)
-            } else if (cleanupFailures.isNotEmpty()) {
-                val first = cleanupFailures.first()
-                cleanupFailures.drop(1).forEach(first::addSuppressed)
-                throw first
-            }
-        }
+        }, exercise = exercise)
     }
 
     @Test
@@ -355,6 +326,7 @@ class TierERootfulContainerEndpointIntegrationTest {
         val runId = "tier-e-late-${UUID.randomUUID()}"
         val gate = destination.resolve("gate.fifo")
         val entered = destination.resolve("creation-entered")
+        val created = destination.resolve("creation-completed")
         assertEquals(0, runContainerCommand(listOf("mkfifo", gate.toString())).exitCode)
         val bin = Files.createDirectories(destination.resolve("bin"))
         val docker = bin.resolve("docker")
@@ -366,12 +338,17 @@ class TierERootfulContainerEndpointIntegrationTest {
 if [[ " ${'$'}* " == *" run -d --name $runId-target "* ]]; then
     touch "${'$'}TIER_E_TEST_CREATION_ENTERED"
     read -r release < "${'$'}TIER_E_TEST_CREATION_GATE"
+    "$realDocker" "${'$'}@"
+    status=${'$'}?
+    if [[ "${'$'}status" == 0 ]]; then touch "${'$'}TIER_E_TEST_CREATION_COMPLETED"; fi
+    exit "${'$'}status"
 fi
  exec "$realDocker" "${'$'}@"
 """,
         )
         assertTrue(docker.toFile().setExecutable(true))
         var releaser: Thread? = null
+        val releaseFailure = AtomicReference<Throwable?>()
         try {
             val failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
                 withOwnedFixture(
@@ -383,19 +360,27 @@ fi
                     "PATH" to "$bin:${System.getenv("PATH")}",
                     "TIER_E_TEST_CREATION_ENTERED" to entered.toString(),
                     "TIER_E_TEST_CREATION_GATE" to gate.toString(),
+                    "TIER_E_TEST_CREATION_COMPLETED" to created.toString(),
                 ),
                 ) { controller ->
                     awaitCondition(Duration.ofSeconds(30), "Docker creation entered under lock") { Files.exists(entered) }
                     releaser = Thread {
-                        awaitCondition(Duration.ofSeconds(5), "controller stopped before releasing creation") { !controller.isAlive }
-                        Files.writeString(gate, "release\n")
+                        try {
+                            awaitCondition(Duration.ofSeconds(5), "controller stopped before releasing creation") { !controller.isAlive }
+                            Files.writeString(gate, "release\n")
+                        } catch (error: Throwable) {
+                            releaseFailure.set(error)
+                        }
                     }.also { it.start() }
                     error("cancel during owned container creation")
                 }
             }
             assertTrue(failure.message!!.contains("cancel during owned container creation"))
+            assertTrue(failure.suppressed.isEmpty(), "teardown errors: ${failure.suppressed.contentToString()}")
             releaser?.join(5_000)
             assertTrue(releaser?.isAlive == false)
+            assertTrue(releaseFailure.get() == null, "creation release failed: ${releaseFailure.get()}")
+            assertTrue(Files.exists(created), "Docker must complete the delayed creation before name reconciliation")
             assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode != 0)
             assertTrue(runContainerCommand(endpoint.command("inspect", "$runId-collector")).exitCode != 0)
         } finally {
@@ -441,6 +426,7 @@ fi
                 }
             }
             assertTrue(failure.message!!.contains("controller interrupted"))
+            assertTrue(failure.suppressed.isEmpty(), "teardown errors: ${failure.suppressed.contentToString()}")
             assertTrue(Thread.currentThread().isInterrupted)
             Thread.interrupted()
             assertTrue(runContainerCommand(endpoint.command("inspect", sentinel)).exitCode != 0)

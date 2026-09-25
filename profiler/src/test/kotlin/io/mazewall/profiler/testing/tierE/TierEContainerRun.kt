@@ -1,5 +1,8 @@
-package io.mazewall.testing.containers
+package io.mazewall.profiler.testing.tierE
 
+import io.mazewall.testing.containers.ContainerCommandResult
+import io.mazewall.testing.containers.ContainerEndpoint
+import io.mazewall.testing.containers.runContainerCommand
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
@@ -11,12 +14,35 @@ public class TierEContainerRun(
     public val endpoint: ContainerEndpoint,
     public val runId: String,
     private val artifacts: Path,
+    private val ownedShared: Path? = null,
     private val execute: (List<String>, Duration, Path?) -> ContainerCommandResult = { command, timeout, output ->
         runContainerCommand(command, timeout, outputFile = output)
     },
 ) : AutoCloseable {
     init {
         require(runId.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}"))) { "Invalid scoped Tier E run ID" }
+    }
+
+    /** Best effort only: creation may still complete later. Never export, remove, or retire scratch. */
+    public fun stopForRecovery() {
+        val interrupted = Thread.interrupted()
+        val failures = mutableListOf<String>()
+        try {
+            for (suffix in listOf("target", "collector")) {
+                val name = "$runId-$suffix"
+                try {
+                    val existing = execute(endpoint.command("inspect", name), Duration.ofSeconds(5), null)
+                    if (existing.exitCode != 0 && missing(existing.output)) continue
+                    val result = execute(endpoint.command("stop", "-t", "2", name), Duration.ofSeconds(10), null)
+                    if (result.exitCode != 0) failures += "$name stop failed: ${result.output}"
+                } catch (failure: Exception) {
+                    failures += "$name stop failed: ${failure.message}"
+                }
+            }
+            if (failures.isNotEmpty()) error("Unsettled creation; exact containers retained: ${failures.joinToString("; ")}")
+        } finally {
+            if (Thread.interrupted() || interrupted) Thread.currentThread().interrupt()
+        }
     }
 
     override fun close() {
@@ -87,26 +113,29 @@ public class TierEContainerRun(
                     }
                 }
             }
-            if (failures.isEmpty()) {
+            if (failures.isEmpty() && ownedShared != null) {
                 val marker = artifacts.resolve("$runId.shared-path")
-                if (Files.exists(marker, NOFOLLOW_LINKS)) {
-                    try {
-                        val shared = Path.of(Files.readString(marker).trim())
+                try {
+                    val shared = ownedShared
+                    if (Files.exists(marker, NOFOLLOW_LINKS)) {
+                        check(Path.of(Files.readString(marker).trim()).toRealPath() == shared.toRealPath()) {
+                            "Run $runId shared marker does not match the allocated directory: $marker"
+                        }
+                    }
                         val tempRoot = Path.of(System.getenv("TMPDIR") ?: "/tmp").toRealPath()
                         check(
                             !Files.isSymbolicLink(shared) &&
                             Files.isDirectory(shared, NOFOLLOW_LINKS) &&
                             shared.toRealPath().parent == tempRoot &&
-                            shared.fileName.toString().matches(Regex("tmp\\.[A-Za-z0-9]+")) &&
+                            shared.fileName.toString().startsWith("tier-e-owned-$runId-") &&
                             Files.getOwner(shared) == Files.getOwner(artifacts),
                         ) {
                             "Shared scratch directory is not an owned mktemp child: $shared"
                         }
                         Files.walk(shared).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
-                        Files.delete(marker)
-                    } catch (failure: Exception) {
-                        failures += "Shared fixture scratch cleanup failed: ${failure.message}; recovery path: $marker"
-                    }
+                    if (Files.exists(marker, NOFOLLOW_LINKS)) Files.delete(marker)
+                } catch (failure: Exception) {
+                    failures += "Shared fixture scratch cleanup failed: ${failure.message}; recovery path: $marker"
                 }
             }
             if (failures.isNotEmpty()) throw IllegalStateException(failures.joinToString("; "))

@@ -7,10 +7,14 @@ DOCKER_HOST=${MAZEWALL_DOCKER_HOST:-unix:///var/run/docker.sock}
 IMAGE=${TIER_E_DOCKER_IMAGE:-mazewall-tier-e-rootful:latest}
 ARTIFACT_DIR=${TIER_E_SPLIT_ARTIFACT_DIR:-"${ROOT}/build/tier-e-split-privilege"}
 RUN_ID="${TIER_E_SPLIT_RUN_ID:-tier-e-split-$$}"
-SHARED=$(mktemp -d)
 if [[ -n "${TIER_E_SPLIT_CREATE_LOCK:-}" ]]; then
+    : "${TIER_E_SPLIT_SHARED_DIR:?Kotlin-owned fixture requires a preallocated shared directory}"
+    SHARED=${TIER_E_SPLIT_SHARED_DIR}
+    [[ -d "${SHARED}" && -O "${SHARED}" ]] || { echo 'shared fixture directory is not caller-owned' >&2; exit 1; }
     mkdir -p "${ARTIFACT_DIR}"
     printf '%s\n' "${SHARED}" > "${ARTIFACT_DIR}/${RUN_ID}.shared-path"
+else
+    SHARED=$(mktemp -d)
 fi
 TARGET="${RUN_ID}-target"
 COLLECTOR="${RUN_ID}-collector"
