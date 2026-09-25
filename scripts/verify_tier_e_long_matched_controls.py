@@ -32,6 +32,217 @@ TARGET_BOUNDARY = 'after_workload_before_exit'
 COLLECTOR_BOUNDARY = 'after_terminal_report_before_shutdown'
 
 
+def _read_artifact(fork_dir, arm, fork, filename, errors):
+    rel = f'{arm}/fork-{fork}/{filename}'
+    try:
+        with open(os.path.join(fork_dir, filename), encoding='utf-8') as handle:
+            value = json.load(handle, parse_constant=_reject_nonstandard_constant)
+    except FileNotFoundError:
+        errors.append(f'missing_artifact: {rel}')
+        return None
+    except (OSError, ValueError) as error:
+        errors.append(f'unreadable_artifact: {rel}: {error}')
+        return None
+    if not isinstance(value, dict):
+        errors.append(f'artifact_not_object: {rel}')
+        return None
+    return value
+
+
+def _verify_fork_dir(arm, fork, fork_dir, row, errors, counters):
+    rel = lambda filename: f'{arm}/fork-{fork}/{filename}'
+    expected_seed = 23063 + fork - 1
+    baseline = arm == BASELINE
+    if row is None:
+        errors.append(f'missing_row_for_artifacts: {arm}/fork-{fork}')
+        return
+
+    result = _read_artifact(fork_dir, arm, fork, 'arm-result.json', errors)
+    if result is not None:
+        if (
+            result.get('schema_version') == 1
+            and result.get('fork') == fork
+            and result.get('arm') == arm
+            and result.get('status') == 'COMPLETE'
+            and result.get('fixture_exit') == 0
+            and result.get('timed_out') is False
+            and result.get('seed') == expected_seed
+            and result.get('policy_eligibility') is False
+        ):
+            counters['arm_result_records'] += 1
+        else:
+            errors.append(f'arm_result_mismatch: {rel("arm-result.json")}')
+
+    oracle = _read_artifact(fork_dir, arm, fork, 'coverage-oracle.json', errors)
+    if oracle is not None:
+        paths = oracle.get('paths')
+        if (
+            oracle.get('seed') != expected_seed
+            or oracle.get('declared_operations') != DECLARED_OPERATIONS
+            or not isinstance(paths, list)
+            or len(paths) != 72
+        ):
+            errors.append(f'oracle_mismatch: {rel("coverage-oracle.json")}')
+        if row.get('seed') != oracle.get('seed') or row.get('declared_operations') != oracle.get(
+            'declared_operations'
+        ):
+            errors.append(f'oracle_row_mismatch: {rel("coverage-oracle.json")}')
+
+    target = _read_artifact(fork_dir, arm, fork, 'target-cpu.json', errors)
+    target_ok = False
+    if target is not None:
+        target_ok = (
+            target.get('schema_version') == 1
+            and target.get('version') == 1
+            and _positive_finite(target.get('target_cpu_ns'))
+            and target.get('unit') == 'ns'
+            and target.get('sample_boundary') == TARGET_BOUNDARY
+            and type(target.get('host_pid')) is int
+            and target.get('host_pid') > 0
+            and type(target.get('starttime')) is int
+            and target.get('starttime') > 0
+        )
+        if not target_ok:
+            errors.append(f'target_cpu_mismatch: {rel("target-cpu.json")}')
+        if row.get('target_cpu_ns') != target.get('target_cpu_ns') or row.get(
+            'target_sample_boundary'
+        ) != target.get('sample_boundary'):
+            errors.append(f'target_cpu_row_mismatch: {rel("target-cpu.json")}')
+
+    if baseline:
+        for forbidden in ('terminal-report.json', 'collector-process-metrics.json'):
+            if os.path.exists(os.path.join(fork_dir, forbidden)):
+                errors.append(f'baseline_has_profiled_artifact: {rel(forbidden)}')
+        summary = _read_artifact(fork_dir, arm, fork, 'summary.json', errors)
+        if summary is not None:
+            if (
+                summary.get('mode') == 'baseline'
+                and summary.get('target_exit') == 0
+                and summary.get('policy_eligibility') is False
+            ):
+                counters['baseline_summaries'] += 1
+            else:
+                errors.append(f'baseline_summary_mismatch: {rel("summary.json")}')
+        return
+
+    coverage = _read_artifact(fork_dir, arm, fork, 'coverage-verdict.json', errors)
+    if coverage is not None:
+        if not (
+            coverage.get('coverage_verdict') == 'PASS'
+            and coverage.get('expected_edges') == 72
+            and coverage.get('recovered_edges') == 72
+            and coverage.get('admission_errors') == []
+            and coverage.get('missing_paths') == []
+            and coverage.get('wrong_edges') == []
+            and coverage.get('policy_eligibility') is False
+        ):
+            errors.append(f'coverage_mismatch: {rel("coverage-verdict.json")}')
+        if row.get('coverage_verdict') != coverage.get('coverage_verdict') or row.get(
+            'covered_paths'
+        ) != coverage.get('recovered_edges'):
+            errors.append(f'coverage_row_mismatch: {rel("coverage-verdict.json")}')
+
+    terminal = _read_artifact(fork_dir, arm, fork, 'terminal-report.json', errors)
+    terminal_ok = False
+    if terminal is not None:
+        terminal_ok = (
+            terminal.get('evidence_integrity') == 'COMPLETE'
+            and terminal.get('terminal_reason') == 'COMPLETE'
+            and terminal.get('policy_eligibility') is False
+            and isinstance(terminal.get('registration_id'), str)
+            and terminal.get('registration_id') != ''
+            and type(terminal.get('session_epoch')) is int
+            and type(terminal.get('target_pid')) is int
+            and terminal.get('target_pid') > 0
+            and type(terminal.get('process_incarnation')) is int
+            and terminal.get('process_incarnation') > 0
+        )
+        if not terminal_ok:
+            errors.append(f'terminal_mismatch: {rel("terminal-report.json")}')
+        if row.get('terminal_integrity') != terminal.get('evidence_integrity'):
+            errors.append(f'terminal_row_mismatch: {rel("terminal-report.json")}')
+        if terminal_ok:
+            counters['profiled_terminal_reports'] += 1
+
+    if target_ok and terminal_ok:
+        if target.get('host_pid') != terminal.get('target_pid') or target.get(
+            'starttime'
+        ) != terminal.get('process_incarnation'):
+            errors.append(
+                f'pid_incarnation_mismatch: {rel("target-cpu.json")} vs {rel("terminal-report.json")}'
+            )
+
+    collector = _read_artifact(fork_dir, arm, fork, 'collector-process-metrics.json', errors)
+    if collector is not None:
+        if not (
+            _positive_finite(collector.get('cpu_ns'))
+            and _positive_finite(collector.get('cpu_ticks'))
+            and collector.get('unit') == 'ns'
+            and collector.get('cpu_time_basis') == 'process_ticks_since_start'
+            and collector.get('sample_boundary') == COLLECTOR_BOUNDARY
+        ):
+            errors.append(f'collector_cpu_mismatch: {rel("collector-process-metrics.json")}')
+        if row.get('collector_cpu_ns') != collector.get('cpu_ns') or row.get(
+            'collector_sample_boundary'
+        ) != collector.get('sample_boundary'):
+            errors.append(f'collector_cpu_row_mismatch: {rel("collector-process-metrics.json")}')
+
+    summary = _read_artifact(fork_dir, arm, fork, 'summary.json', errors)
+    if summary is not None:
+        if (
+            isinstance(summary.get('coverage'), dict)
+            and isinstance(summary.get('terminal'), dict)
+            and summary.get('policy_eligibility') is False
+            and (coverage is None or summary.get('coverage') == coverage)
+            and (terminal is None or summary.get('terminal') == terminal)
+        ):
+            counters['profiled_summaries'] += 1
+        else:
+            errors.append(f'summary_mismatch: {rel("summary.json")}')
+
+
+def _verify_run_tree(decision_dir, rows, errors, counters):
+    row_by_key = {}
+    for row in rows:
+        if isinstance(row, dict):
+            row_by_key[(row.get('arm'), row.get('fork'))] = row
+    try:
+        top_entries = sorted(os.listdir(decision_dir))
+    except OSError as error:
+        errors.append(f'decision_dir_unreadable: {error}')
+        return
+    for name in top_entries:
+        full = os.path.join(decision_dir, name)
+        if not os.path.isdir(full):
+            continue
+        if name not in ALL_ARMS:
+            errors.append(f'unexpected_arm_dir: {name}')
+            continue
+        try:
+            fork_entries = sorted(os.listdir(full))
+        except OSError as error:
+            errors.append(f'arm_dir_unreadable: {name}: {error}')
+            continue
+        for fork_name in fork_entries:
+            fork_full = os.path.join(full, fork_name)
+            if not os.path.isdir(fork_full):
+                continue
+            fork = None
+            if fork_name.startswith('fork-'):
+                try:
+                    fork = int(fork_name.split('-', 1)[1])
+                except ValueError:
+                    fork = None
+            if fork is None or fork < 1 or fork > FORKS:
+                errors.append(f'unexpected_fork_dir: {name}/{fork_name}')
+                continue
+            _verify_fork_dir(name, fork, fork_full, row_by_key.get((name, fork)), errors, counters)
+    for arm in ALL_ARMS:
+        for fork in range(1, FORKS + 1):
+            if not os.path.isdir(os.path.join(decision_dir, arm, f'fork-{fork}')):
+                errors.append(f'missing_arm_dir: {arm}/fork-{fork}')
+
+
 def fail(errors, context):
     verdict = {
         'schema_version': 1,
@@ -243,46 +454,22 @@ def main(argv):
 
     dir_checks = None
     if decision_dir and os.path.isdir(decision_dir):
-        arm_results = []
-        terminal_reports = 0
-        baseline_summaries = 0
-        profiled_summaries = 0
-        for name in sorted(os.listdir(decision_dir)):
-            arm_dir = os.path.join(decision_dir, name)
-            if not os.path.isdir(arm_dir):
-                continue
-            for fork_name in sorted(os.listdir(arm_dir)):
-                fork_dir = os.path.join(arm_dir, fork_name)
-                if not os.path.isdir(fork_dir):
-                    continue
-                arm_results.append(f'{name}/{fork_name}')
-                if os.path.isfile(os.path.join(fork_dir, 'terminal-report.json')):
-                    terminal_reports += 1
-                summary_path = os.path.join(fork_dir, 'summary.json')
-                if os.path.isfile(summary_path):
-                    try:
-                        with open(summary_path, encoding='utf-8') as handle:
-                            summary = json.load(handle)
-                        if summary.get('mode') == 'baseline':
-                            baseline_summaries += 1
-                        else:
-                            profiled_summaries += 1
-                    except ValueError:
-                        errors.append(f'bad_summary: {name}/{fork_name}')
-        dir_checks = {
-            'arm_result_records': len(arm_results),
-            'profiled_terminal_reports': terminal_reports,
-            'baseline_summaries': baseline_summaries,
-            'profiled_summaries': profiled_summaries,
+        counters = {
+            'arm_result_records': 0,
+            'profiled_terminal_reports': 0,
+            'baseline_summaries': 0,
+            'profiled_summaries': 0,
         }
-        if len(arm_results) != FORKS * 7:
-            errors.append(f'dir_arm_result_count: {len(arm_results)}')
-        if terminal_reports != FORKS * 6:
-            errors.append(f'dir_profiled_terminal_reports: {terminal_reports}')
-        if baseline_summaries != FORKS:
-            errors.append(f'dir_baseline_summaries: {baseline_summaries}')
-        if profiled_summaries != FORKS * 6:
-            errors.append(f'dir_profiled_summaries: {profiled_summaries}')
+        _verify_run_tree(decision_dir, rows, errors, counters)
+        dir_checks = counters
+        if counters['arm_result_records'] != FORKS * 7:
+            errors.append(f'dir_arm_result_count: {counters["arm_result_records"]}')
+        if counters['profiled_terminal_reports'] != FORKS * 6:
+            errors.append(f'dir_profiled_terminal_reports: {counters["profiled_terminal_reports"]}')
+        if counters['baseline_summaries'] != FORKS:
+            errors.append(f'dir_baseline_summaries: {counters["baseline_summaries"]}')
+        if counters['profiled_summaries'] != FORKS * 6:
+            errors.append(f'dir_profiled_summaries: {counters["profiled_summaries"]}')
 
     if errors:
         return fail(errors, {

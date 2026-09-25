@@ -218,6 +218,186 @@ def test_empty_identity_rejected():
     assert result['errors']
 
 
+def _write_run_tree(root, rows, manifest, before, after, terminal):
+    import tempfile
+    tree = pathlib.Path(tempfile.mkdtemp(prefix='tier-e-run-tree-'))
+    for row in rows:
+        arm_dir = tree / row['arm'] / f"fork-{row['fork']}"
+        arm_dir.mkdir(parents=True)
+        host_pid = 5000 + row['fork']
+        starttime = 9100000 + row['fork']
+        (arm_dir / 'arm-result.json').write_text(json.dumps({
+            'schema_version': 1, 'fork': row['fork'], 'arm': row['arm'],
+            'status': 'COMPLETE', 'fixture_exit': 0, 'timed_out': False,
+            'seed': row['seed'], 'policy_eligibility': False,
+        }))
+        (arm_dir / 'coverage-oracle.json').write_text(json.dumps({
+            'schema_version': 1, 'seed': row['seed'], 'declared_operations': 75000,
+            'paths': [{'path': i} for i in range(72)],
+        }))
+        (arm_dir / 'target-cpu.json').write_text(json.dumps({
+            'schema_version': 1, 'version': 1, 'pid': 1, 'host_pid': host_pid,
+            'starttime': starttime, 'sample_boundary': 'after_workload_before_exit',
+            'unit': 'ns', 'target_cpu_ns': row['target_cpu_ns'],
+        }))
+        if row['arm'] == 'baseline':
+            (arm_dir / 'summary.json').write_text(json.dumps({
+                'schema_version': 1, 'mode': 'baseline', 'target_exit': 0,
+                'policy_eligibility': False,
+            }))
+        else:
+            coverage = {
+                'coverage_verdict': 'PASS', 'admission_errors': [], 'expected_edges': 72,
+                'recovered_edges': 72, 'missing_paths': [], 'wrong_edges': [],
+                'policy_eligibility': False,
+            }
+            terminal_report = {
+                'schema_version': 1, 'registration_id': 'split-fixture', 'session_epoch': 19802,
+                'target_pid': host_pid, 'process_incarnation': starttime,
+                'evidence_integrity': 'COMPLETE', 'terminal_reason': 'COMPLETE',
+                'policy_eligibility': False,
+            }
+            (arm_dir / 'coverage-verdict.json').write_text(json.dumps(coverage))
+            (arm_dir / 'terminal-report.json').write_text(json.dumps(terminal_report))
+            (arm_dir / 'collector-process-metrics.json').write_text(json.dumps({
+                'schema_version': 1, 'collector_host_pid': 6000 + row['fork'],
+                'cpu_ticks': 100 + row['fork'], 'cpu_ns': row['collector_cpu_ns'],
+                'peak_rss_kb': 100, 'unit': 'ns',
+                'cpu_time_basis': 'process_ticks_since_start',
+                'sample_boundary': 'after_terminal_report_before_shutdown',
+                'collector_starttime': 9200000 + row['fork'],
+            }))
+            (arm_dir / 'summary.json').write_text(json.dumps({
+                'coverage': coverage, 'terminal': terminal_report, 'policy_eligibility': False,
+            }))
+    (tree / 'fork-results.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    (tree / 'run-manifest.json').write_text(json.dumps(manifest))
+    (tree / 'source-state-before.json').write_text(json.dumps(before))
+    (tree / 'source-state-after.json').write_text(json.dumps(after))
+    (tree / 'terminal.json').write_text(json.dumps(terminal))
+    return tree
+
+
+def _verify_tree(tree):
+    run = subprocess.run(
+        [sys.executable, str(VERIFIER), str(tree)],
+        capture_output=True, text=True, check=False,
+    )
+    return run.returncode, json.loads(run.stdout)
+
+
+def test_full_directory_run_tree_passes():
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    tree = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        code, result = _verify_tree(tree)
+        assert code == 0, result.get('errors')
+        assert result['verdict'] == 'PASS'
+        assert result['verification_mode'] == 'full-directory'
+        assert result['dir_checks']['arm_result_records'] == 105
+        assert result['dir_checks']['profiled_terminal_reports'] == 90
+        assert result['dir_checks']['baseline_summaries'] == 15
+        assert result['dir_checks']['profiled_summaries'] == 90
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+
+
+def _mutated_tree(base_tree):
+    import shutil
+    clone = pathlib.Path(base_tree).parent / (pathlib.Path(base_tree).name + '-mut')
+    if clone.exists():
+        shutil.rmtree(clone, ignore_errors=True)
+    shutil.copytree(base_tree, clone)
+    return clone
+
+
+def _rewrite_json(path, updates):
+    data = json.loads(path.read_text())
+    data.update(updates)
+    path.write_text(json.dumps(data))
+
+
+def _swap_files(first, second):
+    a, b = first.read_text(), second.read_text()
+    first.write_text(b)
+    second.write_text(a)
+
+
+MUTATION_NAMES = [
+    'missing_arm_result',
+    'corrupt_terminal',
+    'empty_summary',
+    'incomplete_arm_result',
+    'wrong_arm_in_result',
+    'terminal_disagrees_with_row',
+    'standalone_coverage_disagrees',
+    'cpu_disagrees_with_row',
+    'swapped_target_cpu',
+    'collector_in_baseline',
+    'renamed_directory',
+]
+
+
+def test_full_directory_mutations_fail_closed():
+    import shutil
+    rows, manifest, before, after, terminal = _retained_documents()
+    pristine = _write_run_tree(None, rows, manifest, before, after, terminal)
+    try:
+        for name in MUTATION_NAMES:
+            tree = _mutated_tree(pristine)
+            try:
+                _apply_mutation_on_tree(tree, name)
+                code, result = _verify_tree(tree)
+                assert code != 0, name
+                assert result['verdict'] == 'INCOMPLETE', name
+                assert result['errors'], name
+            finally:
+                shutil.rmtree(tree, ignore_errors=True)
+    finally:
+        shutil.rmtree(pristine, ignore_errors=True)
+
+
+def _apply_mutation_on_tree(tree, name):
+    first_profiled = tree / 'dictionary-full-stream-v1' / 'fork-1'
+    first_baseline = tree / 'baseline' / 'fork-1'
+    if name == 'missing_arm_result':
+        (first_profiled / 'arm-result.json').unlink()
+    elif name == 'corrupt_terminal':
+        (first_profiled / 'terminal-report.json').write_text('{broken')
+    elif name == 'empty_summary':
+        (first_profiled / 'summary.json').write_text('{}')
+    elif name == 'incomplete_arm_result':
+        (first_profiled / 'arm-result.json').write_text(json.dumps({
+            'schema_version': 1, 'fork': 1, 'arm': 'dictionary-full-stream-v1',
+            'status': 'INCOMPLETE', 'fixture_exit': 1, 'timed_out': False,
+            'seed': 23063, 'policy_eligibility': False}))
+    elif name == 'wrong_arm_in_result':
+        (first_profiled / 'arm-result.json').write_text(json.dumps({
+            'schema_version': 1, 'fork': 1, 'arm': 'dictionary-full-stream-v2',
+            'status': 'COMPLETE', 'fixture_exit': 0, 'timed_out': False,
+            'seed': 23063, 'policy_eligibility': False}))
+    elif name == 'terminal_disagrees_with_row':
+        _rewrite_json(first_profiled / 'terminal-report.json', {'evidence_integrity': 'INCOMPLETE'})
+    elif name == 'standalone_coverage_disagrees':
+        _rewrite_json(first_profiled / 'coverage-verdict.json', {'recovered_edges': 71})
+    elif name == 'cpu_disagrees_with_row':
+        _rewrite_json(first_profiled / 'target-cpu.json', {'target_cpu_ns': 1})
+    elif name == 'swapped_target_cpu':
+        _swap_files(first_profiled / 'target-cpu.json',
+                     tree / 'dictionary-full-stream-v1' / 'fork-2' / 'target-cpu.json')
+    elif name == 'collector_in_baseline':
+        (first_baseline / 'collector-process-metrics.json').write_text(
+            (first_profiled / 'collector-process-metrics.json').read_text())
+    elif name == 'renamed_directory':
+        import shutil
+        shutil.rmtree(tree / 'baseline' / 'fork-15')
+        (tree / 'unexpected-arm' / 'fork-1').mkdir(parents=True)
+        (tree / 'unexpected-arm' / 'fork-1' / 'arm-result.json').write_text('{}')
+    else:
+        raise AssertionError(name)
+
+
 def test_mutated_inputs_fail_closed():
     original = [json.loads(line) for line in (EVIDENCE / 'fork-results.jsonl').read_text().splitlines()]
     mutations = {
