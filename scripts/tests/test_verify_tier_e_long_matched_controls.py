@@ -29,6 +29,104 @@ def test_retained_run_passes():
     code, result = verify(rows)
     assert code == 0
     assert result['verdict'] == 'PASS'
+    assert result['verification_mode'] == 'jsonl-only'
+
+
+CPU_FIELD_CASES = [
+    ('nan_target', 'target_cpu_ns', float('nan')),
+    ('inf_target', 'target_cpu_ns', float('inf')),
+    ('neg_inf_target', 'target_cpu_ns', float('-inf')),
+    ('zero_target', 'target_cpu_ns', 0),
+    ('negative_target', 'target_cpu_ns', -5),
+    ('null_target', 'target_cpu_ns', None),
+    ('string_target', 'target_cpu_ns', '6770000000'),
+    ('bool_target', 'target_cpu_ns', True),
+    ('list_target', 'target_cpu_ns', [6770000000]),
+    ('dict_target', 'target_cpu_ns', {'ns': 6770000000}),
+    ('nan_collector', 'collector_cpu_ns', float('nan')),
+    ('inf_collector', 'collector_cpu_ns', float('inf')),
+    ('zero_collector', 'collector_cpu_ns', 0),
+    ('negative_collector', 'collector_cpu_ns', -1),
+    ('string_collector', 'collector_cpu_ns', '62550000000'),
+    ('bool_collector', 'collector_cpu_ns', False),
+]
+
+
+def test_malformed_cpu_values_fail_closed():
+    import tempfile
+    original = [json.loads(line) for line in (EVIDENCE / 'fork-results.jsonl').read_text().splitlines()]
+    profiled = next(row for row in original if row['arm'] != 'baseline')
+    for name, field, bad in CPU_FIELD_CASES:
+        rows = [dict(row) for row in original]
+        target = next(row for row in rows if row['fork'] == profiled['fork'] and row['arm'] == profiled['arm'])
+        target[field] = bad
+        with tempfile.TemporaryDirectory() as directory:
+            sample = pathlib.Path(directory) / 'rows.jsonl'
+            sample.write_text(''.join(json.dumps(row, allow_nan=True) + '\n' for row in rows))
+            run = subprocess.run(
+                [sys.executable, str(VERIFIER), '--jsonl-only', str(sample),
+                 str(EVIDENCE / 'run-manifest.json'), str(EVIDENCE / 'source-state-before.json'),
+                 str(EVIDENCE / 'source-state-after.json'), str(EVIDENCE / 'terminal.json')],
+                capture_output=True, text=True, check=False,
+            )
+            assert run.returncode != 0, name
+            result = json.loads(run.stdout)
+            assert result['verdict'] == 'INCOMPLETE', name
+            assert result['errors'], name
+            assert 'Traceback' not in run.stderr, name
+
+
+def test_malformed_top_level_inputs_fail_closed():
+    import tempfile
+    original = [json.loads(line) for line in (EVIDENCE / 'fork-results.jsonl').read_text().splitlines()]
+    good_text = ''.join(json.dumps(row) + '\n' for row in original)
+    with tempfile.TemporaryDirectory() as directory:
+        tmp = pathlib.Path(directory)
+        bad_manifest = tmp / 'manifest.json'
+        bad_manifest.write_text('[]')
+        sample = tmp / 'rows.jsonl'
+        sample.write_text(good_text)
+        run = subprocess.run(
+            [sys.executable, str(VERIFIER), '--jsonl-only', str(sample), str(bad_manifest),
+             str(EVIDENCE / 'source-state-before.json'),
+             str(EVIDENCE / 'source-state-after.json'), str(EVIDENCE / 'terminal.json')],
+            capture_output=True, text=True, check=False,
+        )
+        assert run.returncode != 0
+        assert json.loads(run.stdout)['verdict'] == 'INCOMPLETE'
+
+        null_row = tmp / 'null.jsonl'
+        null_row.write_text('null\n')
+        run = subprocess.run(
+            [sys.executable, str(VERIFIER), '--jsonl-only', str(null_row),
+             str(EVIDENCE / 'run-manifest.json'), str(EVIDENCE / 'source-state-before.json'),
+             str(EVIDENCE / 'source-state-after.json'), str(EVIDENCE / 'terminal.json')],
+            capture_output=True, text=True, check=False,
+        )
+        assert run.returncode != 0
+        assert json.loads(run.stdout)['verdict'] == 'INCOMPLETE'
+
+        array_row = tmp / 'array.jsonl'
+        array_row.write_text('[]\n')
+        run = subprocess.run(
+            [sys.executable, str(VERIFIER), '--jsonl-only', str(array_row),
+             str(EVIDENCE / 'run-manifest.json'), str(EVIDENCE / 'source-state-before.json'),
+             str(EVIDENCE / 'source-state-after.json'), str(EVIDENCE / 'terminal.json')],
+            capture_output=True, text=True, check=False,
+        )
+        assert run.returncode != 0
+        assert json.loads(run.stdout)['verdict'] == 'INCOMPLETE'
+
+        corrupt = tmp / 'corrupt.jsonl'
+        corrupt.write_text('{not json\n')
+        run = subprocess.run(
+            [sys.executable, str(VERIFIER), '--jsonl-only', str(corrupt),
+             str(EVIDENCE / 'run-manifest.json'), str(EVIDENCE / 'source-state-before.json'),
+             str(EVIDENCE / 'source-state-after.json'), str(EVIDENCE / 'terminal.json')],
+            capture_output=True, text=True, check=False,
+        )
+        assert run.returncode != 0
+        assert json.loads(run.stdout)['verdict'] == 'INCOMPLETE'
 
 
 def test_mutated_inputs_fail_closed():

@@ -12,6 +12,7 @@ Usage:
   verify_tier_e_long_matched_controls.py --jsonl-only <fork-results.jsonl> <run-manifest.json> <source-before.json> <source-after.json> <terminal.json>
 """
 import json
+import math
 import os
 import sys
 
@@ -35,12 +36,29 @@ def fail(errors, context):
     verdict = {
         'schema_version': 1,
         'verdict': 'INCOMPLETE',
+        'verification_mode': 'full-directory' if (context or {}).get('decision_dir') else 'jsonl-only',
         'errors': errors,
         'context': context,
         'policy_eligibility': False,
     }
     print(json.dumps(verdict, indent=2, sort_keys=True))
     return 1
+
+
+def _reject_nonstandard_constant(value):
+    raise ValueError(f'nonstandard_json_constant: {value}')
+
+
+def _positive_finite(value):
+    return type(value) in (int, float) and math.isfinite(value) and value > 0
+
+
+def _freeze(value):
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return repr(value)
 
 
 def main(argv):
@@ -68,17 +86,21 @@ def main(argv):
             for line in handle:
                 line = line.strip()
                 if line:
-                    rows.append(json.loads(line))
+                    rows.append(json.loads(line, parse_constant=_reject_nonstandard_constant))
     except (OSError, ValueError) as error:
         return fail([f'jsonl_unreadable: {error}'], {'jsonl': jsonl_path})
 
     def load(path, label):
         try:
             with open(path, encoding='utf-8') as handle:
-                return json.load(handle)
+                value = json.load(handle, parse_constant=_reject_nonstandard_constant)
         except (OSError, ValueError) as error:
             errors.append(f'{label}_unreadable: {error}')
             return None
+        if not isinstance(value, dict):
+            errors.append(f'{label}_not_object')
+            return None
+        return value
 
     manifest = load(manifest_path, 'manifest')
     before = load(before_path, 'source_before')
@@ -112,14 +134,17 @@ def main(argv):
 
     by_fork = {}
     for row in rows:
+        if not isinstance(row, dict):
+            errors.append('row_not_object')
+            continue
         by_fork.setdefault(row.get('fork'), []).append(row)
 
     identity_fields = ['source_digest', 'image_id', 'native_so_sha256', 'daemon_jars_sha256']
-    identity_values = {field: {row.get(field) for row in rows} for field in identity_fields}
+    identity_values = {field: {_freeze(row.get(field)) for row in rows if isinstance(row, dict)} for field in identity_fields}
     for field, values in identity_values.items():
         if len(values) != 1 or None in values:
             errors.append(f'identity_not_uniform: {field}={sorted(map(str, values))}')
-    if manifest is not None and rows:
+    if manifest is not None and rows and isinstance(rows[0], dict):
         for field in identity_fields:
             if manifest.get(field) != rows[0].get(field):
                 errors.append(
@@ -152,7 +177,7 @@ def main(argv):
                 errors.append(f"fork_{fork}_{row.get('arm')}_policy_eligibility")
             if row.get('artifact_errors'):
                 errors.append(f"fork_{fork}_{row.get('arm')}_artifact_errors: {row.get('artifact_errors')}")
-            if row.get('target_cpu_ns') is None or row.get('target_cpu_ns') <= 0:
+            if not _positive_finite(row.get('target_cpu_ns')):
                 errors.append(f"fork_{fork}_{row.get('arm')}_target_cpu")
             if row.get('target_sample_boundary') != TARGET_BOUNDARY:
                 errors.append(f"fork_{fork}_{row.get('arm')}_target_boundary")
@@ -174,7 +199,7 @@ def main(argv):
                     )
                 if row.get('terminal_integrity') != 'COMPLETE':
                     errors.append(f"fork_{fork}_{row.get('arm')}_terminal: {row.get('terminal_integrity')}")
-                if row.get('collector_cpu_ns') is None or row.get('collector_cpu_ns') <= 0:
+                if not _positive_finite(row.get('collector_cpu_ns')):
                     errors.append(f"fork_{fork}_{row.get('arm')}_collector_cpu")
                 if row.get('collector_sample_boundary') != COLLECTOR_BOUNDARY:
                     errors.append(f"fork_{fork}_{row.get('arm')}_collector_boundary")
@@ -240,6 +265,7 @@ def main(argv):
     print(json.dumps({
         'schema_version': 1,
         'verdict': 'PASS',
+        'verification_mode': 'full-directory' if decision_dir else 'jsonl-only',
         'rows': len(rows),
         'baseline_rows': baseline_rows,
         'profiled_rows': profiled_rows,
