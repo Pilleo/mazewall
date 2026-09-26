@@ -44,7 +44,10 @@ public fun main(args: Array<String>) {
         }
         val repository = Path.of(args[1])
         val nativeType = System.getenv("MAZEWALL_TIER_E_NATIVE_BUILD_TYPE") ?: "Release"
+        val fingerprintStarted = System.nanoTime()
         val fingerprint = TierEBenchmarkBundleFingerprint.read(repository, args[3].toBoolean(), nativeType)
+        val fingerprintMillis = java.util.concurrent.TimeUnit.NANOSECONDS
+            .toMillis(System.nanoTime() - fingerprintStarted)
         val cache = System.getenv("MAZEWALL_TIER_E_BUILD_CACHE_ROOT")?.let(Path::of)
             ?: repository.resolve("build/tier-e-benchmark-cache")
         val status = TierEBenchmarkBundleBuilder.build(
@@ -55,6 +58,7 @@ public fun main(args: Array<String>) {
             args[4].toBoolean(),
             nativeType,
             fingerprint,
+            fingerprintMillis,
         )
         println("tier-e-benchmark-bundle: status=$status fingerprint=$fingerprint bundle=${args[2]}")
         return

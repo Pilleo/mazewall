@@ -23,6 +23,8 @@ public object TierEBenchmarkBundleBuilder {
         force: Boolean,
         nativeBuildType: String,
         fingerprint: String = TierEBenchmarkBundleFingerprint.read(repository, usdt, nativeBuildType),
+        fingerprintMillis: Long = 0,
+        clockMillis: () -> Long = System::currentTimeMillis,
         execute: (List<String>, Duration, Path) -> Unit = { command, timeout, root ->
             val result = runContainerCommand(command, timeout, outputFile = root.resolve("bundle-build.log"))
             check(result.exitCode == 0) { "Tier E bundle build failed: ${command.first()} (${result.exitCode}): ${result.output}" }
@@ -30,6 +32,8 @@ public object TierEBenchmarkBundleBuilder {
     ): String {
         require(nativeBuildType.matches(Regex("[A-Za-z0-9_]+"))) { "Invalid native build type" }
         require(fingerprint.matches(Regex("[a-f0-9]{64}"))) { "Invalid bundle fingerprint" }
+        require(fingerprintMillis >= 0) { "Invalid fingerprint duration" }
+        val started = clockMillis()
         Files.createDirectories(cacheRoot)
         FileChannel.open(cacheRoot.resolve("bundle-build.lock"), CREATE, WRITE).use { channel ->
             channel.lock().use {
@@ -46,6 +50,7 @@ public object TierEBenchmarkBundleBuilder {
                 if (!force && prior == fingerprint) return "reused"
                 val native = cacheRoot.resolve("native-$fingerprint")
                 Files.createDirectories(native)
+                val configureStarted = clockMillis()
                 execute(
                     listOf(
                         "cmake",
@@ -59,9 +64,13 @@ public object TierEBenchmarkBundleBuilder {
                         Duration.ofMinutes(5),
                     repository,
                 )
+                val configureMillis = clockMillis() - configureStarted
+                val nativeStarted = clockMillis()
                 execute(listOf("cmake", "--build", native.toString(), "-j2"), Duration.ofMinutes(5), repository)
+                val nativeMillis = clockMillis() - nativeStarted
                 val runtimeCache = cacheRoot.resolve("runtime-$fingerprint")
                 val runtime = runtimeCache.resolve("runtime")
+                val gradleStarted = clockMillis()
                 if (Files.exists(runtimeCache, NOFOLLOW_LINKS) && !Files.isRegularFile(runtimeCache.resolve("input-fingerprint"), NOFOLLOW_LINKS)) {
                     error("Tier E runtime cache is incomplete")
                 }
@@ -90,13 +99,26 @@ public object TierEBenchmarkBundleBuilder {
                 require(Files.readString(runtimeCache.resolve("input-fingerprint")).trim() == fingerprint && Files.isDirectory(runtime, NOFOLLOW_LINKS)) {
                     "Tier E runtime cache fingerprint mismatch"
                 }
+                val gradleMillis = clockMillis() - gradleStarted
+                val stagingStarted = clockMillis()
                 val parent = requireNotNull(bundle.toAbsolutePath().parent)
                 Files.createDirectories(parent)
                 val staged = Files.createTempDirectory(parent, ".tier-e-bundle-")
                 try {
                     Files.copy(native.resolve("libmazewall_stack_agent.so"), staged.resolve("libmazewall_stack_agent.so"))
                     copyTree(runtime, staged.resolve("runtime"))
-                    TierEBenchmarkBundleManifest.write(staged, fingerprint)
+                    TierEBenchmarkBundleManifest.write(
+                        staged,
+                        fingerprint,
+                        mapOf(
+                        "fingerprint" to fingerprintMillis,
+                        "native_configure" to configureMillis,
+                        "native_build" to nativeMillis,
+                        "gradle_install" to gradleMillis,
+                        "staging" to (clockMillis() - stagingStarted),
+                        "total" to (clockMillis() - started + fingerprintMillis),
+                    ),
+                    )
                     TierEBenchmarkBundleManifest.verify(staged, fingerprint)
                     if (prior != null) {
                         val replacement = Path.of("$bundle.replaced-${prior.ifEmpty { "unbound" }}")

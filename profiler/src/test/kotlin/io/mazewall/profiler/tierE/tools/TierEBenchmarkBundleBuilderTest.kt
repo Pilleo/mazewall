@@ -1,10 +1,12 @@
 package io.mazewall.profiler.tierE.tools
 
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicLong
 
 class TierEBenchmarkBundleBuilderTest {
     @Test
@@ -16,7 +18,17 @@ class TierEBenchmarkBundleBuilderTest {
             val cache = root.resolve("cache")
             val fingerprint = "c".repeat(64)
             val executed = mutableListOf<String>()
-            val status = TierEBenchmarkBundleBuilder.build(root, bundle, cache, false, false, "Release", fingerprint) { command, _, _ ->
+            val clock = AtomicLong(0)
+            val status = TierEBenchmarkBundleBuilder.build(
+                root,
+                bundle,
+                cache,
+                false,
+                false,
+                "Release",
+                fingerprint,
+                clockMillis = { clock.getAndAdd(10) },
+            ) { command, _, _ ->
                 executed += command.first()
                 when {
                     command.first() == "cmake" && "--build" in command -> {
@@ -32,6 +44,16 @@ class TierEBenchmarkBundleBuilderTest {
             assertEquals("built", status)
             assertEquals(listOf("cmake", "cmake", "env"), executed)
             assertTrue(TierEBenchmarkBundleManifest.verify(bundle, fingerprint))
+            val manifest = kotlinx.serialization.json.Json
+                .parseToJsonElement(Files.readString(bundle.resolve("manifest.json")))
+                .jsonObject
+            assertTrue(
+                manifest
+                .getValue("build_timing_ms")
+                .jsonObject
+                .getValue("native_build")
+                .toString() == "10",
+            )
         } finally {
             root.toFile().deleteRecursively()
         }
