@@ -112,9 +112,11 @@ These are still substantive controllers, not thin launchers:
   target missed 11 operation IDs; it is not qualified evidence of node-noise
   parity or a reason to relax the Tier E operation oracle.
   The clean-workspace rootful gate is fail-closed and retains its runner and
-  workspace when export/qualification fails: platform lint was repaired, but
-  existing enforcer integration-test ktlint violations in 49 files currently
-  block the profiler fresh-JVM stage (issue-20260926-113027-386). The bundle entrypoint bootstraps Kotlin
+  workspace when export/qualification fails. Transferring the tracked root
+  `.editorconfig` eliminated apparent enforcer ktlint violations, and an owned
+  UNIX socket fixture passed fresh-JVM tests. The gate now stops at a real
+  `raw_key_ns` phase median of 770,918 ns versus its 551,140 ns retained limit
+  (issue-20260926-133258-892); no baseline was revised. The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.
   A real native/runtime bundle built by this controller passed the historical

@@ -14,7 +14,9 @@ class TierERootfulSourceTransferTest {
             val untracked = Files.createDirectories(root.resolve("scripts")).resolve("scenario.sh")
             Files.writeString(tracked, "tracked")
             Files.writeString(untracked, "untracked")
+            Files.writeString(root.resolve(".editorconfig"), "root = true\n[*.kt]\nktlint_standard_no-wildcard-imports = disabled\n")
             check(ProcessBuilder("git", "-C", root.toString(), "add", "profiler/entry.kt").start().waitFor() == 0)
+            check(ProcessBuilder("git", "-C", root.toString(), "add", ".editorconfig").start().waitFor() == 0)
             val tar = root.resolve("source.tar")
             TierERootfulSourceTransfer.archive(root, tar)
             val listing = ProcessBuilder("tar", "-tf", tar.toString())
@@ -24,6 +26,7 @@ class TierERootfulSourceTransferTest {
                 .readText()
             assertTrue("profiler/entry.kt" in listing)
             assertTrue("scripts/scenario.sh" in listing)
+            assertTrue(".editorconfig" in listing)
         } finally {
             root.toFile().deleteRecursively()
         }

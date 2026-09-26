@@ -23,6 +23,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
 
         val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
         val definitionRoot = Files.createTempDirectory("tier-e-daemon-workflow")
+        val socketPath = definitionRoot.resolve("control.sock")
         val daemon = ProcessBuilder(
             java,
             "-cp",
@@ -31,17 +32,18 @@ class TierEDaemonNativeWorkflowIntegrationTest {
         ).redirectErrorStream(true)
             .also { process ->
             process.environment()["TIER_E_DEFINITION_ROOT"] = definitionRoot.toString()
+            process.environment()["TIER_E_SOCKET"] = socketPath.toString()
         }.start()
         val transcript = StringBuilder()
         val daemonReader = daemon.inputStream.bufferedReader()
         val firstLine = daemonReader.readLine() ?: error("daemon exited before announcing a port")
         transcript.appendLine(firstLine)
-        val port = Regex("listening port=([0-9]+)")
+        val announcedSocket = Regex("listening socket=(\\S+)")
             .find(firstLine)
             ?.groupValues
             ?.get(1)
-            ?.toInt()
-            ?: error("daemon did not announce a TCP port: $firstLine")
+            ?: error("daemon did not announce a UNIX socket: $firstLine")
+        assertEquals(socketPath.toString(), announcedSocket)
 
         val markerOffset = ElfSymbolOffset.resolve(agent, "mazewall_stack_marker")
         val workload = ProcessBuilder(
@@ -53,7 +55,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
             "0",
             "platform",
             "20",
-            port.toString(),
+            socketPath.toString(),
             agent.toString(),
             markerOffset.toString(16),
             "4d5a",
@@ -81,6 +83,7 @@ class TierEDaemonNativeWorkflowIntegrationTest {
             if (daemon.isAlive) daemon.destroyForcibly()
             daemon.waitFor(5, TimeUnit.SECONDS)
             Files.deleteIfExists(definitionFile)
+            Files.deleteIfExists(socketPath)
             Files.deleteIfExists(definitionRoot)
         }
     }

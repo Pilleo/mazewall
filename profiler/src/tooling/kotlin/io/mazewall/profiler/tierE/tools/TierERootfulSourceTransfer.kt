@@ -25,6 +25,7 @@ public object TierERootfulSourceTransfer {
         "build.gradle.kts",
         "settings.gradle.kts",
         "gradle.properties",
+        ".editorconfig",
     )
 
     public fun archive(
