@@ -88,6 +88,7 @@ public object TierECoverageMatrixRunner {
                         identityCase = null,
                         baseline = arm.baseline,
                         benchmark = false,
+                        allowIncomplete = !longMatched && arm.transport == "inline-per-invocation" && config.fixture.operations > 72,
                     ),
                 )
                 var status = 0
@@ -99,7 +100,12 @@ public object TierECoverageMatrixRunner {
                     timedOut = status == 124
                     Files.writeString(artifact.resolve("runner-failure.txt"), failure.stackTraceToString())
                 }
-                val complete = status == 0 && TierELongMatchedArmStatus.complete(artifact, arm.baseline)
+                val complete = status == 0 &&
+                    if (longMatched) {
+                    TierELongMatchedArmStatus.complete(artifact, arm.baseline)
+                } else {
+                    TierELongMatchedArmStatus.legacySummary(artifact, armConfig.scenario.allowIncomplete)
+                }
                 if (!complete) failures += "${arm.name}/fork-${arm.fork}"
                 if (longMatched) {
                     val meta = buildJsonObject {
@@ -134,11 +140,6 @@ public object TierECoverageMatrixRunner {
                     }.toString() +
                         "\n",
                     )
-                }
-                if (!longMatched && status == 0) {
-                    if (!TierELongMatchedArmStatus.legacySummary(artifact, arm.transport == "inline-per-invocation" && config.fixture.operations > 72)) {
-                        failures += "${arm.name}/fork-${arm.fork}:coverage"
-                    }
                 }
             }
             val after = TierESourceFingerprint.read(root, sourceBefore)

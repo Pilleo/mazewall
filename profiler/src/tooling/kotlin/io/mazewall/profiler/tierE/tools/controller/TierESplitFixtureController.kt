@@ -238,7 +238,7 @@ public object TierESplitFixtureController {
         }
         val negativeArtifact = config.scenario.negativeArtifact
         val artifactFile = when (negativeArtifact) {
-            null -> "orders.mzse"
+            null -> if (config.scenario.delayedArtifact) "delayed.mzse" else "orders.mzse"
             "missing", "malformed", "symlink", "unclosed", "session-mismatch" -> "$negativeArtifact.mzse"
             else -> error("Unrecognized negative artifact: $negativeArtifact")
         }
@@ -606,6 +606,12 @@ public object TierESplitFixtureController {
         }
         Files.createFile(shared.resolve("start"))
         command(engine("wait", targetName), timeout)
+        if (config.scenario.delayedArtifact) {
+            TimeUnit.SECONDS.sleep(2)
+            val closed = shared.resolve("definitions/orders.mzse")
+            check(Files.isRegularFile(closed, NOFOLLOW_LINKS)) { "Delayed source artifact was not producer-closed" }
+            Files.copy(closed, shared.resolve("definitions/delayed.mzse"))
+        }
         val report = shared.resolve("evidence/split-fixture-19802.tier-e.json")
         await(Duration.ofSeconds(config.deadlines.terminalSeconds.toLong()), "terminal report") { Files.exists(report) }
         if (config.fixture.coverage || config.scenario.benchmark) {
@@ -698,7 +704,9 @@ public object TierESplitFixtureController {
                 artifacts.resolve("terminal-report.json"),
             )
             Files.writeString(artifacts.resolve("coverage-verdict.json"), "$verdict\n")
-            check(verdict.getValue("coverage_verdict").toString() == "\"PASS\"") { "Tier E coverage incomplete: $verdict" }
+            if (!config.scenario.allowIncomplete) {
+                check(verdict.getValue("coverage_verdict").toString() == "\"PASS\"") { "Tier E coverage incomplete: $verdict" }
+            }
         }
         Files.writeString(
             artifacts.resolve("verdict.env"),
@@ -707,6 +715,7 @@ public object TierESplitFixtureController {
                 when {
                     negativeArtifact != null -> "negative:$negativeArtifact"
                     config.scenario.faultSyscall != null -> "fault"
+                    config.scenario.allowIncomplete -> "allow-incomplete"
                     else -> "normal"
                 },
             ) +

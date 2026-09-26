@@ -7,6 +7,29 @@ import java.nio.file.Files
 
 class TierEFixtureVerdictTest {
     @Test
+    fun `allowed incomplete accepts only matching incomplete coverage and terminal`() {
+        val directory = Files.createTempDirectory("tier-e-allow-incomplete-")
+        try {
+            Files.writeString(
+                directory.resolve("terminal-report.json"),
+                """{"evidence_integrity":"INCOMPLETE","policy_eligibility":false}""",
+            )
+            Files.writeString(
+                directory.resolve("coverage-verdict.json"),
+                """{"coverage_verdict":"INCOMPLETE","wrong_edges":[],"policy_eligibility":false}""",
+            )
+            assertTrue(TierEFixtureVerdict.validate(directory, "allow-incomplete").contains("coverage_verdict=INCOMPLETE"))
+            Files.writeString(
+                directory.resolve("coverage-verdict.json"),
+                """{"coverage_verdict":"PASS","wrong_edges":[],"policy_eligibility":false}""",
+            )
+            assertThrows(IllegalArgumentException::class.java) { TierEFixtureVerdict.validate(directory, "allow-incomplete") }
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `fault mode requires map sourced singleton recovery and incomplete transport`() {
         val directory = Files.createTempDirectory("tier-e-kotlin-fault-verdict-")
         try {

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -18,6 +19,29 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 2 && args[0] == "coverage-summary") {
+        val summary = TierECoverageReport.write(Path.of(args[1]))
+        println(
+            buildJsonObject {
+            put("artifact", Path.of(args[1]).resolve("coverage-summary.json").toString())
+            put("completed", summary.getValue("run_completed"))
+            put(
+                "variants",
+                JsonArray(
+                    summary.getValue("variants").jsonArray.map { variant ->
+                buildJsonObject {
+                    val item = variant.jsonObject
+                    put("variant", item.getValue("variant"))
+                    put("all_forks_recover_all_paths", item.getValue("all_forks_recover_all_paths"))
+                    put("cumulative_recall", item.getValue("cumulative_recall"))
+                }
+            },
+                ),
+            )
+        },
+        )
+        return
+    }
     if (args.size == 1 && args[0] == "version") {
         println("tier-e-tools-1")
         return

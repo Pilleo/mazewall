@@ -90,6 +90,7 @@ public data class TierERunConfiguration(
             put("baseline", scenario.baseline)
             put("benchmark", scenario.benchmark)
             put("allow_incomplete", scenario.allowIncomplete)
+            put("delayed_artifact", scenario.delayedArtifact)
         },
         )
         put(
@@ -129,6 +130,7 @@ public data class TierERunConfiguration(
         require(!scenario.baseline || (!scenario.benchmark && scenario.faultSyscall == null))
         require(scenario.negativeArtifact == null || scenario.negativeArtifact in setOf("missing", "malformed", "symlink", "unclosed", "session-mismatch"))
         require(scenario.identityCase == null || scenario.identityCase in setOf("stale", "simulated-reuse", "real-reuse"))
+        require(!scenario.delayedArtifact || (scenario.negativeArtifact == null && scenario.identityCase == null && !scenario.baseline && !scenario.benchmark))
         require(deadlines.armSeconds > 0 && deadlines.terminalSeconds > 0 && deadlines.stopSeconds > 0)
         return this
     }

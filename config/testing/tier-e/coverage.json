@@ -3,7 +3,7 @@
   "container": { "engine": "docker", "uri": null, "image": "mazewall-tier-e-rootful:latest" },
   "fixture": { "coverage": true, "operations": 75000, "emission_mode": "full-stream", "recovery_mode": "disabled" },
   "measurement": { "forks": 5, "workload_cpu": 0, "collector_cpu": 1, "seed_start": 23063, "warmups": 3, "batches": 10, "iterations": 100 },
-  "scenario": { "marker_version": "v1", "marker_backend": "uprobe", "stack_transport": "dictionary", "socket_access": "group", "fault_syscall": null, "negative_artifact": null, "identity_case": null, "live_snapshots": false, "baseline": false, "benchmark": false, "allow_incomplete": false },
+  "scenario": { "marker_version": "v1", "marker_backend": "uprobe", "stack_transport": "dictionary", "socket_access": "group", "fault_syscall": null, "negative_artifact": null, "identity_case": null, "live_snapshots": false, "baseline": false, "benchmark": false, "allow_incomplete": false, "delayed_artifact": false },
   "build": { "native_build_dir": null, "reuse": true },
   "deadlines": { "arm_seconds": 600, "terminal_seconds": 90, "stop_seconds": 10 },
   "artifacts": { "output_root": null, "fresh": true, "retain_on_failure": true }

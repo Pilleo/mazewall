@@ -303,6 +303,35 @@ class TierERootfulContainerEndpointIntegrationTest {
         assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
     }
 
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned delayed closed artifact is admitted after target exit`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val delayed = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(delayedArtifact = true))
+        TierESplitFixtureController.run(delayed, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"COMPLETE\""))
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned allowed incomplete flag uses explicit coverage verdict`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val allowed = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(allowIncomplete = true))
+        TierESplitFixtureController.run(allowed, endpoint, prepared.root, destination, prepared.native)
+        val verdict = Files.readString(destination.resolve("verdict.env"))
+        assertTrue(verdict.contains("coverage_verdict=PASS"))
+        assertTrue(verdict.contains("policy_eligibility=false"))
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["missing", "malformed", "symlink", "session-mismatch"])
     @Timeout(value = 5, unit = TimeUnit.MINUTES)

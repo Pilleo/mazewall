@@ -10,6 +10,7 @@ case "${LEVEL}" in
 esac
 REPOSITORY_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ARTIFACT_DIR=${2:-"${REPOSITORY_DIR}/build/tier-e-coverage-${LEVEL}"}
+"${REPOSITORY_DIR}/gradlew" :profiler:installDist >/dev/null
 export MAZEWALL_TIER_E_RUN_LEVEL=custom
 export MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-coverage-discovery
 export MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=oracle
@@ -23,6 +24,6 @@ export MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK=monotonic
 RUN_STATUS=0
 bash "${REPOSITORY_DIR}/scripts/run_tier_e_trustworthy_benchmark.sh" "${ARTIFACT_DIR}" || RUN_STATUS=$?
 if [[ -f "${ARTIFACT_DIR}/results.jsonl" ]]; then
-    node "${REPOSITORY_DIR}/scripts/summarize_tier_e_coverage.mjs" "${ARTIFACT_DIR}"
+    bash "${REPOSITORY_DIR}/scripts/tier_e_tools" coverage-summary "${ARTIFACT_DIR}"
 fi
 exit "${RUN_STATUS}"

@@ -19,6 +19,7 @@ public data class TierEExecutionProfile(
     val baseline: Boolean,
     val benchmark: Boolean,
     val allowIncomplete: Boolean,
+    val delayedArtifact: Boolean = false,
 ) {
     public companion object {
         private val fields = setOf(
@@ -33,6 +34,7 @@ public data class TierEExecutionProfile(
             "baseline",
             "benchmark",
             "allow_incomplete",
+            "delayed_artifact",
         )
 
         public fun parse(
@@ -52,9 +54,12 @@ public data class TierEExecutionProfile(
                     false,
                     false,
                     false,
+                    false,
                 )
             }
-            require(section.keys == fields) { "Unexpected or missing Tier E scenario fields: ${section.keys - fields}, ${fields - section.keys}" }
+            require(section.keys == fields || section.keys == fields - "delayed_artifact") {
+                "Unexpected or missing Tier E scenario fields: ${section.keys - fields}, ${(fields - "delayed_artifact") - section.keys}"
+            }
 
             fun text(key: String): String {
                 val value = section[key] as? JsonPrimitive
@@ -90,6 +95,7 @@ public data class TierEExecutionProfile(
                 flag("baseline"),
                 flag("benchmark"),
                 flag("allow_incomplete"),
+                if ("delayed_artifact" in section) flag("delayed_artifact") else false,
             )
         }
     }

@@ -67,8 +67,10 @@ These are still substantive controllers, not thin launchers:
 
 - `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
   `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
-  reuse, delayed artifacts, and allowed-incomplete coverage are rejected.
-  Live snapshots and benchmark phases are accepted. A caller-supplied
+  reuse is rejected. Delayed producer-closed artifacts, explicit bounded
+  incomplete coverage, live snapshots, and benchmark phases are typed fixture
+  inputs. Older v2 profiles without `delayed_artifact` default it to false.
+  A caller-supplied
   creation lock keeps container cleanup with that caller. Kotlin checks the
   run ID, scratch-directory ownership, lock and open-state identities before
   writing artifacts or creating containers; failure receipts mark those
@@ -97,7 +99,10 @@ These are still substantive controllers, not thin launchers:
   unresolved observations; ordinary fixture errors never become successful
   arms because their text resembles an expected oracle result.
 - The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
-  substantive Bash execution and some Node analysis. Standalone Python perf
+  substantive Bash execution. The active coverage summary and stack identity
+  comparison are Kotlin-owned; replay on copied immutable 2026-09-21 smoke and
+  five-fork full archives matched their saved Node summaries with zero semantic
+  JSON differences. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis
   commands must stay reproducible but not be selected as active dependencies.
 

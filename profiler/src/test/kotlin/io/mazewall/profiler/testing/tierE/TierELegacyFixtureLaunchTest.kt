@@ -8,6 +8,20 @@ import org.junit.jupiter.api.Test
 
 class TierELegacyFixtureLaunchTest {
     @Test
+    fun `unknown legacy boolean spelling cannot silently disable a fixture mode`() {
+        for (name in listOf("TIER_E_SPLIT_DELAYED_ARTIFACT", "TIER_E_SPLIT_ALLOW_INCOMPLETE", "TIER_E_SPLIT_COVERAGE")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                TierELegacyFixtureLaunch.translate(mapOf(name to "maybe"))
+            }
+        }
+        for (name in listOf("TIER_E_COVERAGE_SEED", "TIER_E_SPLIT_FAULT_RING_DROP_SYSCALL", "TIER_E_SPLIT_WORKLOAD_CPU")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                TierELegacyFixtureLaunch.translate(mapOf(name to "invalid"))
+            }
+        }
+    }
+
+    @Test
     fun `legacy coverage environment becomes a typed fixture request`() {
         val launch = TierELegacyFixtureLaunch.translate(
             mapOf(
@@ -44,12 +58,11 @@ class TierELegacyFixtureLaunchTest {
     }
 
     @Test
-    fun `real guest reuse and incomplete coverage stay outside the launcher`() {
+    fun `real guest reuse stays outside the launcher while incomplete coverage is explicit`() {
         assertThrows(IllegalArgumentException::class.java) {
             TierELegacyFixtureLaunch.translate(mapOf("TIER_E_SPLIT_REAL_PID_REUSE" to "1"))
         }
-        assertThrows(IllegalArgumentException::class.java) {
-            TierELegacyFixtureLaunch.translate(mapOf("TIER_E_SPLIT_ALLOW_INCOMPLETE" to "1", "TIER_E_SPLIT_COVERAGE" to "1"))
-        }
+        val launch = TierELegacyFixtureLaunch.translate(mapOf("TIER_E_SPLIT_ALLOW_INCOMPLETE" to "1", "TIER_E_SPLIT_COVERAGE" to "1"))
+        assertTrue(launch.configuration.scenario.allowIncomplete)
     }
 }
