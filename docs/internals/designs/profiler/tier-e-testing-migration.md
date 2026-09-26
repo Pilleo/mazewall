@@ -145,6 +145,14 @@ These are still substantive controllers, not thin launchers:
   beneficial paired 95% interval in both modes. See the
   [retained v2 evidence](../../evidence/tier-e-comparable-phase-v2-20260926/README.md)
   and the [original isolation record](../../evidence/tier-e-raw-key-comparability-20260926/README.md).
+  A later clean-workspace rootful gate on the final Kotlin diagnostics
+  revision `d82ca4b9` completed its native and profiler checks but **failed**
+  the unchanged `GetStackTrace` historical phase limit in two bounded runs
+  (4,676,424 ns and 2,743,788 ns). Both retained stopped exact-name runners,
+  artifact volumes, logs and `INCOMPLETE` terminals. These failed gates do not
+  supersede the earlier v2 passing receipt, nor do they qualify this final
+  revision. The final orchestrator handoff remains blocked; no phase threshold
+  was increased or baseline replaced.
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.

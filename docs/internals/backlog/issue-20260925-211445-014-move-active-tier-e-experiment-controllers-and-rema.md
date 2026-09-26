@@ -180,5 +180,16 @@ Podman runtime parity is operator-deferred and **unverified**. Do not close this
 issue on the Docker-only migration receipts or treat the one-pair diagnostic
 as a decision-quality capacity/noise comparison.
 
+**Final rootful gate blocker:** The final diagnostics source revision
+`d82ca4b9` passed `./gradlew build` and its rootful Docker native/profiler
+checks, but two bounded complete rootful gate attempts rejected the unchanged
+historical `GetStackTrace` phase limit (4,676,424 ns, then 2,743,788 ns).
+Both retained stopped exact-name runners and volumes under
+`/tmp/tier-e-kotlin-final-rootful-gate-resumed-1790463269` and
+`/tmp/tier-e-kotlin-final-rootful-gate-retry-1790463583` with
+`INCOMPLETE`, policy-ineligible terminals and recovery receipts. The earlier
+sealed passing v2 sample is historical; a final passing clean gate is not
+claimed. Neither threshold nor baseline was changed to clear this blocker.
+
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->
