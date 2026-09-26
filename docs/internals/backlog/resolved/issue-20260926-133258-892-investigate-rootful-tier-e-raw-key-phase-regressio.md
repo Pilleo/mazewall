@@ -1,7 +1,7 @@
 ---
 title: "Investigate rootful Tier E raw-key phase regression before qualification"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -9,12 +9,26 @@ target_modules: ["profiler", "profiler-native"]
 target_files:
   - "profiler-native/tier-e-benchmark-baseline.env"
   - "profiler-native/src/agent.cpp"
+  - "profiler-native/CMakeLists.txt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkPhaseGate.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeScenarioRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEToolsMain.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkPhaseGateTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifierTest.kt"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
+  - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
   - "docs/internals/evidence/tier-e-raw-key-comparability-20260926/README.md"
   - "docs/internals/evidence/tier-e-raw-key-comparability-20260926/comparison.json"
   - "docs/internals/evidence/tier-e-raw-key-comparability-20260926/raw-samples.tar.gz"
   - "docs/internals/evidence/tier-e-raw-key-comparability-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/README.md"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/paired-decision.json"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/paired-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/rootful-gate-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-comparable-phase-v2-20260926/legacy-v2-denial.txt"
 target_symbols:
   - "RAW_KEY_NS"
 open_questions: false
@@ -53,7 +67,22 @@ and its checksum-sealed raw samples. The original per-phase gate still fails;
 no baseline or policy decision was revised.
 
 **Needed:**
-1. Obtain operator approval for a new *comparable* phase contract before changing measurement or acceptance code: retain the raw-key baseline, count canonical-cache lookup independently, bound aggregate key+lookup+logical work against unchanged historical totals, and validate unique-edge separately. Do not remove weak-class guard or generation validation or claim a green gate under its old meaning.
+1. Under the operator-approved version-two contract, count canonical-cache lookup independently of key construction, bound aggregate key+lookup+logical work against the unchanged historical totals, validate unique-edge separately, and reject missing or unequal work. Preserve weak-class guards, generation checks, the old baseline, and legacy replay.
+
+**Resolution:** `agent.cpp` reports disjoint raw-key construction and cache
+lookup durations, a version-two emission label, and its existing correctness
+counts without changing capture or cache behavior. The v2 Kotlin gate requires
+three mode-bound samples with 514 captures, zero failures, active cache
+population summing to 514, positive work, and the unchanged historical
+stack/key and aggregate-total limits. The legacy gate explicitly rejects v2
+records. Thirty-nine native CTests and the profiler host suite passed. A clean
+rootful Docker gate completed with version-two full/unique totals of
+1,355,282/1,344,775 ns below fixed limits 13,412,790/2,119,025 ns. A
+predetermined 15-pair same-image Debug control retained all 60 CTest arms,
+with beneficial paired-bootstrap 95% intervals for both comparable native
+totals. All immutable inputs and raw/decision rows are checksum sealed in
+[`tier-e-comparable-phase-v2-20260926`](../../evidence/tier-e-comparable-phase-v2-20260926/README.md).
+`policy_eligibility=false` and `REJECT_DEFAULT_PROMOTION` stand.
 
 ---
 <!-- id: issue-20260926-133258-892-investigate-rootful-tier-e-raw-key-phase-regressio  file: issue-20260926-133258-892-investigate-rootful-tier-e-raw-key-phase-regressio.md -->

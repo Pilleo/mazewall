@@ -11,7 +11,8 @@ public object TierERootfulGateResultVerifier {
         require(
             Files.isRegularFile(output.resolve("native-ctest.log")) &&
             Files.isRegularFile(output.resolve("profiler-tests.log")) &&
-            Files.readString(output.resolve("benchmark-gate-status.txt")).trim() == "PASS",
+            Files.readString(output.resolve("benchmark-gate-status.txt")).trim() == "PASS" &&
+            Files.readString(output.resolve("benchmark-gate-contract.txt")).trim() == "2",
         ) {
             "Rootful gate lacks passing native, profiler, or benchmark evidence"
         }

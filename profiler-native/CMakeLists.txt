@@ -142,6 +142,12 @@ add_test(
 set_tests_properties(agent_phase_benchmark_full PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* raw_hash_ns=[1-9][0-9]* raw_equality_ns=[1-9][0-9]* generation_validation_ns=[1-9][0-9]* guard_validation_ns=[1-9][0-9]* canonical_cache_lock_wait_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* .*serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
 
 add_test(
+    NAME agent_phase_comparable_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-comparable-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_comparable_full PROPERTIES PASS_REGULAR_EXPRESSION "canonical_cache_lookup_ns=[1-9][0-9]*")
+
+add_test(
     NAME agent_capture_profile_jdk25_openat
     COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-profile=jdk25-unix-openat0" -cp "${AGENT_TEST_CLASSES}" OpenatProfileWorkload
 )
@@ -163,6 +169,12 @@ add_test(
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-benchmark-dictionary-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
 set_tests_properties(agent_phase_benchmark_unique PROPERTIES PASS_REGULAR_EXPRESSION "tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=[1-9][0-9]* raw_key_ns=[1-9][0-9]* raw_hash_ns=[1-9][0-9]* raw_equality_ns=[1-9][0-9]* generation_validation_ns=[1-9][0-9]* guard_validation_ns=[1-9][0-9]* canonical_cache_lock_wait_ns=[1-9][0-9]* logical_metadata_ns=[1-9][0-9]* .*serialization_ns=[1-9][0-9]* publication_bytes=[1-9][0-9]*")
+
+add_test(
+    NAME agent_phase_comparable_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-comparable-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_phase_comparable_unique PROPERTIES PASS_REGULAR_EXPRESSION "canonical_cache_lookup_ns=[1-9][0-9]*")
 
 add_test(
     NAME agent_phase_benchmark_full_disabled

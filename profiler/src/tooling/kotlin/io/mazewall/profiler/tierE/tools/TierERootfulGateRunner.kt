@@ -186,6 +186,7 @@ public object TierERootfulGateRunner {
                 )
                 docker("exec", owner.runner, "cp", "-a", "profiler/build/test-results/integrationTestFreshJvm", "/artifacts/")
                 val gate = artifacts.resolve("benchmark-gate.log")
+                Files.writeString(artifacts.resolve("benchmark-gate-contract.txt"), "2\n")
                 for (mode in listOf("full", "unique")) {
                     val logs = (1..3)
                         .map { sample ->
@@ -198,7 +199,7 @@ public object TierERootfulGateRunner {
                                 "profiler-native/build",
                             "-V",
                                 "-R",
-                                "^agent_phase_benchmark_$mode$",
+                                "^agent_phase_comparable_$mode$",
                             ),
                                 Duration.ofMinutes(3),
                             outputFile = artifacts.resolve("$mode-$sample.log"),
@@ -207,7 +208,20 @@ public object TierERootfulGateRunner {
                         Files.readString(artifacts.resolve("$mode-$sample.log"))
                     }.joinToString("\n")
                     Files.writeString(gate, logs, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
-                    TierEBenchmarkPhaseGate.check(mode, logs, TierEBenchmarkPhaseGate.baselines(repository.resolve("profiler-native/tier-e-benchmark-baseline.env"), mode))
+                    val result = TierEBenchmarkPhaseGate.comparable(
+                        mode,
+                        logs,
+                        TierEBenchmarkPhaseGate.baselines(repository.resolve("profiler-native/tier-e-benchmark-baseline.env"), mode),
+                    )
+                    Files.writeString(
+                        gate,
+                        "tier-e-comparable-gate: contract=2 mode=$mode raw_key_ns=${result.getValue("raw_key_ns")} " +
+                            "canonical_cache_lookup_ns=${result.getValue("canonical_cache_lookup_ns")} " +
+                            "logical_metadata_ns=${result.getValue("logical_metadata_ns")} " +
+                            "combined_ns=${result.getValue("key_lookup_logical_total_ns")} " +
+                            "limit_ns=${result.getValue("historical_total_limit_ns")} status=PASS policy_eligibility=false\n",
+                        java.nio.file.StandardOpenOption.APPEND,
+                    )
                 }
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "PASS\n")
             } catch (error: Throwable) {
@@ -236,6 +250,7 @@ public object TierERootfulGateRunner {
                         appendLine("$dimension=$status")
                     }
                 appendLine("benchmark_gate_status=${if (primary == null) "PASS" else "FAILED"}")
+                appendLine("benchmark_gate_contract=2")
                 appendLine("rootful_gate_status=${if (primary == null) 0 else 1}")
                 appendLine("rootless_podman_fixture=INCOMPLETE")
             },

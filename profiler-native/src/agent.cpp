@@ -58,6 +58,7 @@ std::atomic<std::uint64_t> virtual_pinned_scopes{0};
 std::atomic<std::uint64_t> virtual_pinned_nanos{0};
 std::atomic<std::uint64_t> benchmark_get_stack_trace_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_key_nanos{0};
+std::atomic<std::uint64_t> benchmark_canonical_cache_lookup_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_hash_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_equality_nanos{0};
 std::atomic<std::uint64_t> benchmark_generation_validation_nanos{0};
@@ -1095,27 +1096,30 @@ private:
         const auto retained = truncated ? frames.size() - 1 : static_cast<std::size_t>(frame_count);
         const auto raw_key_started = benchmark_started();
         const RawStackView raw{frames.data(), retained, flags_, capture_epoch};
+        if (benchmark_phases) benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
         if (!truncated) {
             if (canonical_cache_enabled) {
+                const auto lookup_started = benchmark_started();
                 if (const auto existing = find_canonical_stack(env, raw); existing != 0) {
                     const auto validation_started = benchmark_started();
                     const auto generation_valid = symbolization_generation.validate(capture_lease);
                     if (benchmark_phases) benchmark_generation_validation_nanos.fetch_add(elapsed_nanos(validation_started), std::memory_order_relaxed);
                     if (!generation_valid) {
+                        if (benchmark_phases) benchmark_canonical_cache_lookup_nanos.fetch_add(elapsed_nanos(lookup_started), std::memory_order_relaxed);
                         stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
                         return Capture{0, 5, 0, false};
                     }
                     if (benchmark_phases) {
                         benchmark_cache_hits.fetch_add(1, std::memory_order_relaxed);
-                        benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
+                        benchmark_canonical_cache_lookup_nanos.fetch_add(elapsed_nanos(lookup_started), std::memory_order_relaxed);
                     }
                     stack_capture_count.fetch_add(1, std::memory_order_relaxed);
                     return Capture{existing, 0, proposed_context_id, true};
                 }
+                if (benchmark_phases) benchmark_canonical_cache_lookup_nanos.fetch_add(elapsed_nanos(lookup_started), std::memory_order_relaxed);
             }
             if (benchmark_phases) benchmark_cache_misses.fetch_add(1, std::memory_order_relaxed);
         }
-        if (benchmark_phases) benchmark_raw_key_nanos.fetch_add(elapsed_nanos(raw_key_started), std::memory_order_relaxed);
         std::vector<LogicalFrame> logical;
         std::vector<jweak> class_guards;
         logical.reserve(retained);
@@ -1898,7 +1902,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     if (benchmark_phases) {
         std::fprintf(
             stderr,
-            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu raw_hash_ns=%llu raw_equality_ns=%llu generation_validation_ns=%llu guard_validation_ns=%llu canonical_cache_lock_wait_ns=%llu logical_metadata_ns=%llu marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu publication_cpu_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu marker_admission_clear_ns=%llu marker_exact_set_ns=%llu marker_exit_clear_ns=%llu marker_admission_clear_count=%llu marker_exact_set_count=%llu marker_exit_clear_count=%llu\n",
+            "tier-e-benchmark: stack_transport=%s get_stack_trace_ns=%llu raw_key_ns=%llu raw_hash_ns=%llu raw_equality_ns=%llu generation_validation_ns=%llu guard_validation_ns=%llu canonical_cache_lock_wait_ns=%llu logical_metadata_ns=%llu phase_contract_version=2 canonical_cache_lookup_ns=%llu emission_mode=%s marker_set_ns=%llu marker_clear_ns=%llu serialization_ns=%llu publication_bytes=%llu publication_latency_ns=%llu publication_cpu_ns=%llu lock_wait_ns=%llu peak_retained_bytes=%llu native_retained_bytes=%llu native_retention_exhaustions=%llu publication_count=%llu coalesced_publications=%llu failed_publications=%llu cache_hits=%llu cache_misses=%llu metadata_cache_hits=%llu metadata_cache_misses=%llu marker_admission_clear_ns=%llu marker_exact_set_ns=%llu marker_exit_clear_ns=%llu marker_admission_clear_count=%llu marker_exact_set_count=%llu marker_exit_clear_count=%llu\n",
             stack_transport == StackTransport::dictionary ? "dictionary" : "inline-per-invocation",
             static_cast<unsigned long long>(benchmark_get_stack_trace_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_raw_key_nanos.load(std::memory_order_relaxed)),
@@ -1908,6 +1912,8 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
             static_cast<unsigned long long>(benchmark_guard_validation_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_canonical_cache_lock_wait_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_logical_metadata_nanos.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(benchmark_canonical_cache_lookup_nanos.load(std::memory_order_relaxed)),
+            emission_mode == EmissionMode::full_stream ? "full-stream" : "unique-stack-syscall",
             static_cast<unsigned long long>(benchmark_marker_set_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_marker_clear_nanos.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_serialization_nanos.load(std::memory_order_relaxed)),

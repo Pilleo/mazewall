@@ -95,6 +95,33 @@ public object TierENativeScenarioRunner {
         }
     }
 
+    public fun checkComparablePhaseGate(
+        build: Path,
+        baseline: Path,
+        output: Path,
+    ) {
+        Files.createDirectories(requireNotNull(output.toAbsolutePath().parent))
+        Files.writeString(output, "")
+        for (mode in listOf("full", "unique")) {
+            val log = output.resolveSibling("${output.fileName}.$mode")
+            Files.writeString(log, "")
+            repeat(3) { runCtest(build, "agent_phase_comparable_$mode", log) }
+            val raw = Files.readString(log)
+            Files.writeString(output, raw, java.nio.file.StandardOpenOption.APPEND)
+            val result = TierEBenchmarkPhaseGate.comparable(mode, raw, TierEBenchmarkPhaseGate.baselines(baseline, mode))
+            Files.writeString(
+                output,
+                "tier-e-comparable-gate: contract=2 mode=$mode raw_key_ns=${result.getValue("raw_key_ns")} " +
+                    "canonical_cache_lookup_ns=${result.getValue("canonical_cache_lookup_ns")} " +
+                    "logical_metadata_ns=${result.getValue("logical_metadata_ns")} " +
+                    "combined_ns=${result.getValue("key_lookup_logical_total_ns")} " +
+                    "historical_total_ns=${result.getValue("historical_total_ns")} " +
+                    "limit_ns=${result.getValue("historical_total_limit_ns")} status=PASS policy_eligibility=false\n",
+                java.nio.file.StandardOpenOption.APPEND,
+            )
+        }
+    }
+
     private fun runCtest(
         build: Path,
         scenario: String,

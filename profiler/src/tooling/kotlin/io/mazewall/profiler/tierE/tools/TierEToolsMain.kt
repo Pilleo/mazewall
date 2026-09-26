@@ -35,6 +35,24 @@ public fun main(args: Array<String>) {
         TierENativeScenarioRunner.checkPhaseGate(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]))
         return
     }
+    if (args.size == 4 && args[0] == "native-comparable-gate") {
+        TierENativeScenarioRunner.checkComparablePhaseGate(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]))
+        return
+    }
+    if (args.size == 4 && args[0] == "native-comparable-evidence") {
+        val result = TierEBenchmarkPhaseGate.comparable(
+            args[1],
+            Files.readString(Path.of(args[2])),
+            TierEBenchmarkPhaseGate.baselines(Path.of(args[3]), args[1]),
+        )
+        println(
+            buildJsonObject {
+            for ((key, value) in result) put(key, value)
+            put("policy_eligibility", false)
+        },
+        )
+        return
+    }
     if (args.size == 5 && args[0] == "native-scenarios") {
         TierENativeScenarioRunner.run(args[1], Path.of(args[2]), Path.of(args[3]), Path.of(args[4]))
         return

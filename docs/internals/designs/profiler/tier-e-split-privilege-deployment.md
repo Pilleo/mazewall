@@ -198,8 +198,11 @@ source through the engine into a per-run volume, builds with a persistent
 engine-owned Gradle volume, and exports inspected artifacts via the client.
 The transfer includes the tracked root `.editorconfig`: omitting it made a
 disposable checkout apply default ktlint rules to otherwise unchanged
-integration tests. The clean Kotlin gate now reaches native phase measurement;
-its observed `raw_key_ns` regression remains a failed gate, not a new baseline.
+integration tests. The historical raw-key-only gate retains its failed v1
+verdict on v2 evidence. The clean Kotlin Docker gate now passes the separately
+versioned comparable phase contract (disjoint key construction and lookup,
+exact capture counts and unchanged historical total bounds); see
+[`tier-e-comparable-phase-v2-20260926`](../../evidence/tier-e-comparable-phase-v2-20260926/README.md).
 The rootful build has no writable host checkout or normal Gradle-cache mount.
 An interrupted or failing container cannot deposit root-owned build outputs
 there. Publication is checked stage by stage (copy, validation, host export,

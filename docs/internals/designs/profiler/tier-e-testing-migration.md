@@ -114,14 +114,18 @@ These are still substantive controllers, not thin launchers:
   The clean-workspace rootful gate is fail-closed and retains its runner and
   workspace when export/qualification fails. Transferring the tracked root
   `.editorconfig` eliminated apparent enforcer ktlint violations, and an owned
-  UNIX socket fixture passed fresh-JVM tests. The gate now stops at a real
-  `raw_key_ns` phase median of 770,918 ns versus its 551,140 ns retained limit
-  (issue-20260926-133258-892); no baseline was revised. Controlled rootful
-  historical/current Debug pairs show the full-stream raw-key interval now
-  includes canonical-cache lookup (504 hits), which the historical full-stream
-  interval excluded. The old per-phase threshold remains failed until an
-  operator approves a comparable, lookup-inclusive total-work gate; see the
-  [retained isolation evidence](../../evidence/tier-e-raw-key-comparability-20260926/README.md).
+  UNIX socket fixture passed fresh-JVM tests. The historical raw-key-only
+  version-one gate correctly rejects version-two native samples and its
+  original threshold and baseline remain immutable. The operator-approved
+  version-two rootful gate measures key construction and cache lookup in
+  disjoint intervals, checks the exact capture/cache denominator, and bounds
+  the per-sample key+lookup+logical median by 125% of each unchanged historical
+  mode's total. The clean rootful Docker gate passed for both full and unique
+  without changing attribution or policy eligibility; a predetermined
+  15-pair Debug diagnostic comparison retained complete captures and a
+  beneficial paired 95% interval in both modes. See the
+  [retained v2 evidence](../../evidence/tier-e-comparable-phase-v2-20260926/README.md)
+  and the [original isolation record](../../evidence/tier-e-raw-key-comparability-20260926/README.md).
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.

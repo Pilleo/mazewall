@@ -13,6 +13,7 @@ class TierERootfulGateResultVerifierTest {
             Files.writeString(output.resolve("native-ctest.log"), "native passed")
             Files.writeString(output.resolve("profiler-tests.log"), "gradle passed")
             Files.writeString(output.resolve("benchmark-gate-status.txt"), "PASS\n")
+            Files.writeString(output.resolve("benchmark-gate-contract.txt"), "2\n")
             val reports = Files.createDirectory(output.resolve("integrationTestFreshJvm"))
             Files.writeString(
                 reports.resolve("TierEEndToEndIntegrationTest.xml"),
@@ -24,6 +25,9 @@ class TierERootfulGateResultVerifierTest {
                 """<testsuite name="TierEDaemonNativeWorkflowIntegrationTest" tests="1" skipped="0" failures="0" errors="0"/>""",
             )
             assertTrue(TierERootfulGateResultVerifier.verify(output))
+            Files.writeString(output.resolve("benchmark-gate-contract.txt"), "1\n")
+            assertThrows(IllegalArgumentException::class.java) { TierERootfulGateResultVerifier.verify(output) }
+            Files.writeString(output.resolve("benchmark-gate-contract.txt"), "2\n")
             Files.writeString(
                 workflow,
                 """<testsuite name="TierEDaemonNativeWorkflowIntegrationTest" tests="1" skipped="1" failures="0" errors="0"/>""",
