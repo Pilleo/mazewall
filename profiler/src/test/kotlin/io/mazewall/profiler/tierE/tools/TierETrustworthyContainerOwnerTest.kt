@@ -10,6 +10,30 @@ import java.nio.file.Files
 
 class TierETrustworthyContainerOwnerTest {
     @Test
+    fun `interrupted recovery temporarily permits stopping owned runner then restores interrupt`() {
+        val output = Files.createTempDirectory("tier-e-interrupted-recovery-")
+        var stopWasUninterrupted = false
+        try {
+            val owner = TierETrustworthyContainerOwner(
+                ContainerEndpoint(ContainerEngine.DOCKER, "unix:///var/run/docker.sock"),
+                "tier-e-interrupted",
+                output,
+            ) { command, _, _ ->
+                if ("stop" in command) stopWasUninterrupted = !Thread.currentThread().isInterrupted
+                ContainerCommandResult(0, "ok")
+            }
+            owner.ownRunner()
+            Thread.currentThread().interrupt()
+            owner.retainForRecovery("cancelled")
+            assertTrue(stopWasUninterrupted)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+            output.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `post export evidence failure retains stopped runner and source volume`() {
         val output = Files.createTempDirectory("tier-e-owner-post-export-")
         val commands = mutableListOf<List<String>>()

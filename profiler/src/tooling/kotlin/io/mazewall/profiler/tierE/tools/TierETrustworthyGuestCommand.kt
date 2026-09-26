@@ -23,6 +23,8 @@ public object TierETrustworthyGuestCommand {
             "-Dmazewall.tier-e.kernel-coverage-mode=${settings.kernelCoverageMode}",
             "-Dmazewall.tier-e.sys-enter-attachment-shape=${settings.attachmentShape}",
             "-Dmazewall.tier-e.benchmark-scope=${settings.scope}",
+            "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${settings.rawSysEnterAudit}",
+            "-Dmazewall.tier-e.benchmark-exact-admission-audit=${settings.exactAdmissionAudit}",
             "-Dmazewall.tier-e.sustained-load=${settings.sustainedLoad}",
             "-Dmazewall.tier-e.sustained-rate-per-second=${settings.sustainedRate}",
             "-Dmazewall.tier-e.benchmark-workload=${settings.workload}",

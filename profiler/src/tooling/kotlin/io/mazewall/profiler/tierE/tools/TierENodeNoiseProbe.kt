@@ -4,6 +4,7 @@ import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -16,6 +17,43 @@ import java.util.concurrent.TimeUnit
 
 /** Benchmark-only global node-noise diagnostic; Java procfs-loop values never join historical shell-loop samples. */
 public object TierENodeNoiseProbe {
+    public fun observedMarker(
+        output: Path,
+        target: Path,
+    ): Path {
+        require(target.parent == output && target.fileName.toString().matches(Regex("target-[1-9][0-9]*-artifact"))) {
+            "Unexpected node-noise target artifact"
+        }
+        return output.resolve("${target.fileName}.attachment-ready.observed")
+    }
+
+    public fun workloadPid(marker: String): Long =
+        Regex("^workload_pid=([1-9][0-9]*)\\n$")
+            .matchEntire(marker)
+        ?.groupValues
+            ?.get(1)
+            ?.toLongOrNull() ?: throw IllegalArgumentException("Invalid attached workload identity")
+
+    public fun boundToFirstFullStream(
+        rows: List<JsonObject>,
+        pid: Long,
+    ): Boolean {
+        if (pid <= 0) return false
+        val selected = rows.filter {
+            it["kind"]?.jsonPrimitive?.content == "fork-output" &&
+                it["variant"]?.jsonPrimitive?.content?.startsWith("dictionary_full_stream") == true
+        }
+        return selected.size == 1 &&
+            Regex("(?:^|\\s)workload_pid=$pid(?:\\s|$)")
+            .containsMatchIn(
+                selected
+                .single()["output"]
+                ?.jsonPrimitive
+                ?.content
+                .orEmpty(),
+            )
+    }
+
     public fun runPairs(
         runs: Int,
         output: Path,
@@ -26,6 +64,8 @@ public object TierENodeNoiseProbe {
         require(runs in 1..20)
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Node-noise probe requires fresh artifacts" }
+        TierEMatrixTerminal.run(output) {
+        Files.writeString(output.resolve("results.jsonl"), "")
         val results = mutableListOf<kotlinx.serialization.json.JsonObject>()
         for (index in 1..runs) {
             val baseline = observe("baseline-$index")
@@ -33,15 +73,16 @@ public object TierENodeNoiseProbe {
             attached(target)
             val published = observe("attached-$index")
             completed(target)
-            results += buildJsonObject {
+            val pair = buildJsonObject {
                 put("kind", "node_noise_pair")
                 put("run", index)
                 put("baseline", baseline.json())
                 put("global_raw_tracepoint_attached", published.json())
                 put("policy_eligibility", false)
             }
+            Files.writeString(output.resolve("results.jsonl"), "$pair\n", java.nio.file.StandardOpenOption.APPEND)
+            results += pair
         }
-        Files.writeString(output.resolve("results.jsonl"), results.joinToString("\n", postfix = "\n"))
         Files.writeString(
             output.resolve("summary.json"),
             buildJsonObject {
@@ -53,6 +94,7 @@ public object TierENodeNoiseProbe {
         }.toString() +
             "\n",
         )
+        }
     }
 
     public fun run(
@@ -67,6 +109,8 @@ public object TierENodeNoiseProbe {
         require(durationSeconds in 1..30 && noiseCpu >= 0)
         val executor = Executors.newSingleThreadExecutor()
         var active: java.util.concurrent.Future<*>? = null
+        val observedPids = mutableMapOf<Path, Long>()
+        var primary: Throwable? = null
         try {
             runPairs(runs, output, observe = { label ->
                 val log = output.resolve("noise-$label.log")
@@ -129,18 +173,47 @@ public object TierENodeNoiseProbe {
                     .getValue("run_id")
                     .jsonPrimitive.content
                 val runner = "$runId-runner"
-                val ready = destination.resolve("attachment-ready")
+                val ready = observedMarker(output, destination)
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90)
                 while (!Files.exists(ready)) {
                     check(System.nanoTime() < deadline && active?.isDone != true) { "Node-noise target never produced attachment-ready evidence" }
                     runContainerCommand(endpoint.command("cp", "$runner:/artifacts/attachment-ready", ready.toString()), Duration.ofSeconds(5))
                     Thread.sleep(100)
                 }
+                val pid = workloadPid(Files.readString(ready))
+                check(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                    "Attached node-noise workload PID is not alive"
+                }
+                observedPids[destination] = pid
                 // The target stays active while the paired attached sample runs.
-            }, completed = { active?.get(30, TimeUnit.MINUTES) })
+            }, completed = { destination ->
+                val pid = observedPids.getValue(destination)
+                check(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                    "Attached node-noise workload exited during observation"
+                }
+                active?.get(30, TimeUnit.MINUTES)
+                val rows = Files
+                    .readAllLines(destination.resolve("results.jsonl"))
+                    .filter(String::isNotBlank)
+                    .map { Json.parseToJsonElement(it).jsonObject }
+                check(boundToFirstFullStream(rows, pid)) {
+                    "Observed attachment marker does not belong to the profiled workload"
+                }
+            })
+        } catch (failure: Throwable) {
+            primary = failure
+            throw failure
         } finally {
             active?.cancel(true)
             executor.shutdownNow()
+            val interrupted = Thread.interrupted()
+            try {
+                check(executor.awaitTermination(30, TimeUnit.SECONDS)) { "Node-noise target did not settle after cancellation" }
+            } catch (cleanup: Throwable) {
+                if (primary != null) primary.addSuppressed(cleanup) else throw cleanup
+            } finally {
+                if (Thread.interrupted() || interrupted) Thread.currentThread().interrupt()
+            }
         }
     }
 }

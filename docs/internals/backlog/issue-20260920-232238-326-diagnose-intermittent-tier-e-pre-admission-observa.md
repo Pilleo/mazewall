@@ -10,6 +10,11 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyContainerOwner.kt"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -86,3 +91,27 @@ raw logs at `/tmp/tier-e-node-noise-kotlin-v3-1790425247/` and
 missing-ID outcome is not solely caused by the noise loop. No denominator or
 retained-state budget was changed, neither run qualifies a capacity ceiling,
 and the diagnostic remains separate from historical shell-loop rates.
+
+### 2026-09-26 opt-in raw-entry/exact-admission audit and Kotlin noise smoke
+
+Sealed receipts: [the Kotlin node-noise diagnostic](../evidence/tier-e-kotlin-node-noise-diagnostic-20260926/README.md).
+For one source-pinned audit-enabled control and noisy target, both individual
+10,000-operation targets completed. The then-active controller rejected the
+noisy target's suffixed `dictionary_full_stream_collector_continuous` variant;
+the controller now binds to that completed sustained variant and saves the
+observed attachment marker outside the mutable target artifact. A later
+one-pair audit-enabled rootful run completed end to end: the observed marker
+matched the first profiled full-stream fork, all 10,000 raw `sys_enter` events
+and all 10,000 exact admissions were counted, and the operation oracle matched
+10,000/10,000 with `policy_eligibility=false`. These runs have **different**
+source fingerprints and are not one five-pair result.
+
+In another audited failing noisy target, raw `sys_enter` observed 10,000/10,000
+operations, but only 9,994 operations reached exact-admission submission; two
+wrong-target rejections were explicitly recorded. Neither the remaining four
+missing IDs nor the intermittent default-path shortfall is assigned to a
+specific kernel branch on that evidence. A separate unaudited default-path
+noisy attempt missed two operations. This issue remains **open** until a
+source-pinned, predetermined multi-pair noisy/control result reconciles every
+declared operation without audit-dependent qualification. Historical baseline,
+resource budgets, and operation denominators remain unchanged.

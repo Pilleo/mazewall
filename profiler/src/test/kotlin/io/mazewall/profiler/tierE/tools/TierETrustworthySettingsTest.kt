@@ -2,9 +2,38 @@ package io.mazewall.profiler.tierE.tools
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TierETrustworthySettingsTest {
+    @Test
+    fun `sustained audit request remains an explicit benchmark-only guest option`() {
+        val settings = TierETrustworthySettings.load(
+            mapOf(
+            "MAZEWALL_TIER_E_BENCHMARK_SCOPE" to "tier-e-sustained-collector",
+            "MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND" to "1000",
+            "MAZEWALL_TIER_E_BENCHMARK_RAW_SYS_ENTER_AUDIT" to "true",
+        ),
+        )
+        assertTrue(settings.rawSysEnterAudit)
+        assertTrue(
+            "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=true" in
+            TierETrustworthyGuestCommand.java(settings, 0, 2),
+        )
+        val exact = TierETrustworthySettings.load(
+            mapOf(
+            "MAZEWALL_TIER_E_BENCHMARK_SCOPE" to "tier-e-sustained-collector",
+            "MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND" to "1000",
+            "MAZEWALL_TIER_E_BENCHMARK_EXACT_ADMISSION_AUDIT" to "true",
+        ),
+        )
+        assertTrue(exact.exactAdmissionAudit)
+        assertTrue("-Dmazewall.tier-e.benchmark-exact-admission-audit=true" in TierETrustworthyGuestCommand.java(exact, 0, 2))
+        assertThrows(IllegalArgumentException::class.java) {
+            TierETrustworthySettings.load(mapOf("MAZEWALL_TIER_E_BENCHMARK_RAW_SYS_ENTER_AUDIT" to "maybe"))
+        }
+    }
+
     @Test
     fun `smoke level is bounded and decision level cannot use fewer than fifteen forks`() {
         val smoke = TierETrustworthySettings.load(mapOf("MAZEWALL_TIER_E_RUN_LEVEL" to "smoke"))

@@ -88,10 +88,19 @@ public class TierETrustworthyContainerOwner(
     public fun retainForRecovery(reason: String) {
         check(!retired) { "Tier E resources already retired" }
         if (retained) return
-        val stopped = if (runnerCreated && !runnerRemoved) {
-            execute(endpoint.command("stop", "-t", "2", runner), Duration.ofSeconds(15), null)
-        } else {
+        var stopFailure: Throwable? = null
+        val interrupted = Thread.interrupted()
+        val stopped = try {
+            if (runnerCreated && !runnerRemoved) {
+                execute(endpoint.command("stop", "-t", "2", runner), Duration.ofSeconds(15), null)
+            } else {
+                null
+            }
+        } catch (failure: Throwable) {
+            stopFailure = failure
             null
+        } finally {
+            if (Thread.interrupted() || interrupted) Thread.currentThread().interrupt()
         }
         Files.writeString(
             output.resolve("recovery.json"),
@@ -109,6 +118,7 @@ public class TierETrustworthyContainerOwner(
                 "\n",
         )
         retained = true
+        if (stopFailure != null) throw stopFailure
         check(stopped == null || stopped.exitCode == 0) { "Tier E runner stop failed: ${stopped?.output}" }
     }
 

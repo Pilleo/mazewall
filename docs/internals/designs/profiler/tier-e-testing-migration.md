@@ -1,6 +1,7 @@
 # Tier E testing configuration and execution ownership
 
-**Status (2026-09-25): In progress; not a Kotlin-only execution path.**
+**Status (2026-09-26): Active execution is Kotlin-owned; optional node-noise
+default-path qualification and Podman parity remain open.**
 
 The operator chose a Tier E-first migration: one typed, versioned JSON
 configuration and Kotlin-owned experiment and acceptance decisions. The
@@ -35,11 +36,11 @@ must observe `closed` and refuse creation. A mid-wait interruption is restored
 after independently attempting sentinel cleanup. An unresolved controller
 retains evidence and only stops currently visible containers.
 
-## Implemented migration slice
+## Migration sequence and qualification
 
 - Short rootful JUnit fixture consumes the smoke JSON profile and exports its
-  resolved configuration; other scenario parameters in its legacy shell
-  controller still cross the compatibility environment boundary.
+  resolved configuration. Its scenario controller and declared parameters are
+  now Kotlin-owned; historical shell replay remains explicit.
 - The split fixture's inline Node binary negative-envelope emitter and
   coverage, normal, fault, identity, and marker verdict checks invoke Kotlin
   tooling. Its registered-host-PID probe now runs Kotlin instead of the
@@ -50,18 +51,18 @@ retains evidence and only stops currently visible containers.
   short matched/live/fault source-fingerprint callers use the existing Kotlin
   fingerprint, with identical digest and file inventory on the same checkout.
 - The active matched, live-comparison and ring-drop fault scripts now call
-  Kotlin for per-arm rows and aggregate summaries as well. The current
+  Kotlin for process scheduling, per-arm rows and aggregate summaries. The
   fork-level fault parser reproduced all ten retained native-live fault rows
   exactly, and the retained 30-arm ring-drop rows matched all historical
   columns (the later optional `native_live_publications` field is null in
-  that older archive). These scripts still own process scheduling in Bash.
+  that older archive).
 - The rootful Docker JUnit suite executed all eight short cases. The
   unavailable Podman endpoint skipped all eight cases with a visible reason;
   actual rootful Podman runtime parity is unverified. The controlled 72-path
   ring-drop fault and unclosed native envelope fixtures passed with Kotlin
-  helpers. A live host-PID-reuse qualification was not run here.
+  helpers. A later real guest PID-reuse qualification is recorded below.
 
-## Remaining active ownership
+## Active ownership
 
 These are still substantive controllers, not thin launchers:
 
@@ -69,7 +70,11 @@ These are still substantive controllers, not thin launchers:
   `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
   reuse requires a disposable Linux guest with a bounded guest-only PID limit
   and an explicit v2 hybrid registered profile; a normal host's PID controls
-  remain unchanged. Delayed producer-closed artifacts, explicit bounded
+  remain unchanged. The Kotlin controller observed a real guest-host PID
+  replacement held across collector resume and rejected it with incomplete
+  lifecycle, zero resolved syscalls, and policy-ineligible terminal evidence;
+  see [the Kotlin guest receipt](../../evidence/tier-e-kotlin-real-pid-reuse-20260926/README.md).
+  Delayed producer-closed artifacts, explicit bounded
   incomplete coverage, live snapshots, and benchmark phases are typed fixture
   inputs. Older v2 profiles without `delayed_artifact` default it to false.
   A caller-supplied
@@ -110,15 +115,21 @@ These are still substantive controllers, not thin launchers:
   Bounded one-fork rootful Docker CPU perf with 11/11 required JIT maps and
   allocation recording with an owned per-run kernel probe both completed
   with policy-ineligible terminal receipts. Large raw `perf.data` and
-  allocation data remain local diagnostic artifacts, outside Git. The
+  allocation data remain local diagnostic artifacts, outside Git; SHA-bound
+  local receipts are at [perf/allocation](../../evidence/tier-e-kotlin-perf-allocation-20260926/README.md). The
   capacity controller pins per-stage retained limits and stops at the first
   ineligible pilot; a single short Docker stage passed. Its optional node-noise
-  probe now runs a separate JVM-based `/proc/self/stat` loop and must not be
-  combined with historical shell-loop rates. A bounded one-pair rootful run
-  correctly remained incomplete when the underlying 10,000-operation Tier E
-  target missed 11 operation IDs; a no-noise control under the same 10,000-op
-  schedule also missed 6. Neither qualifies node-noise parity or justifies
-  relaxing the Tier E operation oracle.
+   probe now runs a separate JVM-based `/proc/self/stat` loop and must not be
+   combined with historical shell-loop rates. A bounded one-pair rootful run
+   correctly remained incomplete when the underlying 10,000-operation Tier E
+   target missed 11 operation IDs; a no-noise control under the same 10,000-op
+   schedule also missed 6. The opt-in raw-syscall and exact-admission audits
+   localized one failing target to 10,000 raw entries but only 9,994 submitted
+   exact admissions. A later audit-enabled, marker-bound one-pair Java noise
+   diagnostic completed with 10,000/10,000 raw entries, submitted admissions,
+   and matched operations; see the [sealed diagnostic](../../evidence/tier-e-kotlin-node-noise-diagnostic-20260926/README.md).
+   This is not a five-pair default-path qualification: intermittent missing IDs
+   remain open and no denominator or operation oracle is relaxed.
   The clean-workspace rootful gate is fail-closed and retains its runner and
   workspace when export/qualification fails. Transferring the tracked root
   `.editorconfig` eliminated apparent enforcer ktlint violations, and an owned

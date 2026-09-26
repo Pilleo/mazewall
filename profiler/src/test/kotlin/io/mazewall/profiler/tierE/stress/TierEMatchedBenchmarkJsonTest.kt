@@ -19,6 +19,22 @@ import kotlin.test.assertTrue
 
 class TierEMatchedBenchmarkJsonTest {
     @Test
+    fun `raw syscall audit can be explicitly admitted for sustained diagnostics only`() {
+        assertEquals(true, TierEMatchedBenchmark.AuditOptions.rawAuditRequested("tier-e-sustained-collector", true))
+        assertEquals(false, TierEMatchedBenchmark.AuditOptions.rawAuditRequested("tier-e-sustained-collector", false))
+        assertFailsWith<IllegalArgumentException> {
+            TierEMatchedBenchmark.AuditOptions.rawAuditRequested("full", true)
+        }
+    }
+
+    @Test
+    fun `exact admission audit is explicit and cannot silently enter ordinary benchmark scopes`() {
+        assertTrue(TierEMatchedBenchmark.AuditOptions.exactAdmissionAuditRequested("tier-e-sustained-collector", true))
+        assertFalse(TierEMatchedBenchmark.AuditOptions.exactAdmissionAuditRequested("tier-e-sustained-collector", false))
+        assertFailsWith<IllegalArgumentException> { TierEMatchedBenchmark.AuditOptions.exactAdmissionAuditRequested("full", true) }
+    }
+
+    @Test
     fun `targeted selection determines terminal expected fork count`() {
         val selected = TierEMatchedBenchmark.selectVariantNames(
             available = listOf("baseline", "dictionary_full_stream", "dictionary_unique_edge"),

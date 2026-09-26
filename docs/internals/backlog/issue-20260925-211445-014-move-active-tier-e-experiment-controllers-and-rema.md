@@ -131,6 +131,13 @@ target_files:
   - "config/testing/tier-e/long-matched.json"
   - "config/testing/tier-e/real-pid-reuse.json"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/manifest.json"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/manifest.json"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/raw-fixture.tar.gz"
   - "docs/internals/designs/profiler/tier-e-design.md"
   - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
   - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/README.md"
@@ -157,6 +164,21 @@ Active Tier E Bash controllers and Node matrix summaries still interpret configu
  2. Replace the active long/short/live/fault Bash experiment controllers, Node matrix summaries, and remaining active analysis paths with Kotlin. Keep paced long measurements explicit, outside the default build.
  3. Preserve archived Python/Node reproduction commands, all historical evidence and checksum ledgers. Revalidate output and rejection parity against retained artifacts before switching each caller.
  4. Qualify rootful Podman on a real endpoint. Until then mark runtime parity unverified; never claim policy eligibility or reverse REJECT_DEFAULT_PROMOTION.
+
+**2026-09-26 progress:** The active launchers, split fixture, matrices, bundle,
+capacity, coverage, rootful gate, and trustworthy perf/allocation controllers
+now delegate substantive decisions and lifecycle to Kotlin. Replayed historical
+rows, short rootful Docker tests, native phase v2, owned perf/allocation, and
+real disposable-guest host-PID reuse have retained evidence linked from the
+[migration design](../designs/profiler/tier-e-testing-migration.md). The
+Kotlin node-noise controller passed an opt-in-audited one-pair rootful diagnostic
+with exact accounting and an observed attachment identity; the unaudited
+multi-pair qualification remains `INCOMPLETE` because target controls also
+intermittently miss declared operations. See [the sealed diagnostic](../evidence/tier-e-kotlin-node-noise-diagnostic-20260926/README.md)
+and [the still-open pre-admission issue](issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md).
+Podman runtime parity is operator-deferred and **unverified**. Do not close this
+issue on the Docker-only migration receipts or treat the one-pair diagnostic
+as a decision-quality capacity/noise comparison.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

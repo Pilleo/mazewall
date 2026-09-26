@@ -31,6 +31,11 @@ internal object TierEMatchedBenchmark {
         require(args.size in 1..8) {
             "usage: <agent.so> [iterations] [warmups] [batches] [forks] [workload-cpu] [collector-cpu] [results.jsonl]"
         }
+        val scope = Scope.fromProperty(System.getProperty("mazewall.tier-e.benchmark-scope", "full"))
+        val rawAuditFlag = System.getProperty("mazewall.tier-e.benchmark-raw-sys-enter-audit", "false").toBooleanStrictOrNull()
+            ?: error("mazewall.tier-e.benchmark-raw-sys-enter-audit must be true or false")
+        val exactAuditFlag = System.getProperty("mazewall.tier-e.benchmark-exact-admission-audit", "false").toBooleanStrictOrNull()
+            ?: error("mazewall.tier-e.benchmark-exact-admission-audit must be true or false")
         val requestedConfig = Config(
             agent = Path.of(args[0]).toAbsolutePath(),
             iterations = args.getOrElse(1) { "100" }.toInt(),
@@ -40,7 +45,7 @@ internal object TierEMatchedBenchmark {
             workloadCpu = args.getOrElse(5) { "0" },
             collectorCpu = args.getOrElse(6) { "1" },
             artifact = Path.of(args.getOrElse(7) { "build/tier-e-matched-benchmark/results.jsonl" }).toAbsolutePath(),
-            scope = Scope.fromProperty(System.getProperty("mazewall.tier-e.benchmark-scope", "full")),
+            scope = scope,
             workload = Workload.fromProperty(System.getProperty("mazewall.tier-e.benchmark-workload", "oracle")),
             lifecycleScenario = System.getProperty("mazewall.tier-e.lifecycle-scenario", "normal"),
             dumpPerfMapAtExit = System.getProperty("mazewall.tier-e.dump-perf-map", "false").toBooleanStrictOrNull()
@@ -56,30 +61,10 @@ internal object TierEMatchedBenchmark {
                 System.getProperty("mazewall.tier-e.sustained-load", "below_capacity"),
             ),
             sustainedRatePerSecond = System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0").toLong(),
+            rawSysEnterAudit = AuditOptions.rawAuditRequested(scope.jsonName, rawAuditFlag),
+            exactAdmissionAudit = AuditOptions.exactAdmissionAuditRequested(scope.jsonName, exactAuditFlag),
         )
-        if (requestedConfig.scope == Scope.TIER_E_COVERAGE_DISCOVERY) {
-            require(requestedConfig.workload == Workload.ORACLE && !requestedConfig.calibrationEnabled)
-            TierECoverageOracle.schedule(Math.multiplyExact(requestedConfig.batches, requestedConfig.iterations), 1L)
-        }
-        require(Files.isRegularFile(requestedConfig.agent)) { "missing agent: ${requestedConfig.agent}" }
-        require(
-            requestedConfig.iterations > 0 &&
-                requestedConfig.warmups >= 0 &&
-                requestedConfig.batches > 0 &&
-                requestedConfig.forks > 0 &&
-                requestedConfig.childTimeoutSeconds > 0 &&
-                requestedConfig.childTerminationAfterMillis >= 0 &&
-                requestedConfig.userNotifWorkerTimeoutSeconds > 0 &&
-                requestedConfig.userNotifChildTimeoutSeconds > requestedConfig.userNotifWorkerTimeoutSeconds,
-        ) {
-            "benchmark dimensions and deadlines must be positive; USER_NOTIF child timeout must exceed its worker timeout"
-        }
-        require(requestedConfig.sustainedRatePerSecond >= 0L) {
-            "${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY} must be non-negative"
-        }
-        require(requestedConfig.scope != Scope.TIER_E_SUSTAINED_COLLECTOR || requestedConfig.sustainedRatePerSecond > 0L) {
-            "tier-e-sustained-collector requires a positive ${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}"
-        }
+        Startup.validate(requestedConfig)
         requestedConfig.artifact.parent?.createDirectories()
         val calibration = if (requestedConfig.calibrationEnabled) calibrate(requestedConfig) else null
         val config = requestedConfig.copy(iterations = calibration?.selection?.operations ?: requestedConfig.iterations)
@@ -124,6 +109,56 @@ internal object TierEMatchedBenchmark {
             throw failure
         }
     }
+
+    internal object AuditOptions {
+        internal fun rawAuditRequested(
+            scopeName: String,
+            requested: Boolean,
+        ): Boolean {
+            require(!requested || scopeName in setOf("tier-e-sustained-collector", "tier-e-attachment-diagnostic")) {
+                "Raw sys_enter audit is restricted to explicit sustained or attachment diagnostics"
+            }
+            return requested || scopeName == "tier-e-attachment-diagnostic"
+        }
+
+        internal fun exactAdmissionAuditRequested(
+            scopeName: String,
+            requested: Boolean,
+        ): Boolean {
+            require(!requested || scopeName in setOf("tier-e-sustained-collector", "tier-e-attachment-diagnostic")) {
+                "Exact admission audit is restricted to explicit sustained or attachment diagnostics"
+            }
+            return requested
+        }
+    }
+
+    private object Startup {
+        fun validate(requestedConfig: Config) {
+            if (requestedConfig.scope == Scope.TIER_E_COVERAGE_DISCOVERY) {
+                require(requestedConfig.workload == Workload.ORACLE && !requestedConfig.calibrationEnabled)
+                TierECoverageOracle.schedule(Math.multiplyExact(requestedConfig.batches, requestedConfig.iterations), 1L)
+            }
+            require(Files.isRegularFile(requestedConfig.agent)) { "missing agent: ${requestedConfig.agent}" }
+            require(
+                requestedConfig.iterations > 0 &&
+                    requestedConfig.warmups >= 0 &&
+                    requestedConfig.batches > 0 &&
+                    requestedConfig.forks > 0 &&
+                    requestedConfig.childTimeoutSeconds > 0 &&
+                    requestedConfig.childTerminationAfterMillis >= 0 &&
+                    requestedConfig.userNotifWorkerTimeoutSeconds > 0 &&
+                    requestedConfig.userNotifChildTimeoutSeconds > requestedConfig.userNotifWorkerTimeoutSeconds,
+            ) {
+                "benchmark dimensions and deadlines must be positive; USER_NOTIF child timeout must exceed its worker timeout"
+            }
+            require(requestedConfig.sustainedRatePerSecond >= 0L) {
+                "${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY} must be non-negative"
+            }
+            require(requestedConfig.scope != Scope.TIER_E_SUSTAINED_COLLECTOR || requestedConfig.sustainedRatePerSecond > 0L) {
+                "tier-e-sustained-collector requires a positive ${TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY}"
+            }
+        }
+        }
 
     private fun calibrate(config: Config): CalibrationOutcome {
         val artifact = config.artifact.resolveSibling("calibration-results.jsonl")
@@ -308,8 +343,8 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.idle-poll-max-backoff-nanos=${maxPollBackoffFor(variant)}",
                 "-Dmazewall.tier-e.collector-receipt-clock=$collectorReceiptClock",
                 "-Dmazewall.tier-e.attachment-diagnostic=${config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC}",
-                "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC}",
-                "-Dmazewall.tier-e.benchmark-exact-admission-audit=false",
+                "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${config.rawSysEnterAudit}",
+                "-Dmazewall.tier-e.benchmark-exact-admission-audit=${config.exactAdmissionAudit}",
                 "-Dmazewall.tier-e.attachment-ready-file=$attachmentReadyFile",
                 "-Dmazewall.tier-e.marker-transport=${markerTransportFor(variant).wireName}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",
@@ -2693,6 +2728,8 @@ internal object TierEMatchedBenchmark {
         val runLevel: String,
         val sustainedLoad: TierESustainedCollectorDecision.Load,
         val sustainedRatePerSecond: Long,
+        val rawSysEnterAudit: Boolean,
+        val exactAdmissionAudit: Boolean,
     )
 
     private data class CalibrationOutcome(

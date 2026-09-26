@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "VERIFIED_HOST_LOCAL",
+  "policy_eligibility": false,
+  "perf_run_id": "tier-e-trustworthy-0c78e733-2e14-4aeb-9a3f-060b427a34d6",
+  "allocation_run_id": "tier-e-trustworthy-c2eb0642-9ff7-4719-8f4b-9b70bd66f3cb",
+  "perf_required_jit_maps": 11,
+  "perf_present_jit_maps": 11,
+  "forks_per_run": 7,
+  "all_profiled_forks_complete": true,
+  "all_declared_operations_accounted_for": true,
+  "allocation_summary_coverage": "lower_bound_malloc_only",
+  "raw": [
+    {
+      "host_local_path": "/tmp/tier-e-perf-qualified-1790450417/perf.data",
+      "bytes": 845904636,
+      "sha256": "9b2c128f7cc1e126bfa422d79940e4f4d9d77d19f70d391327be7147956bfe59"
+    },
+    {
+      "host_local_path": "/tmp/tier-e-allocation-qualified-1790451226/allocation.data",
+      "bytes": 106841351,
+      "sha256": "ff7eeefcbf585de21464707b3322fff347d87c40e87c4f517c3cb5b8e2caf89c"
+    },
+    {
+      "host_local_path": "/tmp/tier-e-allocation-qualified-1790451226/allocation-events.txt",
+      "bytes": 138822548,
+      "sha256": "b4d8114e4258aa3df60ca677cabf7a49e16595cd55ac263a7df10e43dd321e13"
+    }
+  ]
+}

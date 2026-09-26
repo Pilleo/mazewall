@@ -36,6 +36,8 @@ public data class TierETrustworthySettings(
     val perfCallGraph: String,
     val benchmarkJavaOptions: String,
     val fixtureChildTerminationMillis: Int,
+    val rawSysEnterAudit: Boolean = false,
+    val exactAdmissionAudit: Boolean = false,
 ) {
     public fun guestEnvironment(): Map<String, String> =
         mapOf(
@@ -69,6 +71,8 @@ public data class TierETrustworthySettings(
         "PERF_CALL_GRAPH" to perfCallGraph,
             "BENCHMARK_JAVA_OPTIONS" to benchmarkJavaOptions,
         "FIXTURE_CHILD_TERMINATION_AFTER_MILLIS" to fixtureChildTerminationMillis.toString(),
+        "BENCHMARK_RAW_SYS_ENTER_AUDIT" to rawSysEnterAudit.toString(),
+        "BENCHMARK_EXACT_ADMISSION_AUDIT" to exactAdmissionAudit.toString(),
     ).mapKeys { (key, _) -> "MAZEWALL_TIER_E_$key" }
 
     public fun resolvedJson(): JsonObject =
@@ -104,6 +108,8 @@ public data class TierETrustworthySettings(
         put("perf_call_graph", perfCallGraph)
         put("benchmark_java_options", benchmarkJavaOptions)
         put("fixture_child_termination_after_millis", fixtureChildTerminationMillis)
+        put("benchmark_raw_sys_enter_audit", rawSysEnterAudit)
+        put("benchmark_exact_admission_audit", exactAdmissionAudit)
         put("policy_eligibility", false)
     }
 
@@ -195,6 +201,14 @@ public data class TierETrustworthySettings(
                 .also { require(it in allowed) { "Unknown Tier E $name: $it" } }
             val level = choice("RUN_LEVEL", "development", setOf("smoke", "development", "decision", "custom"))
             val scope = choice("BENCHMARK_SCOPE", "full", scopes)
+            val rawAudit = flag("BENCHMARK_RAW_SYS_ENTER_AUDIT", false)
+            val exactAudit = flag("BENCHMARK_EXACT_ADMISSION_AUDIT", false)
+            require(!rawAudit || scope in setOf("tier-e-sustained-collector", "tier-e-attachment-diagnostic")) {
+                "Raw sys_enter audit requires an explicit sustained or attachment diagnostic"
+            }
+            require(!exactAudit || scope in setOf("tier-e-sustained-collector", "tier-e-attachment-diagnostic")) {
+                "Exact admission audit requires an explicit sustained or attachment diagnostic"
+            }
             val forks = number(
                 "FORKS",
                 if (level == "smoke") {
@@ -256,6 +270,8 @@ public data class TierETrustworthySettings(
                 choice("PERF_CALL_GRAPH", "dwarf", setOf("dwarf", "fp", "lbr")),
                 value("BENCHMARK_JAVA_OPTIONS", ""),
                 number("FIXTURE_CHILD_TERMINATION_AFTER_MILLIS", 0, 0),
+                rawAudit,
+                exactAudit,
             )
         }
     }
