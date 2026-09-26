@@ -26,9 +26,27 @@ public object TierEFaultMatrix {
         require(backend in setOf("uprobe", "usdt")) { "Unknown Tier E fault backend: $backend" }
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Tier E fault matrix requires a fresh directory" }
+        TierEMatrixTerminal.run(output) {
         val before = TierESourceFingerprint.read(root, null)
         Files.writeString(output.resolve("source-state-before.json"), "$before\n")
         val native = TierENativeFixtureBuild.prepare(root, config.build.nativeBuildDir)
+        val nativeLibrary = native.resolve("libmazewall_stack_agent.so")
+        val identity = TierEMatrixProvenance.capture(root, endpoint, config.container.image, nativeLibrary)
+        Files.writeString(
+            output.resolve("run-manifest.json"),
+            buildJsonObject {
+            put("schema_version", 2)
+            put("forks", forks)
+            put("operations", operations)
+            put("backend", backend)
+            put("fault_syscall", 257)
+            put("native_live_snapshots", false)
+            put("phase_instrumentation", false)
+            put("source_digest", before.getValue("source_digest"))
+            for ((key, value) in identity.json()) put(key, value)
+        }.toString() +
+            "\n",
+        )
         var failures = 0
         for (fork in 0 until forks) {
             for (emission in listOf("full-stream", "unique-stack-syscall")) {
@@ -62,24 +80,12 @@ public object TierEFaultMatrix {
         val after = TierESourceFingerprint.read(root, before)
         Files.writeString(output.resolve("source-state-after.json"), "$after\n")
         val sourceChanged = if (after["unchanged"] == JsonPrimitive(true)) 0 else 1
+        check(identity.unchanged(root, endpoint, config.container.image, nativeLibrary)) { "Tier E fault binary identity changed" }
         val summary = TierEHybridFaultRows.summary(output, failures, sourceChanged)
         Files.writeString(output.resolve("summary.json"), "$summary\n")
-        Files.writeString(
-            output.resolve("run-manifest.json"),
-            buildJsonObject {
-                put("schema_version", 2)
-                put("forks", forks)
-                put("operations", operations)
-                put("backend", backend)
-                put("fault_syscall", 257)
-                put("native_live_snapshots", false)
-                put("phase_instrumentation", false)
-                put("policy_eligibility", false)
-            }.toString() +
-                "\n",
-        )
         check(summary.getValue("all_singletons_recovered") == JsonPrimitive(true)) { "Fault matrix did not recover every singleton" }
         check(summary.getValue("discovery_p99_under_500ms") == JsonPrimitive(true)) { "Fault discovery p99 exceeded 500 ms" }
         check(summary.getValue("source_state_unchanged") == JsonPrimitive(true)) { "Fault matrix source state changed" }
+        }
     }
 }

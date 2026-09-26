@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.tools.controller
 
+import io.mazewall.profiler.tierE.tools.TierEBenchmarkOperationAcceptance
 import io.mazewall.profiler.tierE.tools.TierECollectorCpuSample
 import io.mazewall.profiler.tierE.tools.TierEFixtureEnvelope
 import io.mazewall.profiler.tierE.tools.TierEFixtureVerdict
@@ -11,7 +12,9 @@ import io.mazewall.profiler.tierE.tools.TierETargetCpuSample
 import io.mazewall.testing.containers.ContainerCommandResult
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -678,7 +681,10 @@ public object TierESplitFixtureController {
                 artifacts.resolve("terminal-report.json"),
             )
             Files.writeString(artifacts.resolve("operation-verdict.json"), "$operation\n")
-            check(operation.getValue("operation_coverage_verdict").toString() == "\"PASS\"") { "Benchmark operation oracle incomplete: $operation" }
+            val observations = Json.parseToJsonElement(Files.readString(artifacts.resolve("benchmark-operations.json"))).jsonObject
+            check(TierEBenchmarkOperationAcceptance.accept(config.fixture.emissionMode, observations, operation)) {
+                "Benchmark operation evidence incomplete: $operation"
+            }
         }
         if (config.fixture.coverage) {
             export("/shared/evidence/split-fixture-19802.tier-e-coverage.json", "coverage-manifest.json")

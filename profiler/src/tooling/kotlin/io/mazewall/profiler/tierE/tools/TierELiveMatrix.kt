@@ -28,9 +28,24 @@ public object TierELiveMatrix {
         require(selectedProfiles.isNotEmpty() && selectedProfiles.all { it in profiles }) { "Unknown Tier E live profile" }
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Tier E live matrix requires a fresh directory" }
+        TierEMatrixTerminal.run(output) {
         val before = TierESourceFingerprint.read(root, null)
         Files.writeString(output.resolve("source-state-before.json"), "$before\n")
         val native = TierENativeFixtureBuild.prepare(root, config.build.nativeBuildDir)
+        val nativeLibrary = native.resolve("libmazewall_stack_agent.so")
+        val identity = TierEMatrixProvenance.capture(root, endpoint, config.container.image, nativeLibrary)
+        Files.writeString(
+            output.resolve("run-manifest.json"),
+            buildJsonObject {
+            put("schema_version", 1)
+            put("forks", forks)
+            put("iterations", iterations)
+            put("profiles", selectedProfiles.joinToString(","))
+            put("source_digest", before.getValue("source_digest"))
+            for ((key, value) in identity.json()) put(key, value)
+        }.toString() +
+            "\n",
+        )
         var failed = 0
         for (fork in 0 until forks) {
             for (profile in selectedProfiles) {
@@ -54,8 +69,7 @@ public object TierELiveMatrix {
                                 identityCase = null,
                             ),
                         )
-                        var status = 0
-                        try {
+                        val status = TierEArmAttempt.run(artifact) {
                             TierESplitFixtureController.run(
                                 arm,
                                 endpoint,
@@ -66,11 +80,6 @@ public object TierELiveMatrix {
                                 benchmarkPhases = true,
                                 workloadProfile = profile,
                             )
-                        } catch (failure: Exception) {
-                            val uniqueEdgeOracle = emission == "unique-stack-syscall" &&
-                                failure.message.orEmpty().contains("Benchmark operation oracle incomplete")
-                            status = if (uniqueEdgeOracle) 0 else 1
-                            Files.writeString(artifact.resolve("runner-failure.txt"), failure.stackTraceToString())
                         }
                         val row = TierEHybridLiveRows.row(artifact, fork, mode, profile, live, status, iterations * 10)
                         Files.writeString(output.resolve("fork-results.jsonl"), "$row\n", CREATE, APPEND)
@@ -82,18 +91,10 @@ public object TierELiveMatrix {
         val after = TierESourceFingerprint.read(root, before)
         Files.writeString(output.resolve("source-state-after.json"), "$after\n")
         val drift = if (after["unchanged"] == JsonPrimitive(true)) 0 else 1
+        check(identity.unchanged(root, endpoint, config.container.image, nativeLibrary)) { "Tier E live binary identity changed" }
         val summary = TierEHybridLiveRows.summary(output, failed, drift)
         Files.writeString(output.resolve("summary.json"), "$summary\n")
-        Files.writeString(
-            output.resolve("run-manifest.json"),
-            buildJsonObject {
-                put("schema_version", 1)
-                put("forks", forks)
-                put("iterations", iterations)
-                put("policy_eligibility", false)
-            }.toString() +
-                "\n",
-        )
         check(failed == 0 && drift == 0 && summary.getValue("completed") != JsonPrimitive(0)) { "Live matrix incomplete: $summary" }
+        }
     }
 }

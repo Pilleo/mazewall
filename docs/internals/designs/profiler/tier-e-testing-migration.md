@@ -87,6 +87,15 @@ These are still substantive controllers, not thin launchers:
   does not reverse `REJECT_DEFAULT_PROMOTION`.
 - `scripts/run_tier_e_split_matched_benchmark.sh` launches `matched-matrix`.
   Non-default timeouts, capture profiles, and attachment backends are rejected.
+  Matched, fault and live matrices pin image, native agent, JAR and source
+  identities before their first arm and compare binary identities afterwards;
+  a durable `terminal.json` starts `INCOMPLETE` and becomes complete only after
+  every required arm and post-run check succeeds. Baseline and USER_NOTIF arms
+  use exact-name container cleanup on failure. Unique-edge benchmarks accept
+  representative operation evidence only when the session-bound typed oracle
+  reports a complete terminal, a nonzero recovered denominator, and no
+  unresolved observations; ordinary fixture errors never become successful
+  arms because their text resembles an expected oracle result.
 - The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
   substantive Bash execution and some Node analysis. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis
