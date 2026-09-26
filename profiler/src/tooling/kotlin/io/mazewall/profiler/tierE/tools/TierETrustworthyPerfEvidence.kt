@@ -25,13 +25,30 @@ public object TierETrustworthyPerfEvidence {
         require(rows.isNotEmpty()) { "No perf fork outputs" }
         val identities = rows.map { row ->
             val text = row["output"]?.jsonPrimitive?.content ?: error("Missing fork output")
+            val variant = row.getValue("variant").jsonPrimitive.content
+            val target = row["target_pid"]
+                ?.jsonPrimitive
+                ?.content
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 }
+                ?: throw IllegalArgumentException("Missing benchmark target PID")
             val pair = Regex("collector_pid=([0-9]+) workload_pid=([0-9]+)").find(text)
-                ?: throw IllegalArgumentException("Missing collector and workload PID identity")
             buildJsonObject {
                 put("variant", row.getValue("variant"))
                 put("fork", row.getValue("fork"))
-                put("collector_pid", pair.groupValues[1].toLong())
-                put("workload_pid", pair.groupValues[2].toLong())
+                if (variant == "baseline" || variant.startsWith("user_notif")) {
+                    require(pair == null) { "Unexpected collector PID for an unprofiled benchmark arm" }
+                    put("target_pid", target)
+                } else {
+                    require(pair != null) { "Missing collector and workload PID identity" }
+                    val collector = pair.groupValues[1].toLong()
+                    val workload = pair.groupValues[2].toLong()
+                    require(collector == target && workload > 0 && workload != collector) {
+                        "Mismatched Tier E collector or workload process identity"
+                    }
+                    put("collector_pid", collector)
+                    put("workload_pid", workload)
+                }
             }
         }
         Files.writeString(directory.resolve("perf-processes.json"), JsonArray(identities).toString() + "\n")
@@ -55,7 +72,12 @@ public object TierETrustworthyPerfEvidence {
             "\n",
         )
         val entries = identities.flatMap { identity ->
-            listOf("collector" to identity.getValue("collector_pid"), "workload" to identity.getValue("workload_pid")).map { (role, id) ->
+            val roles = if ("target_pid" in identity) {
+                listOf("target" to identity.getValue("target_pid"))
+            } else {
+                listOf("collector" to identity.getValue("collector_pid"), "workload" to identity.getValue("workload_pid"))
+            }
+            roles.map { (role, id) ->
                 val pid = id.jsonPrimitive.content.toLong()
                 buildJsonObject {
                     put("variant", identity.getValue("variant"))

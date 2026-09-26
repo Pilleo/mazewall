@@ -230,7 +230,12 @@ public object TierETrustworthyRunner {
                     "-e",
                     "COLLECTOR_CPU=$collectorCpu",
                 ) +
-                    (settings.guestEnvironment() + provenanceEnv).flatMap { (key, value) -> listOf("-e", "$key=$value") }.toTypedArray() +
+                    (
+                        settings.guestEnvironment() +
+                        provenanceEnv +
+                        if (settings.allocationRecord) mapOf("TIER_E_ALLOCATION_PROBE_RUN_ID" to runId) else emptyMap()
+                    ).flatMap { (key, value) -> listOf("-e", "$key=$value") }
+                        .toTypedArray() +
                     arrayOf(
                         "-v",
                         "$bundle:/bundle:ro",
@@ -253,10 +258,12 @@ public object TierETrustworthyRunner {
                     var created = false
                     try {
                         val privilege = if (settings.allocationRecord) arrayOf("--privileged", "--security-opt", "seccomp=unconfined") else emptyArray()
+                        val allocationOwner = if (settings.allocationRecord) arrayOf("-e", "TIER_E_ALLOCATION_PROBE_RUN_ID=$runId") else emptyArray()
                         command(
                             *(
                                 arrayOf("create", "--name", analysis) +
                             privilege +
+                            allocationOwner +
                             arrayOf(
                             "-v",
                                 "$bundle:/bundle:ro",
@@ -281,14 +288,8 @@ public object TierETrustworthyRunner {
                 }
             } catch (error: Throwable) {
                 failure = error
-            } finally {
-                try {
-                    owner.finish(failure == null)
-                } catch (cleanup: Throwable) {
-                    if (failure == null) failure = cleanup else failure.addSuppressed(cleanup)
-                }
             }
-            if (failure != null) throw failure
+            TierETrustworthySettlement.settle(owner, failure) {
             if (settings.perfRecord) TierETrustworthyPerfEvidence.write(artifacts, settings.perfJitMap)
             if (settings.allocationRecord) TierETrustworthyAllocationEvidence.write(artifacts)
             val metadata = Files
@@ -311,6 +312,7 @@ public object TierETrustworthyRunner {
             TierEBenchmarkBundleManifest.verify(bundle, sourceFingerprint)
             check(after["unchanged"]?.toString() == "true" && command("image", "inspect", image, "--format", "{{.Id}}") == imageId) {
                 "Tier E benchmark inputs changed during measurement"
+            }
             }
         }
     }

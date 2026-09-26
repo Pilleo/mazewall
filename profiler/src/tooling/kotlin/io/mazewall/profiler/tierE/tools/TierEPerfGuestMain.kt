@@ -22,9 +22,19 @@ public object TierEPerfGuestMain {
         }
     }
     val schedule = TierEPerfAnalysisPlan.commands(mode)
+    val allocationProbe = if (mode == "allocation") {
+        val runId = requireNotNull(System.getenv("TIER_E_ALLOCATION_PROBE_RUN_ID")) { "Missing allocation probe owner" }
+        val event = TierEAllocationProbe.nameFor(runId)
+        require(Files.readString(artifact.resolve("allocation-probe-name.txt")).trim() == event) {
+            "Allocation analysis uses a different probe owner"
+        }
+        TierEAllocationProbe(event)
+    } else {
+        null
+    }
     var primary: Throwable? = null
-    var probeOwned = false
     try {
+        allocationProbe?.open()
         for ((index, command) in schedule.withIndex()) {
             val output = when (mode) {
                 "perf" -> when (index) {
@@ -33,7 +43,7 @@ public object TierEPerfGuestMain {
                     3 -> artifact.resolve("perf-timed-samples.txt")
                     else -> null
                 }
-                else -> if (index == 1) artifact.resolve("allocation-events.txt") else null
+                else -> artifact.resolve("allocation-events.txt")
             }
             val process = ProcessBuilder(command)
                 .redirectErrorStream(true)
@@ -46,16 +56,14 @@ public object TierEPerfGuestMain {
                 error("Perf analysis timed out: ${command.first()}")
             }
             check(process.exitValue() == 0) { "Perf analysis command failed: $command" }
-            if (mode == "allocation" && index == 0) probeOwned = true
         }
     } catch (failure: Throwable) {
         primary = failure
         throw failure
     } finally {
-        if (probeOwned) {
+        if (allocationProbe != null) {
             try {
-                val cleanup = ProcessBuilder("perf", "probe", "--del", "probe_libc:malloc").inheritIO().start()
-                check(cleanup.waitFor(20, TimeUnit.SECONDS) && cleanup.exitValue() == 0) { "Allocation probe cleanup failed" }
+                allocationProbe.close()
             } catch (cleanup: Throwable) {
                 if (primary != null) primary.addSuppressed(cleanup) else throw cleanup
             }

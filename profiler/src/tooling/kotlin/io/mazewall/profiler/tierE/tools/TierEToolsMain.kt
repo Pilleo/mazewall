@@ -19,6 +19,15 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 3 && args[0] == "perf-evidence") {
+        require(args[2] in setOf("true", "false")) { "JIT map requirement must be boolean" }
+        TierETrustworthyPerfEvidence.write(Path.of(args[1]), args[2].toBoolean())
+        return
+    }
+    if (args.size == 2 && args[0] == "allocation-evidence") {
+        TierETrustworthyAllocationEvidence.write(Path.of(args[1]))
+        return
+    }
     if (args.size == 4 && args[0] == "tier-e-checks") {
         TierEChecksRunner.run(args[1], Path.of(args[2]), Path.of(args[3]))
         return

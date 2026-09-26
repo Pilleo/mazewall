@@ -15,6 +15,8 @@ class TierETrustworthyPerfEvidenceTest {
             Files.writeString(
                 directory.resolve("results.jsonl"),
                 """{"kind":"fork-output","variant":"dictionary_full_stream","fork":1,"target_pid":31,"output":"collector_pid=31 workload_pid=32 tier-e-perf-window: pid=31"}
+{"kind":"fork-output","variant":"baseline","fork":1,"target_pid":30,"output":"baseline"}
+{"kind":"fork-output","variant":"user_notif","fork":1,"target_pid":33,"output":"user-notif"}
 """,
             )
             Files.writeString(directory.resolve("perf-pid-tid-samples.txt"), "java 31/31 cycles: 0x1 symbol dso\njava 31/32 cycles: 0x2 symbol dso\n")
@@ -23,6 +25,8 @@ class TierETrustworthyPerfEvidenceTest {
             val entries = report.getValue("entries").jsonArray
             assertEquals("2", entries[0].jsonObject.getValue("samples").toString())
             assertEquals("0", entries[1].jsonObject.getValue("samples").toString())
+            assertEquals(4, entries.size)
+            assertEquals("\"target\"", entries[2].jsonObject.getValue("role").toString())
         } finally {
             directory.toFile().deleteRecursively()
         }

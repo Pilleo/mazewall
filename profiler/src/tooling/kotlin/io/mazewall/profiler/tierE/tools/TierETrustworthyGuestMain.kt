@@ -70,6 +70,14 @@ public fun trustworthyGuestMain() {
         ) { "Canonical cache was not disabled" }
     }
     val java = TierETrustworthyGuestCommand.java(settings, workloadCpu, collectorCpu)
+    val allocationProbe = if (settings.allocationRecord) {
+        val runId = requireNotNull(System.getenv("TIER_E_ALLOCATION_PROBE_RUN_ID")) { "Missing allocation probe owner" }
+        TierEAllocationProbe(TierEAllocationProbe.nameFor(runId))
+    } else {
+        null
+    }
+    var primary: Throwable? = null
+    try {
     val profiler = when {
         settings.perfRecord -> listOf(
             "perf",
@@ -86,13 +94,13 @@ public fun trustworthyGuestMain() {
         ) +
             java
         settings.allocationRecord -> {
-            execute(listOf("perf", "probe", "-x", "/usr/lib/x86_64-linux-gnu/libc.so.6", "malloc size=%di:s64"), Duration.ofSeconds(20))
-            listOf("perf", "record", "--output", "/artifacts/allocation.data", "--event", "probe_libc:malloc", "--") + java
+            val probe = requireNotNull(allocationProbe)
+            probe.open()
+            Files.writeString(artifact.resolve("allocation-probe-name.txt"), "${probe.event}\n")
+            listOf("perf", "record", "--output", "/artifacts/allocation.data", "--event", probe.event, "--") + java
         }
         else -> java
     }
-    var primary: Throwable? = null
-    try {
         val options = settings.benchmarkJavaOptions.trim() +
             if (settings.perfRecord && settings.perfJitMap) {
             " -XX:+UnlockDiagnosticVMOptions -XX:+DumpPerfMapAtExit"
@@ -128,9 +136,9 @@ public fun trustworthyGuestMain() {
         primary = failure
         throw failure
     } finally {
-        if (settings.allocationRecord) {
+        if (allocationProbe != null) {
             try {
-                execute(listOf("perf", "probe", "--del", "probe_libc:malloc"), Duration.ofSeconds(20))
+                allocationProbe.close()
             } catch (cleanup: Throwable) {
                 if (primary != null) primary.addSuppressed(cleanup) else throw cleanup
             }

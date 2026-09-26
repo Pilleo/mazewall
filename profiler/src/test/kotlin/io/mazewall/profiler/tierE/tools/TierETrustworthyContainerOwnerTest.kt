@@ -10,6 +10,43 @@ import java.nio.file.Files
 
 class TierETrustworthyContainerOwnerTest {
     @Test
+    fun `post export evidence failure retains stopped runner and source volume`() {
+        val output = Files.createTempDirectory("tier-e-owner-post-export-")
+        val commands = mutableListOf<List<String>>()
+        try {
+            val owner = TierETrustworthyContainerOwner(
+                ContainerEndpoint(ContainerEngine.DOCKER, "unix:///var/run/docker.sock"),
+                "tier-e-post-export",
+                output,
+            ) { command, _, _ ->
+                commands += command
+                if ("cp" in command) {
+                    Files.writeString(
+                        java.nio.file.Path
+                            .of(command.last())
+                            .resolve("results.jsonl"),
+                        """{"kind":"fork-output"}
+{"kind":"summary","sample_count":0}
+{"kind":"terminal","success":true}
+""",
+                    )
+                }
+                ContainerCommandResult(0, "ok")
+            }
+            owner.ownVolume()
+            owner.ownRunner()
+            owner.export()
+            assertTrue(commands.none { "rm" in it })
+            owner.retainForRecovery("perf map missing")
+            assertTrue(commands.any { "stop" in it })
+            assertTrue(commands.none { it.takeLast(3) == listOf("volume", "rm", "tier-e-post-export-artifacts") })
+            assertTrue(Files.readString(output.resolve("recovery.json")).contains("perf map missing"))
+        } finally {
+            output.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `custom rootful gate verdict failure retains copied runner and workspace`() {
         val output = Files.createTempDirectory("tier-e-owner-verdict-")
         val calls = mutableListOf<List<String>>()

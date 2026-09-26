@@ -10,10 +10,7 @@ public object TierEPerfAnalysisPlan {
             listOf("perf", "script", "-F", "comm,pid,tid,event,ip,sym,dso", "-i", "/artifacts/perf.data"),
             listOf("perf", "script", "--ns", "-F", "comm,pid,tid,time,event,ip,sym,dso", "-i", "/artifacts/perf.data"),
         )
-        "allocation" -> listOf(
-            listOf("perf", "probe", "-x", "/usr/lib/x86_64-linux-gnu/libc.so.6", "malloc size=%di:s64"),
-            listOf("perf", "script", "-f", "-i", "/artifacts/allocation.data"),
-        )
+        "allocation" -> listOf(listOf("perf", "script", "-f", "-i", "/artifacts/allocation.data"))
         else -> throw IllegalArgumentException("Unknown Tier E analysis mode: $mode")
     }
 }
