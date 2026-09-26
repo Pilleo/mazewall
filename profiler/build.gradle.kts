@@ -70,9 +70,11 @@ sourceSets {
     }
     test {
         java.srcDir(rootProject.file("src/sharedTest/kotlin"))
+        kotlin.exclude("io/mazewall/testing/containers/ContainerEndpointDiscovery.kt")
     }
     create("integrationTest") {
         java.srcDir(rootProject.file("src/sharedTest/kotlin"))
+        kotlin.exclude("io/mazewall/testing/containers/ContainerEndpointDiscovery.kt")
         compileClasspath += main.get().output + test.get().output
         runtimeClasspath += main.get().output + test.get().output
     }
@@ -82,6 +84,8 @@ sourceSets {
 // jar. Ordinary Kotlin unit tests can exercise them without Docker/Podman.
 val toolingSourceSet =
     sourceSets.create("tooling") {
+        kotlin.srcDir(rootProject.file("src/sharedTest/kotlin/io/mazewall/testing/containers"))
+        kotlin.exclude("EnabledIfRootfulContainerAvailable.kt")
         compileClasspath += sourceSets.main.get().output
         runtimeClasspath += sourceSets.main.get().output
     }
@@ -155,13 +159,35 @@ tasks.register<JavaExec>("tierEResolveConfig") {
     }
 }
 
+tasks.register<JavaExec>("tierEShortFixture") {
+    group = "verification"
+    description = "Explicit short Kotlin-owned Tier E split fixture using a versioned JSON profile"
+    dependsOn("installDist")
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/smoke.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    if (providers.environmentVariable("MAZEWALL_DOCKER_HOST").isPresent) environment("DOCKER_HOST", "")
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("fixture-run", profile.get(), repositoryPath, output.get())
+    }
+}
+
 // An explicit, intentionally non-cached measurement. It is never wired into
 // test, integrationTest, check, or build: 75,000 paced operations impose a
 // 60-second wall-clock floor on each of seven arms per fork.
-tasks.register<Exec>("tierELongMatchedBenchmark") {
+tasks.register<JavaExec>("tierELongMatchedBenchmark") {
     group = "verification"
     description = "Explicit long Tier E seven-arm matched benchmark (defaults to 15 forks)"
     dependsOn("installDist")
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/long-matched.json")
     val forks = providers.gradleProperty("tierEForks").orElse("15")
     val operations = providers.gradleProperty("tierEOperations").orElse("75000")
     val output =
@@ -170,19 +196,13 @@ tasks.register<Exec>("tierELongMatchedBenchmark") {
                 .dir("tier-e-long-matched")
                 .map { it.asFile.absolutePath },
         )
-    commandLine("bash", rootProject.file("scripts/run_tier_e_split_coverage_matrix.sh"))
+    if (providers.environmentVariable("MAZEWALL_DOCKER_HOST").isPresent) environment("DOCKER_HOST", "")
     doFirst {
         require(forks.get().toIntOrNull()?.let { it > 0 } == true) { "tierEForks must be positive" }
         require(operations.get().toIntOrNull()?.let { it >= 72 && it % 24 == 0 } == true) {
             "tierEOperations must be at least 72 and divisible by 24"
         }
-        environment("TIER_E_SPLIT_COVERAGE_LONG_MATCHED", "1")
-        environment("TIER_E_SPLIT_COVERAGE_FORKS", forks.get())
-        environment("TIER_E_SPLIT_COVERAGE_OPERATIONS", operations.get())
-        environment("TIER_E_SPLIT_REUSE_BUILD", "1")
-        environment("TIER_E_SPLIT_WORKLOAD_CPU", providers.environmentVariable("TIER_E_SPLIT_WORKLOAD_CPU").orElse("0").get())
-        environment("TIER_E_SPLIT_COLLECTOR_CPU", providers.environmentVariable("TIER_E_SPLIT_COLLECTOR_CPU").orElse("1").get())
-        args(output.get())
+        args("coverage-matrix", profile.get(), repositoryPath, output.get(), "hybrid", "1", forks.get(), operations.get())
     }
 }
 

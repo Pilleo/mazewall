@@ -1,5 +1,6 @@
 package io.mazewall.profiler.testing.tierE
 
+import io.mazewall.profiler.tierE.tools.controller.TierEContainerRun
 import io.mazewall.testing.containers.ContainerCommandResult
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
@@ -14,6 +15,26 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 class TierEContainerRunTest {
+    @Test
+    fun `owned scratch cleanup uses the same Java temporary parent as allocation`() {
+        val parent = Files.createTempDirectory("tier-e-custom-java-tmp-")
+        val prior = System.getProperty("java.io.tmpdir")
+        val runId = "tier-e-parent-123"
+        try {
+            System.setProperty("java.io.tmpdir", parent.toString())
+            val scratch = Files.createTempDirectory(parent, "tier-e-owned-$runId-")
+            val artifacts = Files.createDirectory(parent.resolve("artifacts"))
+            Files.writeString(artifacts.resolve("$runId.shared-path"), "${scratch.toRealPath()}\n")
+            TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts, ownedShared = scratch) { command, _, _ ->
+                if (command[1] == "inspect") ContainerCommandResult(1, "No such object") else error("No container was created")
+            }.close()
+            assertTrue(!Files.exists(scratch))
+        } finally {
+            System.setProperty("java.io.tmpdir", prior)
+            parent.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `unresolved creation stops visible containers without exporting deleting or trusting shared marker`() {
         val artifacts = Files.createTempDirectory("tier-e-unsettled-")

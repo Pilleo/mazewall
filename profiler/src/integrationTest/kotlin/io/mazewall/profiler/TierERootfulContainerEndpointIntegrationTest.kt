@@ -1,10 +1,11 @@
 package io.mazewall.profiler
 
 import io.mazewall.profiler.testing.tierE.EnabledIfTierERootfulAvailable
-import io.mazewall.profiler.testing.tierE.TierEContainerRun
-import io.mazewall.profiler.testing.tierE.TierEFixtureLifecycle
-import io.mazewall.profiler.testing.tierE.TierENativeFixtureBuild
 import io.mazewall.profiler.tierE.tools.TierERunConfiguration
+import io.mazewall.profiler.tierE.tools.controller.TierEContainerRun
+import io.mazewall.profiler.tierE.tools.controller.TierEFixtureLifecycle
+import io.mazewall.profiler.tierE.tools.controller.TierENativeFixtureBuild
+import io.mazewall.profiler.tierE.tools.controller.TierESplitFixtureController
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -161,6 +164,161 @@ class TierERootfulContainerEndpointIntegrationTest {
                     Files.writeString(destination.resolve("$runId.resolved-config.json"), prepared.configuration.resolvedJson() + "\n")
                 }.start()
         }, exercise = exercise)
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned two-container fixture recovers exact 72 declared paths`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        TierESplitFixtureController.run(prepared.configuration, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("coverage-verdict.json")).contains("\"recovered_edges\":72"))
+        assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"COMPLETE\""))
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned coverage baseline runs without agent or collector`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val baseline = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(baseline = true))
+        TierESplitFixtureController.run(baseline, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("coverage_verdict=NOT_APPLICABLE"))
+        assertTrue(Files.readString(destination.resolve("summary.json")).contains("\"mode\":\"baseline\""))
+        assertTrue(!Files.exists(destination.resolve("terminal-report.json")))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned short benchmark reconciles exact operations`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val benchmark = prepared.configuration.copy(
+            fixture = prepared.configuration.fixture.copy(coverage = false),
+            scenario = prepared.configuration.scenario.copy(benchmark = true),
+        )
+        TierESplitFixtureController.run(benchmark, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("operation-verdict.json")).contains("\"operation_coverage_verdict\":\"PASS\""))
+        assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"COMPLETE\""))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned owner-only control socket rejects target and unrelated users`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val restricted = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(socketAccess = "owner-only"))
+        TierESplitFixtureController.run(restricted, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("socket_access=OWNER_ONLY"))
+        assertTrue(
+            Files.readString(destination.resolve("target-user-denied.log")).contains("Permission denied") ||
+            Files.readString(destination.resolve("target-user-denied.log")).contains("AccessDeniedException"),
+        )
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned stale identity is rejected before workload attribution`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val stale = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(identityCase = "stale"))
+        TierESplitFixtureController.run(stale, endpoint, prepared.root, destination, prepared.native)
+        val verdict = Files.readString(destination.resolve("verdict.env"))
+        assertTrue(verdict.contains("terminal_reason=STALE_PROCESS_IDENTITY"))
+        assertTrue(verdict.contains("policy_eligibility=false"))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned simulated PID reuse closes the session incomplete`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val reused = prepared.configuration.copy(
+            fixture = prepared.configuration.fixture.copy(coverage = false),
+            scenario = prepared.configuration.scenario.copy(identityCase = "simulated-reuse"),
+        )
+        TierESplitFixtureController.run(reused, endpoint, prepared.root, destination, prepared.native)
+        val verdict = Files.readString(destination.resolve("verdict.env"))
+        assertTrue(verdict.contains("terminal_reason=PROCESS_IDENTITY_REUSED"))
+        assertTrue(verdict.contains("policy_eligibility=false"))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned fault fixture retains exact coverage and incomplete ring transport`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val fault = TierERunConfiguration.load(
+            prepared.root.resolve("config/testing/tier-e/fault-recovery.json"),
+            environment = emptyMap(),
+                overrides = mapOf(
+                    "container.engine" to endpoint.engine.name.lowercase(),
+                "container.uri" to requireNotNull(endpoint.resolvedUri),
+                    "container.image" to prepared.image,
+                ),
+        )
+        TierESplitFixtureController.run(fault, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("coverage-verdict.json")).contains("\"recovered_edges\":72"))
+        assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"INCOMPLETE\""))
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("ring_transport=INCOMPLETE"))
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned unclosed artifact is rejected without policy eligibility`(
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val negative = prepared.configuration.copy(
+            fixture = prepared.configuration.fixture.copy(coverage = false),
+            scenario = prepared.configuration.scenario.copy(negativeArtifact = "unclosed"),
+        )
+        TierESplitFixtureController.run(negative, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"INCOMPLETE\""))
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("negative_artifact_case=unclosed"))
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["missing", "malformed", "symlink", "session-mismatch"])
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `Kotlin owned negative artifact keeps terminal incomplete`(
+        scenario: String,
+        endpoint: ContainerEndpoint,
+        @TempDir destination: Path,
+    ) {
+        assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
+        val prepared = prepareFixture(endpoint)
+        val negative = prepared.configuration.copy(
+            fixture = prepared.configuration.fixture.copy(coverage = false),
+            scenario = prepared.configuration.scenario.copy(negativeArtifact = scenario),
+        )
+        TierESplitFixtureController.run(negative, endpoint, prepared.root, destination, prepared.native)
+        assertTrue(Files.readString(destination.resolve("verdict.env")).contains("negative_artifact_case=$scenario"))
     }
 
     @Test

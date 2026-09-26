@@ -1,5 +1,7 @@
 package io.mazewall.profiler.testing.tierE
 
+import io.mazewall.profiler.tierE.tools.controller.TierEContainerRun
+import io.mazewall.profiler.tierE.tools.controller.TierEFixtureLifecycle
 import io.mazewall.testing.containers.ContainerCommandResult
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
@@ -11,6 +13,34 @@ import java.nio.file.Files
 import java.time.Duration
 
 class TierEFixtureLifecycleTest {
+    @Test
+    fun `settled fixture failure retains stopped source when recovery is requested`() {
+        val artifacts = Files.createTempDirectory("tier-e-retain-on-failure-")
+        val stopped = mutableSetOf<String>()
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-retain-123", artifacts) { command, _, _ ->
+                val name = command.last()
+                when (command[1]) {
+                    "inspect" -> ContainerCommandResult(0, "exists")
+                    "stop" -> {
+                        stopped += name
+                        ContainerCommandResult(0, name)
+                    }
+                    else -> error("Failed fixture must not export/remove the only evidence: $command")
+                }
+            }
+            val original = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(owner, artifacts.resolve("create.lock"), settle = { _, _ -> }, retainOnFailure = true)
+                    .run { error("original fixture failure") }
+            }
+            assertTrue(original.message!!.contains("original fixture failure"))
+            assertTrue(original.suppressed.isEmpty())
+            assertEquals(setOf("tier-e-retain-123-target", "tier-e-retain-123-collector"), stopped)
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `interruption raised during controller wait is restored after sentinel cleanup`() {
         val artifacts = Files.createTempDirectory("tier-e-wait-interrupt-")

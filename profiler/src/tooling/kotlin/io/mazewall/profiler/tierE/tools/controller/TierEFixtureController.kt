@@ -1,4 +1,4 @@
-package io.mazewall.profiler.testing.tierE
+package io.mazewall.profiler.tierE.tools.controller
 
 import io.mazewall.testing.containers.runContainerCommand
 import java.nio.file.Path

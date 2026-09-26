@@ -1,4 +1,4 @@
-package io.mazewall.profiler.testing.tierE
+package io.mazewall.profiler.tierE.tools.controller
 
 import java.nio.file.Path
 
@@ -10,10 +10,22 @@ public class TierEFixtureLifecycle(
         TierEFixtureController.awaitCreationQuiescence(controller, lock)
     },
     private val extraCleanup: () -> Unit = {},
+    private val retainOnFailure: Boolean = false,
 ) {
+    public fun run(exercise: () -> Unit) {
+        runScoped(start = { null }) { exercise() }
+    }
+
     public fun run(
         start: () -> Process,
         exercise: (Process) -> Unit,
+    ) {
+        runScoped(start) { controller -> exercise(requireNotNull(controller)) }
+    }
+
+    private fun runScoped(
+        start: () -> Process?,
+        exercise: (Process?) -> Unit,
     ) {
         var controller: Process? = null
         var primary: Throwable? = null
@@ -42,7 +54,7 @@ public class TierEFixtureLifecycle(
                     settle(controller, creationLock)
                     settled = true
                 }
-                if (settled) {
+                if (settled && !(retainOnFailure && primary != null)) {
                     attempt { owner.close() }
                 } else {
                     attempt { owner.stopForRecovery() }

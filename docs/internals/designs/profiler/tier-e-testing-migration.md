@@ -65,18 +65,25 @@ retains evidence and only stops currently visible containers.
 
 These are still substantive controllers, not thin launchers:
 
-- `scripts/run_tier_e_split_privilege_fixture.sh`: creation, mount and
-  registration, start gates, PID/session handling, terminal wait and export;
-  it is still the controller used by the short JUnit test and matrices.
-- `scripts/run_tier_e_split_coverage_matrix.sh`: long seven-arm scheduling,
-  fork rotation, provenance and per-arm timeout. The explicit
-  `:profiler:tierELongMatchedBenchmark` Gradle task still invokes it as Bash;
-  it remains outside `build`/`check` because of 75,000 × 800 µs pacing.
-- `scripts/run_tier_e_split_matched_benchmark.sh`,
-  `scripts/run_tier_e_hybrid_live_comparison.sh`, and
-  `scripts/run_tier_e_hybrid_fault_matrix.sh`: variant planning and manifests.
-  Their current row and summary helpers now call Kotlin, but runtime
-  sequencing, status propagation and provenance remain Bash-owned.
+- `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
+  `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
+  reuse, delayed artifacts, live snapshots, benchmark phases, and allowed
+  incomplete coverage are rejected there. The creation-lock path still
+  executes `run_tier_e_split_privilege_fixture_legacy.sh` because the
+  lifecycle tests depend on that admission contract.
+- `scripts/run_tier_e_split_coverage_matrix.sh` launches `coverage-matrix`.
+  Skip-existing, allowed-incomplete coverage, and non-default arm timeouts are
+  rejected. `:profiler:tierELongMatchedBenchmark` calls the same Kotlin
+  scheduler directly and remains outside `build`/`check`.
+- `scripts/run_tier_e_split_negative_matrix.sh` launches `negative-matrix`.
+  It no longer shells out to `jq`.
+- `scripts/run_tier_e_hybrid_fault_matrix.sh` launches `fault-matrix`.
+  Live snapshots and phase instrumentation are rejected.
+- `scripts/run_tier_e_hybrid_live_comparison.sh` launches `live-matrix`.
+  Phase instrumentation and live snapshot admission are fixture inputs. This
+  does not reverse `REJECT_DEFAULT_PROMOTION`.
+- `scripts/run_tier_e_split_matched_benchmark.sh` still sequences baseline,
+  USER_NOTIF, and rotated Tier E arms in Bash.
 - The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
   substantive Bash execution and some Node analysis. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis

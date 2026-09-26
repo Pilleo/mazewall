@@ -16,6 +16,34 @@ class TierERunConfigurationTest {
     }"""
 
     @Test
+    fun `version two models scenario build deadlines and artifact policy before controller execution`() {
+        val profile = Files.createTempFile("tier-e-v2-", ".json")
+        try {
+            val v2 = smoke
+                .replace("\"schema_version\":1", "\"schema_version\":2")
+                .replace("\"recovery_mode\":\"disabled\"", "\"recovery_mode\":\"recover\"")
+                .replace(
+                    "\"collector_cpu\":1}",
+                    """"collector_cpu":1,"seed_start":23063,"warmups":3,"batches":10,"iterations":100},
+                    "scenario":{"marker_version":"v2","marker_backend":"uprobe","stack_transport":"dictionary","socket_access":"group","fault_syscall":257,"negative_artifact":null,"identity_case":null,"live_snapshots":false,"baseline":false,"benchmark":false,"allow_incomplete":false},
+                    "build":{"native_build_dir":null,"reuse":true},
+                    "deadlines":{"arm_seconds":600,"terminal_seconds":90,"stop_seconds":10},
+                    "artifacts":{"output_root":null,"fresh":true,"retain_on_failure":true}""",
+                )
+            Files.writeString(profile, v2)
+            val config = TierERunConfiguration.load(profile, environment = emptyMap())
+            assertEquals("v2", config.scenario.markerVersion)
+            assertEquals(257, config.scenario.faultSyscall)
+            assertEquals(600, config.deadlines.armSeconds)
+            assertTrue(config.resolvedJson().contains("\"marker_version\":\"v2\""))
+            Files.writeString(profile, v2.replace("\"marker_version\":\"v2\"", "\"marker_version\":\"v1\""))
+            assertThrows(IllegalArgumentException::class.java) { TierERunConfiguration.load(profile, environment = emptyMap()) }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
     fun `typed profile is resolved once and legacy overrides are explicit`() {
         val profile = Files.createTempFile("tier-e-smoke-", ".json")
         try {

@@ -1,5 +1,10 @@
 package io.mazewall.profiler.tierE.tools
 
+import io.mazewall.profiler.tierE.tools.controller.TierESplitFixtureController
+import io.mazewall.testing.containers.ContainerEndpointDiscovery
+import io.mazewall.testing.containers.ContainerEngine
+import io.mazewall.testing.containers.EndpointConfig
+import io.mazewall.testing.containers.EndpointSelection
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -125,6 +130,114 @@ public fun main(args: Array<String>) {
     if (args.size == 3 && args[0] == "config") {
         val config = TierERunConfiguration.load(Path.of(args[1]))
         Files.writeString(Path.of(args[2]), config.resolvedJson() + "\n")
+        return
+    }
+    if (args.size == 4 && args[0] == "fixture-run") {
+        val configuration = TierERunConfiguration.load(Path.of(args[1]))
+        val endpoint = when (val selected = ContainerEndpointDiscovery().discover(EndpointConfig(ContainerEngine.valueOf(configuration.container.engine.uppercase()), configuration.container.uri))) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E fixture requires a rootful endpoint: ${selected.reason}")
+        }
+        val output = Path.of(args[3])
+        Files.createDirectories(output)
+        TierESplitFixtureController.run(
+            configuration,
+            endpoint,
+            Path.of(args[2]),
+            output,
+            configuration.build.nativeBuildDir,
+            configuration.measurement.seedStart,
+        )
+        println("Tier E Kotlin fixture artifacts: $output")
+        return
+    }
+    if (args.size == 3 && args[0] == "fixture-run-env") {
+        val launch = TierELegacyFixtureLaunch.translate(System.getenv())
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(
+                    ContainerEngine.valueOf(
+                        launch.configuration.container.engine
+                    .uppercase(),
+                    ),
+                        launch.configuration.container.uri,
+                ),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E fixture requires a rootful endpoint: ${selected.reason}")
+        }
+        val output = Path.of(args[2])
+        Files.createDirectories(output)
+        TierESplitFixtureController.run(
+            launch.configuration,
+            endpoint,
+            Path.of(args[1]),
+            output,
+            launch.configuration.build.nativeBuildDir,
+            launch.seed,
+            launch.pinCpus,
+            launch.benchmarkPhases,
+            launch.workloadProfile,
+        )
+        println("Tier E Kotlin fixture artifacts: $output")
+        return
+    }
+    if (args.size in setOf(6, 7) && args[0] == "live-matrix") {
+        val configuration = TierERunConfiguration.load(Path.of(args[1]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(ContainerEngine.valueOf(configuration.container.engine.uppercase()), configuration.container.uri),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E live matrix requires a rootful endpoint: ${selected.reason}")
+        }
+        val selectedProfiles = if (args.size == 7) args[6].split(",").filter(String::isNotBlank) else TierELiveMatrix.profiles
+        TierELiveMatrix.run(configuration, endpoint, Path.of(args[2]), Path.of(args[3]), args[4].toInt(), args[5].toInt(), selectedProfiles)
+        return
+    }
+    if (args.size == 7 && args[0] == "fault-matrix") {
+        val configuration = TierERunConfiguration.load(Path.of(args[1]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(ContainerEngine.valueOf(configuration.container.engine.uppercase()), configuration.container.uri),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E fault matrix requires a rootful endpoint: ${selected.reason}")
+        }
+        TierEFaultMatrix.run(
+            configuration,
+            endpoint,
+            Path.of(args[2]),
+            Path.of(args[3]),
+            args[4].toInt(),
+            args[5].toInt(),
+            args[6],
+        )
+        return
+    }
+    if (args.size == 4 && args[0] == "negative-matrix") {
+        val configuration = TierERunConfiguration.load(Path.of(args[1]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(ContainerEngine.valueOf(configuration.container.engine.uppercase()), configuration.container.uri),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E negative matrix requires a rootful endpoint: ${selected.reason}")
+        }
+        TierENegativeMatrix.run(configuration, endpoint, Path.of(args[2]), Path.of(args[3]))
+        return
+    }
+    if (args.isNotEmpty() && args[0] == "coverage-matrix" && args.size in setOf(6, 8, 9)) {
+        require(args[5] in setOf("0", "1")) { "Long matrix flag must be 0 or 1" }
+        val hybridOnly = if (args.size == 9) args[8] else "0"
+        require(hybridOnly in setOf("0", "1")) { "Hybrid-only flag must be 0 or 1" }
+        val changes = if (args.size >= 8) mapOf("measurement.forks" to args[6], "fixture.operations" to args[7]) else emptyMap()
+        val config = TierERunConfiguration.load(Path.of(args[1]), overrides = changes)
+        TierECoverageMatrixRunner.run(config, Path.of(args[2]), Path.of(args[3]), args[5] == "1", args[4], hybridOnly == "1")
         return
     }
     if (args.size == 3 && args[0] == "arm-status") {

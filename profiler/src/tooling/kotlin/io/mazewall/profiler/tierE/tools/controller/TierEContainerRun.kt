@@ -1,4 +1,4 @@
-package io.mazewall.profiler.testing.tierE
+package io.mazewall.profiler.tierE.tools.controller
 
 import io.mazewall.testing.containers.ContainerCommandResult
 import io.mazewall.testing.containers.ContainerEndpoint
@@ -122,7 +122,7 @@ public class TierEContainerRun(
                             "Run $runId shared marker does not match the allocated directory: $marker"
                         }
                     }
-                        val tempRoot = Path.of(System.getenv("TMPDIR") ?: "/tmp").toRealPath()
+                    val tempRoot = Path.of(System.getProperty("java.io.tmpdir")).toRealPath()
                         check(
                             !Files.isSymbolicLink(shared) &&
                             Files.isDirectory(shared, NOFOLLOW_LINKS) &&

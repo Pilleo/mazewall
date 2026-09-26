@@ -1,5 +1,6 @@
 package io.mazewall.profiler.testing.tierE
 
+import io.mazewall.profiler.tierE.tools.controller.TierEFixtureController
 import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.containers.runContainerCommand
 import org.junit.jupiter.api.Assertions.assertTrue
