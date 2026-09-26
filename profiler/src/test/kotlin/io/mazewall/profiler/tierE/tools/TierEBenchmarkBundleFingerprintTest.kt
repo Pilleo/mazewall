@@ -18,6 +18,8 @@ class TierEBenchmarkBundleFingerprintTest {
             assertTrue(first.matches(Regex("[a-f0-9]{64}")))
             Files.writeString(source, "v2")
             assertNotEquals(first, TierEBenchmarkBundleFingerprint.read(repository, false, "Release"))
+            Files.delete(source)
+            assertNotEquals(first, TierEBenchmarkBundleFingerprint.read(repository, false, "Release"))
             assertNotEquals(
                 TierEBenchmarkBundleFingerprint.read(repository, false, "Release"),
                 TierEBenchmarkBundleFingerprint.read(repository, true, "Release"),

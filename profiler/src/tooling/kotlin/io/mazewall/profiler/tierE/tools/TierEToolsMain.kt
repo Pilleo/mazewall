@@ -19,6 +19,180 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 4 && args[0] == "tier-e-checks") {
+        TierEChecksRunner.run(args[1], Path.of(args[2]), Path.of(args[3]))
+        return
+    }
+    if (args.size == 4 && args[0] == "ring-microbenchmark") {
+        TierERingMicrobenchmarkRunner.run(args[1], Path.of(args[2]), Path.of(args[3]))
+        return
+    }
+    if (args.size == 3 && args[0] == "native-transports") {
+        TierENativeScenarioRunner.compareTransports(Path.of(args[1]), Path.of(args[2]))
+        return
+    }
+    if (args.size == 4 && args[0] == "native-phase-gate") {
+        TierENativeScenarioRunner.checkPhaseGate(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]))
+        return
+    }
+    if (args.size == 5 && args[0] == "native-scenarios") {
+        TierENativeScenarioRunner.run(args[1], Path.of(args[2]), Path.of(args[3]), Path.of(args[4]))
+        return
+    }
+    if (args.size == 3 && args[0] == "node-noise-run") {
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(
+                    ContainerEngine.DOCKER,
+            System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock",
+                ),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E node-noise probe requires rootful Docker: ${selected.reason}")
+        }
+
+        fun positive(
+            name: String,
+            default: Int,
+        ): Int =
+            (System.getenv(name) ?: default.toString())
+                .toIntOrNull()
+            ?.takeIf { it > 0 } ?: throw IllegalArgumentException("Invalid $name")
+        TierENodeNoiseProbe.run(
+            Path.of(args[1]),
+            Path.of(args[2]),
+            endpoint,
+            System.getenv("MAZEWALL_TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+            positive("MAZEWALL_TIER_E_NODE_NOISE_RUNS", 5),
+            positive("MAZEWALL_TIER_E_NODE_NOISE_DURATION_SECONDS", 3),
+            positive("MAZEWALL_TIER_E_NODE_NOISE_CPU", 2),
+        )
+        return
+    }
+    if (args.size == 4 && args[0] == "coverage-run") {
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(
+                    ContainerEngine.DOCKER,
+            System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock",
+                ),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E coverage run requires rootful Docker: ${selected.reason}")
+        }
+        TierECoverageExperiment.run(
+            args[1],
+            Path.of(args[2]),
+            Path.of(args[3]),
+            endpoint,
+            System.getenv("MAZEWALL_TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+        )
+        return
+    }
+    if (args.size == 3 && args[0] == "capacity-run") {
+        val root = Path.of(args[1])
+        val config = TierESustainedCapacitySettings.load()
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(
+                    ContainerEngine.DOCKER,
+            System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock",
+                ),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E capacity requires rootful Docker: ${selected.reason}")
+        }
+        val image = System.getenv("MAZEWALL_TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+        TierESustainedCapacityRunner.run(config, Path.of(args[2]), root, nodeNoise = { destination ->
+            fun positive(
+                name: String,
+                default: Int,
+            ): Int =
+                (System.getenv(name) ?: default.toString())
+                    .toIntOrNull()
+                ?.takeIf { it > 0 } ?: throw IllegalArgumentException("Invalid $name")
+            TierENodeNoiseProbe.run(
+                root,
+                destination,
+                endpoint,
+                image,
+                positive("MAZEWALL_TIER_E_NODE_NOISE_RUNS", 5),
+                positive("MAZEWALL_TIER_E_NODE_NOISE_DURATION_SECONDS", 3),
+                positive("MAZEWALL_TIER_E_NODE_NOISE_CPU", 2),
+            )
+        }) { stage, artifact, shadow ->
+            val maxRecords = "-Dmazewall.tier-e.benchmark-max-retained-records=${stage.maxRetainedRecords}"
+            val shadowOption = if (shadow) " -Dmazewall.tier-e.benchmark-strace-output=/artifacts/strace-shadow.log" else ""
+            val env = System.getenv() +
+                mapOf(
+                "MAZEWALL_TIER_E_BENCHMARK_SCOPE" to "tier-e-sustained-collector",
+                "MAZEWALL_TIER_E_SUSTAINED_RATE_PER_SECOND" to stage.rate.toString(),
+                "MAZEWALL_TIER_E_SUSTAINED_LOAD" to config.load,
+                "MAZEWALL_TIER_E_COLLECTOR_RECEIPT_CLOCK" to config.receiptClock,
+                "MAZEWALL_TIER_E_CALIBRATION" to "false",
+                "MAZEWALL_TIER_E_ITERATIONS" to config.iterations.toString(),
+                "MAZEWALL_TIER_E_WARMUPS" to config.warmups.toString(),
+                "MAZEWALL_TIER_E_BATCHES" to stage.batches.toString(),
+                "MAZEWALL_TIER_E_FORKS" to stage.forks.toString(),
+                "MAZEWALL_TIER_E_RUN_LEVEL" to "custom",
+                "MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS" to "${System.getenv("MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS").orEmpty()} $maxRecords$shadowOption",
+            )
+            TierETrustworthyRunner.run(
+                TierETrustworthySettings.load(env),
+                endpoint,
+                root,
+                artifact,
+                image,
+                System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS"),
+            )
+        }
+        return
+    }
+    if (args.size == 3 && args[0] == "rootful-gate") {
+        val engine = ContainerEngine.valueOf((System.getenv("TIER_E_CONTAINER_ENGINE") ?: "docker").uppercase())
+        val uri = if (engine == ContainerEngine.PODMAN) {
+            System.getenv("MAZEWALL_CONTAINER_HOST")
+        } else {
+            System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"
+        }
+        val endpoint = when (val selected = ContainerEndpointDiscovery().discover(EndpointConfig(engine, uri))) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E rootful gate requires local rootful engine: ${selected.reason}")
+        }
+        TierERootfulGateRunner.run(
+            Path.of(args[1]),
+            Path.of(args[2]),
+            endpoint,
+            System.getenv("TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:latest",
+        )
+        return
+    }
+    if (args.size == 2 && args[0] == "trustworthy-source-state") {
+        println(TierETrustworthySourceState.read(Path.of(args[1])))
+        return
+    }
+    if (args.size == 3 && args[0] == "trustworthy-run") {
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E trustworthy run requires rootful Docker: ${selected.reason}")
+        }
+        TierETrustworthyRunner.run(
+            TierETrustworthySettings.load(),
+            endpoint,
+            Path.of(args[1]),
+            Path.of(args[2]),
+            System.getenv("MAZEWALL_TIER_E_DOCKER_IMAGE") ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+            System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS"),
+        )
+        return
+    }
     if (args.size == 3 && args[0] == "bundle-fingerprint") {
         require(args[2] in setOf("true", "false")) { "USDT must be true or false" }
         println(

@@ -98,8 +98,23 @@ These are still substantive controllers, not thin launchers:
   reports a complete terminal, a nonzero recovered denominator, and no
   unresolved observations; ordinary fixture errors never become successful
   arms because their text resembles an expected oracle result.
-- The trustworthy rootful/capacity/coverage benchmark scripts retain
-  substantive Bash execution. The bundle entrypoint now bootstraps Kotlin
+- The trustworthy, rootful, capacity, and coverage experiment entrypoints
+  launch Kotlin tooling. The trustworthy controller owns local Docker volume
+  creation, separate bundle-build and benchmark containers, bounded artifact
+  export, terminal JSONL admission, typed manifest and process-scoped perf or
+  allocation evidence. A one-fork rootful Docker smoke completed; perf and
+  allocation recording still need their own live runtime qualification. The
+  capacity controller pins per-stage retained limits and stops at the first
+  ineligible pilot; a single short Docker stage passed. Its optional node-noise
+  probe now runs a separate JVM-based `/proc/self/stat` loop and must not be
+  combined with historical shell-loop rates. A bounded one-pair rootful run
+  correctly remained incomplete when the underlying 10,000-operation Tier E
+  target missed 11 operation IDs; it is not qualified evidence of node-noise
+  parity or a reason to relax the Tier E operation oracle.
+  The clean-workspace rootful gate is fail-closed and retains its runner and
+  workspace when export/qualification fails: platform lint was repaired, but
+  existing enforcer integration-test ktlint violations in 49 files currently
+  block the profiler fresh-JVM stage (issue-20260926-113027-386). The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.
   A real native/runtime bundle built by this controller passed the historical
@@ -109,6 +124,17 @@ These are still substantive controllers, not thin launchers:
   JSON differences. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis
   commands must stay reproducible but not be selected as active dependencies.
+
+The additional active native release/flavour, transport comparison, phase gate,
+ring decoder/mapped-drain, and focused/delivery checks scripts now launch Kotlin
+controllers. `TierEActiveEntrypointPolicyTest` inventories active `run_tier_e_*`,
+`build_tier_e_*`, `compare_tier_e_*`, and `check_tier_e_*` scripts, excluding only
+the explicit legacy fixture replay, and rejects a return to Node, Python, jq,
+CTest, engine CLI commands, or shell matrix loops in active launchers. Native
+phase medians still use the historical 125% baseline bound; the current host
+phase test rejected a measured regression, which is retained as a failed gate
+rather than rebaselined. The operator's `REJECT_DEFAULT_PROMOTION` decision
+remains unchanged.
 
 Completion means no active Tier E caller depends on repository-owned Bash,
 Python, or Node for orchestration, protocol construction, verdicts, or

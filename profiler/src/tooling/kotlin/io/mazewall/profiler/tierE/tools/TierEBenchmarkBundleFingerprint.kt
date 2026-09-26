@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.tools
 
 import java.io.ByteArrayOutputStream
+import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -56,7 +57,11 @@ public object TierEBenchmarkBundleFingerprint {
         write("java=${command("java", "-version").lineSequence().first()}\u0000")
         for (path in paths) {
             write("path=$path\u0000")
-            write(command("sha256sum", path))
+            if (Files.exists(repository.resolve(path), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                write(command("sha256sum", path))
+            } else {
+                write("MISSING  $path\n")
+            }
         }
         return MessageDigest
             .getInstance("SHA-256")
