@@ -67,9 +67,9 @@ These are still substantive controllers, not thin launchers:
 
 - `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
   `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
-  reuse, delayed artifacts, live snapshots, benchmark phases, and allowed
-  incomplete coverage are rejected there. The creation-lock path still
-  executes `run_tier_e_split_privilege_fixture_legacy.sh` because the
+  reuse, delayed artifacts, and allowed-incomplete coverage are rejected.
+  Live snapshots and benchmark phases are accepted. The creation-lock path
+  still executes `run_tier_e_split_privilege_fixture_legacy.sh` because the
   lifecycle tests depend on that admission contract.
 - `scripts/run_tier_e_split_coverage_matrix.sh` launches `coverage-matrix`.
   Skip-existing, allowed-incomplete coverage, and non-default arm timeouts are
@@ -82,8 +82,8 @@ These are still substantive controllers, not thin launchers:
 - `scripts/run_tier_e_hybrid_live_comparison.sh` launches `live-matrix`.
   Phase instrumentation and live snapshot admission are fixture inputs. This
   does not reverse `REJECT_DEFAULT_PROMOTION`.
-- `scripts/run_tier_e_split_matched_benchmark.sh` still sequences baseline,
-  USER_NOTIF, and rotated Tier E arms in Bash.
+- `scripts/run_tier_e_split_matched_benchmark.sh` launches `matched-matrix`.
+  Non-default timeouts, capture profiles, and attachment backends are rejected.
 - The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
   substantive Bash execution and some Node analysis. Standalone Python perf
   analysis remains outside automatic runners. Historical standalone analysis

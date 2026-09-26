@@ -439,6 +439,8 @@ public object TierESplitFixtureController {
             "-e",
             "TIER_E_BENCHMARK_PHASES=${if (benchmarkPhases) 1 else 0}",
             "-e",
+            "TIER_E_COLLECTOR_RECEIPT_CLOCK=${if (benchmarkPhases) "monotonic" else "disabled"}",
+            "-e",
             "TIER_E_LIVE_SNAPSHOT_ADMISSION=${if (config.scenario.liveSnapshots) 1 else 0}",
             *coverageArguments.toTypedArray(),
             *retentionArguments.toTypedArray(),

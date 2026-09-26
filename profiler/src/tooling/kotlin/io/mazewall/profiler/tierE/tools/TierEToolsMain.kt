@@ -183,6 +183,32 @@ public fun main(args: Array<String>) {
         println("Tier E Kotlin fixture artifacts: $output")
         return
     }
+    if (args.size == 9 && args[0] == "matched-matrix") {
+        val configuration = TierERunConfiguration.load(
+            Path.of(args[1]),
+            overrides = mapOf("measurement.workload_cpu" to args[7], "measurement.collector_cpu" to args[8]),
+        )
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+                EndpointConfig(ContainerEngine.valueOf(configuration.container.engine.uppercase()), configuration.container.uri),
+            )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E matched matrix requires a rootful endpoint: ${selected.reason}")
+        }
+        TierEMatchedMatrix.run(
+            configuration,
+            endpoint,
+            Path.of(args[2]),
+            Path.of(args[3]),
+            args[4].toInt(),
+            args[5].toInt(),
+            args[6].split(",").filter(String::isNotBlank),
+            System.getenv("TIER_E_SPLIT_INSTRUMENTED_FORK_PARITY") ?: "even",
+            System.getenv("TIER_E_SPLIT_WORKLOAD_PROFILE") ?: "syscall_dense",
+        )
+        return
+    }
     if (args.size in setOf(6, 7) && args[0] == "live-matrix") {
         val configuration = TierERunConfiguration.load(Path.of(args[1]))
         val endpoint = when (
