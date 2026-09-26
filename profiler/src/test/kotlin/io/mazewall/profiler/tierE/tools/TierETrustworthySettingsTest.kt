@@ -4,8 +4,27 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
 
 class TierETrustworthySettingsTest {
+    @Test
+    fun `versioned trustworthy profile rejects unknown keys and ignores legacy experiment overrides`() {
+        val profile = Files.createTempFile("tier-e-experiment-", ".json")
+        try {
+            Files.writeString(
+                profile,
+                """{"schema_version":1,"kind":"trustworthy","settings":{"run_level":"smoke","benchmark_scope":"full"},"node_noise":{"runs":1,"duration_seconds":1,"cpu":2}}""",
+            )
+            val selected = TierEExperimentProfile.load(profile)
+            assertEquals(1, selected.trustworthy.forks)
+            assertEquals(1, selected.nodeNoise.runs)
+            Files.writeString(profile, Files.readString(profile).replace("\"cpu\":2", "\"cpu\":2,\"typo\":true"))
+            assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
     @Test
     fun `sustained audit request remains an explicit benchmark-only guest option`() {
         val settings = TierETrustworthySettings.load(

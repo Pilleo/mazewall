@@ -191,5 +191,20 @@ Both retained stopped exact-name runners and volumes under
 sealed passing v2 sample is historical; a final passing clean gate is not
 claimed. Neither threshold nor baseline was changed to clear this blocker.
 
+**2026-09-27 execution improvements:** The rootful gate no longer passes
+`--rerun-tasks`; pure compilation/tooling output remains Gradle-cacheable,
+while live kernel integration tasks are explicitly non-cacheable. A phase-only
+Docker controller separates native build reuse from fresh CTest acquisition,
+records source/image/toolchain/binary identities, always samples both modes,
+and retains exact owned resources when a historical bound fails. A separate
+replay task verifies saved samples and was observed `UP-TO-DATE` on its second
+unchanged invocation. The second keyed native-only run reused the first run's
+exact binary SHA-256 while recording new run IDs and different medians; the
+source-dirty results are diagnostic only. Strict experiment JSON profiles
+replace active trustworthy and node-noise setting env-vars at the new Gradle
+entrypoints; historical env launchers remain. A predetermined, source-pinned,
+interleaved previous/current comparison and a passing final aggregate rootful
+gate are still required before unblocking the handoff.
+
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

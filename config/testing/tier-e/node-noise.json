@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "kind": "node-noise",
+  "settings": {"run_level": "custom", "benchmark_scope": "tier-e-sustained-collector", "benchmark_workload": "syscall_dense", "sustained_load": "near_capacity", "sustained_rate_per_second": 1000, "iterations": 10000, "warmups": 0, "batches": 1, "forks": 1, "calibration": false, "benchmark_java_options": "-Dmazewall.tier-e.attachment-ready-file=/artifacts/attachment-ready"},
+  "node_noise": {"runs": 5, "duration_seconds": 3, "cpu": 2}
+}

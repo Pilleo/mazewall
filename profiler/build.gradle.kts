@@ -159,6 +159,88 @@ tasks.register<JavaExec>("tierEResolveConfig") {
     }
 }
 
+tasks.register<JavaExec>("tierEResolveExperiment") {
+    group = "verification"
+    description = "Validate and resolve a versioned Tier E experiment profile"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/trustworthy.json")
+    val output = providers.gradleProperty("tierEConfigOutput")
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEConfigOutput=/path/to/resolved.json" }
+        args("experiment-config", profile.get(), output.get())
+    }
+}
+
+tasks.register<JavaExec>("tierETrustworthyExperiment") {
+    group = "verification"
+    description = "Explicit profile-selected rootful benchmark; fresh kernel evidence is never cached"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/trustworthy.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("experiment-run", profile.get(), repositoryPath, output.get())
+    }
+}
+
+tasks.register<JavaExec>("tierENodeNoiseExperiment") {
+    group = "verification"
+    description = "Explicit profile-selected node-noise experiment; requires fresh kernel evidence"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/node-noise.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("node-noise-profile", profile.get(), repositoryPath, output.get())
+    }
+}
+
+tasks.register<JavaExec>("tierERootfulPhaseProbe") {
+    group = "verification"
+    description = "Fresh, never-cached rootful native phase acquisition without the full profiler suite"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("rootful-phase", repositoryPath, output.get())
+    }
+}
+
+tasks.register<JavaExec>("tierEReplayPhaseEvidence") {
+    group = "verification"
+    description = "Recheck retained native phase samples with the unchanged historical baseline"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val samples = providers.gradleProperty("tierEArtifacts")
+    val output = providers.gradleProperty("tierEOutput")
+    val baselinePath = rootProject.file("profiler-native/tier-e-benchmark-baseline.env").absolutePath
+    samples.orNull?.let { artifactRoot ->
+        for (mode in listOf("full", "unique")) {
+            for (sample in 1..3) {
+                inputs.file(file("$artifactRoot/$mode-$sample.log")).withPathSensitivity(PathSensitivity.NONE)
+            }
+        }
+        inputs.file(file(baselinePath)).withPathSensitivity(PathSensitivity.NONE)
+    }
+    output.orNull?.let { outputs.file(file(it)) }
+    doFirst {
+        require(samples.isPresent && output.isPresent) { "Pass -PtierEArtifacts=/path/to/samples -PtierEOutput=/path/to/verdict" }
+        args("phase-replay", samples.get(), baselinePath, output.get())
+    }
+}
+
 tasks.register<JavaExec>("tierEShortFixture") {
     group = "verification"
     description = "Explicit short Kotlin-owned Tier E split fixture using a versioned JSON profile"
@@ -277,6 +359,9 @@ val integrationTest =
             excludeTags("rootful-container")
         }
         dependsOn("rootfulContainerTest")
+        // Kernel and process state can change without a Gradle input changing.
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
         forkEvery = 0
         maxParallelForks = 1
     }
@@ -302,6 +387,7 @@ val rootfulContainerTest =
             environment(name, selected)
         }
         outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
         maxParallelForks = 1
     }
 
@@ -313,6 +399,8 @@ val integrationTestFreshJvm =
             includeTags("needs-fresh-jvm")
         }
         forkEvery = 1
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
         doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 

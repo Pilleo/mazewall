@@ -105,6 +105,7 @@ public object TierENodeNoiseProbe {
         runs: Int,
         durationSeconds: Int,
         noiseCpu: Int,
+        targetSettings: TierETrustworthySettings? = null,
     ) {
         require(durationSeconds in 1..30 && noiseCpu >= 0)
         val executor = Executors.newSingleThreadExecutor()
@@ -135,7 +136,7 @@ public object TierENodeNoiseProbe {
                 check(result.exitCode == 0) { "Node-noise loop failed: ${result.output}" }
                 TierENodeNoiseSample.parse(Files.readString(log))
             }, attached = { destination ->
-                val settings = TierETrustworthySettings.load(
+                val settings = targetSettings ?: TierETrustworthySettings.load(
                     System.getenv() +
                     mapOf(
                     "MAZEWALL_TIER_E_RUN_LEVEL" to "custom",

@@ -11,6 +11,24 @@ import java.util.concurrent.TimeUnit
 
 /** Rootful, disposable source-volume test gate with exact-name ownership and fail-closed exports. */
 public object TierERootfulGateRunner {
+    public fun profilerVerificationCommand(runner: String): List<String> =
+        listOf(
+        "exec",
+        "-e",
+        "TIER_E_AGENT_LIBRARY=/workspace/profiler-native/build/libmazewall_stack_agent.so",
+        "-e",
+        "TIER_E_WORKLOAD_CLASSPATH=/workspace/profiler-native/build/agent-test-classes",
+        runner,
+        "./gradlew",
+        ":profiler:test",
+        ":profiler:integrationTest",
+        ":profiler:integrationTestFreshJvm",
+        "-Dtier.e.agent=/workspace/profiler-native/build/libmazewall_stack_agent.so",
+        "-Dtier.e.workloadClasspath=/workspace/profiler-native/build/agent-test-classes",
+        "--no-daemon",
+        "--stacktrace",
+    )
+
     public fun run(
         root: Path,
         output: Path,
@@ -166,27 +184,14 @@ public object TierERootfulGateRunner {
                     log = artifacts.resolve("native-ctest.log"),
                 )
                 docker(
-                    "exec",
-                    "-e",
-                    "TIER_E_AGENT_LIBRARY=/workspace/profiler-native/build/libmazewall_stack_agent.so",
-                    "-e",
-                    "TIER_E_WORKLOAD_CLASSPATH=/workspace/profiler-native/build/agent-test-classes",
-                    owner.runner,
-                    "./gradlew",
-                    ":profiler:test",
-                    ":profiler:integrationTest",
-                    ":profiler:integrationTestFreshJvm",
-                    "-Dtier.e.agent=/workspace/profiler-native/build/libmazewall_stack_agent.so",
-                    "-Dtier.e.workloadClasspath=/workspace/profiler-native/build/agent-test-classes",
-                    "--no-daemon",
-                    "--rerun-tasks",
-                    "--stacktrace",
+                    *profilerVerificationCommand(owner.runner).toTypedArray(),
                     timeout = Duration.ofMinutes(25),
                     log = artifacts.resolve("profiler-tests.log"),
                 )
                 docker("exec", owner.runner, "cp", "-a", "profiler/build/test-results/integrationTestFreshJvm", "/artifacts/")
                 val gate = artifacts.resolve("benchmark-gate.log")
                 Files.writeString(artifacts.resolve("benchmark-gate-contract.txt"), "2\n")
+                val acquisitionFailures = mutableListOf<Throwable>()
                 for (mode in listOf("full", "unique")) {
                     val logs = (1..3)
                         .map { sample ->
@@ -204,24 +209,15 @@ public object TierERootfulGateRunner {
                                 Duration.ofMinutes(3),
                             outputFile = artifacts.resolve("$mode-$sample.log"),
                         )
-                        check(result.exitCode == 0) { "Native benchmark failed for $mode" }
+                        if (result.exitCode != 0) acquisitionFailures += IllegalStateException("Native benchmark failed for $mode sample $sample")
                         Files.readString(artifacts.resolve("$mode-$sample.log"))
                     }.joinToString("\n")
                     Files.writeString(gate, logs, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
-                    val result = TierEBenchmarkPhaseGate.comparable(
-                        mode,
-                        logs,
-                        TierEBenchmarkPhaseGate.baselines(repository.resolve("profiler-native/tier-e-benchmark-baseline.env"), mode),
-                    )
-                    Files.writeString(
-                        gate,
-                        "tier-e-comparable-gate: contract=2 mode=$mode raw_key_ns=${result.getValue("raw_key_ns")} " +
-                            "canonical_cache_lookup_ns=${result.getValue("canonical_cache_lookup_ns")} " +
-                            "logical_metadata_ns=${result.getValue("logical_metadata_ns")} " +
-                            "combined_ns=${result.getValue("key_lookup_logical_total_ns")} " +
-                            "limit_ns=${result.getValue("historical_total_limit_ns")} status=PASS policy_eligibility=false\n",
-                        java.nio.file.StandardOpenOption.APPEND,
-                    )
+                }
+                val replay = TierERootfulPhaseEvidence.verify(artifacts, repository.resolve("profiler-native/tier-e-benchmark-baseline.env"))
+                acquisitionFailures.forEach { replay.exceptionOrNull()?.addSuppressed(it) }
+                check(replay.isSuccess && acquisitionFailures.isEmpty()) {
+                    "Native phase gate incomplete: ${replay.exceptionOrNull()?.message ?: acquisitionFailures.firstOrNull()?.message}"
                 }
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "PASS\n")
             } catch (error: Throwable) {

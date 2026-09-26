@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "kind": "trustworthy",
+  "settings": {"run_level": "smoke", "benchmark_scope": "full", "calibration": false, "forks": 1},
+  "node_noise": {"runs": 1, "duration_seconds": 1, "cpu": 2}
+}

@@ -19,6 +19,59 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 4 && args[0] == "phase-replay") {
+        require(Path.of(args[1]).toRealPath() != Path.of(args[3]).toAbsolutePath()) { "Replay output must differ from sample directory" }
+        TierERootfulPhaseEvidence.verify(Path.of(args[1]), Path.of(args[2])).getOrThrow()
+        Files.writeString(Path.of(args[3]), "PASS policy_eligibility=false\n")
+        return
+    }
+    if (args.size == 3 && args[0] == "rootful-phase") {
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+            EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+        )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Native phase probe requires rootful Docker: ${selected.reason}")
+        }
+        TierERootfulPhaseProbe.run(Path.of(args[1]), Path.of(args[2]), endpoint)
+        return
+    }
+    if (args.size == 3 && args[0] == "experiment-config") {
+        val profile = TierEExperimentProfile.load(Path.of(args[1]))
+        Files.writeString(Path.of(args[2]), "${profile.resolvedJson()}\n")
+        return
+    }
+    if (args.size == 4 && args[0] in setOf("experiment-run", "node-noise-profile")) {
+        val profile = TierEExperimentProfile.load(Path.of(args[1]))
+        val requestedKind = if (args[0] == "experiment-run") "trustworthy" else "node-noise"
+        require(profile.kind == requestedKind) { "Profile kind must be $requestedKind" }
+        val root = Path.of(args[2])
+        val output = Path.of(args[3])
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+            EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+        )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Tier E experiment requires rootful Docker: ${selected.reason}")
+        }
+        val image = "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+        when (requestedKind) {
+            "trustworthy" -> TierETrustworthyRunner.run(profile.trustworthy, endpoint, root, output, image)
+            else -> TierENodeNoiseProbe.run(
+                root,
+                output,
+                endpoint,
+                image,
+                profile.nodeNoise.runs,
+                profile.nodeNoise.durationSeconds,
+                profile.nodeNoise.cpu,
+                profile.trustworthy,
+            )
+        }
+        return
+    }
     if (args.size == 3 && args[0] == "perf-evidence") {
         require(args[2] in setOf("true", "false")) { "JIT map requirement must be boolean" }
         TierETrustworthyPerfEvidence.write(Path.of(args[1]), args[2].toBoolean())

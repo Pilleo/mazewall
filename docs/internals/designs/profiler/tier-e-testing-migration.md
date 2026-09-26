@@ -153,6 +153,23 @@ These are still substantive controllers, not thin launchers:
   supersede the earlier v2 passing receipt, nor do they qualify this final
   revision. The final orchestrator handoff remains blocked; no phase threshold
   was increased or baseline replaced.
+  A subsequent execution split removed the gate's forced Gradle `--rerun-tasks`
+  while keeping `integrationTest`, `integrationTestFreshJvm`, and
+  `rootfulContainerTest` non-cacheable as live kernel evidence. A separate
+  `:profiler:tierERootfulPhaseProbe` acquires **fresh** full/unique CTest
+  samples on each invocation; a content-keyed Docker native build volume
+  reuses only compilation for matching source/image/compiler/JDK inputs.
+  `:profiler:tierEReplayPhaseEvidence` verifies retained raw samples against
+  the same historical baseline and is Gradle-incremental. Two same-binary
+  native-only probes completed with different run IDs in 23 and 10 seconds;
+  earlier probes on source-dirty diagnostic worktrees failed the unchanged
+  timing guard. These are diagnostics, not an interleaved clean-revision
+  prior/current comparison or a replacement for the final aggregate gate.
+  The new `tierETrustworthyExperiment` and `tierENodeNoiseExperiment` tasks
+  select strict version-one experiment JSON profiles rather than operator
+  benchmark variables; legacy environment-based entrypoints remain available
+  for historical reproduction. Machine-local Docker endpoint selection remains
+  separate. Neither default node-noise qualification nor Podman parity changes.
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.
