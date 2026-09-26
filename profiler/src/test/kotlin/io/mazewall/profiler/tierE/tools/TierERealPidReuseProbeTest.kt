@@ -12,6 +12,20 @@ import java.time.Duration
 
 class TierERealPidReuseProbeTest {
     @Test
+    fun `guest procfs PID limit requires a complete bounded line`() {
+        val proc = Files.createTempDirectory("tier-e-proc-sysctl-")
+        try {
+            val kernel = Files.createDirectories(proc.resolve("sys/kernel"))
+            Files.writeString(kernel.resolve("pid_max"), "4096\n")
+            assertEquals(4096, TierERealPidReuseProbe.pidMax(proc))
+            Files.writeString(kernel.resolve("pid_max"), "4oops\n")
+            assertThrows(IllegalArgumentException::class.java) { TierERealPidReuseProbe.pidMax(proc) }
+        } finally {
+            proc.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `real replacement admission requires the exact observed PID and live start time`() {
         val result = Json
             .parseToJsonElement(

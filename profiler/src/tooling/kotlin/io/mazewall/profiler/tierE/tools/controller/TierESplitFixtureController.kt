@@ -84,7 +84,7 @@ public object TierESplitFixtureController {
             ) {
                 "Real PID reuse requires v2 hybrid registered workflow on a standalone rootful Docker guest"
             }
-            require(Files.readString(Path.of("/proc/sys/kernel/pid_max")).trim().toInt() in 1024..4096) {
+            require(TierERealPidReuseProbe.pidMax() in 1024..4096) {
                 "Real PID reuse requires a disposable guest with pid_max <=4096; normal host PID controls must not change"
             }
         }

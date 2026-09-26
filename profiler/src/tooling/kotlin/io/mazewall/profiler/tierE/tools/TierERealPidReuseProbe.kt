@@ -13,6 +13,20 @@ import java.util.concurrent.TimeUnit
 
 /** Bounded diagnostic probe for the registered host PID; never changes PID controls. */
 public object TierERealPidReuseProbe {
+    private fun procNumber(
+        proc: Path,
+        name: String,
+    ): Int =
+        Files.newBufferedReader(proc.resolve(name)).use { reader ->
+        val line = reader.readLine()
+        require(line != null && line.length in 1..20 && line.all(Char::isDigit) && reader.readLine() == null) {
+            "Invalid guest procfs value: $name"
+        }
+        line.toInt().also { require(it > 0) { "Invalid guest procfs value: $name" } }
+    }
+
+    public fun pidMax(proc: Path = Path.of("/proc")): Int = procNumber(proc, "sys/kernel/pid_max")
+
     public fun validReplacement(
         report: JsonObject,
         pid: Long,
@@ -78,8 +92,8 @@ public object TierERealPidReuseProbe {
             val result = buildJsonObject {
                 put("schema_version", 1)
                 put("kernel", System.getProperty("os.version"))
-                put("pid_max", Files.readString(proc.resolve("sys/kernel/pid_max")).trim().toInt())
-                put("ns_last_pid", Files.readString(proc.resolve("sys/kernel/ns_last_pid")).trim().toInt())
+                put("pid_max", pidMax(proc))
+                put("ns_last_pid", procNumber(proc, "sys/kernel/ns_last_pid"))
                 put(
                     "original",
                     buildJsonObject {

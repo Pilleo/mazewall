@@ -43,6 +43,13 @@ open_questions: false
 **Context:**
 Existing simulated-incarnation fixture did not establish that the registered rootful collector rejects a genuinely recycled guest-host PID. A disposable VM run must hold a replacement with the same PID and a different /proc starttime while the collector observes it; keep hybrid evidence policy-ineligible.
 
+**Kotlin guest preflight finding (2026-09-26):** The disposable VM showed
+`pid_max=4096` to the shell while JDK 25 `Files.readString` returned only `4`
+for the procfs sysctl file. A buffered line reader returned `4096`. The
+fixture and probe now require a complete bounded numeric line for `pid_max`
+and `ns_last_pid`; the first Kotlin attempt was rejected before any containers
+were created and the guest PID limit was restored in its exit trap.
+
 **Needed:**
 1. Retain a bounded registered-host-PID probe, rootful v2 recovery fixture, negative terminal report, raw logs, guest-only pid_max isolation, checksums, and design/backlog references.
 2. Match the registered PID and starttime against the marker proof and the real replacement's live `/proc` starttime. Require `PROCESS_IDENTITY_REUSED`, incomplete lifecycle, zero resolved syscalls, and `policy_eligibility=false`.
