@@ -116,7 +116,13 @@ These are still substantive controllers, not thin launchers:
   `.editorconfig` eliminated apparent enforcer ktlint violations, and an owned
   UNIX socket fixture passed fresh-JVM tests. The gate now stops at a real
   `raw_key_ns` phase median of 770,918 ns versus its 551,140 ns retained limit
-  (issue-20260926-133258-892); no baseline was revised. The bundle entrypoint bootstraps Kotlin
+  (issue-20260926-133258-892); no baseline was revised. Controlled rootful
+  historical/current Debug pairs show the full-stream raw-key interval now
+  includes canonical-cache lookup (504 hits), which the historical full-stream
+  interval excluded. The old per-phase threshold remains failed until an
+  operator approves a comparable, lookup-inclusive total-work gate; see the
+  [retained isolation evidence](../../evidence/tier-e-raw-key-comparability-20260926/README.md).
+  The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.
   A real native/runtime bundle built by this controller passed the historical
