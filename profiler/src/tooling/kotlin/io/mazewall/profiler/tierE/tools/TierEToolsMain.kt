@@ -19,6 +19,46 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 3 && args[0] == "bundle-fingerprint") {
+        require(args[2] in setOf("true", "false")) { "USDT must be true or false" }
+        println(
+            TierEBenchmarkBundleFingerprint.read(
+                Path.of(args[1]),
+                args[2] == "true",
+            System.getenv("MAZEWALL_TIER_E_NATIVE_BUILD_TYPE") ?: "Release",
+            ),
+        )
+        return
+    }
+    if (args.size in setOf(2, 3) && args[0] == "bundle-verify") {
+        TierEBenchmarkBundleManifest.verify(Path.of(args[1]), args.getOrNull(2))
+        return
+    }
+    if (args.size in setOf(2, 3) && args[0] == "bundle-write-manifest") {
+        TierEBenchmarkBundleManifest.write(Path.of(args[1]), args.getOrNull(2) ?: "")
+        return
+    }
+    if (args.size == 5 && args[0] == "bundle-build") {
+        require(args[3] in setOf("true", "false") && args[4] in setOf("true", "false")) {
+            "Bundle build expects USDT and rebuild boolean flags"
+        }
+        val repository = Path.of(args[1])
+        val nativeType = System.getenv("MAZEWALL_TIER_E_NATIVE_BUILD_TYPE") ?: "Release"
+        val fingerprint = TierEBenchmarkBundleFingerprint.read(repository, args[3].toBoolean(), nativeType)
+        val cache = System.getenv("MAZEWALL_TIER_E_BUILD_CACHE_ROOT")?.let(Path::of)
+            ?: repository.resolve("build/tier-e-benchmark-cache")
+        val status = TierEBenchmarkBundleBuilder.build(
+            repository,
+            Path.of(args[2]),
+            cache,
+            args[3].toBoolean(),
+            args[4].toBoolean(),
+            nativeType,
+            fingerprint,
+        )
+        println("tier-e-benchmark-bundle: status=$status fingerprint=$fingerprint bundle=${args[2]}")
+        return
+    }
     if (args.size == 2 && args[0] == "coverage-summary") {
         val summary = TierECoverageReport.write(Path.of(args[1]))
         println(

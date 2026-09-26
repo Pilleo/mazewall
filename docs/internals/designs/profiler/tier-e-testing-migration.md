@@ -98,8 +98,12 @@ These are still substantive controllers, not thin launchers:
   reports a complete terminal, a nonzero recovered denominator, and no
   unresolved observations; ordinary fixture errors never become successful
   arms because their text resembles an expected oracle result.
-- The trustworthy rootful/capacity/bundle/coverage benchmark scripts retain
-  substantive Bash execution. The active coverage summary and stack identity
+- The trustworthy rootful/capacity/coverage benchmark scripts retain
+  substantive Bash execution. The bundle entrypoint now bootstraps Kotlin
+  tooling from the checkout and delegates source fingerprinting, native/runtime
+  cache staging, manifest verification, and bundle replacement to Kotlin.
+  A real native/runtime bundle built by this controller passed the historical
+  shell verifier and was reused without rebuilding. The active coverage summary and stack identity
   comparison are Kotlin-owned; replay on copied immutable 2026-09-21 smoke and
   five-fork full archives matched their saved Node summaries with zero semantic
   JSON differences. Standalone Python perf
