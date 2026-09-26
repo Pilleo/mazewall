@@ -72,3 +72,17 @@ A second seven-mode, five-rotated-fork rootful matrix used the saved `calibratio
 ### 2026-09-22 collector-resource follow-up
 
 A second calibrated five-fork seven-mode matrix retained privileged-collector process CPU and peak RSS after terminal publication: `docs/internals/evidence/tier-e-split-calibrated-metrics-20260922/README.md`. All 35 forks completed, all 20 Tier E terminal reports were complete, and both full-stream transports again recovered exactly 2,600/2,600 declared operations per fork. Dictionary/full-stream collector peak RSS median was 362,952 KiB versus inline/full-stream 546,872 KiB; CPU medians (including setup and terminal work) were 5.41 s and 7.37 s. Wide timing intervals across the two calibrated runs preclude a speed ranking. Receipt p99, publication phase time, a matching prior-release regression baseline, real host PID reuse, and sustained inline 72-path completion remain unqualified. This issue remains open and `policy_eligibility=false`.
+
+### 2026-09-26 node-noise qualification control
+
+A bounded Kotlin one-pair rootful Docker run using the unmodified
+10,000-operation, 1,000/s near-capacity schedule and a one-second Java procfs
+noise loop was `INCOMPLETE`: full-stream declared 10,000 operations, matched
+9,989, missing 11 with no reported ring loss. A fresh no-noise control with
+the same target schedule, CPUs and attachment-ready option also failed the
+exact oracle (9,994/10,000, missing 6). Both runs retained source volume and
+raw logs at `/tmp/tier-e-node-noise-kotlin-v3-1790425247/` and
+`/tmp/tier-e-node-control-1790451632/`, respectively. The control shows the
+missing-ID outcome is not solely caused by the noise loop. No denominator or
+retained-state budget was changed, neither run qualifies a capacity ceiling,
+and the diagnostic remains separate from historical shell-loop rates.

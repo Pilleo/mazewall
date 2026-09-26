@@ -58,10 +58,19 @@ class TierELegacyFixtureLaunchTest {
     }
 
     @Test
-    fun `real guest reuse stays outside the launcher while incomplete coverage is explicit`() {
+    fun `real guest reuse becomes an explicit v2 hybrid fixture while incomplete coverage stays explicit`() {
         assertThrows(IllegalArgumentException::class.java) {
             TierELegacyFixtureLaunch.translate(mapOf("TIER_E_SPLIT_REAL_PID_REUSE" to "1"))
         }
+        val reuse = TierELegacyFixtureLaunch.translate(
+            mapOf(
+            "TIER_E_SPLIT_REAL_PID_REUSE" to "1",
+                "TIER_E_SPLIT_MARKER_VERSION" to "v2",
+            "TIER_E_SPLIT_RECOVERY_MODE" to "recover",
+                "TIER_E_SPLIT_COVERAGE" to "0",
+            ),
+        )
+        assertEquals("real-reuse", reuse.configuration.scenario.identityCase)
         val launch = TierELegacyFixtureLaunch.translate(mapOf("TIER_E_SPLIT_ALLOW_INCOMPLETE" to "1", "TIER_E_SPLIT_COVERAGE" to "1"))
         assertTrue(launch.configuration.scenario.allowIncomplete)
     }

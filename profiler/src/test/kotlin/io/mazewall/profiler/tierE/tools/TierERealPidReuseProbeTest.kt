@@ -3,6 +3,7 @@ package io.mazewall.profiler.tierE.tools
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -10,6 +11,17 @@ import java.nio.file.Files
 import java.time.Duration
 
 class TierERealPidReuseProbeTest {
+    @Test
+    fun `real replacement admission requires the exact observed PID and live start time`() {
+        val result = Json
+            .parseToJsonElement(
+            """{"original":{"pid":3514,"starttime":133817},"replacement":{"pid":3514,"starttime":134936},"host_pid_reuse_verdict":"OBSERVED","policy_eligibility":false}""",
+        ).jsonObject
+        assertTrue(TierERealPidReuseProbe.validReplacement(result, 3514, 133817, 134936))
+        assertFalse(TierERealPidReuseProbe.validReplacement(result, 3514, 133817, 134937))
+        assertFalse(TierERealPidReuseProbe.validReplacement(result, 3515, 133817, 134936))
+    }
+
     @Test
     fun `proc stat parser counts fields after final process-name parenthesis`() {
         val line = "123 (name ) with parentheses) " + (1..20).joinToString(" ")

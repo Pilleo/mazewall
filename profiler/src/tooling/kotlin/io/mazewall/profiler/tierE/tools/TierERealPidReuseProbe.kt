@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.nio.file.Files
 import java.nio.file.Path
@@ -12,6 +13,27 @@ import java.util.concurrent.TimeUnit
 
 /** Bounded diagnostic probe for the registered host PID; never changes PID controls. */
 public object TierERealPidReuseProbe {
+    public fun validReplacement(
+        report: JsonObject,
+        pid: Long,
+        start: Long,
+        replacementStart: Long,
+    ): Boolean {
+        fun JsonObject?.number(field: String): Long? = (this?.get(field) as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
+        val original = report["original"] as? JsonObject
+        val replacement = report["replacement"] as? JsonObject
+        return pid > 0 &&
+            start > 0 &&
+            replacementStart > 0 &&
+            replacementStart != start &&
+            original.number("pid") == pid &&
+            original.number("starttime") == start &&
+            replacement.number("pid") == pid &&
+            replacement.number("starttime") == replacementStart &&
+            report["host_pid_reuse_verdict"] == JsonPrimitive("OBSERVED") &&
+            report["policy_eligibility"] == JsonPrimitive(false)
+    }
+
     public fun starttime(stat: String): Long {
         val end = stat.lastIndexOf(')')
         require(end >= 0) { "Malformed /proc stat process name" }

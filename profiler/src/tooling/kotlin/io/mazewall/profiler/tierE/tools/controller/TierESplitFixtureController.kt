@@ -13,8 +13,11 @@ import io.mazewall.testing.containers.ContainerCommandResult
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -24,6 +27,8 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.LockSupport
 
@@ -61,14 +66,34 @@ public object TierESplitFixtureController {
             "External Tier E ownership requires run id, shared directory, lock, and state"
         }
         if (!external) require(Files.list(artifacts).use { it.findAny().isEmpty }) { "Tier E fixture requires fresh artifact directory" }
-        require(configuration.scenario.identityCase == null || configuration.scenario.identityCase in setOf("stale", "simulated-reuse")) {
-            "Kotlin fixture does not yet run real guest PID reuse"
+        require(configuration.scenario.identityCase == null || configuration.scenario.identityCase in setOf("stale", "simulated-reuse", "real-reuse")) {
+            "Unknown Tier E identity fixture"
+        }
+        if (configuration.scenario.identityCase == "real-reuse") {
+            require(
+                configuration.scenario.markerVersion == "v2" &&
+                configuration.fixture.recoveryMode == "recover" &&
+                !configuration.fixture.coverage &&
+                !configuration.scenario.benchmark &&
+                !configuration.scenario.baseline &&
+                configuration.scenario.faultSyscall == null &&
+                configuration.scenario.negativeArtifact == null &&
+                configuration.scenario.socketAccess == "group" &&
+                !external &&
+                endpoint.engine.name.equals("docker", ignoreCase = true),
+            ) {
+                "Real PID reuse requires v2 hybrid registered workflow on a standalone rootful Docker guest"
+            }
+            require(Files.readString(Path.of("/proc/sys/kernel/pid_max")).trim().toInt() in 1024..4096) {
+                "Real PID reuse requires a disposable guest with pid_max <=4096; normal host PID controls must not change"
+            }
         }
         require(
             when (configuration.scenario.identityCase) {
                 null -> true
                 "stale" -> configuration.fixture.coverage
                 "simulated-reuse" -> !configuration.fixture.coverage
+                "real-reuse" -> !configuration.fixture.coverage
                 else -> false
             } &&
                 !configuration.scenario.baseline &&
@@ -393,6 +418,8 @@ public object TierESplitFixtureController {
             *(
                 if (config.scenario.identityCase == "simulated-reuse") {
                 arrayOf("-e", "TIER_E_SPLIT_SIMULATE_PID_REUSE_MARKER=/shared/reused")
+            } else if (config.scenario.identityCase == "real-reuse") {
+                arrayOf("-e", "TIER_E_SPLIT_REAL_REUSE_READY=/shared/real-reuse-ready")
             } else {
                 emptyArray()
             }
@@ -496,7 +523,7 @@ public object TierESplitFixtureController {
             }
             ),
             "-e",
-            "TIER_E_SPLIT_BENCHMARK=${if (config.scenario.benchmark) 1 else 0}",
+            "TIER_E_SPLIT_BENCHMARK=${if (config.scenario.benchmark || config.scenario.identityCase == "real-reuse") 1 else 0}",
             "-e",
             "TIER_E_BENCHMARK_PHASES=${if (benchmarkPhases) 1 else 0}",
             "-e",
@@ -603,6 +630,129 @@ public object TierESplitFixtureController {
                 "socket_access=OWNER_ONLY\ntarget_admission=DENIED\nunrelated_user_admission=DENIED\npolicy_eligibility=false\n",
             )
             return
+        }
+        if (config.scenario.identityCase == "real-reuse") {
+            val ready = shared.resolve("real-reuse-ready")
+            val probeOutput = artifacts.resolve("real-pid-reuse-probe.json")
+            val terminal = shared.resolve("evidence/split-fixture-19802.tier-e.json")
+            val executor = Executors.newSingleThreadExecutor { work -> Thread.ofPlatform().name("tier-e-real-reuse-$runId").unstarted(work) }
+            var probe: Future<kotlinx.serialization.json.JsonObject>? = null
+            var paused = false
+            var primary: Throwable? = null
+            try {
+                Files.createFile(shared.resolve("start"))
+                await(Duration.ofSeconds(10), "attached target reuse gate") { Files.isRegularFile(ready) && Files.size(ready) > 0 }
+                check(command(engine("inspect", "-f", "{{.State.Running}}", targetName)).output.trim() == "true") {
+                    "Target exited before real-reuse attach gate"
+                }
+                check(
+                    TierERealPidReuseProbe.starttime(Files.readString(Path.of("/proc/$hostPid/stat"))) == start &&
+                    Files.readString(shared.resolve("target.properties")).lineSequence().any { it == "process_incarnation=$start" },
+                ) {
+                    "Registered Tier E incarnation differs from the live target"
+                }
+                command(engine("pause", collectorName))
+                paused = true
+                command(engine("kill", targetName))
+                command(engine("wait", targetName), timeout)
+                val targetExit = command(engine("inspect", "-f", "{{.State.ExitCode}}", targetName)).output.trim().toInt()
+                check(targetExit == 137) { "Real-reuse target did not exit by kill: $targetExit" }
+                probe = executor.submit<kotlinx.serialization.json.JsonObject> {
+                    TierERealPidReuseProbe.run(hostPid, start, 8192, Duration.ofSeconds(75), Duration.ofSeconds(30), probeOutput)
+                }
+                await(Duration.ofSeconds(80), "held real PID replacement") {
+                    Files.isRegularFile(probeOutput) && Files.size(probeOutput) > 0 || probe?.isDone == true
+                }
+                val evidence = Json.parseToJsonElement(Files.readString(probeOutput)).jsonObject
+                if (evidence["host_pid_reuse_verdict"] != JsonPrimitive("OBSERVED")) {
+                    Files.writeString(artifacts.resolve("verdict.env"), "host_pid_reuse_verdict=UNVERIFIED\npolicy_eligibility=false\n")
+                    error("Real guest host PID reuse was not observed within the bounded probe")
+                }
+                val replacement = evidence["replacement"]
+                    ?.jsonObject
+                    ?.get("starttime")
+                    ?.jsonPrimitive
+                    ?.longOrNull
+                    ?: error("Real PID replacement was not observed")
+                check(
+                    TierERealPidReuseProbe.validReplacement(evidence, hostPid, start, replacement) &&
+                    TierERealPidReuseProbe.starttime(Files.readString(Path.of("/proc/$hostPid/stat"))) == replacement,
+                ) {
+                    "Replacement is not the held live guest-host PID"
+                }
+                command(engine("unpause", collectorName))
+                paused = false
+                await(Duration.ofSeconds(config.deadlines.terminalSeconds.toLong()), "reuse terminal report") { Files.isRegularFile(terminal) }
+                check(TierERealPidReuseProbe.starttime(Files.readString(Path.of("/proc/$hostPid/stat"))) == replacement) {
+                    "Held replacement exited before collector terminalization"
+                }
+                command(
+                    engine(
+                        "run",
+                        "--rm",
+                        "-v",
+                        "$shared:/shared:ro",
+                        image,
+                    "cat",
+                        "/shared/evidence/split-fixture-19802.tier-e.json",
+                    ),
+                        Duration.ofSeconds(15),
+                    artifacts.resolve("terminal-report.json"),
+                )
+                Files.writeString(
+                    artifacts.resolve("verdict.env"),
+                    TierEFixtureVerdict.validate(artifacts, "real-reuse") +
+                    "host_pid_reuse_verdict=OBSERVED\ntarget_exit=$targetExit\n",
+                )
+                command(
+                    engine(
+                        "run",
+                        "--rm",
+                        "--user",
+                        "$uid:$gid",
+                        "--cap-drop",
+                        "ALL",
+                        "-v",
+                        "$shared:/shared",
+                    image,
+                        "java",
+                        "-cp",
+                        "/shared/agent-test-classes",
+                        "AgentWorkload",
+                        "control",
+                        "/shared/control.sock",
+                        "shutdown",
+                    ),
+                    Duration.ofSeconds(20),
+                    artifacts.resolve("control.log"),
+                )
+                command(engine("wait", collectorName), timeout)
+                check(command(engine("inspect", "-f", "{{.State.ExitCode}}", collectorName)).output.trim() == "0") {
+                    "Collector failed to shut down after identity-reuse terminal"
+                }
+                probe.get(35, TimeUnit.SECONDS)
+                command(engine("logs", targetName), Duration.ofSeconds(10), artifacts.resolve("target.log"))
+                command(engine("logs", collectorName), Duration.ofSeconds(10), artifacts.resolve("collector.log"))
+                Files.copy(shared.resolve("definitions/orders.marker-proof"), artifacts.resolve("marker-version-proof.txt"))
+                return
+            } catch (failure: Throwable) {
+                primary = failure
+                throw failure
+            } finally {
+                if (paused) {
+                    val unpaused = runContainerCommand(engine("unpause", collectorName), Duration.ofSeconds(10))
+                    if (unpaused.exitCode != 0) {
+                        val cleanup = IllegalStateException("Paused Tier E collector could not be released: ${unpaused.output}")
+                        if (primary != null) primary.addSuppressed(cleanup) else throw cleanup
+                    }
+                }
+                probe?.cancel(true)
+                executor.shutdownNow()
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    val cleanup = IllegalStateException("Real PID probe did not terminate")
+                    if (primary != null) primary.addSuppressed(cleanup) else throw cleanup
+                }
+            }
         }
         Files.createFile(shared.resolve("start"))
         command(engine("wait", targetName), timeout)

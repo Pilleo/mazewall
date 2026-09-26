@@ -67,7 +67,9 @@ These are still substantive controllers, not thin launchers:
 
 - `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
   `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
-  reuse is rejected. Delayed producer-closed artifacts, explicit bounded
+  reuse requires a disposable Linux guest with a bounded guest-only PID limit
+  and an explicit v2 hybrid registered profile; a normal host's PID controls
+  remain unchanged. Delayed producer-closed artifacts, explicit bounded
   incomplete coverage, live snapshots, and benchmark phases are typed fixture
   inputs. Older v2 profiles without `delayed_artifact` default it to false.
   A caller-supplied
@@ -102,15 +104,21 @@ These are still substantive controllers, not thin launchers:
   launch Kotlin tooling. The trustworthy controller owns local Docker volume
   creation, separate bundle-build and benchmark containers, bounded artifact
   export, terminal JSONL admission, typed manifest and process-scoped perf or
-  allocation evidence. A one-fork rootful Docker smoke completed; perf and
-  allocation recording still need their own live runtime qualification. The
+  allocation evidence. Export now precedes host-side validation; only complete
+  perf, allocation, manifest and source/image checks authorize exact container
+  and volume retirement. A failed post-export check stops and retains them.
+  Bounded one-fork rootful Docker CPU perf with 11/11 required JIT maps and
+  allocation recording with an owned per-run kernel probe both completed
+  with policy-ineligible terminal receipts. Large raw `perf.data` and
+  allocation data remain local diagnostic artifacts, outside Git. The
   capacity controller pins per-stage retained limits and stops at the first
   ineligible pilot; a single short Docker stage passed. Its optional node-noise
   probe now runs a separate JVM-based `/proc/self/stat` loop and must not be
   combined with historical shell-loop rates. A bounded one-pair rootful run
   correctly remained incomplete when the underlying 10,000-operation Tier E
-  target missed 11 operation IDs; it is not qualified evidence of node-noise
-  parity or a reason to relax the Tier E operation oracle.
+  target missed 11 operation IDs; a no-noise control under the same 10,000-op
+  schedule also missed 6. Neither qualifies node-noise parity or justifies
+  relaxing the Tier E operation oracle.
   The clean-workspace rootful gate is fail-closed and retains its runner and
   workspace when export/qualification fails. Transferring the tracked root
   `.editorconfig` eliminated apparent enforcer ktlint violations, and an owned

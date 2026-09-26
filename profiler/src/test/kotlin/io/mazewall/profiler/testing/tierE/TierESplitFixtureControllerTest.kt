@@ -12,6 +12,38 @@ import java.nio.file.Path
 
 class TierESplitFixtureControllerTest {
     @Test
+    fun `real PID reuse requires v2 hybrid registered workflow before any container is created`() {
+        val root = Files.createTempDirectory("tier-e-real-reuse-preflight-")
+        val output = Files.createTempDirectory("tier-e-real-reuse-output-")
+        try {
+            Files.createDirectory(root.resolve("profiler-native"))
+            val profile = root.resolve("profile.json")
+            Files.writeString(
+                profile,
+                """{"schema_version":1,"container":{"engine":"docker","uri":"unix:///var/run/docker.sock","image":"fixture"},"fixture":{"coverage":true,"operations":72,"emission_mode":"full-stream","recovery_mode":"disabled"},"measurement":{"forks":1,"workload_cpu":0,"collector_cpu":1}}""",
+            )
+            val config = TierERunConfiguration
+                .load(
+                profile,
+                environment = emptyMap(),
+            ).copy(scenario = TierERunConfiguration.load(profile, environment = emptyMap()).scenario.copy(identityCase = "real-reuse"))
+            val failure = assertThrows(IllegalArgumentException::class.java) {
+                TierESplitFixtureController.run(
+                    config,
+                    ContainerEndpoint(ContainerEngine.DOCKER, "unix:///var/run/docker.sock"),
+                    root,
+                    output,
+                )
+            }
+            assertTrue(failure.message!!.contains("v2 hybrid"))
+            assertTrue(Files.list(output).use { it.findAny().isEmpty })
+        } finally {
+            root.toFile().deleteRecursively()
+            output.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `externally owned fixture rejects mismatched and symlinked admission without writing artifacts`() {
         val repository = Files.createTempDirectory("tier-e-owned-preflight-")
         val artifacts = Files.createTempDirectory("tier-e-owned-artifacts-")

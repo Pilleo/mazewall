@@ -32,7 +32,6 @@ public data class TierELegacyFixtureLaunch(
                 raw.toIntOrNull() ?: throw IllegalArgumentException("Invalid Tier E integer: $name")
             }
             val rejected = listOf(
-                "TIER_E_SPLIT_REAL_PID_REUSE" to "1",
                 "TIER_E_SPLIT_DISABLE_MARKER_PROOF" to "1",
             ).filter { (name, active) -> environment[name] == active }
             require(rejected.isEmpty()) { "Kotlin fixture launcher does not own ${rejected.joinToString { it.first }}" }
@@ -46,12 +45,27 @@ public data class TierELegacyFixtureLaunch(
             val benchmark = binary("TIER_E_SPLIT_BENCHMARK")
             val baseline = binary("TIER_E_SPLIT_COVERAGE_BASELINE")
             val simulated = binary("TIER_E_SPLIT_SIMULATED_PID_REUSE")
+            val real = binary("TIER_E_SPLIT_REAL_PID_REUSE")
             val identity = environment["TIER_E_SPLIT_NEGATIVE_IDENTITY_CASE"]?.takeIf { it.isNotBlank() }
-            require(!(simulated && identity != null)) { "Simulated reuse and stale identity are mutually exclusive" }
+            require(!(simulated && identity != null) && !(real && (simulated || identity != null))) {
+                "Tier E identity cases are mutually exclusive"
+            }
             val socket = when (val access = flag("TIER_E_SPLIT_SOCKET_ACCESS", "group")) {
                 "group" -> "group"
                 "owner" -> "owner-only"
                 else -> error("Unknown Tier E socket access: $access")
+            }
+            if (real) {
+                require(
+                    !coverage &&
+                !benchmark &&
+                !baseline &&
+                socket == "group" &&
+                flag("TIER_E_SPLIT_MARKER_VERSION", "v1") == "v2" &&
+                flag("TIER_E_SPLIT_RECOVERY_MODE", "disabled") == "recover",
+                ) {
+                "Real PID reuse requires v2 hybrid registered workflow"
+            }
             }
             val operations = flag("TIER_E_SPLIT_COVERAGE_OPERATIONS", "72").toIntOrNull()
                 ?: error("Invalid Tier E operations")
@@ -103,7 +117,18 @@ public data class TierELegacyFixtureLaunch(
                     put("socket_access", socket)
                     put("fault_syscall", fault?.let(::JsonPrimitive) ?: JsonNull)
                     put("negative_artifact", environment["TIER_E_SPLIT_NEGATIVE_ARTIFACT_CASE"]?.takeIf { it.isNotBlank() }?.let(::JsonPrimitive) ?: JsonNull)
-                    put("identity_case", (identity ?: if (simulated) "simulated-reuse" else null)?.let(::JsonPrimitive) ?: JsonNull)
+                    put(
+                        "identity_case",
+                        (
+                            identity ?: if (real) {
+                        "real-reuse"
+                    } else if (simulated) {
+                        "simulated-reuse"
+                    } else {
+                        null
+                    }
+                        )?.let(::JsonPrimitive) ?: JsonNull,
+                    )
                     put("live_snapshots", liveDefinitions)
                     put("baseline", baseline)
                     put("benchmark", benchmark)
