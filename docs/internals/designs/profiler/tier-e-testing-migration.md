@@ -68,9 +68,12 @@ These are still substantive controllers, not thin launchers:
 - `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
   `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
   reuse, delayed artifacts, and allowed-incomplete coverage are rejected.
-  Live snapshots and benchmark phases are accepted. The creation-lock path
-  still executes `run_tier_e_split_privilege_fixture_legacy.sh` because the
-  lifecycle tests depend on that admission contract.
+  Live snapshots and benchmark phases are accepted. A caller-supplied
+  creation lock keeps container cleanup with that caller. Kotlin checks the
+  run ID, scratch-directory ownership, lock and open-state identities before
+  writing artifacts or creating containers; failure receipts mark those
+  resources `EXTERNALLY_OWNED`. The legacy script is no longer the active
+  controller.
 - `scripts/run_tier_e_split_coverage_matrix.sh` launches `coverage-matrix`.
   Skip-existing, allowed-incomplete coverage, and non-default arm timeouts are
   rejected. `:profiler:tierELongMatchedBenchmark` calls the same Kotlin

@@ -169,6 +169,7 @@ public fun main(args: Array<String>) {
         }
         val output = Path.of(args[2])
         Files.createDirectories(output)
+        val ownedRun = System.getenv("TIER_E_SPLIT_RUN_ID")?.takeIf { System.getenv("TIER_E_SPLIT_CREATE_LOCK") != null }
         TierESplitFixtureController.run(
             launch.configuration,
             endpoint,
@@ -179,6 +180,10 @@ public fun main(args: Array<String>) {
             launch.pinCpus,
             launch.benchmarkPhases,
             launch.workloadProfile,
+            ownedRunId = ownedRun,
+            ownedShared = System.getenv("TIER_E_SPLIT_SHARED_DIR")?.let(Path::of),
+            creationLock = System.getenv("TIER_E_SPLIT_CREATE_LOCK")?.let(Path::of),
+            creationState = System.getenv("TIER_E_SPLIT_CREATE_STATE")?.let(Path::of),
         )
         println("Tier E Kotlin fixture artifacts: $output")
         return

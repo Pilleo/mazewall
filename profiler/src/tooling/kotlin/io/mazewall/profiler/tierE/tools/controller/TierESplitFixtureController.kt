@@ -14,6 +14,7 @@ import io.mazewall.testing.containers.runContainerCommand
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
@@ -35,6 +36,10 @@ public object TierESplitFixtureController {
         pinCpus: Boolean = false,
         benchmarkPhases: Boolean = false,
         workloadProfile: String = "syscall_dense",
+        ownedRunId: String? = null,
+        ownedShared: Path? = null,
+        creationLock: Path? = null,
+        creationState: Path? = null,
     ) {
         configuration.validate()
         require(seed >= 0) { "Tier E seed must be nonnegative" }
@@ -48,7 +53,11 @@ public object TierESplitFixtureController {
         require(configuration.container.uri == null || configuration.container.uri == endpoint.resolvedUri) { "Container URI disagrees with profile" }
         require(Files.isDirectory(repository.resolve("profiler-native"))) { "Missing native profiler source" }
         require(Files.isDirectory(artifacts)) { "Missing caller-owned artifact directory" }
-        require(Files.list(artifacts).use { it.findAny().isEmpty }) { "Tier E fixture requires fresh artifact directory" }
+        val external = ownedRunId != null
+        require((ownedRunId != null) == (ownedShared != null) && (ownedRunId != null) == (creationLock != null) && (ownedRunId != null) == (creationState != null)) {
+            "External Tier E ownership requires run id, shared directory, lock, and state"
+        }
+        if (!external) require(Files.list(artifacts).use { it.findAny().isEmpty }) { "Tier E fixture requires fresh artifact directory" }
         require(configuration.scenario.identityCase == null || configuration.scenario.identityCase in setOf("stale", "simulated-reuse")) {
             "Kotlin fixture does not yet run real guest PID reuse"
         }
@@ -68,17 +77,59 @@ public object TierESplitFixtureController {
             "Stale identity requires coverage; simulated reuse requires the registered workflow"
         }
         require(!(configuration.fixture.coverage && configuration.scenario.benchmark)) { "Coverage and benchmark workloads cannot share one arm" }
-        val runId = "tier-e-kotlin-${UUID.randomUUID()}"
-        val shared = Files.createTempDirectory(Path.of(System.getProperty("java.io.tmpdir")).toRealPath(), "tier-e-owned-$runId-")
+        val runId = ownedRunId ?: "tier-e-kotlin-${UUID.randomUUID()}"
+        require(runId.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}"))) { "Invalid scoped Tier E run ID" }
+        val shared = ownedShared ?: Files.createTempDirectory(Path.of(System.getProperty("java.io.tmpdir")).toRealPath(), "tier-e-owned-$runId-")
+        val lock = creationLock ?: artifacts.resolve("$runId.creation.lock")
+        val state = creationState ?: artifacts.resolve("$runId.creation.lock.state")
+        if (external) {
+            val artifactRoot = artifacts.toRealPath()
+            val tempRoot = Path.of(System.getProperty("java.io.tmpdir")).toRealPath()
+            require(
+                Files.isDirectory(shared, NOFOLLOW_LINKS) &&
+                shared.toRealPath().parent == tempRoot &&
+                shared.fileName.toString().startsWith("tier-e-owned-$runId-"),
+            ) { "Invalid externally owned shared directory" }
+            require(Files.getAttribute(shared, "unix:uid") == Files.getAttribute(artifacts, "unix:uid")) { "Shared directory owner mismatch" }
+            require(
+                Files.isRegularFile(state, NOFOLLOW_LINKS) &&
+                state.toRealPath().parent == artifactRoot &&
+                state.fileName.toString() == "$runId.creation.lock.state" &&
+                Files.getAttribute(state, "unix:uid") == Files.getAttribute(artifacts, "unix:uid") &&
+                Files.readString(state) == "open\n",
+            ) {
+                "External creation state must be open and owned by this run"
+            }
+            require(
+                lock.parent?.toRealPath() == artifactRoot &&
+                lock.fileName.toString() == "$runId.creation.lock" &&
+                !Files.isSymbolicLink(lock) &&
+                (
+                    !Files.exists(lock, NOFOLLOW_LINKS) ||
+                    Files.isRegularFile(lock, NOFOLLOW_LINKS) &&
+                Files.getAttribute(lock, "unix:uid") == Files.getAttribute(artifacts, "unix:uid")
+                ),
+            ) {
+                "External creation lock must belong to this run"
+            }
+            require(
+                !Files.exists(artifacts.resolve("resolved-config.json"), NOFOLLOW_LINKS) &&
+                !Files.exists(artifacts.resolve("$runId.shared-path"), NOFOLLOW_LINKS),
+            ) { "External fixture output already exists" }
+        }
+        require(Files.isDirectory(shared, NOFOLLOW_LINKS)) { "Missing owned Tier E shared directory" }
         Files.writeString(artifacts.resolve("$runId.shared-path"), "${shared.toRealPath()}\n")
-        val lock = artifacts.resolve("$runId.creation.lock")
-        val state = artifacts.resolve("$runId.creation.lock.state")
-        Files.writeString(state, "open\n")
+        if (!external) Files.writeString(state, "open\n")
         Files.writeString(artifacts.resolve("resolved-config.json"), configuration.resolvedJson() + "\n")
         val owner = TierEContainerRun(endpoint, runId, artifacts, ownedShared = shared)
         try {
-            TierEFixtureLifecycle(owner, lock, retainOnFailure = configuration.artifacts.retainOnFailure).run {
+            val body = {
                 execute(configuration, endpoint, repository, artifacts, nativeDirectory, runId, shared, lock, state, seed, pinCpus, benchmarkPhases, workloadProfile)
+            }
+            if (external) {
+                body()
+            } else {
+                TierEFixtureLifecycle(owner, lock, retainOnFailure = configuration.artifacts.retainOnFailure).run(body)
             }
         } catch (failure: Throwable) {
             try {
@@ -91,12 +142,19 @@ public object TierESplitFixtureController {
                     put("collector_name", "$runId-collector")
                     put("shared_path", shared.toString())
                     put("creation_lock", lock.toString())
-                    put("resource_state", if (configuration.artifacts.retainOnFailure) "RETAINED_FOR_RECOVERY" else "CLEANUP_ATTEMPTED")
+                    put(
+                        "resource_state",
+                        when {
+                        external -> "EXTERNALLY_OWNED"
+                        configuration.artifacts.retainOnFailure -> "RETAINED_FOR_RECOVERY"
+                        else -> "CLEANUP_ATTEMPTED"
+                    },
+                    )
                     put("policy_eligibility", false)
                 }.toString() +
                     "\n",
                 )
-                if (configuration.artifacts.retainOnFailure) {
+                if (!external && configuration.artifacts.retainOnFailure) {
                     failure.addSuppressed(IllegalStateException("Tier E resources retained: $runId-target, $runId-collector, $shared"))
                 }
             } catch (recordFailure: Exception) {
