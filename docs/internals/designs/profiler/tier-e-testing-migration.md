@@ -196,6 +196,20 @@ These are still substantive controllers, not thin launchers:
   audit-enabled noisy diagnostic both completed. Those do not repair or
   attribute the intermittent default-path observation gap; see the
   [fail-closed receipts](../../evidence/tier-e-clean-node-noise-20260927/README.md).
+  A later clean `3899dc9b` **five-pair AB/BA** control/noisy qualification
+  preserved two source/image/agent/CPU-matched complete pairs and then
+  stopped on pair 3: its no-noise control matched both modes, while the
+  noisy target's later unique mode missed IDs `1777`–`1778` (29,996 kernel
+  exact admissions, 29,996 ring-ready records, zero ring loss). The independent
+  [instrumented three-pair audit](../../evidence/tier-e-clean-admission-audit-20260927/README.md)
+  also failed on pair 3 in later unique mode. Its raw audit saw all 10,000
+  target operations on CPU 1, but exact descriptor admission submitted 9,993,
+  missing IDs `2904`–`2910` with zero counted admissions for those descriptors.
+  The admission boundary is unresolved between raw observation and exact
+  descriptor dispatch/rejection. Both series retained prior pairs, failed
+  terminals and exact recovery resources. Neither establishes unique-mode
+  noise overlap or qualifies default noise, and no BPF branch is blamed or
+  silently bypassed.
   Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

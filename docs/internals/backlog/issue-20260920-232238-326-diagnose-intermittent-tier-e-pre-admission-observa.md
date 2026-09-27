@@ -21,6 +21,14 @@ target_files:
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-abba-pre-admission-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-abba-pre-admission-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-abba-pre-admission-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-abba-pre-admission-20260927/raw-diagnostic.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/raw-audit.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -168,3 +176,33 @@ comparison is claimed. An audit-enabled one-pair diagnostic, if subsequently
 needed, stays a separate instrumented series and cannot upgrade this default
 decision. Store the chosen committed HEAD and exact image digest with the
 series plan **before** starting a container.
+
+**Observed AB/BA stop:** The [sealed clean-source series](../evidence/tier-e-clean-abba-pre-admission-20260927/README.md)
+reached two fully complete control/noisy pairs and a passing pair-3
+no-noise control. The pair-3 noisy full-stream fork was exact, but later
+unique mode missed IDs `1777` and `1778`: 9,998/10,000, kernel exact
+admissions 29,996/30,000, ring-ready 29,996, ring loss zero. The unaudited
+raw-entry denominator cannot tell whether the deficit preceded the syscall
+handler or which exact-admission check rejected it. No third pair was
+published; the exact source volume/runner and earlier pairs were preserved.
+This **does not close** the underlying gap or justify a BPF design change.
+
+**Separate source-matched instrumented boundary:** The
+[three-pair opt-in audit series](../evidence/tier-e-clean-admission-audit-20260927/README.md)
+also stopped on pair 3, with two prior complete pairs retained. In its later
+unique fork raw audit counted **10,000/10,000** target operations on CPU 1,
+but exact admission submitted only **9,993**; seven descriptor IDs
+`2904`–`2910` each had zero recorded exact admissions. Kernel exact and
+ring-ready counts both stopped at 29,986/30,000 with ring loss zero. The
+audited main handler-entered count covers unrelated syscalls, and raw/main
+program ingress is not currently counted on the same per-descriptor domain.
+These observations establish a gap **between raw target observation and
+exact descriptor admission**, not whether the main program failed to run or
+an early syscall/argument gate diverted those seven events. The broad
+lookup-failure/wrong-target counters include unrelated syscalls and cannot
+be assigned to the missing IDs. Do not infer a cause or change the core
+BPF scan from the aggregate counts. The next diagnostic needs a narrowly
+bounded benchmark-only main-program ingress checkpoint keyed by the declared
+descriptor, plus tests and a versioned protocol/layout review; any invasive
+core BPF redesign needs explicit operator approval. The unaudited five-pair
+qualification remains `INCOMPLETE`.

@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "qualification": "INCOMPLETE_INSTRUMENTED_ONLY",
+  "policy_eligibility": false,
+  "predeclared": {
+    "schema_version": 1,
+    "status": "PREDECLARED",
+    "scope": "separate_instrumented_diagnostic_not_default_qualification",
+    "source_revision": "3899dc9ba4a4e76bae1a5126dbaf96e6db612cae",
+    "source_digest": "4ee9bf45ec4d8bea2eaecab1a857c260f7d001ec39722f8f740112f84fdf5e99",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "native_agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+    "profile_sha256": "7fdb385f5d64b6d4616c1d73bd01c41f4331270a5f1a7981bf3a20a6a6f159b0",
+    "runs": 3,
+    "cpu_set": "0,1",
+    "noise_cpu": 2,
+    "operations_per_mode": 10000,
+    "raw_audit": true,
+    "exact_admission_audit": true,
+    "on_failure": "stop; preserve raw rejection counters and exact runner; do not promote default lane",
+    "policy_eligibility": false
+  },
+  "completed_instrumented_pairs": 2,
+  "terminal": {
+    "schema_version": 1,
+    "success": false,
+    "reason": "INCOMPLETE",
+    "policy_eligibility": false
+  },
+  "targets": [
+    {
+      "pair": 1,
+      "target_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_matched": 10000,
+      "unique_matched": 10000,
+      "missing_ids": [],
+      "raw_observed": null,
+      "exact_handler_entered": null,
+      "exact_session_matched": null,
+      "exact_submitted": null,
+      "audit_non_singleton_count": null,
+      "audit_non_singleton_samples": null,
+      "kernel_exact_admissions": null,
+      "ring_ready": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 2,
+      "target_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_matched": 10000,
+      "unique_matched": 10000,
+      "missing_ids": [],
+      "raw_observed": null,
+      "exact_handler_entered": null,
+      "exact_session_matched": null,
+      "exact_submitted": null,
+      "audit_non_singleton_count": null,
+      "audit_non_singleton_samples": null,
+      "kernel_exact_admissions": null,
+      "ring_ready": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 3,
+      "target_terminal": {
+        "schema_version": 1,
+        "success": false,
+        "reason": "INCOMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_matched": 10000,
+      "unique_matched": null,
+      "missing_ids": [
+        2904,
+        2905,
+        2906,
+        2907,
+        2908,
+        2909,
+        2910
+      ],
+      "raw_observed": "10000",
+      "exact_handler_entered": "10275",
+      "exact_session_matched": "9993",
+      "exact_submitted": "9993",
+      "audit_non_singleton_count": "7",
+      "audit_non_singleton_samples": "2904:0,2905:0,2906:0,2907:0,2908:0,2909:0,2910:0",
+      "kernel_exact_admissions": "29986",
+      "ring_ready": "29986",
+      "ring_loss": "0"
+    }
+  ]
+}

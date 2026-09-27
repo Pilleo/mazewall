@@ -340,5 +340,18 @@ derive image/CPU placement from the same chosen profile. A typed capacity
 resolved snapshot includes the pilot/decision schedule. These validations
 are configuration contracts, not default node-noise qualification.
 
+**Bounded M3 result:** On clean committed `3899dc9b`, the predeclared
+control/noisy AB/BA series stopped at pair 3 with two complete pairs retained.
+Its third no-noise control passed, while the later noisy-target unique fork
+missed `1777`–`1778`; see the [unaudited series](../evidence/tier-e-clean-abba-pre-admission-20260927/README.md).
+The separate [instrumented audit](../evidence/tier-e-clean-admission-audit-20260927/README.md)
+also stopped on pair 3: 10,000 raw target syscalls but only 9,993 exact
+descriptor submissions in unique mode. Neither instrumented output nor the
+two prior complete default pairs repairs the default five-pair oracle.
+The pre-admission issue remains open for a proven main-program ingress or
+early-rejection cause; kernel BPF/filter design is not changed from this
+aggregate evidence. Podman and external orchestrator acceptance remain
+separate blocked/deferred steps.
+
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "scope": "unaudited_five_pair_default_pre_admission_diagnostic",
+  "policy_eligibility": false,
+  "qualification": "INCOMPLETE",
+  "planned_pairs": 5,
+  "completed_pairs": 2,
+  "predeclared_plan": {
+    "schema_version": 1,
+    "status": "PREDECLARED",
+    "source_revision": "3899dc9ba4a4e76bae1a5126dbaf96e6db612cae",
+    "source_digest": "4ee9bf45ec4d8bea2eaecab1a857c260f7d001ec39722f8f740112f84fdf5e99",
+    "profile_sha256": "2ff1083b53e2b9dd822b9f3648adda7a4593003aee0c5bae6fa832735596502d",
+    "native_agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "cpu_set": "0,1",
+    "unrelated_noise_cpu": 2,
+    "declared_operations_per_fork": 10000,
+    "rate_per_second": 1000,
+    "modes": [
+      "dictionary_full_stream_collector_continuous",
+      "dictionary_unique_edge_collector_continuous"
+    ],
+    "audit_flags": {
+      "raw_sys_enter": false,
+      "exact_admission": false
+    },
+    "schedule": [
+      "control-1",
+      "noisy-1",
+      "noisy-2",
+      "control-2",
+      "control-3",
+      "noisy-3",
+      "noisy-4",
+      "control-4",
+      "control-5",
+      "noisy-5"
+    ],
+    "on_failure": "stop without changing denominator; retain completed pairs and owned recovery resources",
+    "claim": "first full-stream fork overlap only; no unique-mode noise overlap claim",
+    "policy_eligibility": false
+  },
+  "terminal": {
+    "schema_version": 1,
+    "success": false,
+    "reason": "INCOMPLETE",
+    "policy_eligibility": false
+  },
+  "arms": [
+    {
+      "pair": 1,
+      "arm": "control",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": 10000,
+      "missing_id_samples": [],
+      "kernel_exact_admissions": null,
+      "ring_ready_records": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 1,
+      "arm": "noisy",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": 10000,
+      "missing_id_samples": [],
+      "kernel_exact_admissions": null,
+      "ring_ready_records": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 2,
+      "arm": "control",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": 10000,
+      "missing_id_samples": [],
+      "kernel_exact_admissions": null,
+      "ring_ready_records": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 2,
+      "arm": "noisy",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": 10000,
+      "missing_id_samples": [],
+      "kernel_exact_admissions": null,
+      "ring_ready_records": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 3,
+      "arm": "control",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": 10000,
+      "missing_id_samples": [],
+      "kernel_exact_admissions": null,
+      "ring_ready_records": null,
+      "ring_loss": null
+    },
+    {
+      "pair": 3,
+      "arm": "noisy",
+      "terminal": {
+        "schema_version": 1,
+        "success": false,
+        "reason": "INCOMPLETE",
+        "policy_eligibility": false
+      },
+      "source_fingerprint": "afae84667f18cd44b561fdba8b9c1414290948db940f06dbc99e221db46897ff",
+      "full_fork_matched": 10000,
+      "unique_fork_matched": null,
+      "missing_id_samples": [
+        1777,
+        1778
+      ],
+      "kernel_exact_admissions": "29996",
+      "ring_ready_records": "29996",
+      "ring_loss": "0"
+    }
+  ]
+}
