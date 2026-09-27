@@ -85,6 +85,7 @@ public object TierERootfulGateRunner {
         require(cpuSet == null || cpuSet.matches(Regex("[0-9]+,[0-9]+")) && cpuSet.split(',').distinct().size == 2) {
             "Rootful gate requires distinct CPU IDs"
         }
+        cpuSet?.let { TierEAllowedCpuVerifier.requireAvailable(it) }
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Tier E gate requires fresh artifacts" }
         val repository = root.toRealPath()

@@ -45,12 +45,28 @@ public fun main(args: Array<String>) {
         }
         return
     }
+    if (args.size in 4..5 && args[0] == "rootful-phase-profile") {
+        TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
+        val profile = TierERootfulGateProfile.load(Path.of(args[3]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+            EndpointConfig(ContainerEngine.DOCKER, TierEProfileEndpoint.select()),
+        )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Profile-selected phase requires local rootful Docker: ${selected.reason}")
+        }
+        TierERootfulPhaseProbe.runProfile(Path.of(args[1]), Path.of(args[2]), endpoint, profile, args.getOrNull(4)?.let(Path::of))
+        return
+    }
     if (args.size == 3 && args[0] == "experiment-config") {
+        TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
         val profile = TierEExperimentProfile.load(Path.of(args[1]))
         Files.writeString(Path.of(args[2]), "${profile.resolvedJson()}\n")
         return
     }
     if (args.size in 4..5 && args[0] in setOf("experiment-run", "node-noise-profile", "capacity-profile")) {
+        TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
         val profile = TierEExperimentProfile.load(Path.of(args[1]))
         val requestedKind = when (args[0]) {
             "experiment-run" -> "trustworthy"
@@ -62,7 +78,7 @@ public fun main(args: Array<String>) {
         val output = Path.of(args[3])
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
-            EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+            EndpointConfig(ContainerEngine.DOCKER, TierEProfileEndpoint.select()),
         )
         ) {
             is EndpointSelection.Ready -> selected.endpoint
@@ -254,10 +270,11 @@ public fun main(args: Array<String>) {
         return
     }
     if (args.size in 4..6 && args[0] == "rootful-gate-profile") {
+        TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
         val profile = TierERootfulGateProfile.load(Path.of(args[3]))
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
-            EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+            EndpointConfig(ContainerEngine.DOCKER, TierEProfileEndpoint.select()),
         )
         ) {
             is EndpointSelection.Ready -> selected.endpoint

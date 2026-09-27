@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
@@ -164,7 +165,10 @@ public data class TierERunConfiguration(
             environment: Map<String, String> = System.getenv(),
             overrides: Map<String, String> = emptyMap(),
         ): TierERunConfiguration {
-            val document = Json.parseToJsonElement(Files.readString(profile)) as? JsonObject
+            require(Files.size(profile) <= 65_536L) { "Tier E fixture profile exceeds size bound" }
+            val text = Files.readString(profile)
+            TierEProfileJson.requireUniqueKeys(text)
+            val document = Json.parseToJsonElement(text) as? JsonObject
                 ?: throw IllegalArgumentException("Tier E profile must be a JSON object: $profile")
             val version = document["schema_version"]?.toString()
             require(version in setOf("1", "2")) { "Unsupported Tier E profile version" }
@@ -177,6 +181,19 @@ public data class TierERunConfiguration(
             ): JsonObject {
                 val obj = document[name] as? JsonObject ?: throw IllegalArgumentException("Missing Tier E $name configuration")
                 require(obj.keys == required) { "Unexpected or missing Tier E $name fields: ${obj.keys - required}, ${required - obj.keys}" }
+                for ((key, entry) in obj) {
+                    if (name == "container" && key == "uri") {
+                        require(entry == JsonNull || entry is JsonPrimitive && entry.isString) { "Invalid Tier E container URI type" }
+                        continue
+                    }
+                    val primitive = entry as? JsonPrimitive ?: throw IllegalArgumentException("Invalid Tier E $name.$key type")
+                    val valid = when {
+                        name == "fixture" && key == "coverage" -> !primitive.isString && primitive.booleanOrNull != null
+                        name == "fixture" && key == "operations" || name == "measurement" -> !primitive.isString && primitive.intOrNull != null
+                        else -> primitive.isString
+                    }
+                    require(valid) { "Invalid Tier E $name.$key JSON type" }
+                }
                 return obj
             }
             val container = section("container", containerFields)

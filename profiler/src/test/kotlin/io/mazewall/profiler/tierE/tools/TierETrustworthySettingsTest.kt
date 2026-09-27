@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.tools
 
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -9,6 +10,19 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 
 class TierETrustworthySettingsTest {
+    @Test
+    fun `explicit profile selection rejects legacy measurement knobs but accepts machine endpoint`() {
+        val failure = assertThrows(IllegalArgumentException::class.java) {
+            TierEExperimentProfile.requireNoLegacyExperimentEnvironment(mapOf("MAZEWALL_TIER_E_FORKS" to "1"))
+        }
+        assertTrue(failure.message.orEmpty().contains("MAZEWALL_TIER_E_FORKS"))
+        assertDoesNotThrow {
+            TierEExperimentProfile.requireNoLegacyExperimentEnvironment(
+                mapOf("MAZEWALL_DOCKER_HOST" to "unix:///var/run/docker.sock"),
+            )
+        }
+    }
+
     @Test
     fun `versioned trustworthy profile rejects unknown keys and ignores legacy experiment overrides`() {
         val profile = Files.createTempFile("tier-e-experiment-", ".json")
@@ -22,6 +36,63 @@ class TierETrustworthySettingsTest {
             assertEquals(1, selected.nodeNoise.runs)
             Files.writeString(profile, Files.readString(profile).replace("\"cpu\":2", "\"cpu\":2,\"typo\":true"))
             assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            Files.writeString(
+                profile,
+                """
+                {"schema_version":1,"kind":"trustworthy",
+                 "settings":{"iterations":10000,"iter\u0061tions":1},
+                 "node_noise":{"runs":1,"duration_seconds":1,"cpu":2}}
+            """.trimIndent(),
+            )
+            assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            Files.writeString(profile, "[".repeat(70) + "0" + "]".repeat(70))
+            val depthFailure = assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            assertTrue(depthFailure.message.orEmpty().contains("nesting exceeds bound"))
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
+    fun `duplicate experiment keys cannot override a declared measured denominator`() {
+        val profile = Files.createTempFile("tier-e-duplicate-profile-", ".json")
+        try {
+            Files.writeString(
+                profile,
+                """
+                {"schema_version":1,"kind":"trustworthy",
+                 "settings":{"run_level":"smoke","iterations":10000,"iterations":1},
+                 "node_noise":{"runs":1,"duration_seconds":1,"cpu":2}}
+            """.trimIndent(),
+            )
+            assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
+    fun `profile JSON numbers booleans and image names retain their declared types`() {
+        val repository = generateSequence(
+            java.nio.file.Path
+            .of("")
+            .toAbsolutePath(),
+        ) { it.parent }
+            .first { Files.isRegularFile(it.resolve("config/testing/tier-e/trustworthy.json")) }
+        val document = Files.readString(repository.resolve("config/testing/tier-e/trustworthy.json"))
+        val profile = Files.createTempFile("tier-e-profile-types-", ".json")
+        try {
+            for ((before, after) in listOf(
+                "\"forks\": 1" to "\"forks\": \"1\"",
+                "\"calibration\": false" to "\"calibration\": \"false\"",
+                "\"image\": \"mazewall-tier-e-rootful:perf-20260919-external-profiler\"" to "\"image\": 42",
+                "\"workload_cpu\": 0" to "\"workload_cpu\": \"0\"",
+                "\"cpu\": 2" to "\"cpu\": \"2\"",
+            )) {
+                require(before in document)
+                Files.writeString(profile, document.replace(before, after))
+                assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            }
         } finally {
             Files.deleteIfExists(profile)
         }
@@ -69,6 +140,31 @@ class TierETrustworthySettingsTest {
             assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
             Files.writeString(profile, document.replace("\"stage_seconds\":1", "\"stage_seconds\":1,\"unknown\":true"))
             assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
+    fun `capacity schedule rejects numeric and boolean strings and non-string pilot list`() {
+        val repository = generateSequence(
+            java.nio.file.Path
+            .of("")
+            .toAbsolutePath(),
+        ) { it.parent }
+            .first { Files.isRegularFile(it.resolve("config/testing/tier-e/capacity.json")) }
+        val document = Files.readString(repository.resolve("config/testing/tier-e/capacity.json"))
+        val profile = Files.createTempFile("tier-e-capacity-types-", ".json")
+        try {
+            for ((before, after) in listOf(
+                "\"pilot_rates\": \"1000\"" to "\"pilot_rates\": 1000",
+                "\"stage_seconds\": 1" to "\"stage_seconds\": \"1\"",
+                "\"run_node_noise_probe\": false" to "\"run_node_noise_probe\": \"false\"",
+            )) {
+                require(before in document)
+                Files.writeString(profile, document.replace(before, after))
+                assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            }
         } finally {
             Files.deleteIfExists(profile)
         }

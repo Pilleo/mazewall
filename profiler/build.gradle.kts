@@ -179,6 +179,7 @@ tasks.register<JavaExec>("tierETrustworthyExperiment") {
     classpath = toolingSourceSet.runtimeClasspath
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/trustworthy.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
@@ -197,6 +198,7 @@ tasks.register<JavaExec>("tierENodeNoiseExperiment") {
     classpath = toolingSourceSet.runtimeClasspath
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/node-noise.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
@@ -215,6 +217,7 @@ tasks.register<JavaExec>("tierECapacityExperiment") {
     classpath = toolingSourceSet.runtimeClasspath
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/capacity.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
@@ -233,6 +236,8 @@ tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     classpath = toolingSourceSet.runtimeClasspath
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/rootful-gate.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
     val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierENativeBuild")
@@ -240,7 +245,7 @@ tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("rootful-phase", repositoryPath, output.get(), nativePackage.get())
+        args("rootful-phase-profile", repositoryPath, output.get(), profile.get(), nativePackage.get())
     }
 }
 
@@ -250,6 +255,7 @@ tasks.register<JavaExec>("tierERootfulGate") {
     classpath = toolingSourceSet.runtimeClasspath
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/rootful-gate.json")
     val output = providers.gradleProperty("tierEOutput")
     val phase = providers.gradleProperty("tierEPhaseArtifacts")
@@ -285,7 +291,6 @@ tasks.register<io.mazewall.build.TierEPhaseReplayTask>("tierEReplayPhaseEvidence
 
 fun registerTierENativeBuild(
     taskName: String,
-    defaultImage: String,
     defaultBuildType: String,
     defaultUsdt: String,
     outputName: String,
@@ -293,8 +298,27 @@ fun registerTierENativeBuild(
     group = "verification"
     description = "Cache only native binary and workload build outputs, never CTest execution"
     val docker = providers.gradleProperty("tierEDockerCli").orElse("/usr/bin/docker")
-    val endpoint = providers.environmentVariable("MAZEWALL_DOCKER_HOST").orElse("unix:///var/run/docker.sock")
-    val image = providers.gradleProperty("tierENativeImage").orElse(defaultImage)
+    val endpoint =
+        providers
+            .gradleProperty("tierEEndpoint")
+            .orElse(providers.environmentVariable("MAZEWALL_DOCKER_HOST"))
+            .orElse("unix:///var/run/docker.sock")
+    val defaultProfile = if (defaultBuildType == "Debug") "config/testing/tier-e/rootful-gate.json" else "config/testing/tier-e/trustworthy.json"
+    val profileFile = rootProject.file(providers.gradleProperty("tierEProfile").orElse(defaultProfile).get())
+    val profiledImage =
+        providers.fileContents(layout.file(providers.provider { profileFile })).asText.map { text ->
+            val container =
+                (groovy.json.JsonSlurper().parseText(text) as? Map<*, *>)?.get("container") as? Map<*, *>
+                    ?: error("Tier E native build profile lacks a container")
+            val selected = container["image"] as? String ?: error("Tier E native build profile lacks an image")
+            require(selected.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:/-]+"))) { "Invalid Tier E native build image" }
+            selected
+        }
+    val image =
+        profiledImage.zip(providers.gradleProperty("tierENativeImage").orElse(profiledImage)) { selected, requested ->
+            require(requested == selected) { "Native image override conflicts with selected Tier E experiment profile" }
+            selected
+        }
     val inspectedImage =
         providers
             .exec {
@@ -340,10 +364,9 @@ fun registerTierENativeBuild(
     artifactDirectory.set(layout.buildDirectory.dir(outputName))
 }
 
-registerTierENativeBuild("tierENativeBuild", "mazewall-tier-e-rootful:latest", "Debug", "false", "tier-e-native-artifacts")
+registerTierENativeBuild("tierENativeBuild", "Debug", "false", "tier-e-native-artifacts")
 registerTierENativeBuild(
     "tierETrustworthyNativeBuild",
-    "mazewall-tier-e-rootful:perf-20260919-external-profiler",
     "Release",
     (System.getProperty("os.arch") in setOf("amd64", "x86_64")).toString(),
     "tier-e-trustworthy-native-artifacts",

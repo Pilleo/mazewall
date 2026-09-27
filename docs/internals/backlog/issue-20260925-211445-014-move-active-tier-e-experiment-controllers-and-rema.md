@@ -66,6 +66,9 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleFingerprint.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBuilder.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileJson.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileEndpoint.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEAllowedCpuVerifier.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentCapacityProfile.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeArtifactPackage.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileExperimentRunner.kt"
@@ -115,6 +118,9 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuseTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeArtifactPackageTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeCompatibilityTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileLauncherTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileEndpointTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEAllowedCpuVerifierTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettingsTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageSummaryTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageStackIdentityTest.kt"
@@ -322,6 +328,17 @@ wall time. Host Gradle 9.6.1 TestKit-worker startup required excluding only
 that buildSrc task in the **clean-checkout cache probe**; the buildSrc
 functional cache contracts ran separately on the current host wrapper.
 No saved measurement was admitted as a fresh run.
+
+**Profile-first follow-up:** The normal trustworthy/capacity/node-noise
+launchers select their checked-in JSON when no legacy settings are present;
+`--legacy-env` and the existing prefixed variables retain historical replay.
+An explicit profile now rejects ambient legacy experiment settings, duplicate
+or escaped-equivalent keys, quoted numeric/boolean values, unavailable local
+CPUs, conflicting endpoint aliases, and a native-image override at odds with
+the selected profile. The Gradle-native artifact and phase-only controller
+derive image/CPU placement from the same chosen profile. A typed capacity
+resolved snapshot includes the pilot/decision schedule. These validations
+are configuration contracts, not default node-noise qualification.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

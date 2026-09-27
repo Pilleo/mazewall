@@ -3,6 +3,7 @@ package io.mazewall.profiler.tierE.tools
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -68,6 +69,17 @@ public data class TierEExperimentProfile(
     }
 
     public companion object {
+        public fun requireNoLegacyExperimentEnvironment(environment: Map<String, String> = System.getenv()) {
+            val conflicts = environment.keys.filter { name ->
+                name.startsWith("MAZEWALL_TIER_E_") ||
+                    name.startsWith("TIER_E_SUSTAINED_") ||
+                    name in setOf("TIER_E_DOCKER_IMAGE", "TIER_E_CONTAINER_ENGINE")
+            }
+            require(conflicts.isEmpty()) {
+                "Profile-selected Tier E run conflicts with legacy settings: ${conflicts.sorted()}; use --legacy-env for historical replay"
+            }
+        }
+
         private val fields = mapOf(
             "run_level" to "RUN_LEVEL",
             "benchmark_scope" to "BENCHMARK_SCOPE",
@@ -102,13 +114,41 @@ public data class TierEExperimentProfile(
             "benchmark_raw_sys_enter_audit" to "BENCHMARK_RAW_SYS_ENTER_AUDIT",
             "benchmark_exact_admission_audit" to "BENCHMARK_EXACT_ADMISSION_AUDIT",
         )
+        private val integerFields = setOf(
+            "forks",
+            "batches",
+            "warmups",
+            "iterations",
+            "decision_forks",
+            "child_timeout_seconds",
+            "worker_timeout_seconds",
+            "user_notif_child_timeout_seconds",
+            "sustained_rate_per_second",
+            "fixture_child_termination_after_millis",
+        )
+        private val booleanFields = setOf(
+            "require_decision_forks",
+            "perf_record",
+            "allocation_record",
+            "perf_jit_map",
+            "verify_build",
+            "calibration",
+            "benchmark_raw_sys_enter_audit",
+            "benchmark_exact_admission_audit",
+        )
 
         public fun load(profile: Path): TierEExperimentProfile {
-            val document = Json.parseToJsonElement(Files.readString(profile)) as? JsonObject
+            require(Files.size(profile) <= 65_536L) { "Tier E profile exceeds size bound" }
+            val text = Files.readString(profile)
+            TierEProfileJson.requireUniqueKeys(text)
+            val document = Json.parseToJsonElement(text) as? JsonObject
                 ?: throw IllegalArgumentException("Experiment profile must be a JSON object")
-            val version = document["schema_version"]?.jsonPrimitive?.intOrNull
+            val schema = document["schema_version"] as? JsonPrimitive
+            val version = schema?.takeUnless(JsonPrimitive::isString)?.intOrNull
             require(version in setOf(1, 2)) { "Unsupported experiment profile version" }
-            val kind = document.getValue("kind").jsonPrimitive.content
+            val selectedKind = document.getValue("kind").jsonPrimitive
+            require(selectedKind.isString) { "Experiment kind must be a JSON string" }
+            val kind = selectedKind.content
             require(kind in setOf("trustworthy", "node-noise", "capacity") && (version == 2 || kind != "capacity")) {
                 "Unknown experiment kind"
             }
@@ -121,13 +161,23 @@ public data class TierEExperimentProfile(
             val values = settings
                 .map { (field, item) ->
                 require(item is JsonPrimitive) { "Non-scalar experiment setting: $field" }
+                val valid = when (field) {
+                    in integerFields -> !item.isString && item.intOrNull != null
+                    in booleanFields -> !item.isString && item.booleanOrNull != null
+                    else -> item.isString
+                }
+                require(valid) { "Experiment setting has wrong JSON type: $field" }
                 "MAZEWALL_TIER_E_${fields.getValue(field)}" to item.content
             }.toMap()
             val noise = document["node_noise"] as? JsonObject ?: throw IllegalArgumentException("Missing node-noise settings")
             require(noise.keys == setOf("runs", "duration_seconds", "cpu")) { "Unknown node-noise setting" }
 
             fun number(field: String): Int =
-                noise.getValue(field).jsonPrimitive.intOrNull
+                noise
+                    .getValue(field)
+                    .jsonPrimitive
+                    .takeUnless(JsonPrimitive::isString)
+                    ?.intOrNull
                 ?: throw IllegalArgumentException("Invalid node-noise $field")
             val nodeNoise = NodeNoise(number("runs"), number("duration_seconds"), number("cpu"))
             require(nodeNoise.runs in 1..20 && nodeNoise.durationSeconds in 1..30 && nodeNoise.cpu >= 0) {
@@ -144,12 +194,25 @@ public data class TierEExperimentProfile(
             require(container == null || container.keys == setOf("image", "workload_cpu", "collector_cpu")) {
                 "Unknown or missing experiment container fields"
             }
-            val image = container?.getValue("image")?.jsonPrimitive?.content
-                ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+            val image = if (container == null) {
+                "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+            } else {
+                val configured = container.getValue("image").jsonPrimitive
+                require(configured.isString) { "Experiment image must be a JSON string" }
+                configured.content
+            }
             require(image.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:/-]+"))) { "Invalid experiment image" }
             val cpus = container?.let {
-                val workload = it.getValue("workload_cpu").jsonPrimitive.intOrNull
-                val collector = it.getValue("collector_cpu").jsonPrimitive.intOrNull
+                val workload = it
+                    .getValue("workload_cpu")
+                    .jsonPrimitive
+                    .takeUnless(JsonPrimitive::isString)
+                    ?.intOrNull
+                val collector = it
+                    .getValue("collector_cpu")
+                    .jsonPrimitive
+                    .takeUnless(JsonPrimitive::isString)
+                    ?.intOrNull
                 require(workload != null && collector != null && workload >= 0 && collector >= 0 && workload != collector) {
                     "Experiment CPUs must be distinct nonnegative integers"
                 }

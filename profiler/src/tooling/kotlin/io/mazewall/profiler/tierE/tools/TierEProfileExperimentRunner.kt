@@ -56,6 +56,10 @@ public object TierEProfileExperimentRunner {
         nativePackage: Path?,
     ) {
         val cpus = profile.cpuSet
+        cpus?.let { selected ->
+            val noisy = profile.kind == "node-noise" || profile.kind == "capacity" && profile.capacity?.runNodeNoiseProbe == true
+            TierEAllowedCpuVerifier.requireAvailable(if (noisy) "$selected,${profile.nodeNoise.cpu}" else selected)
+        }
 
         fun runTrustworthy(
             settings: TierETrustworthySettings,

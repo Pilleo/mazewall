@@ -16,6 +16,28 @@ class TierERunConfigurationTest {
     }"""
 
     @Test
+    fun `split fixture profile rejects quoted denominators and duplicate decoded keys`() {
+        val profile = Files.createTempFile("tier-e-strict-split-", ".json")
+        try {
+            for ((before, after) in listOf(
+                "\"image\":\"mazewall-tier-e-rootful:latest\"" to "\"image\":42",
+                "\"coverage\":true" to "\"coverage\":\"true\"",
+                "\"operations\":72" to "\"operations\":\"72\"",
+                "\"forks\":1" to "\"forks\":\"1\"",
+                "\"workload_cpu\":0" to "\"workload_cpu\":\"0\"",
+                "\"operations\":72" to "\"operations\":72,\"oper\\u0061tions\":24",
+            )) {
+                Files.writeString(profile, smoke.replace(before, after))
+                assertThrows(IllegalArgumentException::class.java) {
+                    TierERunConfiguration.load(profile, environment = emptyMap())
+                }
+            }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
     fun `version two models scenario build deadlines and artifact policy before controller execution`() {
         val profile = Files.createTempFile("tier-e-v2-", ".json")
         try {

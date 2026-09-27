@@ -17,6 +17,10 @@ class TierERootfulGateProfileTest {
             assertThrows(IllegalArgumentException::class.java) { TierERootfulGateProfile.load(profile) }
             Files.writeString(profile, input.replace("\"cpu_set\"", "\"cpus_typo\""))
             assertThrows(IllegalArgumentException::class.java) { TierERootfulGateProfile.load(profile) }
+            Files.writeString(profile, input.replace("\"mazewall-tier-e-rootful:latest\"", "42"))
+            assertThrows(IllegalArgumentException::class.java) { TierERootfulGateProfile.load(profile) }
+            Files.writeString(profile, input.replace("\"schema_version\":1", "\"schema_version\":\"1\""))
+            assertThrows(IllegalArgumentException::class.java) { TierERootfulGateProfile.load(profile) }
         } finally {
             Files.deleteIfExists(profile)
         }

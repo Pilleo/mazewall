@@ -2,6 +2,8 @@ package io.mazewall.profiler.tierE.tools
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 
 /** Typed capacity schedule adapter; no ambient experiment environment enters a selected profile. */
 internal object TierEExperimentCapacityProfile {
@@ -21,6 +23,8 @@ internal object TierEExperimentCapacityProfile {
         "shadow_on_failure" to "SHADOW_ON_FAILURE",
         "run_node_noise_probe" to "RUN_NODE_NOISE_PROBE",
     )
+    private val stringFields = setOf("pilot_rates", "run_level", "load", "receipt_clock")
+    private val booleanFields = setOf("run_decision", "shadow_on_failure", "run_node_noise_probe")
 
     fun load(
         section: JsonObject,
@@ -30,6 +34,12 @@ internal object TierEExperimentCapacityProfile {
         val values = section
             .map { (key, value) ->
             require(value is JsonPrimitive && value.content != "null") { "Invalid capacity setting: $key" }
+            val valid = when (key) {
+                in stringFields -> value.isString
+                in booleanFields -> !value.isString && value.booleanOrNull != null
+                else -> !value.isString && value.longOrNull != null
+            }
+            require(valid) { "Capacity setting has wrong JSON type: $key" }
             "MAZEWALL_TIER_E_SUSTAINED_${fields.getValue(key)}" to value.content
         }.toMap()
         return TierESustainedCapacitySettings.load(

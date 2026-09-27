@@ -225,6 +225,20 @@ These are still substantive controllers, not thin launchers:
   timings and from the still-unqualified node-noise account. The original
   Docker build-volume path remains a compatibility route; it is not treated
   as a new measurement or automatically deleted.
+  Profile-first shell launchers now select the checked-in trustworthy,
+  capacity and node-noise JSON without ambient experiment variables. A
+  prefixed legacy setting or explicit `--legacy-env` keeps historical env
+  invocation available; an explicitly selected profile rejects conflicting
+  legacy settings rather than silently ignoring them. Rootful gate shell
+  startup also preserves the old explicit engine/image override. The new
+  `tierEEndpoint` Gradle property is a machine-local socket override; the
+  native build task derives its image from the same selected profile and
+  rejects conflicting image overrides. Selected CPUs must belong to the
+  local effective Linux affinity before runner allocation. Experiment,
+  capacity, split-fixture and rootful JSON loaders reject duplicate decoded
+  keys and wrong JSON primitive types (including quoted denominators);
+  normal resolution retains a complete non-secret capacity schedule. These
+  profile validations do not relax the 10,000-operation noise oracle.
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.

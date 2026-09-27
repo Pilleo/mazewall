@@ -29,7 +29,7 @@ public object TierERootfulPhaseProbe {
         output: Path,
         endpoint: ContainerEndpoint,
     ) {
-        runPrepared(root, output, endpoint, null)
+        runPrepared(root, output, endpoint, null, null)
     }
 
     public fun runWithNativePackage(
@@ -38,7 +38,17 @@ public object TierERootfulPhaseProbe {
         endpoint: ContainerEndpoint,
         nativePackage: Path,
     ) {
-        runPrepared(root, output, endpoint, nativePackage)
+        runPrepared(root, output, endpoint, nativePackage, null)
+    }
+
+    public fun runProfile(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        profile: TierERootfulGateProfile,
+        nativePackage: Path? = null,
+    ) {
+        runPrepared(root, output, endpoint, nativePackage, profile)
     }
 
     private fun runPrepared(
@@ -46,10 +56,13 @@ public object TierERootfulPhaseProbe {
         output: Path,
         endpoint: ContainerEndpoint,
         nativePackage: Path?,
+        profile: TierERootfulGateProfile?,
     ) {
         require(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri?.startsWith("unix://") == true) {
             "Native phase acquisition requires local rootful Docker"
         }
+        val desiredCpuSet = profile?.cpuSet ?: "0,1"
+        TierEAllowedCpuVerifier.requireAvailable(desiredCpuSet)
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Native phase acquisition requires fresh artifacts" }
         val artifacts = output.toRealPath()
@@ -82,7 +95,8 @@ public object TierERootfulPhaseProbe {
         TierEMatrixTerminal.run(artifacts) {
             var primary: Throwable? = null
             try {
-                val image = "mazewall-tier-e-rootful:latest"
+                val image = profile?.image ?: "mazewall-tier-e-rootful:latest"
+                val cpuSet = desiredCpuSet
                 val imageId = docker("image", "inspect", image, "--format", "{{.Id}}")
                 require(imageId.startsWith("sha256:")) { "Native phase image identity unavailable" }
                 check(runContainerCommand(endpoint.command("volume", "inspect", owner.volume)).exitCode != 0)
@@ -144,7 +158,7 @@ public object TierERootfulPhaseProbe {
                     "--pid=host",
                     "--network=host",
                     "--userns=host",
-                    "--cpuset-cpus=0,1",
+                    "--cpuset-cpus=$cpuSet",
                     "--security-opt",
                     "seccomp=unconfined",
                     "-v",
@@ -192,7 +206,7 @@ public object TierERootfulPhaseProbe {
                     put("compiler", toolchain)
                     put("java", java)
                     put("native_build_cache", if (verifiedPackage == null) buildCache else "gradle:${verifiedPackage.sourceDigest}")
-                    put("cpu_set", "0,1")
+                    put("cpu_set", cpuSet)
                     put("run_id", id)
                     put("policy_eligibility", false)
                 }.toString() +
