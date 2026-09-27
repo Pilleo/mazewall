@@ -18,6 +18,7 @@ class TierEBenchmarkBundleBuilderTest {
             val cache = root.resolve("cache")
             val fingerprint = "c".repeat(64)
             val executed = mutableListOf<String>()
+            val gradleCommands = mutableListOf<List<String>>()
             val clock = AtomicLong(0)
             val status = TierEBenchmarkBundleBuilder.build(
                 root,
@@ -35,6 +36,7 @@ class TierEBenchmarkBundleBuilderTest {
                         Files.writeString(cache.resolve("native-$fingerprint/libmazewall_stack_agent.so"), "native")
                     }
                     command.first() == "env" -> {
+                        gradleCommands += command
                         val runtime = root.resolve("profiler/build/install/tier-e-daemon/lib")
                         Files.createDirectories(runtime)
                         Files.writeString(runtime.resolve("daemon.jar"), "jar")
@@ -43,6 +45,8 @@ class TierEBenchmarkBundleBuilderTest {
             }
             assertEquals("built", status)
             assertEquals(listOf("cmake", "cmake", "env"), executed)
+            assertTrue(gradleCommands.single().contains("--project-cache-dir"))
+            assertTrue(gradleCommands.single().contains(cache.resolve("gradle-project-cache").toString()))
             assertTrue(TierEBenchmarkBundleManifest.verify(bundle, fingerprint))
             val manifest = kotlinx.serialization.json.Json
                 .parseToJsonElement(Files.readString(bundle.resolve("manifest.json")))

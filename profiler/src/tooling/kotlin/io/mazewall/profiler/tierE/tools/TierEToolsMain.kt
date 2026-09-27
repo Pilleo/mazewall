@@ -42,9 +42,13 @@ public fun main(args: Array<String>) {
         Files.writeString(Path.of(args[2]), "${profile.resolvedJson()}\n")
         return
     }
-    if (args.size == 4 && args[0] in setOf("experiment-run", "node-noise-profile")) {
+    if (args.size == 4 && args[0] in setOf("experiment-run", "node-noise-profile", "capacity-profile")) {
         val profile = TierEExperimentProfile.load(Path.of(args[1]))
-        val requestedKind = if (args[0] == "experiment-run") "trustworthy" else "node-noise"
+        val requestedKind = when (args[0]) {
+            "experiment-run" -> "trustworthy"
+            "capacity-profile" -> "capacity"
+            else -> "node-noise"
+        }
         require(profile.kind == requestedKind) { "Profile kind must be $requestedKind" }
         val root = Path.of(args[2])
         val output = Path.of(args[3])
@@ -56,20 +60,7 @@ public fun main(args: Array<String>) {
             is EndpointSelection.Ready -> selected.endpoint
             is EndpointSelection.Skipped -> error("Tier E experiment requires rootful Docker: ${selected.reason}")
         }
-        val image = "mazewall-tier-e-rootful:perf-20260919-external-profiler"
-        when (requestedKind) {
-            "trustworthy" -> TierETrustworthyRunner.run(profile.trustworthy, endpoint, root, output, image)
-            else -> TierENodeNoiseProbe.run(
-                root,
-                output,
-                endpoint,
-                image,
-                profile.nodeNoise.runs,
-                profile.nodeNoise.durationSeconds,
-                profile.nodeNoise.cpu,
-                profile.trustworthy,
-            )
-        }
+        TierEProfileExperimentRunner.run(profile, root, output, endpoint)
         return
     }
     if (args.size == 3 && args[0] == "perf-evidence") {

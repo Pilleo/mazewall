@@ -26,6 +26,44 @@ class TierETrustworthySettingsTest {
     }
 
     @Test
+    fun `capacity profile owns image CPUs and exact stage schedule without ambient experiment variables`() {
+        val profile = Files.createTempFile("tier-e-capacity-profile-", ".json")
+        try {
+            val document = """
+                {
+                  "schema_version": 2,
+                  "kind": "capacity",
+                  "settings": {"run_level":"custom","benchmark_scope":"tier-e-sustained-collector",
+                    "sustained_rate_per_second":1000,"iterations":1000,"warmups":0,"calibration":false},
+                  "node_noise": {"runs":1,"duration_seconds":1,"cpu":2},
+                  "container": {"image":"mazewall-tier-e-rootful:latest","workload_cpu":0,"collector_cpu":1},
+                  "capacity": {"pilot_rates":"1000 2000","stage_seconds":1,"run_node_noise_probe":false}
+                }
+            """.trimIndent()
+            Files.writeString(profile, document)
+            val selected = TierEExperimentProfile.load(profile)
+            assertEquals("mazewall-tier-e-rootful:latest", selected.image)
+            assertEquals("0,1", selected.cpuSet)
+            assertEquals(listOf(1000, 2000), selected.capacity!!.pilotRates)
+            val stage = selected.capacity!!.plan(1000, 1, 1, "pilot")
+            assertEquals(1, stage.batches)
+            val settings = TierEProfileExperimentRunner.stageSettings(selected.trustworthy, selected.capacity!!, stage, false)
+            assertEquals(1000, settings.sustainedRate)
+            assertEquals(1000, settings.iterations)
+            assertEquals(1, settings.batches)
+            assertEquals(0, settings.warmups)
+            assertEquals("tier-e-sustained-collector", settings.scope)
+            assertTrue(settings.benchmarkJavaOptions.contains("benchmark-max-retained-records="))
+            Files.writeString(profile, document.replace("\"collector_cpu\":1", "\"collector_cpu\":0"))
+            assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+            Files.writeString(profile, document.replace("\"stage_seconds\":1", "\"stage_seconds\":1,\"unknown\":true"))
+            assertThrows(IllegalArgumentException::class.java) { TierEExperimentProfile.load(profile) }
+        } finally {
+            Files.deleteIfExists(profile)
+        }
+    }
+
+    @Test
     fun `sustained audit request remains an explicit benchmark-only guest option`() {
         val settings = TierETrustworthySettings.load(
             mapOf(

@@ -16,7 +16,10 @@ else
     usage
 fi
 # Bootstrap tooling from the checkout, not from the bundle being constructed.
-"${ROOT}/gradlew" --no-daemon :profiler:installDist >/dev/null
+CACHE_ROOT=${MAZEWALL_TIER_E_BUILD_CACHE_ROOT:-"${ROOT}/build/tier-e-benchmark-cache"}
+mkdir -p "${CACHE_ROOT}/gradle-home" "${CACHE_ROOT}/gradle-bootstrap-project-cache"
+GRADLE_USER_HOME="${CACHE_ROOT}/gradle-home" "${ROOT}/gradlew" --no-daemon \
+    --project-cache-dir "${CACHE_ROOT}/gradle-bootstrap-project-cache" :profiler:installDist >/dev/null
 case "$1" in
     --fingerprint)
         exec bash "${ROOT}/scripts/tier_e_tools" bundle-fingerprint "$2" "$3"

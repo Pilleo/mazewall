@@ -15,6 +15,9 @@ public data class TierEExperimentProfile(
     val kind: String,
     val trustworthy: TierETrustworthySettings,
     val nodeNoise: NodeNoise,
+    val image: String = "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    val cpuSet: String? = null,
+    val capacity: TierESustainedCapacitySettings? = null,
 ) {
     public data class NodeNoise(
         val runs: Int,
@@ -24,7 +27,7 @@ public data class TierEExperimentProfile(
 
     public fun resolvedJson(): JsonObject =
         buildJsonObject {
-        put("schema_version", 1)
+        put("schema_version", if (cpuSet == null) 1 else 2)
         put("kind", kind)
         put("configuration", trustworthy.resolvedJson())
         put(
@@ -36,6 +39,10 @@ public data class TierEExperimentProfile(
         },
         )
         put("policy_eligibility", false)
+        if (cpuSet != null) {
+            put("image", image)
+            put("cpu_set", cpuSet)
+        }
     }
 
     public companion object {
@@ -77,10 +84,16 @@ public data class TierEExperimentProfile(
         public fun load(profile: Path): TierEExperimentProfile {
             val document = Json.parseToJsonElement(Files.readString(profile)) as? JsonObject
                 ?: throw IllegalArgumentException("Experiment profile must be a JSON object")
-            require(document.keys == setOf("schema_version", "kind", "settings", "node_noise")) { "Unknown experiment profile fields" }
-            require(document["schema_version"]?.jsonPrimitive?.intOrNull == 1) { "Unsupported experiment profile version" }
+            val version = document["schema_version"]?.jsonPrimitive?.intOrNull
+            require(version in setOf(1, 2)) { "Unsupported experiment profile version" }
             val kind = document.getValue("kind").jsonPrimitive.content
-            require(kind in setOf("trustworthy", "node-noise")) { "Unknown experiment kind" }
+            require(kind in setOf("trustworthy", "node-noise", "capacity") && (version == 2 || kind != "capacity")) {
+                "Unknown experiment kind"
+            }
+            val required = setOf("schema_version", "kind", "settings", "node_noise") +
+                (if (version == 2) setOf("container") else emptySet()) +
+                (if (kind == "capacity") setOf("capacity") else emptySet())
+            require(document.keys == required) { "Unknown or missing experiment profile fields: ${document.keys - required}, ${required - document.keys}" }
             val settings = document["settings"] as? JsonObject ?: throw IllegalArgumentException("Missing experiment settings")
             require(settings.keys.all { it in fields }) { "Unknown experiment setting: ${settings.keys - fields.keys}" }
             val values = settings
@@ -100,7 +113,39 @@ public data class TierEExperimentProfile(
             }
             // A selected profile never inherits legacy experiment knobs. The endpoint remains
             // an explicit caller-supplied machine setting rather than a benchmark input.
-            return TierEExperimentProfile(kind, TierETrustworthySettings.load(values), nodeNoise)
+            val container = if (version == 2) {
+                document["container"] as? JsonObject
+                ?: throw IllegalArgumentException("Missing experiment container")
+            } else {
+                null
+            }
+            require(container == null || container.keys == setOf("image", "workload_cpu", "collector_cpu")) {
+                "Unknown or missing experiment container fields"
+            }
+            val image = container?.getValue("image")?.jsonPrimitive?.content
+                ?: "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+            require(image.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:/-]+"))) { "Invalid experiment image" }
+            val cpus = container?.let {
+                val workload = it.getValue("workload_cpu").jsonPrimitive.intOrNull
+                val collector = it.getValue("collector_cpu").jsonPrimitive.intOrNull
+                require(workload != null && collector != null && workload >= 0 && collector >= 0 && workload != collector) {
+                    "Experiment CPUs must be distinct nonnegative integers"
+                }
+                "$workload,$collector"
+            }
+            require(kind != "node-noise" || cpus == null || nodeNoise.cpu.toString() !in cpus.split(',')) {
+                "Node-noise CPU must differ from measured CPUs"
+            }
+            val trustworthy = TierETrustworthySettings.load(values)
+            val capacity = if (kind == "capacity") {
+                TierEExperimentCapacityProfile.load(
+                    document["capacity"] as? JsonObject ?: throw IllegalArgumentException("Missing capacity schedule"),
+                    trustworthy,
+                )
+            } else {
+                null
+            }
+            return TierEExperimentProfile(kind, trustworthy, nodeNoise, image, cpus, capacity)
         }
     }
 }

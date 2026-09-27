@@ -78,12 +78,15 @@ public object TierEBenchmarkBundleBuilder {
                     val stage = Files.createTempDirectory(cacheRoot, ".tier-e-runtime-")
                     try {
                         val gradleHome = Files.createDirectories(cacheRoot.resolve("gradle-home"))
+                        val gradleProjectCache = Files.createDirectories(cacheRoot.resolve("gradle-project-cache"))
                         execute(
                             listOf(
                                 "env",
                                 "GRADLE_USER_HOME=$gradleHome",
                                 repository.resolve("gradlew").toString(),
                             "--no-daemon",
+                                "--project-cache-dir",
+                                gradleProjectCache.toString(),
                                 ":profiler:installDist",
                             ),
                                 Duration.ofMinutes(10),

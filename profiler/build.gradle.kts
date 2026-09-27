@@ -203,6 +203,21 @@ tasks.register<JavaExec>("tierENodeNoiseExperiment") {
     }
 }
 
+tasks.register<JavaExec>("tierECapacityExperiment") {
+    group = "verification"
+    description = "Explicit profile-selected capacity stages with fresh rootful Docker evidence"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/capacity.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("capacity-profile", profile.get(), repositoryPath, output.get())
+    }
+}
+
 tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     group = "verification"
     description = "Fresh, never-cached rootful native phase acquisition without the full profiler suite"

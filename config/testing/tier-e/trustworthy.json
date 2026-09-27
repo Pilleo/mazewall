@@ -1,6 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "trustworthy",
   "settings": {"run_level": "smoke", "benchmark_scope": "full", "calibration": false, "forks": 1},
-  "node_noise": {"runs": 1, "duration_seconds": 1, "cpu": 2}
+  "node_noise": {"runs": 1, "duration_seconds": 1, "cpu": 2},
+  "container": {"image": "mazewall-tier-e-rootful:perf-20260919-external-profiler", "workload_cpu": 0, "collector_cpu": 1}
 }

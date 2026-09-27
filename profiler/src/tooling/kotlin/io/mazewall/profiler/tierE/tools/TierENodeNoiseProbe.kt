@@ -106,6 +106,7 @@ public object TierENodeNoiseProbe {
         durationSeconds: Int,
         noiseCpu: Int,
         targetSettings: TierETrustworthySettings? = null,
+        targetCpus: String? = null,
     ) {
         require(durationSeconds in 1..30 && noiseCpu >= 0)
         val executor = Executors.newSingleThreadExecutor()
@@ -152,6 +153,11 @@ public object TierENodeNoiseProbe {
                     "MAZEWALL_TIER_E_BENCHMARK_JAVA_OPTIONS" to "-Dmazewall.tier-e.attachment-ready-file=/artifacts/attachment-ready",
                 ),
                 )
+                val workloadCpus = targetCpus ?: if (targetSettings == null) {
+                    System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS") ?: "0,1"
+                } else {
+                    error("Profile-selected node-noise requires explicit target CPUs")
+                }
                 active = executor.submit {
                     TierETrustworthyRunner.run(
                         settings,
@@ -159,7 +165,7 @@ public object TierENodeNoiseProbe {
                         repository,
                         destination,
                         image,
-                        System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS") ?: "0,1",
+                        workloadCpus,
                     )
                 }
                 val manifest = destination.resolve("manifest.json")
