@@ -59,6 +59,9 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleManifest.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleFingerprint.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBuilder.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentCapacityProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileExperimentRunner.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestMain.kt"
@@ -77,6 +80,10 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyAllocationEvidence.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulSourceTransfer.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseEvidence.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuse.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifier.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkPhaseGate.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESustainedCapacitySettings.kt"
@@ -94,6 +101,11 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleManifestTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleFingerprintTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBuilderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBootstrapTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateProfileTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunnerTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuseTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettingsTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageSummaryTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageStackIdentityTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageReportTest.kt"
@@ -130,7 +142,31 @@ target_files:
   - "config/testing/tier-e/fault-recovery.json"
   - "config/testing/tier-e/long-matched.json"
   - "config/testing/tier-e/real-pid-reuse.json"
+  - "config/testing/tier-e/capacity.json"
+  - "config/testing/tier-e/node-noise.json"
+  - "config/testing/tier-e/trustworthy.json"
+  - "config/testing/tier-e/rootful-gate.json"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/README.md"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/raw-ctest.tar.gz"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/README.md"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/raw-gate.tar.gz"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/README.md"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/raw-capacity.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/README.md"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/raw-receipts.tar.gz"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/README.md"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/SHA256SUMS"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/manifest.json"
@@ -205,6 +241,44 @@ replace active trustworthy and node-noise setting env-vars at the new Gradle
 entrypoints; historical env launchers remain. A predetermined, source-pinned,
 interleaved previous/current comparison and a passing final aggregate rootful
 gate are still required before unblocking the handoff.
+
+**2026-09-27 clean pinned follow-up:** The prior/current source-pinned,
+interleaved native comparison is retained at
+[pinned phase evidence](../evidence/tier-e-pinned-native-comparison-20260927/README.md).
+Every individual CTest passed and the two revisions used identical native
+agent/workload class bytes. Unrestricted placement also failed for the old
+revision; explicit CPUs `0,1` completed all six planned prior/current runs
+under the unchanged 125% historical bounds. The later clean committed
+`de268c9e` [full rootful receipt](../evidence/tier-e-pinned-rootful-gate-20260927/README.md)
+passed 39 native CTests, the profiler/rootful/fresh-JVM suites and both phase
+modes with `policy_eligibility=false`. That receipt predates the separate
+`b8901ed7` capacity-profile and bundle-cache isolation slice. New version-two
+JSON experiment profiles explicitly select Docker image and measured CPUs;
+the [bounded typed capacity smoke](../evidence/tier-e-typed-capacity-20260927/README.md)
+completed twice after separating the bundle bootstrap and nested Gradle
+project caches from the operator's locked checkout. The 1,000/s one-second
+pilot is not a decision ceiling. The clean `b8901ed7` default five-pair
+[node-noise attempt](../evidence/tier-e-clean-node-noise-20260927/README.md)
+stopped on pair 1 when unique mode missed five of 10,000 declared IDs; the
+same-source unaudited no-noise control and one-pair audit-enabled diagnostic
+completed, but neither upgrades the default `INCOMPLETE` result. The
+post-slice aggregate gate needs its own result. Podman remains
+operator-deferred and this issue stays open.
+
+**2026-09-27 final rootful split:** The first clean post-capacity gate timed
+out one five-second four-thread fresh-JVM test under whole-container CPU
+pinning; its identical retry passed the live JVM suite but failed both
+`GetStackTrace` bounds. A child-only phase-first attempt also rejected the
+unchanged historical phase bound. Each failure retained an exact stopped
+runner, volume, `INCOMPLETE` terminal and raw evidence. The new
+[source-bound separated phase receipt](../evidence/tier-e-separated-phase-gate-20260927/README.md)
+for clean committed `ae38c8ab` passed three fresh CTests per native mode.
+The full rootful gate admitted it only after matching revision/source digest,
+image, exact native agent and Java workload SHA-256s, compiler/JDK, CPUs and
+replaying all six raw samples. The separate full gate then passed 39 native
+CTests and all required live profiler/fresh-JVM suites with `COMPLETE`,
+`policy_eligibility=false`. This is not a Podman or unaudited multi-pair
+node-noise qualification, and `REJECT_DEFAULT_PROMOTION` remains in force.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

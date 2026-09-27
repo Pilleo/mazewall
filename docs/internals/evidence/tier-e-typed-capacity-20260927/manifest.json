@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "qualification": "bounded_smoke_only_source_dirty",
+  "policy_eligibility": false,
+  "stage_rate": 1000,
+  "stage_seconds": 1,
+  "runs": [
+    {
+      "artifact": "tier-e-capacity-typed-bootstrap-1790468939",
+      "source_revision": "de268c9ec8fd4508d862811780eac192452d1377",
+      "source_fingerprint": "7c4be99af086db3182f852f747c81555e1658895868f7496ca833d142b391faf",
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "target_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "capacity_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "bundle_timing_ms": {
+        "fingerprint": 2813,
+        "native_configure": 372,
+        "native_build": 9316,
+        "gradle_install": 64608,
+        "staging": 4,
+        "total": 77115
+      }
+    },
+    {
+      "artifact": "tier-e-capacity-typed-warm-1790469298",
+      "source_revision": "de268c9ec8fd4508d862811780eac192452d1377",
+      "source_fingerprint": "7c4be99af086db3182f852f747c81555e1658895868f7496ca833d142b391faf",
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "target_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "capacity_terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "bundle_timing_ms": {
+        "fingerprint": 3901,
+        "native_configure": 191,
+        "native_build": 234,
+        "gradle_install": 0,
+        "staging": 11,
+        "total": 4339
+      }
+    }
+  ]
+}

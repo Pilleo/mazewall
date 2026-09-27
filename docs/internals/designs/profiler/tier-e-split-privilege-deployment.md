@@ -203,6 +203,20 @@ verdict on v2 evidence. The clean Kotlin Docker gate now passes the separately
 versioned comparable phase contract (disjoint key construction and lookup,
 exact capture counts and unchanged historical total bounds); see
 [`tier-e-comparable-phase-v2-20260926`](../../evidence/tier-e-comparable-phase-v2-20260926/README.md).
+For a separate fresh phase invocation, `tierERootfulPhaseProbe` now uses the
+same absolute native build path as the full gate. The gate's explicit
+`tierEPhaseArtifacts` option accepts only a `COMPLETE`, policy-ineligible
+phase terminal with all six unsymlinked raw CTest samples and matching phase
+verdicts. It checks the exact Git revision/source digest, Docker image ID,
+native agent **and Java workload class SHA-256s**, compiler/JDK identity and
+native CPU placement against its own build, then replays both modes against
+its own unchanged v2 baseline. Phase input is read-only; imported copies and
+the original terminal hash are retained in the aggregate evidence. A failing
+or foreign phase receipt retains the gate's owned runner/volume and cannot
+replace the 39 native CTests or fresh rootful/JVM integration suites. The
+clean [separated gate receipt](../../evidence/tier-e-separated-phase-gate-20260927/README.md)
+records one such fully bound passing run; default Tier E policy eligibility
+remains false.
 The rootful build has no writable host checkout or normal Gradle-cache mount.
 An interrupted or failing container cannot deposit root-owned build outputs
 there. Publication is checked stage by stage (copy, validation, host export,

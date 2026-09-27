@@ -153,6 +153,18 @@ These are still substantive controllers, not thin launchers:
   supersede the earlier v2 passing receipt, nor do they qualify this final
   revision. The final orchestrator handoff remains blocked; no phase threshold
   was increased or baseline replaced.
+  The subsequent **clean**, committed `de268c9e` gate explicitly pinned the
+  Docker runner to CPUs `0,1` through the versioned
+  `config/testing/tier-e/rootful-gate.json` profile. All 39 native CTests,
+  the profiler/rootful/fresh-JVM suites and both unchanged version-two phase
+  bounds passed with a complete, policy-ineligible terminal. The matched
+  [source-pinned phase comparison](../../evidence/tier-e-pinned-native-comparison-20260927/README.md)
+  retained 96/96 successful CTests across clean prior/current revisions using
+  the **same** native agent and Java workload bytes. Unrestricted placement
+  produced incomplete phase gates even for the earlier revision; explicit
+  `0,1` placement completed all six predeclared pinned runs. The earlier
+  failures remain preserved, not rebaselined. See the
+  [clean aggregate receipt](../../evidence/tier-e-pinned-rootful-gate-20260927/README.md).
   A subsequent execution split removed the gate's forced Gradle `--rerun-tasks`
   while keeping `integrationTest`, `integrationTestFreshJvm`, and
   `rootfulContainerTest` non-cacheable as live kernel evidence. A separate
@@ -163,13 +175,44 @@ These are still substantive controllers, not thin launchers:
   the same historical baseline and is Gradle-incremental. Two same-binary
   native-only probes completed with different run IDs in 23 and 10 seconds;
   earlier probes on source-dirty diagnostic worktrees failed the unchanged
-  timing guard. These are diagnostics, not an interleaved clean-revision
-  prior/current comparison or a replacement for the final aggregate gate.
+  timing guard. Those first two runs are diagnostics, not the later
+  interleaved clean-revision comparison or a replacement for the aggregate
+  gate.
   The new `tierETrustworthyExperiment` and `tierENodeNoiseExperiment` tasks
-  select strict version-one experiment JSON profiles rather than operator
-  benchmark variables; legacy environment-based entrypoints remain available
-  for historical reproduction. Machine-local Docker endpoint selection remains
-  separate. Neither default node-noise qualification nor Podman parity changes.
+  select strict experiment JSON profiles rather than operator benchmark
+  variables. Version-two profiles also pin image and workload/collector CPUs,
+  and `tierECapacityExperiment` resolves its typed pilot/decision schedule from
+  `config/testing/tier-e/capacity.json`. Legacy environment-based entrypoints
+  remain available for historical reproduction. The bundle's bootstrap and
+  nested Gradle builds use owned project caches to avoid host-checkout locks;
+  two bounded 1,000-operation typed pilots completed with an independently
+  [retained cache receipt](../../evidence/tier-e-typed-capacity-20260927/README.md).
+  Machine-local Docker endpoint selection remains separate. These short pilots
+  do not qualify a capacity ceiling. The subsequent **clean `b8901ed7`**
+  default five-pair node-noise profile correctly stopped at its first
+  incomplete target: full-stream matched 10,000/10,000, unique mode missed
+  five consecutive IDs, and zero complete pairs were published. The same
+  source/image/agent's separate unaudited no-noise control and one-pair
+  audit-enabled noisy diagnostic both completed. Those do not repair or
+  attribute the intermittent default-path observation gap; see the
+  [fail-closed receipts](../../evidence/tier-e-clean-node-noise-20260927/README.md).
+  Podman parity remains operator-deferred and unverified.
+  The post-capacity clean `b8901ed7` gate's first run timed out one
+  four-thread JVM test under a whole-container two-CPU limit; an identical
+  retry passed the JVM suites but failed both native `GetStackTrace` phase
+  bounds. Measuring phase first while pinning only the CTest child still
+  produced an `INCOMPLETE` timing result. All three failures and their
+  recovery receipts remain retained. The [subsequent clean
+  `ae38c8ab` gate](../../evidence/tier-e-separated-phase-gate-20260927/README.md)
+  separated acquisition from JVM testing: a fresh, isolated six-sample
+  native phase passed the **unchanged** v2 bounds, then the full rootful gate
+  required the exact same source revision/digest, image ID, native agent and
+  workload SHA-256s, JDK/compiler and CPUs before independently replaying
+  every phase sample. All 39 native CTests and the fresh unrestricted-CPU
+  profiler/kernel/JVM suites passed; the aggregate terminal was `COMPLETE`
+  and policy-ineligible. No cached test or unrelated phase result can replace
+  live kernel validation. This still does not qualify the incomplete default
+  node-noise lane or deferred Podman parity.
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.

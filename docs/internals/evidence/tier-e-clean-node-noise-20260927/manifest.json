@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "policy_eligibility": false,
+  "qualification": "INCOMPLETE_DEFAULT_NODE_NOISE",
+  "predeclared_default_pairs": 5,
+  "completed_default_pairs": 0,
+  "audited_diagnostic_pairs": 1,
+  "runs": [
+    {
+      "label": "default_noisy_incomplete",
+      "revision": "b8901ed7c943829ae4a4d8a173afd59cfbc7c8e4",
+      "source_fingerprint": "d53caac1583fcc7d0be31033552adfe9b25509f41bc60b0f4c3369c5b40d5ba5",
+      "source_benchmark_input_dirty_count": 0,
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "cpu_set": "0,1",
+      "terminal": {
+        "schema_version": 1,
+        "success": false,
+        "reason": "INCOMPLETE",
+        "policy_eligibility": false
+      },
+      "full_fork_missing_operations": 0,
+      "unique_fork_missing_operations": null,
+      "missing_id_samples": [
+        9632,
+        9633,
+        9634,
+        9635,
+        9636
+      ]
+    },
+    {
+      "label": "audit_enabled_noisy_one_pair",
+      "revision": "b8901ed7c943829ae4a4d8a173afd59cfbc7c8e4",
+      "source_fingerprint": "d53caac1583fcc7d0be31033552adfe9b25509f41bc60b0f4c3369c5b40d5ba5",
+      "source_benchmark_input_dirty_count": 0,
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "cpu_set": "0,1",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "full_fork_missing_operations": 0,
+      "unique_fork_missing_operations": 0,
+      "missing_id_samples": []
+    },
+    {
+      "label": "unaudited_no_noise_control",
+      "revision": "b8901ed7c943829ae4a4d8a173afd59cfbc7c8e4",
+      "source_fingerprint": "d53caac1583fcc7d0be31033552adfe9b25509f41bc60b0f4c3369c5b40d5ba5",
+      "source_benchmark_input_dirty_count": 0,
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "cpu_set": "0,1",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "full_fork_missing_operations": 0,
+      "unique_fork_missing_operations": 0,
+      "missing_id_samples": []
+    }
+  ]
+}

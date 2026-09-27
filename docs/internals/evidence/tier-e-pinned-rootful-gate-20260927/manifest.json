@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "qualifies": "rootful_docker_full_gate_at_de268c9e_only",
+  "source_revision": "de268c9ec8fd4508d862811780eac192452d1377",
+  "source_snapshot": "clean committed detached clone",
+  "terminal": {
+    "schema_version": 1,
+    "success": true,
+    "reason": "COMPLETE",
+    "policy_eligibility": false
+  },
+  "native_ctests": 39,
+  "fresh_jvm_suites": {
+    "TierEEndToEndIntegrationTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "TierEDaemonNativeWorkflowIntegrationTest": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "phase_v2": {
+    "full": {
+      "mode": "full",
+      "status": "PASS",
+      "reason": "complete",
+      "phase_contract_version": 2,
+      "get_stack_trace_ns": 1634066,
+      "raw_key_ns": 12593,
+      "canonical_cache_lookup_ns": 664863,
+      "logical_metadata_ns": 425893,
+      "key_lookup_logical_total_ns": 1111795,
+      "historical_total_ns": 10730232,
+      "historical_total_limit_ns": 13412790,
+      "policy_eligibility": false
+    },
+    "unique": {
+      "mode": "unique",
+      "status": "PASS",
+      "reason": "complete",
+      "phase_contract_version": 2,
+      "get_stack_trace_ns": 1621907,
+      "raw_key_ns": 12425,
+      "canonical_cache_lookup_ns": 653623,
+      "logical_metadata_ns": 394162,
+      "key_lookup_logical_total_ns": 1060377,
+      "historical_total_ns": 1695220,
+      "historical_total_limit_ns": 2119025,
+      "policy_eligibility": false
+    }
+  },
+  "native_build": {
+    "source_digest": "07f61294ec5fb2a722beeb63792b6901685f31064540c00b610a15b0cc576e1b",
+    "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+    "compiler": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS",
+    "cpu_set": "0,1",
+    "build_cache": "mazewall-tier-e-rootful-native-10d51b27d500a6cc07c571cd",
+    "policy_eligibility": "false"
+  },
+  "policy_eligibility": false
+}

@@ -15,6 +15,10 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyContainerOwner.kt"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -115,3 +119,19 @@ noisy attempt missed two operations. This issue remains **open** until a
 source-pinned, predetermined multi-pair noisy/control result reconciles every
 declared operation without audit-dependent qualification. Historical baseline,
 resource budgets, and operation denominators remain unchanged.
+
+### 2026-09-27 clean-source default profile and matched controls
+
+[Sealed Docker receipts](../evidence/tier-e-clean-node-noise-20260927/README.md)
+pin `b8901ed7`, the same source fingerprint, image/native binary and target
+CPUs `0,1`. A predeclared five-pair **unaudited** noisy profile failed closed
+on its first target: full-stream matched 10,000/10,000 but the later unique
+fork missed IDs `9632`–`9636` (5/10,000), so zero complete pairs were published.
+The exact runner/volume were retained for recovery. A separate one-pair
+**audit-enabled** noisy diagnostic recovered all 10,000 raw entries and exact
+submissions in both forks; a separate unaudited no-noise control matched both
+forks. Neither positive result explains the intermittent default-path gap or
+permits attributing the five missing IDs solely to noise. This issue stays
+**open**; do not reduce the operation denominator, reclassify incomplete
+targets as samples, or treat these unequal instruments as paired performance
+rates.
