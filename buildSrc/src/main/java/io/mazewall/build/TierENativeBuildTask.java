@@ -97,13 +97,13 @@ public abstract class TierENativeBuildTask extends DefaultTask {
         try {
             String uid = Files.getAttribute(root, "unix:uid").toString();
             String gid = Files.getAttribute(root, "unix:gid").toString();
-            String command = "cmake -S /workspace/profiler-native -B /workspace/profiler-native/build "
+            String command = "cmake -S /workspace/profiler-native -B /workspace/native-build "
                 + "-DCMAKE_BUILD_TYPE=" + variant + " -DMAZEWALL_ENABLE_TIER_E_USDT=" + getUsdtEnabled().get()
-                + " && cmake --build /workspace/profiler-native/build -j2";
+                + " && cmake --build /workspace/native-build -j2";
             execution.exec(spec -> {
                 spec.commandLine(getDockerExecutable().get().getAsFile(), "run", "--rm", "--userns=host", "--user", uid + ":" + gid,
                     "-v", root + ":/workspace/profiler-native:ro",
-                    "-v", working + ":/workspace/profiler-native/build",
+                    "-v", working + ":/workspace/native-build",
                     "-w", "/workspace", image, "/bin/sh", "-c", command);
                 spec.environment("DOCKER_HOST", getDockerEndpoint().get());
             }).assertNormalExitValue();
@@ -217,7 +217,7 @@ public abstract class TierENativeBuildTask extends DefaultTask {
             throw new IllegalArgumentException("Native artifact ownership manifest is invalid");
         }
         String body = document.substring(begin + marker.length(), end - 1);
-        Matcher entries = Pattern.compile("\"([A-Za-z0-9._/-]+)\":\"([a-f0-9]{64})\"").matcher(body);
+        Matcher entries = Pattern.compile("\"([A-Za-z0-9._/$-]+)\":\"([a-f0-9]{64})\"").matcher(body);
         var declared = new java.util.HashSet<String>();
         while (entries.find()) {
             String name = entries.group(1);

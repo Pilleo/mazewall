@@ -21,7 +21,7 @@ final class TierENativeBuildTaskFunctionalTest {
                 #!/bin/sh
                 while [ "$#" -gt 0 ]; do
                     if [ "$1" = "-v" ]; then
-                        case "$2" in *:/workspace/profiler-native/build) output=${2%:/workspace/profiler-native/build};; esac
+                        case "$2" in *:/workspace/native-build) output=${2%:/workspace/native-build};; esac
                         shift 2
                     else shift; fi
                 done
@@ -30,6 +30,7 @@ final class TierENativeBuildTaskFunctionalTest {
                 printf fixture > "$output/dummy_test"
                 chmod +x "$output/dummy_test"
                 printf class > "$output/agent-test-classes/AgentWorkload.class"
+                printf inner > "$output/agent-test-classes/RedefinitionAgent\\$1.class"
                 printf jar > "$output/agent-test-classes/redefinition-agent.jar"
                 """);
             docker.toFile().setExecutable(true);
