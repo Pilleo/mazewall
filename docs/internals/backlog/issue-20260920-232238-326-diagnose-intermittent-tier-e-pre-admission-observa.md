@@ -11,6 +11,9 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBenchmarkAuditMapReader.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfMapAllocator.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditCount.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditMap.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
@@ -47,6 +50,18 @@ target_files:
   - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/raw-pair.tar.gz"
+  - "docs/internals/evidence/tier-e-v4-verifier-eligibility-20260927/README.md"
+  - "docs/internals/evidence/tier-e-v4-verifier-eligibility-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-v4-verifier-eligibility-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v4-verifier-eligibility-20260927/raw-verifier.tar.gz"
+  - "docs/internals/evidence/tier-e-v4-post-session-guard-20260927/README.md"
+  - "docs/internals/evidence/tier-e-v4-post-session-guard-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-v4-post-session-guard-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v4-post-session-guard-20260927/raw-verifier.tar.gz"
+  - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/README.md"
+  - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/raw-verifier.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -382,3 +397,88 @@ No additional run may be selected merely because this one passed. The
 next work is to isolate the pre-arm target/session gate versus program
 dispatch when the deficit recurs, with per-ID evidence before any core BPF
 change. Timing stability and default node-noise closure remain blocked.
+
+**Version-four feasibility gate before BPF edits:** The real branch order in
+both direct-raw programs is low32 `openat` → current TGID helper → **session
+map lookup and target comparison** → common arm lookup → early aggregate
+counter → `pt_regs` argument read → declared-descriptor hash. The two
+opposite failed runs cannot distinguish a missing callback from a
+pre-counter session/target diversion. Engine installation receives the
+positive target TGID, but `TierEKernelSmoke` reads declared FDs only after
+constructing its `TierEOptions`/session and before installation; therefore
+derive the independent target comparison from that install argument and
+create a **fixed** benchmark-only descriptor array, not a late-size map or
+new public API. Use at most 131,072 keys (the existing benchmark audit cap)
+with five 64-bit slots per key: declared marker, raw/main pre-session and
+raw/main post-session (5,242,880 map value bytes plus kernel overhead).
+Reject an oracle FD outside `0..131071` before attaching, mark only the
+declared entries after attach, and arm both programs only after this and
+the older audit maps are configured. A per-ID count must follow an
+immutable installed-TGID check and a successful argument read, but **precede**
+the mutable session-map lookup; an explicit read/lookup failure makes the
+diagnostic `INCOMPLETE`, never zero by assumption. The second stage follows
+successful session/TGID admission. This is opt-in on the selected direct-
+raw backend; the default linear-scan program and historical v3 reports
+remain unchanged. If this bounded shape cannot load, stop with the verifier
+log rather than changing core program architecture to obtain a PASS.
+
+**Version-four implementation pending kernel verifier:** The shared arm
+array retains v3 raw/main target counters and adds six failure slots for
+raw/main argument-read and before/after indexed-map lookup errors. A fixed,
+benchmark-only five-u64-per-FD array holds the declared marker and raw/main
+pre-/post-session counts; the 131,072-key cap reserves 5,242,880 value
+bytes plus kernel overhead. The installed positive TGID is an immediate in
+both *direct-raw* diagnostic programs, independent of the mutable session
+map. The before-session checkpoint reads the descriptor only after the
+common arm, classifies unrelated negative/out-of-range FDs as ambient,
+and increments declared keys before the existing session gate. The after-
+session checkpoint runs after that gate but before later attribution.
+Failed reads/lookups remain explicit counters; map setup, verifier and
+kernel failures stop the instrumented run. Legacy v3 reports, default
+BPF bytecode, the 152-byte exact-audit map and operation denominators
+remain untouched. Test-first builder/classifier checks pass; a real
+verifier-load and clean acquisition have **not** yet occurred, so no new
+delivery or causal claim is made here.
+
+**First v4 verifier stopped on a probe bug:** The [sealed source-dirty
+verifier](../evidence/tier-e-v4-verifier-eligibility-20260927/README.md)
+loaded the bounded array but stopped on its first full fork. Raw/main
+pre-session ID counts were 10,000/10,000 and their armed target aggregates
+were 10,002/10,002, but main after-session and exact submissions counted
+32,847 and 30,000. Those impossible per-ID multiplicities resulted from
+the **new diagnostic helper** leaving `r5` nonzero before the older
+exact-audit eligibility initialization, not a classified kernel delivery
+loss. The exact stopped runner/volume were retained. A bytecode test failed
+on this register initialization before the opt-in v4-only reset made it
+pass. This fork cannot classify main versus raw dispatch; re-verify the
+changed source once, rather than repeating an unchanged failing verifier.
+
+**Second changed-source v4 verifier also stopped on an instrument-only
+branch:** [Sealed receipts](../evidence/tier-e-v4-post-session-guard-20260927/README.md)
+showed raw/main pre-session 10,000/10,000, raw post-session 10,000 and
+exact submissions 10,000, but main post-session counted **33,045**.
+The opt-in main post-session diagnostic read the previously saved FD even
+on later non-`openat` syscalls; those counts were not real declared opens.
+A new builder test failed before and passed after guarding that lookup on
+the low32 `openat` number. The failed full fork stopped before unique mode,
+and its exact runner/volume remain retained. A separately predeclared
+changed-source verifier may check this *one demonstrated probe fix*; if
+another instrumented fork is still incoherent, stop and review the
+diagnostic architecture rather than continuing a success-seeking series.
+
+**Third predeclared verifier reached the architecture stop:** The [sealed
+source-dirty receipt](../evidence/tier-e-v4-architecture-stop-20260927/README.md)
+stopped on its first full fork. Main exact submission was 10,000/10,000;
+raw observed 9,997/10,000 on CPU 1 and missed IDs `7746`–`7748`. Armed
+raw/main target totals were 10,000/10,003; raw/main pre- and post-session
+*aggregate* descriptor totals were each 9,997/10,000. Read/map failure
+counters and ring loss were zero. Those totals do **not** establish a
+particular ID's pre-gate branch or prove raw program non-execution.
+The classifier incorrectly labeled unrelated repeated low32 descriptors
+as missing main hash entries; these lower-numbered ambient FDs filled its
+16 slots before the three missing raw IDs. Its `pre_gate_audit_boundary`
+field is **not decision-quality** for this fork. Unique mode and the clean
+v4 series were not started; the stopped runner and volume are retained.
+Stop further probe fixes and kernel acquisition until the diagnostic
+architecture and per-ID evidence representation receive explicit review.
+The five-pair unaudited qualification remains `INCOMPLETE`.

@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "status": "INCOMPLETE_INSTRUMENTATION_DEFECT",
+  "policy_eligibility": false,
+  "default_promotion": "REJECT_DEFAULT_PROMOTION",
+  "source_revision": "87e8743597b04b790d2b92a80776cbff59c5cfaa",
+  "source_dirty": true,
+  "failed_mode": "dictionary_full_stream",
+  "raw_declared": 10000,
+  "main_pre_session_declared": 10000,
+  "raw_after_session_declared": 10000,
+  "main_after_session_declared": 33045,
+  "main_exact_submissions": 10000,
+  "early_raw_target_openat": 10002,
+  "early_main_target_openat": 10002,
+  "kernel_ring_loss": 0,
+  "instrumentation_defect": "v4 main post-session lookup ran on non-openat and reused stale descriptor scratch; focused bytecode regression failed before and passed after the syscall guard",
+  "runner": "tier-e-trustworthy-7021809b-fd88-4f55-8c51-062a6d8168ee-runner",
+  "volume": "tier-e-trustworthy-7021809b-fd88-4f55-8c51-062a6d8168ee-artifacts",
+  "resource_state": "RETAINED_FOR_RECOVERY",
+  "host_local_artifacts": "/tmp/tier-e-v4-eligibility-fixed-1790547258*"
+}

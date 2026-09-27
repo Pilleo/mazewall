@@ -259,6 +259,34 @@ These are still substantive controllers, not thin launchers:
    loss. It is one instrumented positive pair, not causal proof about the
    earlier shortfalls or a substitute for the still-incomplete five-pair
    unaudited decision.
+   An additional benchmark-only **version-four** experiment is bounded to
+   the selected direct-raw backend and both audits enabled: immutable
+   install-time TGID, one shared arm point, and a fixed-capacity 131,072-key
+   array (40 aligned bytes/key) recording declared raw/main IDs before and
+   after the mutable session gate. Early read/array lookup failures are
+   explicit; unrelated negative/out-of-range FDs are skipped, while a
+   declared out-of-range FD fails before attachment. Host verifier loading
+   and one clean source-pinned discriminator remain pending. It cannot
+   identify BPF non-execution from a zero earliest count alone, and does
+   not replace the default unaudited qualification.
+   The first [source-dirty v4 verifier](../../evidence/tier-e-v4-verifier-eligibility-20260927/README.md)
+   loaded the fixed array but stopped because the new pre-gate helper
+   contaminated the older audit's initial eligibility register. The
+   impossible multi-counts are an **instrumentation defect**; a red/green
+   bytecode test covers the v4-only reset. Re-verification and clean
+   acquisition remain pending, and the default BPF scan is unchanged.
+   A second [source-dirty v4 verifier](../../evidence/tier-e-v4-post-session-guard-20260927/README.md)
+   corrected exact counts but failed closed on an opt-in main post-session
+   lookup that did not exclude non-`openat` events. A focused red/green
+   test covers its new syscall guard; no default-path/kernel-delivery
+   inference transfers from those inflated diagnostic counters.
+   A third [predeclared v4 verifier](../../evidence/tier-e-v4-architecture-stop-20260927/README.md)
+   stopped with three raw target IDs missing while main exact admission
+   was complete. Its new 16-slot classifier filled with ambient repeated
+   descriptors rather than the missing raw IDs; aggregate differences are
+   retained, but per-ID gate attribution is not valid. This is an
+   **architecture-review stop** for the opt-in diagnostic; the clean v4
+   series was not run and the default filter/decision is unchanged.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
