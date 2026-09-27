@@ -252,6 +252,13 @@ These are still substantive controllers, not thin launchers:
    both main low32 and exact admission. It retained its stopped runner and
    volume. This narrows a development hypothesis to at or before the main
    early counter; no production branch or default decision is changed.
+   The separately [sealed clean version-three control/noisy
+   pair](../../evidence/tier-e-clean-armed-predecode-20260927/README.md)
+   completed both full+unique forks per arm with all 10,000 descriptor raw
+   entries and exact submissions, equal armed early totals, and zero ring
+   loss. It is one instrumented positive pair, not causal proof about the
+   earlier shortfalls or a substitute for the still-incomplete five-pair
+   unaudited decision.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

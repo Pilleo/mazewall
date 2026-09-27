@@ -43,6 +43,10 @@ target_files:
   - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/raw-pilots.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-armed-predecode-20260927/raw-pair.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -360,3 +364,21 @@ and exact runner/volume are retained under
 `/tmp/tier-e-armed-v3-smoke-1790541641*` and in the same sealed archive. A clean committed-source
 predeclared diagnostic is required before attributing this result; do not
 rerun the failed arm merely to obtain a positive sample.
+
+**One predeclared clean-source v3 diagnostic pair:** The [sealed arm
+receipts](../evidence/tier-e-clean-armed-predecode-20260927/README.md)
+pin clean `0cb0b3ee`, one source fingerprint, Docker image/native agent,
+target CPUs `0,1`, unrelated CPU `2`, and the unchanged 10,000-op/1,000/s
+full+unique schedule for control then noisy. All four forks independently
+matched **10,000 raw descriptor entries, 10,000 exact submissions,
+30,000 kernel exact/ring-ready records**, with zero ring loss. Armed early
+target `openat` totals were **raw=10,002/main=10,002** each time (including
+two unrelated target opens), and all four paired diagnostic verdicts passed.
+The noisy observation was bound to the first full-stream PID; it does not
+prove overlap with the later unique fork. This is **one audited pair** with
+`policy_eligibility=false`, not a regression fix, not proof of the cause of
+the earlier eight-ID failures and not the required *five unaudited* pairs.
+No additional run may be selected merely because this one passed. The
+next work is to isolate the pre-arm target/session gate versus program
+dispatch when the deficit recurs, with per-ID evidence before any core BPF
+change. Timing stability and default node-noise closure remain blocked.
