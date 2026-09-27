@@ -19,6 +19,20 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 5 && args[0] == "node-noise-qualification") {
+        TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
+        val profile = TierEExperimentProfile.load(Path.of(args[1]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+            EndpointConfig(ContainerEngine.DOCKER, TierEProfileEndpoint.select()),
+        )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Node-noise qualification requires rootful Docker: ${selected.reason}")
+        }
+        TierENodeNoiseQualification.run(profile, Path.of(args[2]), Path.of(args[3]), endpoint, Path.of(args[4]))
+        return
+    }
     if (args.size == 4 && args[0] == "phase-replay-dir") {
         TierERootfulPhaseEvidence.replay(Path.of(args[1]), Path.of(args[2]), Path.of(args[3])).getOrThrow()
         return

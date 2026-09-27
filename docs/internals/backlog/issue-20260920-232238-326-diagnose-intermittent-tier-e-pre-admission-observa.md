@@ -12,6 +12,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseQualification.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseQualificationTest.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyContainerOwner.kt"
@@ -148,3 +150,21 @@ full-stream overlap only unless it explicitly observes a separate unique-mode
 attachment and overlaps that mode. Preserve full+unique exact-operation
 oracles either way; do not infer the missing-ID cause from the first-fork
 marker.
+
+**Next predeclared diagnostic (2026-09-27, before acquisition):** Use one
+clean committed source snapshot, the checked-in `node-noise.json` schedule,
+the exact rootful Docker image/native package, CPUs `0,1` for the profiled
+target and CPU `2` for the unrelated process. Select the **unaudited**
+10,000-operation/1,000-per-second full+unique target without changing the
+denominator. Execute five control/noisy pairs in order
+`control,noisy | noisy,control | control,noisy | noisy,control | control,noisy`.
+The Kotlin scheduler validates both modes and all 10,000 IDs per target,
+requires identical source/image/agent/CPU identities, and writes each pair
+immediately after both arms complete. Stop on the first failed arm with an
+`INCOMPLETE` terminal, preserve earlier pairs and the exact retained runner,
+and report the missing admission boundary rather than rerunning until green.
+Only the first full-stream fork has proven noise overlap; no noisy unique
+comparison is claimed. An audit-enabled one-pair diagnostic, if subsequently
+needed, stays a separate instrumented series and cannot upgrade this default
+decision. Store the chosen committed HEAD and exact image digest with the
+series plan **before** starting a container.

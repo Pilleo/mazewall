@@ -211,6 +211,25 @@ tasks.register<JavaExec>("tierENodeNoiseExperiment") {
     }
 }
 
+tasks.register<JavaExec>("tierENodeNoiseQualification") {
+    group = "verification"
+    description = "Explicit five-pair fail-closed control/noise comparison; both 10,000-operation modes must be exact"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    providers.gradleProperty("tierEEndpoint").orNull?.let { systemProperty("mazewall.tier-e.endpoint", it) }
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/node-noise.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierETrustworthyNativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("node-noise-qualification", profile.get(), repositoryPath, output.get(), nativePackage.get())
+    }
+}
+
 tasks.register<JavaExec>("tierECapacityExperiment") {
     group = "verification"
     description = "Explicit profile-selected capacity stages with fresh rootful Docker evidence"
