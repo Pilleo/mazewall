@@ -213,6 +213,18 @@ These are still substantive controllers, not thin launchers:
   and policy-ineligible. No cached test or unrelated phase result can replace
   live kernel validation. This still does not qualify the incomplete default
   node-noise lane or deferred Podman parity.
+  Gradle now owns a cacheable native **build-artifact package** (not CMake
+  intermediate state or CTest results). The rootful, phase-only and
+  profile-selected trustworthy/capacity/noise controllers validate native
+  source, selected image/toolchain/build flags and every packaged file hash
+  before loading binaries into per-run writable CMake directories. A second
+  clean checkout restored the package `FROM-CACHE` in six seconds after the
+  first built in 24 seconds; all 39 native CTests then executed afresh. The
+  [cache receipt](../../evidence/tier-e-gradle-portable-cache-20260927/README.md)
+  separates this from intermediate source-dirty, short matched workload
+  timings and from the still-unqualified node-noise account. The original
+  Docker build-volume path remains a compatibility route; it is not treated
+  as a new measurement or automatically deleted.
   The bundle entrypoint bootstraps Kotlin
   tooling from the checkout and delegates source fingerprinting, native/runtime
   cache staging, manifest verification, and bundle replacement to Kotlin.

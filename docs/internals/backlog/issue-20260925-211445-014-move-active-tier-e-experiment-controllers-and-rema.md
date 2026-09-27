@@ -177,6 +177,10 @@ target_files:
   - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/raw-receipts.tar.gz"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/README.md"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/raw-receipts.tar.gz"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/README.md"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/SHA256SUMS"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/manifest.json"
@@ -304,6 +308,20 @@ The clean `ae38c8ab` split gate remains a historical PASS, not a new result
 for future code edits. Failed unpinned/whole-runner-pinned gates and the clean
 `b8901ed7` missing-operation run retain their evidence and original policy
 ineligibility.
+
+**Portable compilation and warm-cost receipt:** The
+[Gradle-native cache diagnostic](../evidence/tier-e-gradle-portable-cache-20260927/README.md)
+demonstrates a real `FROM-CACHE` 23-file native package across two clean
+checkouts, followed by fresh 39/39 native CTests using the restored binaries.
+Rootful/phase controllers and profile-selected trustworthy/capacity/noise
+paths validate and consume immutable package bytes while kernel and JVM tests
+still run fresh. Two source-matched, policy-ineligible seven-fork smokes took
+426.44s then 272.47s; measured bundle runtime preparation fell from
+171,916 ms to zero, while bootstrap and live workloads still dominated total
+wall time. Host Gradle 9.6.1 TestKit-worker startup required excluding only
+that buildSrc task in the **clean-checkout cache probe**; the buildSrc
+functional cache contracts ran separately on the current host wrapper.
+No saved measurement was admitted as a fresh run.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

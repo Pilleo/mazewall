@@ -218,6 +218,18 @@ clean [separated gate receipt](../../evidence/tier-e-separated-phase-gate-202609
 records one such fully bound passing run; default Tier E policy eligibility
 remains false.
 The rootful build has no writable host checkout or normal Gradle-cache mount.
+The explicit Gradle native task mounts the native source read-only and writes
+only to an isolated caller-owned sibling build directory. Its cache output
+contains a verified agent, native test executables and Java workload classes;
+no CTest result or CMake intermediate directory is stored as a cache hit.
+When selected, the rootful and phase controllers mount that package
+**read-only**, configure CMake metadata in each owned run volume, check
+source/image/toolchain/build-option and per-file SHA-256 identities, then run
+39 CTests or the six timing CTests afresh. Trustworthy bundle construction
+uses a separately keyed Release/USDT package with the selected perf image;
+its archived environment-only entrypoint still supports the legacy builder.
+The [portable cache receipt](../../evidence/tier-e-gradle-portable-cache-20260927/README.md)
+records real cross-checkout `FROM-CACHE` and fresh 39-CTest restoration.
 An interrupted or failing container cannot deposit root-owned build outputs
 there. Publication is checked stage by stage (copy, validation, host export,
 cleanup); a failed export retains its source container or evidence volume and

@@ -51,6 +51,22 @@ final class TierENativeBuildTaskFunctionalTest {
             Files.writeString(second.resolve("build.gradle"),
                 Files.readString(second.resolve("build.gradle")).replace("compilerVersion.set('compiler-a')", "compilerVersion.set('compiler-b')"));
             equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            write(second, "native/include/config.h", "new native header\n");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            write(second, "native/tests/AgentWorkload.java", "new native workload\n");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, IMAGE_DIGEST, "sha256:" + "b".repeat(64));
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, "javaVersion.set('jdk-25')", "javaVersion.set('jdk-26')");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, "cmakeVersion.set('cmake-a')", "cmakeVersion.set('cmake-b')");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, "targetArchitecture.set('x86_64')", "targetArchitecture.set('aarch64')");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, "buildType.set('Debug')", "buildType.set('Release')");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
+            change(second, "usdtEnabled.set(false)", "usdtEnabled.set(true)");
+            equal(TaskOutcome.SUCCESS, run(second).task(":nativeBuild").getOutcome());
             Path note = second.resolve("build/native-package/operator-note.txt");
             Files.writeString(note, "operator-owned\n");
             Files.writeString(second.resolve("native/src/agent.cpp"), "third native source\n");
@@ -94,6 +110,13 @@ final class TierENativeBuildTaskFunctionalTest {
         Path path = root.resolve(name);
         Files.createDirectories(path.getParent());
         Files.writeString(path, value);
+    }
+
+    private static void change(Path root, String oldValue, String newValue) throws Exception {
+        Path build = root.resolve("build.gradle");
+        String script = Files.readString(build);
+        if (!script.contains(oldValue)) throw new AssertionError("Missing fixture option: " + oldValue);
+        Files.writeString(build, script.replace(oldValue, newValue));
     }
 
     private static BuildResult run(Path root) {

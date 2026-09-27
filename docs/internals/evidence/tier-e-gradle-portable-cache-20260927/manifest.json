@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "policy_eligibility": false,
+  "qualification": "build_cache_diagnostic_not_performance_promotion",
+  "native_clean_clones": {
+    "revision": "47597329",
+    "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+    "native_source_digest": "c3e86a4571e035ca80bbd397355c1e1a66f3f3f2016ef7b80baadef08048528e",
+    "agent_sha256": "8e46245a1fef44c8e1065855c90c8109b009ce7290a8de308c7f4e7bd19f13b5",
+    "artifacts": 23,
+    "native_ctests_fresh": 39,
+    "task_results": [
+      "SUCCESS (24s)",
+      "FROM-CACHE (6s)"
+    ],
+    "testkit_host_gradle_9_6_limitation": "Only clean-clone cache proof excluded buildSrc:verificationActionsTest due host workerMain ClassNotFound; normal host Gradle9.8 buildSrc functional suite passed separately"
+  },
+  "matched_trustworthy_runs": [
+    {
+      "label": "first",
+      "wall_seconds": 426.44,
+      "source_revision": "47597329ac00b114ecf4af71fed13e768ff22de1",
+      "source_fingerprint": "d29da7fc8fce9c529f2f0f3fefe76159d7fa811dcb59953b845f9c11dc9b1b42",
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "forks": 7,
+      "missing_operations": 0,
+      "bundle_timing_ms": {
+        "fingerprint": 1984,
+        "native_configure": 0,
+        "native_build": 0,
+        "gradle_install": 171916,
+        "staging": 6,
+        "total": 173995
+      }
+    },
+    {
+      "label": "second",
+      "wall_seconds": 272.47,
+      "source_revision": "47597329ac00b114ecf4af71fed13e768ff22de1",
+      "source_fingerprint": "d29da7fc8fce9c529f2f0f3fefe76159d7fa811dcb59953b845f9c11dc9b1b42",
+      "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+      "agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "forks": 7,
+      "missing_operations": 0,
+      "bundle_timing_ms": {
+        "fingerprint": 1769,
+        "native_configure": 0,
+        "native_build": 0,
+        "gradle_install": 0,
+        "staging": 8,
+        "total": 1863
+      }
+    }
+  ]
+}
