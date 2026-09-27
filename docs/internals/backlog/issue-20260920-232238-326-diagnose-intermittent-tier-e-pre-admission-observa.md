@@ -34,6 +34,10 @@ target_files:
   - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-clean-admission-audit-20260927/raw-audit.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/raw-audit.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -213,14 +217,17 @@ core BPF redesign needs explicit operator approval. The unaudited five-pair
    qualification remains `INCOMPLETE`.
 
 **Opt-in audit v2 checkpoint (2026-09-27):** The benchmark-only BPF path now
-counts the low 32-bit `openat` event at the start of the main program, keyed
-by its syscall descriptor, *before* the existing full-width syscall check and
-subsequent admission gates. The diagnostic map value grows from 144 to 152
+counts the low 32-bit `openat` event near the start of the main program, keyed
+by its syscall descriptor, *after* argument decoding and an audit-map lookup
+but *before* the existing full-width syscall check and subsequent admission
+gates. The diagnostic map value grows from 144 to 152
 bytes; `exact_admission_audit_contract_version=2` emits both the per-descriptor
 low32 count and a bounded missing-descriptor sample. The old full-width
 handler, rejection and submission counters remain independently available.
-The per-descriptor comparison can distinguish absence at main-program ingress
-from a full-width/argument diversion or a later admission rejection. Aggregate
+The per-descriptor comparison can distinguish events counted at the low32
+checkpoint from later full-width/admission diversions. A zero low32 count does
+**not** prove the main program never ran: argument decoding, eligibility and
+the descriptor-map lookup precede the increment. Aggregate
 counts include unrelated `openat` operations and cannot be subtracted from the
 10,000 target denominator without matching the descriptor. This adds no
 production-path instrumentation when the audit is disabled; it does not
@@ -241,3 +248,30 @@ The BPF audit extraction reduced the existing `buildSysEnterProgram` Detekt
 complexity from 67 to 61 and method length from 422 to 395; the two existing
 numeric warning inventory entries were reviewed and updated, with no new
 warnings or suppression.
+
+**Clean source-matched audit-v2 stop:** [The sealed diagnostic](../evidence/tier-e-clean-low32-ingress-20260927/README.md)
+predeclared three audited AB/BA control/noisy pairs at clean `bffaccdf`, with
+unchanged 10,000-operation/1,000/s full+unique modes, image, agent and CPUs.
+The first control completed both modes with 10,000 raw target entries,
+10,000 session-matched/exact submissions and 30,000 kernel exact/ring-ready
+records per mode. The first noisy arm failed on its **first full-stream fork**:
+the independent raw audit counted 10,000/10,000 target entries on CPU 1, but
+descriptor IDs `4742`–`4749` each had zero low32 checkpoint and zero exact
+admission counts. Exact submitted/session-matched were 9,992 and kernel
+exact/ring-ready stopped at 29,984/30,000, with zero reported ring loss. The
+aggregate low32 and full-width handler counts were both 10,048, including
+unrelated opens; argument-read failures were zero. A first-fork live-target
+noise sample was retained, but the individual missing IDs have no measured
+overlap with its three-second window. No complete audited pairs were published.
+The exact failed runner and volume remain stopped/retained. The 9.6.1 TestKit
+preflight failure and decision-controller rejection of a three-pair audited
+profile both happened **before any scheduled target**; the tested 9.8.0
+launcher then executed the explicitly recorded serial schedule without
+changing source or profile denominators. Those setup failures and arm logs
+are preserved in the sealed receipt. The result narrows the eight IDs to
+**at or before the low32 count**, not specifically to a missing main-program
+dispatch: audit-map lookup failures or an earlier gate are still possible.
+Do not attribute an aggregate lookup or wrong-target counter to those IDs.
+The underlying gap and the unaudited five-pair decision remain `INCOMPLETE`;
+further attribution requires descriptor-specific evidence before changing the
+core BPF branch or promoting a default result.

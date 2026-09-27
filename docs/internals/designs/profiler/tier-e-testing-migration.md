@@ -211,8 +211,9 @@ These are still substantive controllers, not thin launchers:
   noise overlap or qualifies default noise, and no BPF branch is blamed or
    silently bypassed.
    The separate opt-in admission audit now reports contract version 2: a
-   descriptor-keyed low32 `openat` main-program ingress checkpoint before
-   the existing full-width handler and later exact-admission counters. Its
+   descriptor-keyed low32 `openat` main-program checkpoint after argument
+   decoding and audit-map lookup, before the existing full-width handler and
+   later exact-admission counters. Its
    152-byte map value is diagnostic-only; the default uninstrumented BPF and
    full+unique 10,000-operation oracle remain unchanged. Compare counters
    **per descriptor**, since aggregate low32/handler totals also include
@@ -221,6 +222,14 @@ These are still substantive controllers, not thin launchers:
    it cannot upgrade the failed AB/BA or audited series or identify the gap's
    cause. The [open pre-admission issue](../../backlog/issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md)
    tracks the next clean-source diagnostic.
+   That [clean-source audit-v2 diagnostic](../../evidence/tier-e-clean-low32-ingress-20260927/README.md)
+   stopped on its first noisy full-stream fork: raw audit saw all 10,000
+   target events, but eight IDs were absent at the low32 checkpoint and at
+   exact admission. Its separate control completed both modes. Absence at
+   the checkpoint does **not** establish that the main program was never
+   invoked, since argument decoding and the map lookup run first. No audited
+   pair or unaudited qualification was completed; exact failure resources
+   and all preflight attempts are retained.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
