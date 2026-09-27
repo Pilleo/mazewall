@@ -240,10 +240,12 @@ tasks.register<JavaExec>("tierERootfulGate") {
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/rootful-gate.json")
     val output = providers.gradleProperty("tierEOutput")
+    val phase = providers.gradleProperty("tierEPhaseArtifacts")
     val repositoryPath = rootProject.projectDir.absolutePath
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
         args("rootful-gate-profile", repositoryPath, output.get(), profile.get())
+        if (phase.isPresent) args(phase.get())
     }
 }
 

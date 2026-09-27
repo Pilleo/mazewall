@@ -38,6 +38,7 @@ public object TierERootfulPhaseProbe {
         val repository = root.toRealPath()
         val sourceBeforeTransfer = TierESourceFingerprint.read(repository, null)
         val sourceBeforeDigest = sourceBeforeTransfer.getValue("source_digest").jsonPrimitive.content
+        val sourceRevision = sourceBeforeTransfer.getValue("revision").jsonPrimitive.content
         val id = "tier-e-phase-${UUID.randomUUID()}"
         val owner = TierETrustworthyContainerOwner(endpoint, id, artifacts, verifyExport = { result ->
             val exported = result.resolve("exported-native-phase")
@@ -122,7 +123,7 @@ public object TierERootfulPhaseProbe {
                     "-v",
                     "${owner.volume}:/workspace",
                     "-v",
-                    "$buildCache:/phase-build-cache",
+                    "$buildCache:/workspace/profiler-native/build",
                     "-w",
                     "/workspace",
                     image,
@@ -132,17 +133,22 @@ public object TierERootfulPhaseProbe {
                 owner.ownRunner()
                 docker("start", owner.runner)
                 docker("exec", owner.runner, "mkdir", "-p", "/artifacts")
-                val build = "/phase-build-cache/build"
+                val build = "/workspace/profiler-native/build"
                 docker("exec", owner.runner, "cmake", "-S", "profiler-native", "-B", build, "-DCMAKE_BUILD_TYPE=Debug")
                 docker("exec", owner.runner, "cmake", "--build", build, "-j2")
                 val identity = docker("exec", owner.runner, "sha256sum", "$build/libmazewall_stack_agent.so")
                     .substringBefore(' ')
+                val workloadClass = docker("exec", owner.runner, "sha256sum", "$build/agent-test-classes/AgentWorkload.class")
+                    .substringBefore(' ')
                 Files.writeString(
                     artifacts.resolve("native-identity.json"),
                     buildJsonObject {
+                    put("schema_version", 1)
                     put("source_digest", source)
+                    put("source_revision", sourceRevision)
                     put("image_id", imageId)
                     put("agent_sha256", identity)
+                    put("workload_class_sha256", workloadClass)
                     put("native_build_key", buildKey)
                     put("compiler", toolchain)
                     put("java", java)

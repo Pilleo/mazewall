@@ -55,6 +55,7 @@ public object TierERootfulGateRunner {
         endpoint: ContainerEndpoint,
         image: String,
         cpuSet: String? = null,
+        phaseRoot: Path? = null,
     ) {
         require(endpoint.resolvedUri?.startsWith("unix://") == true) { "Tier E rootful gate requires a local engine" }
         require(cpuSet == null || cpuSet.matches(Regex("[0-9]+,[0-9]+")) && cpuSet.split(',').distinct().size == 2) {
@@ -104,10 +105,9 @@ public object TierERootfulGateRunner {
                 log = artifacts.resolve("image-build.log"),
             )
         }
-        val sourceBefore = TierESourceFingerprint
-            .read(repository, null)
-            .getValue("source_digest")
-            .jsonPrimitive.content
+        val sourceState = TierESourceFingerprint.read(repository, null)
+        val sourceBefore = sourceState.getValue("source_digest").jsonPrimitive.content
+        val sourceRevision = sourceState.getValue("revision").jsonPrimitive.content
         val imageId = docker("image", "inspect", image, "--format", "{{.Id}}")
         require(imageId.startsWith("sha256:")) { "Rootful gate image identity unavailable" }
         val compiler = docker("run", "--rm", "--entrypoint", "c++", image, "--version").lineSequence().first()
@@ -236,24 +236,47 @@ public object TierERootfulGateRunner {
                 )
                 val gate = artifacts.resolve("benchmark-gate.log")
                 Files.writeString(artifacts.resolve("benchmark-gate-contract.txt"), "2\n")
-                val acquisitionFailures = mutableListOf<Throwable>()
-                for (mode in listOf("full", "unique")) {
-                    val logs = (1..3)
-                        .map { sample ->
-                        val result = runContainerCommand(
-                            endpoint.command(*phaseCommand(owner.runner, mode, cpuSet).toTypedArray()),
+                val baseline = repository.resolve("profiler-native/tier-e-benchmark-baseline.env")
+                if (phaseRoot != null) {
+                    val agentSha = docker("exec", owner.runner, "sha256sum", "profiler-native/build/libmazewall_stack_agent.so").substringBefore(' ')
+                    val classSha = docker("exec", owner.runner, "sha256sum", "profiler-native/build/agent-test-classes/AgentWorkload.class")
+                        .substringBefore(' ')
+                    TierERootfulPhaseReuse.accept(
+                        phaseRoot,
+                        artifacts,
+                        baseline,
+                        TierERootfulPhaseReuse.Expected(
+                            sourceBefore,
+                            sourceRevision,
+                            imageId,
+                            agentSha,
+                            classSha,
+                            compiler,
+                            javaVersion,
+                            cpuSet ?: "unrestricted",
+                        ),
+                    )
+                    Files.writeString(gate, "tier-e-comparable-gate: separate fresh phase receipt bound to source, image, binary, workload, toolchain and CPUs\n")
+                } else {
+                    val acquisitionFailures = mutableListOf<Throwable>()
+                    for (mode in listOf("full", "unique")) {
+                        val logs = (1..3)
+                            .map { sample ->
+                            val result = runContainerCommand(
+                                endpoint.command(*phaseCommand(owner.runner, mode, cpuSet).toTypedArray()),
                                 Duration.ofMinutes(3),
-                            outputFile = artifacts.resolve("$mode-$sample.log"),
-                        )
-                        if (result.exitCode != 0) acquisitionFailures += IllegalStateException("Native benchmark failed for $mode sample $sample")
-                        Files.readString(artifacts.resolve("$mode-$sample.log"))
-                    }.joinToString("\n")
-                    Files.writeString(gate, logs, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
-                }
-                val replay = TierERootfulPhaseEvidence.verify(artifacts, repository.resolve("profiler-native/tier-e-benchmark-baseline.env"))
-                acquisitionFailures.forEach { replay.exceptionOrNull()?.addSuppressed(it) }
-                check(replay.isSuccess && acquisitionFailures.isEmpty()) {
-                    "Native phase gate incomplete: ${replay.exceptionOrNull()?.message ?: acquisitionFailures.firstOrNull()?.message}"
+                                outputFile = artifacts.resolve("$mode-$sample.log"),
+                            )
+                            if (result.exitCode != 0) acquisitionFailures += IllegalStateException("Native benchmark failed for $mode sample $sample")
+                            Files.readString(artifacts.resolve("$mode-$sample.log"))
+                        }.joinToString("\n")
+                        Files.writeString(gate, logs, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+                    }
+                    val replay = TierERootfulPhaseEvidence.verify(artifacts, baseline)
+                    acquisitionFailures.forEach { replay.exceptionOrNull()?.addSuppressed(it) }
+                    check(replay.isSuccess && acquisitionFailures.isEmpty()) {
+                        "Native phase gate incomplete: ${replay.exceptionOrNull()?.message ?: acquisitionFailures.firstOrNull()?.message}"
+                    }
                 }
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "PASS\n")
                 docker(
