@@ -35,20 +35,74 @@ public object TierEProfileExperimentRunner {
         output: Path,
         endpoint: ContainerEndpoint,
     ) {
+        runPrepared(profile, root, output, endpoint, null)
+    }
+
+    public fun runWithNativePackage(
+        profile: TierEExperimentProfile,
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path,
+    ) {
+        runPrepared(profile, root, output, endpoint, nativePackage)
+    }
+
+    private fun runPrepared(
+        profile: TierEExperimentProfile,
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path?,
+    ) {
         val cpus = profile.cpuSet
-        when (profile.kind) {
-            "trustworthy" -> TierETrustworthyRunner.run(profile.trustworthy, endpoint, root, output, profile.image, cpus)
-            "node-noise" -> TierENodeNoiseProbe.run(
-                root,
-                output,
-                endpoint,
-                profile.image,
+
+        fun runTrustworthy(
+            settings: TierETrustworthySettings,
+            artifact: Path,
+        ) {
+            if (nativePackage == null) {
+                TierETrustworthyRunner.run(settings, endpoint, root, artifact, profile.image, cpus)
+            } else {
+                TierETrustworthyRunner.runWithNativePackage(settings, endpoint, root, artifact, profile.image, cpus, nativePackage)
+            }
+        }
+
+        fun runNoise(
+            settings: TierETrustworthySettings,
+            artifact: Path,
+            requestedCpus: String,
+        ) {
+            if (nativePackage == null) {
+                TierENodeNoiseProbe.run(
+                    root,
+                    artifact,
+                    endpoint,
+                    profile.image,
                 profile.nodeNoise.runs,
-                profile.nodeNoise.durationSeconds,
-                profile.nodeNoise.cpu,
-                profile.trustworthy,
-                cpus ?: System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS") ?: "0,1",
-            )
+                    profile.nodeNoise.durationSeconds,
+                    profile.nodeNoise.cpu,
+                    settings,
+                    requestedCpus,
+                )
+            } else {
+                TierENodeNoiseProbe.runWithNativePackage(
+                    root,
+                    artifact,
+                    endpoint,
+                    profile.image,
+                profile.nodeNoise.runs,
+                    profile.nodeNoise.durationSeconds,
+                    profile.nodeNoise.cpu,
+                    settings,
+                    requestedCpus,
+                    nativePackage,
+                )
+            }
+        }
+        when (profile.kind) {
+            "trustworthy" -> runTrustworthy(profile.trustworthy, output)
+            "node-noise" -> runNoise(profile.trustworthy, output, cpus ?: System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS") ?: "0,1")
             "capacity" -> {
                 requireNotNull(cpus) { "Capacity profile requires explicit workload and collector CPUs" }
                 val schedule = requireNotNull(profile.capacity)
@@ -66,26 +120,9 @@ public object TierEProfileExperimentRunner {
                         calibration = false,
                         benchmarkJavaOptions = "-Dmazewall.tier-e.attachment-ready-file=/artifacts/attachment-ready",
                     )
-                    TierENodeNoiseProbe.run(
-                        root,
-                        destination,
-                        endpoint,
-                        profile.image,
-                        profile.nodeNoise.runs,
-                        profile.nodeNoise.durationSeconds,
-                        profile.nodeNoise.cpu,
-                        target,
-                        cpus,
-                    )
+                    runNoise(target, destination, cpus)
                 }) { stage, artifact, shadow ->
-                    TierETrustworthyRunner.run(
-                        stageSettings(profile.trustworthy, schedule, stage, shadow),
-                        endpoint,
-                        root,
-                        artifact,
-                        profile.image,
-                        cpus,
-                    )
+                    runTrustworthy(stageSettings(profile.trustworthy, schedule, stage, shadow), artifact)
                 }
             }
             else -> error("Unknown experiment kind: ${profile.kind}")

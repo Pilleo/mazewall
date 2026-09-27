@@ -29,6 +29,68 @@ public object TierEBenchmarkBundleBuilder {
             val result = runContainerCommand(command, timeout, outputFile = root.resolve("bundle-build.log"))
             check(result.exitCode == 0) { "Tier E bundle build failed: ${command.first()} (${result.exitCode}): ${result.output}" }
         },
+    ): String =
+        buildInternal(
+        repository,
+            bundle,
+            cacheRoot,
+            usdt,
+            force,
+            nativeBuildType,
+            null,
+            null,
+        fingerprint,
+            fingerprintMillis,
+            clockMillis,
+            execute,
+    )
+
+    /** Source/toolchain-verified Gradle artifact avoids recompiling the same native library in the builder. */
+    public fun buildPrepared(
+        repository: Path,
+        bundle: Path,
+        cacheRoot: Path,
+        usdt: Boolean,
+        force: Boolean,
+        nativeBuildType: String,
+        nativePackage: Path,
+        expected: TierENativeArtifactPackage.Expected,
+        fingerprint: String = TierEBenchmarkBundleFingerprint.read(repository, usdt, nativeBuildType),
+        fingerprintMillis: Long = 0,
+        clockMillis: () -> Long = System::currentTimeMillis,
+        execute: (List<String>, Duration, Path) -> Unit = { command, timeout, root ->
+            val result = runContainerCommand(command, timeout, outputFile = root.resolve("bundle-build.log"))
+            check(result.exitCode == 0) { "Tier E bundle build failed: ${command.first()} (${result.exitCode}): ${result.output}" }
+        },
+    ): String =
+        buildInternal(
+        repository,
+            bundle,
+            cacheRoot,
+            usdt,
+            force,
+            nativeBuildType,
+            nativePackage,
+            expected,
+        fingerprint,
+            fingerprintMillis,
+            clockMillis,
+            execute,
+    )
+
+    private fun buildInternal(
+        repository: Path,
+        bundle: Path,
+        cacheRoot: Path,
+        usdt: Boolean,
+        force: Boolean,
+        nativeBuildType: String,
+        nativePackage: Path?,
+        expected: TierENativeArtifactPackage.Expected?,
+        fingerprint: String,
+        fingerprintMillis: Long,
+        clockMillis: () -> Long,
+        execute: (List<String>, Duration, Path) -> Unit,
     ): String {
         require(nativeBuildType.matches(Regex("[A-Za-z0-9_]+"))) { "Invalid native build type" }
         require(fingerprint.matches(Regex("[a-f0-9]{64}"))) { "Invalid bundle fingerprint" }
@@ -48,26 +110,37 @@ public object TierEBenchmarkBundleBuilder {
                     null
                 }
                 if (!force && prior == fingerprint) return "reused"
-                val native = cacheRoot.resolve("native-$fingerprint")
-                Files.createDirectories(native)
-                val configureStarted = clockMillis()
-                execute(
-                    listOf(
-                        "cmake",
-                        "-S",
-                        repository.resolve("profiler-native").toString(),
-                        "-B",
-                        native.toString(),
-                    "-DCMAKE_BUILD_TYPE=$nativeBuildType",
-                        "-DMAZEWALL_ENABLE_TIER_E_USDT=$usdt",
-                    ),
+                val verified = if (nativePackage == null) {
+                    null
+                } else {
+                    requireNotNull(expected) { "Native package requires declared image and toolchain" }
+                    require(expected.buildType == nativeBuildType && expected.usdt == usdt) { "Native package build mode differs" }
+                    TierENativeArtifactPackage.verify(nativePackage, repository.resolve("profiler-native"), expected)
+                }
+                val native = nativePackage ?: cacheRoot.resolve("native-$fingerprint")
+                var configureMillis = 0L
+                var nativeMillis = 0L
+                if (verified == null) {
+                    Files.createDirectories(native)
+                    val configureStarted = clockMillis()
+                    execute(
+                        listOf(
+                            "cmake",
+                            "-S",
+                            repository.resolve("profiler-native").toString(),
+                            "-B",
+                            native.toString(),
+                            "-DCMAKE_BUILD_TYPE=$nativeBuildType",
+                            "-DMAZEWALL_ENABLE_TIER_E_USDT=$usdt",
+                        ),
                         Duration.ofMinutes(5),
-                    repository,
-                )
-                val configureMillis = clockMillis() - configureStarted
-                val nativeStarted = clockMillis()
-                execute(listOf("cmake", "--build", native.toString(), "-j2"), Duration.ofMinutes(5), repository)
-                val nativeMillis = clockMillis() - nativeStarted
+                        repository,
+                    )
+                    configureMillis = clockMillis() - configureStarted
+                    val nativeStarted = clockMillis()
+                    execute(listOf("cmake", "--build", native.toString(), "-j2"), Duration.ofMinutes(5), repository)
+                    nativeMillis = clockMillis() - nativeStarted
+                }
                 val runtimeCache = cacheRoot.resolve("runtime-$fingerprint")
                 val runtime = runtimeCache.resolve("runtime")
                 val gradleStarted = clockMillis()
@@ -109,6 +182,14 @@ public object TierEBenchmarkBundleBuilder {
                 val staged = Files.createTempDirectory(parent, ".tier-e-bundle-")
                 try {
                     Files.copy(native.resolve("libmazewall_stack_agent.so"), staged.resolve("libmazewall_stack_agent.so"))
+                    if (verified != null) {
+                        require(
+                            java.security.MessageDigest
+                                .getInstance("SHA-256")
+                                .digest(Files.readAllBytes(staged.resolve("libmazewall_stack_agent.so")))
+                            .joinToString("") { "%02x".format(it) } == verified.agentSha256,
+                        ) { "Native package changed during bundle staging" }
+                    }
                     copyTree(runtime, staged.resolve("runtime"))
                     TierEBenchmarkBundleManifest.write(
                         staged,

@@ -24,6 +24,30 @@ public object TierETrustworthyRunner {
         image: String,
         requestedCpus: String? = null,
     ) {
+        runPrepared(settings, endpoint, root, output, image, requestedCpus, null)
+    }
+
+    public fun runWithNativePackage(
+        settings: TierETrustworthySettings,
+        endpoint: ContainerEndpoint,
+        root: Path,
+        output: Path,
+        image: String,
+        requestedCpus: String?,
+        nativePackage: Path,
+    ) {
+        runPrepared(settings, endpoint, root, output, image, requestedCpus, nativePackage)
+    }
+
+    private fun runPrepared(
+        settings: TierETrustworthySettings,
+        endpoint: ContainerEndpoint,
+        root: Path,
+        output: Path,
+        image: String,
+        requestedCpus: String?,
+        nativePackage: Path?,
+    ) {
         require(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri?.startsWith("unix://") == true) {
             "Tier E trustworthy benchmark requires verified local rootful Docker"
         }
@@ -72,6 +96,23 @@ public object TierETrustworthyRunner {
             val cpuSet = cpuPair.joinToString(",")
             val imageId = command("image", "inspect", image, "--format", "{{.Id}}")
             require(imageId.startsWith("sha256:")) { "Tier E image identity unavailable" }
+            val expectedNative = nativePackage?.let { packageRoot ->
+                val compiler = command("run", "--rm", "--entrypoint", "c++", image, "--version").lineSequence().first()
+                val java = command("run", "--rm", "--entrypoint", "java", image, "-version")
+                val cmake = command("run", "--rm", "--entrypoint", "cmake", image, "--version").lineSequence().first()
+                val architecture = command("image", "inspect", image, "--format", "{{.Architecture}}")
+                val selected = TierENativeArtifactPackage.Expected(
+                    imageId,
+                    settings.nativeBuildType,
+                    System.getProperty("os.arch") in setOf("amd64", "x86_64"),
+                    compiler,
+                    java,
+                    cmake,
+                    architecture,
+                )
+                TierENativeArtifactPackage.verify(packageRoot, repository.resolve("profiler-native"), selected)
+                selected
+            }
             val uid = Files.getAttribute(repository, "unix:uid") as Int
             val gid = Files.getAttribute(repository, "unix:gid") as Int
             val cache = Files.createDirectories(repository.resolve("build/tier-e-benchmark-cache"))
@@ -103,6 +144,22 @@ public object TierETrustworthyRunner {
                     "$artifacts:/artifacts",
                     "-v",
                     "$cache:/benchmark-cache",
+                    *(
+                        if (nativePackage == null) {
+                        emptyArray()
+                    } else {
+                        arrayOf(
+                        "-v",
+                            "${nativePackage.toRealPath()}:/native-package:ro",
+                        "-e",
+                            "MAZEWALL_TIER_E_NATIVE_PACKAGE_ROOT=/native-package",
+                        "-e",
+                            "MAZEWALL_TIER_E_NATIVE_PACKAGE_IMAGE_ID=${requireNotNull(expectedNative).imageId}",
+                        "-e",
+                            "MAZEWALL_TIER_E_NATIVE_PACKAGE_ARCH=${requireNotNull(expectedNative).architecture}",
+                    )
+                    }
+                    ),
                     "-w",
                     repository.toString(),
                     image,

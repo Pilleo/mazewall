@@ -182,9 +182,12 @@ tasks.register<JavaExec>("tierETrustworthyExperiment") {
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/trustworthy.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierETrustworthyNativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("experiment-run", profile.get(), repositoryPath, output.get())
+        args("experiment-run", profile.get(), repositoryPath, output.get(), nativePackage.get())
     }
 }
 
@@ -197,9 +200,12 @@ tasks.register<JavaExec>("tierENodeNoiseExperiment") {
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/node-noise.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierETrustworthyNativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("node-noise-profile", profile.get(), repositoryPath, output.get())
+        args("node-noise-profile", profile.get(), repositoryPath, output.get(), nativePackage.get())
     }
 }
 
@@ -212,9 +218,12 @@ tasks.register<JavaExec>("tierECapacityExperiment") {
     val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/capacity.json")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierETrustworthyNativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("capacity-profile", profile.get(), repositoryPath, output.get())
+        args("capacity-profile", profile.get(), repositoryPath, output.get(), nativePackage.get())
     }
 }
 
@@ -226,9 +235,12 @@ tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
     val output = providers.gradleProperty("tierEOutput")
     val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierENativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("rootful-phase", repositoryPath, output.get())
+        args("rootful-phase", repositoryPath, output.get(), nativePackage.get())
     }
 }
 
@@ -242,10 +254,12 @@ tasks.register<JavaExec>("tierERootfulGate") {
     val output = providers.gradleProperty("tierEOutput")
     val phase = providers.gradleProperty("tierEPhaseArtifacts")
     val repositoryPath = rootProject.projectDir.absolutePath
+    val nativeBuild = tasks.named<io.mazewall.build.TierENativeBuildTask>("tierENativeBuild")
+    dependsOn(nativeBuild)
+    val nativePackage = nativeBuild.flatMap { it.artifactDirectory }.map { it.asFile.absolutePath }
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("rootful-gate-profile", repositoryPath, output.get(), profile.get())
-        if (phase.isPresent) args(phase.get())
+        args("rootful-gate-profile", repositoryPath, output.get(), profile.get(), phase.orNull ?: "--no-phase", nativePackage.get())
     }
 }
 
@@ -268,6 +282,72 @@ tasks.register<io.mazewall.build.TierEPhaseReplayTask>("tierEReplayPhaseEvidence
     contractVersion.set("2")
     output.orNull?.let { reportDirectory.fileValue(file(it)) }
 }
+
+fun registerTierENativeBuild(
+    taskName: String,
+    defaultImage: String,
+    defaultBuildType: String,
+    defaultUsdt: String,
+    outputName: String,
+) = tasks.register<io.mazewall.build.TierENativeBuildTask>(taskName) {
+    group = "verification"
+    description = "Cache only native binary and workload build outputs, never CTest execution"
+    val docker = providers.gradleProperty("tierEDockerCli").orElse("/usr/bin/docker")
+    val endpoint = providers.environmentVariable("MAZEWALL_DOCKER_HOST").orElse("unix:///var/run/docker.sock")
+    val image = providers.gradleProperty("tierENativeImage").orElse(defaultImage)
+    val inspectedImage =
+        providers
+            .exec {
+                commandLine(docker.get(), "image", "inspect", image.get(), "--format", "{{.Id}}")
+                environment("DOCKER_HOST", endpoint.get())
+            }.standardOutput.asText
+            .map(String::trim)
+
+    fun dockerTool(
+        tool: String,
+        argument: String,
+    ) = providers.exec {
+        commandLine(docker.get(), "run", "--rm", "--entrypoint", tool, inspectedImage.get(), argument)
+        environment("DOCKER_HOST", endpoint.get())
+    }
+    nativeDirectory.fileValue(rootProject.file("profiler-native"))
+    nativeSources.from(
+        rootProject.fileTree("profiler-native") {
+            include("CMakeLists.txt", "src/**", "include/**", "tests/**")
+            exclude("build/**")
+        },
+    )
+    dockerExecutable.fileValue(file(docker.get()))
+    dockerEndpoint.set(endpoint)
+    imageDigest.set(inspectedImage)
+    compilerVersion.set(dockerTool("c++", "--version").standardOutput.asText.map { it.lineSequence().first().trim() })
+    javaVersion.set(dockerTool("java", "-version").standardError.asText.map(String::trim))
+    cmakeVersion.set(dockerTool("cmake", "--version").standardOutput.asText.map { it.lineSequence().first().trim() })
+    targetArchitecture.set(
+        providers
+            .exec {
+                commandLine(docker.get(), "image", "inspect", inspectedImage.get(), "--format", "{{.Architecture}}")
+                environment("DOCKER_HOST", endpoint.get())
+            }.standardOutput.asText
+            .map(String::trim),
+    )
+    buildType.set(providers.gradleProperty("tierENativeBuildType").orElse(defaultBuildType))
+    usdtEnabled.set(
+        providers.gradleProperty("tierENativeUsdt").orElse(defaultUsdt).map { value ->
+            value.toBooleanStrictOrNull() ?: error("tierENativeUsdt must be true or false")
+        },
+    )
+    artifactDirectory.set(layout.buildDirectory.dir(outputName))
+}
+
+registerTierENativeBuild("tierENativeBuild", "mazewall-tier-e-rootful:latest", "Debug", "false", "tier-e-native-artifacts")
+registerTierENativeBuild(
+    "tierETrustworthyNativeBuild",
+    "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "Release",
+    (System.getProperty("os.arch") in setOf("amd64", "x86_64")).toString(),
+    "tier-e-trustworthy-native-artifacts",
+)
 
 tasks.register<JavaExec>("tierEShortFixture") {
     group = "verification"

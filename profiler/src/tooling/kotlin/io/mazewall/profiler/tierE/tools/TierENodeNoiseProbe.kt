@@ -108,6 +108,36 @@ public object TierENodeNoiseProbe {
         targetSettings: TierETrustworthySettings? = null,
         targetCpus: String? = null,
     ) {
+        runPrepared(repository, output, endpoint, image, runs, durationSeconds, noiseCpu, targetSettings, targetCpus, null)
+    }
+
+    public fun runWithNativePackage(
+        repository: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        runs: Int,
+        durationSeconds: Int,
+        noiseCpu: Int,
+        targetSettings: TierETrustworthySettings?,
+        targetCpus: String?,
+        nativePackage: Path,
+    ) {
+        runPrepared(repository, output, endpoint, image, runs, durationSeconds, noiseCpu, targetSettings, targetCpus, nativePackage)
+    }
+
+    private fun runPrepared(
+        repository: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        runs: Int,
+        durationSeconds: Int,
+        noiseCpu: Int,
+        targetSettings: TierETrustworthySettings?,
+        targetCpus: String?,
+        nativePackage: Path?,
+    ) {
         require(durationSeconds in 1..30 && noiseCpu >= 0)
         val executor = Executors.newSingleThreadExecutor()
         var active: java.util.concurrent.Future<*>? = null
@@ -159,7 +189,18 @@ public object TierENodeNoiseProbe {
                     error("Profile-selected node-noise requires explicit target CPUs")
                 }
                 active = executor.submit {
-                    TierETrustworthyRunner.run(
+                    if (nativePackage != null) {
+                        TierETrustworthyRunner.runWithNativePackage(
+                        settings,
+                            endpoint,
+                            repository,
+                            destination,
+                            image,
+                            workloadCpus,
+                            nativePackage,
+                    )
+                    } else {
+                        TierETrustworthyRunner.run(
                         settings,
                         endpoint,
                         repository,
@@ -167,6 +208,7 @@ public object TierENodeNoiseProbe {
                         image,
                         workloadCpus,
                     )
+                    }
                 }
                 val manifest = destination.resolve("manifest.json")
                 val buildDeadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(20)

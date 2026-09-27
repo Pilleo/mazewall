@@ -29,6 +29,24 @@ public object TierERootfulPhaseProbe {
         output: Path,
         endpoint: ContainerEndpoint,
     ) {
+        runPrepared(root, output, endpoint, null)
+    }
+
+    public fun runWithNativePackage(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path,
+    ) {
+        runPrepared(root, output, endpoint, nativePackage)
+    }
+
+    private fun runPrepared(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path?,
+    ) {
         require(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri?.startsWith("unix://") == true) {
             "Native phase acquisition requires local rootful Docker"
         }
@@ -108,7 +126,16 @@ public object TierERootfulPhaseProbe {
                 val java = docker("run", "--rm", "--entrypoint", "java", image, "-version")
                 val buildKey = nativeBuildKey(source, imageId, toolchain, java)
                 val buildCache = "mazewall-tier-e-phase-build-${buildKey.take(24)}"
-                docker("volume", "create", buildCache)
+                val verifiedPackage = nativePackage?.let { packageRoot ->
+                    val cmake = docker("run", "--rm", "--entrypoint", "cmake", image, "--version").lineSequence().first()
+                    val architecture = docker("image", "inspect", image, "--format", "{{.Architecture}}")
+                    TierENativeArtifactPackage.verify(
+                        packageRoot,
+                        repository.resolve("profiler-native"),
+                        TierENativeArtifactPackage.Expected(imageId, "Debug", false, toolchain, java, cmake, architecture),
+                    )
+                }
+                if (verifiedPackage == null) docker("volume", "create", buildCache)
                 docker(
                     "create",
                     "--name",
@@ -122,8 +149,13 @@ public object TierERootfulPhaseProbe {
                     "seccomp=unconfined",
                     "-v",
                     "${owner.volume}:/workspace",
-                    "-v",
-                    "$buildCache:/workspace/profiler-native/build",
+                    *(
+                        if (verifiedPackage == null) {
+                        arrayOf("-v", "$buildCache:/workspace/profiler-native/build")
+                    } else {
+                        arrayOf("-v", "${requireNotNull(nativePackage).toRealPath()}:/native-package:ro")
+                    }
+                    ),
                     "-w",
                     "/workspace",
                     image,
@@ -135,11 +167,18 @@ public object TierERootfulPhaseProbe {
                 docker("exec", owner.runner, "mkdir", "-p", "/artifacts")
                 val build = "/workspace/profiler-native/build"
                 docker("exec", owner.runner, "cmake", "-S", "profiler-native", "-B", build, "-DCMAKE_BUILD_TYPE=Debug")
-                docker("exec", owner.runner, "cmake", "--build", build, "-j2")
+                if (verifiedPackage == null) {
+                    docker("exec", owner.runner, "cmake", "--build", build, "-j2")
+                } else {
+                    for (command in TierENativeArtifactPackage.installCommands(owner.runner)) docker(*command.toTypedArray())
+                }
                 val identity = docker("exec", owner.runner, "sha256sum", "$build/libmazewall_stack_agent.so")
                     .substringBefore(' ')
                 val workloadClass = docker("exec", owner.runner, "sha256sum", "$build/agent-test-classes/AgentWorkload.class")
                     .substringBefore(' ')
+                require(verifiedPackage == null || identity == verifiedPackage.agentSha256 && workloadClass == verifiedPackage.workloadClassSha256) {
+                    "Native cached bytes changed during phase staging"
+                }
                 Files.writeString(
                     artifacts.resolve("native-identity.json"),
                     buildJsonObject {
@@ -152,7 +191,7 @@ public object TierERootfulPhaseProbe {
                     put("native_build_key", buildKey)
                     put("compiler", toolchain)
                     put("java", java)
-                    put("native_build_cache", buildCache)
+                    put("native_build_cache", if (verifiedPackage == null) buildCache else "gradle:${verifiedPackage.sourceDigest}")
                     put("cpu_set", "0,1")
                     put("run_id", id)
                     put("policy_eligibility", false)

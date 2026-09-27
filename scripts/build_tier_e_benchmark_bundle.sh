@@ -42,4 +42,7 @@ case "$1" in
         ;;
 esac
 repository=${MAZEWALL_TIER_E_REPOSITORY_DIR:-$ROOT}
+if [[ -n "${MAZEWALL_TIER_E_NATIVE_PACKAGE_ROOT:-}" ]]; then
+    exec bash "${ROOT}/scripts/tier_e_tools" bundle-build "$repository" "$bundle" "$usdt" "$force" "$MAZEWALL_TIER_E_NATIVE_PACKAGE_ROOT"
+fi
 exec bash "${ROOT}/scripts/tier_e_tools" bundle-build "$repository" "$bundle" "$usdt" "$force"

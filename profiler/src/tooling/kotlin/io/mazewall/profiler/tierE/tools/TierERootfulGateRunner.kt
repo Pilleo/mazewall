@@ -57,6 +57,30 @@ public object TierERootfulGateRunner {
         cpuSet: String? = null,
         phaseRoot: Path? = null,
     ) {
+        runPrepared(root, output, endpoint, image, cpuSet, phaseRoot, null)
+    }
+
+    public fun runWithNativePackage(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        cpuSet: String?,
+        phaseRoot: Path?,
+        nativePackage: Path,
+    ) {
+        runPrepared(root, output, endpoint, image, cpuSet, phaseRoot, nativePackage)
+    }
+
+    private fun runPrepared(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        cpuSet: String?,
+        phaseRoot: Path?,
+        nativePackage: Path?,
+    ) {
         require(endpoint.resolvedUri?.startsWith("unix://") == true) { "Tier E rootful gate requires a local engine" }
         require(cpuSet == null || cpuSet.matches(Regex("[0-9]+,[0-9]+")) && cpuSet.split(',').distinct().size == 2) {
             "Rootful gate requires distinct CPU IDs"
@@ -112,7 +136,20 @@ public object TierERootfulGateRunner {
         require(imageId.startsWith("sha256:")) { "Rootful gate image identity unavailable" }
         val compiler = docker("run", "--rm", "--entrypoint", "c++", image, "--version").lineSequence().first()
         val javaVersion = docker("run", "--rm", "--entrypoint", "java", image, "-version")
-        val nativeCache = nativeBuildCache(sourceBefore, imageId, compiler, javaVersion)
+        val verifiedPackage = nativePackage?.let { packageRoot ->
+            val cmake = docker("run", "--rm", "--entrypoint", "cmake", image, "--version").lineSequence().first()
+            val architecture = docker("image", "inspect", image, "--format", "{{.Architecture}}")
+            TierENativeArtifactPackage.verify(
+                packageRoot,
+                repository.resolve("profiler-native"),
+                TierENativeArtifactPackage.Expected(imageId, "Debug", false, compiler, javaVersion, cmake, architecture),
+            )
+        }
+        val nativeCache = if (verifiedPackage == null) {
+            nativeBuildCache(sourceBefore, imageId, compiler, javaVersion)
+        } else {
+            "gradle:${verifiedPackage.sourceDigest}"
+        }
         val wrapper = repository.resolve("gradle/wrapper/gradle-wrapper.properties")
         val key = MessageDigest
             .getInstance("SHA-256")
@@ -131,7 +168,7 @@ public object TierERootfulGateRunner {
                 docker("volume", "create", owner.volume)
                 owner.ownVolume()
                 docker("volume", "create", cache)
-                docker("volume", "create", nativeCache)
+                if (verifiedPackage == null) docker("volume", "create", nativeCache)
                 val tar = Files.createTempFile("tier-e-rootful-source-", ".tar")
                 try {
                     TierERootfulSourceTransfer.archive(repository, tar)
@@ -181,8 +218,13 @@ public object TierERootfulGateRunner {
                     "seccomp=unconfined",
                     "-v",
                     "${owner.volume}:/workspace",
-                    "-v",
-                    "$nativeCache:/workspace/profiler-native/build",
+                    *(
+                        if (verifiedPackage == null) {
+                        arrayOf("-v", "$nativeCache:/workspace/profiler-native/build")
+                    } else {
+                        arrayOf("-v", "${requireNotNull(nativePackage).toRealPath()}:/native-package:ro")
+                    }
+                    ),
                     "-v",
                     "$cache:/container-gradle-home",
                     "-e",
@@ -206,6 +248,7 @@ public object TierERootfulGateRunner {
                     "source_digest=$sourceBefore\nimage_id=$imageId\ncompiler=$compiler\njava=$javaVersion\n" +
                         "phase_cpu_set=${cpuSet ?: "unrestricted"}\nlive_test_cpu_set=unrestricted\n" +
                         "build_cache=$nativeCache\n" +
+                        (if (verifiedPackage != null) "agent_sha256=${verifiedPackage.agentSha256}\n" else "") +
                         "policy_eligibility=false\n",
                 )
                 docker("exec", owner.runner, "mkdir", "-p", "/artifacts")
@@ -223,7 +266,17 @@ public object TierERootfulGateRunner {
                     "-DCMAKE_BUILD_TYPE=Debug",
                     timeout = Duration.ofMinutes(5),
                 )
-                docker("exec", owner.runner, "cmake", "--build", "profiler-native/build", "-j2", timeout = Duration.ofMinutes(5))
+                if (verifiedPackage == null) {
+                    docker("exec", owner.runner, "cmake", "--build", "profiler-native/build", "-j2", timeout = Duration.ofMinutes(5))
+                } else {
+                    for (command in TierENativeArtifactPackage.installCommands(owner.runner)) docker(*command.toTypedArray())
+                    val agentSha = docker("exec", owner.runner, "sha256sum", "profiler-native/build/libmazewall_stack_agent.so").substringBefore(' ')
+                    val classSha = docker("exec", owner.runner, "sha256sum", "profiler-native/build/agent-test-classes/AgentWorkload.class")
+                        .substringBefore(' ')
+                    require(agentSha == verifiedPackage.agentSha256 && classSha == verifiedPackage.workloadClassSha256) {
+                        "Native cached bytes changed during rootful staging"
+                    }
+                }
                 docker(
                     "exec",
                     owner.runner,

@@ -29,7 +29,7 @@ public fun main(args: Array<String>) {
         Files.writeString(Path.of(args[3]), "PASS policy_eligibility=false\n")
         return
     }
-    if (args.size == 3 && args[0] == "rootful-phase") {
+    if (args.size in 3..4 && args[0] == "rootful-phase") {
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
             EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
@@ -38,7 +38,11 @@ public fun main(args: Array<String>) {
             is EndpointSelection.Ready -> selected.endpoint
             is EndpointSelection.Skipped -> error("Native phase probe requires rootful Docker: ${selected.reason}")
         }
-        TierERootfulPhaseProbe.run(Path.of(args[1]), Path.of(args[2]), endpoint)
+        if (args.size == 4) {
+            TierERootfulPhaseProbe.runWithNativePackage(Path.of(args[1]), Path.of(args[2]), endpoint, Path.of(args[3]))
+        } else {
+            TierERootfulPhaseProbe.run(Path.of(args[1]), Path.of(args[2]), endpoint)
+        }
         return
     }
     if (args.size == 3 && args[0] == "experiment-config") {
@@ -46,7 +50,7 @@ public fun main(args: Array<String>) {
         Files.writeString(Path.of(args[2]), "${profile.resolvedJson()}\n")
         return
     }
-    if (args.size == 4 && args[0] in setOf("experiment-run", "node-noise-profile", "capacity-profile")) {
+    if (args.size in 4..5 && args[0] in setOf("experiment-run", "node-noise-profile", "capacity-profile")) {
         val profile = TierEExperimentProfile.load(Path.of(args[1]))
         val requestedKind = when (args[0]) {
             "experiment-run" -> "trustworthy"
@@ -64,7 +68,11 @@ public fun main(args: Array<String>) {
             is EndpointSelection.Ready -> selected.endpoint
             is EndpointSelection.Skipped -> error("Tier E experiment requires rootful Docker: ${selected.reason}")
         }
-        TierEProfileExperimentRunner.run(profile, root, output, endpoint)
+        if (args.size == 5) {
+            TierEProfileExperimentRunner.runWithNativePackage(profile, root, output, endpoint, Path.of(args[4]))
+        } else {
+            TierEProfileExperimentRunner.run(profile, root, output, endpoint)
+        }
         return
     }
     if (args.size == 3 && args[0] == "perf-evidence") {
@@ -245,7 +253,7 @@ public fun main(args: Array<String>) {
         )
         return
     }
-    if (args.size in 4..5 && args[0] == "rootful-gate-profile") {
+    if (args.size in 4..6 && args[0] == "rootful-gate-profile") {
         val profile = TierERootfulGateProfile.load(Path.of(args[3]))
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
@@ -255,7 +263,20 @@ public fun main(args: Array<String>) {
             is EndpointSelection.Ready -> selected.endpoint
             is EndpointSelection.Skipped -> error("Rootful gate requires local Docker: ${selected.reason}")
         }
-        TierERootfulGateRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet, args.getOrNull(4)?.let(Path::of))
+        val phase = args.getOrNull(4)?.takeUnless { it == "--no-phase" }?.let(Path::of)
+        if (args.size == 6) {
+            TierERootfulGateRunner.runWithNativePackage(
+                Path.of(args[1]),
+                Path.of(args[2]),
+                endpoint,
+                profile.image,
+                profile.cpuSet,
+                phase,
+                Path.of(args[5]),
+            )
+        } else {
+            TierERootfulGateRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet, phase)
+        }
         return
     }
     if (args.size == 2 && args[0] == "trustworthy-source-state") {
@@ -300,7 +321,7 @@ public fun main(args: Array<String>) {
         TierEBenchmarkBundleManifest.write(Path.of(args[1]), args.getOrNull(2) ?: "")
         return
     }
-    if (args.size == 5 && args[0] == "bundle-build") {
+    if (args.size in 5..6 && args[0] == "bundle-build") {
         require(args[3] in setOf("true", "false") && args[4] in setOf("true", "false")) {
             "Bundle build expects USDT and rebuild boolean flags"
         }
@@ -312,16 +333,52 @@ public fun main(args: Array<String>) {
             .toMillis(System.nanoTime() - fingerprintStarted)
         val cache = System.getenv("MAZEWALL_TIER_E_BUILD_CACHE_ROOT")?.let(Path::of)
             ?: repository.resolve("build/tier-e-benchmark-cache")
-        val status = TierEBenchmarkBundleBuilder.build(
-            repository,
-            Path.of(args[2]),
-            cache,
-            args[3].toBoolean(),
-            args[4].toBoolean(),
-            nativeType,
-            fingerprint,
-            fingerprintMillis,
-        )
+        val status = if (args.size == 5) {
+            TierEBenchmarkBundleBuilder.build(
+                repository,
+                Path.of(args[2]),
+                cache,
+                args[3].toBoolean(),
+                args[4].toBoolean(),
+                nativeType,
+                fingerprint,
+                fingerprintMillis,
+            )
+        } else {
+            fun tool(vararg command: String): String {
+                val result = io.mazewall.testing.containers
+                    .runContainerCommand(command.toList())
+                check(result.exitCode == 0) { "Bundle native toolchain unavailable: ${command.first()} (${result.exitCode})" }
+                return result.output.trim()
+            }
+            val imageId = requireNotNull(System.getenv("MAZEWALL_TIER_E_NATIVE_PACKAGE_IMAGE_ID")) {
+                "Native package image identity is required"
+            }
+            val architecture = requireNotNull(System.getenv("MAZEWALL_TIER_E_NATIVE_PACKAGE_ARCH")) {
+                "Native package architecture is required"
+            }
+            val expected = TierENativeArtifactPackage.Expected(
+                imageId,
+                nativeType,
+                args[3].toBoolean(),
+                tool("c++", "--version").lineSequence().first(),
+                tool("java", "-version"),
+                tool("cmake", "--version").lineSequence().first(),
+                architecture,
+            )
+            TierEBenchmarkBundleBuilder.buildPrepared(
+                repository,
+                Path.of(args[2]),
+                cache,
+                args[3].toBoolean(),
+                args[4].toBoolean(),
+                nativeType,
+                Path.of(args[5]),
+                expected,
+                fingerprint,
+                fingerprintMillis,
+            )
+        }
         println("tier-e-benchmark-bundle: status=$status fingerprint=$fingerprint bundle=${args[2]}")
         return
     }
