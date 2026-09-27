@@ -15,8 +15,12 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditCount.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditMap.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifact.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateBytecodeExecutionTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifierTest.kt"
   - "config/detekt/warnings/profiler.txt"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt"
@@ -26,6 +30,9 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyContainerOwner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyPreGateExport.kt"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/README.md"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
@@ -62,6 +69,10 @@ target_files:
   - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-v4-architecture-stop-20260927/raw-verifier.tar.gz"
+  - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/README.md"
+  - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/raw-verifier.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -482,3 +493,42 @@ v4 series were not started; the stopped runner and volume are retained.
 Stop further probe fixes and kernel acquisition until the diagnostic
 architecture and per-ID evidence representation receive explicit review.
 The five-pair unaudited qualification remains `INCOMPLETE`.
+
+**Reviewed v4 diagnostic correction (in progress, not kernel-qualified):**
+The earlier sixteen-row classifier compared ambient/mixed low32 counts
+against target-qualified pre-gate counts and assigned a causal `MAIN_HASH_GATE`
+without evidence. The decision classifier now uses only declared, target-
+qualified raw/main pre-/post-session rows, treats missing later observations
+as an unclassified checkpoint absence rather than proof of a particular
+kernel gate, and excludes the mixed low32 map from its verdict. A separate
+bounded sidecar writes **every declared FD** with pre-/post-stage counts,
+raw target count and exact submission into a fresh atomic artifact before
+the child can report success. Tooling checks its per-fork SHA-256, count,
+ordering and schema before retiring the Docker volume; missing or torn
+evidence fails closed. The printed sixteen rows are only a preview.
+
+The v4 BPF path now initializes a per-invocation eligibility flag and
+validated FD before the target/syscall/arm/argument/declared checks; later
+post-session evidence requires that flag and uses that preserved FD. An
+instruction-prefix interpreter test (not a mock of the decision function)
+failed for stale scratch, failed first argument reads and unarmed events
+before the code change and now exercises wrong-target, session rejection,
+missing map-entry and consecutive-syscall paths. These are **host-only
+checks**; do not reinterpret or discard the sealed architecture-stop run.
+No subsequent kernel verifier or clean v4 acquisition has run under the
+corrected contract; default qualification remains blocked.
+
+**Reviewed-probe development verifier and host export correction:** The
+[source-dirty, predeclared real-kernel run](../evidence/tier-e-v4-reviewed-artifact-verifier-20260927/README.md)
+recorded all 10,000 target raw IDs and 10,000 exact submissions in each
+full+unique fork. Raw/main pre-/post-session counts were each 10,000 per
+fork, all explicit pre-gate failure counters were zero and both complete
+10,000-row per-ID sidecars were written with recorded hashes. Kernel exact
+and ring-ready were 30,000/30,000 with zero loss. The host export stopped
+`INCOMPLETE` because `fork-output.target_pid` names the collector process,
+not the target JVM in the sidecar header. A red/green test corrected the
+verifier to bind to the **child's `workload_pid`**; offline verification
+against the *same retained exported files* then passed without another
+kernel run. The original terminal is **not retroactively upgraded**. The
+runner and volume remain retained. This is still source-dirty development
+evidence: no clean-source v4 pair or default qualification is claimed.

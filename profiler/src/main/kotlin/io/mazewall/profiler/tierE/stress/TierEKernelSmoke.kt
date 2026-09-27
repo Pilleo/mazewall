@@ -428,6 +428,16 @@ internal object TierEKernelSmoke {
                 emptySet()
             }
             val auditExpectedOpenatFds = boundedAuditSample(expectedOpenatFds)
+            val pairedPreGateAudit = benchmarkRawSysEnterAudit &&
+                benchmarkExactAdmissionAudit &&
+                configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT &&
+                TierEbpfEngine.selectSysEnterAttachmentBackend(configuredSysEnterAttachmentBackend) ==
+                TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+            if (pairedPreGateAudit) {
+                check(auditExpectedOpenatFds.all { it in 0 until TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS }) {
+                    "declared pre-gate audit descriptor exceeds bounded BPF array capacity"
+                }
+            }
             if (coverageDiscovery) pinTargetToCpu(args[6].toInt(), ProcessHandle.current().pid())
             val attachStarted = System.nanoTime()
             session.installAndAttach(process.pid().toInt(), sessionTag, agent, markerOffset, usdtNote)
@@ -435,6 +445,7 @@ internal object TierEKernelSmoke {
             val (effectiveSysEnterAttachmentBackend, sysEnterAttachmentCpus) = engine.sysEnterAttachmentEvidence()
             if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(auditExpectedOpenatFds)
             if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(auditExpectedOpenatFds)
+            if (pairedPreGateAudit) engine.configurePreGateAudit(auditExpectedOpenatFds)
             val pairedEarlyAudit = benchmarkRawSysEnterAudit &&
                 benchmarkExactAdmissionAudit &&
                 configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
@@ -571,6 +582,25 @@ internal object TierEKernelSmoke {
                 engine,
                 pairedEarlyAudit,
             )
+            val preGateCounts = if (pairedPreGateAudit) engine.readPreGateAuditCounts(auditExpectedOpenatFds) else emptyMap()
+            val preGateFailures = if (pairedPreGateAudit) engine.readPreGateAuditFailures() else emptyMap()
+            val preGateReceipt = if (pairedPreGateAudit) {
+                val path = System
+                    .getProperty("mazewall.tier-e.pre-gate-evidence-file")
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(Path::of)
+                    ?: error("version-four pre-gate audit requires an owned output artifact path")
+                TierEPreGateEvidenceArtifact.write(
+                    path = path,
+                    targetPid = process.pid().toInt(),
+                    expected = auditExpectedOpenatFds,
+                    counts = preGateCounts,
+                    rawTarget = rawSysEnterAuditCounts.mapValues { (_, count) -> count.openat },
+                    mainSubmitted = exactAdmissionAuditCounts.mapValues { (_, count) -> count.submitted },
+                )
+            } else {
+                null
+            }
             val exactAdmissionAuditArgumentReadFailures = if (benchmarkExactAdmissionAudit) {
                 engine.readExactAdmissionAuditArgumentReadFailureCount()
             } else {
@@ -612,6 +642,15 @@ internal object TierEKernelSmoke {
                     early = early,
                 )
             } ?: true
+            val preGateBoundary = if (pairedPreGateAudit) {
+                TierEAdmissionAuditSummary.preGateSummary(
+                    auditExpectedOpenatFds,
+                    preGateCounts,
+                )
+            } else {
+                "disabled"
+            }
+            val preGateComplete = !pairedPreGateAudit || (preGateBoundary == "PASS" && preGateFailures.values.all { it == 0L })
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -930,7 +969,7 @@ internal object TierEKernelSmoke {
                         oracle.wrong == 0L &&
                         oracle.unclassified == 0L
                     )
-            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete
+            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete && preGateComplete
             val sysEnterProgramEvidence = engine.sysEnterProgramEvidence()
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
@@ -972,8 +1011,13 @@ internal object TierEKernelSmoke {
                     16,
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
-                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts, earlyTargetOpenat)} " +
+                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts, earlyTargetOpenat, preGateCounts.takeIf { pairedPreGateAudit })} " +
                 "paired_early_target_audit_verdict=${if (pairedAuditComplete) "PASS" else "INCOMPLETE"} " +
+                "pre_gate_audit_boundary=$preGateBoundary " +
+                "pre_gate_audit_failure_counts=${preGateFailures.toSortedMap().entries.joinToString(",") { (key, count) -> "$key:$count" }.ifEmpty { "none" }} " +
+                "pre_gate_audit_evidence_rows=${preGateReceipt?.rows ?: 0} " +
+                "pre_gate_audit_evidence_file=${preGateReceipt?.path ?: "none"} " +
+                "pre_gate_audit_evidence_sha256=${preGateReceipt?.sha256 ?: "none"} " +
                 "exact_admission_audit_population_operations=${expectedOpenatFds.size} " +
                 "exact_admission_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
                 "exact_admission_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
@@ -1099,10 +1143,10 @@ internal object TierEKernelSmoke {
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
-            check(pairedAuditComplete) {
+            check(pairedAuditComplete && preGateComplete) {
                 "Tier E paired raw/main audit incomplete: raw=$rawSysEnterAuditObserved/${auditExpectedOpenatFds.size} " +
                     "rawMissing=${rawSysEnterAuditMissing.size} exactMissing=${exactAdmissionAuditMissing.size} " +
-                    "early=$earlyTargetOpenat"
+                    "early=$earlyTargetOpenat preGate=$preGateBoundary failures=$preGateFailures"
             }
             if (lifecycleScenario == "detach_while_active") {
                 check(lifecycleFaultApplied) { "native lifecycle barrier was never observed" }

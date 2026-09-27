@@ -435,6 +435,61 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `version four raw descriptor checkpoint precedes mutable session gate for installed target`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(
+            earlyTargetCount = true,
+            benchmarkTargetTgid = 12345,
+        )
+        val beforeSession = program.indexOfFirst { it.code == 0x18 && it.imm == 5 }
+        val firstSession = program.indexOfFirst { it.code == 0x18 && it.imm == 1 }
+        val firstArgRead = program.indexOfFirst { it.code == 0x85 && it.imm == 113 }
+        assertTrue(firstArgRead in 1 until beforeSession && beforeSession < firstSession)
+        assertTrue(program.take(beforeSession).any { it.imm == 12345 }, "immutable installed TGID must gate per-ID observations")
+        assertTrue(program.take(beforeSession).any { it.code == 0x35 && it.imm == 131072 }, "ambient out-of-range FDs are not declared map failures")
+        assertEquals(2, program.count { it.code == 0x18 && it.imm == 5 }, "raw pre/post session stages must use the same bounded map")
+        assertTrue(TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram().none { it.code == 0x18 && it.imm == 5 })
+    }
+
+    @Test
+    fun `version four main per descriptor checkpoint precedes session and retains no audit disabled bytecode`() {
+        val options = TierEOptions(benchmarkPhases = true, benchmarkRawSysEnterAudit = true, benchmarkExactAdmissionAudit = true)
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, benchmarkTargetTgid = 12345)
+        val beforeSession = program.indexOfFirst { it.code == 0x18 && it.imm == 10 }
+        val firstSession = program.indexOfFirst { it.code == 0x18 && it.imm == 3 }
+        val firstArgRead = program.indexOfFirst { it.code == 0x85 && it.imm == 113 }
+        assertTrue(firstArgRead in 1 until beforeSession && beforeSession < firstSession)
+        assertTrue(program.take(beforeSession).any { it.imm == 12345 })
+        assertTrue(program.take(beforeSession).any { it.code == 0x35 && it.imm == 131072 })
+        assertEquals(2, program.count { it.code == 0x18 && it.imm == 10 })
+        assertTrue(TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions()).none { it.code == 0x18 && it.imm == 10 })
+    }
+
+    @Test
+    fun `v4 probe cannot carry a nonzero scratch register into exact audit eligibility`() {
+        val options = TierEOptions(benchmarkPhases = true, benchmarkRawSysEnterAudit = true, benchmarkExactAdmissionAudit = true)
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, benchmarkTargetTgid = 12345)
+        val eligibilityInitialization = program.indexOfFirst { it.code == 0x63 && it.dst == 10 && it.src == 5 && it.off == (-100).toShort() }
+        assertTrue(eligibilityInitialization > 0)
+        assertEquals(
+            TierEbpfEngine.Insn(code = 0xb7, dst = 5, imm = 0),
+            program[eligibilityInitialization - 1],
+            "non-openat entries must not inherit a positive audit eligibility flag from the pre-gate probe",
+        )
+    }
+
+    @Test
+    fun `v4 main post session descriptor stage rejects non openat before reading scratch key`() {
+        val options = TierEOptions(benchmarkPhases = true, benchmarkRawSysEnterAudit = true, benchmarkExactAdmissionAudit = true)
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, benchmarkTargetTgid = 12345)
+        val postStageMap = program.indexOfLast { it.code == 0x18 && it.imm == 10 }
+        val precedingSessionMap = (0 until postStageMap).last { program[it].code == 0x18 && program[it].imm == 3 }
+        assertTrue(
+            program.subList(precedingSessionMap, postStageMap).any { it.code == 0x55 && it.imm == 257 },
+            "non-openat syscall must branch around the main post-session descriptor lookup",
+        )
+    }
+
+    @Test
     fun `exact admission audit records every pre-admission rejection reason without entering the ring path`() {
         val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
             TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),

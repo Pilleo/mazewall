@@ -60,7 +60,13 @@ public object TierETrustworthyRunner {
         val artifacts = output.toRealPath()
         val runId = "tier-e-trustworthy-${UUID.randomUUID()}"
         val builderName = "$runId-builder"
-        val owner = TierETrustworthyContainerOwner(endpoint, runId, artifacts)
+        val preGateRequired = settings.rawSysEnterAudit &&
+            settings.exactAdmissionAudit &&
+            settings.attachmentShape == "main-plus-audit" &&
+            settings.attachmentBackend != "perf-tracepoint-compat"
+        val owner = TierETrustworthyContainerOwner(endpoint, runId, artifacts, verifyExport = { result ->
+            TierETrustworthyResultVerifier.verify(result.resolve("results.jsonl"), preGateRequired)
+        })
 
         fun command(
             vararg arguments: String,

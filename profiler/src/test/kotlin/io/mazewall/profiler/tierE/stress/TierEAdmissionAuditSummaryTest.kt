@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.stress
 
+import io.mazewall.profiler.tierE.engine.TierEPreGateAuditCount
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -100,5 +101,53 @@ class TierEAdmissionAuditSummaryTest {
             early = TierEbpfEngine.EarlyTargetOpenatCounts(main = 10002, raw = 10002),
         ),
         )
+    }
+
+    @Test
+    fun `pre session descriptor stages distinguish main delivery boundary from target gate`() {
+        val missingBefore = TierEPreGateAuditCount(
+            declared = 1,
+            rawBeforeSession = 1,
+            mainBeforeSession = 0,
+            rawAfterSession = 1,
+            mainAfterSession = 0,
+        )
+        val missingAtGate = missingBefore.copy(mainBeforeSession = 1)
+        assertTrue("MAIN_PRE_STAGE_ABSENT" in TierEAdmissionAuditSummary.preGateSummary(setOf(4410), mapOf(4410 to missingBefore)))
+        assertTrue("MAIN_POST_STAGE_ABSENT" in TierEAdmissionAuditSummary.preGateSummary(setOf(4410), mapOf(4410 to missingAtGate)))
+        assertTrue("INCONCLUSIVE" in TierEAdmissionAuditSummary.preGateSummary(setOf(4410), emptyMap()))
+    }
+
+    @Test
+    fun `mixed population low32 deficit cannot identify a target hash boundary`() {
+        val admitted = TierEPreGateAuditCount(
+            declared = 1,
+            rawBeforeSession = 1,
+            mainBeforeSession = 1,
+            rawAfterSession = 1,
+            mainAfterSession = 1,
+        )
+        assertTrue(
+            "PASS" == TierEAdmissionAuditSummary.preGateSummary(
+            setOf(4410),
+                mapOf(4410 to admitted),
+        ),
+        )
+    }
+
+    @Test
+    fun `seventeen repeated ambient low32 entries cannot hide a high raw missing descriptor`() {
+        val admitted = TierEPreGateAuditCount(
+            declared = 1,
+            rawBeforeSession = 1,
+            mainBeforeSession = 1,
+            rawAfterSession = 1,
+            mainAfterSession = 1,
+        )
+        val ambient = (1..17).associateWith { admitted }
+        val counts = ambient + (7746 to admitted.copy(rawBeforeSession = 0, rawAfterSession = 0))
+        val summary = TierEAdmissionAuditSummary.preGateSummary(counts.keys, counts)
+        assertTrue("7746:RAW_PRE_STAGE_ABSENT" in summary)
+        assertTrue("MAIN_HASH_GATE" !in summary)
     }
 }

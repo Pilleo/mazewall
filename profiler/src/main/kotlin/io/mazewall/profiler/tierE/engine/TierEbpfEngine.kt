@@ -8,10 +8,8 @@ import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.native.RawSyscallOperations
-import io.mazewall.platform.native.asBpf
 import io.mazewall.platform.native.bpf
 import io.mazewall.platform.native.getFdOrThrow
-import io.mazewall.platform.native.openDescriptor
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
 import io.mazewall.profiler.internal.attribution.MarkerVersion
@@ -161,7 +159,6 @@ internal class TierEbpfEngine(
         private const val PERF_EVENT_IOC_SET_BPF: Long = 0x40042408
         private const val PERF_TYPE_TRACEPOINT: Int = 2
 
-        private const val BPF_MAP_CREATE: Long = 0
         private const val BPF_MAP_LOOKUP_ELEM: Long = 1
         private const val BPF_MAP_UPDATE_ELEM: Long = 2
         private const val BPF_MAP_GET_NEXT_KEY: Long = 4
@@ -210,7 +207,7 @@ internal class TierEbpfEngine(
         private const val COUNTER_MAP_ENTRIES = 13
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val EARLY_TARGET_OPENAT_COUNTER_KEYS = 3
-        private const val EARLY_TARGET_OPENAT_ARM_KEY = 2
+        private const val EARLY_TARGET_OPENAT_V4_KEYS = 9
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
         private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
@@ -295,6 +292,8 @@ internal class TierEbpfEngine(
             this.options = options
             val sysEnterAttachmentBackend = selectSysEnterAttachmentBackend(options.sysEnterAttachmentBackend)
             installed.sysEnterAttachmentBackend = sysEnterAttachmentBackend
+            installed.preGateAuditEnabled = options.usesPairedEarlyTargetAudit() &&
+                sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
             installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
             val taskStorageV2 = options.markerVersion == MarkerVersion.V2
             installed.invocationStorageFd = createMap(
@@ -364,7 +363,15 @@ internal class TierEbpfEngine(
                     MAP_ARRAY,
                 keySize = 4,
                 valueSize = Long.SIZE_BYTES,
-                maxEntries = EARLY_TARGET_OPENAT_COUNTER_KEYS,
+                maxEntries = if (installed.preGateAuditEnabled) EARLY_TARGET_OPENAT_V4_KEYS else EARLY_TARGET_OPENAT_COUNTER_KEYS,
+                )
+            }
+            if (installed.preGateAuditEnabled) {
+                installed.preGateAuditFd = createMap(
+                    MAP_ARRAY,
+                keySize = 4,
+                valueSize = TierEPreGateAuditCount.VALUE_SIZE,
+                    maxEntries = BENCHMARK_AUDIT_MAX_DESCRIPTORS,
                 )
             }
             Arena.ofConfined().use { arena ->
@@ -392,7 +399,11 @@ internal class TierEbpfEngine(
             if (!options.benchmarkSysEnterAttachmentShape.isAuditOnly()) {
                 installed.progFd = loadProg(
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
-                        buildRawTracepointProgram()
+                        if (installed.preGateAuditEnabled) {
+                            TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, targetTgid)
+                        } else {
+                            buildRawTracepointProgram()
+                        }
                     } else {
                         buildProgram()
                     },
@@ -407,6 +418,7 @@ internal class TierEbpfEngine(
                         installed.exactAdmissionAuditFd?.value ?: -1,
                         installed.recoveryEdgeFd?.value ?: -1,
                         installed.earlyTargetOpenatFd?.value ?: -1,
+                        installed.preGateAuditFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -423,7 +435,14 @@ internal class TierEbpfEngine(
                         if (options.benchmarkSysEnterAttachmentShape.usesMinimalAuditProgram()) {
                             TierEBpfProgramBuilder.buildMinimalRawTracepointSysEnterAuditProgram()
                         } else {
-                            buildRawTracepointSysEnterAuditProgram()
+                            if (installed.preGateAuditEnabled) {
+                                TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(
+                                    earlyTargetCount = true,
+                                    benchmarkTargetTgid = targetTgid,
+                                )
+                            } else {
+                                buildRawTracepointSysEnterAuditProgram()
+                            }
                         }
                     } else {
                         if (options.benchmarkSysEnterAttachmentShape.usesMinimalAuditProgram()) {
@@ -438,6 +457,7 @@ internal class TierEbpfEngine(
                         installed.requireLossFd().value,
                         installed.requireRawSysEnterAuditCpuFd().value,
                         installed.earlyTargetOpenatFd?.value ?: -1,
+                        installed.preGateAuditFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -538,18 +558,37 @@ internal class TierEbpfEngine(
         installed.exactAdmissionAuditConfigured = true
     }
 
+    /** Mark only declared descriptor slots before opening the shared arm window. */
+    internal fun configurePreGateAudit(expectedDirectoryFds: Set<Int>) {
+        val installed = requireInstalled()
+        check(installed.preGateAuditEnabled && !installed.preGateAuditConfigured) { "pre-gate descriptor audit is unavailable or already configured" }
+        TierEPreGateAuditMap.configure(native, installed.requirePreGateAuditFd().value, expectedDirectoryFds)
+        installed.preGateAuditConfigured = true
+    }
+
     /** Opens the same target observation window in both programs after attachments and maps are ready. */
     internal fun armEarlyTargetOpenatComparison() {
         check(options.usesPairedEarlyTargetAudit()) { "paired early target audit is not enabled" }
         val installed = requireInstalled()
         check(installed.rawSysEnterAuditConfigured && installed.exactAdmissionAuditConfigured) { "paired audit maps are not configured" }
+        check(!installed.preGateAuditEnabled || installed.preGateAuditConfigured) { "pre-gate audit map is not configured" }
         check(!installed.earlyTargetOpenatArmed) { "paired early target audit was already armed" }
-        Arena.ofConfined().use { arena ->
-            val armed = arena.allocate(ValueLayout.JAVA_LONG)
-            armed.set(ValueLayout.JAVA_LONG, 0, 1L)
-            updateElem(arena, installed.requireEarlyTargetOpenatFd().value, intSeg(arena, EARLY_TARGET_OPENAT_ARM_KEY), armed)
-        }
+        TierEPreGateAuditMap.arm(native, installed.requireEarlyTargetOpenatFd().value)
         installed.earlyTargetOpenatArmed = true
+    }
+
+    internal fun readPreGateAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, TierEPreGateAuditCount> {
+        val installed = requireInstalled()
+        check(installed.preGateAuditEnabled && installed.preGateAuditConfigured && installed.earlyTargetOpenatArmed) {
+            "pre-gate descriptor audit was not fully armed"
+        }
+        return TierEBenchmarkAuditMapReader.readPreGate(native, installed.requirePreGateAuditFd().value, expectedDirectoryFds)
+    }
+
+    internal fun readPreGateAuditFailures(): Map<Int, Long> {
+        val installed = requireInstalled()
+        check(installed.preGateAuditEnabled && installed.earlyTargetOpenatArmed) { "pre-gate failure counters were not armed" }
+        return TierEBenchmarkAuditMapReader.readPreGateFailures(native, installed.requireEarlyTargetOpenatFd().value)
     }
 
     /** Reads only the declared descriptors; absent entries are a configuration failure. */
@@ -1009,6 +1048,7 @@ internal class TierEbpfEngine(
         close(installed.rawSysEnterAuditCpuFd) { installed.rawSysEnterAuditCpuFd = null }
         close(installed.exactAdmissionAuditFd) { installed.exactAdmissionAuditFd = null }
         close(installed.earlyTargetOpenatFd) { installed.earlyTargetOpenatFd = null }
+        close(installed.preGateAuditFd) { installed.preGateAuditFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
         close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }
@@ -1060,19 +1100,7 @@ internal class TierEbpfEngine(
         btfFd: Int = 0,
         btfKeyTypeId: Int = 0,
         btfValueTypeId: Int = 0,
-    ): BpfFd =
-        Arena.ofConfined().use {
-            val attr = it.allocate(72)
-            attr.set(ValueLayout.JAVA_INT, 0, type)
-            attr.set(ValueLayout.JAVA_INT, 4, keySize)
-            attr.set(ValueLayout.JAVA_INT, 8, valueSize)
-            attr.set(ValueLayout.JAVA_INT, 12, maxEntries)
-            attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.MAP_FLAGS, mapFlags)
-            attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_FD, btfFd)
-            attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_KEY_TYPE_ID, btfKeyTypeId)
-            attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_VALUE_TYPE_ID, btfValueTypeId)
-            native.asBpf().openDescriptor(BPF_MAP_CREATE, ConfinedSegment(attr), 72, "bpf(BPF_MAP_CREATE)")
-        }
+    ): BpfFd = TierEBpfMapAllocator.create(native, type, keySize, valueSize, maxEntries, mapFlags, btfFd, btfKeyTypeId, btfValueTypeId)
 
     private fun loadBtf(bytes: ByteArray): BpfFd =
         Arena.ofConfined().use {
@@ -1339,6 +1367,7 @@ private class Resources {
     var rawSysEnterAuditCpuFd: BpfFd? = null
     var exactAdmissionAuditFd: BpfFd? = null
     var earlyTargetOpenatFd: BpfFd? = null
+    var preGateAuditFd: BpfFd? = null
     var progFd: BpfFd? = null
     var rawSysEnterAuditProgFd: BpfFd? = null
     var markerProgFd: BpfFd? = null
@@ -1353,6 +1382,8 @@ private class Resources {
     var rawSysEnterAuditConfigured = false
     var exactAdmissionAuditConfigured = false
     var earlyTargetOpenatArmed = false
+    var preGateAuditEnabled = false
+    var preGateAuditConfigured = false
     var sysEnterAttachmentBackend: TierESysEnterAttachmentBackend? = null
     val sysEnterAttachmentCpus = mutableListOf<Int>()
     var mainSysEnterProgramAttached: Boolean = false
@@ -1378,6 +1409,8 @@ private class Resources {
     fun requireExactAdmissionAuditFd(): BpfFd = requireNotNull(exactAdmissionAuditFd) { "exact-admission audit descriptor was not acquired" }
 
     fun requireEarlyTargetOpenatFd(): BpfFd = requireNotNull(earlyTargetOpenatFd) { "early target openat descriptor was not acquired" }
+
+    fun requirePreGateAuditFd(): BpfFd = requireNotNull(preGateAuditFd) { "pre-gate descriptor array was not acquired" }
 
     fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
 

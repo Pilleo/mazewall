@@ -11,6 +11,14 @@ import java.nio.file.Path
 /** Require an intact benchmark JSONL before retiring the source artifact volume. */
 public object TierETrustworthyResultVerifier {
     public fun verify(file: Path): Boolean {
+        return verify(file, preGateRequired = false)
+    }
+
+    /** Audit-enabled exports must retain their complete version-four per-ID snapshot. */
+    public fun verify(
+        file: Path,
+        preGateRequired: Boolean,
+    ): Boolean {
         val text = Files.readString(file)
         require(text.endsWith('\n')) { "Torn benchmark JSONL tail" }
         val rows = text
@@ -32,6 +40,11 @@ public object TierETrustworthyResultVerifier {
         val samples = (summaries.single()["sample_count"] as? JsonPrimitive)?.intOrNull
         require(samples != null && samples >= 0 && rows.count { kind(it) == "sample" } == samples) {
             "Benchmark sample count mismatch"
+        }
+        if (preGateRequired) {
+            rows.filter { kind(it) == "fork-output" }.forEach { fork ->
+                TierETrustworthyPreGateExport.verify(requireNotNull(file.parent), fork)
+            }
         }
         return true
     }

@@ -287,6 +287,21 @@ These are still substantive controllers, not thin launchers:
    retained, but per-ID gate attribution is not valid. This is an
    **architecture-review stop** for the opt-in diagnostic; the clean v4
    series was not run and the default filter/decision is unchanged.
+   The reviewed v4 correction separates target/window-qualified descriptor
+   rows from ambient/mixed low32 aggregates, writes the complete bounded
+   ID table atomically alongside the fork output, and checks its checksum
+   before the source volume is retired. A per-invocation eligibility flag
+   and preserved validated FD guard later post-session counting. Instruction-
+   prefix tests cover consecutive entries and failed helper/map outcomes;
+   those host tests are not evidence of a new kernel-qualified result.
+   A [source-dirty reviewed v4 verifier](../../evidence/tier-e-v4-reviewed-artifact-verifier-20260927/README.md)
+   acquired coherent real-kernel full+unique receipts and all 10,000 ID
+   rows per fork. Its host export failed because the fork row's launcher
+   PID was wrongly compared with the sidecar's target JVM PID. A corrected
+   verifier passed an offline replay over the exact retained files; the
+   original `INCOMPLETE` terminal remains unchanged. A separately
+   predeclared clean-source diagnostic is still pending, and the default
+   five-pair unaudited decision remains incomplete.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

@@ -50,9 +50,20 @@ internal object TierEBpfProgramBuilder {
     private const val EXACT_ADMISSION_AUDIT_MAP_INDEX: Int = 7
     private const val RAW_PRE_DECODE_TARGET_MAP_INDEX: Int = 4
     private const val MAIN_PRE_DECODE_TARGET_MAP_INDEX: Int = 9
+    private const val RAW_PRE_GATE_DESCRIPTOR_MAP_INDEX: Int = 5
+    private const val MAIN_PRE_GATE_DESCRIPTOR_MAP_INDEX: Int = 10
     private const val MAIN_SESSION_MAP_INDEX: Int = 3
     private const val EARLY_TARGET_ARM_KEY: Int = 2
     private const val PID_TGID_HIGH_HALF_SHIFT: Int = 32
+    private const val TARGET_OPENAT_SYSCALL_NUMBER: Int = 257
+    private const val V4_RAW_READ_FAILURE_KEY: Int = 3
+    private const val V4_MAIN_READ_FAILURE_KEY: Int = 4
+    private const val V4_RAW_LOOKUP_FAILURE_KEY: Int = 5
+    private const val V4_MAIN_LOOKUP_FAILURE_KEY: Int = 6
+    private const val V4_RAW_POST_LOOKUP_FAILURE_KEY: Int = 7
+    private const val V4_MAIN_POST_LOOKUP_FAILURE_KEY: Int = 8
+    private const val V4_ELIGIBILITY_STACK_OFFSET: Int = -128
+    private const val V4_VALIDATED_FD_STACK_OFFSET: Int = -132
     private const val RECOVERY_MAP_INDEX: Int = 8
     private const val BPF_NOEXIST: Int = 1
     internal const val RECOVERY_INSERTION_FAILURE_COUNTER_INDEX: Int = 12
@@ -86,6 +97,7 @@ internal object TierEBpfProgramBuilder {
     private const val JA: Int = 0x05
     private const val JNE_IMM: Int = 0x55
     private const val JNE_REG: Int = 0x5d
+    private const val JGE_IMM: Int = 0x35
     private const val OR_IMM: Int = 0x47
     private const val RSH_IMM: Int = 0x77
     private const val LD_MAP_FD: Int = 0x18
@@ -118,6 +130,17 @@ internal object TierEBpfProgramBuilder {
 
     public fun buildRawTracepointSysEnterAuditProgram(earlyTargetCount: Boolean): List<Insn> =
         buildSysEnterAuditProgram(rawTracepoint = true, descriptorCounts = true, earlyTargetCount = earlyTargetCount)
+
+    public fun buildRawTracepointSysEnterAuditProgram(
+        earlyTargetCount: Boolean,
+        benchmarkTargetTgid: Int,
+    ): List<Insn> =
+        buildSysEnterAuditProgram(
+            rawTracepoint = true,
+            descriptorCounts = true,
+            earlyTargetCount = earlyTargetCount,
+            benchmarkTargetTgid = benchmarkTargetTgid,
+        )
 
     /**
      * Minimal benchmark-only denominator: validates a declared directory descriptor and
@@ -173,10 +196,134 @@ internal object TierEBpfProgramBuilder {
         }
     }
 
+    /** A bounded per-ID checkpoint before consulting the mutable session map. */
+    private fun emitPreGateDescriptorCounter(
+        program: MutableList<Insn>,
+        targetTgid: Int,
+        rawTracepoint: Boolean,
+        mainProgram: Boolean,
+        armMapIndex: Int,
+        descriptorMapIndex: Int,
+        beforeOffset: Int,
+        emit: (Insn) -> Int,
+        ldMap: (Int, Int) -> Unit,
+    ) {
+        require(targetTgid > 0)
+        emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
+        val otherSyscall = emit(Insn(JNE_IMM, dst = 5, imm = TARGET_OPENAT_SYSCALL_NUMBER))
+        emit(Insn(MOV_REG, dst = 5, src = 8))
+        emit(Insn(RSH_IMM, dst = 5, imm = PID_TGID_HIGH_HALF_SHIFT))
+        val otherTarget = emit(Insn(JNE_IMM, dst = 5, imm = targetTgid))
+        emit(Insn(MOV_IMM, dst = 5, imm = EARLY_TARGET_ARM_KEY))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -120))
+        ldMap(1, armMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -120))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val noArm = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_DW, dst = 5, src = 0))
+        val notArmed = emit(Insn(JNE_IMM, dst = 5, imm = 1))
+        val readFailure: Int?
+        if (rawTracepoint) {
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 0))
+            emit(Insn(ADD_IMM, dst = 3, imm = X86_64_PT_REGS_DI_OFFSET))
+            emit(Insn(MOV_REG, dst = 1, src = FP))
+            emit(Insn(ADD_IMM, dst = 1, imm = -88))
+            emit(Insn(MOV_IMM, dst = 2, imm = 8))
+            emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+            readFailure = emit(Insn(JNE_IMM, dst = 0))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -88))
+        } else {
+            readFailure = null
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+        }
+        emit(Insn(STX_W, dst = FP, src = 5, off = -88))
+        emit(Insn(LDX_W, dst = 5, src = FP, off = -88))
+        val ambientOutOfRange = emit(Insn(JGE_IMM, dst = 5, imm = TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS))
+        ldMap(1, descriptorMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -88))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingMapEntry = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_DW, dst = 5, src = 0, off = TierEPreGateAuditCount.DECLARED_OFFSET.toShort()))
+        val unrelatedDescriptor = emit(Insn(JNE_IMM, dst = 5, imm = 1))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = beforeOffset.toShort()))
+        emit(Insn(STX_W, dst = FP, src = 5, off = V4_ELIGIBILITY_STACK_OFFSET.toShort()))
+        emit(Insn(LDX_W, dst = 5, src = FP, off = -88))
+        emit(Insn(STX_W, dst = FP, src = 5, off = V4_VALIDATED_FD_STACK_OFFSET.toShort()))
+        val counted = emit(Insn(JA))
+        val lookupFailureHandler = program.size
+        emitPreGateFailureCounter(program, armMapIndex, if (mainProgram) V4_MAIN_LOOKUP_FAILURE_KEY else V4_RAW_LOOKUP_FAILURE_KEY, emit, ldMap)
+        val countedLookupFailure = emit(Insn(JA))
+        val readFailureHandler = program.size
+        if (rawTracepoint) {
+            emitPreGateFailureCounter(program, armMapIndex, if (mainProgram) V4_MAIN_READ_FAILURE_KEY else V4_RAW_READ_FAILURE_KEY, emit, ldMap)
+        }
+        val complete = program.size
+        listOf(otherSyscall, otherTarget, noArm, notArmed, ambientOutOfRange, unrelatedDescriptor, counted, countedLookupFailure).forEach { index ->
+            program[index] = program[index].copy(off = (complete - index - 1).toShort())
+        }
+        program[missingMapEntry] = program[missingMapEntry].copy(off = (lookupFailureHandler - missingMapEntry - 1).toShort())
+        readFailure?.let { index -> program[index] = program[index].copy(off = (readFailureHandler - index - 1).toShort()) }
+    }
+
+    private fun emitPreGateFailureCounter(
+        program: MutableList<Insn>,
+        armMapIndex: Int,
+        key: Int,
+        emit: (Insn) -> Int,
+        ldMap: (Int, Int) -> Unit,
+    ) {
+        emit(Insn(MOV_IMM, dst = 5, imm = key))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -120))
+        ldMap(1, armMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -120))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val noCounter = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        program[noCounter] = program[noCounter].copy(off = (program.size - noCounter - 1).toShort())
+    }
+
+    private fun emitPostSessionDescriptorCounter(
+        program: MutableList<Insn>,
+        descriptorMapIndex: Int,
+        armMapIndex: Int,
+        failureKey: Int,
+        afterOffset: Int,
+        emit: (Insn) -> Int,
+        ldMap: (Int, Int) -> Unit,
+    ) {
+        emit(Insn(LDX_W, dst = 5, src = FP, off = V4_ELIGIBILITY_STACK_OFFSET.toShort()))
+        val notEligible = emit(Insn(JEQ_IMM, dst = 5))
+        emit(Insn(LDX_W, dst = 5, src = FP, off = V4_VALIDATED_FD_STACK_OFFSET.toShort()))
+        val ambientOutOfRange = emit(Insn(JGE_IMM, dst = 5, imm = TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS))
+        ldMap(1, descriptorMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = V4_VALIDATED_FD_STACK_OFFSET))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingEntry = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_DW, dst = 5, src = 0, off = TierEPreGateAuditCount.DECLARED_OFFSET.toShort()))
+        val unrelatedDescriptor = emit(Insn(JNE_IMM, dst = 5, imm = 1))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = afterOffset.toShort()))
+        val counted = emit(Insn(JA))
+        val failedLookup = program.size
+        emitPreGateFailureCounter(program, armMapIndex, failureKey, emit, ldMap)
+        val complete = program.size
+        listOf(notEligible, ambientOutOfRange, unrelatedDescriptor, counted).forEach { index ->
+            program[index] = program[index].copy(off = (complete - index - 1).toShort())
+        }
+        program[missingEntry] = program[missingEntry].copy(off = (failedLookup - missingEntry - 1).toShort())
+    }
+
     private fun buildSysEnterAuditProgram(
         rawTracepoint: Boolean,
         descriptorCounts: Boolean,
         earlyTargetCount: Boolean,
+        benchmarkTargetTgid: Int? = null,
     ): List<Insn> {
         val program = mutableListOf<Insn>()
 
@@ -198,6 +345,10 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 8, src = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+        if (benchmarkTargetTgid != null) {
+            emit(Insn(STX_W, dst = FP, src = 5, off = V4_ELIGIBILITY_STACK_OFFSET.toShort()))
+            emit(Insn(STX_W, dst = FP, src = 5, off = V4_VALIDATED_FD_STACK_OFFSET.toShort()))
+        }
 
         // raw_syscalls/sys_enter: syscall id is u64@8 and args[0] is u64@16.
         emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
@@ -208,6 +359,21 @@ internal object TierEBpfProgramBuilder {
         val openatCounter = program.size
         emit(Insn(MOV_IMM, dst = 6, imm = 0))
         val descriptorLookup = program.size
+        if (benchmarkTargetTgid != null) {
+            val notOpenat = emit(Insn(JNE_IMM, dst = 6))
+            emitPreGateDescriptorCounter(
+                program,
+                benchmarkTargetTgid,
+                rawTracepoint,
+                false,
+                RAW_PRE_DECODE_TARGET_MAP_INDEX,
+                RAW_PRE_GATE_DESCRIPTOR_MAP_INDEX,
+                TierEPreGateAuditCount.RAW_BEFORE_OFFSET,
+                ::emit,
+                ::loadMap,
+            )
+            program[notOpenat] = program[notOpenat].copy(off = (program.size - notOpenat - 1).toShort())
+        }
         if (earlyTargetCount) {
             val notOpenat = emit(Insn(JNE_IMM, dst = 6))
             emitPreDecodeTargetCounter(program, 1, RAW_PRE_DECODE_TARGET_MAP_INDEX, 1, ::emit, ::loadMap)
@@ -253,6 +419,19 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 5, src = 8))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
+        if (benchmarkTargetTgid != null) {
+            val notOpenat = emit(Insn(JNE_IMM, dst = 6))
+            emitPostSessionDescriptorCounter(
+                program,
+                RAW_PRE_GATE_DESCRIPTOR_MAP_INDEX,
+                RAW_PRE_DECODE_TARGET_MAP_INDEX,
+                V4_RAW_POST_LOOKUP_FAILURE_KEY,
+                TierEPreGateAuditCount.RAW_AFTER_OFFSET,
+                ::emit,
+                ::loadMap,
+            )
+            program[notOpenat] = program[notOpenat].copy(off = (program.size - notOpenat - 1).toShort())
+        }
 
         // The bounded per-CPU array is diagnostic-only and counts only target
         // workload syscalls that have passed the session gate.
@@ -412,9 +591,15 @@ internal object TierEBpfProgramBuilder {
     /** x86_64 raw-tracepoint program with the same 88-byte ring record. */
     public fun buildRawTracepointSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true)
 
+    public fun buildRawTracepointSysEnterProgram(
+        options: TierEOptions,
+        benchmarkTargetTgid: Int,
+    ): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true, benchmarkTargetTgid = benchmarkTargetTgid)
+
     private fun buildSysEnterProgram(
         options: TierEOptions,
         rawTracepoint: Boolean,
+        benchmarkTargetTgid: Int? = null,
     ): List<Insn> {
         if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
             require(options.markerVersion == MarkerVersion.V2) {
@@ -563,6 +748,25 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
 
+        if (benchmarkTargetTgid != null) {
+            require(options.benchmarkRawSysEnterAudit && options.benchmarkExactAdmissionAudit && rawTracepoint)
+            emit(Insn(STX_W, dst = FP, src = 5, off = V4_ELIGIBILITY_STACK_OFFSET.toShort()))
+            emit(Insn(STX_W, dst = FP, src = 5, off = V4_VALIDATED_FD_STACK_OFFSET.toShort()))
+            emitPreGateDescriptorCounter(
+                p,
+                benchmarkTargetTgid,
+                true,
+                true,
+                MAIN_PRE_DECODE_TARGET_MAP_INDEX,
+                MAIN_PRE_GATE_DESCRIPTOR_MAP_INDEX,
+                TierEPreGateAuditCount.MAIN_BEFORE_OFFSET,
+                ::emit,
+                ::ldMap,
+            )
+            // The v4 probe may leave r5 holding a successful count or a syscall ID.
+            // The existing audit setup stores r5 as its initial eligibility flag.
+            emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        }
         if (options.benchmarkExactAdmissionAudit) {
             emitExactAdmissionAuditSetup(
                 p,
@@ -589,6 +793,20 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
         emit(Insn(MOV_REG, dst = 7, src = 0))
+        if (benchmarkTargetTgid != null) {
+            emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
+            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = TARGET_OPENAT_SYSCALL_NUMBER))
+            emitPostSessionDescriptorCounter(
+                p,
+                MAIN_PRE_GATE_DESCRIPTOR_MAP_INDEX,
+                MAIN_PRE_DECODE_TARGET_MAP_INDEX,
+                V4_MAIN_POST_LOOKUP_FAILURE_KEY,
+                TierEPreGateAuditCount.MAIN_AFTER_OFFSET,
+                ::emit,
+                ::ldMap,
+            )
+            p[notOpenat] = p[notOpenat].copy(off = (p.size - notOpenat - 1).toShort())
+        }
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_SESSION_MATCHED_OFFSET)
 
         // Count before reading marker attachment. Otherwise a handler could

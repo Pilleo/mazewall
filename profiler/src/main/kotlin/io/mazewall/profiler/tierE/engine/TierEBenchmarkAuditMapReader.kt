@@ -14,6 +14,8 @@ internal object TierEBenchmarkAuditMapReader {
     private const val BPF_ATTR_SIZE = 24L
     private const val KEY_POINTER_OFFSET = 8L
     private const val VALUE_POINTER_OFFSET = 16L
+    private const val FIRST_PRE_GATE_FAILURE_KEY = 3
+    private const val LAST_PRE_GATE_FAILURE_KEY = 8
 
     private fun lookup(
         native: RawSyscallOperations,
@@ -45,6 +47,35 @@ internal object TierEBenchmarkAuditMapReader {
             val raw = lookup(native, arena, mapFd, 1, Long.SIZE_BYTES).get(ValueLayout.JAVA_LONG, 0)
             TierEbpfEngine.EarlyTargetOpenatCounts(main = main, raw = raw)
         }
+
+    fun readPreGateFailures(
+        native: RawSyscallOperations,
+        mapFd: Int,
+    ): Map<Int, Long> =
+        Arena.ofConfined().use { arena ->
+            (FIRST_PRE_GATE_FAILURE_KEY..LAST_PRE_GATE_FAILURE_KEY).associateWith { key ->
+                lookup(native, arena, mapFd, key, Long.SIZE_BYTES).get(ValueLayout.JAVA_LONG, 0)
+            }
+        }
+
+    fun readPreGate(
+        native: RawSyscallOperations,
+        mapFd: Int,
+        descriptors: Set<Int>,
+    ): Map<Int, TierEPreGateAuditCount> =
+        Arena.ofConfined().use { arena ->
+        descriptors.associateWith { descriptor ->
+            val value = lookup(native, arena, mapFd, descriptor, TierEPreGateAuditCount.VALUE_SIZE)
+            val offsets = TierEPreGateAuditCount
+            TierEPreGateAuditCount(
+                declared = value.get(ValueLayout.JAVA_LONG, offsets.DECLARED_OFFSET.toLong()),
+                rawBeforeSession = value.get(ValueLayout.JAVA_LONG, offsets.RAW_BEFORE_OFFSET.toLong()),
+                mainBeforeSession = value.get(ValueLayout.JAVA_LONG, offsets.MAIN_BEFORE_OFFSET.toLong()),
+                rawAfterSession = value.get(ValueLayout.JAVA_LONG, offsets.RAW_AFTER_OFFSET.toLong()),
+                mainAfterSession = value.get(ValueLayout.JAVA_LONG, offsets.MAIN_AFTER_OFFSET.toLong()),
+            )
+        }
+    }
 
     fun readRaw(
         native: RawSyscallOperations,
