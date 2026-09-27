@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.tools
 
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -11,6 +12,13 @@ import java.util.concurrent.TimeUnit
 
 /** Rootful, disposable source-volume test gate with exact-name ownership and fail-closed exports. */
 public object TierERootfulGateRunner {
+    public fun nativeBuildCache(
+        source: String,
+        image: String,
+        compiler: String,
+        java: String,
+    ): String = "mazewall-tier-e-rootful-native-${TierERootfulPhaseProbe.nativeBuildKey(source, image, compiler, java).take(24)}"
+
     public fun profilerVerificationCommand(runner: String): List<String> =
         listOf(
         "exec",
@@ -34,8 +42,12 @@ public object TierERootfulGateRunner {
         output: Path,
         endpoint: ContainerEndpoint,
         image: String,
+        cpuSet: String? = null,
     ) {
         require(endpoint.resolvedUri?.startsWith("unix://") == true) { "Tier E rootful gate requires a local engine" }
+        require(cpuSet == null || cpuSet.matches(Regex("[0-9]+,[0-9]+")) && cpuSet.split(',').distinct().size == 2) {
+            "Rootful gate requires distinct CPU IDs"
+        }
         Files.createDirectories(output)
         require(Files.list(output).use { it.findAny().isEmpty }) { "Tier E gate requires fresh artifacts" }
         val repository = root.toRealPath()
@@ -80,6 +92,15 @@ public object TierERootfulGateRunner {
                 log = artifacts.resolve("image-build.log"),
             )
         }
+        val sourceBefore = TierESourceFingerprint
+            .read(repository, null)
+            .getValue("source_digest")
+            .jsonPrimitive.content
+        val imageId = docker("image", "inspect", image, "--format", "{{.Id}}")
+        require(imageId.startsWith("sha256:")) { "Rootful gate image identity unavailable" }
+        val compiler = docker("run", "--rm", "--entrypoint", "c++", image, "--version").lineSequence().first()
+        val javaVersion = docker("run", "--rm", "--entrypoint", "java", image, "-version")
+        val nativeCache = nativeBuildCache(sourceBefore, imageId, compiler, javaVersion)
         val wrapper = repository.resolve("gradle/wrapper/gradle-wrapper.properties")
         val key = MessageDigest
             .getInstance("SHA-256")
@@ -98,6 +119,7 @@ public object TierERootfulGateRunner {
                 docker("volume", "create", owner.volume)
                 owner.ownVolume()
                 docker("volume", "create", cache)
+                docker("volume", "create", nativeCache)
                 val tar = Files.createTempFile("tier-e-rootful-source-", ".tar")
                 try {
                     TierERootfulSourceTransfer.archive(repository, tar)
@@ -127,6 +149,14 @@ public object TierERootfulGateRunner {
                     Files.deleteIfExists(tar)
                     runContainerCommand(endpoint.command("rm", "-f", "$id-transfer"))
                 }
+                check(
+                    TierESourceFingerprint
+                    .read(repository, null)
+                    .getValue("source_digest")
+                    .jsonPrimitive.content == sourceBefore,
+                ) {
+                    "Rootful gate source changed during transfer"
+                }
                 docker(
                     "create",
                     "--name",
@@ -135,10 +165,13 @@ public object TierERootfulGateRunner {
                     "--pid=host",
                     "--network=host",
                     "--userns=host",
+                    *(if (cpuSet == null) emptyArray() else arrayOf("--cpuset-cpus=$cpuSet")),
                     "--security-opt",
                     "seccomp=unconfined",
                     "-v",
                     "${owner.volume}:/workspace",
+                    "-v",
+                    "$nativeCache:/workspace/profiler-native/build",
                     "-v",
                     "$cache:/container-gradle-home",
                     "-e",
@@ -157,6 +190,12 @@ public object TierERootfulGateRunner {
                 )
                 owner.ownRunner()
                 docker("start", owner.runner)
+                Files.writeString(
+                    artifacts.resolve("native-build-identity.txt"),
+                    "source_digest=$sourceBefore\nimage_id=$imageId\ncompiler=$compiler\njava=$javaVersion\n" +
+                        "cpu_set=${cpuSet ?: "unrestricted"}\nbuild_cache=$nativeCache\n" +
+                        "policy_eligibility=false\n",
+                )
                 docker("exec", owner.runner, "mkdir", "-p", "/artifacts")
                 if (runContainerCommand(endpoint.command("exec", owner.runner, "mountpoint", "-q", "/sys/kernel/tracing")).exitCode != 0) {
                     docker("exec", owner.runner, "mount", "-t", "tracefs", "tracefs", "/sys/kernel/tracing")

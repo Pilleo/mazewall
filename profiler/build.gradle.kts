@@ -217,6 +217,21 @@ tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     }
 }
 
+tasks.register<JavaExec>("tierERootfulGate") {
+    group = "verification"
+    description = "Fresh rootful Docker verification with source-keyed native and Gradle build reuse"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val profile = providers.gradleProperty("tierEProfile").orElse("config/testing/tier-e/rootful-gate.json")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("rootful-gate-profile", repositoryPath, output.get(), profile.get())
+    }
+}
+
 tasks.register<JavaExec>("tierEReplayPhaseEvidence") {
     group = "verification"
     description = "Recheck retained native phase samples with the unchanged historical baseline"

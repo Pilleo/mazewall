@@ -116,6 +116,7 @@ public object TierERootfulPhaseProbe {
                     "--pid=host",
                     "--network=host",
                     "--userns=host",
+                    "--cpuset-cpus=0,1",
                     "--security-opt",
                     "seccomp=unconfined",
                     "-v",
@@ -146,6 +147,7 @@ public object TierERootfulPhaseProbe {
                     put("compiler", toolchain)
                     put("java", java)
                     put("native_build_cache", buildCache)
+                    put("cpu_set", "0,1")
                     put("run_id", id)
                     put("policy_eligibility", false)
                 }.toString() +

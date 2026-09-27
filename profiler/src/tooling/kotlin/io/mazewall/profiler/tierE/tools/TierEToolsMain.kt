@@ -250,6 +250,19 @@ public fun main(args: Array<String>) {
         )
         return
     }
+    if (args.size == 4 && args[0] == "rootful-gate-profile") {
+        val profile = TierERootfulGateProfile.load(Path.of(args[3]))
+        val endpoint = when (
+            val selected = ContainerEndpointDiscovery().discover(
+            EndpointConfig(ContainerEngine.DOCKER, System.getenv("MAZEWALL_DOCKER_HOST") ?: "unix:///var/run/docker.sock"),
+        )
+        ) {
+            is EndpointSelection.Ready -> selected.endpoint
+            is EndpointSelection.Skipped -> error("Rootful gate requires local Docker: ${selected.reason}")
+        }
+        TierERootfulGateRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet)
+        return
+    }
     if (args.size == 2 && args[0] == "trustworthy-source-state") {
         println(TierETrustworthySourceState.read(Path.of(args[1])))
         return

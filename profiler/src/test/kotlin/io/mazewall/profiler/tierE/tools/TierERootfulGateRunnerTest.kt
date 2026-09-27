@@ -41,6 +41,16 @@ class TierERootfulGateRunnerTest {
     }
 
     @Test
+    fun `aggregate gate caches native build only for identical source and toolchain`() {
+        val first = TierERootfulGateRunner.nativeBuildCache("source-a", "image-a", "compiler-a", "jdk-a")
+        assertTrue(first.startsWith("mazewall-tier-e-rootful-native-"))
+        assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-b", "image-a", "compiler-a", "jdk-a"))
+        assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-b", "compiler-a", "jdk-a"))
+        assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-a", "compiler-b", "jdk-a"))
+        assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-a", "compiler-a", "jdk-b"))
+    }
+
+    @Test
     fun `remote engine cannot receive local source or create artifact volume`() {
         val root = Files.createTempDirectory("tier-e-gate-root-")
         val output = Files.createTempDirectory("tier-e-gate-output-")

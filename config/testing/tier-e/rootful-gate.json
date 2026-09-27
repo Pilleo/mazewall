@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "container": { "engine": "docker", "image": "mazewall-tier-e-rootful:latest" },
+  "cpu_set": "0,1"
+}
