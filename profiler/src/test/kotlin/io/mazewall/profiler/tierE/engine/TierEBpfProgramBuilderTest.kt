@@ -411,6 +411,30 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `opt-in main target counter precedes descriptor read and is absent from production`() {
+        val audited = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkRawSysEnterAudit = true, benchmarkExactAdmissionAudit = true),
+        )
+        val targetCounterMap = audited.indexOfFirst { it.code == 0x18 && it.imm == 9 }
+        val firstArgumentRead = audited.indexOfFirst { it.code == 0x85 && it.imm == 113 }
+        assertTrue(targetCounterMap in 1 until firstArgumentRead)
+        assertEquals(2, audited.count { it.code == 0x18 && it.imm == 9 }, "arming and counting must use the same map")
+        val production = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions())
+        assertTrue(production.none { it.code == 0x18 && it.imm == 9 })
+    }
+
+    @Test
+    fun `independent raw target counter precedes argument read without altering ordinary raw audit`() {
+        val audited = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(earlyTargetCount = true)
+        val targetCounterMap = audited.indexOfFirst { it.code == 0x18 && it.imm == 4 }
+        val firstArgumentRead = audited.indexOfFirst { it.code == 0x85 && it.imm == 113 }
+        assertTrue(targetCounterMap in 1 until firstArgumentRead)
+        assertEquals(2, audited.count { it.code == 0x18 && it.imm == 4 }, "raw attachment must honor the shared arm gate")
+        val ordinary = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram()
+        assertTrue(ordinary.none { it.code == 0x18 && it.imm == 4 })
+    }
+
+    @Test
     fun `exact admission audit records every pre-admission rejection reason without entering the ring path`() {
         val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
             TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),

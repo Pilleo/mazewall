@@ -118,6 +118,12 @@ internal class TierEbpfEngine(
                 ringReservationFailed
     }
 
+    /** Independent, descriptor-free target openat counts from the same quiescent audit window. */
+    internal data class EarlyTargetOpenatCounts(
+        val main: Long,
+        val raw: Long,
+    )
+
     /** Kernel-reported execution evidence; absent kernel fields are never coerced to zero. */
     internal sealed interface BpfProgramExecutionEvidence {
         data class Available(
@@ -203,6 +209,8 @@ internal class TierEbpfEngine(
         internal const val EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX = 11
         private const val COUNTER_MAP_ENTRIES = 13
         private const val IN_FLIGHT_MAP_ENTRIES = 1
+        private const val EARLY_TARGET_OPENAT_COUNTER_KEYS = 3
+        private const val EARLY_TARGET_OPENAT_ARM_KEY = 2
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
         private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
@@ -260,70 +268,6 @@ internal class TierEbpfEngine(
     )
 
     private enum class Lifecycle { DETACHED, INSTALLING, ATTACHED, CLOSING, CLOSED }
-
-    /**
-     * The complete ownership set for one installation. It is deliberately not
-     * published until every acquisition succeeds, so a failed install has one
-     * reverse-order rollback path instead of nine independently visible FDs.
-     */
-    private class Resources {
-        var invocationStorageFd: BpfFd? = null
-        var invocationBtfFd: BpfFd? = null
-        var ringFd: BpfFd? = null
-        var lossFd: BpfFd? = null
-        var contextMetricFd: BpfFd? = null
-        var inFlightFd: BpfFd? = null
-        var sessionFd: BpfFd? = null
-        var coverageEdgeFd: BpfFd? = null
-        var recoveryEdgeFd: BpfFd? = null
-        var rawSysEnterAuditFd: BpfFd? = null
-        var rawSysEnterAuditCpuFd: BpfFd? = null
-        var exactAdmissionAuditFd: BpfFd? = null
-        var progFd: BpfFd? = null
-        var rawSysEnterAuditProgFd: BpfFd? = null
-        var markerProgFd: BpfFd? = null
-        var execProgFd: BpfFd? = null
-        val syscallPerfFds = mutableListOf<BpfFd>()
-        val rawSysEnterAuditPerfFds = mutableListOf<BpfFd>()
-        var syscallRawTracepointFd: BpfFd? = null
-        var rawSysEnterAuditRawTracepointFd: BpfFd? = null
-        var execRawTracepointFd: BpfFd? = null
-        val markerPerfFds = mutableListOf<BpfFd>()
-        var ringReader: BpfRingBufferReader? = null
-        var rawSysEnterAuditConfigured = false
-        var exactAdmissionAuditConfigured = false
-        var sysEnterAttachmentBackend: TierESysEnterAttachmentBackend? = null
-        val sysEnterAttachmentCpus = mutableListOf<Int>()
-        var mainSysEnterProgramAttached: Boolean = false
-
-        fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
-
-        fun requireInvocationStorageFd(): BpfFd = requireNotNull(invocationStorageFd) { "invocation storage descriptor was not acquired" }
-
-        fun requireRingFd(): BpfFd = requireNotNull(ringFd) { "ring buffer descriptor was not acquired" }
-
-        fun requireLossFd(): BpfFd = requireNotNull(lossFd) { "loss counter descriptor was not acquired" }
-
-        fun requireContextMetricFd(): BpfFd = requireNotNull(contextMetricFd) { "context metric descriptor was not acquired" }
-
-        fun requireInFlightFd(): BpfFd = requireNotNull(inFlightFd) { "in-flight counter descriptor was not acquired" }
-
-        fun requireSessionFd(): BpfFd = requireNotNull(sessionFd) { "session descriptor was not acquired" }
-
-        fun requireRawSysEnterAuditFd(): BpfFd = requireNotNull(rawSysEnterAuditFd) { "raw sys_enter audit descriptor was not acquired" }
-
-        fun requireRawSysEnterAuditCpuFd(): BpfFd = requireNotNull(rawSysEnterAuditCpuFd) { "raw sys_enter audit CPU descriptor was not acquired" }
-
-        fun requireExactAdmissionAuditFd(): BpfFd = requireNotNull(exactAdmissionAuditFd) { "exact-admission audit descriptor was not acquired" }
-
-        fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
-
-        fun requireMarkerProgFd(): BpfFd = requireNotNull(markerProgFd) { "marker program descriptor was not acquired" }
-
-        fun requireRawSysEnterAuditProgFd(): BpfFd = requireNotNull(rawSysEnterAuditProgFd) { "raw sys_enter audit program descriptor was not acquired" }
-    }
-
-    private typealias BpfFd = FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned>
 
     private val lifecycleLock = Any()
     private var lifecycle = Lifecycle.DETACHED
@@ -415,6 +359,14 @@ internal class TierEbpfEngine(
                     maxEntries = EXACT_ADMISSION_AUDIT_CAPACITY,
                 )
             }
+            if (options.usesPairedEarlyTargetAudit()) {
+                installed.earlyTargetOpenatFd = createMap(
+                    MAP_ARRAY,
+                keySize = 4,
+                valueSize = Long.SIZE_BYTES,
+                maxEntries = EARLY_TARGET_OPENAT_COUNTER_KEYS,
+                )
+            }
             Arena.ofConfined().use { arena ->
             val configuration = arena.allocate(16, 4)
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
@@ -454,6 +406,7 @@ internal class TierEbpfEngine(
                         installed.requireInFlightFd().value,
                         installed.exactAdmissionAuditFd?.value ?: -1,
                         installed.recoveryEdgeFd?.value ?: -1,
+                        installed.earlyTargetOpenatFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -484,6 +437,7 @@ internal class TierEbpfEngine(
                         installed.requireSessionFd().value,
                         installed.requireLossFd().value,
                         installed.requireRawSysEnterAuditCpuFd().value,
+                        installed.earlyTargetOpenatFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -584,28 +538,26 @@ internal class TierEbpfEngine(
         installed.exactAdmissionAuditConfigured = true
     }
 
+    /** Opens the same target observation window in both programs after attachments and maps are ready. */
+    internal fun armEarlyTargetOpenatComparison() {
+        check(options.usesPairedEarlyTargetAudit()) { "paired early target audit is not enabled" }
+        val installed = requireInstalled()
+        check(installed.rawSysEnterAuditConfigured && installed.exactAdmissionAuditConfigured) { "paired audit maps are not configured" }
+        check(!installed.earlyTargetOpenatArmed) { "paired early target audit was already armed" }
+        Arena.ofConfined().use { arena ->
+            val armed = arena.allocate(ValueLayout.JAVA_LONG)
+            armed.set(ValueLayout.JAVA_LONG, 0, 1L)
+            updateElem(arena, installed.requireEarlyTargetOpenatFd().value, intSeg(arena, EARLY_TARGET_OPENAT_ARM_KEY), armed)
+        }
+        installed.earlyTargetOpenatArmed = true
+    }
+
     /** Reads only the declared descriptors; absent entries are a configuration failure. */
     internal fun readRawSysEnterAuditCounts(expectedDirectoryFds: Set<Int>): Map<Int, RawSysEnterAuditCount> {
         check(options.benchmarkRawSysEnterAudit) { "raw sys_enter audit is not enabled" }
         val installed = requireInstalled()
         check(installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was not configured" }
-        return Arena.ofConfined().use { arena ->
-            expectedDirectoryFds.associateWith { descriptor ->
-                val value = arena.allocate(RawSysEnterAuditCount.VALUE_SIZE.toLong(), 8)
-                val attr = arena.allocate(24)
-                attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireRawSysEnterAuditFd().value)
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
-                bpfCall(H_LOOKUP.toLong(), attr, 24)
-                RawSysEnterAuditCount(
-                    openat = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.OPENAT_OFFSET.toLong()),
-                    openat2 = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.OPENAT2_OFFSET.toLong()),
-                    preSession = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.PRE_SESSION_OFFSET.toLong()),
-                    noSession = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.NO_SESSION_OFFSET.toLong()),
-                    wrongTarget = value.get(ValueLayout.JAVA_LONG, RawSysEnterAuditCount.WRONG_TARGET_OFFSET.toLong()),
-                )
-            }
-        }
+        return TierEBenchmarkAuditMapReader.readRaw(native, installed.requireRawSysEnterAuditFd().value, expectedDirectoryFds)
     }
 
     /** Benchmark-only CPU-local raw-audit counts for declared workload descriptors. */
@@ -613,18 +565,7 @@ internal class TierEbpfEngine(
         check(options.benchmarkRawSysEnterAudit) { "raw sys_enter audit is not enabled" }
         val installed = requireInstalled()
         check(installed.rawSysEnterAuditConfigured) { "raw sys_enter audit was not configured" }
-        return Arena.ofConfined().use { arena ->
-            possibleCpus()
-                .associateWith { cpu ->
-                val value = arena.allocate(Long.SIZE_BYTES.toLong(), Long.SIZE_BYTES.toLong())
-                val attr = arena.allocate(24)
-                attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireRawSysEnterAuditCpuFd().value)
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, cpu))
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
-                bpfCall(H_LOOKUP.toLong(), attr, 24)
-                value.get(ValueLayout.JAVA_LONG, 0)
-            }.filterValues { it != 0L }
-        }
+        return TierEBenchmarkAuditMapReader.readRawCpu(native, installed.requireRawSysEnterAuditCpuFd().value, possibleCpus())
     }
 
     /** Captures terminal kernel execution evidence for both attachment programs. */
@@ -643,37 +584,15 @@ internal class TierEbpfEngine(
         check(options.benchmarkExactAdmissionAudit) { "exact-admission audit is not enabled" }
         val installed = requireInstalled()
         check(installed.exactAdmissionAuditConfigured) { "exact-admission audit was not configured" }
-        return Arena.ofConfined().use { arena ->
-            expectedDirectoryFds.associateWith { descriptor ->
-                val value = arena.allocate(ExactAdmissionAuditCount.VALUE_SIZE.toLong(), 8)
-                val attr = arena.allocate(24)
-                attr.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireExactAdmissionAuditFd().value)
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, intSeg(arena, descriptor))
-                attr.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, value)
-                bpfCall(H_LOOKUP.toLong(), attr, 24)
-                ExactAdmissionAuditCount(
-                    handlerEntered = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.HANDLER_ENTERED_OFFSET.toLong()),
-                    sessionMatched = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.SESSION_MATCHED_OFFSET.toLong()),
-                    inFlightAdmitted = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.IN_FLIGHT_ADMITTED_OFFSET.toLong()),
-                    markerAttached = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.MARKER_ATTACHED_OFFSET.toLong()),
-                    taskStorageAvailable = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.TASK_STORAGE_AVAILABLE_OFFSET.toLong()),
-                    activeInvocation = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.ACTIVE_INVOCATION_OFFSET.toLong()),
-                    generationValidated = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.GENERATION_VALIDATED_OFFSET.toLong()),
-                    ringReserved = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.RING_RESERVED_OFFSET.toLong()),
-                    submitted = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.SUBMITTED_OFFSET.toLong()),
-                    sessionUnavailable = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.SESSION_UNAVAILABLE_OFFSET.toLong()),
-                    wrongTarget = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.WRONG_TARGET_OFFSET.toLong()),
-                    inFlightUnavailable = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.IN_FLIGHT_UNAVAILABLE_OFFSET.toLong()),
-                    markerDetached = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.MARKER_DETACHED_OFFSET.toLong()),
-                    markerStateUnavailable = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.MARKER_STATE_UNAVAILABLE_OFFSET.toLong()),
-                    taskStorageUnavailable = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.TASK_STORAGE_UNAVAILABLE_OFFSET.toLong()),
-                    inactiveInvocation = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.INACTIVE_INVOCATION_OFFSET.toLong()),
-                    staleMarkerGeneration = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.STALE_MARKER_GENERATION_OFFSET.toLong()),
-                    ringReservationFailed = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.RING_RESERVATION_FAILED_OFFSET.toLong()),
-                    low32HandlerEntered = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.LOW32_HANDLER_ENTERED_OFFSET.toLong()),
-                )
-            }
-        }
+        return TierEBenchmarkAuditMapReader.readExact(native, installed.requireExactAdmissionAuditFd().value, expectedDirectoryFds)
+    }
+
+    /** Compare the same session window after the target exited; ownership stays with this engine. */
+    internal fun readEarlyTargetOpenatCounts(): EarlyTargetOpenatCounts {
+        check(options.usesPairedEarlyTargetAudit()) { "paired early target audit is not enabled" }
+        val installed = requireInstalled()
+        check(installed.earlyTargetOpenatArmed) { "paired early target audit was not armed" }
+        return TierEBenchmarkAuditMapReader.readEarlyTargetOpenat(native, installed.requireEarlyTargetOpenatFd().value)
     }
 
     /** Waits until all handlers admitted before marker detachment reach their completion epilogue. */
@@ -1089,6 +1008,7 @@ internal class TierEbpfEngine(
         close(installed.rawSysEnterAuditFd) { installed.rawSysEnterAuditFd = null }
         close(installed.rawSysEnterAuditCpuFd) { installed.rawSysEnterAuditCpuFd = null }
         close(installed.exactAdmissionAuditFd) { installed.exactAdmissionAuditFd = null }
+        close(installed.earlyTargetOpenatFd) { installed.earlyTargetOpenatFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
         close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }
@@ -1100,9 +1020,9 @@ internal class TierEbpfEngine(
 
     internal fun buildRawTracepointProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options)
 
-    internal fun buildRawSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram()
+    internal fun buildRawSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawSysEnterAuditProgram(options.usesPairedEarlyTargetAudit())
 
-    internal fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram()
+    internal fun buildRawTracepointSysEnterAuditProgram(): List<Insn> = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(options.usesPairedEarlyTargetAudit())
 
     /** x86_64 uprobe program for `mazewall_stack_marker(uint64_t)`. */
     internal fun buildMarkerProgram(options: TierEOptions = this.options): List<Insn> = TierEBpfProgramBuilder.buildMarkerProgram(options)
@@ -1404,6 +1324,70 @@ internal class TierEbpfEngine(
     }
 }
 
+/** The complete FD ownership set for one installation, unpublished until acquisition succeeds. */
+private class Resources {
+    var invocationStorageFd: BpfFd? = null
+    var invocationBtfFd: BpfFd? = null
+    var ringFd: BpfFd? = null
+    var lossFd: BpfFd? = null
+    var contextMetricFd: BpfFd? = null
+    var inFlightFd: BpfFd? = null
+    var sessionFd: BpfFd? = null
+    var coverageEdgeFd: BpfFd? = null
+    var recoveryEdgeFd: BpfFd? = null
+    var rawSysEnterAuditFd: BpfFd? = null
+    var rawSysEnterAuditCpuFd: BpfFd? = null
+    var exactAdmissionAuditFd: BpfFd? = null
+    var earlyTargetOpenatFd: BpfFd? = null
+    var progFd: BpfFd? = null
+    var rawSysEnterAuditProgFd: BpfFd? = null
+    var markerProgFd: BpfFd? = null
+    var execProgFd: BpfFd? = null
+    val syscallPerfFds = mutableListOf<BpfFd>()
+    val rawSysEnterAuditPerfFds = mutableListOf<BpfFd>()
+    var syscallRawTracepointFd: BpfFd? = null
+    var rawSysEnterAuditRawTracepointFd: BpfFd? = null
+    var execRawTracepointFd: BpfFd? = null
+    val markerPerfFds = mutableListOf<BpfFd>()
+    var ringReader: BpfRingBufferReader? = null
+    var rawSysEnterAuditConfigured = false
+    var exactAdmissionAuditConfigured = false
+    var earlyTargetOpenatArmed = false
+    var sysEnterAttachmentBackend: TierESysEnterAttachmentBackend? = null
+    val sysEnterAttachmentCpus = mutableListOf<Int>()
+    var mainSysEnterProgramAttached: Boolean = false
+
+    fun requireInvocationBtfFd(): BpfFd = requireNotNull(invocationBtfFd) { "invocation BTF descriptor was not acquired" }
+
+    fun requireInvocationStorageFd(): BpfFd = requireNotNull(invocationStorageFd) { "invocation storage descriptor was not acquired" }
+
+    fun requireRingFd(): BpfFd = requireNotNull(ringFd) { "ring buffer descriptor was not acquired" }
+
+    fun requireLossFd(): BpfFd = requireNotNull(lossFd) { "loss counter descriptor was not acquired" }
+
+    fun requireContextMetricFd(): BpfFd = requireNotNull(contextMetricFd) { "context metric descriptor was not acquired" }
+
+    fun requireInFlightFd(): BpfFd = requireNotNull(inFlightFd) { "in-flight counter descriptor was not acquired" }
+
+    fun requireSessionFd(): BpfFd = requireNotNull(sessionFd) { "session descriptor was not acquired" }
+
+    fun requireRawSysEnterAuditFd(): BpfFd = requireNotNull(rawSysEnterAuditFd) { "raw sys_enter audit descriptor was not acquired" }
+
+    fun requireRawSysEnterAuditCpuFd(): BpfFd = requireNotNull(rawSysEnterAuditCpuFd) { "raw sys_enter audit CPU descriptor was not acquired" }
+
+    fun requireExactAdmissionAuditFd(): BpfFd = requireNotNull(exactAdmissionAuditFd) { "exact-admission audit descriptor was not acquired" }
+
+    fun requireEarlyTargetOpenatFd(): BpfFd = requireNotNull(earlyTargetOpenatFd) { "early target openat descriptor was not acquired" }
+
+    fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
+
+    fun requireMarkerProgFd(): BpfFd = requireNotNull(markerProgFd) { "marker program descriptor was not acquired" }
+
+    fun requireRawSysEnterAuditProgFd(): BpfFd = requireNotNull(rawSysEnterAuditProgFd) { "raw sys_enter audit program descriptor was not acquired" }
+}
+
+private typealias BpfFd = FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned>
+
 /**
  * Native layout of the initial, stable portion of `union bpf_attr` for
  * `BPF_PROG_LOAD` on 64-bit Linux. The union contains unrelated commands at
@@ -1448,6 +1432,11 @@ private fun TierESysEnterAttachmentShape.isAuditOnly(): Boolean =
 private fun TierESysEnterAttachmentShape.usesMinimalAuditProgram(): Boolean =
     this == TierESysEnterAttachmentShape.MINIMAL_COUNTER_ONLY ||
         this == TierESysEnterAttachmentShape.MINIMAL_AUDIT_ONLY
+
+private fun TierEOptions.usesPairedEarlyTargetAudit(): Boolean =
+    benchmarkRawSysEnterAudit &&
+        benchmarkExactAdmissionAudit &&
+        benchmarkSysEnterAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
 
 /** Native layout of `union bpf_attr` for `BPF_BTF_LOAD`. */
 internal object BpfBtfLoadLayout {

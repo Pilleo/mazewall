@@ -435,6 +435,10 @@ internal object TierEKernelSmoke {
             val (effectiveSysEnterAttachmentBackend, sysEnterAttachmentCpus) = engine.sysEnterAttachmentEvidence()
             if (benchmarkRawSysEnterAudit) engine.configureRawSysEnterAudit(auditExpectedOpenatFds)
             if (benchmarkExactAdmissionAudit) engine.configureExactAdmissionAudit(auditExpectedOpenatFds)
+            val pairedEarlyAudit = benchmarkRawSysEnterAudit &&
+                benchmarkExactAdmissionAudit &&
+                configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
+            if (pairedEarlyAudit) engine.armEarlyTargetOpenatComparison()
             straceOutputPath?.let { output ->
                 output.parent?.let(Files::createDirectories)
                 Files.deleteIfExists(output)
@@ -563,6 +567,10 @@ internal object TierEKernelSmoke {
             } else {
                 emptyMap()
             }
+            val earlyTargetOpenat = TierEAdmissionAuditSummary.captureEarlyTargetCounts(
+                engine,
+                pairedEarlyAudit,
+            )
             val exactAdmissionAuditArgumentReadFailures = if (benchmarkExactAdmissionAudit) {
                 engine.readExactAdmissionAuditArgumentReadFailureCount()
             } else {
@@ -593,6 +601,17 @@ internal object TierEKernelSmoke {
                 attachmentDiagnosticDescriptorComplete
             val exactAdmissionAuditMissing = exactAdmissionAuditCounts.filterValues { count -> count.submitted != 1L }
             val exactAdmissionAuditRejections = exactAdmissionAuditCounts.values.sumOf { count -> count.rejected }
+            val pairedAuditComplete = earlyTargetOpenat?.let { early ->
+                TierEAdmissionAuditSummary.pairedAuditComplete(
+                    expected = auditExpectedOpenatFds.size,
+                    rawObserved = rawSysEnterAuditObserved,
+                    rawMissing = rawSysEnterAuditMissing.size,
+                    exactMissing = exactAdmissionAuditMissing.size,
+                    rawReadFailures = rawAuditArgumentReadFailures,
+                    exactReadFailures = exactAdmissionAuditArgumentReadFailures,
+                    early = early,
+                )
+            } ?: true
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -911,7 +930,7 @@ internal object TierEKernelSmoke {
                         oracle.wrong == 0L &&
                         oracle.unclassified == 0L
                     )
-            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete
+            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete
             val sysEnterProgramEvidence = engine.sysEnterProgramEvidence()
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
@@ -953,7 +972,8 @@ internal object TierEKernelSmoke {
                     16,
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
-                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts)} " +
+                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts, earlyTargetOpenat)} " +
+                "paired_early_target_audit_verdict=${if (pairedAuditComplete) "PASS" else "INCOMPLETE"} " +
                 "exact_admission_audit_population_operations=${expectedOpenatFds.size} " +
                 "exact_admission_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
                 "exact_admission_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +
@@ -1079,6 +1099,11 @@ internal object TierEKernelSmoke {
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
+            check(pairedAuditComplete) {
+                "Tier E paired raw/main audit incomplete: raw=$rawSysEnterAuditObserved/${auditExpectedOpenatFds.size} " +
+                    "rawMissing=${rawSysEnterAuditMissing.size} exactMissing=${exactAdmissionAuditMissing.size} " +
+                    "early=$earlyTargetOpenat"
+            }
             if (lifecycleScenario == "detach_while_active") {
                 check(lifecycleFaultApplied) { "native lifecycle barrier was never observed" }
                 check(profile.integrity.lifecycleInvalidations > 0L) {

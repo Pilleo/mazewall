@@ -230,6 +230,28 @@ These are still substantive controllers, not thin launchers:
    invoked, since argument decoding and the map lookup run first. No audited
    pair or unaudited qualification was completed; exact failure resources
    and all preflight attempts are retained.
+   The next separate **opt-in version-three diagnostic** compares target-
+   TGID `openat` counts from independent raw and main attachments *before*
+   argument decoding and descriptor-map lookup. A shared three-slot array
+   is used only when both benchmark audits are enabled. Matching target
+   aggregates narrow the question to decoding/lookup but cannot assign
+   unrelated target opens to individual declared descriptors. Zero-count
+   descriptor samples are reported ahead of repeated ambient descriptors.
+   This does not change the default BPF program, the prior 152-byte exact
+   audit value, or the five-pair unaudited correctness contract.
+   An initial **source-dirty** version-three smoke exposed the converse
+   gap: full-stream main exact submitted 10,000 while raw audit counted
+   9,993 declared IDs, missing `4021`–`4027`. Its normal operation terminal
+   remained complete; paired diagnostic completeness now has an explicit
+   fail-closed check. The third array slot arms both counters only after
+   both programs attach and maps are configured. Previous pre-arm aggregate
+   counts had unequal start windows and cannot prove per-ID dispatch.
+   A separate **armed**, source-dirty no-noise probe correctly failed
+   closed: raw observed all 10,000 target operations while the main early
+   target aggregate was eight lower and IDs `4410`–`4417` were absent from
+   both main low32 and exact admission. It retained its stopped runner and
+   volume. This narrows a development hypothesis to at or before the main
+   early counter; no production branch or default decision is changed.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

@@ -10,6 +10,7 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBenchmarkAuditMapReader.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
@@ -38,6 +39,10 @@ target_files:
   - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-low32-ingress-20260927/raw-audit.tar.gz"
+  - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/README.md"
+  - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v3-predecode-pilots-20260927/raw-pilots.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -275,3 +280,83 @@ Do not attribute an aggregate lookup or wrong-target counter to those IDs.
 The underlying gap and the unaudited five-pair decision remain `INCOMPLETE`;
 further attribution requires descriptor-specific evidence before changing the
 core BPF branch or promoting a default result.
+
+**Next discriminator, read-only review (2026-09-27):** Both independently
+attached direct-raw `sys_enter` programs read the low syscall number at
+context offset 8 and argument 0 from x86_64 `pt_regs` offset 112. Their
+descriptor maps are created and filled before workload release; map update
+and userspace lookup errors throw. The current raw audit counts *declared*
+target descriptors after argument decode, its own map lookup and session
+gate. The main low32 count follows argument decode and a separate hash-map
+lookup, but precedes the full-width syscall check. Program run statistics
+were unavailable. In the failed noisy fork, both argument-read failure
+counters were zero; the main audit's **1,844,588 aggregate lookup failures**
+include ambient syscalls and cannot be assigned to IDs `4742`–`4749`.
+
+| Hypothesis | What the retained evidence says | Discriminator |
+| --- | --- | --- |
+| The main program did not run for those entries | Raw descriptor counts were one, main low32 counts were zero; independent raw/main direct-raw attachments do not prove identical delivery. | Compare independently counted *all target `openat`* entries in each program before argument decoding or descriptor lookup, using the same target/session gate and quiescent interval. |
+| Main program ran, but decoded argument or audit hash lookup did not reach its increment | The helper failure total was zero, but lookup failures are aggregate and the current hash counter cannot identify those IDs. | If independent early target totals agree, compare per-descriptor low32 counts with explicit read/lookup failure stages; do not assign the aggregate failures to missing IDs. |
+| The version-two bounded report hid a declared missing descriptor | This run printed all eight zeros, but eight unrelated repeated descriptors used half its 16 slots; future runs can conceal higher-numbered zero IDs. | Prioritize zero-count descriptors ahead of repeated non-singletons and test truncation explicitly. |
+
+The next probe may add only benchmark-enabled pre-decode target counters
+on both direct-raw attachments and a versioned diagnostic receipt. A target
+total mismatch narrows the boundary to program delivery or the pre-counter
+session/target gate, before argument decoding and descriptor lookup;
+matching totals alone cannot prove which *individual* descriptor took a
+particular branch when unrelated target `openat` calls are also present.
+Preserve the exact full+unique oracle, stop at first failure and avoid
+changing production/default BPF bytecode or the linear scan.
+
+**Diagnostic implementation pending clean acquisition:** When *both* raw and
+exact audits are opted in, a shared, preallocated three-entry array records
+target-TGID `openat` entries separately for raw and main attachments. Both
+increments precede `pt_regs` argument decoding and descriptor-hash lookup;
+both check the same configured session target. The version-three report
+prints the independent raw/main totals next to the existing descriptor
+counts, after workload exit. It must not subtract an aggregate total from
+the 10,000 declared-descriptor denominator: unrelated target opens may occur.
+Bounded low32 samples now prioritize zero-count descriptors over unrelated
+repeat counts. The map, added instructions and report fields are opt-in only;
+the production audit-disabled BPF and 152-byte exact-admission value are
+unchanged. Focused tests and verifier-load checks precede any fresh clean
+series. Numeric Detekt inventory entries are reviewed in place; no new
+warning category or suppressed security check is accepted.
+
+**Development probe exposed an independent raw-audit shortfall:** The first
+source-dirty version-three, non-noisy 10,000-operation smoke completed the
+main full+unique oracle. Full-stream raw audit saw **9,993/10,000** target
+descriptors, missing `4021`–`4027`, while main exact submission was 10,000.
+The early target totals were raw 9,995 and main 10,002; unique mode saw
+10,000 raw entries and matching early totals of 10,002. Both programs used
+direct raw tracepoints, raw target CPU count was `1:9993`, argument-read
+failures were zero and kernel ring loss was zero. The normal operation
+terminal `COMPLETE` did **not** qualify the independent raw audit. Raw logs
+remain at `/tmp/tier-e-predecode-v3-smoke-1790540584*` and in the
+[sealed pilot archive](../evidence/tier-e-v3-predecode-pilots-20260927/README.md).
+
+The first early counters began when each program attached, **before** both
+maps were configured. Main attaches first; those aggregate counts did not
+have a proven shared start, even though seven declared descriptors were
+independently missing at raw observation. A third map slot now arms both
+early counters after both programs attach and both descriptor maps are
+populated, before the workload is released. A paired diagnostic fails
+closed after printing its evidence if raw/exact descriptor counts or
+argument reads are incomplete or the armed aggregate target totals differ.
+This does not prove which attachment failed to execute for a specific ID.
+
+**Armed, fail-closed development probe:** A separate source-dirty 10,000-op
+no-noise run under the shared arm gate stopped on its first full-stream fork.
+Raw audit observed 10,000/10,000 target descriptors on CPU 1 and its early
+target count was 10,002. The main early target count was **9,994**, the main
+low32 checkpoint had zero entries for IDs `4410`–`4417`, exact submitted
+9,992, and kernel exact/ring-ready both stopped at 29,984 with zero ring
+loss. The sample contained two additional target opens in the raw early
+total, so the eight-count *armed aggregate difference* matches the eight
+per-descriptor omissions, but does not prove whether the main BPF program
+failed to run or a pre-counter session/target gate diverged. The paired
+verdict was `INCOMPLETE`, the target stopped immediately before unique mode,
+and exact runner/volume are retained under
+`/tmp/tier-e-armed-v3-smoke-1790541641*` and in the same sealed archive. A clean committed-source
+predeclared diagnostic is required before attributing this result; do not
+rerun the failed arm merely to obtain a positive sample.
