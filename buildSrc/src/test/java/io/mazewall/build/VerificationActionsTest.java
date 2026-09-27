@@ -30,6 +30,7 @@ public final class VerificationActionsTest {
         verifiesBacklogContracts();
         verifiesTestHealthAggregation();
         TestHealthPluginFunctionalTest.verify();
+        TierEPhaseReplayTaskFunctionalTest.verify();
         writeSuccessMarker(successMarker);
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
     }

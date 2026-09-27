@@ -5,8 +5,12 @@ status: "open"
 priority: high
 dependencies: []
 component: "core"
-target_modules: ["profiler", "scripts"]
+target_modules: ["profiler", "scripts", "buildSrc"]
 target_files:
+  - "buildSrc/build.gradle"
+  - "buildSrc/src/main/java/io/mazewall/build/TierEPhaseReplayTask.java"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/TierEPhaseReplayTaskFunctionalTest.java"
   - "scripts/run_tier_e_split_privilege_fixture.sh"
   - "scripts/run_tier_e_split_privilege_fixture_legacy.sh"
   - "scripts/run_tier_e_split_coverage_matrix.sh"
@@ -83,6 +87,7 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateProfile.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseProbe.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseEvidence.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEPhaseReplayTest.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuse.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifier.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkPhaseGate.kt"
@@ -279,6 +284,21 @@ replaying all six raw samples. The separate full gate then passed 39 native
 CTests and all required live profiler/fresh-JVM suites with `COMPLETE`,
 `policy_eligibility=false`. This is not a Podman or unaudited multi-pair
 node-noise qualification, and `REJECT_DEFAULT_PROMOTION` remains in force.
+
+### 2026-09-27 remaining qualification matrix
+
+| Claim | Scope owner | Required receipt / stop rule |
+| --- | --- | --- |
+| Portable replay cache | This migration issue (`buildSrc`, `profiler`) | Same six file roles/baseline/verifier contract: local `UP-TO-DATE`, independent checkout `FROM-CACHE`, changed semantic input invalidates; a failure cannot leave stale PASS. |
+| Native Gradle build cache | This migration issue (`buildSrc`, `profiler-native` consumers) | Verified immutable native binary/workload artifact from a separate clean workspace, toolchain/image/option/source invalidation, fresh CTests; no CTest or phase output restored as new evidence. |
+| Default source-pinned five-pair node noise | Open pre-admission issue `issue-20260920-232238-326` | Original 10,000-operation full **and** unique denominators, audited overlap per claimed mode, zero unexplained missing IDs and five complete unaudited pairs; stop at first incomplete target. |
+| Native phase and rootful JVM gate | This migration issue | Predeclared complete timing series under unchanged baseline plus independently source/image/agent/class/toolchain/CPU-bound phase receipts and fresh 39 CTests/JVM suites. |
+| Podman parity and merge | Operator/orchestrator | Separate real endpoint evidence and approved orchestrator handoff; absent endpoint and local-only bundle leave status blocked. |
+
+The clean `ae38c8ab` split gate remains a historical PASS, not a new result
+for future code edits. Failed unpinned/whole-runner-pinned gates and the clean
+`b8901ed7` missing-operation run retain their evidence and original policy
+ineligibility.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

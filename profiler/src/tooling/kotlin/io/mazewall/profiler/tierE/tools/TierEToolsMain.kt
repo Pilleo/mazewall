@@ -19,6 +19,10 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
+    if (args.size == 4 && args[0] == "phase-replay-dir") {
+        TierERootfulPhaseEvidence.replay(Path.of(args[1]), Path.of(args[2]), Path.of(args[3])).getOrThrow()
+        return
+    }
     if (args.size == 4 && args[0] == "phase-replay") {
         require(Path.of(args[1]).toRealPath() != Path.of(args[3]).toAbsolutePath()) { "Replay output must differ from sample directory" }
         TierERootfulPhaseEvidence.verify(Path.of(args[1]), Path.of(args[2])).getOrThrow()

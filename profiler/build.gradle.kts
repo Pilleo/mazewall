@@ -249,28 +249,24 @@ tasks.register<JavaExec>("tierERootfulGate") {
     }
 }
 
-tasks.register<JavaExec>("tierEReplayPhaseEvidence") {
+tasks.register<io.mazewall.build.TierEPhaseReplayTask>("tierEReplayPhaseEvidence") {
     group = "verification"
-    description = "Recheck retained native phase samples with the unchanged historical baseline"
-    classpath = toolingSourceSet.runtimeClasspath
-    workingDir(rootProject.projectDir)
-    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    description = "Cacheable analysis of six retained native phase samples; never acquires fresh measurements"
     val samples = providers.gradleProperty("tierEArtifacts")
     val output = providers.gradleProperty("tierEOutput")
-    val baselinePath = rootProject.file("profiler-native/tier-e-benchmark-baseline.env").absolutePath
     samples.orNull?.let { artifactRoot ->
+        sampleDirectory.fileValue(file(artifactRoot))
         for (mode in listOf("full", "unique")) {
             for (sample in 1..3) {
-                inputs.file(file("$artifactRoot/$mode-$sample.log")).withPathSensitivity(PathSensitivity.NONE)
+                this.samples.from(file("$artifactRoot/$mode-$sample.log"))
             }
         }
-        inputs.file(file(baselinePath)).withPathSensitivity(PathSensitivity.NONE)
     }
-    output.orNull?.let { outputs.file(file(it)) }
-    doFirst {
-        require(samples.isPresent && output.isPresent) { "Pass -PtierEArtifacts=/path/to/samples -PtierEOutput=/path/to/verdict" }
-        args("phase-replay", samples.get(), baselinePath, output.get())
-    }
+    baseline.fileValue(rootProject.file("profiler-native/tier-e-benchmark-baseline.env"))
+    verifierClasspath.from(toolingSourceSet.runtimeClasspath)
+    verifierMainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    contractVersion.set("2")
+    output.orNull?.let { reportDirectory.fileValue(file(it)) }
 }
 
 tasks.register<JavaExec>("tierEShortFixture") {
