@@ -10,6 +10,11 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
+  - "config/detekt/warnings/profiler.txt"
+  - "docs/internals/designs/profiler/tier-e-testing-migration.md"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseProbe.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseQualification.kt"
@@ -205,4 +210,34 @@ BPF scan from the aggregate counts. The next diagnostic needs a narrowly
 bounded benchmark-only main-program ingress checkpoint keyed by the declared
 descriptor, plus tests and a versioned protocol/layout review; any invasive
 core BPF redesign needs explicit operator approval. The unaudited five-pair
-qualification remains `INCOMPLETE`.
+   qualification remains `INCOMPLETE`.
+
+**Opt-in audit v2 checkpoint (2026-09-27):** The benchmark-only BPF path now
+counts the low 32-bit `openat` event at the start of the main program, keyed
+by its syscall descriptor, *before* the existing full-width syscall check and
+subsequent admission gates. The diagnostic map value grows from 144 to 152
+bytes; `exact_admission_audit_contract_version=2` emits both the per-descriptor
+low32 count and a bounded missing-descriptor sample. The old full-width
+handler, rejection and submission counters remain independently available.
+The per-descriptor comparison can distinguish absence at main-program ingress
+from a full-width/argument diversion or a later admission rejection. Aggregate
+counts include unrelated `openat` operations and cannot be subtracted from the
+10,000 target denominator without matching the descriptor. This adds no
+production-path instrumentation when the audit is disabled; it does not
+change BPF's linear scan, the exact oracle, or the qualification contract.
+
+A **source-dirty development smoke** with the opt-in v2 raw and exact audits,
+unchanged 10,000-operation/1,000-per-second denominator and rootful Docker
+successfully loaded the new layout and completed both modes: 10,000/10,000
+target raw entries, session-matched admissions and exact submissions in each,
+30,000/30,000 kernel exact and ring-ready records per mode, no missing IDs or
+ring loss. Its BPF low32/main counts were 10,222/10,222 in full mode and
+10,062/10,062 in unique mode, including ambient wrong-target opens. Raw logs,
+profile, plan and results remain under `/tmp/tier-e-low32-audit-1790535499*`.
+This non-noisy, source-dirty smoke proves verifier/layout viability, **not**
+the cause of the intermittent gap or a five-pair default-path PASS. Focused
+builder/report tests and 22 rootful Docker JUnit tests ran without skips.
+The BPF audit extraction reduced the existing `buildSysEnterProgram` Detekt
+complexity from 67 to 61 and method length from 422 to 395; the two existing
+numeric warning inventory entries were reviewed and updated, with no new
+warnings or suppression.

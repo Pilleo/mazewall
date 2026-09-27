@@ -80,6 +80,7 @@ internal class TierEbpfEngine(
         val inactiveInvocation: Long,
         val staleMarkerGeneration: Long,
         val ringReservationFailed: Long,
+        val low32HandlerEntered: Long,
     ) {
         internal companion object {
             const val HANDLER_ENTERED_OFFSET: Int = 0
@@ -100,7 +101,8 @@ internal class TierEbpfEngine(
             const val INACTIVE_INVOCATION_OFFSET: Int = 120
             const val STALE_MARKER_GENERATION_OFFSET: Int = 128
             const val RING_RESERVATION_FAILED_OFFSET: Int = 136
-            const val VALUE_SIZE: Int = 144
+            const val LOW32_HANDLER_ENTERED_OFFSET: Int = 144
+            const val VALUE_SIZE: Int = 152
         }
 
         val admitted: Long get() = generationValidated
@@ -668,6 +670,7 @@ internal class TierEbpfEngine(
                     inactiveInvocation = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.INACTIVE_INVOCATION_OFFSET.toLong()),
                     staleMarkerGeneration = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.STALE_MARKER_GENERATION_OFFSET.toLong()),
                     ringReservationFailed = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.RING_RESERVATION_FAILED_OFFSET.toLong()),
+                    low32HandlerEntered = value.get(ValueLayout.JAVA_LONG, ExactAdmissionAuditCount.LOW32_HANDLER_ENTERED_OFFSET.toLong()),
                 )
             }
         }

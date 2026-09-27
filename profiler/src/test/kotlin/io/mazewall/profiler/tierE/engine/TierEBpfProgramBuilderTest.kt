@@ -394,6 +394,23 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `benchmark-only low32 ingress distinguishes main dispatch from an early full-width syscall gate`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
+            TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),
+        )
+        val low32Id = program.indexOfFirst { it.code == 0x61 && it.src == 9 && it.off == 8.toShort() }
+        val earlyIngress = program.indexOfFirst { it.code == 0xdb && it.off == 144.toShort() }
+        val fullWidthId = program.indexOfFirst { it.code == 0x79 && it.src == 9 && it.off == 8.toShort() }
+        val existingHandler = (fullWidthId + 1 until program.size).firstOrNull { index ->
+            program[index].code == 0xdb && program[index].off == 0.toShort()
+        } ?: -1
+        assertTrue(low32Id >= 0 && earlyIngress > low32Id && fullWidthId > earlyIngress && existingHandler > fullWidthId)
+        assertEquals(152, TierEbpfEngine.ExactAdmissionAuditCount.VALUE_SIZE)
+        val production = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions())
+        assertTrue(production.none { it.code == 0xdb && it.off == 144.toShort() })
+    }
+
+    @Test
     fun `exact admission audit records every pre-admission rejection reason without entering the ring path`() {
         val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(
             TierEOptions(benchmarkPhases = true, benchmarkExactAdmissionAudit = true),

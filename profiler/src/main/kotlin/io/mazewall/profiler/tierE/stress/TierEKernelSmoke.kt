@@ -953,7 +953,7 @@ internal object TierEKernelSmoke {
                     16,
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
-                "exact_admission_audit_expected_operations=${exactAdmissionAuditCounts.size} " +
+                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts)} " +
                 "exact_admission_audit_population_operations=${expectedOpenatFds.size} " +
                 "exact_admission_audit_sampled_operations=${auditExpectedOpenatFds.size} " +
                 "exact_admission_audit_sampling=${auditSamplingLabel(expectedOpenatFds, auditExpectedOpenatFds)} " +

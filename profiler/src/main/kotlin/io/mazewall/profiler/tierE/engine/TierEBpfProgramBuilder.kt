@@ -52,6 +52,7 @@ internal object TierEBpfProgramBuilder {
     private const val BPF_NOEXIST: Int = 1
     internal const val RECOVERY_INSERTION_FAILURE_COUNTER_INDEX: Int = 12
     private const val EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.HANDLER_ENTERED_OFFSET
+    private const val EXACT_ADMISSION_AUDIT_LOW32_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.LOW32_HANDLER_ENTERED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_SESSION_MATCHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.SESSION_MATCHED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.IN_FLIGHT_ADMITTED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_MARKER_ATTACHED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.MARKER_ATTACHED_OFFSET
@@ -274,6 +275,75 @@ internal object TierEBpfProgramBuilder {
      */
     public fun buildSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = false)
 
+    private fun emitAuditFailureInstructions(
+        program: MutableList<Insn>,
+        counterIndex: Int,
+        emit: (Insn) -> Int,
+        ldMap: (Int, Int) -> Unit,
+    ) {
+        emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -120))
+        ldMap(1, COUNTER_MAP_INDEX)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -120))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+        val complete = program.size
+        program[missingCounter] = program[missingCounter].copy(off = (complete - missingCounter - 1).toShort())
+    }
+
+    /** Benchmark-only main-program ingress, before the retained full-width syscall audit gate. */
+    private fun emitExactAdmissionAuditSetup(
+        program: MutableList<Insn>,
+        rawTracepoint: Boolean,
+        emit: (Insn) -> Int,
+        loadSyscallNumber: () -> Unit,
+        emitCounter: (Int) -> Unit,
+        emitFailureCounter: (Int) -> Unit,
+    ) {
+        emit(Insn(STX_W, dst = FP, src = 5, off = -100))
+        emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
+        val notOpenatLow32 = emit(Insn(JNE_IMM, dst = 5, imm = 257))
+        val argumentReadFailure: Int?
+        if (rawTracepoint) {
+            emit(Insn(LDX_DW, dst = 3, src = 9, off = 0))
+            emit(Insn(ADD_IMM, dst = 3, imm = X86_64_SYSCALL_ARGUMENT_OFFSETS[0]))
+            emit(Insn(MOV_REG, dst = 1, src = FP))
+            emit(Insn(ADD_IMM, dst = 1, imm = -96))
+            emit(Insn(MOV_IMM, dst = 2, imm = 8))
+            emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
+            argumentReadFailure = emit(Insn(JNE_IMM, dst = 0))
+            emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+        } else {
+            argumentReadFailure = null
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
+        }
+        emit(Insn(STX_W, dst = FP, src = 5, off = -88))
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(STX_W, dst = FP, src = 5, off = -100))
+        emitCounter(EXACT_ADMISSION_AUDIT_LOW32_HANDLER_ENTERED_OFFSET)
+        loadSyscallNumber()
+        val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
+        emitCounter(EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET)
+        val auditSetupComplete = if (rawTracepoint) emit(Insn(JA)) else null
+        val readFailureHandler = if (rawTracepoint) {
+            program.size.also { emitFailureCounter(EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX) }
+        } else {
+            null
+        }
+        val afterAuditSetup = program.size
+        program[notOpenatLow32] = program[notOpenatLow32].copy(off = (afterAuditSetup - notOpenatLow32 - 1).toShort())
+        program[notOpenat] = program[notOpenat].copy(off = (afterAuditSetup - notOpenat - 1).toShort())
+        auditSetupComplete?.let { complete ->
+            program[complete] = program[complete].copy(off = (afterAuditSetup - complete - 1).toShort())
+        }
+        argumentReadFailure?.let { failure ->
+            program[failure] = program[failure].copy(off = (requireNotNull(readFailureHandler) - failure - 1).toShort())
+        }
+    }
+
     /** x86_64 raw-tracepoint program with the same 88-byte ring record. */
     public fun buildRawTracepointSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true)
 
@@ -400,19 +470,7 @@ internal object TierEBpfProgramBuilder {
             p[noRecoveryContext] = p[noRecoveryContext].copy(off = (recoveryDone - noRecoveryContext - 1).toShort())
         }
 
-        fun emitAuditFailureCounter(counterIndex: Int) {
-            emit(Insn(MOV_IMM, dst = 5, imm = counterIndex))
-            emit(Insn(STX_W, dst = FP, src = 5, off = -120))
-            ldMap(1, COUNTER_MAP_INDEX)
-            emit(Insn(MOV_REG, dst = 2, src = FP))
-            emit(Insn(ADD_IMM, dst = 2, imm = -120))
-            emit(Insn(CALL, imm = H_LOOKUP))
-            val missingCounter = emit(Insn(JEQ_IMM, dst = 0))
-            emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-            val complete = p.size
-            p[missingCounter] = p[missingCounter].copy(off = (complete - missingCounter - 1).toShort())
-        }
+        fun emitAuditFailureCounter(counterIndex: Int) = emitAuditFailureInstructions(p, counterIndex, ::emit, ::ldMap)
 
         fun emitExactAdmissionAuditCounter(offset: Int) {
             if (!options.benchmarkExactAdmissionAudit) return
@@ -441,41 +499,14 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
 
         if (options.benchmarkExactAdmissionAudit) {
-            emit(Insn(STX_W, dst = FP, src = 5, off = -100))
-            loadSyscallNumber()
-            val notOpenat = emit(Insn(JNE_IMM, dst = 5, imm = 257))
-            val argumentReadFailure: Int?
-            if (rawTracepoint) {
-                emit(Insn(LDX_DW, dst = 3, src = 9, off = 0))
-                emit(Insn(ADD_IMM, dst = 3, imm = X86_64_SYSCALL_ARGUMENT_OFFSETS[0]))
-                emit(Insn(MOV_REG, dst = 1, src = FP))
-                emit(Insn(ADD_IMM, dst = 1, imm = -96))
-                emit(Insn(MOV_IMM, dst = 2, imm = 8))
-                emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
-                argumentReadFailure = emit(Insn(JNE_IMM, dst = 0))
-                emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
-            } else {
-                argumentReadFailure = null
-                emit(Insn(LDX_DW, dst = 5, src = 9, off = 16))
-            }
-            emit(Insn(STX_W, dst = FP, src = 5, off = -88))
-            emit(Insn(MOV_IMM, dst = 5, imm = 1))
-            emit(Insn(STX_W, dst = FP, src = 5, off = -100))
-            emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET)
-            val auditSetupComplete = if (rawTracepoint) emit(Insn(JA)) else null
-            val readFailureHandler = if (rawTracepoint) {
-                p.size.also { emitAuditFailureCounter(EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX) }
-            } else {
-                null
-            }
-            val afterAuditSetup = p.size
-            p[notOpenat] = p[notOpenat].copy(off = (afterAuditSetup - notOpenat - 1).toShort())
-            auditSetupComplete?.let { complete ->
-                p[complete] = p[complete].copy(off = (afterAuditSetup - complete - 1).toShort())
-            }
-            argumentReadFailure?.let { failure ->
-                p[failure] = p[failure].copy(off = (requireNotNull(readFailureHandler) - failure - 1).toShort())
-            }
+            emitExactAdmissionAuditSetup(
+                p,
+                rawTracepoint,
+                ::emit,
+                { loadSyscallNumber() },
+                ::emitExactAdmissionAuditCounter,
+                ::emitAuditFailureCounter,
+            )
         }
 
         // Reject every process except the configured target before consulting
