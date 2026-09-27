@@ -1,5 +1,7 @@
 package io.mazewall.profiler.tierE.tools
 
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -45,6 +47,15 @@ class TierETrustworthySettingsTest {
             assertEquals("mazewall-tier-e-rootful:latest", selected.image)
             assertEquals("0,1", selected.cpuSet)
             assertEquals(listOf(1000, 2000), selected.capacity!!.pilotRates)
+            assertEquals(
+                "1000 2000",
+                selected
+                .resolvedJson()
+                .getValue("capacity")
+                .jsonObject
+                .getValue("pilot_rates")
+                .jsonPrimitive.content,
+            )
             val stage = selected.capacity!!.plan(1000, 1, 1, "pilot")
             assertEquals(1, stage.batches)
             val settings = TierEProfileExperimentRunner.stageSettings(selected.trustworthy, selected.capacity!!, stage, false)

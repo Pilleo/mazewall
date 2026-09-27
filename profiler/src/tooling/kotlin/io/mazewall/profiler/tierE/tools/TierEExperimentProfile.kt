@@ -43,6 +43,28 @@ public data class TierEExperimentProfile(
             put("image", image)
             put("cpu_set", cpuSet)
         }
+        capacity?.let { schedule ->
+            put(
+                "capacity",
+                buildJsonObject {
+                put("pilot_rates", schedule.pilotRates.joinToString(" "))
+                put("run_level", schedule.runLevel)
+                put("load", schedule.load)
+                put("receipt_clock", schedule.receiptClock)
+                put("stage_seconds", schedule.stageSeconds)
+                put("iterations", schedule.iterations)
+                put("warmups", schedule.warmups)
+                put("max_retained_records", schedule.maxRetainedRecordsOverride)
+                put("records_per_operation_upper_bound", schedule.recordsPerOperationUpperBound)
+                put("retained_budget_bytes", schedule.retainedBudgetBytes)
+                put("run_decision", schedule.runDecision)
+                put("decision_forks", schedule.decisionForks)
+                put("decision_stage_seconds", schedule.decisionStageSeconds)
+                put("shadow_on_failure", schedule.shadowOnFailure)
+                put("run_node_noise_probe", schedule.runNodeNoiseProbe)
+            },
+            )
+        }
     }
 
     public companion object {

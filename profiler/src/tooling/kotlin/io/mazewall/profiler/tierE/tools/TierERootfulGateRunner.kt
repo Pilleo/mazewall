@@ -12,6 +12,18 @@ import java.util.concurrent.TimeUnit
 
 /** Rootful, disposable source-volume test gate with exact-name ownership and fail-closed exports. */
 public object TierERootfulGateRunner {
+    /** Pin native timing only; the multi-thread JVM integration suite needs normal CPU access. */
+    public fun phaseCommand(
+        runner: String,
+        mode: String,
+        cpuSet: String?,
+    ): List<String> {
+        require(mode in setOf("full", "unique")) { "Unsupported native phase mode" }
+        return listOf("exec", runner) +
+            (if (cpuSet == null) emptyList() else listOf("taskset", "-c", cpuSet)) +
+            listOf("ctest", "--test-dir", "profiler-native/build", "-V", "-R", "^agent_phase_comparable_$mode$")
+    }
+
     public fun nativeBuildCache(
         source: String,
         image: String,
@@ -165,7 +177,6 @@ public object TierERootfulGateRunner {
                     "--pid=host",
                     "--network=host",
                     "--userns=host",
-                    *(if (cpuSet == null) emptyArray() else arrayOf("--cpuset-cpus=$cpuSet")),
                     "--security-opt",
                     "seccomp=unconfined",
                     "-v",
@@ -193,7 +204,8 @@ public object TierERootfulGateRunner {
                 Files.writeString(
                     artifacts.resolve("native-build-identity.txt"),
                     "source_digest=$sourceBefore\nimage_id=$imageId\ncompiler=$compiler\njava=$javaVersion\n" +
-                        "cpu_set=${cpuSet ?: "unrestricted"}\nbuild_cache=$nativeCache\n" +
+                        "phase_cpu_set=${cpuSet ?: "unrestricted"}\nlive_test_cpu_set=unrestricted\n" +
+                        "build_cache=$nativeCache\n" +
                         "policy_eligibility=false\n",
                 )
                 docker("exec", owner.runner, "mkdir", "-p", "/artifacts")
@@ -222,12 +234,6 @@ public object TierERootfulGateRunner {
                     timeout = Duration.ofMinutes(5),
                     log = artifacts.resolve("native-ctest.log"),
                 )
-                docker(
-                    *profilerVerificationCommand(owner.runner).toTypedArray(),
-                    timeout = Duration.ofMinutes(25),
-                    log = artifacts.resolve("profiler-tests.log"),
-                )
-                docker("exec", owner.runner, "cp", "-a", "profiler/build/test-results/integrationTestFreshJvm", "/artifacts/")
                 val gate = artifacts.resolve("benchmark-gate.log")
                 Files.writeString(artifacts.resolve("benchmark-gate-contract.txt"), "2\n")
                 val acquisitionFailures = mutableListOf<Throwable>()
@@ -235,16 +241,7 @@ public object TierERootfulGateRunner {
                     val logs = (1..3)
                         .map { sample ->
                         val result = runContainerCommand(
-                            endpoint.command(
-                                "exec",
-                                owner.runner,
-                                "ctest",
-                                "--test-dir",
-                                "profiler-native/build",
-                            "-V",
-                                "-R",
-                                "^agent_phase_comparable_$mode$",
-                            ),
+                            endpoint.command(*phaseCommand(owner.runner, mode, cpuSet).toTypedArray()),
                                 Duration.ofMinutes(3),
                             outputFile = artifacts.resolve("$mode-$sample.log"),
                         )
@@ -259,6 +256,12 @@ public object TierERootfulGateRunner {
                     "Native phase gate incomplete: ${replay.exceptionOrNull()?.message ?: acquisitionFailures.firstOrNull()?.message}"
                 }
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "PASS\n")
+                docker(
+                    *profilerVerificationCommand(owner.runner).toTypedArray(),
+                    timeout = Duration.ofMinutes(25),
+                    log = artifacts.resolve("profiler-tests.log"),
+                )
+                docker("exec", owner.runner, "cp", "-a", "profiler/build/test-results/integrationTestFreshJvm", "/artifacts/")
             } catch (error: Throwable) {
                 primary = error
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "FAILED\n")

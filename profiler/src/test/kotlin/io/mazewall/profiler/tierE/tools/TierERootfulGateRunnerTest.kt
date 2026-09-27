@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.tools
 
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -48,6 +49,15 @@ class TierERootfulGateRunnerTest {
         assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-b", "compiler-a", "jdk-a"))
         assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-a", "compiler-b", "jdk-a"))
         assertTrue(first != TierERootfulGateRunner.nativeBuildCache("source-a", "image-a", "compiler-a", "jdk-b"))
+    }
+
+    @Test
+    fun `phase affinity is scoped to the native CTest child not the JVM integration runner`() {
+        val pinned = TierERootfulGateRunner.phaseCommand("exact-runner", "unique", "0,1")
+        assertEquals(listOf("exec", "exact-runner", "taskset", "-c", "0,1", "ctest"), pinned.take(6))
+        assertTrue(pinned.contains("^agent_phase_comparable_unique$"))
+        val unpinned = TierERootfulGateRunner.phaseCommand("exact-runner", "full", null)
+        assertTrue("taskset" !in unpinned)
     }
 
     @Test
