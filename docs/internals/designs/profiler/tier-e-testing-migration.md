@@ -239,6 +239,16 @@ These are still substantive controllers, not thin launchers:
   timings and from the still-unqualified node-noise account. The original
   Docker build-volume path remains a compatibility route; it is not treated
   as a new measurement or automatically deleted.
+  The later [predeclared clean `75d68260` stability
+  series](../../evidence/tier-e-final-phase-stability-20260927/README.md)
+  stopped on phase run 1: all six fresh native CTests executed, full mode
+  passed, but unique `GetStackTrace` median 2,545,657 ns exceeded the same
+  2,307,381 ns historical bound. Its terminal and any new aggregate gate
+  decision are **not** complete for this revision. The previously clean
+  `ae38c8ab` rootful PASS remains historical and cannot be inherited across
+  source revisions. The native code-section and Java workload class hashes
+  matched; this is not a basis to rebaseline or to cherry-pick a later phase
+  sample. A replacement gate requires explicit operator approval.
   Profile-first shell launchers now select the checked-in trustworthy,
   capacity and node-noise JSON without ambient experiment variables. A
   prefixed legacy setting or explicit `--legacy-env` keeps historical env

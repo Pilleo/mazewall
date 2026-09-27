@@ -187,6 +187,10 @@ target_files:
   - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/raw-receipts.tar.gz"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/README.md"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/raw-phase.tar.gz"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/README.md"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/SHA256SUMS"
   - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/manifest.json"
@@ -328,6 +332,19 @@ wall time. Host Gradle 9.6.1 TestKit-worker startup required excluding only
 that buildSrc task in the **clean-checkout cache probe**; the buildSrc
 functional cache contracts ran separately on the current host wrapper.
 No saved measurement was admitted as a fresh run.
+
+**Current M4 timing blocker:** The [predeclared clean `75d68260` phase
+series](../evidence/tier-e-final-phase-stability-20260927/README.md)
+stopped after its first attempt. Full mode passed; unique mode had three
+fresh successful CTests but a `GetStackTrace` median 2,545,657 ns above the
+unchanged 2,307,381 ns bound. No subsequent sample was selected, no aggregate
+gate on this revision was reported passing, and exact stopped resources were
+retained. Earlier passing source-bound gates are historical. Native `.text`
+and Java workload class bytes matched the earlier passing receipt, but this
+does not prove why host timing changed. The baseline is immutable; any new
+gate contract requires an explicit operator decision and new controlled
+evidence. This issue remains open independently of the still-incomplete
+node-noise lane and deferred Podman runtime.
 
 **Profile-first follow-up:** The normal trustworthy/capacity/node-noise
 launchers select their checked-in JSON when no legacy settings are present;
