@@ -135,3 +135,16 @@ permits attributing the five missing IDs solely to noise. This issue stays
 **open**; do not reduce the operation denominator, reclassify incomplete
 targets as samples, or treat these unequal instruments as paired performance
 rates.
+
+**Overlap limitation discovered during closure planning (2026-09-27):**
+`TierENodeNoiseProbe.runPairs` samples the unrelated process only after the
+first full-stream attachment marker, then `completed` verifies that **that
+same first-fork PID is still alive** before waiting for the remaining target
+forks. The `b8901ed7` unique-mode IDs `9632`–`9636` were therefore missing in
+a later fork, after the three-second noise sample had ended. Its failure is
+still a mandatory whole-target correctness failure, but it is **not proof of
+noise overlap in unique mode**. A future comparison may claim noisy
+full-stream overlap only unless it explicitly observes a separate unique-mode
+attachment and overlaps that mode. Preserve full+unique exact-operation
+oracles either way; do not infer the missing-ID cause from the first-fork
+marker.
