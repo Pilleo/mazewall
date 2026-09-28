@@ -402,8 +402,23 @@ These are still substantive controllers, not thin launchers:
       Only the zero-token residual was admitted by the source's rule;
       do not retrospectively label the missing-storage event ambient or
       infer a per-ID kernel skip from system-wide miss counters. Unique-
-      edge, original five unaudited pairs and native timing remain
-      unqualified.
+       edge, original five unaudited pairs and native timing remain
+       unqualified.
+       The next opt-in sustained comparison uses the *same* workload CPU
+       startup placement and all-thread pre-gate affinity check for both
+       unaudited and paired-witness modes. Each exports the entire
+       target-authored original FD manifest and evaluates declared-ID
+       completeness independently from diagnostic integrity; the per-fork
+       qualification axis remains `UNVERIFIED`. Audit-disabled mode does
+       not synthesize raw counters, and the old v5 diagnostic contract is
+       still emitted only when paired audits are enabled. Independent host
+       settlement checks every successful comparison fork's source-bound
+       manifest, exact-ID oracle, CPU receipt and all three status axes.
+       This new experiment is bounded to four serial 10,000-operation
+       forks at 1,000/s (full disabled/enabled, unique disabled/enabled)
+       with stop on the first incomplete fork. A fully passing comparison
+       is only "not reproduced within budget"; it neither explains the
+       earlier gap nor upgrades the separate default qualification.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

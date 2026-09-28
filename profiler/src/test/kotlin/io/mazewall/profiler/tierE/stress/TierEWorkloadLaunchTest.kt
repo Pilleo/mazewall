@@ -14,11 +14,28 @@ class TierEWorkloadLaunchTest {
     }
 
     @Test
-    fun `legacy unaudited launch and existing coverage target policy remain explicit`() {
+    fun `non-sustained unaudited launch and existing coverage target policy remain explicit`() {
         val java = listOf("java", "Target")
         assertEquals(java, TierEWorkloadLaunch.command(java, "0", startupPin = false))
         assertEquals(listOf("taskset", "-c", "0", "java", "Target"), TierEWorkloadLaunch.command(java, "0", startupPin = true))
         assertThrows(IllegalArgumentException::class.java) { TierEWorkloadLaunch.command(java, "-1", startupPin = true) }
+    }
+
+    @Test
+    fun `sustained shared workload starts on selected CPU with both audits disabled or enabled`() {
+        val java = listOf("java", "Target")
+        for (pairedAudit in listOf(false, true)) {
+            val startupPin = TierEWorkloadLaunch.shouldPinFromStartup(
+                benchmark = true,
+                sharedOpenatOracle = true,
+                benchmarkScope = "tier-e-sustained-collector",
+                coverageDiscovery = false,
+                pairedPreGateAudit = pairedAudit,
+            )
+            assertEquals(listOf("taskset", "-c", "0", "java", "Target"), TierEWorkloadLaunch.command(java, "0", startupPin))
+        }
+        assertEquals(false, TierEWorkloadLaunch.shouldPinFromStartup(true, true, "tier-e-calibration", false, false))
+        assertEquals(false, TierEWorkloadLaunch.shouldPinFromStartup(false, true, "tier-e-sustained-collector", false, false))
     }
 
     @Test

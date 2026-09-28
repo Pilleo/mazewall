@@ -5,6 +5,19 @@ import java.nio.file.Path
 
 /** Pin before Java startup so every JVM-created worker inherits the requested target affinity. */
 internal object TierEWorkloadLaunch {
+    private const val SUSTAINED_SCOPE = "tier-e-sustained-collector"
+
+    fun shouldPinFromStartup(
+        benchmark: Boolean,
+        sharedOpenatOracle: Boolean,
+        benchmarkScope: String?,
+        coverageDiscovery: Boolean,
+        pairedPreGateAudit: Boolean,
+    ): Boolean =
+        coverageDiscovery ||
+            pairedPreGateAudit ||
+            (benchmark && sharedOpenatOracle && benchmarkScope == SUSTAINED_SCOPE)
+
     fun command(
         java: List<String>,
         targetCpu: String?,

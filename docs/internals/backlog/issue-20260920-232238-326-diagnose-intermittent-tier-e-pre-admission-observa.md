@@ -7,6 +7,12 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonMode.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonVerdict.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonModeTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonVerdictTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyComparisonVerifierTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyComparisonVerifier.kt"
   - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/SHA256SUMS"
@@ -809,3 +815,23 @@ recursion-miss deltas were 166/346, still program-wide and not causal.
 The exact stopped runner and artifact volume are retained. No default
 or unaudited qualification follows; the complete instrumented 10,000-ID
 count does not prove the earlier uninstrumented gap was fixed.
+
+**Decision-oriented successor harness:** An opt-in sustained comparison
+profile selects exactly one of two shapes: both audits disabled, or the
+current paired raw/main invocation witness. Both now launch the shared
+`openat` target pinned to its selected CPU *before JVM startup* and check
+every extant target thread's affinity before releasing the workload.
+Both copy the complete original target-authored FD manifest into owned
+artifacts, independent of collector output; the existing version-five
+audit contract remains conditional on paired audits. A fork receipt
+reports declared-operation completeness, optional diagnostic integrity
+and `UNVERIFIED` qualification as separate axes without upgrading an
+existing fail-closed terminal. Host settlement rejects a successful
+comparison export missing original IDs, exact operation accounting,
+startup CPU provenance or matching declared/diagnostic axes. TDD host
+tests cover audit-disabled/witness selection and missing evidence. The
+reviewed Detekt report updates only pre-existing numeric harness entries;
+no thresholds or new warning kinds were adopted. The next series is
+capped at full unaudited, full witnessed, unique unaudited and unique
+witnessed, in that order, at 10,000 operations per fork and 1,000/s.
+Stop and retain the first incomplete arm; no default promotion follows.

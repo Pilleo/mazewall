@@ -65,7 +65,11 @@ public object TierETrustworthyRunner {
             settings.attachmentShape == "main-plus-audit" &&
             settings.attachmentBackend != "perf-tracepoint-compat"
         val owner = TierETrustworthyContainerOwner(endpoint, runId, artifacts, verifyExport = { result ->
-            TierETrustworthyResultVerifier.verify(result.resolve("results.jsonl"), preGateRequired)
+            TierETrustworthyResultVerifier.verify(
+                result.resolve("results.jsonl"),
+                preGateRequired,
+                comparisonRequired = "-Dmazewall.tier-e.sustained-comparison=true" in settings.benchmarkJavaOptions,
+            )
         })
 
         fun command(

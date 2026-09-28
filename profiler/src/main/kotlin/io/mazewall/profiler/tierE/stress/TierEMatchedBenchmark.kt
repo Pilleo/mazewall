@@ -36,11 +36,13 @@ internal object TierEMatchedBenchmark {
             ?: error("mazewall.tier-e.benchmark-raw-sys-enter-audit must be true or false")
         val exactAuditFlag = System.getProperty("mazewall.tier-e.benchmark-exact-admission-audit", "false").toBooleanStrictOrNull()
             ?: error("mazewall.tier-e.benchmark-exact-admission-audit must be true or false")
-        val invocationWitness = System.getProperty("mazewall.tier-e.benchmark-invocation-id-witness", "false").toBooleanStrictOrNull()
-            ?: error("mazewall.tier-e.benchmark-invocation-id-witness must be true or false")
-        require(!invocationWitness || (scope == Scope.TIER_E_SUSTAINED_COLLECTOR && rawAuditFlag && exactAuditFlag)) {
-            "invocation-ID witness requires paired sustained benchmark raw/main audit"
-        }
+        val (invocationWitness, sustainedComparison) = TierESustainedComparisonMode.select(
+            scope.jsonName,
+            rawAuditFlag,
+            exactAuditFlag,
+            System.getProperty("mazewall.tier-e.benchmark-invocation-id-witness", "false"),
+            System.getProperty("mazewall.tier-e.sustained-comparison", "false"),
+        )
         val requestedConfig = Config(
             agent = Path.of(args[0]).toAbsolutePath(),
             iterations = args.getOrElse(1) { "100" }.toInt(),
@@ -69,6 +71,7 @@ internal object TierEMatchedBenchmark {
             rawSysEnterAudit = AuditOptions.rawAuditRequested(scope.jsonName, rawAuditFlag),
             exactAdmissionAudit = AuditOptions.exactAdmissionAuditRequested(scope.jsonName, exactAuditFlag),
             invocationWitness = invocationWitness,
+            sustainedComparison = sustainedComparison,
         )
         Startup.validate(requestedConfig)
         requestedConfig.artifact.parent?.createDirectories()
@@ -290,6 +293,8 @@ internal object TierEMatchedBenchmark {
         if (coverageDiscovery) Files.createDirectories(coverageManifest.parent)
         val childJvmPrefix = listOf(
             java,
+            "-Dmazewall.tier-e.benchmark-scope=${config.scope.jsonName}",
+            "-Dmazewall.tier-e.sustained-comparison=${config.sustainedComparison}",
             "-D${TierECoverageOracle.ENABLED_PROPERTY}=$coverageDiscovery",
             "-D${TierECoverageOracle.SEED_PROPERTY}=$fork",
             "-Dmazewall.tier-e.coverage-collector-cpu=${config.collectorCpu}",
@@ -2749,6 +2754,7 @@ internal object TierEMatchedBenchmark {
         val rawSysEnterAudit: Boolean,
         val exactAdmissionAudit: Boolean,
         val invocationWitness: Boolean = false,
+        val sustainedComparison: Boolean = false,
     )
 
     private data class CalibrationOutcome(

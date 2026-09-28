@@ -173,6 +173,19 @@ internal object TierEKernelSmoke {
             configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT &&
             TierEbpfEngine.selectSysEnterAttachmentBackend(configuredSysEnterAttachmentBackend) ==
             TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+        val sustainedSharedBenchmark = benchmark &&
+            sharedOpenatOracleWorkload &&
+            System.getProperty("mazewall.tier-e.benchmark-scope") == "tier-e-sustained-collector"
+        val sustainedComparison = System.getProperty("mazewall.tier-e.sustained-comparison", "false").toBooleanStrictOrNull()
+            ?: error("sustained comparison must be true or false")
+        check(!sustainedComparison || sustainedSharedBenchmark) { "comparison requires sustained shared-openat workload" }
+        val startupPinnedTarget = TierEWorkloadLaunch.shouldPinFromStartup(
+            benchmark,
+            sharedOpenatOracleWorkload,
+            System.getProperty("mazewall.tier-e.benchmark-scope"),
+            coverageDiscovery,
+            startupPreGateAudit,
+        )
         val invocationWitness = System.getProperty("mazewall.tier-e.benchmark-invocation-id-witness", "false").toBooleanStrictOrNull()
             ?: error("invocation-ID witness must be true or false")
         check(!invocationWitness || (benchmark && startupPreGateAudit)) {
@@ -348,7 +361,7 @@ internal object TierEKernelSmoke {
             }
         }
         val targetCpu = args.getOrNull(6)
-        val launchCommand = TierEWorkloadLaunch.command(command, targetCpu, coverageDiscovery || startupPreGateAudit)
+        val launchCommand = TierEWorkloadLaunch.command(command, targetCpu, startupPinnedTarget)
         val child = ManagedProcessCapture.start(ProcessBuilder(launchCommand).inheritIO())
         val process = child.process
         val processEpoch = runCatching { processEpoch(process.pid()) }
@@ -454,7 +467,12 @@ internal object TierEKernelSmoke {
                 }
                 check(auditExpectedOpenatFds == expectedOpenatFds) { "version-five pre-gate diagnostic requires every declared ID" }
             }
-            val declaredIdReceipt = if (pairedPreGateAudit) {
+            val declaredIdReceipt = if (TierESustainedComparisonMode.exportDeclaredManifest(
+                    sustainedComparison,
+                    sustainedSharedBenchmark,
+                    pairedPreGateAudit,
+                )
+            ) {
                 val destination = System
                     .getProperty("mazewall.tier-e.declared-id-evidence-file")
                     ?.takeIf(String::isNotBlank)
@@ -547,7 +565,7 @@ internal object TierEKernelSmoke {
                 check(targetAffinity == args[6] && collectorAffinity == collectorCpu.toString())
                 println("tier-e-coverage-affinity: workload=$targetAffinity collector=$collectorAffinity launched_pinned=true")
             }
-            if (pairedPreGateAudit) {
+            if (pairedPreGateAudit || sustainedSharedBenchmark) {
                 TierEWorkloadLaunch.verifyRunningTarget(process.pid(), targetCpu)
             }
             val workloadStarted = System.nanoTime()
@@ -1069,7 +1087,24 @@ internal object TierEKernelSmoke {
                         oracle.wrong == 0L &&
                         oracle.unclassified == 0L
                     )
-            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete && preGateComplete && invocationWitnessComplete
+            val comparisonVerdict = if (sustainedComparison) {
+                TierESustainedComparisonVerdict.evaluate(
+                    expected = expectedOpenatFds.size,
+                    retainedIds = declaredIdReceipt?.rows,
+                    oracleAvailable = operationOracleAvailable,
+                    operationOracleComplete = operationOracleComplete,
+                    auditsEnabled = benchmarkRawSysEnterAudit || benchmarkExactAdmissionAudit,
+                    pairedDiagnosticComplete = pairedAuditComplete && preGateComplete && invocationWitnessComplete,
+                )
+            } else {
+                null
+            }
+            val effectiveEvidenceComplete = profile.integrity.coverageComplete &&
+                operationOracleComplete &&
+                pairedAuditComplete &&
+                preGateComplete &&
+                invocationWitnessComplete &&
+                (comparisonVerdict == null || comparisonVerdict.declaredOperations == TierESustainedComparisonVerdict.DeclaredOperations.PASS)
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "sys_enter_backend_configured=${configuredSysEnterAttachmentBackend.name.lowercase()} " +
@@ -1101,6 +1136,10 @@ internal object TierEKernelSmoke {
                     "invocation_witness_ambient_raw=${invocationConservation?.ambientRaw ?: "unavailable"} " +
                     "invocation_witness_ambient_main=${invocationConservation?.ambientMain ?: "unavailable"} " +
                     "invocation_witness_complete=$invocationWitnessComplete " +
+                    "sustained_comparison_contract_version=${if (sustainedComparison) 1 else 0} " +
+                    "sustained_comparison_declared=${comparisonVerdict?.declaredOperations?.name ?: "DISABLED"} " +
+                    "sustained_comparison_diagnostic=${comparisonVerdict?.diagnosticIntegrity?.name ?: "DISABLED"} " +
+                    "sustained_comparison_qualification=${comparisonVerdict?.qualification ?: "UNVERIFIED"} " +
                     "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
                     "sys_enter_program_update_helper_calls=${sysEnterProgramEvidence.updateHelperCalls} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
@@ -1137,7 +1176,7 @@ internal object TierEKernelSmoke {
                     earlyTargetOpenat,
                     preGateCounts.takeIf { pairedPreGateAudit },
                     versionFive =
-                    declaredIdReceipt != null,
+                    pairedPreGateAudit,
                 )} " +
                 "paired_early_target_audit_verdict=${if (pairedAuditComplete) "PASS" else "INCOMPLETE"} " +
                 "declared_ids_evidence_file=${declaredIdReceipt?.path ?: "none"} " +
@@ -1273,7 +1312,12 @@ internal object TierEKernelSmoke {
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
-            check(pairedAuditComplete && preGateComplete && invocationWitnessComplete) {
+            check(
+                pairedAuditComplete &&
+                preGateComplete &&
+                invocationWitnessComplete &&
+                (comparisonVerdict == null || comparisonVerdict.declaredOperations == TierESustainedComparisonVerdict.DeclaredOperations.PASS),
+            ) {
                 "Tier E paired raw/main audit incomplete: raw=$rawSysEnterAuditObserved/${auditExpectedOpenatFds.size} " +
                     "rawMissing=${rawSysEnterAuditMissing.size} exactMissing=${exactAdmissionAuditMissing.size} " +
                     "early=$earlyTargetOpenat preGate=$preGateBoundary failures=$preGateFailures invocationWitness=$invocationWitnessComplete witnessFailures=$invocationFailures"

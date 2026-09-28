@@ -4,8 +4,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 
 /** Require an intact benchmark JSONL before retiring the source artifact volume. */
@@ -18,6 +20,7 @@ public object TierETrustworthyResultVerifier {
     public fun verify(
         file: Path,
         preGateRequired: Boolean,
+        comparisonRequired: Boolean = false,
     ): Boolean {
         val text = Files.readString(file)
         require(text.endsWith('\n')) { "Torn benchmark JSONL tail" }
@@ -41,14 +44,36 @@ public object TierETrustworthyResultVerifier {
         require(samples != null && samples >= 0 && rows.count { kind(it) == "sample" } == samples) {
             "Benchmark sample count mismatch"
         }
+        val expectedOperations = rows
+            .singleOrNull { kind(it) == "metadata" }
+            ?.get("iterations")
+            ?.jsonPrimitive
+            ?.intOrNull
+        val output = requireNotNull(file.parent)
+        val hostManifestPath = output.resolve("manifest.json")
+        val hostManifest = if (Files.isRegularFile(hostManifestPath, NOFOLLOW_LINKS)) {
+            Json.parseToJsonElement(Files.readString(hostManifestPath)) as? JsonObject
+                ?: error("invalid source-bound host manifest")
+        } else {
+            null
+        }
+        val comparisonRequested = hostManifest
+            ?.get("configuration")
+            ?.jsonObject
+            ?.get("benchmark_java_options")
+            ?.jsonPrimitive
+            ?.content
+            ?.contains("-Dmazewall.tier-e.sustained-comparison=true") == true
+        check(!comparisonRequired || comparisonRequested) { "predeclared comparison profile or host manifest is missing" }
+        val forks = rows.filter { kind(it) == "fork-output" }
         if (preGateRequired) {
-            val expectedOperations = rows
-                .singleOrNull { kind(it) == "metadata" }
-                ?.get("iterations")
-                ?.jsonPrimitive
-                ?.intOrNull
-            rows.filter { kind(it) == "fork-output" }.forEach { fork ->
-                TierETrustworthyPreGateExport.verify(requireNotNull(file.parent), fork, expectedOperations)
+            forks.forEach { fork ->
+                TierETrustworthyPreGateExport.verify(output, fork, expectedOperations)
+            }
+        }
+        if (comparisonRequested) {
+            forks.forEach { fork ->
+                TierETrustworthyComparisonVerifier.verify(output, fork, expectedOperations, requireNotNull(hostManifest))
             }
         }
         return true
