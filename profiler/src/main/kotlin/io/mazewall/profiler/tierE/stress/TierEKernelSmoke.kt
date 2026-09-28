@@ -168,6 +168,11 @@ internal object TierEKernelSmoke {
         val configuredAttachmentShape = sysEnterAttachmentShape(
             System.getProperty("mazewall.tier-e.sys-enter-attachment-shape", "main-plus-audit"),
         )
+        val startupPreGateAudit = benchmarkRawSysEnterAudit &&
+            benchmarkExactAdmissionAudit &&
+            configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT &&
+            TierEbpfEngine.selectSysEnterAttachmentBackend(configuredSysEnterAttachmentBackend) ==
+            TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -330,7 +335,8 @@ internal object TierEKernelSmoke {
                 addAll(listOf("gate:$gate", args.getOrElse(4) { "platform" }, args.getOrElse(5) { "1" }))
             }
         }
-        val launchCommand = if (coverageDiscovery) listOf("taskset", "-c", requireNotNull(args.getOrNull(6))) + command else command
+        val targetCpu = args.getOrNull(6)
+        val launchCommand = TierEWorkloadLaunch.command(command, targetCpu, coverageDiscovery || startupPreGateAudit)
         val child = ManagedProcessCapture.start(ProcessBuilder(launchCommand).inheritIO())
         val process = child.process
         val processEpoch = runCatching { processEpoch(process.pid()) }
@@ -428,11 +434,7 @@ internal object TierEKernelSmoke {
                 emptySet()
             }
             val auditExpectedOpenatFds = boundedAuditSample(expectedOpenatFds)
-            val pairedPreGateAudit = benchmarkRawSysEnterAudit &&
-                benchmarkExactAdmissionAudit &&
-                configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT &&
-                TierEbpfEngine.selectSysEnterAttachmentBackend(configuredSysEnterAttachmentBackend) ==
-                TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+            val pairedPreGateAudit = startupPreGateAudit
             if (pairedPreGateAudit) {
                 check(auditExpectedOpenatFds.all { it in 0 until TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS }) {
                     "declared pre-gate audit descriptor exceeds bounded BPF array capacity"
@@ -509,7 +511,7 @@ internal object TierEKernelSmoke {
                 ?.let { path ->
                     Files.writeString(Path.of(path), "workload_pid=${process.pid()}\n")
                 }
-            args.getOrNull(6)?.toInt()?.let { cpu ->
+            targetCpu?.toInt()?.let { cpu ->
                 pinTargetToCpu(cpu, process.pid())
             }
             if (coverageDiscovery) {
@@ -531,6 +533,9 @@ internal object TierEKernelSmoke {
                     .trim()
                 check(targetAffinity == args[6] && collectorAffinity == collectorCpu.toString())
                 println("tier-e-coverage-affinity: workload=$targetAffinity collector=$collectorAffinity launched_pinned=true")
+            }
+            if (pairedPreGateAudit) {
+                TierEWorkloadLaunch.verifyRunningTarget(process.pid(), targetCpu)
             }
             val workloadStarted = System.nanoTime()
             coverageStartedNanos = workloadStarted

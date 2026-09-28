@@ -342,6 +342,24 @@ These are still substantive controllers, not thin launchers:
     No BPF runtime-stats sysctl or global static key was changed. A bounded
     new-kernel clean control-only diagnostic remains subject to its own
     predeclared source/kernel/image/CPU contract and stop rule.
+    The [first clean 7.2.8 control](../../evidence/tier-e-kernel-7-2-8-recursion-control-20260928/README.md)
+    stopped on full stream: raw/main declared observations were
+    9,957/9,958, with 43 raw-only and 42 main-only missing IDs and zero
+    overlap. Program-wide raw/main recursion-miss deltas were 222/4,957;
+    none can be attributed to an individual declared syscall. The run
+    also exposed a sustained harness CPU-provenance error: target raw
+    events were all on CPU 1 despite requesting workload CPU 0. The JVM
+    inherited collector CPU 1 at startup and only its leader was moved
+    afterwards. The failure remains `INCOMPLETE`; any startup-affinity
+    correction changes the experimental source/CPU contract and needs a
+     fresh, separately predeclared series.
+     The subsequent source correction pins the opt-in audited target JVM
+     *at process creation*, before any Java worker exists, and verifies
+     every existing target thread's effective CPU mask via `/proc` before
+     the workload gate opens. An empty, unreadable or mismatched thread
+     snapshot aborts. This is a new harness/source contract; its host tests
+     do not qualify the sealed `6e0d5dd6` failure, and a fresh kernel run
+     still requires a versioned plan and exact identity/CPU evidence.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

@@ -8,6 +8,8 @@ component: "core"
 target_modules: []
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEWorkloadLaunch.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEWorkloadLaunchTest.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentity.kt"
@@ -93,6 +95,10 @@ target_files:
   - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/SHA256SUMS"
   - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/raw-verifier.tar.gz"
+  - "docs/internals/evidence/tier-e-kernel-7-2-8-recursion-control-20260928/README.md"
+  - "docs/internals/evidence/tier-e-kernel-7-2-8-recursion-control-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-kernel-7-2-8-recursion-control-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kernel-7-2-8-recursion-control-20260928/raw-control.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -651,3 +657,49 @@ if all pass, report not reproduced within this fixed budget. An available
 zero raw miss delta would exclude the recursion guard for a failed arm;
 nonzero misses remain aggregate system-wide evidence, not per-ID proof.
 None of these opt-in outcomes qualifies the unaudited or timing gates.
+
+**First new-kernel control stopped, source-clean (2026-09-28 UTC):** The
+[sealed `6e0d5dd6` control](../evidence/tier-e-kernel-7-2-8-recursion-control-20260928/README.md)
+ran on XanMod `7.2.8` under its fixed source/image/agent/CPU-set plan.
+On the first full-stream fork raw counted 9,957 and main exact submitted
+9,958 of 10,000. The original target FD manifest and complete per-ID
+rows show **43 raw-only**, **42 main-only**, and **zero jointly missing**
+IDs. Explicit read/array-lookup failure counters and ring loss were zero.
+After shared-arm baselines of six each, per-program recursion-miss deltas
+were **222 raw and 4,957 main**, with runtime timing/count still
+unavailable. The tagged kernel's recursion guard can skip one program,
+but these system-wide miss totals cannot be assigned to any of the 85
+specific failed IDs. This supports investigation, not a causal claim.
+Controls two/three and unique mode did not run; exact failed runner and
+source volume remain retained.
+
+**Additional demonstrated CPU-provenance defect:** The manifest requested
+workload CPU `0` and collector CPU `1`, yet **all 9,957 observed raw target
+operations occurred on CPU 1**. In sustained non-coverage mode,
+`TierEMatchedBenchmark` starts the collector pinned to CPU 1, which
+launches the target JVM with inherited CPU-1 affinity. Only its leader
+is later moved via `taskset -pc 0`; established JVM workers can retain
+CPU 1. Thus this result does not establish target-thread CPU-0 affinity,
+although the direct-raw attachment itself is system-wide. Do not use
+the data as a CPU-0 workload qualification. A separate versioned
+startup-affinity correction must pin the target before its JVM threads
+start and verify effective workload-thread affinity before gate release;
+any later run is a newly predeclared source/CPU contract, not a retry of
+this `INCOMPLETE` terminal.
+
+**Startup-affinity correction (source validation, not kernel qualification):**
+The opt-in paired pre-gate audit now launches the target JVM with `taskset -c`
+on the selected workload CPU **before** its Java threads exist. The harness
+reads `/proc/<target>/task/*/status` and requires every existing target thread
+to have exactly that CPU in `Cpus_allowed_list` before releasing the operation
+gate; an unreadable, empty or mismatched snapshot fails closed. The earlier
+leader-only operation remains for the other benchmark modes. A focused
+red/green test checks the startup command and rejects one mis-affined thread.
+This is a new source revision and therefore cannot revise the sealed
+`6e0d5dd6` result. No new CPU-pinned kernel control has been acquired.
+The Detekt report for this exact correction was reviewed: the pre-existing
+oversized `TierEKernelSmoke.main` inventory changed from complexity 362 to
+363 and length 1308 to 1313; its existing two numeric warning entries were
+updated individually. The report adds no other warning, and one previously
+tracked magic-number occurrence was removed. No threshold or module-wide
+warning allowance was changed.
