@@ -44,7 +44,10 @@ class TierETrustworthyV5EvidenceTest {
                 "declared_ids_evidence_file=/artifacts/${oracle.fileName} declared_ids_evidence_sha256=${sha(declared)} declared_ids_evidence_rows=1 " +
                 "pre_gate_audit_evidence_file=/artifacts/${sidecar.fileName} pre_gate_audit_evidence_sha256=${sha(content)} pre_gate_audit_evidence_rows=1 " +
                 "sys_enter_program_sha256=${"b".repeat(64)} sys_enter_audit_program_sha256=${"c".repeat(64)} " +
-                "sys_enter_main_program_execution=IdentityOnly(programId=321, sys_enter_audit_program_execution=IdentityOnly(programId=322, " +
+                "sys_enter_main_program_execution=IdentityOnly(programId=321, translatedInstructionBytes=800, reason=runtime unavailable, recursionMisses=0) " +
+                "sys_enter_audit_program_execution=IdentityOnly(programId=322, translatedInstructionBytes=700, reason=runtime unavailable, recursionMisses=0) " +
+                "sys_enter_main_recursion_misses_before=0 sys_enter_audit_recursion_misses_before=0 " +
+                "sys_enter_main_recursion_misses_delta=0 sys_enter_audit_recursion_misses_delta=0 " +
                 "raw_sys_enter_audit_observed_operations=1 exact_admission_audit_submitted=1 " +
                 "pre_gate_audit_raw_before_session=1 pre_gate_audit_main_before_session=1 " +
                 "pre_gate_audit_raw_after_session=1 pre_gate_audit_main_after_session=1 " +
@@ -54,6 +57,9 @@ class TierETrustworthyV5EvidenceTest {
         }
         publish(row)
         assertTrue(TierETrustworthyResultVerifier.verify(results, preGateRequired = true))
+        Files.writeString(log, Files.readString(log).replace("sys_enter_audit_recursion_misses_delta=0", "sys_enter_audit_recursion_misses_delta=unavailable"))
+        assertThrows(IllegalStateException::class.java) { TierETrustworthyResultVerifier.verify(results, preGateRequired = true) }
+        publish(row)
         Files.writeString(log, Files.readString(log).replace("programId=322", "programId=321"))
         assertThrows(IllegalStateException::class.java) { TierETrustworthyResultVerifier.verify(results, preGateRequired = true) }
         publish(row.replace("7746\t1", "7748\t1")) // valid checksum, wrong declared ID

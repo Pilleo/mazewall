@@ -20,6 +20,7 @@ internal data class TierEInstalledProgramIdentity(
         val translatedInstructionBytes: Int,
         val runCount: Long?,
         val runTimeNanos: Long?,
+        val recursionMisses: Long?,
     ) {
         val runtimeUnavailable: Boolean get() = runCount == null || runTimeNanos == null
     }
@@ -61,12 +62,16 @@ internal data class TierEInstalledProgramIdentity(
             translatedBytes: Int,
             runCount: Long?,
             runTimeNanos: Long?,
+            recursionMisses: Long?,
         ): KernelInfo {
             check(returnedLength >= BpfProgramInfoLayout.XLATED_PROGRAM_LENGTH + Int.SIZE_BYTES && programId > 0 && translatedBytes > 0) {
                 "kernel BPF program identity is unavailable"
             }
+            check((returnedLength >= BpfProgramInfoLayout.RECURSION_MISSES + Long.SIZE_BYTES) == (recursionMisses != null)) {
+                "recursion-miss availability disagrees with returned kernel program-info length"
+            }
             val unavailable = runCount == null || runTimeNanos == null || (runCount == 0L && runTimeNanos == 0L)
-            return KernelInfo(programId, translatedBytes, if (unavailable) null else runCount, if (unavailable) null else runTimeNanos)
+            return KernelInfo(programId, translatedBytes, if (unavailable) null else runCount, if (unavailable) null else runTimeNanos, recursionMisses)
         }
     }
 }

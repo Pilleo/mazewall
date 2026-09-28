@@ -175,6 +175,8 @@ class BpfProgLoadLayoutTest {
         assertEquals(20L, BpfProgramInfoLayout.XLATED_PROGRAM_LENGTH)
         assertEquals(192L, BpfProgramInfoLayout.RUN_TIME_NANOS)
         assertEquals(200L, BpfProgramInfoLayout.RUN_COUNT)
+        assertEquals(208L, BpfProgramInfoLayout.RECURSION_MISSES)
+        assertEquals(232L, BpfProgramInfoLayout.SIZE)
     }
 
     private fun assertVerifierReachable(program: List<TierEbpfEngine.Insn>) {

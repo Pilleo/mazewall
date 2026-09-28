@@ -329,6 +329,19 @@ These are still substantive controllers, not thin launchers:
     hashes were retained; optional kernel runtime statistics were
     unavailable. This bounds, but cannot prove, raw delivery versus the
     earliest target/arm/read path. The clean three-pair series did not start.
+    After a reboot, the running XanMod kernel is `7.2.8-x64v3-xanmod1`,
+    separate from the `7.2.4` failure. Both exact source tags contain a
+    per-program raw-tracepoint recursion guard with a missed-invocation
+    counter. The Linux UAPI places `bpf_prog_info.recursion_misses` at byte
+    208; the old 208-byte info request omitted it. The opt-in reader now
+    requests the full 232-byte info, retains unavailable separately from
+    zero, and compares raw/main miss counters over the common arm window.
+    This is an unverified hypothesis, not a causal finding: nonzero
+    program-wide misses cannot identify a declared operation, while an
+    available zero raw delta can exclude that guard for a failed fork.
+    No BPF runtime-stats sysctl or global static key was changed. A bounded
+    new-kernel clean control-only diagnostic remains subject to its own
+    predeclared source/kernel/image/CPU contract and stop rule.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

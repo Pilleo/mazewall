@@ -129,12 +129,14 @@ internal class TierEbpfEngine(
             val translatedInstructionBytes: Int,
             val runCount: Long?,
             val runTimeNanos: Long?,
+            val recursionMisses: Long?,
         ) : BpfProgramExecutionEvidence
 
         data class IdentityOnly(
             val programId: Int,
             val translatedInstructionBytes: Int,
             val reason: String,
+            val recursionMisses: Long?,
         ) : BpfProgramExecutionEvidence
 
         data class Unavailable(
@@ -1436,13 +1438,14 @@ internal object BpfObjGetInfoLayout {
     const val INFO: Long = 8
 }
 
-/** Prefix of bpf_prog_info through execution counters, guarded by returned info_len. */
+/** Linux bpf_prog_info including recursion_misses, guarded by returned info_len. */
 internal object BpfProgramInfoLayout {
-    const val SIZE: Long = 208
+    const val SIZE: Long = 232
     const val ID: Long = 4
     const val XLATED_PROGRAM_LENGTH: Long = 20
     const val RUN_TIME_NANOS: Long = 192
     const val RUN_COUNT: Long = 200
+    const val RECURSION_MISSES: Long = 208
 }
 
 private fun TierESysEnterAttachmentShape.isAuditOnly(): Boolean =

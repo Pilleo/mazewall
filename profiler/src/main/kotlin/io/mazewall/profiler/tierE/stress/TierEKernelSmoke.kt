@@ -460,6 +460,16 @@ internal object TierEKernelSmoke {
             val pairedEarlyAudit = benchmarkRawSysEnterAudit &&
                 benchmarkExactAdmissionAudit &&
                 configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
+            val recursionBeforeArm = if (pairedPreGateAudit) {
+                engine.readSysEnterProgramExecutionEvidence().also { evidence ->
+                    val baseline = TierEProgramMissComparison.compare(evidence, evidence)
+                    check(baseline.main == 0L && baseline.raw == 0L) {
+                        "kernel cannot report both per-program recursion-miss baselines"
+                    }
+                }
+            } else {
+                null
+            }
             if (pairedEarlyAudit) engine.armEarlyTargetOpenatComparison()
             straceOutputPath?.let { output ->
                 output.parent?.let(Files::createDirectories)
@@ -579,6 +589,11 @@ internal object TierEKernelSmoke {
                 emptyMap()
             }
             val sysEnterProgramExecutionEvidence = engine.readSysEnterProgramExecutionEvidence()
+            val recursionMissDelta = recursionBeforeArm?.let { before ->
+                TierEProgramMissComparison.compare(before, sysEnterProgramExecutionEvidence).also { delta ->
+                    check(delta.main != null && delta.raw != null) { "kernel lost program recursion-miss evidence after the armed interval" }
+                }
+            }
             val rawAuditArgumentReadFailures = if (benchmarkRawSysEnterAudit) {
                 engine.readRawAuditArgumentReadFailureCount()
             } else {
@@ -1008,6 +1023,10 @@ internal object TierEKernelSmoke {
                     "sys_enter_audit_program_sha256=${rawAuditProgramIdentity?.sha256 ?: "not-attached"} " +
                     "sys_enter_main_program_execution=${sysEnterProgramExecutionEvidence.getValue("main")} " +
                     "sys_enter_audit_program_execution=${sysEnterProgramExecutionEvidence.getValue("audit")} " +
+                    "sys_enter_main_recursion_misses_before=${recursionBeforeArm?.getValue("main")?.let { TierEProgramMissComparison.sample(it) } ?: "unavailable"} " +
+                    "sys_enter_audit_recursion_misses_before=${recursionBeforeArm?.getValue("audit")?.let { TierEProgramMissComparison.sample(it) } ?: "unavailable"} " +
+                    "sys_enter_main_recursion_misses_delta=${recursionMissDelta?.main ?: "unavailable"} " +
+                    "sys_enter_audit_recursion_misses_delta=${recursionMissDelta?.raw ?: "unavailable"} " +
                     "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
                     "sys_enter_program_update_helper_calls=${sysEnterProgramEvidence.updateHelperCalls} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +

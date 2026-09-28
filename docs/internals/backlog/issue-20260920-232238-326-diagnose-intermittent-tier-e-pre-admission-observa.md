@@ -14,24 +14,22 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramInfoReader.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBenchmarkAuditMapReader.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfMapAllocator.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramInfoReader.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentity.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditCount.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditMap.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifact.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifact.kt"
-  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifact.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEProgramMissComparison.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateBytecodeExecutionTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentityTest.kt"
-  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentityTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramInfoReaderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/BpfProgLoadLayoutTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifactTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifactTest.kt"
-  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEProgramMissComparisonTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifierTest.kt"
-  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceTest.kt"
   - "config/detekt/warnings/profiler.txt"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
@@ -612,3 +610,44 @@ mode and the predeclared clean three-pair campaign were **not** started.
 Do not rerun the same schedule without a new testable hypothesis separating
 program delivery from the earliest target/arm/argument checks. Default
 unaudited node-noise and the native timing gate remain incomplete.
+
+**New-kernel source-bound discriminator (2026-09-28, before acquisition):**
+The operator rebooted into `7.2.8-x64v3-xanmod1`, GitLab XanMod tag
+[`ca927d28dad3d7cdaad121df660728a67439dad0`](https://gitlab.com/xanmod/linux/-/tree/7.2.8-xanmod1).
+The v5 raw IDs `5050`–`5052` were acquired on older `7.2.4` and cannot be
+transferred to this kernel. In both exact source tags `__bpf_trace_run`
+checks each raw program's recursion context, increments **that program's**
+misses when it cannot run, and skips its callback. The raw BPF dispatch
+file, tracepoint dispatch file, and isolated recursion/miss-accounting
+functions are byte-identical between the tags. This establishes an
+available **hypothesis**, not the cause of the historical three IDs.
+The running kernel's `bpf_prog_info.recursion_misses` lies at byte 208;
+the old 208-byte request omitted it. A host C `offsetof` probe found
+size 232 and offset 208. Normal BPF programs allocate per-program stats
+and the raw recursion-miss increment does not depend on the BPF runtime-
+timing static key. `/proc/sys/kernel/bpf_stats_enabled` is `0` and no
+global switch was changed. `BPF_ENABLE_STATS` would require `CAP_SYS_ADMIN`
+and temporarily enable a global static key, so it is not selected.
+The optional diagnostic reader now requests 232 bytes, guards the returned
+length, retains `null` if unavailable, and captures separate raw/main
+miss-count baselines before arm and post-target counts with program-ID
+continuity checks. Source/FFM host tests passed; **no new-kernel benchmark
+has yet run**.
+
+| Explanation | Current bound | Falsifier in a future armed, source-pinned fork |
+| --- | --- | --- |
+| Raw callback skipped by its program recursion guard | Exact tagged source has the branch and per-program counter; historical value was not requested. | **Available zero raw recursion-miss delta** alongside a raw missing ID rules out this skip for that fork. Nonzero program-wide misses support, but cannot by themselves identify, any particular ID. |
+| Raw low32 syscall, immutable TGID or shared arm check exited | Armed raw target total and raw pre-ID count both fell three below main; no tracked argument/lookup failure. | An independently admitted event reaches a checkpoint before the selected condition (requires a separately reviewed, narrowly bounded probe). |
+| Raw argument or declared-map access failed | Target-written IDs were stable, and all explicit argument/map-failure counters were zero. | A newly captured explicit failure in the exact missing-ID interval, after checking helper/branch behavior. |
+| FD reuse or denominator change | Target retains its directory FDs until the workload completes; the target-authored manifest and full per-ID file agree without duplicates. | A same-target FD-lifetime or manifest discrepancy. |
+
+If host validation remains green, the next **separately predeclared**
+experiment is at most three clean, serial *control-only* audited targets
+on `7.2.8` with the original 10,000-operation full+unique schedule. Noise
+overlap did not explain the previous missing IDs, so a control-only
+measurement isolates this recursion hypothesis. Stop on the first failure,
+retain full rows, source/kernel/program identities and raw/main miss deltas;
+if all pass, report not reproduced within this fixed budget. An available
+zero raw miss delta would exclude the recursion guard for a failed arm;
+nonzero misses remain aggregate system-wide evidence, not per-ID proof.
+None of these opt-in outcomes qualifies the unaudited or timing gates.

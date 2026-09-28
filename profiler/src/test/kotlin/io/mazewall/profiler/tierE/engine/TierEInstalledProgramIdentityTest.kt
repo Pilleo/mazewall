@@ -39,14 +39,30 @@ class TierEInstalledProgramIdentityTest {
     @Test
     fun `program identity survives absent kernel runtime statistics`() {
         val evidence = TierEInstalledProgramIdentity.kernelInfo(
-            returnedLength = 208,
+            returnedLength = 232,
             programId = 321,
             translatedBytes = 1234,
             runCount = 0,
             runTimeNanos = 0,
+            recursionMisses = 3,
         )
         assertEquals(321, evidence.programId)
         assertEquals(1234, evidence.translatedInstructionBytes)
+        assertTrue(evidence.runtimeUnavailable)
+        assertEquals(3L, evidence.recursionMisses)
+    }
+
+    @Test
+    fun `short kernel program info reports missing recursion field as unavailable not zero`() {
+        val evidence = TierEInstalledProgramIdentity.kernelInfo(
+            returnedLength = 208,
+            programId = 321,
+            translatedBytes = 1234,
+            runCount = null,
+            runTimeNanos = null,
+            recursionMisses = null,
+        )
+        assertEquals(null, evidence.recursionMisses)
         assertTrue(evidence.runtimeUnavailable)
     }
 }

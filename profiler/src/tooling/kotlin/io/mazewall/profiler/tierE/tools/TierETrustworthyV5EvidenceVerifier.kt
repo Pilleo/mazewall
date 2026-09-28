@@ -73,6 +73,29 @@ internal object TierETrustworthyV5EvidenceVerifier {
         ) {
             "the installed BPF program identities are unavailable"
         }
+
+        fun verifyMisses(
+            program: String,
+            fieldName: String,
+        ) {
+            val before = field("sys_enter_${fieldName}_recursion_misses_before").toLongOrNull()
+            val delta = field("sys_enter_${fieldName}_recursion_misses_delta").toLongOrNull()
+            val after = Regex("${Regex.escape(program)}=(?:Available|IdentityOnly)\\([^)]*recursionMisses=([0-9]+)\\)")
+                .find(report)
+                ?.groupValues
+                ?.get(1)
+                ?.toLongOrNull()
+            check(
+                before != null &&
+                delta != null &&
+                after != null &&
+                before >= 0 &&
+                delta >= 0 &&
+                Math.addExact(before, delta) == after,
+            ) { "version-five $fieldName recursion-miss evidence is unavailable or inconsistent" }
+        }
+        verifyMisses("sys_enter_main_program_execution", "main")
+        verifyMisses("sys_enter_audit_program_execution", "audit")
         val sums = LongArray(EXPECTED_COLUMNS - 2)
         val ids = HashSet<Int>(rowCount)
         Files.newBufferedReader(sidecar).use { reader ->

@@ -37,18 +37,25 @@ internal object TierEBpfProgramInfoReader {
             } else {
                 null
             }
+            val recursionMisses = if (available >= BpfProgramInfoLayout.RECURSION_MISSES + Long.SIZE_BYTES) {
+                info.get(ValueLayout.JAVA_LONG, BpfProgramInfoLayout.RECURSION_MISSES)
+            } else {
+                null
+            }
             val observed = TierEInstalledProgramIdentity.kernelInfo(
                 available,
                 info.get(ValueLayout.JAVA_INT, BpfProgramInfoLayout.ID),
                 info.get(ValueLayout.JAVA_INT, BpfProgramInfoLayout.XLATED_PROGRAM_LENGTH),
                 runCount,
                 runTime,
+                recursionMisses,
             )
             if (observed.runtimeUnavailable) {
                 TierEbpfEngine.BpfProgramExecutionEvidence.IdentityOnly(
                     observed.programId,
                     observed.translatedInstructionBytes,
                     "kernel BPF runtime statistics are unavailable",
+                    observed.recursionMisses,
                 )
             } else {
                 TierEbpfEngine.BpfProgramExecutionEvidence.Available(
@@ -56,6 +63,7 @@ internal object TierEBpfProgramInfoReader {
                     observed.translatedInstructionBytes,
                     observed.runCount,
                     observed.runTimeNanos,
+                    observed.recursionMisses,
                 )
             }
         }
