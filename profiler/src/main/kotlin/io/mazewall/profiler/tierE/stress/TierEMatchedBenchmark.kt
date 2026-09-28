@@ -274,6 +274,7 @@ internal object TierEMatchedBenchmark {
         val collectorReceiptClock = System.getProperty("mazewall.tier-e.collector-receipt-clock", "disabled")
         val attachmentReadyFile = System.getProperty("mazewall.tier-e.attachment-ready-file", "")
         val preGateEvidenceFile = config.artifact.parent.resolve("pre-gate-${variant.jsonName(config.scope)}-fork-$fork.tsv")
+        val declaredIdEvidenceFile = config.artifact.parent.resolve("declared-ids-${variant.jsonName(config.scope)}-fork-$fork.manifest")
         val coverageDiscovery = config.scope == Scope.TIER_E_COVERAGE_DISCOVERY
         val coverageManifest = config.artifact.parent
             .resolve("coverage-manifests")
@@ -347,6 +348,7 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${config.rawSysEnterAudit}",
                 "-Dmazewall.tier-e.benchmark-exact-admission-audit=${config.exactAdmissionAudit}",
                 "-Dmazewall.tier-e.pre-gate-evidence-file=$preGateEvidenceFile",
+                "-Dmazewall.tier-e.declared-id-evidence-file=$declaredIdEvidenceFile",
                 "-Dmazewall.tier-e.attachment-ready-file=$attachmentReadyFile",
                 "-Dmazewall.tier-e.marker-transport=${markerTransportFor(variant).wireName}",
                 "-Dmazewall.tier-e.live-publication=${variant.publication == Publication.LIVE}",

@@ -131,6 +131,12 @@ internal class TierEbpfEngine(
             val runTimeNanos: Long?,
         ) : BpfProgramExecutionEvidence
 
+        data class IdentityOnly(
+            val programId: Int,
+            val translatedInstructionBytes: Int,
+            val reason: String,
+        ) : BpfProgramExecutionEvidence
+
         data class Unavailable(
             val reason: String,
         ) : BpfProgramExecutionEvidence
@@ -163,7 +169,6 @@ internal class TierEbpfEngine(
         private const val BPF_MAP_UPDATE_ELEM: Long = 2
         private const val BPF_MAP_GET_NEXT_KEY: Long = 4
         private const val BPF_PROG_LOAD: Long = 5
-        private const val BPF_OBJ_GET_INFO_BY_FD: Long = 15
         private const val BPF_RAW_TRACEPOINT_OPEN: Long = 17
         private const val BPF_BTF_LOAD: Long = 18
 
@@ -426,6 +431,8 @@ internal class TierEbpfEngine(
                         PROG_TRACEPOINT
                     },
                     "tier_e_syscall",
+                    backend = sysEnterAttachmentBackend,
+                    identitySink = { installed.mainProgramIdentity = it },
                 )
                 installed.mainSysEnterProgramAttached = true
             }
@@ -465,6 +472,8 @@ internal class TierEbpfEngine(
                         PROG_TRACEPOINT
                     },
                     "tier_e_audit",
+                    backend = sysEnterAttachmentBackend,
+                    identitySink = { installed.auditProgramIdentity = it },
                 )
             }
             if (installed.mainSysEnterProgramAttached) attachSysEnter(installed, sysEnterAttachmentBackend)
@@ -613,8 +622,8 @@ internal class TierEbpfEngine(
         installed.syscallPerfFds.forEach { rawIoctl(it.value, PERF_EVENT_IOC_DISABLE, 0) }
         installed.rawSysEnterAuditPerfFds.forEach { rawIoctl(it.value, PERF_EVENT_IOC_DISABLE, 0) }
         return mapOf(
-            "main" to programExecutionEvidence(installed.progFd),
-            "audit" to programExecutionEvidence(installed.rawSysEnterAuditProgFd),
+            "main" to TierEBpfProgramInfoReader.read(native, installed.progFd?.value),
+            "audit" to TierEBpfProgramInfoReader.read(native, installed.rawSysEnterAuditProgFd?.value),
         )
     }
 
@@ -884,21 +893,29 @@ internal class TierEbpfEngine(
 
     /** Static program shape retained for benchmark-only kernel-work comparisons. */
     internal fun sysEnterProgramEvidence(): TierESysEnterProgramEvidence {
-        val program =
-            if (options.sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) buildRawTracepointProgram() else buildProgram()
+        val installed = requireInstalled()
+        val program = installed.mainProgramIdentity
         return TierESysEnterProgramEvidence(
             kernelCoverageMode = if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) options.kernelCoverageMode else TierEKernelCoverageMode.NONE,
-            instructionCount = program.size,
-            lookupHelperCalls = program.count { it.code == 0x85 && it.imm == 1 },
-            updateHelperCalls = program.count { it.code == 0x85 && it.imm == 2 },
+            instructionCount = program?.instructionCount ?: 0,
+            lookupHelperCalls = program?.lookupHelperCalls ?: 0,
+            updateHelperCalls = program?.updateHelperCalls ?: 0,
+            digest = program?.sha256 ?: "not-attached",
+            backend = program?.backend?.name?.lowercase() ?: "not-attached",
+            attached = program != null,
         )
     }
+
+    internal fun rawAuditProgramIdentity(): TierEInstalledProgramIdentity? = requireInstalled().auditProgramIdentity
 
     internal data class TierESysEnterProgramEvidence(
         val kernelCoverageMode: TierEKernelCoverageMode,
         val instructionCount: Int,
         val lookupHelperCalls: Int,
         val updateHelperCalls: Int,
+        val digest: String,
+        val backend: String,
+        val attached: Boolean,
     )
 
     /**
@@ -1137,9 +1154,12 @@ internal class TierEbpfEngine(
         mapFds: List<Int>,
         programType: Int,
         programName: String,
+        backend: TierESysEnterAttachmentBackend? = null,
+        identitySink: ((TierEInstalledProgramIdentity) -> Unit)? = null,
     ): BpfFd {
         return Arena.ofConfined().use {
             val request = BpfProgLoadRequestEncoder.encode(it, program, mapFds, programType, programName)
+            identitySink?.invoke(TierEInstalledProgramIdentity.from(programName, requireNotNull(backend), request.instructions))
             when (val result = bpfResult(BPF_PROG_LOAD, request.attr, BpfProgLoadLayout.SIZE)) {
                 is SyscallResult.Success -> result.recordDescriptorAcquisition().getFdOrThrow("BPF_PROG_LOAD", FileDescriptorRole.Bpf)
                 is SyscallResult.Error -> {
@@ -1251,41 +1271,6 @@ internal class TierEbpfEngine(
         }
     }
 
-    private fun programExecutionEvidence(fd: BpfFd?): BpfProgramExecutionEvidence {
-        if (fd == null) return BpfProgramExecutionEvidence.NotAttached
-        return runCatching {
-            Arena.ofConfined().use { arena ->
-                val info = arena.allocate(BpfProgramInfoLayout.SIZE, 8)
-                val attr = arena.allocate(BpfObjGetInfoLayout.SIZE, 8)
-                attr.set(ValueLayout.JAVA_INT, BpfObjGetInfoLayout.BPF_FD, fd.value)
-                attr.set(ValueLayout.JAVA_INT, BpfObjGetInfoLayout.INFO_LEN, BpfProgramInfoLayout.SIZE.toInt())
-                attr.set(ValueLayout.ADDRESS, BpfObjGetInfoLayout.INFO, info)
-                bpfCall(BPF_OBJ_GET_INFO_BY_FD, attr, BpfObjGetInfoLayout.SIZE)
-                val available = attr.get(ValueLayout.JAVA_INT, BpfObjGetInfoLayout.INFO_LEN)
-                val runCount = if (available >= BpfProgramInfoLayout.RUN_COUNT + Long.SIZE_BYTES) {
-                    info.get(ValueLayout.JAVA_LONG, BpfProgramInfoLayout.RUN_COUNT)
-                } else {
-                    null
-                }
-                val runTimeNanos = if (available >= BpfProgramInfoLayout.RUN_TIME_NANOS + Long.SIZE_BYTES) {
-                    info.get(ValueLayout.JAVA_LONG, BpfProgramInfoLayout.RUN_TIME_NANOS)
-                } else {
-                    null
-                }
-                if (runCount == null || runTimeNanos == null || (runCount == 0L && runTimeNanos == 0L)) {
-                    BpfProgramExecutionEvidence.Unavailable("kernel BPF runtime statistics are unavailable")
-                } else {
-                    BpfProgramExecutionEvidence.Available(
-                        programId = info.get(ValueLayout.JAVA_INT, BpfProgramInfoLayout.ID),
-                        translatedInstructionBytes = info.get(ValueLayout.JAVA_INT, BpfProgramInfoLayout.XLATED_PROGRAM_LENGTH),
-                        runCount = runCount,
-                        runTimeNanos = runTimeNanos,
-                    )
-                }
-            }
-        }.getOrElse { BpfProgramExecutionEvidence.Unavailable(it.message ?: it::class.simpleName.orEmpty()) }
-    }
-
     // ── helpers ─────────────────────────────────────────────────────────────
 
     private fun strSeg(
@@ -1370,6 +1355,8 @@ private class Resources {
     var preGateAuditFd: BpfFd? = null
     var progFd: BpfFd? = null
     var rawSysEnterAuditProgFd: BpfFd? = null
+    var mainProgramIdentity: TierEInstalledProgramIdentity? = null
+    var auditProgramIdentity: TierEInstalledProgramIdentity? = null
     var markerProgFd: BpfFd? = null
     var execProgFd: BpfFd? = null
     val syscallPerfFds = mutableListOf<BpfFd>()

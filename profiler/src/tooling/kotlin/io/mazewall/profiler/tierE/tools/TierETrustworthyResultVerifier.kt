@@ -42,8 +42,13 @@ public object TierETrustworthyResultVerifier {
             "Benchmark sample count mismatch"
         }
         if (preGateRequired) {
+            val expectedOperations = rows
+                .singleOrNull { kind(it) == "metadata" }
+                ?.get("iterations")
+                ?.jsonPrimitive
+                ?.intOrNull
             rows.filter { kind(it) == "fork-output" }.forEach { fork ->
-                TierETrustworthyPreGateExport.verify(requireNotNull(file.parent), fork)
+                TierETrustworthyPreGateExport.verify(requireNotNull(file.parent), fork, expectedOperations)
             }
         }
         return true

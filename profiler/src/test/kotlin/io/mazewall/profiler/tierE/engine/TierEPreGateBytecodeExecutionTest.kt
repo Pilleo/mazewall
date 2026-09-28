@@ -69,9 +69,42 @@ class TierEPreGateBytecodeExecutionTest {
         assertEquals(1L, machine.failure(6))
     }
 
+    @Test
+    fun `raw program records only validated declared entries across failed helpers and consecutive syscalls`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(earlyTargetCount = true, benchmarkTargetTgid = 12345)
+        val machine = DiagnosticPrefix(program, target = 12345, rawProgram = true)
+        machine.run(syscall = 257, pid = 12345, firstReadFails = true)
+        assertEquals(0L, machine.pre[1])
+        assertEquals(0L, machine.pre[3])
+        assertEquals(1L, machine.failure(3))
+        machine.run(syscall = 257, pid = 12345, secondReadFd = 222)
+        assertEquals(1L, machine.pre[1])
+        assertEquals(1L, machine.pre[3])
+        assertEquals(0L, machine.other[3])
+        machine.run(syscall = 3, pid = 12345)
+        machine.run(syscall = 257, pid = 12346)
+        assertEquals(1L, machine.pre[1])
+        assertEquals(1L, machine.pre[3])
+    }
+
+    @Test
+    fun `raw probe keeps a pre stage on session rejection and excludes failed descriptor lookup`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(earlyTargetCount = true, benchmarkTargetTgid = 12345)
+        val rejected = DiagnosticPrefix(program, target = 12346, rawProgram = true)
+        rejected.run(syscall = 257, pid = 12345)
+        assertEquals(1L, rejected.pre[1])
+        assertEquals(0L, rejected.pre[3])
+        val noEntry = DiagnosticPrefix(program, target = 12345, rawProgram = true)
+        noEntry.run(syscall = 257, pid = 12345, missingPreGateEntry = true)
+        assertEquals(0L, noEntry.pre[1])
+        assertEquals(0L, noEntry.pre[3])
+        assertEquals(1L, noEntry.failure(5))
+    }
+
     private class DiagnosticPrefix(
         private val program: List<TierEbpfEngine.Insn>,
         private val target: Int,
+        private val rawProgram: Boolean = false,
     ) {
         val pre = LongArray(5).apply { this[0] = 1 }
         val other = LongArray(5).apply { this[0] = 1 }
@@ -132,6 +165,7 @@ class TierEPreGateBytecodeExecutionTest {
                 val insn = program[pc]
                 if (insn.code == 0x7b && insn.off == (-112).toShort()) return // next step enters in-flight attribution
                 if (insn.code == 0x18 && insn.imm == 6) return // main in-flight path is outside this diagnostic prefix
+                if (rawProgram && insn.code == 0x85 && insn.imm == 8) return // CPU audit follows the raw post-session stage
                 var next = pc + 1
                 when (insn.code) {
                     0x00 -> Unit
@@ -159,7 +193,7 @@ class TierEPreGateBytecodeExecutionTest {
                                 else -> error("context offset at $pc")
                             }
                             is Value.Entry -> when (insn.off.toInt()) {
-                                4 -> if (source.map == 3) target.toLong() else source.value[0]
+                                4 -> if (source.map == 3 || source.map == 1) target.toLong() else source.value[0]
                                 else -> source.value[insn.off.toInt() / 8]
                             }
                             else -> error("unsupported load at $pc")
@@ -185,7 +219,8 @@ class TierEPreGateBytecodeExecutionTest {
                     }
                     0x5d -> if (number(insn.dst) != number(insn.src)) next += insn.off
                     0x05 -> next += insn.off
-                    0x85 -> registers[0] = when (insn.imm) {
+                    0x85 -> {
+                        val returned: Value = when (insn.imm) {
                         14 -> Value.Number((pid.toLong() shl 32) or 1L)
                         113 -> {
                             reads++
@@ -200,8 +235,16 @@ class TierEPreGateBytecodeExecutionTest {
                             val map = (registers[1] as Value.Map).index
                             val key = stack[(registers[2] as Value.Address).offset]?.toInt() ?: error("missing key at $pc")
                             val cell = when (map) {
+                                0 -> if (key == 111 || key == 222) LongArray(5) else null
+                                1 -> LongArray(2)
                                 3 -> LongArray(2)
+                                4 -> earlyCounters.getOrNull(key)
                                 9 -> earlyCounters.getOrNull(key)
+                                5 -> when (key) {
+                                    111 -> if (missingPreGateEntry) null else pre
+                                    222 -> other
+                                    else -> null
+                                }
                                 10 -> when (key) {
                                     111 -> if (missingPreGateEntry) null else pre
                                     222 -> other
@@ -213,6 +256,9 @@ class TierEPreGateBytecodeExecutionTest {
                             if (cell == null) Value.Number(0) else Value.Entry(map, key, cell)
                         }
                         else -> error("unsupported helper ${insn.imm} at $pc")
+                    }
+                        (1..5).forEach { register -> registers[register] = Value.Number(Long.MIN_VALUE) }
+                        registers[0] = returned
                     }
                     0xdb -> (registers[insn.dst] as Value.Entry).value[insn.off.toInt() / 8] += number(insn.src)
                     0x95 -> return

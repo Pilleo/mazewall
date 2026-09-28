@@ -309,6 +309,26 @@ These are still substantive controllers, not thin launchers:
     source-matched **instrumented** positive, not proof of the intermittent
     cause and not the still-incomplete five-pair unaudited gate. Unique-mode
     noise overlap was not measured.
+    Version-five benchmark-only provenance hardening now snapshots the
+    exact post-map-FD-substitution BPF bytes loaded for raw and main,
+    reports kernel program identity separately from optional runtime
+    statistics, and exports the original target-authored FD manifest.
+    The complete sidecar binds that manifest and both program digests;
+    host settlement verifies the exact descriptor set and recomputes
+    counter totals before retiring the source volume. Raw/main emitted-
+    bytecode tests model helper clobbering. Older sealed v4 files keep
+    their original contract. Version-five live acquisition remains
+    pending; none of these host checks upgrades default containment or
+    resolves the separate native timing gate.
+    The first [source-dirty version-five rootful
+    verifier](../../evidence/tier-e-v5-raw-pre-admission-stop-20260928/README.md)
+    stopped with raw 9,997/10,000 target IDs and main exact 10,000/10,000.
+    The independently copied original FD manifest and complete 10,000-ID
+    sidecar agree: `5050`–`5052` have zero raw before/after counts and one
+    main before/after/exact count each. Exact loaded BPF IDs and instruction
+    hashes were retained; optional kernel runtime statistics were
+    unavailable. This bounds, but cannot prove, raw delivery versus the
+    earliest target/arm/read path. The clean three-pair series did not start.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

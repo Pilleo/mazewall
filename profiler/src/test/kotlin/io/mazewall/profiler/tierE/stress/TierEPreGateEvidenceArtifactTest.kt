@@ -50,4 +50,24 @@ class TierEPreGateEvidenceArtifactTest {
         }
         assertFalse(Files.exists(path))
     }
+
+    @Test
+    fun `fifth contract binds every row to the independent oracle and exact loaded programs`() {
+        val path = output.resolve("pre-gate-v5.tsv")
+        TierEPreGateEvidenceArtifact.write(
+            path,
+            targetPid = 4321,
+            expected = setOf(7746),
+            counts = mapOf(7746 to TierEPreGateAuditCount(1, 1, 1, 1, 1)),
+            rawTarget = mapOf(7746 to 1L),
+            mainSubmitted = mapOf(7746 to 1L),
+            oracleSha256 = "a".repeat(64),
+            mainProgramSha256 = "b".repeat(64),
+            rawProgramSha256 = "c".repeat(64),
+        )
+        val header = Files.readAllLines(path).first()
+        assertTrue("schema_version=5" in header)
+        assertTrue("declared_sha256=${"a".repeat(64)}" in header)
+        assertTrue("main_program_sha256=${"b".repeat(64)}" in header)
+    }
 }

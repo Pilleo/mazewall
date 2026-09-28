@@ -10,17 +10,29 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilder.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentity.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramInfoReader.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBenchmarkAuditMapReader.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfMapAllocator.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramInfoReader.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentity.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditCount.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateAuditMap.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummary.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifact.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifact.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifact.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfProgramBuilderTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEPreGateBytecodeExecutionTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentityTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInstalledProgramIdentityTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEAdmissionAuditSummaryTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEPreGateEvidenceArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEDeclaredIdManifestArtifactTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifierTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceTest.kt"
   - "config/detekt/warnings/profiler.txt"
   - "docs/internals/designs/profiler/tier-e-testing-migration.md"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt"
@@ -33,6 +45,8 @@ target_files:
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifier.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyPreGateExport.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyV5EvidenceVerifier.kt"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/README.md"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
@@ -77,6 +91,10 @@ target_files:
   - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/raw-pair.tar.gz"
+  - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-v5-raw-pre-admission-stop-20260928/raw-verifier.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -552,3 +570,45 @@ overlap was not measured. This **single instrumented pair** is not a
 reproduction or cause of the earlier opposite misses, nor the five-pair
 unaudited decision. No current-source native timing PASS or policy
 promotion is claimed; stop rather than rerunning until green.
+
+**Version-five provenance hardening (offline, pending kernel verification):**
+The older static helper metrics rebuilt a program under configured `AUTO`,
+which could describe the wrong backend and omitted the v4 install-time
+TGID. The engine now snapshots raw/main **exact map-FD-substituted BPF
+instruction bytes** at each `BPF_PROG_LOAD` and records SHA-256, effective
+backend and helper/byte counts. `BPF_OBJ_GET_INFO_BY_FD` retains the kernel
+program ID and translated byte length even when optional runtime counts
+are zero/unavailable; native errors fail closed rather than being swallowed.
+The target-authored original `fd=` oracle manifest is exported separately
+before the shared arm, with an exact ID set and SHA-256. A new version-five
+sidecar binds that oracle hash and both installed-program digests to its
+full declared-ID rows. Before volume retirement, the host recomputes all
+raw/main stage and admission totals and compares the sorted sidecar IDs
+against the original oracle, not just the child-reported row count.
+Emitted-bytecode prefix tests now also exercise the **raw** program and
+caller-clobbered helper registers, along with the existing main-program
+failure/eligibility matrix. Archived version-four receipts retain their
+historical interpretation. These are host/offline checks so far; no new
+source-clean version-five qualification or default-path PASS exists.
+
+**First version-five kernel verifier failed with complete individual
+evidence (2026-09-28 UTC):** The [sealed source-dirty
+receipt](../evidence/tier-e-v5-raw-pre-admission-stop-20260928/README.md)
+matches the target-authored 10,000-ID oracle to all 10,000 retained
+sidecar rows and records the exact installed raw/main program IDs and
+post-map-FD-substitution instruction digests. It stopped on its **first
+full fork**: raw observed 9,997/10,000 on CPU 1 while main exact submitted
+10,000/10,000. The original target oracle and complete table identify
+`5050`–`5052`: each raw before/after session and raw target count was
+**zero**, while each main before/after session and exact count was **one**.
+No other declared row was abnormal. Armed raw/main target aggregates were
+10,000/10,003, all six explicit read/array-lookup failure counters were
+zero and kernel ring loss was zero. Distinct raw/main kernel program IDs
+`61288`/`61287` survived despite unavailable optional runtime statistics.
+These facts bound the raw deficit to **at or before its per-ID pre-session
+stage**; they do not prove program non-execution or a particular kernel
+callback failure. The exact stopped runner/volume remain retained; unique
+mode and the predeclared clean three-pair campaign were **not** started.
+Do not rerun the same schedule without a new testable hypothesis separating
+program delivery from the earliest target/arm/argument checks. Default
+unaudited node-noise and the native timing gate remain incomplete.

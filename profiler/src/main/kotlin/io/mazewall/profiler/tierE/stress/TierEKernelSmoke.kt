@@ -437,6 +437,17 @@ internal object TierEKernelSmoke {
                 check(auditExpectedOpenatFds.all { it in 0 until TierEbpfEngine.BENCHMARK_AUDIT_MAX_DESCRIPTORS }) {
                     "declared pre-gate audit descriptor exceeds bounded BPF array capacity"
                 }
+                check(auditExpectedOpenatFds == expectedOpenatFds) { "version-five pre-gate diagnostic requires every declared ID" }
+            }
+            val declaredIdReceipt = if (pairedPreGateAudit) {
+                val destination = System
+                    .getProperty("mazewall.tier-e.declared-id-evidence-file")
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(Path::of)
+                    ?: error("version-five diagnostic requires the original declared-ID artifact path")
+                TierEDeclaredIdManifestArtifact.publish(oracleManifest, destination, expectedOpenatFds)
+            } else {
+                null
             }
             if (coverageDiscovery) pinTargetToCpu(args[6].toInt(), ProcessHandle.current().pid())
             val attachStarted = System.nanoTime()
@@ -584,12 +595,21 @@ internal object TierEKernelSmoke {
             )
             val preGateCounts = if (pairedPreGateAudit) engine.readPreGateAuditCounts(auditExpectedOpenatFds) else emptyMap()
             val preGateFailures = if (pairedPreGateAudit) engine.readPreGateAuditFailures() else emptyMap()
+            val sysEnterProgramEvidence = engine.sysEnterProgramEvidence()
+            val rawAuditProgramIdentity = engine.rawAuditProgramIdentity()
             val preGateReceipt = if (pairedPreGateAudit) {
+                check(
+                    sysEnterProgramEvidence.attached &&
+                    sysEnterProgramEvidence.backend == effectiveSysEnterAttachmentBackend.name.lowercase() &&
+                    rawAuditProgramIdentity?.backend == effectiveSysEnterAttachmentBackend,
+                ) {
+                    "version-five sidecar requires the exact installed raw and main programs"
+                }
                 val path = System
                     .getProperty("mazewall.tier-e.pre-gate-evidence-file")
                     ?.takeIf(String::isNotBlank)
                     ?.let(Path::of)
-                    ?: error("version-four pre-gate audit requires an owned output artifact path")
+                    ?: error("version-five pre-gate audit requires an owned output artifact path")
                 TierEPreGateEvidenceArtifact.write(
                     path = path,
                     targetPid = process.pid().toInt(),
@@ -597,6 +617,9 @@ internal object TierEKernelSmoke {
                     counts = preGateCounts,
                     rawTarget = rawSysEnterAuditCounts.mapValues { (_, count) -> count.openat },
                     mainSubmitted = exactAdmissionAuditCounts.mapValues { (_, count) -> count.submitted },
+                    oracleSha256 = requireNotNull(declaredIdReceipt).sha256,
+                    mainProgramSha256 = sysEnterProgramEvidence.digest,
+                    rawProgramSha256 = requireNotNull(rawAuditProgramIdentity).sha256,
                 )
             } else {
                 null
@@ -970,7 +993,6 @@ internal object TierEKernelSmoke {
                         oracle.unclassified == 0L
                     )
             val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete && preGateComplete
-            val sysEnterProgramEvidence = engine.sysEnterProgramEvidence()
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "sys_enter_backend_configured=${configuredSysEnterAttachmentBackend.name.lowercase()} " +
@@ -979,6 +1001,11 @@ internal object TierEKernelSmoke {
                     "kernel_coverage_mode=${sysEnterProgramEvidence.kernelCoverageMode.name.lowercase()} " +
                     "sys_enter_attachment_shape=${configuredAttachmentShape.name.lowercase()} " +
                     "sys_enter_program_instruction_count=${sysEnterProgramEvidence.instructionCount} " +
+                    "sys_enter_program_attached=${sysEnterProgramEvidence.attached} " +
+                    "sys_enter_program_loaded_backend=${sysEnterProgramEvidence.backend} " +
+                    "sys_enter_program_sha256=${sysEnterProgramEvidence.digest} " +
+                    "sys_enter_audit_program_instruction_count=${rawAuditProgramIdentity?.instructionCount ?: 0} " +
+                    "sys_enter_audit_program_sha256=${rawAuditProgramIdentity?.sha256 ?: "not-attached"} " +
                     "sys_enter_main_program_execution=${sysEnterProgramExecutionEvidence.getValue("main")} " +
                     "sys_enter_audit_program_execution=${sysEnterProgramExecutionEvidence.getValue("audit")} " +
                     "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
@@ -1011,8 +1038,18 @@ internal object TierEKernelSmoke {
                     16,
                 ).joinToString(",") { (fd, count) -> "$fd:${count.openat}/${count.openat2}" }.ifEmpty { "none" }} " +
                 "exact_admission_audit=${if (benchmarkExactAdmissionAudit) "enabled" else "disabled"} " +
-                "${TierEAdmissionAuditSummary.render(benchmarkExactAdmissionAudit, exactAdmissionAuditCounts, earlyTargetOpenat, preGateCounts.takeIf { pairedPreGateAudit })} " +
+                "${TierEAdmissionAuditSummary.render(
+                    benchmarkExactAdmissionAudit,
+                    exactAdmissionAuditCounts,
+                    earlyTargetOpenat,
+                    preGateCounts.takeIf { pairedPreGateAudit },
+                    versionFive =
+                    declaredIdReceipt != null,
+                )} " +
                 "paired_early_target_audit_verdict=${if (pairedAuditComplete) "PASS" else "INCOMPLETE"} " +
+                "declared_ids_evidence_file=${declaredIdReceipt?.path ?: "none"} " +
+                "declared_ids_evidence_sha256=${declaredIdReceipt?.sha256 ?: "none"} " +
+                "declared_ids_evidence_rows=${declaredIdReceipt?.rows ?: 0} " +
                 "pre_gate_audit_boundary=$preGateBoundary " +
                 "pre_gate_audit_failure_counts=${preGateFailures.toSortedMap().entries.joinToString(",") { (key, count) -> "$key:$count" }.ifEmpty { "none" }} " +
                 "pre_gate_audit_evidence_rows=${preGateReceipt?.rows ?: 0} " +

@@ -18,6 +18,7 @@ internal object TierETrustworthyPreGateExport {
     fun verify(
         output: Path,
         fork: JsonObject,
+        expectedOperations: Int? = null,
     ) {
         val variant = fork["variant"]?.jsonPrimitive?.content.orEmpty()
         val index = fork["fork"]?.jsonPrimitive?.intOrNull
@@ -28,8 +29,9 @@ internal object TierETrustworthyPreGateExport {
         val name = "pre-gate-$variant-fork-$index.tsv"
         val log = output.resolve("child-logs/$variant-fork-$index.log")
         check(Files.isRegularFile(log, NOFOLLOW_LINKS)) { "missing version-four fork log: $name" }
-        val line = Files.readAllLines(log).singleOrNull { "exact_admission_audit_contract_version=4" in it }
-            ?: error("missing version-four diagnostic receipt for $name")
+        val line = Files.readAllLines(log).singleOrNull {
+            "exact_admission_audit_contract_version=4" in it || "exact_admission_audit_contract_version=5" in it
+        } ?: error("missing versioned pre-gate diagnostic receipt for $name")
 
         fun field(key: String): String =
             Regex("(?:^|\\s)${Regex.escape(key)}=([^\\s]+)")
@@ -47,6 +49,10 @@ internal object TierETrustworthyPreGateExport {
         val rows = field("pre_gate_audit_evidence_rows").toIntOrNull()
         check(rows != null && rows in 1..MAX_DESCRIPTORS) { "invalid version-four sidecar row count" }
         check(sha256(file) == field("pre_gate_audit_evidence_sha256")) { "version-four sidecar hash mismatch" }
+        if (field("exact_admission_audit_contract_version") == "5") {
+            TierETrustworthyV5EvidenceVerifier.verify(output, fork, line, file, rows, workloadPid, expectedOperations)
+            return
+        }
         Files.newBufferedReader(file).use { reader ->
             val header = reader.readLine().orEmpty().split('\t')
             check(
@@ -72,7 +78,7 @@ internal object TierETrustworthyPreGateExport {
         }
     }
 
-    private fun sha256(file: Path): String {
+    internal fun sha256(file: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")
         Files.newInputStream(file).use { input ->
             val buffer = ByteArray(8192)

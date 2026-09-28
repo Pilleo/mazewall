@@ -75,12 +75,16 @@ internal object TierEAdmissionAuditSummary {
         counts: Map<Int, TierEbpfEngine.ExactAdmissionAuditCount>,
         early: TierEbpfEngine.EarlyTargetOpenatCounts? = null,
         preGate: Map<Int, TierEPreGateAuditCount>? = null,
+        versionFive: Boolean = false,
     ): String {
         require(enabled || early == null) { "early target comparison requires the exact admission audit" }
         require(preGate == null || early != null) { "pre-gate descriptor report requires an armed early target comparison" }
+        require(!versionFive || preGate != null) { "version-five diagnostic requires declared per-ID evidence" }
         val missing = counts.filterValues { it.low32HandlerEntered != 1L }
         val zeroFirst = missing.entries.sortedWith(compareBy({ it.value.low32HandlerEntered != 0L }, { it.key }))
-        val version = if (preGate != null) {
+        val version = if (versionFive) {
+            CONTRACT_VERSION + 3
+        } else if (preGate != null) {
             CONTRACT_VERSION + 2
         } else if (early != null) {
             CONTRACT_VERSION + 1

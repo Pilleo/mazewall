@@ -150,4 +150,16 @@ class TierEAdmissionAuditSummaryTest {
         assertTrue("7746:RAW_PRE_STAGE_ABSENT" in summary)
         assertTrue("MAIN_HASH_GATE" !in summary)
     }
+
+    @Test
+    fun `oracle and installed program bound receipt has a distinct fifth contract version`() {
+        val report = TierEAdmissionAuditSummary.render(
+            enabled = true,
+            counts = emptyMap(),
+            early = TierEbpfEngine.EarlyTargetOpenatCounts(main = 10002, raw = 10002),
+            preGate = mapOf(7746 to TierEPreGateAuditCount(1, 1, 1, 1, 1)),
+            versionFive = true,
+        )
+        assertTrue("exact_admission_audit_contract_version=5" in report)
+    }
 }
