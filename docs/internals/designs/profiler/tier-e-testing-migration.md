@@ -521,6 +521,12 @@ These are still substantive controllers, not thin launchers:
        capture-thread CPU/elapsed clocks and recorded host telemetry.
        Its output is diagnostic only; the historical phase limit and
        stopped rootful aggregate remain intact.
+       The [first diagnostic acquisition](../../evidence/tier-e-native-timing-diagnostic-first-stop-20260928/README.md)
+       stopped after one successful A/full JVM: the initial parser
+       counted binding-detail lines as additional capture summaries.
+       Later source tests correct the parser and persist pre/post
+       telemetry before parsing; the stopped 36-sample series is still
+       `INCOMPLETE`, with no paired timing conclusion or automatic retry.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

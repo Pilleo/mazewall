@@ -7,6 +7,10 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/raw-diagnostic.tar.gz"
   - "docs/internals/designs/profiler/tier-e-native-timing-diagnostic-20260928.md"
   - "profiler-native/include/capture_timing_diagnostic.hpp"
   - "profiler-native/tests/capture_timing_diagnostic_test.cpp"
@@ -1030,3 +1034,16 @@ same pinned image; original-agent A and diagnostic build B/C have distinct
 hash-bound provenance. This does not alter the historical first-phase
 failure, original 125% bound, or `policy_eligibility=false`. No diagnostic
 sample is admissible as rootful aggregate or native phase reuse evidence.
+
+**First diagnostic acquisition stopped at the parser:** The
+[sealed `005086b9` first-fork stop](../evidence/tier-e-native-timing-diagnostic-first-stop-20260928/README.md)
+contains the checksummed 36-sample preflight plan, original binary copy,
+successful A/full JVM log and the `INCOMPLETE` ownership receipt. The
+parser treated 12 agent binding-detail lines as duplicate capture
+summaries and rejected sample 01. Samples 02–36 were not executed; the
+diagnostic runner/volume remain separately retained. A red/green parser
+test selects `native-binds=` summary rows in later source, and the
+later runner preserves per-fork telemetry before parsing. This repair
+does not complete the earlier source's diagnostic, explain the timing
+failure, or authorize an automatic repeat. Any new campaign requires a
+new exact source identity and separately fixed plan.

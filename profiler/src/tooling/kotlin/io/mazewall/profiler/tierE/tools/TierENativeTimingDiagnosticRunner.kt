@@ -163,7 +163,9 @@ public object TierENativeTimingDiagnosticRunner {
                 val binary = if (sample.arm == 'A') "original-agent.so" else "libmazewall_stack_agent.so"
                 val option = if (sample.arm == 'C') ",capture-timing-diagnostic" else ""
                 val before = snapshot()
-                val log = artifacts.resolve("sample-${sample.index.toString().padStart(2, '0')}.log")
+                val sampleName = "sample-${sample.index.toString().padStart(2, '0')}"
+                Files.writeString(artifacts.resolve("$sampleName-before.json"), "$before\n")
+                val log = artifacts.resolve("$sampleName.log")
                 val result = runContainerCommand(
                     endpoint.command(
                         "exec",
@@ -180,9 +182,10 @@ public object TierENativeTimingDiagnosticRunner {
                     Duration.ofMinutes(3),
                     outputFile = log,
                 )
+                val after = snapshot()
+                Files.writeString(artifacts.resolve("$sampleName-after.json"), "$after\n")
                 check(result.exitCode == 0) { "Diagnostic JVM sample ${sample.index} failed: ${result.exitCode}: ${result.output}" }
                 val observed = TierENativeTimingDiagnostic.parse(sample.arm, sample.mode, Files.readString(log))
-                val after = snapshot()
                 rows += buildJsonObject {
                     put("index", sample.index)
                     put("block", sample.block)

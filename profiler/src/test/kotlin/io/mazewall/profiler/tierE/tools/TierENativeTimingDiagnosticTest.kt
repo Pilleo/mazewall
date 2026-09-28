@@ -78,6 +78,7 @@ class TierENativeTimingDiagnosticTest {
         """
         agent-workload: workloadNs=70000000
         mazewall-stack-agent: native-binds=248 proxied-binds=4 stack-captures=514 stack-failures=0
+        mazewall-stack-agent: capture-profile-binding=unix-open0 admitted=202 excluded=0
         tier-e-benchmark: get_stack_trace_ns=3157189 raw_key_ns=123 canonical_cache_lookup_ns=456 logical_metadata_ns=789 emission_mode=unique-stack-syscall cache_hits=504 cache_misses=10
         $diagnostic
     """.trimIndent()

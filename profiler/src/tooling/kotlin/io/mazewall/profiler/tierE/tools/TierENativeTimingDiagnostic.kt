@@ -51,7 +51,8 @@ public object TierENativeTimingDiagnostic {
             .singleOrNull() ?: throw IllegalArgumentException("Missing or duplicate timing field: $key")
 
         val workload = field(row("agent-workload"), "workloadNs")
-        val capture = row("mazewall-stack-agent")
+        val capture = log.lineSequence().filter { "mazewall-stack-agent: native-binds=" in it }.singleOrNull()
+            ?: throw IllegalArgumentException("Missing or duplicate native capture summary")
         val count = field(capture, "stack-captures")
         require(
             workload > 0 &&
