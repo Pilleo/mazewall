@@ -434,6 +434,19 @@ These are still substantive controllers, not thin launchers:
        report, while historical V5 settlement remains unchanged.
        This is a new source contract; the failed `7d0c8453` terminal
        remains untouched and a fresh fixed-budget plan is required.
+       The fresh `afc1ed22` [four-arm CPU-matched comparison](../../evidence/tier-e-sustained-four-arm-cpu-matched-20260928/README.md)
+       completed in the fixed order on one clean source/image/agent/CPU
+       contract: full-stream audits disabled/enabled, then unique-edge
+       audits disabled/enabled. Each of the four target-authored manifests
+       contained 10,000 unique IDs, all declared operations matched,
+       all child and host source-volume terminals completed, and all
+       target JVMs had effective pre-gate CPU-0 affinity. Both witnessed
+       modes additionally completed all native/raw/main per-ID stages
+       with zero missing storage and only three conserved target
+       zero-token surplus events per program. The earlier failure remains
+       `INCOMPLETE`; this result is **not reproduced within four forks**,
+       not a cause or default-lane qualification. A separate operator
+       decision is required before the original five-pair unaudited gate.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

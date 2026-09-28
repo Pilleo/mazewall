@@ -7,6 +7,13 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/README.md"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/arm-1.tar.gz"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/arm-2.tar.gz"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/arm-3.tar.gz"
+  - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/arm-4.tar.gz"
   - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/SHA256SUMS"
@@ -863,3 +870,24 @@ rejecting a missing or duplicate final receipt. Focused V5 archive
 verification remains unchanged. This source change does not modify or
 reclassify the original `7d0c8453` `INCOMPLETE` terminal; it permits
 only a new committed-source, separately identified comparison series.
+
+**Four-arm decision at `afc1ed22`: `NOT_REPRODUCED_WITHIN_FIXED_BUDGET`.**
+The [sealed CPU-matched comparison](../evidence/tier-e-sustained-four-arm-cpu-matched-20260928/README.md)
+retains all four new-source, image/agent/CPU-matched rootful forks in the
+declared order: full/unaudited, full/witness, unique/unaudited,
+unique/witness. All had 10,000/10,000 distinct target-authored FD IDs,
+zero missing/wrong/duplicate/unclassified declared operations, CPU-0
+thread affinity and verified complete source-volume export. The two
+unaudited forks reported `declared=PASS, diagnostic=DISABLED` and both
+witnessed forks reported `declared=PASS, diagnostic=PASS`; every fork
+retained `qualification=UNVERIFIED` and `policy_eligibility=false`.
+Both unique-edge forks retained one acknowledged representative and
+9,999 explicit suppressions. The witnessed forks independently reconciled
+native IDs, raw/main tokens and FD stages, and each conserved three
+additional zero-token target entries without missing storage. This
+fixed budget did **not reproduce** the original gap; it neither proves
+that intermittent loss is repaired nor revives historical incomplete
+terminals. The recommended next control-plane decision is whether to
+authorize the **original five-pair unaudited AB/BA gate** on this source;
+native timing and Podman remain separately unverified, and default
+promotion remains rejected.
