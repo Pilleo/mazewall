@@ -480,6 +480,23 @@ These are still substantive controllers, not thin launchers:
        rejected with `policy_eligibility=false`; generic rootful merge
        suite, operator support decision and deferred Podman parity remain
        separate from these completed correctness and timing gates.
+       The original rootful aggregate task accepts only a version-one
+       `rootful-gate.json` profile and rebuilds a selected Docker tag if
+       its `io.mazewall.containerfile.sha256` label differs. The pinned
+       perf image used in generic correctness/timing evidence has no
+       such label, so running that legacy gate would change the image
+       ID and invalidate phase reuse. The opt-in version-two profile
+       `config/testing/tier-e/rootful-gate-pinned.json` instead pins
+       **both** tag and exact image ID. Before any source volume is
+       allocated, the gate checks the tag resolves to that ID; it
+       launches all image-dependent containers by digest, never
+       implicitly rebuilds, rechecks tag identity after live suites
+       and requires an owned pinned-image host-export receipt. The
+       version-one label/rebuild behavior is unchanged. Since gate
+       tooling itself is part of the source fingerprint, this new
+       revision cannot inherit the generic `fbbaad44` five-pair or
+       phase timing acceptance: acquire fresh source-clean prerequisites
+       under the new source before making an aggregate decision.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

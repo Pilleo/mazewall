@@ -2,7 +2,9 @@ package io.mazewall.profiler.tierE.tools
 
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -72,6 +74,31 @@ public object TierERootfulGateRunner {
         runPrepared(root, output, endpoint, image, cpuSet, phaseRoot, nativePackage)
     }
 
+    public fun runPinned(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        cpuSet: String?,
+        phaseRoot: Path?,
+        expectedImageId: String,
+    ) {
+        runPrepared(root, output, endpoint, image, cpuSet, phaseRoot, null, expectedImageId)
+    }
+
+    public fun runWithPinnedNativePackage(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        image: String,
+        cpuSet: String?,
+        phaseRoot: Path?,
+        nativePackage: Path,
+        expectedImageId: String,
+    ) {
+        runPrepared(root, output, endpoint, image, cpuSet, phaseRoot, nativePackage, expectedImageId)
+    }
+
     private fun runPrepared(
         root: Path,
         output: Path,
@@ -80,6 +107,7 @@ public object TierERootfulGateRunner {
         cpuSet: String?,
         phaseRoot: Path?,
         nativePackage: Path?,
+        expectedImageId: String? = null,
     ) {
         require(endpoint.resolvedUri?.startsWith("unix://") == true) { "Tier E rootful gate requires a local engine" }
         require(cpuSet == null || cpuSet.matches(Regex("[0-9]+,[0-9]+")) && cpuSet.split(',').distinct().size == 2) {
@@ -91,7 +119,13 @@ public object TierERootfulGateRunner {
         val repository = root.toRealPath()
         val artifacts = output.toRealPath()
         val id = "tier-e-rootful-gate-${UUID.randomUUID()}"
-        val owner = TierETrustworthyContainerOwner(endpoint, id, artifacts, verifyExport = { TierERootfulGateResultVerifier.verify(it) })
+        val owner = TierETrustworthyContainerOwner(endpoint, id, artifacts, verifyExport = {
+            if (expectedImageId == null) {
+                TierERootfulGateResultVerifier.verify(it)
+            } else {
+                TierERootfulGateResultVerifier.verifyPinned(it, expectedImageId)
+            }
+        })
 
         fun docker(
             vararg args: String,
@@ -116,7 +150,15 @@ public object TierERootfulGateRunner {
                 "{{index .Config.Labels \"io.mazewall.containerfile.sha256\"}}",
             ),
         )
-        if (label.exitCode != 0 || label.output.trim() != containerSha) {
+        val currentImage = runContainerCommand(endpoint.command("image", "inspect", image, "--format", "{{.Id}}"))
+        val selection = TierERootfulImageAdmission.select(
+            image,
+            currentImage.output.trim().takeIf { currentImage.exitCode == 0 },
+            label.output.trim().takeIf { label.exitCode == 0 },
+            containerSha,
+            expectedImageId,
+        )
+        if (selection.rebuild) {
             docker(
                 "build",
                 "--label",
@@ -133,13 +175,31 @@ public object TierERootfulGateRunner {
         val sourceState = TierESourceFingerprint.read(repository, null)
         val sourceBefore = sourceState.getValue("source_digest").jsonPrimitive.content
         val sourceRevision = sourceState.getValue("revision").jsonPrimitive.content
-        val imageId = docker("image", "inspect", image, "--format", "{{.Id}}")
+        val imageReference = selection.imageReference
+        val imageId = docker("image", "inspect", imageReference, "--format", "{{.Id}}")
         require(imageId.startsWith("sha256:")) { "Rootful gate image identity unavailable" }
-        val compiler = docker("run", "--rm", "--entrypoint", "c++", image, "--version").lineSequence().first()
-        val javaVersion = docker("run", "--rm", "--entrypoint", "java", image, "-version")
+        check(expectedImageId == null || imageId == expectedImageId) { "Pinned rootful image bytes changed before source staging" }
+        if (expectedImageId != null) {
+            Files.writeString(
+                artifacts.resolve("image-admission.json"),
+                buildJsonObject {
+                    put("schema_version", 1)
+                    put("mode", "PINNED_IMAGE_ID")
+                    put("image_id", imageId)
+                    put("expected_image_id", expectedImageId)
+                    put("image_reference", imageReference)
+                    put("containerfile_sha256", containerSha)
+                    put("source_digest", sourceBefore)
+                    put("policy_eligibility", false)
+                }.toString() +
+                    "\n",
+            )
+        }
+        val compiler = docker("run", "--rm", "--entrypoint", "c++", imageReference, "--version").lineSequence().first()
+        val javaVersion = docker("run", "--rm", "--entrypoint", "java", imageReference, "-version")
         val verifiedPackage = nativePackage?.let { packageRoot ->
-            val cmake = docker("run", "--rm", "--entrypoint", "cmake", image, "--version").lineSequence().first()
-            val architecture = docker("image", "inspect", image, "--format", "{{.Architecture}}")
+            val cmake = docker("run", "--rm", "--entrypoint", "cmake", imageReference, "--version").lineSequence().first()
+            val architecture = docker("image", "inspect", imageReference, "--format", "{{.Architecture}}")
             TierENativeArtifactPackage.verify(
                 packageRoot,
                 repository.resolve("profiler-native"),
@@ -184,7 +244,7 @@ public object TierERootfulGateRunner {
                             "${owner.volume}:/workspace",
                             "--entrypoint",
                             "tar",
-                            image,
+                            imageReference,
                             "-C",
                             "/workspace",
                             "-xf",
@@ -238,7 +298,7 @@ public object TierERootfulGateRunner {
                     "MAZEWALL_IN_CONTAINER=true",
                     "-w",
                     "/workspace",
-                    image,
+                    imageReference,
                     "sleep",
                     "7200",
                 )
@@ -339,6 +399,11 @@ public object TierERootfulGateRunner {
                     log = artifacts.resolve("profiler-tests.log"),
                 )
                 docker("exec", owner.runner, "cp", "-a", "profiler/build/test-results/integrationTestFreshJvm", "/artifacts/")
+                if (expectedImageId != null) {
+                    check(docker("image", "inspect", image, "--format", "{{.Id}}") == expectedImageId) {
+                        "Pinned rootful image tag changed during aggregate gate"
+                    }
+                }
             } catch (error: Throwable) {
                 primary = error
                 Files.writeString(artifacts.resolve("benchmark-gate-status.txt"), "FAILED\n")

@@ -7,6 +7,14 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "config/testing/tier-e/rootful-gate-pinned.json"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPinnedImageProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulImageAdmission.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEToolsMain.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPinnedImageAdmissionTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifierTest.kt"
   - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/README.md"
   - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/SHA256SUMS"
@@ -947,3 +955,22 @@ source/image/CPU contract** as a candidate supported environment.
 rootful aggregate test suite, deferred Podman parity and operator
 promotion decision are separate. This issue remains open for the
 unsupported XanMod observation gap; no restart of its failed series.
+
+**Pinned-image rootful aggregate contract (source change pending fresh
+qualification):** The previously measured generic candidate image
+`sha256:fc5bf5e1...` has no `io.mazewall.containerfile.sha256` label.
+The legacy version-one aggregate profile would therefore automatically
+rebuild its mutable image tag *before* matching source-bound native phase
+evidence; the correctly labelled `:latest` tag is a different image ID.
+An explicitly selected version-two profile now requires both image tag
+and exact `sha256:` image ID. The rootful runner fails on a mismatched
+tag, launches every container by the immutable ID, does not rebuild an
+explicitly pinned image, checks the tag again before success and retains
+an independent pinned-image admission receipt checked at host export.
+The original version-one label/rebuild path remains unchanged. A new
+source revision changes the source fingerprint: the passing `fbbaad44`
+five-pair and native phase receipts remain historical and cannot be
+reused as acceptance for the new source. This gate must first obtain a
+separately predeclared source-clean correctness and timing series on
+the identical image/kernel/CPU profile before aggregate evidence can
+claim `COMPLETE`; no prior `INCOMPLETE` terminal is upgraded.

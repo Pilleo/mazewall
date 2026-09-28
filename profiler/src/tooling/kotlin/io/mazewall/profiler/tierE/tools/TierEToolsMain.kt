@@ -285,7 +285,18 @@ public fun main(args: Array<String>) {
     }
     if (args.size in 4..6 && args[0] == "rootful-gate-profile") {
         TierEExperimentProfile.requireNoLegacyExperimentEnvironment()
-        val profile = TierERootfulGateProfile.load(Path.of(args[3]))
+        val profileFile = Path.of(args[3])
+        val pinned = if (Json
+            .parseToJsonElement(Files.readString(profileFile))
+            .jsonObject["schema_version"]
+            ?.jsonPrimitive
+            ?.content == "2"
+        ) {
+            TierERootfulPinnedImageProfile.load(profileFile)
+        } else {
+            null
+        }
+        val profile = pinned?.profile ?: TierERootfulGateProfile.load(profileFile)
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
             EndpointConfig(ContainerEngine.DOCKER, TierEProfileEndpoint.select()),
@@ -296,7 +307,8 @@ public fun main(args: Array<String>) {
         }
         val phase = args.getOrNull(4)?.takeUnless { it == "--no-phase" }?.let(Path::of)
         if (args.size == 6) {
-            TierERootfulGateRunner.runWithNativePackage(
+            if (pinned == null) {
+                TierERootfulGateRunner.runWithNativePackage(
                 Path.of(args[1]),
                 Path.of(args[2]),
                 endpoint,
@@ -305,8 +317,24 @@ public fun main(args: Array<String>) {
                 phase,
                 Path.of(args[5]),
             )
+            } else {
+                TierERootfulGateRunner.runWithPinnedNativePackage(
+                Path.of(args[1]),
+                    Path.of(args[2]),
+                    endpoint,
+                    profile.image,
+                    profile.cpuSet,
+                    phase,
+                    Path.of(args[5]),
+                    pinned.imageId,
+            )
+            }
         } else {
-            TierERootfulGateRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet, phase)
+            if (pinned == null) {
+                TierERootfulGateRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet, phase)
+            } else {
+                TierERootfulGateRunner.runPinned(Path.of(args[1]), Path.of(args[2]), endpoint, profile.image, profile.cpuSet, phase, pinned.imageId)
+            }
         }
         return
     }
