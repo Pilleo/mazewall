@@ -447,6 +447,22 @@ These are still substantive controllers, not thin launchers:
        `INCOMPLETE`; this result is **not reproduced within four forks**,
        not a cause or default-lane qualification. A separate operator
        decision is required before the original five-pair unaudited gate.
+       The source-clean `fbbaad44` [original five-pair AB/BA attempt](../../evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/README.md)
+       then **stopped `INCOMPLETE` in pair 2's noisy-first unique fork**.
+       Pair 1 control/noisy each completed both full and unique at
+       10,000/10,000; pair 2 noisy full-stream also completed. The failing
+       unique fork accounted for 9,999/10,000 and named FD 6871. Exact
+       kernel admission and ring-ready were 29,998/30,000, ring loss zero.
+       Workload/collector CPU placement was 0/2 on distinct physical cores;
+       source/image/native identity matched every reached target, and
+       startup workload affinity was verified. The independent host-noise
+       marker belongs to the first full-stream fork and proves no overlap
+       for the later unique loss. No second pair was published, and later
+       arms were not run. The prior four-arm "not reproduced" result
+       does not override this failed default-lane decision. Preserve the
+       stopped runner and volume, reject promotion, and require an explicit
+       supported-kernel/backend decision before a different acceptance
+       attempt; historical native timing remains its own gate.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

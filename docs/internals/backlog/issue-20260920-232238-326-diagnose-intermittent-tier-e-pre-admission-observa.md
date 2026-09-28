@@ -7,6 +7,10 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/raw-gate.tar.gz"
   - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/README.md"
   - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-sustained-four-arm-cpu-matched-20260928/SHA256SUMS"
@@ -891,3 +895,27 @@ terminals. The recommended next control-plane decision is whether to
 authorize the **original five-pair unaudited AB/BA gate** on this source;
 native timing and Podman remain separately unverified, and default
 promotion remains rejected.
+
+**Original five-pair audit-disabled AB/BA gate stopped `INCOMPLETE` at
+pair 2:** The [sealed `fbbaad44` qualification attempt](../evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/README.md)
+preserved the exact five-pair alternating order and unchanged full+unique
+10,000-operation/1,000/s workload with both audits disabled. Only CPU
+placement differed from the old default profile: target 0/core 0,
+collector 2/core 1, host noise CPU 3. Pair 1 control and noisy arms each
+matched 10,000/10,000 in both modes. Pair 2's noisy-first arm matched
+all full-stream operations; the later unique-edge fork missed **FD 6871**
+and reconciled **9,999/10,000** declared IDs. Exact admissions and
+ring-ready records were 29,998/30,000 with zero ring loss. All reached
+targets used the same committed source, fingerprint, image, agent and
+CPU set, and each reached target's pre-gate JVM thread affinity was CPU 0. Pair 2
+control and pairs 3–5 were not run. The attached-noise sample was bound
+to the *first full-stream* fork, not the later failed unique fork: no
+unique-mode overlap or noise causality follows. The exact stopped
+runner and owned artifact volume remain retained. The prior four-arm
+positive comparison remains useful diagnostic characterization but did
+not predict this intermittent first-failure decision. Default Tier E
+qualification is **not passed**, `policy_eligibility=false`, and
+`REJECT_DEFAULT_PROMOTION` remains in force. Stop repeating qualification
+under the same contract; a separate supported-kernel/backend decision
+is now needed before another promotion attempt. Native timing is a
+separate gate, not a substitute for this failed operation oracle.
