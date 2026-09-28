@@ -381,7 +381,16 @@ These are still substantive controllers, not thin launchers:
      remains red. A new, independently tested conservation rule may
      distinguish residual ambient calls only when the complete declared
      set has one native and raw/main token and both FD stages each; any
-     incomplete declared token must still fail closed.
+      incomplete declared token must still fail closed.
+      The subsequent opt-in source implements that conservation test both
+      at the target and at independent host settlement. It requires an
+      exact native-to-raw/main join for *every* declared ID, exact original
+      FD stages, no unknown token-map keys or other witness failures, and
+      per-program early-target surplus equal to its armed zero-token
+      counter. A missing ID makes the residual unclassifiable and remains
+      incomplete. The original pilot's `false` terminal cannot be replayed
+      as success with the later verifier; the updated diagnostic requires
+      a fresh committed source and a separately predeclared kernel pilot.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

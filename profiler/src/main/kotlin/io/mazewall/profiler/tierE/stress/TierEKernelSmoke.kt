@@ -737,13 +737,20 @@ internal object TierEKernelSmoke {
                 "disabled"
             }
             val preGateComplete = !pairedPreGateAudit || (preGateBoundary == "PASS" && preGateFailures.values.all { it == 0L })
-            val invocationWitnessComplete = !invocationWitness ||
-                (
-                    invocationFailures.values.all { it == 0L } &&
-                    invocationNativeIds.values.all { id ->
-                    invocationTokenCounts[id]?.raw == 1L && invocationTokenCounts[id]?.main == 1L
-                }
+            val invocationConservation = if (invocationWitness) {
+                TierEInvocationWitnessConservation.evaluate(
+                    invocationNativeIds,
+                    invocationTokenCounts,
+                    preGateCounts,
+                    rawSysEnterAuditCounts.mapValues { (_, count) -> count.openat },
+                    exactAdmissionAuditCounts.mapValues { (_, count) -> count.submitted },
+                    requireNotNull(earlyTargetOpenat),
+                    invocationFailures,
                 )
+            } else {
+                null
+            }
+            val invocationWitnessComplete = invocationConservation?.complete ?: true
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -1088,6 +1095,11 @@ internal object TierEKernelSmoke {
                     "invocation_witness_evidence_sha256=${invocationWitnessReceipt?.sha256 ?: "none"} " +
                     "invocation_witness_native_sha256=${invocationFdPath?.let(TierEPreGateEvidenceArtifact::sha256) ?: "none"} " +
                     "invocation_witness_failure_counts=${invocationFailures.toSortedMap().entries.joinToString(",") { (key, count) -> "$key:$count" }.ifEmpty { "none" }} " +
+                    "invocation_witness_map_entries=${invocationTokenCounts.size} " +
+                    "invocation_witness_map_raw_total=${invocationTokenCounts.values.sumOf { it.raw }} " +
+                    "invocation_witness_map_main_total=${invocationTokenCounts.values.sumOf { it.main }} " +
+                    "invocation_witness_ambient_raw=${invocationConservation?.ambientRaw ?: "unavailable"} " +
+                    "invocation_witness_ambient_main=${invocationConservation?.ambientMain ?: "unavailable"} " +
                     "invocation_witness_complete=$invocationWitnessComplete " +
                     "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
                     "sys_enter_program_update_helper_calls=${sysEnterProgramEvidence.updateHelperCalls} " +

@@ -7,6 +7,8 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessConservation.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessConservationTest.kt"
   - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/SHA256SUMS"
@@ -766,3 +768,17 @@ conservation condition: every declared ID has both tokens and both FD
 stages exactly once, all other witness failures are zero, and only the
 early-target surplus equals the no-token counters. Any missing declared
 token leaves that surplus unattributable and remains `INCOMPLETE`.
+
+**New source contract, with the original failure unchanged:** A focused
+red/green host regression now admits armed zero-token surplus only when
+every target-authored declared FD has exactly one native ID, raw token,
+main token, before/after descriptor count, and final raw/exact count;
+the token map must contain *only* those IDs. Other marker/map errors
+must be zero, and raw/main early target counts must equal the declared
+cardinality plus their respective zero-token counters. All other cases
+fail closed without calling the surplus ambient. The independent host
+verifier validates the same numeric relationship before retiring an
+exported source volume and rejects the already-sealed pilot's
+`invocation_witness_complete=false` receipt. This is a new source
+revision and needs a separately predeclared clean short pilot; it does
+not rehabilitate the original `42211aa6` terminal.

@@ -22,7 +22,9 @@ class TierETrustworthyInvocationWitnessVerifierTest {
     private fun receipt(
         token: Long = 1,
         fd: Int = 13,
+        ambient: Int = 0,
     ): String {
+        val failures = "9:0,10:0,11:$ambient,12:$ambient,13:0,14:0"
         val native = directory.resolve("invocation-fd-$variant-fork-1.mzif")
         val bytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
         bytes
@@ -42,14 +44,18 @@ class TierETrustworthyInvocationWitnessVerifierTest {
             sidecar,
             "schema_version=1\ttarget_tgid=4321\trows=1\tdeclared_sha256=$oracle\t" +
                 "native_sha256=${sha(native)}\traw_program_sha256=$raw\t" +
-                "main_program_sha256=$main\tfailure_counts=9:0,10:0,11:0,12:0,13:0,14:0\n" +
+                "main_program_sha256=$main\tfailure_counts=$failures\n" +
                 "fd\tinvocation_id\traw_token\tmain_token\traw_before_session\tmain_before_session\tearliest_stage\n" +
                 "$fd\t85048942395434\t$token\t1\t1\t1\tFD_CHECKPOINT_PRESENT\n",
         )
         return "invocation_witness_contract_version=1 invocation_witness_evidence_file=/artifacts/${sidecar.fileName} " +
             "invocation_witness_evidence_rows=1 invocation_witness_evidence_sha256=${sha(sidecar)} " +
             "invocation_witness_native_sha256=${sha(native)} " +
-            "invocation_witness_failure_counts=9:0,10:0,11:0,12:0,13:0,14:0 invocation_witness_complete=true " +
+            "invocation_witness_failure_counts=$failures invocation_witness_complete=true " +
+            "invocation_witness_map_entries=1 invocation_witness_map_raw_total=1 invocation_witness_map_main_total=1 " +
+            "invocation_witness_ambient_raw=$ambient invocation_witness_ambient_main=$ambient " +
+            "raw_sys_enter_audit_pre_decode_target_openat=${ambient + 1} " +
+            "exact_admission_audit_pre_decode_target_openat=${ambient + 1} " +
             "raw_sys_enter_audit_cpu_counts=0:1 raw_sys_enter_audit_cpu_total=1 raw_sys_enter_audit_observed_operations=1"
     }
 
@@ -65,6 +71,54 @@ class TierETrustworthyInvocationWitnessVerifierTest {
         }
         assertThrows(IllegalStateException::class.java) {
             TierETrustworthyInvocationWitnessVerifier.verify(directory, variant, 1, original, setOf(13), 4321, "2", oracle, raw, main)
+        }
+    }
+
+    @Test
+    fun `only conserved zero-token surplus can coexist with all declared IDs complete`() {
+        val conserved = receipt(ambient = 3)
+        TierETrustworthyInvocationWitnessVerifier.verify(directory, variant, 1, conserved, setOf(13), 4321, "0", oracle, raw, main)
+        assertThrows(IllegalStateException::class.java) {
+            TierETrustworthyInvocationWitnessVerifier.verify(
+                directory,
+                variant,
+                1,
+                conserved.replace("invocation_witness_complete=true", "invocation_witness_complete=false"),
+                setOf(13),
+                4321,
+                "0",
+                oracle,
+                raw,
+                main,
+            )
+        }
+        assertThrows(IllegalStateException::class.java) {
+            TierETrustworthyInvocationWitnessVerifier.verify(
+                directory,
+                variant,
+                1,
+                conserved.replace("raw_sys_enter_audit_pre_decode_target_openat=4", "raw_sys_enter_audit_pre_decode_target_openat=3"),
+                setOf(13),
+                4321,
+                "0",
+                oracle,
+                raw,
+                main,
+            )
+        }
+        assertThrows(IllegalStateException::class.java) {
+            TierETrustworthyInvocationWitnessVerifier.verify(
+                directory,
+                variant,
+                1,
+                receipt(token = 0, ambient = 3),
+                setOf(13),
+                4321,
+                "0",
+                oracle,
+                raw,
+                main,
+            )
         }
     }
 }

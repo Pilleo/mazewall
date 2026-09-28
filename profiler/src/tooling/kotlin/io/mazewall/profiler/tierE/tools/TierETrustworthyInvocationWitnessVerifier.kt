@@ -82,7 +82,23 @@ public object TierETrustworthyInvocationWitnessVerifier {
         ) { "unbound or torn invocation witness sidecar" }
         val lines = Files.readAllLines(sidecar)
         val header = lines.firstOrNull()?.split('\t').orEmpty()
-        val failures = "failure_counts=9:0,10:0,11:0,12:0,13:0,14:0"
+        val failureCounts = field("invocation_witness_failure_counts")
+        val noToken = Regex("9:0,10:0,11:([0-9]+),12:([0-9]+),13:0,14:0").matchEntire(failureCounts)
+        val rawSurplus = noToken?.groupValues?.get(1)?.toLongOrNull()
+        val mainSurplus = noToken?.groupValues?.get(2)?.toLongOrNull()
+        val expected = declared.size.toLong()
+        check(
+            rawSurplus != null &&
+            mainSurplus != null &&
+            field("invocation_witness_map_entries").toLongOrNull() == expected &&
+            field("invocation_witness_map_raw_total").toLongOrNull() == expected &&
+            field("invocation_witness_map_main_total").toLongOrNull() == expected &&
+            field("invocation_witness_ambient_raw").toLongOrNull() == rawSurplus &&
+            field("invocation_witness_ambient_main").toLongOrNull() == mainSurplus &&
+            field("raw_sys_enter_audit_pre_decode_target_openat").toLongOrNull() == Math.addExact(expected, rawSurplus) &&
+            field("exact_admission_audit_pre_decode_target_openat").toLongOrNull() == Math.addExact(expected, mainSurplus),
+        ) { "zero-token surplus does not conserve all declared raw and main target observations" }
+        val failures = "failure_counts=$failureCounts"
         check(
             lines.size == declared.size + 2 &&
             "schema_version=1" in header &&
@@ -92,8 +108,7 @@ public object TierETrustworthyInvocationWitnessVerifier {
             "native_sha256=$nativeSha" in header &&
             "raw_program_sha256=$rawProgramSha256" in header &&
             "main_program_sha256=$mainProgramSha256" in header &&
-            failures in header &&
-            field("invocation_witness_failure_counts") == failures.removePrefix("failure_counts="),
+            failures in header,
         ) { "invocation witness does not bind the original manifest and both loaded programs" }
         check(lines[1] == "fd\tinvocation_id\traw_token\tmain_token\traw_before_session\tmain_before_session\tearliest_stage") {
             "invalid invocation witness stage columns"
