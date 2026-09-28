@@ -7,6 +7,12 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/README.md"
+  - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/manifest.json"
+  - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/readiness-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/series-raw.tar.gz"
+  - "profiler/src/test/resources/tier-e/native-timing-cpu-clock-crossing.txt"
   - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-native-timing-diagnostic-first-stop-20260928/SHA256SUMS"
@@ -1062,3 +1068,23 @@ export. The main Gradle diagnostic task requires an independently
 verified `READINESS_COMPLETE` receipt matching its exact committed
 source. This smoke is separate from the 36-fork budget and cannot
 upgrade the earlier `INCOMPLETE` receipt or policy eligibility.
+
+**Source-bound readiness complete; fixed diagnostic stopped at fork 34:**
+The [sealed `3775ab65` report](../evidence/tier-e-native-timing-readiness-and-series-stop-20260929/README.md)
+records six separately owned `READINESS_COMPLETE` A/B/C full/unique
+forks, checked plan and schedule hashes, original/new binary, JDK,
+compiler, cgroup, log and complete owner-export identities. All six
+readiness forks completed 514/514 captures and zero clock errors;
+the subsequent fixed 36-fork series executed 34 successful JVMs but
+accepted only 33 rows. C/full fork 34 reported positive raw
+capture elapsed **1,726,964 ns** and thread CPU **1,734,675 ns**,
+514/514 valid clocks and no cgroup throttling. The controller's
+`cpu <= elapsed` assertion rejected the two sequentially sampled
+clocks after a 7,711 ns aggregate crossing. Forks 35–36 were **not**
+run; the `INCOMPLETE` runner and volume remain retained separately.
+Five complete blocks have descriptive A/B/C timings but do not
+qualify the unfinished 36-fork diagnostic or explain the older
+source's timing failure. The *later-source* regression fixture is
+byte-identical to fork 34; it removes only the unsound clock ordering
+requirement and retains positive/completeness checks. No automatic
+retry, gate reclassification, threshold change or promotion follows.

@@ -52,6 +52,15 @@ The second command is admitted only after independently verifying the first
 command's source-bound receipt and completing all host build checks. Both
 lanes retain only diagnostic evidence; neither promotes policy eligibility.
 
+**2026-09-29 acquisition outcome:** The [source-bound readiness](../../evidence/tier-e-native-timing-readiness-and-series-stop-20260929/README.md)
+completed six of six modes. The following fixed diagnostic stopped after
+successful JVM fork 34 of 36 because its parser incorrectly imposed
+`cpu <= elapsed` on sequentially read capture-thread CPU and wall clocks.
+The 7,711 ns aggregate crossing is retained verbatim. The stopped source's
+`INCOMPLETE` terminal and separately owned runner/volume remain preserved;
+the later-source fix cannot retroactively complete that run. No further
+campaign or timing acceptance follows from the incomplete series.
+
 ## File and interface map
 
 - `profiler-native/include/capture_timing_diagnostic.hpp`: bounded, opt-in clock accounting (`CaptureTimingDiagnostic::begin()/finish()`, `snapshot()`), fail-closed clock and migration observations; no per-capture allocation.

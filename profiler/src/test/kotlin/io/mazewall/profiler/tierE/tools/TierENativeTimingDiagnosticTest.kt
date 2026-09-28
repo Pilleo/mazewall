@@ -26,6 +26,18 @@ class TierENativeTimingDiagnosticTest {
     }
 
     @Test
+    fun `independent capture clocks can cross while both readings are complete`() {
+        val log = requireNotNull(javaClass.getResourceAsStream("/tier-e/native-timing-cpu-clock-crossing.txt")).use { it.readBytes() }
+        val hash = MessageDigest.getInstance("SHA-256").digest(log).joinToString("") { "%02x".format(it) }
+        assertEquals("29819fc10b99b32bcc482041d8cc2121c81b33a4730a1524e0d0f6077f9421a9", hash)
+        val captured = TierENativeTimingDiagnostic.parse('C', "full", log.decodeToString())
+        assertEquals(1_726_964L, captured.captureElapsedNs)
+        assertEquals(1_734_675L, captured.captureCpuNs)
+        assertEquals(514L, captured.captures)
+        assertTrue(!captured.policyEligibility)
+    }
+
+    @Test
     fun `telemetry admission rejects unavailable cpu counters and expanded cpu affinity`() {
         val valid = "usage_usec 150\nnr_periods 1\nnr_throttled 0\nthrottled_usec 0"
         val prior = TierENativeTimingDiagnostic.requireTelemetry(valid, "max 100000", "0,2", "some avg10=0.00 avg60=0.00 avg300=0.00 total=1")

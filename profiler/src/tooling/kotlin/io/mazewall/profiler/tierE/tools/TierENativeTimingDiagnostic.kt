@@ -188,7 +188,10 @@ public object TierENativeTimingDiagnostic {
         }
         val elapsed = field(data, "elapsed_ns")
         val cpu = field(data, "cpu_ns")
-        require(elapsed > 0 && cpu > 0 && cpu <= elapsed) { "Invalid capture CPU/elapsed timing" }
+        // Wall and thread-CPU clocks are sampled in sequence, not at identical
+        // boundaries. Their summed deltas can cross slightly without a failed
+        // read; keep both raw values instead of inventing a clock error.
+        require(elapsed > 0 && cpu > 0) { "Unmeasured capture CPU/elapsed timing" }
         val clockPair = field(data, "clock_pair_ns")
         require(field(data, "clock_pair_valid") == 1L && clockPair > 0) { "Invalid clock-pair overhead diagnostic" }
         for (counter in listOf("migrations", "voluntary_switches", "involuntary_switches")) field(data, counter)

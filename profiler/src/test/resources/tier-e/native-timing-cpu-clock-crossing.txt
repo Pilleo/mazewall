@@ -1,0 +1,16 @@
+agent-workload: workloadNs=35555084
+mazewall-stack-agent: native-binds=248 proxied-binds=4 stack-captures=514 stack-failures=0 scope-failures=0 definitions=written capture-yield=disabled capture-yield-dropped=0
+mazewall-stack-agent: capture-profile-binding=unix-open0 admitted=202 excluded=0
+mazewall-stack-agent: capture-profile-binding=unix-openat0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=unix-close0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=unix-unlink0 admitted=1 excluded=0
+mazewall-stack-agent: capture-profile-binding=file-read0 admitted=211 excluded=0
+mazewall-stack-agent: capture-profile-binding=file-write0 admitted=100 excluded=0
+mazewall-stack-agent: capture-profile-binding=file-close-int-fd admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=socket-read0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=socket-write0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=net-socket0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=net-connect0 admitted=0 excluded=0
+mazewall-stack-agent: capture-profile-binding=net-accept admitted=0 excluded=0
+tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=2081191 raw_key_ns=10373 raw_hash_ns=99592 raw_equality_ns=81313 generation_validation_ns=18896 guard_validation_ns=144278 canonical_cache_lock_wait_ns=15645 logical_metadata_ns=400296 phase_contract_version=2 canonical_cache_lookup_ns=552094 emission_mode=full-stream marker_set_ns=11216 marker_clear_ns=35714 serialization_ns=528145 publication_bytes=35985 publication_latency_ns=699271 publication_cpu_ns=698304 lock_wait_ns=426 peak_retained_bytes=58136 native_retained_bytes=80091 native_retention_exhaustions=0 publication_count=1 coalesced_publications=0 failed_publications=0 cache_hits=504 cache_misses=10 metadata_cache_hits=112 metadata_cache_misses=68 marker_admission_clear_ns=12601 marker_exact_set_ns=11216 marker_exit_clear_ns=11755 marker_admission_clear_count=514 marker_exact_set_count=514 marker_exit_clear_count=514
+capture-timing-diagnostic: attempted=514 completed=514 invalid=0 elapsed_ns=1726964 cpu_ns=1734675 migrations=0 voluntary_switches=0 involuntary_switches=0 clock_pair_ns=966 clock_pair_valid=1

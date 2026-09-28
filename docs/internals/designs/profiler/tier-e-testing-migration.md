@@ -532,6 +532,15 @@ These are still substantive controllers, not thin launchers:
        parser, sample hash and complete host export contracts. Only a
        verified `READINESS_COMPLETE` receipt may admit another fixed
        36-fork diagnostic; neither lane qualifies the historical gate.
+       The [new-source readiness and stopped-series receipt](../../evidence/tier-e-native-timing-readiness-and-series-stop-20260929/README.md)
+       completed all six readiness modes, then halted the fixed
+       series after fork 34. An independently sampled capture-thread
+       CPU sum crossed elapsed by 7,711 ns despite 514 valid reads and
+       zero cgroup throttling. The non-qualifying controller had
+       incorrectly required `cpu <= elapsed`; later-source tests now
+       preserve both positive clocks without that invalid ordering.
+       Forks 35–36 were not run, and the stopped series remains
+       `INCOMPLETE` with no timing-acceptance or cause verdict.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
