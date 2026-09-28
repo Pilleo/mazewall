@@ -58,8 +58,24 @@ successful JVM fork 34 of 36 because its parser incorrectly imposed
 `cpu <= elapsed` on sequentially read capture-thread CPU and wall clocks.
 The 7,711 ns aggregate crossing is retained verbatim. The stopped source's
 `INCOMPLETE` terminal and separately owned runner/volume remain preserved;
-the later-source fix cannot retroactively complete that run. No further
-campaign or timing acceptance follows from the incomplete series.
+the later-source fix cannot retroactively complete that run. No timing
+acceptance follows from the incomplete series. A separately authorized
+new-source experiment is recorded below.
+
+**Separately authorized `1678f33d` experiment:** The independently
+predeclared, source-matched [six-fork readiness and 36-fork diagnostic](../../evidence/tier-e-native-timing-complete-20260929/README.md)
+both completed under the same pinned generic kernel/image/CPU and
+binary/toolchain identities. In the fixed sample, disabled new agent B
+was close to original A, while the instrumented C agent materially
+increased `GetStackTrace` wall-phase totals. C/unique fork 19 had one
+involuntary capture switch with a 361,067 ns elapsed-minus-CPU gap;
+fork 33 had a 4,011,679 ns wall-phase total but a much smaller
+30,151 ns clock gap and no recorded capture switch. This diagnostic
+confirms probe perturbation and bounds what these samples say about
+capture wait, without proving the cause of an earlier source's failed
+historical native timing gate. No release limit or policy eligibility
+changed; source-matched native phase acceptance and the rootful
+aggregate remain separate decisions.
 
 ## File and interface map
 

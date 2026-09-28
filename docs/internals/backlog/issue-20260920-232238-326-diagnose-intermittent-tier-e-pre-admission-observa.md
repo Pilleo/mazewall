@@ -7,6 +7,11 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-native-timing-complete-20260929/README.md"
+  - "docs/internals/evidence/tier-e-native-timing-complete-20260929/manifest.json"
+  - "docs/internals/evidence/tier-e-native-timing-complete-20260929/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-native-timing-complete-20260929/readiness-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-native-timing-complete-20260929/diagnostic-raw.tar.gz"
   - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/README.md"
   - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/manifest.json"
   - "docs/internals/evidence/tier-e-native-timing-readiness-and-series-stop-20260929/SHA256SUMS"
@@ -1088,3 +1093,23 @@ source's timing failure. The *later-source* regression fixture is
 byte-identical to fork 34; it removes only the unsound clock ordering
 requirement and retains positive/completeness checks. No automatic
 retry, gate reclassification, threshold change or promotion follows.
+
+**Separately approved `1678f33d` timing diagnosis `COMPLETE` (not native
+qualification):** The [sealed readiness and 36-fork receipt](../evidence/tier-e-native-timing-complete-20260929/README.md)
+records six source-matched A/B/C full/unique readiness forks before a
+separate, fixed 36-fork six-block comparison. All 42 JVMs completed
+514 captures with zero failures, no cgroup throttling, exact immutable
+image/agent/workload identities and checked byte-for-byte Docker export.
+Descriptive `GetStackTrace` medians over the six acquisition samples
+per arm/mode (ns) were full A/B/C
+**1,632,171.5 / 1,700,150 / 2,432,495.5** and unique A/B/C
+**1,659,733.5 / 1,679,464 / 2,688,377**. Extra clocks in C
+substantially perturb its phase timings. One C/unique fork showed a
+361,067 ns elapsed-minus-CPU gap and one involuntary switch; a
+different C/unique fork reached 4,011,679 ns wall-phase with a much
+smaller clock gap and no capture switches. These facts do not identify
+the earlier different-source timing-failure cause or justify changing
+the historical gate. The new source has **not** passed its separate
+three-run native phase gate or pinned-image rootful aggregate;
+`policy_eligibility=false`, `REJECT_DEFAULT_PROMOTION` and the
+old source's `INCOMPLETE` terminals stay unchanged.

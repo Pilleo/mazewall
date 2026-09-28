@@ -541,6 +541,16 @@ These are still substantive controllers, not thin launchers:
        preserve both positive clocks without that invalid ordering.
        Forks 35–36 were not run, and the stopped series remains
        `INCOMPLETE` with no timing-acceptance or cause verdict.
+       A later, separately approved `1678f33d` [readiness and complete
+       diagnostic](../../evidence/tier-e-native-timing-complete-20260929/README.md)
+       ran all six readiness and 36 fixed comparison forks with
+       byte-matched native/host exports, exact source/image/CPU
+       continuity and zero cgroup throttling. Original A and disabled
+       diagnostic B had similar bounded phase medians; enabled C
+       materially altered the phase wall clock. Individual capture
+       wait evidence is mixed, so this does not explain the earlier
+       timing stop or replace exact-source three-run phase acceptance,
+       the pinned rootful aggregate, or default promotion.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
