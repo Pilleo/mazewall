@@ -7,6 +7,11 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/correctness-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/native-phase-raw.tar.gz"
   - "config/testing/tier-e/rootful-gate-pinned.json"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPinnedImageProfile.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulImageAdmission.kt"
@@ -974,3 +979,22 @@ reused as acceptance for the new source. This gate must first obtain a
 separately predeclared source-clean correctness and timing series on
 the identical image/kernel/CPU profile before aggregate evidence can
 claim `COMPLETE`; no prior `INCOMPLETE` terminal is upgraded.
+
+**Exact-image source prerequisite result — first native timing phase
+`INCOMPLETE`:** The [sealed `8a0d6d32` acquisition](../evidence/tier-e-generic-pinned-image-phase-stop-20260928/README.md)
+on Ubuntu `7.0.0-34-generic` and the same pinned image/source-bound
+native bytes completed the original five-pair AB/BA correctness gate:
+**5/5 pairs, 20/20 exact 10,000-operation forks** with no declared
+gaps. The separately predeclared Debug native phase then executed all
+six phase CTests successfully but failed the unchanged unique-mode
+`GetStackTrace` bound at **3,157,189 ns median** versus **2,307,381 ns**
+limit (individual samples 3,157,189 / 2,557,668 / 3,711,061 ns).
+Full mode passed; native phase runs 2–3 and the pinned-image aggregate
+were **not run**. The exact stopped phase runner and source volume are
+retained. The Debug library, workload-class binary, image/JDK/compiler,
+CPU set and kernel match prior generic timing receipts, but the source
+revision/digest differ; neither timing variability nor a tooling
+regression is established by this observation. No retry, baseline
+change, perf fallback or promotion follows from this `INCOMPLETE` phase
+terminal. The older `fbbaad44` generic five-pair and three-phase pass
+remain valid only for their own committed source.

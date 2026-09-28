@@ -497,6 +497,17 @@ These are still substantive controllers, not thin launchers:
        revision cannot inherit the generic `fbbaad44` five-pair or
        phase timing acceptance: acquire fresh source-clean prerequisites
        under the new source before making an aggregate decision.
+       The source-clean `8a0d6d32` [pinned-image prerequisite stop](../../evidence/tier-e-generic-pinned-image-phase-stop-20260928/README.md)
+       completed a fresh 5/5-pair, 20/20 exact-fork unaudited AB/BA
+       decision on the generic kernel and previously pinned image. Its
+       **first** planned native timing run passed all six individual
+       CTests and full-mode phase bounds but failed the unchanged
+       unique-mode `GetStackTrace` median: 3,157,189 ns versus the
+       historical 2,307,381 ns limit. Later phases and the aggregate
+       v2 gate did not run. Exact runner/volume retained; prior source
+       timing passes cannot be transferred across source revisions.
+       No timing threshold, image, default backend or eligibility was
+       silently changed to pass this stop.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
