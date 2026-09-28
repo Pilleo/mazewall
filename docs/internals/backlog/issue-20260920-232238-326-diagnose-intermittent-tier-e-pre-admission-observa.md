@@ -7,6 +7,10 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-sustained-comparison-host-export-stop-20260928/raw-arm1.tar.gz"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonMode.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonVerdict.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierESustainedComparisonModeTest.kt"
@@ -835,3 +839,18 @@ no thresholds or new warning kinds were adopted. The next series is
 capped at full unaudited, full witnessed, unique unaudited and unique
 witnessed, in that order, at 10,000 operations per fork and 1,000/s.
 Stop and retain the first incomplete arm; no default promotion follows.
+
+**Comparison arm 1 host export stopped before arm 2:** The
+[sealed first-failure receipt](../evidence/tier-e-sustained-comparison-host-export-stop-20260928/README.md)
+pins source `7d0c8453`, kernel `7.2.8`, image/agent IDs and physically
+distinct workload/collector CPUs `0,2`. The child reported 10,000/10,000
+matched operations, all-thread CPU-0 affinity, a complete original
+target-written 10,000-FD manifest, zero loss, `declared=PASS`,
+`diagnostic=DISABLED`, `qualification=UNVERIFIED`. The independent host
+verifier erroneously selected both the `tier-e-kernel-smoke: attachment_ready`
+line and the final `tier-e-kernel-smoke:` report as competing results,
+so export failed and the terminal remains `INCOMPLETE`. The guest runner
+exited 0 but remains retained with its source volume. Arms 2–4 did not
+run. No retroactive success is inferred from parsing the old files with
+a corrected verifier. A regression-backed host-only fix requires a new
+source revision and separately predeclared comparison series.

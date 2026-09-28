@@ -419,6 +419,15 @@ These are still substantive controllers, not thin launchers:
        with stop on the first incomplete fork. A fully passing comparison
        is only "not reproduced within budget"; it neither explains the
        earlier gap nor upgrades the separate default qualification.
+       The first clean `7d0c8453` audit-disabled full-stream arm reached
+       10,000/10,000 declared IDs with zero ring loss and startup CPU-0
+       thread affinity, but host settlement failed to distinguish the
+       earlier `attachment_ready` line from the final result line. The
+       [sealed setup stop](../../evidence/tier-e-sustained-comparison-host-export-stop-20260928/README.md)
+       is still `INCOMPLETE`; the guest exited successfully, but its
+       runner and volume were retained and arms 2–4 did not run. A
+       source-pinned fix needs a new plan. Offline reparsing cannot make
+       that original host-failed terminal a qualified arm.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
