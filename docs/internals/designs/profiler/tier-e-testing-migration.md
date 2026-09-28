@@ -391,6 +391,19 @@ These are still substantive controllers, not thin launchers:
       incomplete. The original pilot's `false` terminal cannot be replayed
       as success with the later verifier; the updated diagnostic requires
       a fresh committed source and a separately predeclared kernel pilot.
+      The new source-matched 200-ID pilot passed its complete-ID token
+      conservation check. The separately predeclared one-target 10,000-ID
+      diagnostic stopped at its first full-stream fork: all declared IDs
+      were present in native/raw/main marker and FD-stage oracles on CPU 0,
+      but raw and main each had one *additional* armed openat without task
+      storage and three additional zero-token openats, out of 10,004 early
+      target entries. The [sealed failure](../../evidence/tier-e-invocation-witness-10k-stop-20260928/README.md)
+      preserves original artifacts and retains the exact runner/volume.
+      Only the zero-token residual was admitted by the source's rule;
+      do not retrospectively label the missing-storage event ambient or
+      infer a per-ID kernel skip from system-wide miss counters. Unique-
+      edge, original five unaudited pairs and native timing remain
+      unqualified.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

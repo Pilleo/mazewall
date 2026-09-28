@@ -7,6 +7,11 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/pilot-pass.tar.gz"
+  - "docs/internals/evidence/tier-e-invocation-witness-10k-stop-20260928/raw-control.tar.gz"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessConservation.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessConservationTest.kt"
   - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/README.md"
@@ -782,3 +787,25 @@ exported source volume and rejects the already-sealed pilot's
 `invocation_witness_complete=false` receipt. This is a new source
 revision and needs a separately predeclared clean short pilot; it does
 not rehabilitate the original `42211aa6` terminal.
+
+**Source-matched revised pilot passed; the fixed 10,000-ID control
+stopped `INCOMPLETE`:** The [sealed `8393bf7f` diagnostic](../evidence/tier-e-invocation-witness-10k-stop-20260928/README.md)
+preserves two separately predeclared runs. One 200-ID pilot completed a
+full native/raw/main join, with three zero-token surplus calls in each
+program conserved against 203/203 early target counts; it is feasibility
+evidence only. The subsequent *single* 10,000-ID full-then-unique control
+stopped at the first full-stream fork. The original target FD manifest,
+native marker sidecar, token sidecar and original pre-gate sidecar agree:
+**all 10,000 declared IDs reached raw and main tokens, both FD stages,
+raw observation and main exact submission on CPU 0**, with zero native
+drops, ring loss or explicit FD-read failures. However each program saw
+10,004 target openat entries before its FD gate: the armed witness had
+**one missing task-storage state and three zero-token states** per
+program. Only zero-token surplus was admitted by the predeclared
+conservation rule. Missing task storage cannot safely be assigned to
+ambient traffic or an individual declared ID from these aggregates, so
+the terminal remains `INCOMPLETE` and unique-edge did not run. Raw/main
+recursion-miss deltas were 166/346, still program-wide and not causal.
+The exact stopped runner and artifact volume are retained. No default
+or unaudited qualification follows; the complete instrumented 10,000-ID
+count does not prove the earlier uninstrumented gap was fixed.
