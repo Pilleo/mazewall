@@ -26,6 +26,7 @@
 #include "binding_manifest.hpp"
 #include "capture_profile.hpp"
 #include "capture_yield_recorder.hpp"
+#include "invocation_fd_recorder.hpp"
 #include "invocation_registry.hpp"
 #include "lifecycle_barrier.hpp"
 #include "marker_version_proof.hpp"
@@ -110,6 +111,9 @@ std::string marker_version_proof_path;
 std::string capture_yield_path;
 std::mutex capture_yield_mutex;
 std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
+std::string invocation_fd_path;
+std::mutex invocation_fd_mutex;
+std::unique_ptr<mazewall::profiler::InvocationFdRecorder> invocation_fd_recorder;
 std::unique_ptr<mazewall::profiler::LifecycleBarrier> lifecycle_barrier;
 std::string lifecycle_barrier_gate_path;
 // Benchmark-only fault injection. The marker has already been cleared before
@@ -232,6 +236,33 @@ bool write_capture_yield() noexcept {
         if (!stream.good()) return false;
         stream.close();
         return std::rename(temporary_path.c_str(), capture_yield_path.c_str()) == 0;
+    } catch (...) {
+        return false;
+    }
+}
+
+void record_invocation_fd(std::uint64_t invocation_id, jint directory_fd) noexcept {
+    if (invocation_fd_recorder == nullptr || directory_fd < 0) return;
+    std::lock_guard lock(invocation_fd_mutex);
+    (void)invocation_fd_recorder->record(invocation_id, directory_fd);
+}
+
+bool write_invocation_fd() noexcept {
+    if (invocation_fd_path.empty() || invocation_fd_recorder == nullptr) return true;
+    try {
+        std::vector<std::uint8_t> bytes;
+        {
+            std::lock_guard lock(invocation_fd_mutex);
+            bytes = invocation_fd_recorder->serialize(session_tag);
+        }
+        const auto temporary_path = invocation_fd_path + ".tmp";
+        std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
+        if (!stream) return false;
+        stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        stream.flush();
+        if (!stream.good()) return false;
+        stream.close();
+        return std::rename(temporary_path.c_str(), invocation_fd_path.c_str()) == 0;
     } catch (...) {
         return false;
     }
@@ -841,6 +872,10 @@ thread_local mazewall::profiler::InvocationRegistry invocation_registry;
 
 class InvocationScope final {
 public:
+    [[nodiscard]] std::uint64_t published_invocation_id() const noexcept {
+        return scope_.valid() ? scope_.id : 0;
+    }
+
     InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind) noexcept
         : binding_kind_(binding_kind) {
         current_env_ = env;
@@ -1193,6 +1228,7 @@ jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags,
 
 jint JNICALL proxy_unix_openat0(JNIEnv* env, jclass owner, jint dirfd, jlong path, jint flags, jint mode) {
     InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0);
+    record_invocation_fd(invocation.published_invocation_id(), dirfd);
     const auto original = original_unix_openat0.load(std::memory_order_acquire);
     return original == nullptr ? -1 : original(env, owner, dirfd, path, flags, mode);
 }
@@ -1710,6 +1746,10 @@ bool parse_options(const char* options) {
         } else if (option.starts_with("capture-yield=")) {
             capture_yield_path = option.substr(std::strlen("capture-yield="));
             if (capture_yield_path.empty()) return false;
+        } else if (option.starts_with("invocation-fd=")) {
+            if (!invocation_fd_path.empty()) return false;
+            invocation_fd_path = option.substr(std::strlen("invocation-fd="));
+            if (invocation_fd_path.empty() || invocation_fd_path.front() != '/') return false;
         } else if (option.starts_with("lifecycle-barrier=")) {
             const auto path = option.substr(std::strlen("lifecycle-barrier="));
             if (path.empty()) return false;
@@ -1814,6 +1854,14 @@ bool parse_options(const char* options) {
             return false;
         }
     }
+    if (!invocation_fd_path.empty()) {
+        if (!benchmark_phases) return false;
+        try {
+            invocation_fd_recorder = std::make_unique<mazewall::profiler::InvocationFdRecorder>(65'536);
+        } catch (...) {
+            return false;
+        }
+    }
     if (!capture_profile.is_full() && !benchmark_phases) return false;
     if (!marker_version_proof_path.empty() && !session_bound_definitions.load(std::memory_order_acquire)) return false;
     capture_profile_admitted.store(capture_profile.is_full(), std::memory_order_release);
@@ -1873,6 +1921,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
     stop_live_publisher();
     const bool definitions_written = write_definitions(true);
     const bool capture_yield_written = write_capture_yield();
+    const bool invocation_fd_written = write_invocation_fd();
     const char* const capture_yield_status = capture_yield_path.empty()
         ? "disabled"
         : (capture_yield_written ? "written" : "failed");
@@ -1887,6 +1936,11 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
         definitions_written ? "written" : "failed",
         capture_yield_status,
         static_cast<unsigned long long>(capture_yield_contention_drops.load(std::memory_order_relaxed)));
+    if (!invocation_fd_path.empty()) {
+        std::fprintf(stderr, "mazewall-stack-agent: invocation-fd=%s invocation-fd-dropped=%llu\n",
+            invocation_fd_written ? "written" : "failed",
+            static_cast<unsigned long long>(invocation_fd_recorder->dropped_count()));
+    }
     for (std::size_t index = 0;
          index < mazewall::profiler::BindingManifest::supported_bindings.size();
          ++index) {

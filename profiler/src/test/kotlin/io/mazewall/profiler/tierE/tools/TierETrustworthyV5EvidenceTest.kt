@@ -57,6 +57,14 @@ class TierETrustworthyV5EvidenceTest {
         }
         publish(row)
         assertTrue(TierETrustworthyResultVerifier.verify(results, preGateRequired = true))
+        Files.writeString(
+            output.resolve("manifest.json"),
+            """{"source_revision":"${"f".repeat(40)}","source_fingerprint":"${"e".repeat(64)}","configuration":{"benchmark_java_options":"-Dmazewall.tier-e.benchmark-invocation-id-witness=true"}}""",
+        )
+        assertThrows(IllegalStateException::class.java) {
+            TierETrustworthyResultVerifier.verify(results, preGateRequired = true)
+        }
+        Files.writeString(output.resolve("manifest.json"), """{"source_revision":"${"f".repeat(40)}","source_fingerprint":"${"e".repeat(64)}"}""")
         Files.writeString(log, Files.readString(log).replace("sys_enter_audit_recursion_misses_delta=0", "sys_enter_audit_recursion_misses_delta=unavailable"))
         assertThrows(IllegalStateException::class.java) { TierETrustworthyResultVerifier.verify(results, preGateRequired = true) }
         publish(row)

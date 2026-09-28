@@ -52,6 +52,9 @@ internal object TierEBpfProgramBuilder {
     private const val MAIN_PRE_DECODE_TARGET_MAP_INDEX: Int = 9
     private const val RAW_PRE_GATE_DESCRIPTOR_MAP_INDEX: Int = 5
     private const val MAIN_PRE_GATE_DESCRIPTOR_MAP_INDEX: Int = 10
+    private const val RAW_INVOCATION_STORAGE_MAP_INDEX: Int = 6
+    private const val RAW_INVOCATION_WITNESS_MAP_INDEX: Int = 7
+    private const val MAIN_INVOCATION_WITNESS_MAP_INDEX: Int = 11
     private const val MAIN_SESSION_MAP_INDEX: Int = 3
     private const val EARLY_TARGET_ARM_KEY: Int = 2
     private const val PID_TGID_HIGH_HALF_SHIFT: Int = 32
@@ -134,13 +137,111 @@ internal object TierEBpfProgramBuilder {
     public fun buildRawTracepointSysEnterAuditProgram(
         earlyTargetCount: Boolean,
         benchmarkTargetTgid: Int,
+        invocationWitness: Boolean = false,
     ): List<Insn> =
         buildSysEnterAuditProgram(
             rawTracepoint = true,
             descriptorCounts = true,
             earlyTargetCount = earlyTargetCount,
             benchmarkTargetTgid = benchmarkTargetTgid,
+            invocationWitness = invocationWitness,
         )
+
+    /** Per-invocation checkpoint precedes arm and descriptor reads in both audit programs. */
+    private fun emitInvocationWitness(
+        program: MutableList<Insn>,
+        targetTgid: Int,
+        storageMapIndex: Int,
+        witnessMapIndex: Int,
+        failureMapIndex: Int,
+        raw: Boolean,
+        enabled: Boolean,
+        emit: (Insn) -> Int,
+        ldMap: (Int, Int) -> Unit,
+    ) {
+        if (!enabled) return
+        emit(Insn(LDX_W, dst = 5, src = 9, off = 8))
+        val otherSyscall = emit(Insn(JNE_IMM, dst = 5, imm = TARGET_OPENAT_SYSCALL_NUMBER))
+        emit(Insn(MOV_REG, dst = 5, src = 8))
+        emit(Insn(RSH_IMM, dst = 5, imm = PID_TGID_HIGH_HALF_SHIFT))
+        val otherTarget = emit(Insn(JNE_IMM, dst = 5, imm = targetTgid))
+        emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
+        val noTask = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(MOV_REG, dst = 2, src = 0))
+        ldMap(1, storageMapIndex)
+        emit(Insn(MOV_IMM, dst = 3, imm = 0))
+        emit(Insn(MOV_IMM, dst = 4, imm = 0))
+        emit(Insn(CALL, imm = H_TASK_STORAGE_GET))
+        val noStorage = emit(Insn(JEQ_IMM, dst = 0))
+        emit(Insn(LDX_DW, dst = 5, src = 0))
+        val noInvocation = emit(Insn(JEQ_IMM, dst = 5))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -192))
+        ldMap(1, witnessMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -192))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val newInvocation = emit(Insn(JEQ_IMM, dst = 0))
+        val addCounter = program.size
+        emit(Insn(MOV_IMM, dst = 5, imm = 1))
+        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = (if (raw) 0 else 8).toShort()))
+        val counted = emit(Insn(JA))
+
+        val insert = program.size
+        emit(Insn(MOV_IMM, dst = 5, imm = 0))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -208))
+        emit(Insn(STX_DW, dst = FP, src = 5, off = -200))
+        ldMap(1, witnessMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -192))
+        emit(Insn(MOV_REG, dst = 3, src = FP))
+        emit(Insn(ADD_IMM, dst = 3, imm = -208))
+        emit(Insn(MOV_IMM, dst = 4, imm = BPF_NOEXIST))
+        emit(Insn(CALL, imm = H_UPDATE))
+        val insertFailed = emit(Insn(JNE_IMM, dst = 0))
+        ldMap(1, witnessMapIndex)
+        emit(Insn(MOV_REG, dst = 2, src = FP))
+        emit(Insn(ADD_IMM, dst = 2, imm = -192))
+        emit(Insn(CALL, imm = H_LOOKUP))
+        val lookupFailed = emit(Insn(JEQ_IMM, dst = 0))
+        val returnToCounter = emit(Insn(JA))
+
+        val failureExits = mutableListOf<Int>()
+
+        fun emitFailure(key: Int): Int {
+            val start = program.size
+            // Ambient JVM openat calls before the shared arm do not invalidate a measured fork.
+            emit(Insn(MOV_IMM, dst = 5, imm = EARLY_TARGET_ARM_KEY))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -120))
+            ldMap(1, failureMapIndex)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -120))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val noArm = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(LDX_DW, dst = 5, src = 0))
+            val unarmed = emit(Insn(JNE_IMM, dst = 5, imm = 1))
+            emitPreGateFailureCounter(program, failureMapIndex, key, emit, ldMap)
+            val exit = emit(Insn(JA))
+            failureExits += exit
+            listOf(noArm, unarmed).forEach { index -> program[index] = program[index].copy(off = (exit - index - 1).toShort()) }
+            return start
+        }
+        val noStorageHandler = emitFailure(if (raw) 9 else 10)
+        val noInvocationHandler = emitFailure(if (raw) 11 else 12)
+        val mapFailureHandler = emitFailure(if (raw) 13 else 14)
+        val complete = program.size
+        (listOf(otherSyscall, otherTarget, counted) + failureExits).forEach { index ->
+            program[index] = program[index].copy(off = (complete - index - 1).toShort())
+        }
+        listOf(noTask, noStorage).forEach { index ->
+            program[index] = program[index].copy(off = (noStorageHandler - index - 1).toShort())
+        }
+        program[noInvocation] = program[noInvocation].copy(off = (noInvocationHandler - noInvocation - 1).toShort())
+        listOf(insertFailed, lookupFailed).forEach { index ->
+            program[index] = program[index].copy(off = (mapFailureHandler - index - 1).toShort())
+        }
+        program[newInvocation] = program[newInvocation].copy(off = (insert - newInvocation - 1).toShort())
+        program[returnToCounter] = program[returnToCounter].copy(off = (addCounter - returnToCounter - 1).toShort())
+    }
 
     /**
      * Minimal benchmark-only denominator: validates a declared directory descriptor and
@@ -324,6 +425,7 @@ internal object TierEBpfProgramBuilder {
         descriptorCounts: Boolean,
         earlyTargetCount: Boolean,
         benchmarkTargetTgid: Int? = null,
+        invocationWitness: Boolean = false,
     ): List<Insn> {
         val program = mutableListOf<Insn>()
 
@@ -360,6 +462,17 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 6, imm = 0))
         val descriptorLookup = program.size
         if (benchmarkTargetTgid != null) {
+            emitInvocationWitness(
+                program,
+                benchmarkTargetTgid,
+                RAW_INVOCATION_STORAGE_MAP_INDEX,
+                RAW_INVOCATION_WITNESS_MAP_INDEX,
+                RAW_PRE_DECODE_TARGET_MAP_INDEX,
+                true,
+                invocationWitness,
+                ::emit,
+                ::loadMap,
+            )
             val notOpenat = emit(Insn(JNE_IMM, dst = 6))
             emitPreGateDescriptorCounter(
                 program,
@@ -752,6 +865,17 @@ internal object TierEBpfProgramBuilder {
             require(options.benchmarkRawSysEnterAudit && options.benchmarkExactAdmissionAudit && rawTracepoint)
             emit(Insn(STX_W, dst = FP, src = 5, off = V4_ELIGIBILITY_STACK_OFFSET.toShort()))
             emit(Insn(STX_W, dst = FP, src = 5, off = V4_VALIDATED_FD_STACK_OFFSET.toShort()))
+            emitInvocationWitness(
+                p,
+                benchmarkTargetTgid,
+                0,
+                MAIN_INVOCATION_WITNESS_MAP_INDEX,
+                MAIN_PRE_DECODE_TARGET_MAP_INDEX,
+                false,
+                options.benchmarkInvocationIdWitness,
+                ::emit,
+                ::ldMap,
+            )
             emitPreGateDescriptorCounter(
                 p,
                 benchmarkTargetTgid,

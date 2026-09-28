@@ -9,6 +9,43 @@ class TierEPreGateBytecodeExecutionTest {
     private val options = TierEOptions(benchmarkPhases = true, benchmarkRawSysEnterAudit = true, benchmarkExactAdmissionAudit = true)
 
     @Test
+    fun `executed raw and main programs count marker ID even when FD argument read fails`() {
+        val tokenOptions = options.copy(benchmarkInvocationIdWitness = true)
+        val main = DiagnosticPrefix(TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(tokenOptions, 12345), 12345)
+        main.run(syscall = 257, pid = 12345, firstReadFails = true)
+        assertEquals(1L, main.witness[1], "main entered before argument read")
+        assertEquals(0L, main.pre[2], "failed FD read remains absent")
+
+        val raw = DiagnosticPrefix(TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(true, 12345, true), 12345, rawProgram = true)
+        raw.run(syscall = 257, pid = 12345, firstReadFails = true)
+        assertEquals(1L, raw.witness[0], "raw entered before argument read")
+        assertEquals(0L, raw.pre[1])
+    }
+
+    @Test
+    fun `executed witness excludes wrong task and missing token cannot fabricate an ID`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(true, 12345, true)
+        val machine = DiagnosticPrefix(program, 12345, rawProgram = true)
+        machine.run(syscall = 257, pid = 12346)
+        machine.run(syscall = 257, pid = 12345, markerTokenZero = true)
+        assertEquals(0L, machine.witness[0])
+        assertEquals(1L, machine.failure(11), "armed target missing marker token must remain explicit")
+    }
+
+    @Test
+    fun `executed witness records map insertion failure and does not count prearm JVM noise as lost tokens`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(true, 12345, true)
+        val missingMap = DiagnosticPrefix(program, 12345, rawProgram = true)
+        missingMap.run(syscall = 257, pid = 12345, witnessInsertFails = true)
+        assertEquals(0L, missingMap.witness[0])
+        assertEquals(1L, missingMap.failure(13), "failed witness-map insertion is not a missing callback")
+
+        val beforeArm = DiagnosticPrefix(program, 12345, rawProgram = true)
+        beforeArm.run(syscall = 257, pid = 12345, armed = false, markerTokenMissing = true)
+        assertEquals(0L, beforeArm.failure(9), "prearm JVM activity must not invalidate the measured interval")
+    }
+
+    @Test
     fun `failed first argument read cannot let later successful read invent post session admission`() {
         val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, benchmarkTargetTgid = 12345)
         val machine = DiagnosticPrefix(program, target = 12345)
@@ -108,8 +145,10 @@ class TierEPreGateBytecodeExecutionTest {
     ) {
         val pre = LongArray(5).apply { this[0] = 1 }
         val other = LongArray(5).apply { this[0] = 1 }
-        private val earlyCounters = Array(9) { LongArray(1) }
+        private val earlyCounters = Array(15) { LongArray(1) }
         private val stack = mutableMapOf<Int, Long>()
+        val witness = LongArray(2)
+        private var witnessInserted = false
 
         fun failure(key: Int): Long = earlyCounters[key][0]
 
@@ -146,6 +185,9 @@ class TierEPreGateBytecodeExecutionTest {
             firstReadFails: Boolean = false,
             secondReadFd: Int = 111,
             missingPreGateEntry: Boolean = false,
+            markerTokenMissing: Boolean = false,
+            markerTokenZero: Boolean = false,
+            witnessInsertFails: Boolean = false,
         ) {
             earlyCounters[2][0] = if (armed) 1 else 0
             val registers = MutableList<Value>(11) { Value.Number(0) }
@@ -164,7 +206,7 @@ class TierEPreGateBytecodeExecutionTest {
             while (pc in program.indices && ++steps < 1600) {
                 val insn = program[pc]
                 if (insn.code == 0x7b && insn.off == (-112).toShort()) return // next step enters in-flight attribution
-                if (insn.code == 0x18 && insn.imm == 6) return // main in-flight path is outside this diagnostic prefix
+                if (!rawProgram && insn.code == 0x18 && insn.imm == 6) return // main in-flight path is outside this diagnostic prefix
                 if (rawProgram && insn.code == 0x85 && insn.imm == 8) return // CPU audit follows the raw post-session stage
                 var next = pc + 1
                 when (insn.code) {
@@ -231,6 +273,15 @@ class TierEPreGateBytecodeExecutionTest {
                                 Value.Number(0)
                             }
                         }
+                        158 -> Value.Number(1)
+                        156 -> if (markerTokenMissing) Value.Number(0) else Value.Entry(-1, 0, longArrayOf(if (markerTokenZero) 0 else 0x4d5a0000002aL))
+                        2 -> {
+                            val map = (registers[1] as Value.Map).index
+                            val key = stack[(registers[2] as Value.Address).offset]?.toInt()
+                            check(key == 42 && (map == 11 || rawProgram && map == 7))
+                            if (!witnessInsertFails) witnessInserted = true
+                            Value.Number(if (witnessInsertFails) -12 else 0)
+                        }
                         1 -> {
                             val map = (registers[1] as Value.Map).index
                             val key = stack[(registers[2] as Value.Address).offset]?.toInt() ?: error("missing key at $pc")
@@ -251,9 +302,15 @@ class TierEPreGateBytecodeExecutionTest {
                                     else -> null
                                 }
                                 7 -> LongArray(19)
+                                11 -> witness
                                 else -> null
                             }
-                            if (cell == null) Value.Number(0) else Value.Entry(map, key, cell)
+                            val actual = if (map == 11 || rawProgram && map == 7 && key == 42) {
+                                witness.takeIf { witnessInserted }
+                            } else {
+                                cell
+                            }
+                            if (actual == null) Value.Number(0) else Value.Entry(map, key, actual)
                         }
                         else -> error("unsupported helper ${insn.imm} at $pc")
                     }

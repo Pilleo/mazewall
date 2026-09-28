@@ -36,6 +36,11 @@ internal object TierEMatchedBenchmark {
             ?: error("mazewall.tier-e.benchmark-raw-sys-enter-audit must be true or false")
         val exactAuditFlag = System.getProperty("mazewall.tier-e.benchmark-exact-admission-audit", "false").toBooleanStrictOrNull()
             ?: error("mazewall.tier-e.benchmark-exact-admission-audit must be true or false")
+        val invocationWitness = System.getProperty("mazewall.tier-e.benchmark-invocation-id-witness", "false").toBooleanStrictOrNull()
+            ?: error("mazewall.tier-e.benchmark-invocation-id-witness must be true or false")
+        require(!invocationWitness || (scope == Scope.TIER_E_SUSTAINED_COLLECTOR && rawAuditFlag && exactAuditFlag)) {
+            "invocation-ID witness requires paired sustained benchmark raw/main audit"
+        }
         val requestedConfig = Config(
             agent = Path.of(args[0]).toAbsolutePath(),
             iterations = args.getOrElse(1) { "100" }.toInt(),
@@ -63,6 +68,7 @@ internal object TierEMatchedBenchmark {
             sustainedRatePerSecond = System.getProperty(TierESharedOpenatOracleWorkload.RATE_PER_SECOND_PROPERTY, "0").toLong(),
             rawSysEnterAudit = AuditOptions.rawAuditRequested(scope.jsonName, rawAuditFlag),
             exactAdmissionAudit = AuditOptions.exactAdmissionAuditRequested(scope.jsonName, exactAuditFlag),
+            invocationWitness = invocationWitness,
         )
         Startup.validate(requestedConfig)
         requestedConfig.artifact.parent?.createDirectories()
@@ -275,6 +281,8 @@ internal object TierEMatchedBenchmark {
         val attachmentReadyFile = System.getProperty("mazewall.tier-e.attachment-ready-file", "")
         val preGateEvidenceFile = config.artifact.parent.resolve("pre-gate-${variant.jsonName(config.scope)}-fork-$fork.tsv")
         val declaredIdEvidenceFile = config.artifact.parent.resolve("declared-ids-${variant.jsonName(config.scope)}-fork-$fork.manifest")
+        val invocationFdEvidenceFile = config.artifact.parent.resolve("invocation-fd-${variant.jsonName(config.scope)}-fork-$fork.mzif")
+        val invocationWitnessEvidenceFile = config.artifact.parent.resolve("invocation-witness-${variant.jsonName(config.scope)}-fork-$fork.tsv")
         val coverageDiscovery = config.scope == Scope.TIER_E_COVERAGE_DISCOVERY
         val coverageManifest = config.artifact.parent
             .resolve("coverage-manifests")
@@ -347,6 +355,9 @@ internal object TierEMatchedBenchmark {
                 "-Dmazewall.tier-e.attachment-diagnostic=${config.scope == Scope.TIER_E_ATTACHMENT_DIAGNOSTIC}",
                 "-Dmazewall.tier-e.benchmark-raw-sys-enter-audit=${config.rawSysEnterAudit}",
                 "-Dmazewall.tier-e.benchmark-exact-admission-audit=${config.exactAdmissionAudit}",
+                "-Dmazewall.tier-e.benchmark-invocation-id-witness=${config.invocationWitness}",
+                "-Dmazewall.tier-e.invocation-fd-file=$invocationFdEvidenceFile",
+                "-Dmazewall.tier-e.invocation-witness-evidence-file=$invocationWitnessEvidenceFile",
                 "-Dmazewall.tier-e.pre-gate-evidence-file=$preGateEvidenceFile",
                 "-Dmazewall.tier-e.declared-id-evidence-file=$declaredIdEvidenceFile",
                 "-Dmazewall.tier-e.attachment-ready-file=$attachmentReadyFile",
@@ -450,6 +461,9 @@ internal object TierEMatchedBenchmark {
                 )}\",\"fork\":$fork,\"timed_out\":${!completed}$failureClassJson,\"output_path\":\"child-logs/${outputFile.fileName}\",\"output\":\"${escape(output)}\"}",
             )
             error("${variant.jsonName(config.scope)} fork $fork ${if (completed) "failed" else "timed out"}:\n$output")
+        }
+        if (config.invocationWitness && mode.tierE) {
+            TierEInvocationWitnessCpuEvidence.requireComplete(output, config.workloadCpu, config.iterations)
         }
         val batches = BATCH_PATTERN
             .findAll(output)
@@ -2734,6 +2748,7 @@ internal object TierEMatchedBenchmark {
         val sustainedRatePerSecond: Long,
         val rawSysEnterAudit: Boolean,
         val exactAdmissionAudit: Boolean,
+        val invocationWitness: Boolean = false,
     )
 
     private data class CalibrationOutcome(

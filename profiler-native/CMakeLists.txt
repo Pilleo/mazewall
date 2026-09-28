@@ -49,6 +49,11 @@ target_include_directories(capture_yield_recorder_test PRIVATE include)
 target_compile_options(capture_yield_recorder_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME capture_yield_recorder_test COMMAND capture_yield_recorder_test)
 
+add_executable(invocation_fd_recorder_test tests/invocation_fd_recorder_test.cpp)
+target_include_directories(invocation_fd_recorder_test PRIVATE include)
+target_compile_options(invocation_fd_recorder_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME invocation_fd_recorder_test COMMAND invocation_fd_recorder_test)
+
 add_executable(capture_yield_file_test tests/capture_yield_file_test.cpp)
 target_include_directories(capture_yield_file_test PRIVATE include)
 target_compile_options(capture_yield_file_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
@@ -99,10 +104,10 @@ add_test(NAME lifecycle_barrier_test COMMAND lifecycle_barrier_test)
 
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
-    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class"
+    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${AGENT_TEST_CLASSES}"
-    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java"
+    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java"
     VERBATIM
 )
 add_custom_command(
@@ -117,7 +122,7 @@ add_custom_command(
     DEPENDS "${AGENT_TEST_CLASSES}/RedefinitionAgent.class" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf"
     VERBATIM
 )
-add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
+add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
 add_test(
     NAME agent_native_outcome_preservation
     COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED"
@@ -163,6 +168,20 @@ add_test(
     COMMAND capture_yield_file_test "${CMAKE_CURRENT_BINARY_DIR}/tier-e-capture-yield.mzcy"
 )
 set_tests_properties(capture_yield_file_test PROPERTIES DEPENDS agent_capture_yield_sidecar)
+
+add_test(
+    NAME agent_invocation_fd_sidecar
+    COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED"
+        "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,session=4d5a,capture-profile=jdk25-unix-openat0,invocation-fd=${CMAKE_CURRENT_BINARY_DIR}/tier-e-invocation-fd.mzif"
+        -cp "${AGENT_TEST_CLASSES}" InvocationFdWorkload
+)
+set_tests_properties(agent_invocation_fd_sidecar PROPERTIES PASS_REGULAR_EXPRESSION "invocation-fd=written")
+
+add_executable(invocation_fd_file_test tests/invocation_fd_file_test.cpp)
+target_include_directories(invocation_fd_file_test PRIVATE include)
+target_compile_options(invocation_fd_file_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME invocation_fd_file_test COMMAND invocation_fd_file_test "${CMAKE_CURRENT_BINARY_DIR}/tier-e-invocation-fd.mzif")
+set_tests_properties(invocation_fd_file_test PROPERTIES DEPENDS agent_invocation_fd_sidecar)
 
 add_test(
     NAME agent_phase_benchmark_unique

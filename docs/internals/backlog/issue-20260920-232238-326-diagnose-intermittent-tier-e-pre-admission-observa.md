@@ -7,6 +7,26 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "profiler-native/CMakeLists.txt"
+  - "profiler-native/src/agent.cpp"
+  - "profiler-native/include/invocation_fd_recorder.hpp"
+  - "profiler-native/tests/invocation_fd_recorder_test.cpp"
+  - "profiler-native/tests/invocation_fd_file_test.cpp"
+  - "profiler-native/tests/InvocationFdWorkload.java"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEOptions.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationFdArtifact.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessComparison.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessCpuEvidence.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessEvidenceArtifact.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInvocationWitnessOptionsTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInvocationWitnessBytecodeTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/TierEInvocationWitnessMapReaderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationFdArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessComparisonTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessCpuEvidenceTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEInvocationWitnessEvidenceArtifactTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyInvocationWitnessVerifierTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyInvocationWitnessVerifier.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEKernelSmoke.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEWorkloadLaunch.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEWorkloadLaunchTest.kt"
@@ -703,3 +723,24 @@ oversized `TierEKernelSmoke.main` inventory changed from complexity 362 to
 updated individually. The report adds no other warning, and one previously
 tracked magic-number occurrence was removed. No threshold or module-wide
 warning allowance was changed.
+
+**Next opt-in discriminating witness (source implementation, not kernel
+qualification):** The native `unix_openat0` proxy records its *published*
+marker invocation ID and positive directory FD in a bounded `MZIF` sidecar;
+the original target-authored FD manifest remains the denominator. When
+explicitly enabled only for paired audited direct raw/main benchmark forks,
+both BPF programs read that invocation ID from existing task storage before
+their arm/FD checkpoint and count it in an owned bounded map. Unavailable
+token, zero marker, and map failures have separate armed counters. A second
+per-ID artifact binds the native sidecar, original manifest, both loaded
+program hashes, and raw/main earliest counters; host settlement checks all
+rows before retiring the source volume. The default BPF bytecode and
+unaudited benchmark remain unchanged. An ID without an early token only
+bounds a **pre-token checkpoint** gap; positive program-wide recursion
+misses still cannot prove that the kernel guard skipped the ID. Native and
+host tests cover wire format, helper failure, emitted bytecode, and
+mismatch rejection. The reviewed Detekt report updates only the existing
+numeric inventory for extended builder/engine/harness declarations; no
+global threshold or new warning category was adopted. A source-clean
+pilot that proves a complete 1:1 native-to-raw/main join is required
+before any full 10,000-operation diagnostic acquisition.

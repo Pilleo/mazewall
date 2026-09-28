@@ -215,6 +215,8 @@ internal class TierEbpfEngine(
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val EARLY_TARGET_OPENAT_COUNTER_KEYS = 3
         private const val EARLY_TARGET_OPENAT_V4_KEYS = 9
+        private const val EARLY_TARGET_OPENAT_WITNESS_KEYS = 15
+        private const val INVOCATION_WITNESS_MAX_ENTRIES = 65_536
         private const val BPF_ATTRIBUTE_FD_OFFSET: Long = 0
         private const val BPF_ATTRIBUTE_KEY_OFFSET: Long = 8
         private const val BPF_ATTRIBUTE_VALUE_OFFSET: Long = 16
@@ -301,6 +303,9 @@ internal class TierEbpfEngine(
             installed.sysEnterAttachmentBackend = sysEnterAttachmentBackend
             installed.preGateAuditEnabled = options.usesPairedEarlyTargetAudit() &&
                 sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+            check(!options.benchmarkInvocationIdWitness || installed.preGateAuditEnabled) {
+                "invocation-ID witness requires paired direct raw/main tracepoint programs"
+            }
             installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
             val taskStorageV2 = options.markerVersion == MarkerVersion.V2
             installed.invocationStorageFd = createMap(
@@ -370,7 +375,19 @@ internal class TierEbpfEngine(
                     MAP_ARRAY,
                 keySize = 4,
                 valueSize = Long.SIZE_BYTES,
-                maxEntries = if (installed.preGateAuditEnabled) EARLY_TARGET_OPENAT_V4_KEYS else EARLY_TARGET_OPENAT_COUNTER_KEYS,
+                maxEntries = when {
+                    options.benchmarkInvocationIdWitness -> EARLY_TARGET_OPENAT_WITNESS_KEYS
+                    installed.preGateAuditEnabled -> EARLY_TARGET_OPENAT_V4_KEYS
+                    else -> EARLY_TARGET_OPENAT_COUNTER_KEYS
+                },
+                )
+            }
+            if (options.benchmarkInvocationIdWitness) {
+                installed.invocationWitnessFd = createMap(
+                    MAP_HASH,
+                    keySize = Long.SIZE_BYTES,
+                    valueSize = 2 * Long.SIZE_BYTES,
+                    maxEntries = INVOCATION_WITNESS_MAX_ENTRIES,
                 )
             }
             if (installed.preGateAuditEnabled) {
@@ -426,6 +443,7 @@ internal class TierEbpfEngine(
                         installed.recoveryEdgeFd?.value ?: -1,
                         installed.earlyTargetOpenatFd?.value ?: -1,
                         installed.preGateAuditFd?.value ?: -1,
+                        installed.invocationWitnessFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -448,6 +466,7 @@ internal class TierEbpfEngine(
                                 TierEBpfProgramBuilder.buildRawTracepointSysEnterAuditProgram(
                                     earlyTargetCount = true,
                                     benchmarkTargetTgid = targetTgid,
+                                    invocationWitness = options.benchmarkInvocationIdWitness,
                                 )
                             } else {
                                 buildRawTracepointSysEnterAuditProgram()
@@ -467,6 +486,8 @@ internal class TierEbpfEngine(
                         installed.requireRawSysEnterAuditCpuFd().value,
                         installed.earlyTargetOpenatFd?.value ?: -1,
                         installed.preGateAuditFd?.value ?: -1,
+                        installed.invocationStorageFd?.value ?: -1,
+                        installed.invocationWitnessFd?.value ?: -1,
                     ),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
@@ -600,6 +621,20 @@ internal class TierEbpfEngine(
         val installed = requireInstalled()
         check(installed.preGateAuditEnabled && installed.earlyTargetOpenatArmed) { "pre-gate failure counters were not armed" }
         return TierEBenchmarkAuditMapReader.readPreGateFailures(native, installed.requireEarlyTargetOpenatFd().value)
+    }
+
+    internal fun readInvocationWitness(): Map<Long, TierEBenchmarkAuditMapReader.InvocationWitnessCount> {
+        check(options.benchmarkInvocationIdWitness) { "invocation-ID witness is not enabled" }
+        val installed = requireInstalled()
+        check(installed.earlyTargetOpenatArmed) { "invocation-ID witness was not armed" }
+        return TierEBenchmarkAuditMapReader.readInvocationWitness(native, installed.requireInvocationWitnessFd().value)
+    }
+
+    internal fun readInvocationWitnessFailures(): Map<Int, Long> {
+        check(options.benchmarkInvocationIdWitness) { "invocation-ID witness is not enabled" }
+        val installed = requireInstalled()
+        check(installed.earlyTargetOpenatArmed) { "invocation-ID witness was not armed" }
+        return TierEBenchmarkAuditMapReader.readInvocationWitnessFailures(native, installed.requireEarlyTargetOpenatFd().value)
     }
 
     /** Reads only the declared descriptors; absent entries are a configuration failure. */
@@ -1068,6 +1103,7 @@ internal class TierEbpfEngine(
         close(installed.exactAdmissionAuditFd) { installed.exactAdmissionAuditFd = null }
         close(installed.earlyTargetOpenatFd) { installed.earlyTargetOpenatFd = null }
         close(installed.preGateAuditFd) { installed.preGateAuditFd = null }
+        close(installed.invocationWitnessFd) { installed.invocationWitnessFd = null }
         close(installed.invocationStorageFd) { installed.invocationStorageFd = null }
         close(installed.invocationBtfFd) { installed.invocationBtfFd = null }
         cleanupFailure?.let { throw it }
@@ -1355,6 +1391,7 @@ private class Resources {
     var exactAdmissionAuditFd: BpfFd? = null
     var earlyTargetOpenatFd: BpfFd? = null
     var preGateAuditFd: BpfFd? = null
+    var invocationWitnessFd: BpfFd? = null
     var progFd: BpfFd? = null
     var rawSysEnterAuditProgFd: BpfFd? = null
     var mainProgramIdentity: TierEInstalledProgramIdentity? = null
@@ -1400,6 +1437,8 @@ private class Resources {
     fun requireEarlyTargetOpenatFd(): BpfFd = requireNotNull(earlyTargetOpenatFd) { "early target openat descriptor was not acquired" }
 
     fun requirePreGateAuditFd(): BpfFd = requireNotNull(preGateAuditFd) { "pre-gate descriptor array was not acquired" }
+
+    fun requireInvocationWitnessFd(): BpfFd = requireNotNull(invocationWitnessFd) { "invocation-ID witness map was not acquired" }
 
     fun requireProgFd(): BpfFd = requireNotNull(progFd) { "syscall program descriptor was not acquired" }
 

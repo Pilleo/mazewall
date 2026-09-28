@@ -173,6 +173,17 @@ internal object TierEKernelSmoke {
             configuredAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT &&
             TierEbpfEngine.selectSysEnterAttachmentBackend(configuredSysEnterAttachmentBackend) ==
             TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+        val invocationWitness = System.getProperty("mazewall.tier-e.benchmark-invocation-id-witness", "false").toBooleanStrictOrNull()
+            ?: error("invocation-ID witness must be true or false")
+        check(!invocationWitness || (benchmark && startupPreGateAudit)) {
+            "invocation-ID witness requires benchmark paired direct raw/main audit"
+        }
+        val invocationFdPath = if (invocationWitness) {
+            System.getProperty("mazewall.tier-e.invocation-fd-file")?.takeIf(String::isNotBlank)?.let(Path::of)
+                ?: error("invocation-ID witness requires an owned target output path")
+        } else {
+            null
+        }
         val uniqueEdgeObserverEnabled = System.getProperty("mazewall.tier-e.unique-edge-observer", "true").toBooleanStrictOrNull()
             ?: error("unique edge observer must be true or false")
         val idlePollBackoffNanos = System.getProperty("mazewall.tier-e.idle-poll-backoff-nanos", "0").toLong()
@@ -290,6 +301,7 @@ internal object TierEKernelSmoke {
             ""
         }
         val captureYieldOption = captureYieldPath?.let { ",capture-yield=$it" } ?: ""
+        val invocationFdOption = invocationFdPath?.let { ",invocation-fd=$it" }.orEmpty()
         val lifecycleBarrierOption = if (lifecycleScenario in setOf("detach_while_active", "terminal_while_active", "exec_transition")) {
             ",lifecycle-barrier=$lifecycleBarrier,lifecycle-gate=$gate"
         } else {
@@ -316,7 +328,7 @@ internal object TierEKernelSmoke {
                 7,
             ) { "full-stream" }},stack-transport=${args.getOrElse(
                 8,
-            ) { "dictionary" }}$benchmarkOptions$captureYieldOption$lifecycleBarrierOption$callbackSuppressionOption$captureFailureOption$execTransitionOption",
+             ) { "dictionary" }}$benchmarkOptions$captureYieldOption$invocationFdOption$lifecycleBarrierOption$callbackSuppressionOption$captureFailureOption$execTransitionOption",
             "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED",
             "-D${TierESharedOpenatOracleWorkload.PROFILE_PROPERTY}=${TierESharedOpenatOracleWorkload.Profile.fromSystemProperty().wireName}",
             "-D${TierECommonFileWorkload.APPLICATION_KIND_PROPERTY}=${System.getProperty(
@@ -366,6 +378,7 @@ internal object TierEKernelSmoke {
                 benchmarkEmitMarkerLossEvents = benchmarkEmitMarkerLossEvents,
                 benchmarkRawSysEnterAudit = benchmarkRawSysEnterAudit,
                 benchmarkExactAdmissionAudit = benchmarkExactAdmissionAudit,
+                benchmarkInvocationIdWitness = invocationWitness,
                 ringDecodeMode = ringDecodeMode,
                 ringArgumentListMode = ringArgumentListMode,
                 ringArgumentViewMode = ringArgumentViewMode,
@@ -644,6 +657,36 @@ internal object TierEKernelSmoke {
             } else {
                 null
             }
+            val invocationNativeIds = if (invocationWitness) {
+                TierEInvocationFdArtifact.read(requireNotNull(invocationFdPath), auditExpectedOpenatFds, sessionTag)
+            } else {
+                emptyMap()
+            }
+            val invocationTokenCounts = if (invocationWitness) engine.readInvocationWitness() else emptyMap()
+            val invocationFailures = if (invocationWitness) engine.readInvocationWitnessFailures() else emptyMap()
+            val invocationWitnessReceipt = if (invocationWitness) {
+                val mainProgram = engine.sysEnterProgramEvidence()
+                val auditProgram = requireNotNull(engine.rawAuditProgramIdentity())
+                val evidencePath = System
+                    .getProperty("mazewall.tier-e.invocation-witness-evidence-file")
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(Path::of)
+                    ?: error("invocation-ID witness requires an owned sidecar path")
+                TierEInvocationWitnessEvidenceArtifact.write(
+                    path = evidencePath,
+                    targetPid = process.pid().toInt(),
+                    nativeIds = invocationNativeIds,
+                    tokenCounts = invocationTokenCounts,
+                    fdCounts = preGateCounts,
+                    oracleSha256 = requireNotNull(declaredIdReceipt).sha256,
+                    nativeSha256 = TierEPreGateEvidenceArtifact.sha256(requireNotNull(invocationFdPath)),
+                    rawProgramSha256 = auditProgram.sha256,
+                    mainProgramSha256 = mainProgram.digest,
+                    failures = invocationFailures,
+                )
+            } else {
+                null
+            }
             val exactAdmissionAuditArgumentReadFailures = if (benchmarkExactAdmissionAudit) {
                 engine.readExactAdmissionAuditArgumentReadFailureCount()
             } else {
@@ -694,6 +737,13 @@ internal object TierEKernelSmoke {
                 "disabled"
             }
             val preGateComplete = !pairedPreGateAudit || (preGateBoundary == "PASS" && preGateFailures.values.all { it == 0L })
+            val invocationWitnessComplete = !invocationWitness ||
+                (
+                    invocationFailures.values.all { it == 0L } &&
+                    invocationNativeIds.values.all { id ->
+                    invocationTokenCounts[id]?.raw == 1L && invocationTokenCounts[id]?.main == 1L
+                }
+                )
             val captureYield = captureYieldPath
                 ?.takeIf(Files::exists)
                 ?.let(TierECaptureYield::read)
@@ -1012,7 +1062,7 @@ internal object TierEKernelSmoke {
                         oracle.wrong == 0L &&
                         oracle.unclassified == 0L
                     )
-            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete && preGateComplete
+            val effectiveEvidenceComplete = profile.integrity.coverageComplete && operationOracleComplete && pairedAuditComplete && preGateComplete && invocationWitnessComplete
             println(
                 "tier-e-kernel-smoke: marker_transport=$markerTransport marker_requested=${requestedMarkerTransport.name.lowercase()} " +
                     "sys_enter_backend_configured=${configuredSysEnterAttachmentBackend.name.lowercase()} " +
@@ -1032,6 +1082,13 @@ internal object TierEKernelSmoke {
                     "sys_enter_audit_recursion_misses_before=${recursionBeforeArm?.getValue("audit")?.let { TierEProgramMissComparison.sample(it) } ?: "unavailable"} " +
                     "sys_enter_main_recursion_misses_delta=${recursionMissDelta?.main ?: "unavailable"} " +
                     "sys_enter_audit_recursion_misses_delta=${recursionMissDelta?.raw ?: "unavailable"} " +
+                    "invocation_witness_contract_version=${if (invocationWitness) 1 else 0} " +
+                    "invocation_witness_evidence_file=${invocationWitnessReceipt?.path ?: "none"} " +
+                    "invocation_witness_evidence_rows=${invocationWitnessReceipt?.rows ?: 0} " +
+                    "invocation_witness_evidence_sha256=${invocationWitnessReceipt?.sha256 ?: "none"} " +
+                    "invocation_witness_native_sha256=${invocationFdPath?.let(TierEPreGateEvidenceArtifact::sha256) ?: "none"} " +
+                    "invocation_witness_failure_counts=${invocationFailures.toSortedMap().entries.joinToString(",") { (key, count) -> "$key:$count" }.ifEmpty { "none" }} " +
+                    "invocation_witness_complete=$invocationWitnessComplete " +
                     "sys_enter_program_lookup_helper_calls=${sysEnterProgramEvidence.lookupHelperCalls} " +
                     "sys_enter_program_update_helper_calls=${sysEnterProgramEvidence.updateHelperCalls} " +
                     "marker_fallback=${markerSelection.fallbackReason ?: "none"} markerTransitions=${profile.integrity.reconciliation.markerTransitions} " +
@@ -1204,10 +1261,10 @@ internal object TierEKernelSmoke {
                 "openat_manifest_non_singletons=${manifestCandidateCounts.filterValues { it != 1 }.entries.take(16).joinToString(",") { "${it.key}:${it.value}" }} " +
                 "attach_ns=$attachNanos terminal_ns=$terminalNanos workloadNs=$workloadNanos",
             )
-            check(pairedAuditComplete && preGateComplete) {
+            check(pairedAuditComplete && preGateComplete && invocationWitnessComplete) {
                 "Tier E paired raw/main audit incomplete: raw=$rawSysEnterAuditObserved/${auditExpectedOpenatFds.size} " +
                     "rawMissing=${rawSysEnterAuditMissing.size} exactMissing=${exactAdmissionAuditMissing.size} " +
-                    "early=$earlyTargetOpenat preGate=$preGateBoundary failures=$preGateFailures"
+                    "early=$earlyTargetOpenat preGate=$preGateBoundary failures=$preGateFailures invocationWitness=$invocationWitnessComplete witnessFailures=$invocationFailures"
             }
             if (lifecycleScenario == "detach_while_active") {
                 check(lifecycleFaultApplied) { "native lifecycle barrier was never observed" }

@@ -360,6 +360,19 @@ These are still substantive controllers, not thin launchers:
      snapshot aborts. This is a new harness/source contract; its host tests
      do not qualify the sealed `6e0d5dd6` failure, and a fresh kernel run
      still requires a versioned plan and exact identity/CPU evidence.
+     The next diagnostic contract is explicitly marker-ID correlated. The
+     existing native proxy publishes a unique session-bound invocation ID
+     before calling `openat0`; opt-in `MZIF` records that ID with the
+     target's positive directory FD without adding a per-operation syscall.
+     A bounded shared raw/main BPF map counts the same task-storage ID
+     before either existing FD/arm gate, with explicit armed lookup/insert
+     failure counters. A second bounded artifact ties every declared FD,
+     native ID, both token counts, and original pre-gate counters to the
+     target-authored manifest and exact loaded BPF hashes. All IDs and
+     failure counters must reconcile at host settlement before a complete
+     pilot may be trusted. An absent token is only an early checkpoint
+     bound, not proof of BPF non-execution or per-ID recursion suppression.
+     This opt-in telemetry cannot qualify the unaudited or native timing gates.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

@@ -161,6 +161,29 @@ internal object TierETrustworthyV5EvidenceVerifier {
         ) {
             "source-bound host manifest is absent from version-five export"
         }
+        val options = hostManifest["configuration"]
+            ?.jsonObject
+            ?.get("benchmark_java_options")
+            ?.jsonPrimitive
+            ?.content
+            .orEmpty()
+        val witnessRequested = "-Dmazewall.tier-e.benchmark-invocation-id-witness=true" in options
+        val witnessPublished = "invocation_witness_contract_version=1" in report
+        check(!witnessPublished || witnessRequested) { "unexpected invocation-ID witness outside predeclared profile" }
+        if (witnessRequested) {
+            TierETrustworthyInvocationWitnessVerifier.verify(
+                output,
+                variant,
+                index,
+                report,
+                declared.toSet(),
+                workloadPid,
+                hostManifest["workload_cpu"]?.jsonPrimitive?.content ?: error("missing witness workload CPU"),
+                field("declared_ids_evidence_sha256"),
+                rawSha,
+                mainSha,
+            )
+        }
     }
 
     private fun programId(

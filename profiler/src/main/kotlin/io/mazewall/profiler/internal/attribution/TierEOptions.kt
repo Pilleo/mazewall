@@ -191,6 +191,8 @@ internal data class TierEOptions(
     val benchmarkRawSysEnterAudit: Boolean = false,
     /** Counts declared openat descriptors after exact marker/task-storage admission; benchmark-only. */
     val benchmarkExactAdmissionAudit: Boolean = false,
+    /** Diagnostic-only per-invocation marker witness before raw/main FD gates. */
+    val benchmarkInvocationIdWitness: Boolean = false,
     /** Primitive owned argument storage is the production path; boxed lists remain benchmark-only. */
     val ownedArgumentStorage: Boolean = true,
     /** Read-only ready transfer is production behavior; copying remains a paired benchmark control. */
@@ -231,6 +233,15 @@ internal data class TierEOptions(
         require(benchmarkPhases || !benchmarkExactAdmissionAudit) {
             "exact-admission auditing is benchmark-only"
         }
+        require(
+            !benchmarkInvocationIdWitness ||
+                (
+                    benchmarkPhases &&
+                    benchmarkRawSysEnterAudit &&
+                    benchmarkExactAdmissionAudit &&
+                    benchmarkSysEnterAttachmentShape == TierESysEnterAttachmentShape.MAIN_PLUS_AUDIT
+                ),
+        ) { "invocation-ID witness requires paired benchmark raw and main audits" }
         require(benchmarkPhases || kernelCoverageMode == TierEKernelCoverageMode.DIAGNOSTIC_UPDATE) {
             "kernel coverage variants are benchmark-only"
         }

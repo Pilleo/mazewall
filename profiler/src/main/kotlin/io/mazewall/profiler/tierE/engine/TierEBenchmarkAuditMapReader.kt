@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.engine
 
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.native.RawSyscallOperations
@@ -11,11 +12,66 @@ import java.lang.foreign.ValueLayout
 /** Reads borrowed diagnostic BPF maps; the owning engine retains all file descriptors. */
 internal object TierEBenchmarkAuditMapReader {
     private const val BPF_MAP_LOOKUP_ELEM = 1L
+    private const val BPF_MAP_GET_NEXT_KEY = 4L
+    private const val WITNESS_MAP_MAX_ENTRIES = 65_536
+    private const val WITNESS_VALUE_SIZE = 2L * Long.SIZE_BYTES
+    private const val WITNESS_ATTR_SIZE = 32L
     private const val BPF_ATTR_SIZE = 24L
     private const val KEY_POINTER_OFFSET = 8L
     private const val VALUE_POINTER_OFFSET = 16L
     private const val FIRST_PRE_GATE_FAILURE_KEY = 3
     private const val LAST_PRE_GATE_FAILURE_KEY = 8
+    private const val FIRST_INVOCATION_WITNESS_FAILURE_KEY = 9
+    private const val LAST_INVOCATION_WITNESS_FAILURE_KEY = 14
+
+    data class InvocationWitnessCount(
+        val raw: Long,
+        val main: Long,
+    )
+
+    /** Borrowed, quiesced hash map; do not fabricate missing entries on kernel errors. */
+    fun readInvocationWitness(
+        native: RawSyscallOperations,
+        mapFd: Int,
+    ): Map<Long, InvocationWitnessCount> =
+        Arena.ofConfined().use { arena ->
+            val key = arena.allocate(ValueLayout.JAVA_LONG)
+            val nextKey = arena.allocate(ValueLayout.JAVA_LONG)
+            val value = arena.allocate(WITNESS_VALUE_SIZE, Long.SIZE_BYTES.toLong())
+            val rows = linkedMapOf<Long, InvocationWitnessCount>()
+            var current: MemorySegment = MemorySegment.NULL
+            while (true) {
+                val next = arena.allocate(WITNESS_ATTR_SIZE)
+                next.set(ValueLayout.JAVA_INT, 0, mapFd)
+                next.set(ValueLayout.ADDRESS, KEY_POINTER_OFFSET, current)
+                next.set(ValueLayout.ADDRESS, VALUE_POINTER_OFFSET, nextKey)
+                when (val result = native.bpf(BPF_MAP_GET_NEXT_KEY, ConfinedSegment(next), WITNESS_ATTR_SIZE)) {
+                    is SyscallResult.Error -> {
+                        if (result.errno == NativeConstants.ENOENT) break
+                        result.throwErrno("bpf(BPF_MAP_GET_NEXT_KEY, invocation witness)")
+                    }
+                    is SyscallResult.Success -> Unit
+                }
+                check(rows.size < WITNESS_MAP_MAX_ENTRIES) { "invocation witness exceeded bounded map capacity" }
+                val id = nextKey.get(ValueLayout.JAVA_LONG, 0)
+                check(id != 0L && id !in rows) { "repeated or empty invocation witness key" }
+                key.set(ValueLayout.JAVA_LONG, 0, id)
+                val lookup = arena.allocate(WITNESS_ATTR_SIZE)
+                lookup.set(ValueLayout.JAVA_INT, 0, mapFd)
+                lookup.set(ValueLayout.ADDRESS, KEY_POINTER_OFFSET, key)
+                lookup.set(ValueLayout.ADDRESS, VALUE_POINTER_OFFSET, value)
+                when (val result = native.bpf(BPF_MAP_LOOKUP_ELEM, ConfinedSegment(lookup), WITNESS_ATTR_SIZE)) {
+                    is SyscallResult.Error -> result.throwErrno("bpf(BPF_MAP_LOOKUP_ELEM, invocation witness)")
+                    is SyscallResult.Success -> Unit
+                }
+                val raw = value.get(ValueLayout.JAVA_LONG, 0)
+                val main = value.get(ValueLayout.JAVA_LONG, 8)
+                check(raw >= 0 && main >= 0 && raw + main > 0) { "invalid invocation witness counters" }
+                rows[id] = InvocationWitnessCount(raw, main)
+                current = key
+            }
+            rows.toMap()
+        }
 
     private fun lookup(
         native: RawSyscallOperations,
@@ -54,6 +110,16 @@ internal object TierEBenchmarkAuditMapReader {
     ): Map<Int, Long> =
         Arena.ofConfined().use { arena ->
             (FIRST_PRE_GATE_FAILURE_KEY..LAST_PRE_GATE_FAILURE_KEY).associateWith { key ->
+                lookup(native, arena, mapFd, key, Long.SIZE_BYTES).get(ValueLayout.JAVA_LONG, 0)
+            }
+        }
+
+    fun readInvocationWitnessFailures(
+        native: RawSyscallOperations,
+        mapFd: Int,
+    ): Map<Int, Long> =
+        Arena.ofConfined().use { arena ->
+            (FIRST_INVOCATION_WITNESS_FAILURE_KEY..LAST_INVOCATION_WITNESS_FAILURE_KEY).associateWith { key ->
                 lookup(native, arena, mapFd, key, Long.SIZE_BYTES).get(ValueLayout.JAVA_LONG, 0)
             }
         }
