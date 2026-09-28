@@ -275,10 +275,26 @@ tasks.register<JavaExec>("tierENativeTimingDiagnostic") {
     workingDir(rootProject.projectDir)
     mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
     val output = providers.gradleProperty("tierEOutput")
+    val readiness = providers.gradleProperty("tierEReadiness")
     val repositoryPath = rootProject.projectDir.absolutePath
     doFirst {
         require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
-        args("native-timing-diagnostic", repositoryPath, output.get())
+        require(readiness.isPresent) { "Pass -PtierEReadiness=/path/to/complete-readiness" }
+        args("native-timing-diagnostic", repositoryPath, output.get(), readiness.get())
+    }
+}
+
+tasks.register<JavaExec>("tierENativeTimingReadiness") {
+    group = "verification"
+    description = "Independent non-qualifying six-fork native timing readiness gate"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-readiness-artifacts" }
+        args("native-timing-readiness", repositoryPath, output.get())
     }
 }
 

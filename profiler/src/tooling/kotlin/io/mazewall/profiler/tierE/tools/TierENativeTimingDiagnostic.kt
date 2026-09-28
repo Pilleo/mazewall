@@ -1,7 +1,65 @@
 package io.mazewall.profiler.tierE.tools
 
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.Path
+
 /** Non-qualifying native timing comparison: fixed order and strict raw sample admission. */
 public object TierENativeTimingDiagnostic {
+    private const val ORIGINAL_SHA = "ff1e640c079de05ba407eab963cfb8939553e7f49390e60fdb20645faa3f790a"
+    private const val DIAGNOSTIC_SHA = "9dafc1495eb42e7c554637b748087fcb7cc42e286d69fa8165776565aa923e76"
+    private const val WORKLOAD_SHA = "12ac99613bffb53253c02545063b37f01eb1860657233acf7879f90365d7c0e6"
+
+    /** Prevent a changed compiler, image or workload bytecode from entering a paired comparison. */
+    public fun requireBinaryIdentities(
+        original: String,
+        diagnostic: String,
+        workload: String,
+    ) {
+        require(original == ORIGINAL_SHA && diagnostic == DIAGNOSTIC_SHA && workload == WORKLOAD_SHA) {
+            "Native timing diagnostic binary identity changed"
+        }
+    }
+
+    public fun requireToolchain(
+        java: String,
+        compiler: String,
+    ) {
+        require(java.lineSequence().firstOrNull() == "openjdk version \"25.0.4\" 2026-07-21 LTS") {
+            "Native timing JDK differs from retained generic timing receipt"
+        }
+        require(compiler == "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0") {
+            "Native timing compiler differs from retained generic timing receipt"
+        }
+    }
+
+    /** The owner retires its runner only after every published raw sample matches its host original. */
+    public fun verifyExport(
+        host: Path,
+        exported: Path,
+        samples: Int = 36,
+    ) {
+        require(samples in setOf(6, 36)) { "Native timing export requires the fixed readiness or acquisition sample count" }
+        require(Files.isDirectory(host, NOFOLLOW_LINKS) && Files.isDirectory(exported, NOFOLLOW_LINKS)) {
+            "Native timing diagnostic export directories are missing"
+        }
+        val shared = listOf("plan.json", "schedule.jsonl", "preflight.sha256", "observations.jsonl", "diagnostic-terminal.json", "original-agent.so")
+        val sampleFiles = (1..samples).flatMap { index ->
+            val name = "sample-${index.toString().padStart(2, '0')}"
+            listOf("$name.log", "$name-before.json", "$name-after.json")
+        }
+        val expected = (shared + sampleFiles).toSet()
+        val published = Files.list(exported).use { entries -> entries.map { it.fileName.toString() }.toList().toSet() }
+        require(published == expected) { "Native timing diagnostic export is missing a raw file or contains an unexpected file" }
+        for (name in expected) {
+            val source = host.resolve(name)
+            val result = exported.resolve(name)
+            require(Files.isRegularFile(source, NOFOLLOW_LINKS) && Files.isRegularFile(result, NOFOLLOW_LINKS) && Files.mismatch(source, result) == -1L) {
+                "Native timing diagnostic export differs from host sample: $name"
+            }
+        }
+    }
+
     public data class Sample(
         val index: Int,
         val block: Int,
@@ -19,6 +77,43 @@ public object TierENativeTimingDiagnostic {
         val policyEligibility: Boolean = false,
     )
 
+    public data class Telemetry(
+        val usageUsec: Long,
+        val throttledPeriods: Long,
+    )
+
+    /** Required, non-invasive cgroup and pressure observations for each measured JVM. */
+    public fun requireTelemetry(
+        cpuStat: String,
+        cpuMax: String,
+        cpus: String,
+        pressure: String,
+    ): Telemetry {
+        fun counter(name: String): Long {
+            val rows = cpuStat
+                .lineSequence()
+                .map { it.split(' ') }
+                .filter { it.firstOrNull() == name }
+                .toList()
+            require(rows.size == 1 && rows.single().size == 2) { "Missing or duplicate cgroup $name" }
+            return rows.single()[1].toLongOrNull()?.takeIf { it >= 0 }
+                ?: throw IllegalArgumentException("Invalid cgroup $name")
+        }
+        require(cpuMax.matches(Regex("max [1-9][0-9]*"))) { "Native timing container has a CPU quota or no quota provenance" }
+        require(cpus == "0,2") { "Native timing container effective CPUs differ from the pinned set" }
+        require(Regex("(?m)^some avg10=[0-9]+\\.[0-9]+ ").containsMatchIn(pressure)) { "Host CPU pressure is unavailable" }
+        return Telemetry(counter("usage_usec"), counter("nr_throttled"))
+    }
+
+    public fun requireProgress(
+        before: Telemetry,
+        after: Telemetry,
+    ) {
+        require(after.usageUsec > before.usageUsec && after.throttledPeriods >= before.throttledPeriods) {
+            "Native timing container CPU counters did not advance monotonically"
+        }
+    }
+
     public fun schedule(): List<Sample> {
         val orders = listOf("ABC", "BCA", "CAB", "CBA", "BAC", "ACB")
         return orders
@@ -28,6 +123,18 @@ public object TierENativeTimingDiagnostic {
                     .map { mode -> Sample(index = 0, block = block + 1, arm = arm, mode = mode) }
             }
         }.mapIndexed { index, sample -> sample.copy(index = index + 1) }
+    }
+
+    /** Independent preflight: exactly one JVM per arm/mode, never a timing-acceptance series. */
+    public fun readinessSchedule(): List<Sample> = schedule().take(6)
+
+    /** A complete, source-matched six-fork smoke must precede a new diagnostic acquisition. */
+    public fun requireReadiness(
+        output: Path,
+        revision: String,
+        sourceDigest: String,
+    ) {
+        TierENativeTimingReadiness.verify(output, revision, sourceDigest)
     }
 
     public fun parse(

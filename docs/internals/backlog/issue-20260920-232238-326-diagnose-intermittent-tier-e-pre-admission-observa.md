@@ -16,6 +16,8 @@ target_files:
   - "profiler-native/tests/capture_timing_diagnostic_test.cpp"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnostic.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingReadiness.kt"
+  - "profiler/src/test/resources/tier-e/native-timing-first-fork.txt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticTest.kt"
   - "profiler/build.gradle.kts"
   - "docs/internals/evidence/tier-e-generic-native-phase-offline-comparison-20260928/README.md"
@@ -1047,3 +1049,16 @@ later runner preserves per-fork telemetry before parsing. This repair
 does not complete the earlier source's diagnostic, explain the timing
 failure, or authorize an automatic repeat. Any new campaign requires a
 new exact source identity and separately fixed plan.
+
+**Readiness gate for a newly approved campaign:** Before any new
+36-fork series, a distinct, fixed six-fork [readiness
+contract](../designs/profiler/tier-e-native-timing-diagnostic-20260928.md)
+exercises each original/disabled/instrumented agent mode once under the
+same pinned source/image/kernel/CPU profile. The checked-in first-fork
+fixture is byte-identical to the sealed failed log, and strict tests
+also cover clock completeness, original/new binary identities, JDK and
+compiler, cgroup CPU counters/quota/affinity, and a complete ownership
+export. The main Gradle diagnostic task requires an independently
+verified `READINESS_COMPLETE` receipt matching its exact committed
+source. This smoke is separate from the 36-fork budget and cannot
+upgrade the earlier `INCOMPLETE` receipt or policy eligibility.

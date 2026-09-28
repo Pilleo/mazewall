@@ -19,7 +19,7 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
-    if (args.size == 3 && args[0] == "native-timing-diagnostic") {
+    if (args.size in 3..4 && args[0] in setOf("native-timing-readiness", "native-timing-diagnostic")) {
         val endpoint = when (
             val selected = ContainerEndpointDiscovery().discover(
                 EndpointConfig(ContainerEngine.DOCKER, "unix:///var/run/docker.sock"),
@@ -28,7 +28,13 @@ public fun main(args: Array<String>) {
             is EndpointSelection.Ready -> selected.endpoint
             is EndpointSelection.Skipped -> error("Native timing diagnostic requires local rootful Docker: ${selected.reason}")
         }
-        TierENativeTimingDiagnosticRunner.run(Path.of(args[1]), Path.of(args[2]), endpoint)
+        if (args[0] == "native-timing-readiness") {
+            require(args.size == 3) { "Readiness takes source and fresh output only" }
+            TierENativeTimingDiagnosticRunner.readiness(Path.of(args[1]), Path.of(args[2]), endpoint)
+        } else {
+            require(args.size == 4) { "Diagnostic acquisition requires a complete readiness receipt" }
+            TierENativeTimingDiagnosticRunner.runWithReadiness(Path.of(args[1]), Path.of(args[2]), endpoint, Path.of(args[3]))
+        }
         return
     }
     if (args.size == 5 && args[0] == "node-noise-qualification") {

@@ -26,6 +26,44 @@ public object TierENativeTimingDiagnosticRunner {
         output: Path,
         endpoint: ContainerEndpoint,
     ) {
+        execute(root, output, endpoint, readinessOnly = false)
+    }
+
+    /** Isolated, six-fork smoke of every arm/mode; never replaces the 36-fork diagnostic. */
+    public fun readiness(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+    ) {
+        execute(root, output, endpoint, readinessOnly = true)
+    }
+
+    /** The operator CLI cannot launch the 36-fork campaign without an independently complete readiness receipt. */
+    public fun runWithReadiness(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        readiness: Path,
+    ) {
+        require(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri == "unix:///var/run/docker.sock") {
+            "Native timing campaign requires local rootful Docker"
+        }
+        val source = TierESourceFingerprint.read(root.toRealPath())
+        require(source.getValue("input_dirty_count").jsonPrimitive.content == "0") { "Native timing campaign source must be clean" }
+        TierENativeTimingDiagnostic.requireReadiness(
+            readiness,
+            source.getValue("revision").jsonPrimitive.content,
+            source.getValue("source_digest").jsonPrimitive.content,
+        )
+        execute(root, output, endpoint, readinessOnly = false)
+    }
+
+    private fun execute(
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        readinessOnly: Boolean,
+    ) {
         require(endpoint.engine == ContainerEngine.DOCKER && endpoint.resolvedUri == "unix:///var/run/docker.sock") {
             "Native diagnostic requires the explicit local rootful Docker endpoint"
         }
@@ -41,9 +79,11 @@ public object TierENativeTimingDiagnosticRunner {
         require(!Files.exists(output) || Files.list(output).use { it.findAny().isEmpty }) { "Native diagnostic output must be fresh" }
         Files.createDirectories(output)
         val artifacts = output.toRealPath()
-        val id = "tier-e-timing-${UUID.randomUUID()}"
+        val id = "tier-e-timing-${if (readinessOnly) "readiness-" else ""}${UUID.randomUUID()}"
+        val schedule = if (readinessOnly) TierENativeTimingDiagnostic.readinessSchedule() else TierENativeTimingDiagnostic.schedule()
+        val duration = if (readinessOnly) 20L else 45L
         val owner = TierETrustworthyContainerOwner(endpoint, id, artifacts, verifyExport = { exported ->
-            require(Files.isRegularFile(exported.resolve("diagnostic/plan.json"))) { "Diagnostic ownership export incomplete" }
+            TierENativeTimingDiagnostic.verifyExport(artifacts, exported.resolve("diagnostic"), schedule.size)
         })
 
         fun docker(
@@ -58,23 +98,23 @@ public object TierENativeTimingDiagnosticRunner {
 
         fun sensor(file: String): String = runCatching { Files.readString(Path.of(file)).trim() }.getOrElse { "unavailable" }
 
-        fun snapshot(): String {
+        fun snapshot(): Pair<String, TierENativeTimingDiagnostic.Telemetry> {
             val cpuStat = docker("exec", owner.runner, "cat", "/sys/fs/cgroup/cpu.stat")
-            require(Regex("(?m)^usage_usec [0-9]+$").containsMatchIn(cpuStat) && Regex("(?m)^nr_throttled [0-9]+$").containsMatchIn(cpuStat)) {
-                "Diagnostic container cgroup CPU counters unavailable"
-            }
+            val cpuMax = docker("exec", owner.runner, "cat", "/sys/fs/cgroup/cpu.max")
+            val cpus = docker("exec", owner.runner, "cat", "/sys/fs/cgroup/cpuset.cpus.effective")
             val pressure = sensor("/proc/pressure/cpu")
-            require(pressure != "unavailable" && "some avg10=" in pressure) { "Diagnostic host CPU pressure unavailable" }
-            return buildJsonObject {
+            val telemetry = TierENativeTimingDiagnostic.requireTelemetry(cpuStat, cpuMax, cpus, pressure)
+            val report = buildJsonObject {
                 put("utc", Instant.now().toString())
                 put("cpu_stat", cpuStat)
-                put("cpu_max", docker("exec", owner.runner, "cat", "/sys/fs/cgroup/cpu.max"))
-                put("cpuset_effective", docker("exec", owner.runner, "cat", "/sys/fs/cgroup/cpuset.cpus.effective"))
+                put("cpu_max", cpuMax)
+                put("cpuset_effective", cpus)
                 put("host_cpu_pressure", pressure)
                 put("cpu0_khz", sensor("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"))
                 put("cpu2_khz", sensor("/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq"))
                 put("thermal_zone0_millidegrees", sensor("/sys/class/thermal/thermal_zone0/temp"))
             }.toString()
+            return report to telemetry
         }
 
         var failure: Throwable? = null
@@ -110,20 +150,23 @@ public object TierENativeTimingDiagnosticRunner {
             )
             owner.ownRunner()
             docker("start", owner.runner)
+            val java = docker("exec", owner.runner, "java", "-version")
+            val compiler = docker("exec", owner.runner, "c++", "--version").lineSequence().first()
+            TierENativeTimingDiagnostic.requireToolchain(java, compiler)
+            val cmake = docker("exec", owner.runner, "cmake", "--version").lineSequence().first()
             docker("exec", owner.runner, "cmake", "-S", "/source/profiler-native", "-B", "/workspace/profiler-native/build", "-DCMAKE_BUILD_TYPE=Debug")
             docker("exec", owner.runner, "cmake", "--build", "/workspace/profiler-native/build", "-j2")
             val build = "/workspace/profiler-native/build"
             val diagnosticSha = docker("exec", owner.runner, "sha256sum", "$build/libmazewall_stack_agent.so").substringBefore(' ')
-            require(diagnosticSha != ORIGINAL_SHA) { "Diagnostic build unexpectedly equals the original agent" }
             val workload = docker("exec", owner.runner, "sha256sum", "$build/agent-test-classes/AgentWorkload.class").substringBefore(' ')
-            require(workload == WORKLOAD_SHA) { "Diagnostic Java workload bytes changed" }
+            TierENativeTimingDiagnostic.requireBinaryIdentities(sha(original), diagnosticSha, workload)
             docker("cp", original.toString(), "${owner.runner}:$build/original-agent.so")
             require(docker("exec", owner.runner, "sha256sum", "$build/original-agent.so").substringBefore(' ') == ORIGINAL_SHA) {
                 "Original agent changed during diagnostic staging"
             }
             val plan = buildJsonObject {
                 put("schema_version", 1)
-                put("kind", "NON_QUALIFYING_TIMING_DIAGNOSTIC")
+                put("kind", if (readinessOnly) "NON_QUALIFYING_TIMING_READINESS" else "NON_QUALIFYING_TIMING_DIAGNOSTIC")
                 put("run_id", id)
                 put("source_revision", source.getValue("revision").jsonPrimitive.content)
                 put("source_digest", source.getValue("source_digest").jsonPrimitive.content)
@@ -134,15 +177,18 @@ public object TierENativeTimingDiagnosticRunner {
                 put("original_agent_sha256", ORIGINAL_SHA)
                 put("diagnostic_agent_sha256", diagnosticSha)
                 put("workload_class_sha256", WORKLOAD_SHA)
-                put("samples", 36)
+                put("compiler", compiler)
+                put("java", java)
+                put("cmake", cmake)
+                put("samples", schedule.size)
                 put("timeout_seconds_per_fork", 180)
-                put("campaign_timeout_minutes", 45)
+                put("campaign_timeout_minutes", duration)
                 put("policy_eligibility", false)
             }
             Files.writeString(artifacts.resolve("plan.json"), "$plan\n")
             Files.writeString(
                 artifacts.resolve("schedule.jsonl"),
-                TierENativeTimingDiagnostic.schedule().joinToString("\n", postfix = "\n") { sample ->
+                schedule.joinToString("\n", postfix = "\n") { sample ->
                     buildJsonObject {
                         put("index", sample.index)
                         put("block", sample.block)
@@ -157,14 +203,14 @@ public object TierENativeTimingDiagnosticRunner {
             )
             val started = System.nanoTime()
             val rows = mutableListOf<String>()
-            for (sample in TierENativeTimingDiagnostic.schedule()) {
-                check(Duration.ofNanos(System.nanoTime() - started) < Duration.ofMinutes(45)) { "Diagnostic acquisition exceeded 45-minute cap" }
+            for (sample in schedule) {
+                check(Duration.ofNanos(System.nanoTime() - started) < Duration.ofMinutes(duration)) { "Native timing acquisition exceeded $duration-minute cap" }
                 val mode = if (sample.mode == "full") "full-stream" else "unique-stack-syscall"
                 val binary = if (sample.arm == 'A') "original-agent.so" else "libmazewall_stack_agent.so"
                 val option = if (sample.arm == 'C') ",capture-timing-diagnostic" else ""
                 val before = snapshot()
                 val sampleName = "sample-${sample.index.toString().padStart(2, '0')}"
-                Files.writeString(artifacts.resolve("$sampleName-before.json"), "$before\n")
+                Files.writeString(artifacts.resolve("$sampleName-before.json"), "${before.first}\n")
                 val log = artifacts.resolve("$sampleName.log")
                 val result = runContainerCommand(
                     endpoint.command(
@@ -183,7 +229,8 @@ public object TierENativeTimingDiagnosticRunner {
                     outputFile = log,
                 )
                 val after = snapshot()
-                Files.writeString(artifacts.resolve("$sampleName-after.json"), "$after\n")
+                Files.writeString(artifacts.resolve("$sampleName-after.json"), "${after.first}\n")
+                TierENativeTimingDiagnostic.requireProgress(before.second, after.second)
                 check(result.exitCode == 0) { "Diagnostic JVM sample ${sample.index} failed: ${result.exitCode}: ${result.output}" }
                 val observed = TierENativeTimingDiagnostic.parse(sample.arm, sample.mode, Files.readString(log))
                 rows += buildJsonObject {
@@ -196,17 +243,18 @@ public object TierENativeTimingDiagnosticRunner {
                     put("capture_elapsed_ns", observed.captureElapsedNs)
                     put("capture_cpu_ns", observed.captureCpuNs)
                     put("clock_pair_ns", observed.clockPairNs)
-                    put("before", before)
-                    put("after", after)
+                    put("before", before.first)
+                    put("after", after.first)
                     put("sample_log_sha256", sha(log))
                     put("policy_eligibility", false)
                 }.toString()
                 Files.writeString(artifacts.resolve("observations.jsonl"), rows.joinToString("\n", postfix = "\n"))
             }
-            require(rows.size == 36 && docker("image", "inspect", pinned.profile.image, "--format", "{{.Id}}") == pinned.imageId) {
+            require(rows.size == schedule.size && docker("image", "inspect", pinned.profile.image, "--format", "{{.Id}}") == pinned.imageId) {
                 "Diagnostic sample count or image ID changed"
             }
-            Files.writeString(artifacts.resolve("diagnostic-terminal.json"), """{"status":"DIAGNOSTIC_COMPLETE","policy_eligibility":false}""" + "\n")
+            val status = if (readinessOnly) "READINESS_COMPLETE" else "DIAGNOSTIC_COMPLETE"
+            Files.writeString(artifacts.resolve("diagnostic-terminal.json"), """{"status":"$status","policy_eligibility":false}""" + "\n")
             docker("exec", owner.runner, "mkdir", "-p", "/artifacts/diagnostic")
             docker("cp", "$artifacts/.", "${owner.runner}:/artifacts/diagnostic/")
             owner.export()

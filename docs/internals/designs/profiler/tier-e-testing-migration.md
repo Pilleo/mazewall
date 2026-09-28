@@ -527,6 +527,11 @@ These are still substantive controllers, not thin launchers:
        Later source tests correct the parser and persist pre/post
        telemetry before parsing; the stopped 36-sample series is still
        `INCOMPLETE`, with no paired timing conclusion or automatic retry.
+       A separately owned, source-matched six-fork readiness lane now
+       exercises all A/B/C modes and verifies clock, cgroup, toolchain,
+       parser, sample hash and complete host export contracts. Only a
+       verified `READINESS_COMPLETE` receipt may admit another fixed
+       36-fork diagnostic; neither lane qualifies the historical gate.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

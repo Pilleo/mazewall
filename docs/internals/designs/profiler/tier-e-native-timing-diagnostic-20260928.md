@@ -20,6 +20,38 @@
 - Verify all identity, telemetry and workload contracts before interpretation; a slow sample is retained, an identity/missing-telemetry failure stops acquisition as `INCOMPLETE`.
 - Never modify `.gitignore`, `docs/internals/backlog/README.md`, `.omo/`, or operator-owned untracked issues. Scoped code and evidence only; no new dependencies, ABI change or capture policy change.
 
+## Pre-acquisition readiness (separate from the 36-fork budget)
+
+Before starting another diagnostic acquisition after the `005086b9` parser
+stop, run a separate **six-fork, non-qualifying** readiness lane on the same
+clean committed source and pinned image. Its order is A/full, A/unique,
+B/full, B/unique, C/full, C/unique; each arm/mode runs once and has its own
+three-minute timeout. The six-fork lane has a 20-minute acquisition cap and
+stops on the first incomplete workload, missing clock, changed image/binary,
+cgroup quota/affinity mismatch, telemetry failure, or failed export. It
+does not estimate A/B or B/C performance, replace the 36-fork comparison,
+or change the historical `GetStackTrace` acceptance bound. Every sample is
+retained, including slow ones.
+
+The acquisition CLI requires the separately owned readiness receipt. Before
+allowing a 36-fork run, verify its `READINESS_COMPLETE`,
+`policy_eligibility=false` terminal, source revision and digest, exact
+kernel/config/image/agent/workload/toolchain IDs, six ordered raw sample
+hashes, complete host telemetry and byte-matched owner export. A failed
+readiness run blocks the campaign; it cannot be extended or silently
+restarted. Preserve it as a separate `INCOMPLETE` terminal.
+
+From a clean source clone, pass fresh distinct output directories:
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:tierENativeTimingReadiness -PtierEOutput=/absolute/readiness --max-workers=1
+DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:tierENativeTimingDiagnostic -PtierEOutput=/absolute/diagnostic -PtierEReadiness=/absolute/readiness --max-workers=1
+```
+
+The second command is admitted only after independently verifying the first
+command's source-bound receipt and completing all host build checks. Both
+lanes retain only diagnostic evidence; neither promotes policy eligibility.
+
 ## File and interface map
 
 - `profiler-native/include/capture_timing_diagnostic.hpp`: bounded, opt-in clock accounting (`CaptureTimingDiagnostic::begin()/finish()`, `snapshot()`), fail-closed clock and migration observations; no per-capture allocation.
@@ -28,6 +60,7 @@
 - `profiler-native/CMakeLists.txt`: register test and two CTest fixture variants. Both run `AgentWorkload 0 platform 100` in full and unique modes; C includes the explicit diagnostic option.
 - `profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnostic.kt`: pure fixed schedule and fail-closed sample parser, separate from the rootful phase receipt.
 - `profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticRunner.kt`: source-clean, pinned-image three-arm acquisition, owned resource lifecycle, per-fork host telemetry and non-qualifying receipts.
+- `profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingReadiness.kt`: fail-closed, read-only cross-check of readiness plan, fixed six-sample schedule, raw sample/telemetry hashes and owner export before acquisition.
 - `profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticTest.kt`: schedule/stop/identity/missing-telemetry and non-promotion tests.
 - `config/testing/tier-e/rootful-gate-pinned.json`: existing exact image/CPU profile, checked against diagnostic constants; per-run `plan.json` and `schedule.jsonl` seal identities, sample budget and timeout before acquisition.
 - `docs/internals/evidence/tier-e-native-timing-diagnostic-20260928/`: predeclared identity/schedule followed by raw artifact checksums, all results and a bounded decision; scoped backlog and testing-design links.
