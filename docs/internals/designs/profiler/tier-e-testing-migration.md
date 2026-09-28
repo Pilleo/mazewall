@@ -549,8 +549,19 @@ These are still substantive controllers, not thin launchers:
        diagnostic B had similar bounded phase medians; enabled C
        materially altered the phase wall clock. Individual capture
        wait evidence is mixed, so this does not explain the earlier
-       timing stop or replace exact-source three-run phase acceptance,
-       the pinned rootful aggregate, or default promotion.
+        timing stop or replace exact-source three-run phase acceptance,
+        the pinned rootful aggregate, or default promotion.
+        The next source-frozen `2a886864` [acceptance
+        attempt](../../evidence/tier-e-2a886864-native-identity-stop-20260929/README.md)
+        stopped after its first native phase, which itself passed all
+        unchanged version-two bounds. Its Gradle Debug package full
+        SHA differed from the diagnostic-built SHA fixed before the
+        plan; their executable `.text` matched, but their source/build
+        Debug path provenance differed. The enclosing source-bound
+        decision is `INCOMPLETE`; two further phases, fresh five-pair
+        correctness and the pinned rootful aggregate were not run.
+        Source or build identity cannot be revised after measuring to
+        convert this stopped plan into an acceptance pass.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

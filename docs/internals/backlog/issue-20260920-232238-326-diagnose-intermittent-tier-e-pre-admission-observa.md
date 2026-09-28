@@ -7,6 +7,11 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/README.md"
+  - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/manifest.json"
+  - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/preflight-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/phase-raw.tar.gz"
   - "docs/internals/evidence/tier-e-native-timing-complete-20260929/README.md"
   - "docs/internals/evidence/tier-e-native-timing-complete-20260929/manifest.json"
   - "docs/internals/evidence/tier-e-native-timing-complete-20260929/SHA256SUMS"
@@ -1113,3 +1118,25 @@ the historical gate. The new source has **not** passed its separate
 three-run native phase gate or pinned-image rootful aggregate;
 `policy_eligibility=false`, `REJECT_DEFAULT_PROMOTION` and the
 old source's `INCOMPLETE` terminals stay unchanged.
+
+**Exact-source `2a886864` acceptance attempt stopped on native binary
+identity after phase 1:** The [sealed source-bound first-failure
+receipt](../evidence/tier-e-2a886864-native-identity-stop-20260929/README.md)
+predeclared three 3+3-sample native phase runs with an unchanged
+125% version-two baseline, followed only conditionally by the
+same-source five-pair exact-operation and pinned-image aggregate
+gates. The first phase runner and both of its comparable modes were
+`COMPLETE` / `PASS` (full `GetStackTrace` median 1,626,989 ns;
+unique 1,574,099 ns versus historical 2,307,381 ns limit).
+Its Gradle-built Debug agent full SHA-256 **`15914500...`** differed
+from the plan-fixed diagnostic-built **`9dafc149...`**. Both retained
+binaries have identical 204,058-byte executable `.text` but their
+Debug strings show different source/build paths; this does not waive
+the full-binary identity rule. The enclosing plan remains
+`INCOMPLETE`: native phases 2–3, five-pair correctness and rootful
+aggregate were **not run**. The successful phase owned runner/volume
+retired after verified export; raw packages and both binaries are
+retained in the 37-file checksum ledger. Historical timing failures
+and default-promotion rejection remain unchanged. A new acceptance
+attempt requires an independently predeclared source/build-identity
+contract; never substitute the measured binary post hoc.
