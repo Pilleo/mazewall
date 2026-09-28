@@ -7,6 +7,8 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-generic-native-phase-offline-comparison-20260928/README.md"
+  - "docs/internals/evidence/tier-e-generic-native-phase-offline-comparison-20260928/SHA256SUMS"
   - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/SHA256SUMS"
@@ -998,3 +1000,17 @@ regression is established by this observation. No retry, baseline
 change, perf fallback or promotion follows from this `INCOMPLETE` phase
 terminal. The older `fbbaad44` generic five-pair and three-phase pass
 remain valid only for their own committed source.
+
+**Offline native timing comparison — no new acquisition:** The
+[retained-sample comparison](../evidence/tier-e-generic-native-phase-offline-comparison-20260928/README.md)
+reads all 18 earlier passing and six newer failed CTest samples. Unique
+`GetStackTrace` increased together with canonical lookup, workload elapsed
+time and publication-thread CPU time, despite identical measured Debug agent
+and workload bytes and unchanged 514-capture / 504-hit workload counts.
+`GetStackTrace` is measured on an elapsed clock; the publication CPU counter
+does not isolate capture CPU. The logs have no per-sample run-queue, throttle,
+frequency or capture-thread CPU observations. Neither scheduling variance
+nor a source regression is proven. Do not pool samples across source
+revisions, retry for a pass, or weaken the current limit; a separately
+predeclared, non-qualifying diagnostic and reviewed acceptance decision would
+be needed before any new timing contract.

@@ -508,6 +508,14 @@ These are still substantive controllers, not thin launchers:
        timing passes cannot be transferred across source revisions.
        No timing threshold, image, default backend or eligibility was
        silently changed to pass this stop.
+       A [read-only retained-sample comparison](../../evidence/tier-e-generic-native-phase-offline-comparison-20260928/README.md)
+       found higher unique `GetStackTrace`, canonical lookup, Java
+       workload elapsed and publication-thread CPU timings alongside
+       unchanged capture/cache counts and byte-identical native agent
+       and workload. The stack phase uses elapsed time; the available
+       CPU counter measures publication only. These records cannot
+       distinguish preemption, host-frequency effects or other timing
+       changes, and do not change the source-bound failed verdict.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
