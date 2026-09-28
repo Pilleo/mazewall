@@ -13,8 +13,10 @@
 #include <fstream>
 #include <mutex>
 #include <memory>
+#include <sched.h>
 #include <stdexcept>
 #include <string>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <thread>
 #include <type_traits>
@@ -25,6 +27,7 @@
 
 #include "binding_manifest.hpp"
 #include "capture_profile.hpp"
+#include "capture_timing_diagnostic.hpp"
 #include "capture_yield_recorder.hpp"
 #include "invocation_fd_recorder.hpp"
 #include "invocation_registry.hpp"
@@ -58,6 +61,8 @@ std::atomic<std::uint64_t> scope_failures{0};
 std::atomic<std::uint64_t> virtual_pinned_scopes{0};
 std::atomic<std::uint64_t> virtual_pinned_nanos{0};
 std::atomic<std::uint64_t> benchmark_get_stack_trace_nanos{0};
+mazewall::profiler::CaptureTimingDiagnostic capture_timing_diagnostic;
+bool capture_timing_diagnostic_enabled = false;
 std::atomic<std::uint64_t> benchmark_raw_key_nanos{0};
 std::atomic<std::uint64_t> benchmark_canonical_cache_lookup_nanos{0};
 std::atomic<std::uint64_t> benchmark_raw_hash_nanos{0};
@@ -149,6 +154,26 @@ std::uint64_t thread_cpu_nanos() noexcept {
     if (::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &current) != 0) return 0;
     return static_cast<std::uint64_t>(current.tv_sec) * 1'000'000'000ull +
         static_cast<std::uint64_t>(current.tv_nsec);
+}
+
+mazewall::profiler::CaptureClockReading read_capture_clock() noexcept {
+    timespec wall{};
+    timespec cpu{};
+    rusage usage{};
+    const auto wallOk = ::clock_gettime(CLOCK_MONOTONIC, &wall) == 0;
+    const auto cpuOk = ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu) == 0;
+    const auto cpuId = ::sched_getcpu();
+    const auto usageOk = ::getrusage(RUSAGE_THREAD, &usage) == 0;
+    if (!wallOk || !cpuOk || cpuId < 0 || !usageOk || wall.tv_sec < 0 || cpu.tv_sec < 0 ||
+        wall.tv_nsec < 0 || wall.tv_nsec >= 1'000'000'000 || cpu.tv_nsec < 0 || cpu.tv_nsec >= 1'000'000'000 ||
+        usage.ru_nvcsw < 0 || usage.ru_nivcsw < 0) {
+        return {0, 0, -1, 0, 0, false};
+    }
+    return {
+        static_cast<std::uint64_t>(wall.tv_sec) * 1'000'000'000ull + static_cast<std::uint64_t>(wall.tv_nsec),
+        static_cast<std::uint64_t>(cpu.tv_sec) * 1'000'000'000ull + static_cast<std::uint64_t>(cpu.tv_nsec),
+        cpuId, static_cast<std::uint64_t>(usage.ru_nvcsw), static_cast<std::uint64_t>(usage.ru_nivcsw), true,
+    };
 }
 
 bool write_definitions(bool producer_closed = false) noexcept;
@@ -1112,12 +1137,14 @@ private:
         }
         const auto capture_epoch = capture_lease.value;
         const auto stack_trace_started = benchmark_started();
+        const auto diagnostic_started = capture_timing_diagnostic.begin(capture_timing_diagnostic_enabled, read_capture_clock);
         const auto result = global_jvmti->GetStackTrace(
             current_thread_,
             0,
             static_cast<jint>(frames.size()),
             frames.data(),
             &frame_count);
+        capture_timing_diagnostic.finish(diagnostic_started, read_capture_clock);
         if (benchmark_phases) benchmark_get_stack_trace_nanos.fetch_add(elapsed_nanos(stack_trace_started), std::memory_order_relaxed);
         if (result != JVMTI_ERROR_NONE || frame_count <= 0) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
@@ -1813,6 +1840,9 @@ bool parse_options(const char* options) {
             }
         } else if (option == "benchmark-phases") {
             benchmark_phases = true;
+        } else if (option == "capture-timing-diagnostic") {
+            if (capture_timing_diagnostic_enabled) return false;
+            capture_timing_diagnostic_enabled = true;
         } else if (option == "capture-profile=jdk25-unix-openat0") {
             capture_profile = *mazewall::profiler::CaptureProfile::parse("jdk25-unix-openat0");
         } else if (option.starts_with("capture-bindings=")) {
@@ -1833,6 +1863,7 @@ bool parse_options(const char* options) {
         if (end == std::string::npos) break;
         start = end + 1;
     }
+    if (capture_timing_diagnostic_enabled && !benchmark_phases) return false;
     if (!definitions_path.empty()) {
         const auto replace = [](std::string& value, const std::string& needle, const std::string& replacement) {
             std::size_t position = 0;
@@ -1991,6 +2022,29 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
             static_cast<unsigned long long>(benchmark_marker_admission_clear_count.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_marker_exact_set_count.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(benchmark_marker_exit_clear_count.load(std::memory_order_relaxed)));
+    }
+    if (capture_timing_diagnostic_enabled) {
+        const auto capture = capture_timing_diagnostic.snapshot();
+        std::uint64_t clock_pair_nanos = 0;
+        bool clock_pair_valid = true;
+        for (int sample = 0; sample < 128; ++sample) {
+            const auto started = std::chrono::steady_clock::now();
+            const auto first = read_capture_clock();
+            const auto second = read_capture_clock();
+            if (!first.valid || !second.valid) clock_pair_valid = false;
+            clock_pair_nanos += elapsed_nanos(started);
+        }
+        std::fprintf(stderr,
+                     "capture-timing-diagnostic: attempted=%llu completed=%llu invalid=%llu elapsed_ns=%llu cpu_ns=%llu migrations=%llu voluntary_switches=%llu involuntary_switches=%llu clock_pair_ns=%llu clock_pair_valid=%d\n",
+                     static_cast<unsigned long long>(capture.attempted),
+                     static_cast<unsigned long long>(capture.completed),
+                     static_cast<unsigned long long>(capture.invalid),
+                     static_cast<unsigned long long>(capture.elapsedNs),
+                     static_cast<unsigned long long>(capture.cpuNs),
+                     static_cast<unsigned long long>(capture.migrations),
+                     static_cast<unsigned long long>(capture.voluntarySwitches),
+                     static_cast<unsigned long long>(capture.involuntarySwitches),
+                     static_cast<unsigned long long>(clock_pair_nanos / 128), clock_pair_valid ? 1 : 0);
     }
     JNIEnv* env = nullptr;
     if (vm != nullptr && vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_8) == JNI_OK) {

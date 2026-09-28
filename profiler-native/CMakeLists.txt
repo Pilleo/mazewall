@@ -89,6 +89,11 @@ target_include_directories(symbolization_generation_test PRIVATE include)
 target_compile_options(symbolization_generation_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME symbolization_generation_test COMMAND symbolization_generation_test)
 
+add_executable(capture_timing_diagnostic_test tests/capture_timing_diagnostic_test.cpp)
+target_include_directories(capture_timing_diagnostic_test PRIVATE include)
+target_compile_options(capture_timing_diagnostic_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME capture_timing_diagnostic_test COMMAND capture_timing_diagnostic_test)
+
 add_executable(lifecycle_identity_fixture tests/lifecycle_identity_fixture.cpp)
 target_compile_options(lifecycle_identity_fixture PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME lifecycle_identity_fixture COMMAND lifecycle_identity_fixture)
@@ -151,6 +156,13 @@ add_test(
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=full-stream,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-comparable-full.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
 set_tests_properties(agent_phase_comparable_full PROPERTIES PASS_REGULAR_EXPRESSION "canonical_cache_lookup_ns=[1-9][0-9]*")
+set_tests_properties(agent_phase_comparable_full PROPERTIES FAIL_REGULAR_EXPRESSION "capture-timing-diagnostic:")
+
+add_test(
+    NAME agent_capture_timing_diagnostic_full
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-timing-diagnostic,mode=full-stream" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_capture_timing_diagnostic_full PROPERTIES PASS_REGULAR_EXPRESSION "capture-timing-diagnostic: attempted=514 completed=514 invalid=0 .*clock_pair_ns=[1-9][0-9]*")
 
 add_test(
     NAME agent_capture_profile_jdk25_openat
@@ -194,6 +206,13 @@ add_test(
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,mode=unique-stack-syscall,definitions=${CMAKE_CURRENT_BINARY_DIR}/tier-e-comparable-unique.mzsd" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
 )
 set_tests_properties(agent_phase_comparable_unique PROPERTIES PASS_REGULAR_EXPRESSION "canonical_cache_lookup_ns=[1-9][0-9]*")
+set_tests_properties(agent_phase_comparable_unique PROPERTIES FAIL_REGULAR_EXPRESSION "capture-timing-diagnostic:")
+
+add_test(
+    NAME agent_capture_timing_diagnostic_unique
+    COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases,capture-timing-diagnostic,mode=unique-stack-syscall" -cp "${AGENT_TEST_CLASSES}" AgentWorkload 0 platform 100
+)
+set_tests_properties(agent_capture_timing_diagnostic_unique PROPERTIES PASS_REGULAR_EXPRESSION "capture-timing-diagnostic: attempted=514 completed=514 invalid=0 .*clock_pair_ns=[1-9][0-9]*")
 
 add_test(
     NAME agent_phase_benchmark_full_disabled

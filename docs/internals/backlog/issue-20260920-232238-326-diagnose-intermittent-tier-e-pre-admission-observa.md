@@ -7,6 +7,13 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/designs/profiler/tier-e-native-timing-diagnostic-20260928.md"
+  - "profiler-native/include/capture_timing_diagnostic.hpp"
+  - "profiler-native/tests/capture_timing_diagnostic_test.cpp"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnostic.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticRunner.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeTimingDiagnosticTest.kt"
+  - "profiler/build.gradle.kts"
   - "docs/internals/evidence/tier-e-generic-native-phase-offline-comparison-20260928/README.md"
   - "docs/internals/evidence/tier-e-generic-native-phase-offline-comparison-20260928/SHA256SUMS"
   - "docs/internals/evidence/tier-e-generic-pinned-image-phase-stop-20260928/README.md"
@@ -1014,3 +1021,12 @@ nor a source regression is proven. Do not pool samples across source
 revisions, retry for a pass, or weaken the current limit; a separately
 predeclared, non-qualifying diagnostic and reviewed acceptance decision would
 be needed before any new timing contract.
+
+**Non-qualifying timing diagnostic design:** The operator approved a
+[fixed 36-fork, three-arm diagnostic](../designs/profiler/tier-e-native-timing-diagnostic-20260928.md).
+The opt-in native capture clock and separate runner collect paired
+elapsed/thread-CPU counters and host scheduling/cgroup context under the
+same pinned image; original-agent A and diagnostic build B/C have distinct
+hash-bound provenance. This does not alter the historical first-phase
+failure, original 125% bound, or `policy_eligibility=false`. No diagnostic
+sample is admissible as rootful aggregate or native phase reuse evidence.

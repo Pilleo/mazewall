@@ -268,6 +268,20 @@ tasks.register<JavaExec>("tierERootfulPhaseProbe") {
     }
 }
 
+tasks.register<JavaExec>("tierENativeTimingDiagnostic") {
+    group = "verification"
+    description = "Non-qualifying, fixed-budget three-arm native capture timing diagnostic"
+    classpath = toolingSourceSet.runtimeClasspath
+    workingDir(rootProject.projectDir)
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEToolsMainKt")
+    val output = providers.gradleProperty("tierEOutput")
+    val repositoryPath = rootProject.projectDir.absolutePath
+    doFirst {
+        require(output.isPresent) { "Pass -PtierEOutput=/path/to/fresh-artifacts" }
+        args("native-timing-diagnostic", repositoryPath, output.get())
+    }
+}
+
 tasks.register<JavaExec>("tierERootfulGate") {
     group = "verification"
     description = "Fresh rootful Docker verification with source-keyed native and Gradle build reuse"

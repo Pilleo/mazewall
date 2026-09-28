@@ -516,6 +516,11 @@ These are still substantive controllers, not thin launchers:
        CPU counter measures publication only. These records cannot
        distinguish preemption, host-frequency effects or other timing
        changes, and do not change the source-bound failed verdict.
+       The [separately approved native timing diagnostic](tier-e-native-timing-diagnostic-20260928.md)
+       uses a fixed 36-fork A/B/C source-bound experiment, with opt-in
+       capture-thread CPU/elapsed clocks and recorded host telemetry.
+       Its output is diagnostic only; the historical phase limit and
+       stopped rootful aggregate remain intact.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
