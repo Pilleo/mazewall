@@ -1,0 +1,41 @@
+{
+  "schema_version": 4,
+  "qualification": "COMPLETE_INSTRUMENTED_ONLY",
+  "policy_eligibility": false,
+  "default_promotion": "REJECT_DEFAULT_PROMOTION",
+  "predeclared_plan_sha256": "c0525c5aae31786d2ca4cbe7c89f5317212a7304325d83725904790c72539f7d",
+  "source_revision": "5959b108887c6c1f42aea70d89a5ae17c3538bad",
+  "source_dirty_count": 0,
+  "source_benchmark_input_dirty_count": 0,
+  "source_fingerprint": "2ec726188142011ff4a5a66305cb16a959046c3affd94328ee141a61ea0ffbc3",
+  "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+  "native_agent_sha256": "118d12826fd8b09017f12e684e915a9d5ce7ab2a4b91be7402b3f780e3b99532",
+  "control_profile_sha256": "eeff01c1df21da4dcfba08a94419e62a41fb8e1982b756fdcfbe72d90551dd0d",
+  "noisy_profile_sha256": "75dc3aa8587d183e6855fec7d8bb1a800fd3b57097776288e9e5647c5dd8ad22",
+  "arm_order": ["control", "noisy"],
+  "completed_instrumented_pairs": 1,
+  "target_cpu_set": "0,1",
+  "noise_cpu": 2,
+  "noise_sample_seconds": 3,
+  "noise_first_full_workload_pid": 3630313,
+  "operations_per_mode": 10000,
+  "rate_per_second": 1000,
+  "forks_per_mode_per_arm": 1,
+  "four_fork_contract": {
+    "raw_target_ids_per_fork": 10000,
+    "main_exact_submissions_per_fork": 10000,
+    "raw_before_and_after_session_per_fork": 10000,
+    "main_before_and_after_session_per_fork": 10000,
+    "exported_sidecar_rows_per_fork": 10000,
+    "kernel_exact_and_ring_ready_per_fork": 30000,
+    "kernel_ring_loss_per_fork": 0,
+    "per_fork_sidecar_sha256": {
+      "control_full": "fbe771625a94475b1fadfd6bac552d7acd004075b2b27bea3751c0b462296991",
+      "control_unique": "4484cfd6f3daef4473fc14e13ea50cc2395839c15c2b925531bb67f096a11a04",
+      "noisy_full": "6252ee3200e1f644482293737d6bf8faf4be045c0d09f1a923943fbc100e5b43",
+      "noisy_unique": "74751fa297c841d62f1eb114d469591e7f306369757894de397635cb19e32ca8"
+    }
+  },
+  "gradle_launcher": "preinstalled Gradle 9.8.0 on untouched clean committed-wrapper checkout",
+  "host_local_artifacts": "/tmp/tier-e-v4-reviewed-clean-1790552612*"
+}

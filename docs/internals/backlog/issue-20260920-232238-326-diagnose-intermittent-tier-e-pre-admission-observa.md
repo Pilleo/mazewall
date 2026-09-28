@@ -73,6 +73,10 @@ target_files:
   - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/manifest.json"
   - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/SHA256SUMS"
   - "docs/internals/evidence/tier-e-v4-reviewed-artifact-verifier-20260927/raw-verifier.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/raw-pair.tar.gz"
 target_symbols:
   - "TierEKernelSmoke"
 open_questions: false
@@ -532,3 +536,19 @@ against the *same retained exported files* then passed without another
 kernel run. The original terminal is **not retroactively upgraded**. The
 runner and volume remain retained. This is still source-dirty development
 evidence: no clean-source v4 pair or default qualification is claimed.
+
+**One clean reviewed-v4 diagnostic pair:** The [sealed clean control/noisy
+receipt](../evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/README.md)
+pins committed `5959b108`, one source fingerprint, image/native agent,
+target CPUs `0,1` and unrelated CPU `2`. Both full+unique forks in each
+arm recovered all **10,000/10,000** declared raw target IDs, main exact
+submissions and target-qualified raw/main pre-/post-session counts. All
+four 10,000-row sidecars were atomically published and checked against
+their fork, **workload PID**, SHA-256, schema and sorted IDs before their
+source volume was retired. Every fork retained 30,000/30,000 kernel
+exact/ring-ready records and zero ring loss. The separate noise sample
+overlapped the observed first full-stream PID only; later unique-mode
+overlap was not measured. This **single instrumented pair** is not a
+reproduction or cause of the earlier opposite misses, nor the five-pair
+unaudited decision. No current-source native timing PASS or policy
+promotion is claimed; stop rather than rerunning until green.

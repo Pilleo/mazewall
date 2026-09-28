@@ -300,8 +300,15 @@ These are still substantive controllers, not thin launchers:
    PID was wrongly compared with the sidecar's target JVM PID. A corrected
    verifier passed an offline replay over the exact retained files; the
    original `INCOMPLETE` terminal remains unchanged. A separately
-   predeclared clean-source diagnostic is still pending, and the default
-   five-pair unaudited decision remains incomplete.
+    predeclared clean-source diagnostic is still pending, and the default
+    five-pair unaudited decision remains incomplete.
+    The [clean reviewed-v4 pair](../../evidence/tier-e-clean-v4-reviewed-pre-gate-20260927/README.md)
+    then completed both full+unique forks per arm with complete 10,000-ID
+    raw/main per-stage sidecars independently bound to workload PID, fork
+    and SHA-256; every raw, exact and ring oracle matched. This remains one
+    source-matched **instrumented** positive, not proof of the intermittent
+    cause and not the still-incomplete five-pair unaudited gate. Unique-mode
+    noise overlap was not measured.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
