@@ -854,3 +854,12 @@ exited 0 but remains retained with its source volume. Arms 2–4 did not
 run. No retroactive success is inferred from parsing the old files with
 a corrected verifier. A regression-backed host-only fix requires a new
 source revision and separately predeclared comparison series.
+
+**Host-export parser correction:** A regression fixture reproduced the
+exact `attachment_ready` plus final-report sequence from the sealed arm
+and failed with `comparison lacks unique target report`. Host settlement
+now selects the single versioned final comparison report while still
+rejecting a missing or duplicate final receipt. Focused V5 archive
+verification remains unchanged. This source change does not modify or
+reclassify the original `7d0c8453` `INCOMPLETE` terminal; it permits
+only a new committed-source, separately identified comparison series.

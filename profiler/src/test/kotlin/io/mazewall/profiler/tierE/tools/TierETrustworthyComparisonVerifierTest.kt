@@ -35,7 +35,8 @@ class TierETrustworthyComparisonVerifierTest {
         val content = "root=/workload\nfd=13\nfd=14\n"
         val declared = output.resolve("declared-ids-$variant-fork-1.manifest")
         val log = Files.createDirectory(output.resolve("child-logs")).resolve("$variant-fork-1.log")
-        val report = "tier-e-pre-gate-affinity: workload_cpu=0 threads=13 launched_pinned=true\n" +
+        val report = "tier-e-kernel-smoke: attachment_ready=true workload_pid=4321\n" +
+            "tier-e-pre-gate-affinity: workload_cpu=0 threads=13 launched_pinned=true\n" +
             "tier-e-kernel-smoke: workload_pid=4321 sustained_comparison_contract_version=1 " +
             "sustained_comparison_declared=PASS sustained_comparison_diagnostic=DISABLED sustained_comparison_qualification=UNVERIFIED " +
             "declared_ids_evidence_file=/artifacts/${declared.fileName} declared_ids_evidence_rows=2 " +

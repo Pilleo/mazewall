@@ -428,6 +428,12 @@ These are still substantive controllers, not thin launchers:
        runner and volume were retained and arms 2–4 did not run. A
        source-pinned fix needs a new plan. Offline reparsing cannot make
        that original host-failed terminal a qualified arm.
+       A targeted red/green host regression reproduced the two
+       `tier-e-kernel-smoke:` lines and now selects only the versioned
+       final comparison report. It still requires exactly one such
+       report, while historical V5 settlement remains unchanged.
+       This is a new source contract; the failed `7d0c8453` terminal
+       remains untouched and a fresh fixed-budget plan is required.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical

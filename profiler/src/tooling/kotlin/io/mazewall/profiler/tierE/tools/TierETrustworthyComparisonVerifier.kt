@@ -66,7 +66,9 @@ internal object TierETrustworthyComparisonVerifier {
             Regex("tier-e-pre-gate-affinity: workload_cpu=([0-9]+) threads=([1-9][0-9]*) launched_pinned=true").matchEntire(it)
         }
         check(selected != null && selected.groupValues[1] == cpu) { "comparison did not pin every target JVM thread before gate release" }
-        val report = entries.singleOrNull { it.startsWith("tier-e-kernel-smoke: ") }
+        val report = entries.singleOrNull {
+            it.startsWith("tier-e-kernel-smoke: ") && "sustained_comparison_contract_version=" in it
+        }
             ?: error("comparison lacks unique target report")
 
         fun field(key: String): String =
