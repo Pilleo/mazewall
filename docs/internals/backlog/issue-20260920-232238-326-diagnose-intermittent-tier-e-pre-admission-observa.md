@@ -7,6 +7,11 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/README.md"
+  - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/five-pair-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/native-phase-raw.tar.gz"
   - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/README.md"
   - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/manifest.json"
   - "docs/internals/evidence/tier-e-five-pair-unaudited-cpu-pinned-stop-20260928/SHA256SUMS"
@@ -919,3 +924,26 @@ qualification is **not passed**, `policy_eligibility=false`, and
 under the same contract; a separate supported-kernel/backend decision
 is now needed before another promotion attempt. Native timing is a
 separate gate, not a substitute for this failed operation oracle.
+
+**Same-host generic-kernel decision — exact candidate, not causal proof:**
+After a verified boot to Ubuntu `7.0.0-34-generic`, the [sealed
+source-matched decision](../evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/README.md)
+used the identical previously measured `fbbaad44` source revision and
+fingerprint, original 10,000-operation/1,000/s unaudited profile,
+rootful image and Release agent bytes, and CPU `0,2`/noise CPU 3.
+The fresh five-pair Kotlin AB/BA gate **completed all five ordered pairs
+and all 20 full/unique forks at 10,000/10,000 declared operations** with
+zero missing/wrong/duplicate/unclassified IDs and no ring loss.
+Each noisy arm's three-second overlap and PID marker belonged to its
+first full-stream fork, not necessarily its later unique fork. The
+independent historical native phase lane also completed **three fresh
+six-sample runs**, with both modes within all unchanged version-two
+bounds; the Debug agent is separately hash-bound to the same source and
+image. XanMod `7.2.8` remains `INCOMPLETE`, and the kernels differ in
+version and configuration; no specific XanMod patch or BPF guard is
+proven responsible. Mark only **Ubuntu `7.0.0-34-generic` with this exact
+source/image/CPU contract** as a candidate supported environment.
+`policy_eligibility=false`, `REJECT_DEFAULT_PROMOTION`; the generic
+rootful aggregate test suite, deferred Podman parity and operator
+promotion decision are separate. This issue remains open for the
+unsupported XanMod observation gap; no restart of its failed series.

@@ -463,6 +463,23 @@ These are still substantive controllers, not thin launchers:
        stopped runner and volume, reject promotion, and require an explicit
        supported-kernel/backend decision before a different acceptance
        attempt; historical native timing remains its own gate.
+       Rebooting the *same host* to Ubuntu `7.0.0-34-generic` enabled a
+       separately predeclared [exact-source kernel comparison](../../evidence/tier-e-generic-7-0-0-34-five-pair-and-phase-20260928/README.md).
+       With unchanged `fbbaad44` source/fingerprint, image, Release
+       agent, CPUs `0,2`/noise 3 and all original unaudited workload
+       bounds, the five-pair AB/BA gate completed **5/5 pairs and
+       20/20 full/unique exact 10,000-ID forks**. The attached-noise
+       marker proves overlap for each noisy arm's first full-stream
+       fork only. Three separate 3+3-sample native timing phase runs
+       on the same source/image/kernel/CPU set passed the unchanged
+       historical GetStackTrace and total bounds with one hash-bound
+       Debug agent; this is not the Release correctness agent binary.
+       This is a candidate **exact generic-kernel environment**, not
+       evidence that a specific XanMod patch caused the previously
+       retained `INCOMPLETE` terminal. Default promotion remains
+       rejected with `policy_eligibility=false`; generic rootful merge
+       suite, operator support decision and deferred Podman parity remain
+       separate from these completed correctness and timing gates.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
