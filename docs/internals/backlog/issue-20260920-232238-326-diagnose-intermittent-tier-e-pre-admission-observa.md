@@ -7,6 +7,10 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/README.md"
+  - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/manifest.json"
+  - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-invocation-marker-join-pilot-stop-20260928/raw-pilot.tar.gz"
   - "profiler-native/CMakeLists.txt"
   - "profiler-native/src/agent.cpp"
   - "profiler-native/include/invocation_fd_recorder.hpp"
@@ -744,3 +748,21 @@ numeric inventory for extended builder/engine/harness declarations; no
 global threshold or new warning category was adopted. A source-clean
 pilot that proves a complete 1:1 native-to-raw/main join is required
 before any full 10,000-operation diagnostic acquisition.
+
+**One source-clean 200-operation feasibility pilot stopped, not retried:**
+The [sealed `42211aa6` marker-join pilot](../evidence/tier-e-invocation-marker-join-pilot-stop-20260928/README.md)
+verified every target-authored FD against one native marker ID, one raw
+token, one main token and both FD-stage checkpoints; 200/200 target events
+were on CPU 0, with zero ring loss. It nevertheless stopped `INCOMPLETE`
+under its predeclared **zero witness failure** rule: raw and main each
+reported three *additional* target `openat` calls with an unavailable
+marker ID during the shared arm. Both early target counts were 203, and
+the no-token counters were 3/3. These aggregates are compatible with
+ambient target traffic but are not per-ID kernel guard evidence. The
+source-clean first terminal, exact stopped runner and artifact volume are
+retained. No 10,000-operation or unaudited gate follows from this result.
+A separate source and experiment contract would need a tested positive
+conservation condition: every declared ID has both tokens and both FD
+stages exactly once, all other witness failures are zero, and only the
+early-target surplus equals the no-token counters. Any missing declared
+token leaves that surplus unattributable and remains `INCOMPLETE`.

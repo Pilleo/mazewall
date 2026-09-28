@@ -373,6 +373,15 @@ These are still substantive controllers, not thin launchers:
      pilot may be trusted. An absent token is only an early checkpoint
      bound, not proof of BPF non-execution or per-ID recursion suppression.
      This opt-in telemetry cannot qualify the unaudited or native timing gates.
+     The first clean `42211aa6` 200-operation pilot passed all declared-ID
+     native/marker/raw/main joins but stopped `INCOMPLETE` on **three armed
+     zero-token target events in each program**. Early target counts were
+     203/203; all 200 declared FD counters were exact. The sealed
+     [pilot failure](../../evidence/tier-e-invocation-marker-join-pilot-stop-20260928/README.md)
+     remains red. A new, independently tested conservation rule may
+     distinguish residual ambient calls only when the complete declared
+     set has one native and raw/main token and both FD stages each; any
+     incomplete declared token must still fail closed.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
