@@ -5,8 +5,12 @@ default-path qualification and Podman parity remain open.**
 
 The operator chose a Tier E-first migration: one typed, versioned JSON
 configuration and Kotlin-owned experiment and acceptance decisions. The
-historical Python/Node implementations and immutable measurement archives
-remain available for explicit reproduction. This does not change hybrid's
+historical Python/Node implementations remain available in an isolated
+checkout at Git revision `07dcdb22`; immutable measurement archives remain
+available for explicit reproduction. Current Tier E entrypoints are Kotlin-owned,
+and obsolete Tier E `.mjs`/Python copies are retired from HEAD. See the
+[retirement and replay guide](tier-e-legacy-script-retirement-20260929.md).
+This does not change hybrid's
 opt-in experimental status, `policy_eligibility=false`, or the operator's
 `REJECT_DEFAULT_PROMOTION` decision.
 
@@ -638,9 +642,10 @@ These are still substantive controllers, not thin launchers:
   shell verifier and was reused without rebuilding. The active coverage summary and stack identity
   comparison are Kotlin-owned; replay on copied immutable 2026-09-21 smoke and
   five-fork full archives matched their saved Node summaries with zero semantic
-  JSON differences. Standalone Python perf
-  analysis remains outside automatic runners. Historical standalone analysis
-  commands must stay reproducible but not be selected as active dependencies.
+  JSON differences. Standalone Python perf and historical Node analyses
+  now replay only from pinned Git revision `07dcdb22`, rather than current
+  `scripts/`. The standalone perf-window leaf analysis has no active Kotlin
+  equivalent; reintroducing it would require a focused tested Kotlin command.
 
 The additional active native release/flavour, transport comparison, phase gate,
 ring decoder/mapped-drain, and focused/delivery checks scripts now launch Kotlin

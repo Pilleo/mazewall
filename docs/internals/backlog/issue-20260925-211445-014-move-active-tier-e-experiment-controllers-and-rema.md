@@ -7,6 +7,32 @@ dependencies: []
 component: "core"
 target_modules: ["profiler", "scripts", "buildSrc"]
 target_files:
+  - "docs/internals/designs/profiler/tier-e-legacy-script-retirement-20260929.md"
+  - "scripts/analyze_tier_e_perf_windows.py"
+  - "scripts/probe_tier_e_real_pid_reuse.py"
+  - "scripts/summarize_tier_e_hybrid_decision.mjs"
+  - "scripts/summarize_tier_e_long_matched_controls.mjs"
+  - "scripts/summarize_tier_e_split_fork.mjs"
+  - "scripts/summarize_tier_e_split_matched.mjs"
+  - "scripts/test_analyze_tier_e_perf_windows.py"
+  - "scripts/test_verify_tier_e_split_operations.mjs"
+  - "scripts/tests/test_probe_tier_e_real_pid_reuse.py"
+  - "scripts/tests/test_tier_e_split_source_fingerprint.py"
+  - "scripts/tests/test_verify_tier_e_long_matched_controls.py"
+  - "scripts/tests/tier_e_coverage_runner.test.mjs"
+  - "scripts/tests/tier_e_coverage_stack_identity.test.mjs"
+  - "scripts/tests/tier_e_coverage_summary.test.mjs"
+  - "scripts/tests/tier_e_hybrid_decision.test.mjs"
+  - "scripts/tests/tier_e_split_fork_parser.test.mjs"
+  - "scripts/tests/tier_e_split_matched_completeness.test.mjs"
+  - "scripts/tier_e_collector_cpu_sample.mjs"
+  - "scripts/tier_e_long_matched_row.mjs"
+  - "scripts/tier_e_split_fork_completeness.mjs"
+  - "scripts/tier_e_split_source_fingerprint.py"
+  - "scripts/tier_e_target_cpu_sample.mjs"
+  - "scripts/verify_tier_e_long_matched_controls.py"
+  - "scripts/verify_tier_e_split_coverage.mjs"
+  - "scripts/verify_tier_e_split_operations.mjs"
   - "buildSrc/build.gradle"
   - "buildSrc/src/main/java/io/mazewall/build/TierEPhaseReplayTask.java"
   - "buildSrc/src/main/java/io/mazewall/build/TierENativeBuildTask.java"
@@ -222,7 +248,7 @@ Active Tier E Bash controllers and Node matrix summaries still interpret configu
 **Needed:**
  1. Complete Kotlin ownership of the split fixture's container/process lifecycle, registration, metadata, fault scenarios, and evidence export. The current JSON profiles and Kotlin verdict/probe/row tools are a first slice, not completion.
  2. Replace the active long/short/live/fault Bash experiment controllers, Node matrix summaries, and remaining active analysis paths with Kotlin. Keep paced long measurements explicit, outside the default build.
- 3. Preserve archived Python/Node reproduction commands, all historical evidence and checksum ledgers. Revalidate output and rejection parity against retained artifacts before switching each caller.
+ 3. Preserve all historical evidence and checksum ledgers. Retired Python/Node commands remain reproducible from pinned Git revision `07dcdb22` in an isolated historical checkout; they need not remain executable in current `scripts/`. Revalidate output and rejection parity against retained artifacts before switching an active caller.
  4. Qualify rootful Podman on a real endpoint. Until then mark runtime parity unverified; never claim policy eligibility or reverse REJECT_DEFAULT_PROMOTION.
 
 **2026-09-26 progress:** The active launchers, split fixture, matrices, bundle,
@@ -369,6 +395,24 @@ The pre-admission issue remains open for a proven main-program ingress or
 early-rejection cause; kernel BPF/filter design is not changed from this
 aggregate evidence. Podman and external orchestrator acceptance remain
 separate blocked/deferred steps.
+
+**2026-09-29 operator-approved legacy-script retirement:** The
+[scoped inventory](../designs/profiler/tier-e-legacy-script-retirement-20260929.md)
+finds no tracked TypeScript files. Twenty Tier E Node `.mjs` files and
+eight Tier E Python files (including their self-tests) had no active
+Gradle/CI/Tier E launcher callers; current launchers already use typed
+Kotlin. A standalone Python perf-window analyzer and the historical
+15-pair hybrid adoption calculator have no exact active Kotlin successor,
+so they were retired rather than recreated without users. The operator
+explicitly approved pinned-Git historical replay: all 28 exact files
+remain available at `07dcdb22` in an isolated checkout, while immutable
+measurement reports and hash ledgers are preserved as published.
+The 20 Node and eight Tier E Python files and their self-tests were
+removed from HEAD together; active Kotlin entrypoints remain. Hook,
+backlog, review-evidence and exploit-demo Python files are separate
+scope and were left intact. This does not qualify the newer source
+revision for the `07dcdb22` exact-environment acceptance receipt,
+enable a Tier E default, or change `policy_eligibility=false`.
 
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->
