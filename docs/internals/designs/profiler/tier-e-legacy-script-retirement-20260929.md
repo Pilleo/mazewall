@@ -11,7 +11,7 @@ The pre-removal repository contained **zero `.ts` or `.tsx` files**. The Node le
 | Tier E `.mjs` commands, modules and their own tests | 20 | 1,671 | Removed from HEAD; pinned historical Git checkout retains exact bytes |
 | Tier E Python commands and their own tests | 8 | 1,577 | Removed from HEAD; pinned historical Git checkout retains exact bytes |
 | Other `scripts/*.py` | 9 | 931 | Project hooks, memory/backlog utilities and manual core-evidence checking |
-| `exploits/**/*.py` | 4 | Separate demo | Vulnerable-app demonstration |
+| `exploits/**/*.py` | 5 | Separate demo | Vulnerable-app demonstration |
 
 This classification searches tracked Gradle configuration, active shell launchers, profiler code/tests, CI and project hooks. It excludes unrelated operator-owned `.omo/` and untracked backlog work. `:profiler:test`, `./scripts/lint.sh` and `./scripts/run_tests.sh` do not select the legacy Node/Python Tier E tests. One active shell wrapper invokes `backlog_negative_indexer.py`; project hooks invoke `pre_invocation_sync.py` and `auto_memory_capture.py`. The vulnerable-app demo calls its Python exploit scripts. These are **not** Tier E legacy.
 
@@ -48,7 +48,7 @@ This is historical reproduction, not a current-source qualification run. Immutab
 ## Not in the Tier E deletion batch
 
 - The nine non-Tier-E `scripts/*.py` files need a **separate control-plane/hook inventory**. `pre_invocation_sync.py` and `auto_memory_capture.py` are invoked from `.agents/hooks.json`; `backlog_negative_indexer.py` is invoked from `scripts/git_async_indexer.sh`. `validate_review_evidence.py` is a manual core-evidence checker. Removing any of these would be a different migration.
-- Four Python exploit/demo files are called by `scripts/run_vulnerable_app_demo.sh`; deleting them breaks that demo.
+- Five Python exploit/demo files serve the vulnerable-app demonstration; `scripts/run_vulnerable_app_demo.sh` calls its exploit runner and result verifier, so deleting them would break that demo.
 - Existing `run_tier_e_*.sh` entrypoints are active compatibility launchers into `scripts/tier_e_tools` and Kotlin, rather than hidden Python/Node controllers. Removing their CLI names is a separate compatibility decision.
 
 ## Verification and limits
