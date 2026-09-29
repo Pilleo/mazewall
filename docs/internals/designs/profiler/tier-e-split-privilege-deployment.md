@@ -130,6 +130,53 @@ A malformed, stale, symlinked, unclosed, unavailable, or PID-reused artifact is 
 cannot produce complete transport or lifecycle evidence. An empty ring is never producer-closure
 proof.
 
+### Opt-in per-syscall evidence handoff (Kubescape SBoB PoC)
+
+Set `TIER_E_ALL_TARGET_CAPTURE=1` on the **collector** with
+`TIER_E_TARGET_REGISTRATION` (v1), `TIER_E_DEFINITION_ROOT`, and
+`TIER_E_EVIDENCE_ROOT`. Launch the registered JVM with the existing v1 JVMTI
+agent, `session-bound-definitions`, and `mode=full-stream`; attach with the
+registered host PID, marker path/offset and session tag. The default marker-gated
+Tier E mode is unchanged. The collector enables its independent capture gate
+only after attaching, disables it before producer quiescence and final ring
+drain, then validates the closed MZSE dictionary as above.
+
+For an admitted, completed registered session, the collector writes
+`<registration-id>-<session-epoch>.events.jsonl` beneath the evidence root.
+Only consume the final filename after atomic publication; a `.tmp` file is
+incomplete. The existing `.tier-e.json` terminal report is written separately.
+The event file has one UTF-8 JSON object per line:
+
+| Row | Fields and interpretation |
+|---|---|
+| `header` | `schema_version=1`, registration ID, decimal session epoch, target host PID, process incarnation, `clock_domain=CLOCK_MONOTONIC`, `observation_scope=SYS_ENTER_TRACEPOINT`, `marker_version=v1`, `stack_transport=session-bound-mzse-v2`, `policy_eligibility=false` |
+| `event` | Registration/session and decimal ordinal; original unsigned kernel timestamp (nanoseconds), host TGID/TID, syscall number, **six unsigned raw arguments** (decimal strings), raw `capture_flags`, `arguments_valid`, invocation ID (or null), attribution and resolution status, stack/execution IDs and context when known, `frames` with class-loader identity, class, method, descriptor, bytecode location and frame kind; always `policy_eligibility=false` |
+| `terminal` | Event/attributed/unattributed counts, observed ring loss, ambient and marker-state-unavailable counts, admitted and submitted kernel counts, terminal reason, separate `capture_complete`, `transport_complete`, `attribution_complete`, `export_complete`, `policy_eligibility=false` |
+
+Repeated syscall entries are separate rows. Unknown or unavailable attribution
+keeps the raw observation with an empty frame array and explicit status; it
+does not imply capture loss. `capture_complete` requires a complete terminal
+reason, valid capture/lifecycle state, zero observed loss and equality of
+admitted, submitted and delivered row counts. `export_complete` means only
+that this bounded file was completely written and published; it does **not**
+imply complete capture, transport, attribution or producer closure. If export
+fails or exceeds its bounds (64 MiB or 100,000 rows by default), no final
+`.events.jsonl` is published; the separate terminal report marks delivery
+failure and an owned `.tmp` may remain. Consumers must reconcile the terminal
+counts and flags and must not infer completeness from the presence of rows.
+
+The scope is syscall entries on the registered target's threads that reach the
+attached `sys_enter` probe **after capture admission and before admission
+shutdown**. It excludes earlier/later syscalls, calls denied before that probe,
+and syscall activity in another process or outside the registered host PID.
+Java frames are available only when the v1 agent has published a matching
+invocation and its terminal dictionary resolves it. This evidence is
+diagnostic, never a directly eligible sandbox policy. The rootful source-dirty
+development fixture `TierEAllTargetDaemonIntegrationTest` exercises the
+separate daemon, target registration, two Java call paths for one syscall,
+ambient rows and atomic file handoff; it does not qualify a two-container
+deployment or supersede the source-pinned Tier E acceptance receipts.
+
 ## Collector lifecycle
 
 The privileged component owns the existing `TierEProfilerSession` and `TierECollectorRuntime`;

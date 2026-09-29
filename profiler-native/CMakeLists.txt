@@ -109,10 +109,10 @@ add_test(NAME lifecycle_barrier_test COMMAND lifecycle_barrier_test)
 
 set(AGENT_TEST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/agent-test-classes")
 add_custom_command(
-    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class"
+    OUTPUT "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class" "${AGENT_TEST_CLASSES}/TierEAllTargetWorkload.class"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${AGENT_TEST_CLASSES}"
-    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java"
+    COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${AGENT_TEST_CLASSES}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/TierEAllTargetWorkload.java"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/OpenatProfileWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentCoverageWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NativeOutcomeWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/InvocationFdWorkload.java" "${CMAKE_CURRENT_SOURCE_DIR}/tests/TierEAllTargetWorkload.java"
     VERBATIM
 )
 add_custom_command(
@@ -127,7 +127,7 @@ add_custom_command(
     DEPENDS "${AGENT_TEST_CLASSES}/RedefinitionAgent.class" "${CMAKE_CURRENT_SOURCE_DIR}/tests/redefinition-agent.mf"
     VERBATIM
 )
-add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
+add_custom_target(agent_workload_test_classes ALL DEPENDS "${AGENT_TEST_CLASSES}/AgentWorkload.class" "${AGENT_TEST_CLASSES}/OpenatProfileWorkload.class" "${AGENT_TEST_CLASSES}/AgentCoverageWorkload.class" "${AGENT_TEST_CLASSES}/NativeOutcomeWorkload.class" "${AGENT_TEST_CLASSES}/InvocationFdWorkload.class" "${AGENT_TEST_CLASSES}/TierEAllTargetWorkload.class" "${AGENT_TEST_CLASSES}/redefinition-agent.jar")
 add_test(
     NAME agent_native_outcome_preservation
     COMMAND "${Java_JAVA_EXECUTABLE}" "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED"

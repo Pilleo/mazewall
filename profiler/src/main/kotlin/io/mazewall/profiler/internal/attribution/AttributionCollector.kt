@@ -118,6 +118,12 @@ internal data class SessionIntegrity(
     val reconciliation: TierEReconciliation = TierEReconciliation(),
     /** Bounded retained-edge recovery accounting; ring transport verdicts stay authoritative. */
     val recoveryEvidence: CoverageRecoveryEvidence = CoverageRecoveryEvidence(),
+    /** All-target marker-state failures have event rows; they are not ring transport loss. */
+    val markerStateUnavailableObservations: Long = 0,
+    /** Independently counted target handlers admitted to the opt-in capture window. */
+    val allTargetAdmittedCount: Long? = null,
+    /** Opt-in ring records submitted before source quiescence. */
+    val allTargetSubmittedCount: Long? = null,
 ) {
     public val evidenceIntegrity: EvidenceIntegrity
         get() = when {

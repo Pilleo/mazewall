@@ -758,7 +758,21 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(ADD_IMM, dst = 1, imm = -96))
             emit(Insn(MOV_IMM, dst = 2, imm = 8))
             emit(Insn(CALL, imm = H_PROBE_READ_KERNEL))
-            emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+            if (options.allTargetCapture) {
+                val readSucceeded = emit(Insn(JEQ_IMM, dst = 0))
+                emit(Insn(MOV_IMM, dst = 5, imm = 0))
+                emit(Insn(LDX_W, dst = 4, src = FP, off = -8))
+                emit(Insn(OR_IMM, dst = 4, imm = SyscallInvocationEvent.FLAG_ARGUMENT_READ_FAILED))
+                emit(Insn(STX_W, dst = FP, src = 4, off = -8))
+                val done = emit(Insn(JA))
+                val goodRead = p.size
+                emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+                val complete = p.size
+                p[readSucceeded] = p[readSucceeded].copy(off = (goodRead - readSucceeded - 1).toShort())
+                p[done] = p[done].copy(off = (complete - done - 1).toShort())
+            } else {
+                emit(Insn(LDX_DW, dst = 5, src = FP, off = -96))
+            }
         }
 
         fun emitRecoveryEdgeInsert() {
@@ -948,6 +962,29 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET)
         emit(Insn(LDX_DW, dst = 7, src = FP, off = -112))
+        // Count a target handler before reading this independent gate. A
+        // handler preempted after an enabled read must remain visible to the
+        // final quiescence wait even after userspace disables new capture.
+        val captureDisabled = if (options.allTargetCapture) {
+            emit(Insn(LDX_W, dst = 5, src = 7, off = 16))
+            emit(Insn(JEQ_IMM, dst = 5))
+        } else {
+            null
+        }
+        val missingCaptureAdmissionCounter = if (options.allTargetCapture) {
+            emit(Insn(MOV_IMM, dst = 5, imm = 13))
+            emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+            ldMap(1, COUNTER_MAP_INDEX)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = -4))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val missing = emit(Insn(JEQ_IMM, dst = 0))
+            emit(Insn(MOV_IMM, dst = 5, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            missing
+        } else {
+            null
+        }
         emit(Insn(LDX_W, dst = 5, src = 7, off = 8))
         val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
         val markerAttached = emit(Insn(JA))
@@ -1040,10 +1077,10 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
         val emitTaskStorageUnavailableDiagnostic =
-            (options.benchmarkEmitTaskStorageUnavailableEvents || options.benchmarkEmitMarkerLossEvents) &&
+            (options.allTargetCapture || options.benchmarkEmitTaskStorageUnavailableEvents || options.benchmarkEmitMarkerLossEvents) &&
                 options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
         val emitMarkerLossDiagnostics =
-            options.benchmarkEmitMarkerLossEvents && options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
+            (options.allTargetCapture || options.benchmarkEmitMarkerLossEvents) && options.ringSubmissionMode == TierERingSubmissionMode.ENABLED
         val skipMarkerLossDiagnostics = if (emitTaskStorageUnavailableDiagnostic || emitMarkerLossDiagnostics) {
             emit(Insn(JA))
         } else {
@@ -1143,6 +1180,7 @@ internal object TierEBpfProgramBuilder {
         }
         val reservationFailed: Int?
         var submitted: Int? = null
+        var missingCaptureSubmittedCounter: Int? = null
         if (options.ringSubmissionMode == TierERingSubmissionMode.BENCHMARK_DISABLED) {
             // This benchmark-only build intentionally preserves the target filter, active-marker
             // admission, task-storage lookup, diagnostic maps, and in-flight accounting. It omits
@@ -1165,8 +1203,10 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(STX_W, dst = 7, src = 8, off = 12))
             loadSyscallNumber()
             emit(Insn(STX_W, dst = 7, src = 5, off = 16))
-            emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
-            emit(Insn(STX_W, dst = 7, src = 5, off = 20))
+            if (!options.allTargetCapture) {
+                emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
+                emit(Insn(STX_W, dst = 7, src = 5, off = 20))
+            }
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
             emit(Insn(STX_DW, dst = 7, src = 5, off = 24))
             emit(Insn(LDX_DW, dst = 5, src = FP, off = -16))
@@ -1174,6 +1214,10 @@ internal object TierEBpfProgramBuilder {
             repeat(SyscallInvocationEvent.ARGUMENT_COUNT) { index ->
                 loadArgument(index)
                 emit(Insn(STX_DW, dst = 7, src = 5, off = (40 + index * 8).toShort()))
+            }
+            if (options.allTargetCapture) {
+                emit(Insn(LDX_W, dst = 5, src = FP, off = -8))
+                emit(Insn(STX_W, dst = 7, src = 5, off = 20))
             }
         }
         if (kernelCoverageMode != TierEKernelCoverageMode.NONE) {
@@ -1213,6 +1257,17 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(MOV_REG, dst = 1, src = 7))
             emit(Insn(MOV_IMM, dst = 2, imm = 0))
             emit(Insn(CALL, imm = H_RB_SUBMIT))
+            if (options.allTargetCapture) {
+                emit(Insn(MOV_IMM, dst = 5, imm = 14))
+                emit(Insn(STX_W, dst = FP, src = 5, off = -4))
+                ldMap(1, COUNTER_MAP_INDEX)
+                emit(Insn(MOV_REG, dst = 2, src = FP))
+                emit(Insn(ADD_IMM, dst = 2, imm = -4))
+                emit(Insn(CALL, imm = H_LOOKUP))
+                missingCaptureSubmittedCounter = emit(Insn(JEQ_IMM, dst = 0))
+                emit(Insn(MOV_IMM, dst = 5, imm = 1))
+                emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
+            }
             submitted = emit(Insn(JA))
         }
         val lossHandler: Int?
@@ -1236,6 +1291,9 @@ internal object TierEBpfProgramBuilder {
             missingLossCounter = null
         }
         val completeActive = p.size
+        captureDisabled?.let { index ->
+            p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
+        }
         // Rejection handlers reuse FP-4 for their diagnostic counter key.
         // Restore the sole in-flight map key (zero) before every completion
         // decrement, including inactive, detached and failed-reservation paths.
@@ -1365,6 +1423,12 @@ internal object TierEBpfProgramBuilder {
             p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
         }
         p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (missingInFlightAuditTarget - missingInFlightCounter - 1).toShort())
+        missingCaptureAdmissionCounter?.let { index ->
+            p[index] = p[index].copy(off = (inFlightCounterFailureHandler - index - 1).toShort())
+        }
+        missingCaptureSubmittedCounter?.let { index ->
+            p[index] = p[index].copy(off = (inFlightCounterFailureHandler - index - 1).toShort())
+        }
         listOfNotNull(
             taskStorageUnavailableDiagnostic,
             markerDetachedDiagnostic,

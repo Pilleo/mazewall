@@ -6,10 +6,29 @@ import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TierEOptionsTest {
+    @Test
+    fun `all target capture is an explicit full stream v1 dictionary opt in`() {
+        assertFalse(TierEOptions().allTargetCapture)
+        assertTrue(TierEOptions(allTargetCapture = true).allTargetCapture)
+        assertFailsWith<IllegalArgumentException> {
+            TierEOptions(allTargetCapture = true, emissionMode = TierEEmissionMode.UNIQUE_STACK_SYSCALL)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TierEOptions(allTargetCapture = true, stackTransport = TierEStackTransport.INLINE_PER_INVOCATION)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TierEOptions(allTargetCapture = true, benchmarkPhases = true)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TierEOptions(allTargetCapture = true, sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT)
+        }
+    }
+
     @Test
     fun `dictionary stack transport is the default`() {
         assertEquals(TierEStackTransport.DICTIONARY, TierEOptions().stackTransport)

@@ -80,6 +80,52 @@ class TierEProfilerSessionLifecycleTest {
     }
 
     @Test
+    fun `all target mode closes capture admission before marker detach quiescence and final drain`() {
+        val source = FakeTierEEventSource(quiescentAfterDetach = true)
+        val profile = TierEProfilerSession(
+            source = source,
+            processEpoch = 1,
+            options = TierEOptions(allTargetCapture = true),
+            definitionReader = { emptyDefinitions() },
+        ).finish(Path.of("ignored"), producerClosed = true)
+
+        assertEquals(listOf("capture-off", "marker-off", "quiescent", "drain"), source.shutdownSteps.take(4))
+        assertEquals(0L, profile.integrity.lifecycleInvalidations)
+    }
+
+    @Test
+    fun `emitted marker state failures remain attribution evidence rather than transport loss`() {
+        val ambient = SyscallInvocationEvent(
+            ktimeNs = 1uL,
+            tgid = 1u,
+            tid = 2u,
+            syscallNr = 257,
+            flags = SyscallInvocationEvent.FLAG_MARKER_STATE_UNAVAILABLE,
+            sequence = 1uL,
+            invocationId = 0uL,
+            args = List(6) { 0uL },
+        )
+        val source = FakeTierEEventSource(
+            events = ArrayDeque(listOf(listOf(ambient))),
+            quiescentAfterDetach = true,
+            markerFailureCount = 1,
+        )
+        val session = TierEProfilerSession(
+            source = source,
+            processEpoch = 1,
+            options = TierEOptions(allTargetCapture = true),
+            definitionReader = { emptyDefinitions() },
+        )
+        session.poll()
+        val profile = session.finish(Path.of("ignored"), producerClosed = true)
+
+        assertEquals(1, profile.syscalls.size)
+        assertEquals(0, profile.integrity.observedLosses)
+        assertEquals(1, profile.integrity.markerStateUnavailableObservations)
+        assertEquals(ResolutionStatus.NO_ACTIVE_INVOCATION, profile.syscalls.single().resolutionStatus)
+    }
+
+    @Test
     fun `retained overflow drops new records and marks cached result incomplete`() {
         val source = FakeTierEEventSource(
             events = ArrayDeque(listOf(listOf(event(1uL)), listOf(event(2uL)))),
@@ -101,6 +147,37 @@ class TierEProfilerSessionLifecycleTest {
         assertEquals(0, metrics.kernelRingLosses)
         assertEquals(1, metrics.retainedResultDrops)
         assertEquals(CaptureGuarantee.INCOMPLETE, profile.integrity.guarantee)
+    }
+
+    @Test
+    fun `retained unattributed event preserves kernel time host tgid and unsigned arguments`() {
+        val raw = SyscallInvocationEvent(
+            ktimeNs = ULong.MAX_VALUE,
+            tgid = UInt.MAX_VALUE,
+            tid = 2u,
+            syscallNr = 257,
+            flags = SyscallInvocationEvent.FLAG_INACTIVE_INVOCATION,
+            sequence = 7uL,
+            invocationId = 0uL,
+            args = listOf(ULong.MAX_VALUE) + List(5) { 0uL },
+        )
+        val session = TierEProfilerSession(
+            source = FakeTierEEventSource(events = ArrayDeque(listOf(listOf(raw)))),
+            processEpoch = 1,
+            definitionReader = { emptyDefinitions() },
+        )
+        session.poll()
+        val result = session.finish(Path.of("ignored"), producerClosed = true).syscalls.single()
+
+        assertEquals(ULong.MAX_VALUE, result.observation.kernelTimestampNanos)
+        assertEquals(UInt.MAX_VALUE, result.observation.hostTgid)
+        assertEquals(
+            ULong.MAX_VALUE,
+            result.observation.args
+            .first()
+            .toULong(),
+        )
+        assertEquals(ResolutionStatus.NO_ACTIVE_INVOCATION, result.resolutionStatus)
     }
 
     @Test
@@ -490,11 +567,13 @@ private class FakeTierEEventSource(
     private val events: ArrayDeque<List<SyscallInvocationEvent>> = ArrayDeque(),
     private val quiescentAfterDetach: Boolean = false,
     private val drainMetrics: TierERingDrainPhaseMetrics = TierERingDrainPhaseMetrics(),
+    private val markerFailureCount: Long = 0L,
 ) : TierEEventSource {
     var closeCalls = 0
     var detachMarkerCalls = 0
     var drainEventsCalls = 0
     var quiescenceCalls = 0
+    val shutdownSteps = mutableListOf<String>()
     val markerOffsets = mutableListOf<Long>()
     val usdtMarkerOffsets = mutableListOf<Long>()
 
@@ -522,15 +601,22 @@ private class FakeTierEEventSource(
 
     override fun detachMarker() {
         detachMarkerCalls++
+        shutdownSteps += "marker-off"
+    }
+
+    override fun disableCaptureAdmission() {
+        shutdownSteps += "capture-off"
     }
 
     override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean {
         quiescenceCalls++
+        shutdownSteps += "quiescent"
         return quiescentAfterDetach
     }
 
     override fun drainEvents(): List<SyscallInvocationEvent> {
         drainEventsCalls++
+        shutdownSteps += "drain"
         return events.removeFirstOrNull().orEmpty()
     }
 
@@ -538,7 +624,7 @@ private class FakeTierEEventSource(
 
     override fun readLossCount(): Long = 0
 
-    override fun readMarkerFailureCount(): Long = 0
+    override fun readMarkerFailureCount(): Long = markerFailureCount
 
     override fun readMarkerTransitionCount(): Long = 0
 

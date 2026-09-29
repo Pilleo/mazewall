@@ -34,6 +34,14 @@ internal interface TierEEventSource : AutoCloseable {
 
     fun detachMarker() {}
 
+    fun enableCaptureAdmission() {
+        error("event source does not support all-target capture")
+    }
+
+    fun disableCaptureAdmission() {
+        error("event source does not support all-target capture")
+    }
+
     fun drainEvents(): List<SyscallInvocationEvent>
 
     fun drainEventsMeasured(): TierERingEventDrain = TierERingEventDrain(drainEvents())
@@ -48,6 +56,10 @@ internal interface TierEEventSource : AutoCloseable {
     fun readAmbientInactiveCount(): Long = 0L
 
     fun readExactAdmissionCount(): Long = 0L
+
+    fun readAllTargetAdmittedCount(): Long = 0L
+
+    fun readAllTargetSubmittedCount(): Long = 0L
 
     fun readMarkerDetachedCount(): Long = 0L
 
@@ -97,6 +109,10 @@ private class NativeTierEEventSource(
 
     override fun detachMarker() = engine.detachMarker()
 
+    override fun enableCaptureAdmission() = engine.enableCaptureAdmission()
+
+    override fun disableCaptureAdmission() = engine.disableCaptureAdmission()
+
     override fun drainEvents(): List<SyscallInvocationEvent> = engine.drainEvents()
 
     override fun drainEventsMeasured(): TierERingEventDrain = engine.drainEventsMeasured()
@@ -110,6 +126,10 @@ private class NativeTierEEventSource(
     override fun readAmbientInactiveCount(): Long = engine.readAmbientInactiveCount()
 
     override fun readExactAdmissionCount(): Long = engine.readExactAdmissionCount()
+
+    override fun readAllTargetAdmittedCount(): Long = engine.readAllTargetAdmittedCount()
+
+    override fun readAllTargetSubmittedCount(): Long = engine.readAllTargetSubmittedCount()
 
     override fun readMarkerDetachedCount(): Long = engine.readMarkerDetachedCount()
 
@@ -865,6 +885,16 @@ internal class TierEProfilerSession internal constructor(
         collector.invalidateAttribution()
     }
 
+    /** Called only after the collector is running; the workload remains gated until this succeeds. */
+    @Synchronized
+    public fun enableCaptureAdmission() {
+        requireCollecting()
+        check(options.allTargetCapture && lifecycle == TierESessionLifecycleState.RUNNING) {
+            "all-target capture admission requires a running opt-in session"
+        }
+        source.enableCaptureAdmission()
+    }
+
     /** Returns the monotonic kernel-active observation total at a lifecycle boundary. */
     public fun kernelActiveObservationCount(): Long = source.readContextMetrics().values.fold(0L, Math::addExact)
 
@@ -926,6 +956,8 @@ internal class TierEProfilerSession internal constructor(
         }
         for (entry in recoveryRaw) ingestRecoveryEntry(entry)
         val reconciliation = collectTerminalKernelCounters()
+        val allTargetAdmitted = if (options.allTargetCapture) source.readAllTargetAdmittedCount() else null
+        val allTargetSubmitted = if (options.allTargetCapture) source.readAllTargetSubmittedCount() else null
         closeSource()
         val definitions = admitTerminalDefinitions(definitionSupplier)
         checkV2DefinitionAdmission(definitions, reconciliation)
@@ -940,7 +972,12 @@ internal class TierEProfilerSession internal constructor(
         retain(collector.finish())
         val profile = TierEProfile(
             resolved,
-            collector.integrity.copy(publicationMetrics = dictionaryPublisher?.metrics ?: SnapshotPublicationMetrics()),
+            collector.integrity.copy(
+                publicationMetrics = dictionaryPublisher?.metrics ?: SnapshotPublicationMetrics(),
+                markerStateUnavailableObservations = if (options.allTargetCapture) reportedMarkerFailures else 0L,
+                allTargetAdmittedCount = allTargetAdmitted,
+                allTargetSubmittedCount = allTargetSubmitted,
+            ),
             recoveredCoverage,
         )
         state = TierESessionState.Finished(profile)
@@ -953,9 +990,10 @@ internal class TierEProfilerSession internal constructor(
         // Stop marker admission before the final drain. A caller that cannot prove producer
         // closure must leave a durable lifecycle invalidation rather than treating an empty
         // ring as a producer barrier.
+        if (options.allTargetCapture) source.disableCaptureAdmission()
         source.detachMarker()
         val quiescent =
-            if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
+            if (!options.allTargetCapture && options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) {
                 producerClosed || source.awaitSysEnterQuiescence(TERMINAL_QUIESCENCE_TIMEOUT_NANOS)
             } else {
                 source.awaitSysEnterQuiescence(TERMINAL_QUIESCENCE_TIMEOUT_NANOS)
@@ -1146,7 +1184,7 @@ internal class TierEProfilerSession internal constructor(
         val markerFailures = source.readMarkerFailureCount()
         check(markerFailures >= reportedMarkerFailures) { "marker failure counter moved backwards" }
         if (markerFailures != reportedMarkerFailures) {
-            collector.recordLoss(markerFailures - reportedMarkerFailures)
+            if (!options.allTargetCapture) collector.recordLoss(markerFailures - reportedMarkerFailures)
             reportedMarkerFailures = markerFailures
         }
         val ambientInactive = source.readAmbientInactiveCount()
@@ -1184,6 +1222,8 @@ internal class TierEProfilerSession internal constructor(
                 invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
                 attributionStatus = status,
                 captureFlags = flags,
+                kernelTimestampNanos = ktimeNs,
+                hostTgid = tgid,
             )
         }
         return SyscallAttribution.fromOwnedArguments(
@@ -1194,6 +1234,8 @@ internal class TierEProfilerSession internal constructor(
             invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
             attributionStatus = status,
             captureFlags = flags,
+            kernelTimestampNanos = ktimeNs,
+            hostTgid = tgid,
         )
     }
 

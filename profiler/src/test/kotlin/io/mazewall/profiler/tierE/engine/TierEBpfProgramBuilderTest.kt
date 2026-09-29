@@ -288,6 +288,56 @@ class TierEBpfProgramBuilderTest {
     }
 
     @Test
+    fun `opt in all target mode emits marker loss reasons without benchmark instrumentation`() {
+        val normal = TierEBpfProgramBuilder.buildSysEnterProgram()
+        val allTarget = TierEBpfProgramBuilder.buildSysEnterProgram(TierEOptions(allTargetCapture = true))
+
+        assertTrue(normal.none { it.code == 0x61 && it.src == 7 && it.off.toInt() == 16 })
+        assertTrue(allTarget.any { it.code == 0x61 && it.src == 7 && it.off.toInt() == 16 }, "capture admission must be independent of marker admission")
+        for (reason in listOf(4, 8, 16, 32, 64)) {
+            val index = allTarget.indexOfFirst { it.code == 0xb7 && it.dst == 5 && it.imm == reason }
+            assertTrue(index >= 0, "missing per-event reason $reason")
+            assertTrue(
+                reachableInstructions(allTarget, index).any { instruction -> allTarget[instruction].code == 0x85 && allTarget[instruction].imm == 131 },
+                "target syscall with reason $reason must reach ring reservation",
+            )
+        }
+    }
+
+    @Test
+    fun `raw argument reads cannot silently export invalid slot values`() {
+        val program = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions(allTargetCapture = true))
+        val reads = program.indices.filter { program[it].code == 0x85 && program[it].imm == 113 }
+
+        assertEquals(6, reads.size, "each raw syscall argument needs a checked kernel read")
+        assertTrue(reads.all { index -> program[index + 1].code == 0x15 && program[index + 1].dst == 0 && program[index + 1].imm == 0 })
+        assertTrue(program.any { it.code == 0x47 && it.imm == 2 }, "failed reads must set FLAG_ARGUMENT_READ_FAILED")
+        val submit = program.indexOfFirst { it.code == 0x85 && it.imm == 132 }
+        assertTrue(submit > reads.last())
+        assertTrue(
+            (reads.last() + 1 until submit).any { index ->
+                program[index].code == 0x63 && program[index].off.toInt() == 20
+            },
+            "event flags must be written after argument-read outcomes are known",
+        )
+    }
+
+    @Test
+    fun `all target mode counts gated target handlers and committed ring records separately`() {
+        val ordinary = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram()
+        val complete = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(TierEOptions(allTargetCapture = true))
+        val admitted = complete.indexOfFirst { it.code == 0xb7 && it.dst == 5 && it.imm == 13 }
+        val submitted = complete.indexOfFirst { it.code == 0xb7 && it.dst == 5 && it.imm == 14 }
+        val captureGate = complete.indexOfFirst { it.code == 0x61 && it.src == 7 && it.off.toInt() == 16 }
+        val reserve = complete.indexOfFirst { it.code == 0x85 && it.imm == 131 }
+        val publish = complete.indexOfFirst { it.code == 0x85 && it.imm == 132 }
+
+        assertTrue(ordinary.none { it.code == 0xb7 && it.dst == 5 && it.imm in setOf(13, 14) })
+        assertTrue(captureGate in 0 until admitted && admitted in 0 until reserve)
+        assertTrue(submitted > publish, "submitted counter must follow the irreversible ring submission")
+    }
+
+    @Test
     fun `all generated sys enter instructions are reachable for every supported diagnostic shape`() {
         listOf(
             TierEOptions(emissionMode = TierEEmissionMode.FULL_STREAM),

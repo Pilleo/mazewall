@@ -17,6 +17,13 @@ class TierETargetRegistrationTest {
     lateinit var root: Path
 
     @Test
+    fun `all target daemon cannot start without operator registration and event evidence root`() {
+        assertFailsWith<IllegalArgumentException> {
+            TierEDaemonService(stopRequested = AtomicBoolean(false), allTargetCapture = true)
+        }
+    }
+
+    @Test
     fun `stale registered incarnation is rejected before engine creation and reported incomplete`() {
         val target = TierERegisteredTarget(
             registrationId = "orders",

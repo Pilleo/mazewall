@@ -85,6 +85,10 @@ internal class SyscallAttribution private constructor(
     public val invocationId: InvocationId?,
     public val attributionStatus: AttributionStatus,
     public val captureFlags: Int = 0,
+    /** Distinct from task sequence: the original unsigned CLOCK_MONOTONIC kernel timestamp. */
+    public val kernelTimestampNanos: ULong? = null,
+    /** Original host TGID from the ring record; synthetic observations may not have one. */
+    public val hostTgid: UInt? = null,
 ) {
     public val args: List<Long> = OwnedLongArguments(ownedArgs)
 
@@ -96,7 +100,9 @@ internal class SyscallAttribution private constructor(
         invocationId: InvocationId?,
         attributionStatus: AttributionStatus,
         captureFlags: Int = 0,
-    ) : this(task, taskSequence, syscallNumber, args.toLongArray(), invocationId, attributionStatus, captureFlags)
+        kernelTimestampNanos: ULong? = null,
+        hostTgid: UInt? = null,
+    ) : this(task, taskSequence, syscallNumber, args.toLongArray(), invocationId, attributionStatus, captureFlags, kernelTimestampNanos, hostTgid)
 
     init {
         require(taskSequence > 0) { "task sequence must be positive" }
@@ -111,7 +117,9 @@ internal class SyscallAttribution private constructor(
         invocationId: InvocationId? = this.invocationId,
         attributionStatus: AttributionStatus = this.attributionStatus,
         captureFlags: Int = this.captureFlags,
-    ): SyscallAttribution = SyscallAttribution(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags)
+        kernelTimestampNanos: ULong? = this.kernelTimestampNanos,
+        hostTgid: UInt? = this.hostTgid,
+    ): SyscallAttribution = SyscallAttribution(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags, kernelTimestampNanos, hostTgid)
 
     override fun equals(other: Any?): Boolean =
         other is SyscallAttribution &&
@@ -121,12 +129,14 @@ internal class SyscallAttribution private constructor(
             args == other.args &&
             invocationId == other.invocationId &&
             attributionStatus == other.attributionStatus &&
-            captureFlags == other.captureFlags
+            captureFlags == other.captureFlags &&
+            kernelTimestampNanos == other.kernelTimestampNanos &&
+            hostTgid == other.hostTgid
 
-    override fun hashCode(): Int = listOf(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags).hashCode()
+    override fun hashCode(): Int = listOf(task, taskSequence, syscallNumber, args, invocationId, attributionStatus, captureFlags, kernelTimestampNanos, hostTgid).hashCode()
 
     override fun toString(): String =
-        "SyscallAttribution(task=$task, taskSequence=$taskSequence, syscallNumber=$syscallNumber, args=$args, invocationId=$invocationId, attributionStatus=$attributionStatus, captureFlags=$captureFlags)"
+        "SyscallAttribution(task=$task, taskSequence=$taskSequence, syscallNumber=$syscallNumber, args=$args, invocationId=$invocationId, attributionStatus=$attributionStatus, captureFlags=$captureFlags, kernelTimestampNanos=$kernelTimestampNanos, hostTgid=$hostTgid)"
 
     public companion object {
         public const val ARGUMENT_COUNT: Int = 6
@@ -143,6 +153,8 @@ internal class SyscallAttribution private constructor(
             invocationId: InvocationId?,
             attributionStatus: AttributionStatus,
             captureFlags: Int = 0,
+            kernelTimestampNanos: ULong? = null,
+            hostTgid: UInt? = null,
         ): SyscallAttribution {
             require(ownedArgs.size == ARGUMENT_COUNT) { "syscall observations need exactly $ARGUMENT_COUNT arguments" }
             return SyscallAttribution(
@@ -153,6 +165,8 @@ internal class SyscallAttribution private constructor(
                 invocationId = invocationId,
                 attributionStatus = attributionStatus,
                 captureFlags = captureFlags,
+                kernelTimestampNanos = kernelTimestampNanos,
+                hostTgid = hostTgid,
             )
         }
     }

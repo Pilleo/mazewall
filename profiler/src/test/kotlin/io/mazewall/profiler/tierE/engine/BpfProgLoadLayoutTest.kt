@@ -18,6 +18,12 @@ import kotlin.test.assertTrue
 
 class BpfProgLoadLayoutTest {
     @Test
+    fun `opt in capture gate extends only the Tier E session map value`() {
+        assertEquals(16, TierEbpfEngine.sessionConfigurationSize(TierEOptions()))
+        assertEquals(24, TierEbpfEngine.sessionConfigurationSize(TierEOptions(allTargetCapture = true)))
+    }
+
+    @Test
     fun `failed install closes every already acquired descriptor`() {
         var bpfCalls = 0
         val closed = mutableListOf<Long>()

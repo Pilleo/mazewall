@@ -14,6 +14,7 @@ import io.mazewall.profiler.internal.attribution.TierELinuxMonotonicClock
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEProducerClosure
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -42,12 +43,22 @@ internal fun main() {
     val socketAccess = TierEControlSocketAccess.fromEnvironment()
 
     val stopRequested = AtomicBoolean(false)
-    val registeredTargetResolver = System
+    val registeredTarget = System
         .getenv("TIER_E_TARGET_REGISTRATION")
         ?.let { TierETargetRegistrationFile.read(Path.of(it)) }
-        ?.let { target -> TierETargetRegistrationResolver(mapOf(target.registrationId to target)) }
+    val registeredTargetResolver = registeredTarget?.let { target -> TierETargetRegistrationResolver(mapOf(target.registrationId to target)) }
+    val allTargetCapture = System.getenv("TIER_E_ALL_TARGET_CAPTURE")?.let { selected ->
+        require(selected == "1") { "TIER_E_ALL_TARGET_CAPTURE accepts only 1 when explicitly enabled" }
+        true
+    } ?: false
     val fileReportSink = System.getenv("TIER_E_EVIDENCE_ROOT")?.let {
         TierETerminalReportFileSink(Path.of(it))
+    }
+    val eventFileSink = if (allTargetCapture) {
+        val root = requireNotNull(System.getenv("TIER_E_EVIDENCE_ROOT")) { "all-target capture requires an evidence root" }
+        TierEEventJsonlFileSink(Path.of(root))
+    } else {
+        null
     }
     val coverageManifestSink = System
         .getenv("TIER_E_COVERAGE_MANIFEST")
@@ -100,6 +111,11 @@ internal fun main() {
             }
         } ?: TierEProcessIdentityVerifier.linux,
         registeredTargetResolver = registeredTargetResolver,
+        resultSink = TierEDaemonResultSink { result ->
+            if (eventFileSink != null) {
+                eventFileSink.publish(requireNotNull(registeredTarget), result.profile, result.terminalReason)
+            }
+        },
         terminalReportSink = TierETerminalReportSink { report ->
             fileReportSink?.accept(report)
             System.out.println(
@@ -118,6 +134,7 @@ internal fun main() {
         operationManifestSink = operationManifestSink,
         benchmarkRecordLimit = benchmarkRecordLimit,
         benchmarkMode = System.getenv("TIER_E_SPLIT_BENCHMARK") == "1",
+        allTargetCapture = allTargetCapture,
     )
     ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { server ->
         server.bind(UnixDomainSocketAddress.of(socketPath))
@@ -178,6 +195,7 @@ internal class TierEDaemonService(
     private val recoveryMapCapacity: Int = recoveryMapCapacityFromEnvironment(),
     private val nativeLiveSnapshotAdmission: Boolean = nativeLiveSnapshotAdmissionFromEnvironment(),
     private val benchmarkDropRingSyscallNumber: Int? = benchmarkDropRingSyscallFromEnvironment(),
+    private val allTargetCapture: Boolean = false,
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
@@ -188,6 +206,18 @@ internal class TierEDaemonService(
     init {
         require(registeredTargetResolver == null || artifactResolver != null) {
             "registered target deployment requires TIER_E_DEFINITION_ROOT"
+        }
+        require(
+            !allTargetCapture ||
+            (
+                registeredTargetResolver != null &&
+                artifactResolver != null &&
+                !benchmarkMode &&
+            !benchmarkPhases &&
+                markerVersion == MarkerVersion.V1
+            ),
+        ) {
+            "all-target capture requires a registered v1 target and non-benchmark definition artifact"
         }
         require(terminalArtifactWaitMillis in 0..30_000L) { "terminal artifact wait must be 0..30000ms" }
         require(
@@ -288,6 +318,12 @@ internal class TierEDaemonService(
                             coverageRecoveryMode = recoveryMode,
                             coverageRecoveryMapCapacity = recoveryMapCapacity,
                             benchmarkDropRingSyscallNumber = benchmarkDropRingSyscallNumber,
+                            allTargetCapture = allTargetCapture,
+                            sysEnterAttachmentBackend = if (allTargetCapture) {
+                                TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
+                            } else {
+                                TierESysEnterAttachmentBackend.AUTO
+                            },
                         ),
                         configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
                     )
@@ -318,6 +354,7 @@ internal class TierEDaemonService(
                         session.enableNativeLiveSnapshots { maxBytes -> resolver.readLive(artifact, maxBytes) }
                     }
                     runtime.start()
+                    if (allTargetCapture) session.enableCaptureAdmission()
                     val active = ActiveSession(runtime, attachment.artifact, attachment.registeredTarget)
                     activeSession = active
                     attachment.registeredTarget?.let { target ->

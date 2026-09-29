@@ -202,6 +202,12 @@ internal class TierEbpfEngine(
         private const val TARGET_TGID_OFFSET: Long = 4
         private const val MARKER_ATTACHED_OFFSET: Long = 8
         private const val MARKER_GENERATION_OFFSET: Long = 12
+        private const val CAPTURE_ADMISSION_OFFSET: Long = 16
+        private const val LEGACY_SESSION_BYTES = 16
+        private const val ALL_TARGET_SESSION_BYTES = 24
+
+        internal fun sessionConfigurationSize(options: TierEOptions): Int = if (options.allTargetCapture) ALL_TARGET_SESSION_BYTES else LEGACY_SESSION_BYTES
+
         private const val MARKER_FAILURE_COUNTER_INDEX = 3
         private const val AMBIENT_INACTIVE_COUNTER_INDEX = 4
         private const val EXACT_ADMISSION_COUNTER_INDEX = 5
@@ -212,6 +218,8 @@ internal class TierEbpfEngine(
         internal const val EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX = 10
         internal const val EXACT_ADMISSION_AUDIT_LOOKUP_FAILURE_COUNTER_INDEX = 11
         private const val COUNTER_MAP_ENTRIES = 13
+        private const val ALL_TARGET_ADMITTED_COUNTER_INDEX = 13
+        private const val ALL_TARGET_SUBMITTED_COUNTER_INDEX = 14
         private const val IN_FLIGHT_MAP_ENTRIES = 1
         private const val EARLY_TARGET_OPENAT_COUNTER_KEYS = 3
         private const val EARLY_TARGET_OPENAT_V4_KEYS = 9
@@ -300,6 +308,9 @@ internal class TierEbpfEngine(
         try {
             this.options = options
             val sysEnterAttachmentBackend = selectSysEnterAttachmentBackend(options.sysEnterAttachmentBackend)
+            require(!options.allTargetCapture || sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                "all-target capture requires direct x86-64 raw sys_enter attachment"
+            }
             installed.sysEnterAttachmentBackend = sysEnterAttachmentBackend
             installed.preGateAuditEnabled = options.usesPairedEarlyTargetAudit() &&
                 sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
@@ -340,11 +351,15 @@ internal class TierEbpfEngine(
                 MAP_ARRAY,
                 keySize = 4,
                 valueSize = 8,
-                maxEntries = if (options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED) COUNTER_MAP_ENTRIES - 1 else COUNTER_MAP_ENTRIES,
+                maxEntries = when {
+                    options.allTargetCapture -> ALL_TARGET_SUBMITTED_COUNTER_INDEX + 1
+                    options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED -> COUNTER_MAP_ENTRIES - 1
+                    else -> COUNTER_MAP_ENTRIES
+                },
             )
             installed.contextMetricFd = createMap(MAP_LRU_HASH, keySize = 8, valueSize = 8, maxEntries = CONTEXT_METRIC_CAPACITY)
             installed.inFlightFd = createMap(MAP_PERCPU_ARRAY, keySize = 4, valueSize = 8, maxEntries = IN_FLIGHT_MAP_ENTRIES)
-            installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = 16, maxEntries = 1)
+            installed.sessionFd = createMap(MAP_ARRAY, keySize = 4, valueSize = sessionConfigurationSize(options), maxEntries = 1)
             if (options.benchmarkRawSysEnterAudit) {
                 check(possibleCpus().all { it in 0 until RAW_SYS_ENTER_AUDIT_CPU_CAPACITY }) {
                     "raw sys_enter audit CPU exceeds bounded capacity $RAW_SYS_ENTER_AUDIT_CPU_CAPACITY"
@@ -399,11 +414,12 @@ internal class TierEbpfEngine(
                 )
             }
             Arena.ofConfined().use { arena ->
-            val configuration = arena.allocate(16, 4)
+            val configuration = arena.allocate(sessionConfigurationSize(options).toLong(), 4)
             configuration.set(ValueLayout.JAVA_INT, SESSION_TAG_OFFSET, sessionTag)
             configuration.set(ValueLayout.JAVA_INT, TARGET_TGID_OFFSET, targetTgid)
             configuration.set(ValueLayout.JAVA_INT, MARKER_ATTACHED_OFFSET, 0)
             configuration.set(ValueLayout.JAVA_INT, MARKER_GENERATION_OFFSET, 0)
+            if (options.allTargetCapture) configuration.set(ValueLayout.JAVA_INT, CAPTURE_ADMISSION_OFFSET, 0)
                 updateElem(arena, installed.requireSessionFd().value, intSeg(arena, 0), configuration)
             }
             installed.markerProgFd =
@@ -532,6 +548,16 @@ internal class TierEbpfEngine(
 
     /** Selected target syscalls that passed marker/task-storage admission before ring reservation. */
     public fun readExactAdmissionCount(): Long = readCounter(EXACT_ADMISSION_COUNTER_INDEX)
+
+    public fun readAllTargetAdmittedCount(): Long {
+        check(options.allTargetCapture) { "all-target capture was not selected" }
+        return readCounter(ALL_TARGET_ADMITTED_COUNTER_INDEX)
+    }
+
+    public fun readAllTargetSubmittedCount(): Long {
+        check(options.allTargetCapture) { "all-target capture was not selected" }
+        return readCounter(ALL_TARGET_SUBMITTED_COUNTER_INDEX)
+    }
 
     internal fun readExactAdmissionAuditArgumentReadFailureCount(): Long = readCounter(EXACT_ADMISSION_AUDIT_ARGUMENT_READ_FAILURE_COUNTER_INDEX)
 
@@ -894,6 +920,11 @@ internal class TierEbpfEngine(
         markerPerfFds.forEach { closeOwned(it) }
     }
 
+    /** Separate from marker attachment: new target sys_enter handlers cannot publish after disable. */
+    public fun enableCaptureAdmission() = setCaptureAdmission(true)
+
+    public fun disableCaptureAdmission() = setCaptureAdmission(false)
+
     /** Drains committed syscall records without waiting or timestamp correlation. */
     public fun drainEvents(): List<SyscallInvocationEvent> {
         val installed = requireInstalled()
@@ -1027,11 +1058,12 @@ internal class TierEbpfEngine(
     private fun setMarkerAttached(
         installed: Resources,
         attached: Boolean,
-    ) {
+    ) = synchronized(lifecycleLock) {
         Arena.ofConfined().use { arena ->
             val key = intSeg(arena, 0)
-            val current = arena.allocate(16, 4)
-            val value = arena.allocate(16, 4)
+            val size = sessionConfigurationSize(options).toLong()
+            val current = arena.allocate(size, 4)
+            val value = arena.allocate(size, 4)
             val lookup = arena.allocate(32)
             lookup.set(ValueLayout.JAVA_INT, 0, installed.requireSessionFd().value)
             lookup.set(ValueLayout.ADDRESS, 8, key)
@@ -1047,6 +1079,25 @@ internal class TierEbpfEngine(
                 MARKER_GENERATION_OFFSET,
                 current.get(ValueLayout.JAVA_INT, MARKER_GENERATION_OFFSET) + 1,
             )
+            updateElem(arena, installed.requireSessionFd().value, key, value)
+        }
+    }
+
+    private fun setCaptureAdmission(enabled: Boolean) =
+        synchronized(lifecycleLock) {
+        check(options.allTargetCapture) { "capture admission is only available in all-target mode" }
+        val installed = requireInstalled()
+        Arena.ofConfined().use { arena ->
+            val key = intSeg(arena, 0)
+            val current = arena.allocate(ALL_TARGET_SESSION_BYTES.toLong(), 4)
+            val value = arena.allocate(ALL_TARGET_SESSION_BYTES.toLong(), 4)
+            val lookup = arena.allocate(32)
+            lookup.set(ValueLayout.JAVA_INT, BPF_ATTRIBUTE_FD_OFFSET, installed.requireSessionFd().value)
+            lookup.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_KEY_OFFSET, key)
+            lookup.set(ValueLayout.ADDRESS, BPF_ATTRIBUTE_VALUE_OFFSET, current)
+            bpfCall(BPF_MAP_LOOKUP_ELEM, lookup, 32)
+            value.copyFrom(current)
+            value.set(ValueLayout.JAVA_INT, CAPTURE_ADMISSION_OFFSET, if (enabled) 1 else 0)
             updateElem(arena, installed.requireSessionFd().value, key, value)
         }
     }

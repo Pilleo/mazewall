@@ -213,6 +213,8 @@ internal data class TierEOptions(
     val experimentalCoverage: Boolean = false,
     /** Controlled fault: drop selected ring events after retained-map insertion. Benchmark only. */
     val benchmarkDropRingSyscallNumber: Int? = null,
+    /** Opt-in target-wide syscall history, independent of native marker attribution. */
+    val allTargetCapture: Boolean = false,
 ) {
     init {
         require(maxPendingRecords > 0) { "maxPendingRecords must be positive" }
@@ -279,6 +281,18 @@ internal data class TierEOptions(
             benchmarkDropRingSyscallNumber == null ||
             ((benchmarkPhases || experimentalCoverage) && coverageRecoveryMode != CoverageRecoveryMode.DISABLED && benchmarkDropRingSyscallNumber >= 0),
         ) { "ring fault injection requires an experimental recovery session and a nonnegative syscall" }
+        require(
+            !allTargetCapture ||
+                (
+                    emissionMode == TierEEmissionMode.FULL_STREAM &&
+                    stackTransport == TierEStackTransport.DICTIONARY &&
+                    markerVersion == MarkerVersion.V1 &&
+                    coverageRecoveryMode == CoverageRecoveryMode.DISABLED &&
+                    ringSubmissionMode == TierERingSubmissionMode.ENABLED &&
+                    sysEnterAttachmentBackend != TierESysEnterAttachmentBackend.PERF_TRACEPOINT_COMPAT &&
+                    !benchmarkPhases
+                ),
+        ) { "all-target capture requires full-stream v1 dictionary, direct raw tracepoint, and no benchmark controls" }
     }
 
     public companion object {
