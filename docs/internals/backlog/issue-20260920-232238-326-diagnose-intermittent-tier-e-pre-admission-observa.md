@@ -7,6 +7,14 @@ dependencies: []
 component: "core"
 target_modules: []
 target_files:
+  - "docs/internals/designs/profiler/tier-e-package-first-acceptance-plan-20260929.md"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/README.md"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/manifest.json"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/preflight-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/native-phases-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/correctness-raw.tar.gz"
+  - "docs/internals/evidence/tier-e-package-first-07dcdb22-complete-20260929/aggregate-raw.tar.gz"
   - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/README.md"
   - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/manifest.json"
   - "docs/internals/evidence/tier-e-2a886864-native-identity-stop-20260929/SHA256SUMS"
@@ -1140,3 +1148,31 @@ retained in the 37-file checksum ledger. Historical timing failures
 and default-promotion rejection remain unchanged. A new acceptance
 attempt requires an independently predeclared source/build-identity
 contract; never substitute the measured binary post hoc.
+
+**Package-first exact-source candidate `07dcdb22` — all planned gates
+`COMPLETE`, policy-ineligible:** The operator approved the frozen
+[package-first procedure](../designs/profiler/tier-e-package-first-acceptance-plan-20260929.md).
+The sealed [candidate receipt](../evidence/tier-e-package-first-07dcdb22-complete-20260929/README.md)
+binds clean source digest `a4219212...`, Ubuntu `7.0.0-34-generic`
+config, immutable image `fc5bf5e1...`, CPU set `0,2` and the **actual
+Gradle-built** Debug/Release full SHA-256s `15914500...` and
+`e3efda53...`. Package files, host checks and unchanged historical
+phase baseline were checked and hashed *before* the first CTest.
+All three independent six-sample native phases passed both full and
+unique version-two bounds, with unique `GetStackTrace` medians
+**1,436,985 / 1,803,931 / 1,640,872 ns** against the unchanged
+**2,307,381 ns** limit. A fresh five-pair 1,000/s unaudited AB/BA
+correctness series completed all **20** full/unique 10,000/10,000
+forks with zero declared-ID gaps and no ring loss. Each noisy arm's
+PID-bound host-noise overlap belongs to its first full-stream fork,
+not necessarily its later unique fork. One v2 pinned-image rootful
+aggregate accepted the *preselected first phase* with exact raw
+sample/agent/source continuity, passed 45/45 native CTests and 18
+fresh-JVM tests without failures or skips, and produced a verified
+`COMPLETE` terminal. The previously stopped terminals remain
+`INCOMPLETE`; this supports only the exact generic-kernel/source/
+image/CPU candidate, **not** blanket kernel support or a causal
+explanation of XanMod gaps. This issue remains open for the
+unsupported-kernel observation gap and deferred Podman parity;
+`policy_eligibility=false`, `REJECT_DEFAULT_PROMOTION` and the
+separate operator support/promotion decision remain in force.

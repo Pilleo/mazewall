@@ -560,8 +560,24 @@ These are still substantive controllers, not thin launchers:
         Debug path provenance differed. The enclosing source-bound
         decision is `INCOMPLETE`; two further phases, fresh five-pair
         correctness and the pinned rootful aggregate were not run.
-        Source or build identity cannot be revised after measuring to
-        convert this stopped plan into an acceptance pass.
+         Source or build identity cannot be revised after measuring to
+         convert this stopped plan into an acceptance pass.
+         A later package-first [exact-source candidate](../../evidence/tier-e-package-first-07dcdb22-complete-20260929/README.md)
+         prepared and sealed both Gradle Debug and Release package
+         hashes before acquisition on frozen clean `07dcdb22`, Ubuntu
+         `7.0.0-34-generic`, exact rootful image and CPU `0,2`.
+         Three independent unchanged v2 native phases (18 fresh
+         samples), five AB/BA exact 10,000-operation pairs (20 forks),
+         and one v2 pinned-image rootful aggregate with the
+         *preselected phase-1 receipt* all completed. The aggregate
+         ran 45 native CTests and 18 fresh-JVM integration tests with
+         no failure or skip and verified pinned-image/source/binary
+         host export. This establishes a **candidate exact supported
+         environment only**: every older `INCOMPLETE` terminal remains
+         unchanged, XanMod's different kernel/config gap has no
+         causal explanation, noisy unique-fork overlap is not proven,
+         and `policy_eligibility=false`/`REJECT_DEFAULT_PROMOTION`
+         await a separate operator support decision.
    Podman parity remains operator-deferred and unverified.
   The post-capacity clean `b8901ed7` gate's first run timed out one
   four-thread JVM test under a whole-container two-CPU limit; an identical
