@@ -1,0 +1,33 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import "sync/atomic"
+
+// observedCounter preserves the existing metric interval reset and keeps a
+// separate non-consuming cumulative observation owned by this reader.
+type observedCounter struct{ interval, total atomic.Uint64 }
+
+func (c *observedCounter) Add(n uint64)         { c.interval.Add(n); c.total.Add(n) }
+func (c *observedCounter) Swap(n uint64) uint64 { return c.interval.Swap(n) }
+
+type traceReaderCounters struct {
+	ready                   atomic.Bool
+	lost, noData, readError observedCounter
+	bufferBytesPerCPU       int
+}
+
+// TraceReaderObservation counts only records consumed by the trace perf reader.
+// Fields are independently sampled; this is not a drained producer snapshot.
+type TraceReaderObservation struct {
+	Lost, NoData, ReadError uint64
+	BufferBytesPerCPU       int
+}
+
+func (t *Tracer) TraceReaderHealth() (TraceReaderObservation, bool) {
+	c := &t.traceReaderCounters
+	if !c.ready.Load() {
+		return TraceReaderObservation{}, false
+	}
+	return TraceReaderObservation{Lost: c.lost.total.Load(), NoData: c.noData.total.Load(), ReadError: c.readError.total.Load(), BufferBytesPerCPU: c.bufferBytesPerCPU}, true
+}

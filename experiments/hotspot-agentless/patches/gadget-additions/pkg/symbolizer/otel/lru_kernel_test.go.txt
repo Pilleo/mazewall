@@ -1,0 +1,59 @@
+//go:build mw_kernel
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/cilium/ebpf"
+)
+
+// Use the pinned provider's actual key/value layout and 256-entry capacity.
+// Kernel LRU eviction is approximate: test membership, not an invented order.
+func TestKernelLRUEvictionPreservesTwoCyclePruning(t *testing.T) {
+	m, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.LRUHash, KeySize: 8 + 3072*8, ValueSize: 8, MaxEntries: 256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	o := fixtureResolver()
+	for i := uint64(1); i <= 300; i++ {
+		key := make([]byte, 8+3072*8)
+		binary.NativeEndian.PutUint32(key, 123)
+		binary.NativeEndian.PutUint32(key[4:], 456)
+		binary.NativeEndian.PutUint64(key[8:], i)
+		if err := m.Put(key, i); err != nil {
+			t.Fatal(err)
+		}
+		o.storeTrace(i, fixtureFrames(), 123, 456)
+	}
+	active := map[uint64]bool{}
+	iter := m.Iterate()
+	var key []byte
+	var id uint64
+	for iter.Next(&key, &id) {
+		active[id] = true
+	}
+	if err := iter.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(active) == 0 || len(active) > 256 || len(active) >= 300 {
+		t.Fatalf("LRU capacity/eviction not observed: %d", len(active))
+	}
+	o.pruneCorrelationMap(active)
+	if len(o.correlationMap) != 300 {
+		t.Fatal("first absent cycle deleted an in-flight definition")
+	}
+	o.pruneCorrelationMap(active)
+	if len(o.correlationMap) != len(active) {
+		t.Fatal("stale userspace definitions not pruned")
+	}
+	for id := range o.correlationMap {
+		if !active[id] {
+			t.Fatal("evicted definition retained")
+		}
+	}
+}

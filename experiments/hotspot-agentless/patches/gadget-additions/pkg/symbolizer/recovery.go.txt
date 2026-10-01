@@ -1,0 +1,28 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import (
+	"context"
+	"errors"
+)
+
+var ErrReferenceRecoveryUnavailable = errors.New("reference recovery unavailable")
+
+type ReferenceRecovery interface {
+	RecoverDefinition(context.Context, Task) (bool, error)
+}
+
+// RecoverDefinition invalidates an unknown producer reference so a subsequent
+// operation can publish a new definition. It never reconstructs an old event.
+func (s *Symbolizer) RecoverDefinition(ctx context.Context, task Task) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	for _, resolver := range s.resolvers {
+		if recovery, ok := resolver.(ReferenceRecovery); ok {
+			return recovery.RecoverDefinition(ctx, task)
+		}
+	}
+	return false, ErrReferenceRecoveryUnavailable
+}

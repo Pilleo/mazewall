@@ -1,0 +1,49 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+
+package otel
+
+import (
+	"context"
+	"slices"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+type correlatedFrames struct {
+	frames   libpf.Frames
+	pid, tid uint32
+}
+
+type correlationWaiter struct {
+	ch   chan struct{}
+	refs int
+}
+
+func (o *otelResolverInstance) storeTrace(id uint64, frames libpf.Frames, pid, tid uint32) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.correlationMap[id] = correlatedFrames{frames: slices.Clone(frames), pid: pid, tid: tid}
+	if waiter, ok := o.waiters[id]; ok {
+		close(waiter.ch)
+		delete(o.waiters, id)
+	}
+}
+
+func (o *otelResolverInstance) ResolveStructured(ctx context.Context, task symbolizer.Task) (symbolizer.StructuredStack, error) {
+	if task.CorrelationID == 0 {
+		return symbolizer.StructuredStack{}, symbolizer.ErrStackUnavailable
+	}
+	trace, ok, err := o.lookupTraceOrWait(ctx, task.CorrelationID, task.EventBootTimestamp)
+	if err != nil {
+		return symbolizer.StructuredStack{}, err
+	}
+	if !ok {
+		return symbolizer.StructuredStack{}, symbolizer.ErrStackUnavailable
+	}
+	if task.Tgid != trace.pid || len(task.PidNumbers) == 0 || task.PidNumbers[0].Pid != trace.tid {
+		return symbolizer.StructuredStack{}, symbolizer.ErrStackIdentityMismatch
+	}
+	return symbolizer.StructuredStack{Frames: slices.Clone(trace.frames), PID: trace.pid, TID: trace.tid}, nil
+}

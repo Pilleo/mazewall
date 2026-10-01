@@ -1,0 +1,42 @@
+--- a/pkg/symbolizer/otel/structured.go
++++ b/pkg/symbolizer/otel/structured.go
+@@ -5,7 +5,10 @@
+ 
+ import (
+ 	"context"
++	"fmt"
++	"os"
+ 	"slices"
++	"strings"
+ 
+ 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+ 	"go.opentelemetry.io/ebpf-profiler/libpf"
+@@ -24,6 +27,18 @@
+ func (o *otelResolverInstance) storeTrace(id uint64, frames libpf.Frames, pid, tid uint32) {
+ 	o.mu.Lock()
+ 	defer o.mu.Unlock()
++	// Test-only build: discard one genuine symbolized definition, leaving the
++	// producer's BPF cache untouched. This code is absent from normal builds.
++	if !o.testDropDefinition {
++		for _, frame := range frames {
++			if strings.Contains(frame.Value().FunctionName.String(), "InlineOpenFixture.pathA") {
++				o.testDropDefinition = true
++				fmt.Fprintf(os.Stderr, "mw-fault-dropped-definition id=%d pid=%d tid=%d\n", id, pid, tid)
++				return
++			}
++		}
++	}
++
+ 	o.correlationMap[id] = correlatedFrames{frames: slices.Clone(frames), pid: pid, tid: tid}
+ 	if waiter, ok := o.waiters[id]; ok {
+ 		close(waiter.ch)
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -69,6 +69,7 @@
+ 	options symbolizer.SymbolizerOptions
+ 
+ 	trc *oteltracer.Tracer
++	testDropDefinition bool
+ 
+ 	// mu protects correlationMap, waiters, and pruneCandidate.
+ 	// There is a single producer (the traceReporter callback, called

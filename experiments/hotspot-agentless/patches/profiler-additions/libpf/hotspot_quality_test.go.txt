@@ -1,0 +1,19 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+import "testing"
+
+func TestHotSpotQualitySurvivesInterning(t *testing.T) {
+	f := Frame{Type: HotSpotFrame, HotSpotQuality: HotSpotQuality{ScopeLookup: HotSpotScopeExactPC, BCIState: HotSpotBCIObservedInRange}}
+	var frames Frames
+	frames.Append(&f)
+	f.HotSpotQuality.ScopeLookup = HotSpotScopeMethodOnly
+	frames.Append(&f)
+	if frames[0] == frames[1] || frames[0].Value().HotSpotQuality.ScopeLookup != HotSpotScopeExactPC {
+		t.Fatal("quality conflated or mutated after interning")
+	}
+	if (Frame{}).HotSpotQuality != (HotSpotQuality{}) {
+		t.Fatal("zero quality is not unknown")
+	}
+}

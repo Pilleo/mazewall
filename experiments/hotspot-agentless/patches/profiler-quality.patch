@@ -1,0 +1,124 @@
+--- a/libpf/trace.go
++++ b/libpf/trace.go
+@@ -71,6 +71,8 @@
+ type Frame struct {
++	// HotSpotQuality records provider evidence; its zero value is unknown.
++	HotSpotQuality HotSpotQuality
+ 	// Type is the frame type.
+ 	Type FrameType
+ 	// FunctionOffset is the line offset from function start line for the frame.
+ 	FunctionOffset uint32
+ 	// FunctionName is the name of the function for the frame.
+--- a/interpreter/hotspot/method.go
++++ b/interpreter/hotspot/method.go
+@@ -31,8 +31,14 @@
+-func (m *hotspotMethod) symbolize(bci uint32, ii *hotspotInstance, frames *libpf.Frames) {
++func (m *hotspotMethod) symbolize(bci uint32, ii *hotspotInstance, frames *libpf.Frames, quality libpf.HotSpotQuality) {
++	if quality.BCIState == libpf.HotSpotBCIObservedInRange {
++		quality.RawBCI = bci
++	}
+ 	// Make sure the BCI is within the method range
+ 	if bci >= uint32(m.bytecodeSize) {
++		if quality.BCIState == libpf.HotSpotBCIObservedInRange {
++			quality.BCIState = libpf.HotSpotBCIOutOfRange
++		}
+ 		bci = 0
+ 	}
+ 
+ 	dec := ii.d.newUnsigned5Decoder(bytes.NewReader(m.lineTable))
+ 	lineNo := dec.mapByteCodeIndexToLine(bci)
+@@ -44,6 +50,7 @@
+ 	frames.Append(&libpf.Frame{
++		HotSpotQuality: quality,
+ 		Type:            libpf.HotSpotFrame,
+ 		AddressOrLineno: libpf.AddressOrLineno(bci),
+ 		FunctionName:    m.methodName,
+ 		SourceFile:      m.sourceFileName,
+ 		SourceLine:      libpf.SourceLineno(lineNo),
+@@ -72,5 +79,7 @@
+ func (ji *hotspotJITInfo) symbolize(ripDelta int32, ii *hotspotInstance,
+-	frames *libpf.Frames) error {
++	frames *libpf.Frames) (resultErr error) {
++	start := len(*frames)
++	defer func() { finishScopeQuality(frames, start, resultErr) }()
+ 	//nolint:lll
+ 	// Unfortunately the data structures read here are not well documented in the JVM
+ 	// source, but for reference implementation you can look:
+@@ -87,25 +96,14 @@
+-	bestPCDelta := int32(-2)
+-	scopeOff := uint32(0)
+ 	vms := &ii.d.Get().vmStructs
+-	for i := uint(0); i < uint(len(ji.scopesPcs)); i += vms.PcDesc.Sizeof {
+-		pcDelta := int32(npsr.Uint32(ji.scopesPcs, i+vms.PcDesc.PcOffset))
+-		if pcDelta >= bestPCDelta && pcDelta <= ripDelta {
+-			bestPCDelta = pcDelta
+-			scopeOff = npsr.Uint32(ji.scopesPcs, i+vms.PcDesc.ScopeDecodeOffset)
+-			if pcDelta == ripDelta {
+-				// Exact match of RIP to PC. Stop search.
+-				// We could also record here that the symbolization
+-				// result is "accurate"
+-				break
+-			}
+-		}
++	scopeOff, lookup, lookupErr := selectScopePC(ji.scopesPcs, vms.PcDesc.Sizeof, vms.PcDesc.PcOffset, vms.PcDesc.ScopeDecodeOffset, ripDelta)
++	if lookupErr != nil {
++		return lookupErr
+ 	}
+ 
+ 	if scopeOff == 0 {
+ 		// It is possible that there is no debug info, or no scope information,
+ 		// for the given RIP. In this case we can provide the method name
+ 		// from the metadata.
+-		ji.method.symbolize(0, ii, frames)
++		ji.method.symbolize(0, ii, frames, libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeMethodOnly, BCIState: libpf.HotSpotBCIUnavailable})
+ 		return nil
+ 	}
+ 
+@@ -138,6 +136,8 @@
++		bciState := libpf.HotSpotBCIUnavailable
+ 		if byteCodeIndex > 0 {
++			bciState = libpf.HotSpotBCIObservedInRange
+ 			// Analysis shows that the BCI stored in the scopes data
+ 			// is one larger than the BCI used by Interpreter or by
+ 			// the lookup tables. This is probably a bug in the JVM.
+ 			byteCodeIndex--
+ 		}
+@@ -145,11 +145,20 @@
+ 		if methodIdx != 0 {
++			if uint64(methodIdx) > uint64(len(ji.metadata)/8) {
++				return fmt.Errorf("HotSpot scope method index out of range: %d", methodIdx)
++			}
+ 			methodPtr := npsr.Ptr(ji.metadata, 8*uint(methodIdx-1))
++			if methodPtr == 0 {
++				return fmt.Errorf("null HotSpot scope method pointer")
++			}
+ 			method, err := ii.getMethod(methodPtr, 0)
+ 			if err != nil {
+ 				return err
+ 			}
+-			method.symbolize(byteCodeIndex, ii, frames)
++			method.symbolize(byteCodeIndex, ii, frames, libpf.HotSpotQuality{ScopeLookup: lookup, BCIState: bciState})
+ 		}
+ 	}
++	if scopeOff != 0 {
++		return fmt.Errorf("nondecreasing or out-of-range HotSpot scope link: %d", scopeOff)
++	}
+ 	return nil
+ }
+--- a/interpreter/hotspot/instance.go
++++ b/interpreter/hotspot/instance.go
+@@ -898,12 +898,13 @@
+ 		frames.Append(&libpf.Frame{
++			HotSpotQuality: libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeStub, BCIState: libpf.HotSpotBCIUnavailable},
+ 			Type:         libpf.HotSpotFrame,
+ 			FunctionName: stubName,
+ 		})
+ 	case support.FrameHotspotInterpreter:
+ 		method, err1 := d.getMethod(ptr, ptrCheck)
+ 		if err1 != nil {
+ 			return err1
+ 		}
+-		method.symbolize(ripOrBci, d, frames)
++		method.symbolize(ripOrBci, d, frames, libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeInterpreter, BCIState: libpf.HotSpotBCIObservedInRange})
+ 	case support.FrameHotspotNative:
+ 		jitinfo, err1 := d.getJITInfo(ptr, ptrCheck)

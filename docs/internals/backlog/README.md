@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 24 | *Total Resolved Issues:* 636
+*Total Active Issues:* 32 | *Total Resolved Issues:* 636
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,14 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de](issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de.md) | Prove event-correlated inline Java paths with a deterministic operation corpus | high | experiment |
+| [issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident](issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md) | Validate captured interpreted HotSpot method identity before cached lookup | high | experiment |
+| [issue-20260930-212335-548-expose-observed-hotspot-scope-and-bci-quality-in-a](issue-20260930-212335-548-expose-observed-hotspot-scope-and-bci-quality-in-a.md) | Expose observed HotSpot scope and BCI quality in agentless frames | high | experiment |
+| [issue-20260930-165600-837-expose-agentless-collection-health-from-existing-r](issue-20260930-165600-837-expose-agentless-collection-health-from-existing-r.md) | Expose agentless collection health from existing reader counters | high | experiment |
+| [issue-20260930-041739-834-recover-agentless-stacks-after-a-lost-first-defini](issue-20260930-041739-834-recover-agentless-stacks-after-a-lost-first-defini.md) | Recover agentless stacks after a lost first definition | high | experiment |
+| [issue-20260930-022737-485-preserve-structured-agentless-hotspot-event-eviden](issue-20260930-022737-485-preserve-structured-agentless-hotspot-event-eviden.md) | Preserve structured agentless HotSpot event evidence with bounded enrichment | high | experiment |
+| [issue-20260930-020717-934-capture-event-triggered-hotspot-openat-stacks-with](issue-20260930-020717-934-capture-event-triggered-hotspot-openat-stacks-with.md) | Capture event-triggered HotSpot openat stacks with Gadget | high | experiment |
+| [issue-20260930-012719-798-lock-agentless-hotspot-experiment-dependencies-and](issue-20260930-012719-798-lock-agentless-hotspot-experiment-dependencies-and.md) | Lock agentless HotSpot experiment dependencies and preflight | high | experiment |
 | [issue-20260929-075557-179-add-opt-in-tier-e-all-target-syscall-capture-and-i](issue-20260929-075557-179-add-opt-in-tier-e-all-target-syscall-capture-and-i.md) | Add opt-in Tier E all-target syscall capture and independent stop barrier | high | core |
 | [issue-20260929-075625-151-export-bounded-terminal-tier-e-event-jsonl-with-ra](issue-20260929-075625-151-export-bounded-terminal-tier-e-event-jsonl-with-ra.md) | Export bounded terminal Tier E event JSONL with raw capture identities and stack evidence | high | core |
 | [issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop](issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop.md) | Integrate a production-owned Tier E collector loop | high | profiler |
