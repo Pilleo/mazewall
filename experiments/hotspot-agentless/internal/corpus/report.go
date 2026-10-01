@@ -16,6 +16,7 @@ import (
 type operation struct {
 	run, branch, filename string
 	sequence              int
+	worker                int
 }
 
 var runPattern = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
@@ -30,12 +31,16 @@ type Report struct {
 	UnavailableSegments int                    `json:"unavailable_application_segments"`
 	WrongAttribution    int                    `json:"wrong_attribution_or_order"`
 	CompiledSegments    map[string]int         `json:"compiled_segments_by_branch"`
+	WorkerTIDs          map[int]uint32         `json:"worker_tids"`
+	WorkerSegments      map[string]int         `json:"compiled_segments_by_worker_branch"`
+	ApplicationSegments map[string]int         `json:"application_segments_by_worker_branch"`
+	RuntimeMode         string                 `json:"runtime_mode"`
 	Compiler            map[string]InlineProof `json:"compiler_inline_proof"`
 	Summary             *model.Summary         `json:"collection_summary"`
 	Failures            []string               `json:"failures,omitempty"`
 }
 
-func readManifest(r io.Reader, perBranch int) (map[string]operation, string, error) {
+func readManifest(r io.Reader, perBranch, workers int) (map[string]operation, string, error) {
 	if perBranch <= 0 || perBranch > 10000 {
 		return nil, "", fmt.Errorf("invalid corpus size")
 	}
@@ -60,8 +65,9 @@ func readManifest(r io.Reader, perBranch int) (map[string]operation, string, err
 			return nil, "", fmt.Errorf("invalid manifest row")
 		}
 		seq, err := strconv.Atoi(row[2])
+		worker, workerErr := strconv.Atoi(row[1])
 		b := row[3]
-		if err != nil || seq < 0 || seq >= perBranch || row[1] != "0" || (b != "A" && b != "B") || !runPattern.MatchString(row[0]) {
+		if err != nil || workerErr != nil || worker < 0 || worker >= workers || worker != seq%workers || seq < 0 || seq >= perBranch || (b != "A" && b != "B") || !runPattern.MatchString(row[0]) {
 			return nil, "", fmt.Errorf("invalid operation identity")
 		}
 		if run == "" {
@@ -70,13 +76,13 @@ func readManifest(r io.Reader, perBranch int) (map[string]operation, string, err
 		if row[0] != run {
 			return nil, "", fmt.Errorf("mixed manifest runs")
 		}
-		filename := "/fixture/mw-inline-corpus-" + run + "-w0-s" + strconv.Itoa(seq) + "-" + b
+		filename := "/fixture/mw-inline-corpus-" + run + "-w" + strconv.Itoa(worker) + "-s" + strconv.Itoa(seq) + "-" + b
 		key := strconv.Itoa(seq) + "/" + b
 		if keys[key] || row[4] != filename {
 			return nil, "", fmt.Errorf("duplicate or noncanonical operation token")
 		}
 		keys[key] = true
-		ops[filename] = operation{run: run, branch: b, filename: filename, sequence: seq}
+		ops[filename] = operation{run: run, branch: b, filename: filename, sequence: seq, worker: worker}
 		counts[b]++
 	}
 	if counts["A"] != perBranch || counts["B"] != perBranch {
@@ -87,19 +93,33 @@ func readManifest(r io.Reader, perBranch int) (map[string]operation, string, err
 
 // Analyze pairs exact filename tokens, not clocks, stack IDs or same-TID guesses.
 func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (Report, error) {
-	r := Report{SchemaVersion: 1, CompiledSegments: map[string]int{"A": 0, "B": 0}}
+	return AnalyzeWorkers(manifest, records, compiler, pid, perBranch, 1)
+}
+
+func AnalyzeWorkers(manifest, records, compiler io.Reader, pid uint32, perBranch, workers int) (Report, error) {
+	return AnalyzeRuntime(manifest, records, compiler, pid, perBranch, workers, "c2")
+}
+
+func AnalyzeRuntime(manifest, records, compiler io.Reader, pid uint32, perBranch, workers int, mode string) (Report, error) {
+	r := Report{SchemaVersion: 1, CompiledSegments: map[string]int{"A": 0, "B": 0}, WorkerTIDs: map[int]uint32{}, WorkerSegments: map[string]int{}, ApplicationSegments: map[string]int{}, RuntimeMode: mode}
+	if mode != "c2" && mode != "tiered" && mode != "interpreter" {
+		return r, fmt.Errorf("unsupported corpus runtime mode")
+	}
+	if workers <= 0 || workers > 16 || perBranch < workers {
+		return r, fmt.Errorf("invalid platform worker count")
+	}
 	fail := func(message string) {
 		if len(r.Failures) < 20 {
 			r.Failures = append(r.Failures, message)
 		}
 	}
-	ops, run, err := readManifest(manifest, perBranch)
+	ops, run, err := readManifest(manifest, perBranch, workers)
 	if err != nil {
 		return r, err
 	}
 	r.Run = run
 	r.Expected = len(ops)
-	r.Compiler, err = ReadCompiler(compiler, pid)
+	r.Compiler, err = readCompiler(compiler, pid, mode == "c2")
 	if err != nil {
 		return r, err
 	}
@@ -180,7 +200,7 @@ func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (
 		return r, fmt.Errorf("unsupported whole-session loss claim")
 	}
 	seen := map[string]bool{}
-	workerTID := uint32(0)
+	tidWorkers := map[uint32]int{}
 	for id, e := range events {
 		op, marked := ops[e.Filename]
 		if !marked {
@@ -195,12 +215,14 @@ func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (
 		}
 		seen[e.Filename] = true
 		r.Observed++
-		if workerTID == 0 {
-			workerTID = e.TID
+		if old, ok := r.WorkerTIDs[op.worker]; ok && old != e.TID {
+			fail("worker operation changed OS TID")
 		}
-		if workerTID != e.TID {
-			fail("single-worker corpus observed multiple worker TIDs")
+		if old, ok := tidWorkers[e.TID]; ok && old != op.worker {
+			fail("different workers shared an OS TID")
 		}
+		r.WorkerTIDs[op.worker] = e.TID
+		tidWorkers[e.TID] = op.worker
 		if e.RegisterRead != 0 || e.ArgumentRead <= 0 || e.PathTruncated || e.DirFD != -100 || e.Flags != 0 || string(e.FilenameBytes) != e.Filename {
 			fail("unreadable or invalid operation arguments")
 		}
@@ -245,6 +267,9 @@ func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (
 				leaf = i
 				compiled = compiled && (f.ScopeLookup == "exact_pc" || f.ScopeLookup == "preceding_pc")
 			}
+			if mode == "interpreter" && strings.Contains(f.FunctionName, "InlineCorpusFixture.") && f.ScopeLookup != "interpreter" {
+				bad = true
+			}
 		}
 		if bad || (leaf != -1 && root != -1 && leaf >= root) {
 			r.WrongAttribution++
@@ -256,8 +281,10 @@ func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (
 			continue
 		}
 		r.ResolvedSegments++
+		r.ApplicationSegments[strconv.Itoa(op.worker)+"/"+op.branch]++
 		if compiled {
 			r.CompiledSegments[op.branch]++
+			r.WorkerSegments[strconv.Itoa(op.worker)+"/"+op.branch]++
 		}
 	}
 	r.Unobserved = r.Expected - r.Observed
@@ -265,8 +292,16 @@ func Analyze(manifest, records, compiler io.Reader, pid uint32, perBranch int) (
 		fail("unobserved intended operations; loss unexplained")
 	}
 	for _, b := range []string{"A", "B"} {
-		if r.CompiledSegments[b] == 0 {
+		if mode == "c2" && r.CompiledSegments[b] == 0 {
 			fail("no reconstructed compiled application segment for branch " + b)
+		}
+	}
+	for worker := 0; worker < workers; worker++ {
+		for _, b := range []string{"A", "B"} {
+			key := strconv.Itoa(worker) + "/" + b
+			if r.ApplicationSegments[key] == 0 || (mode == "c2" && r.WorkerSegments[key] == 0) {
+				fail("no required application segment for worker/branch " + key)
+			}
 		}
 	}
 	if len(r.Failures) > 0 {

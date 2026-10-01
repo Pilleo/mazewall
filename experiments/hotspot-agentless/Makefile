@@ -38,7 +38,7 @@ build: deps
 		-o build/mw-hotspot-demo ./cmd/mw-hotspot-demo
 
 .PHONY: recovery-test-build recovery
-.PHONY: corpus-fixture inline-corpus
+.PHONY: corpus-fixture inline-corpus corpus-matrix
 corpus-fixture:
 	mkdir -p build/inline-corpus-classes
 	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
@@ -48,6 +48,9 @@ corpus-fixture:
 
 inline-corpus: build gadget corpus-fixture
 	MW_CORPUS_RUN="$$(python3 -c 'import secrets; print(secrets.token_hex(8))')" bash scripts/run-demo.sh
+
+corpus-matrix: build gadget corpus-fixture
+	bash scripts/run-corpus-matrix.sh
 
 recovery-test-build:
 	python3 scripts/prepare-gadget.py --drop-first-definition

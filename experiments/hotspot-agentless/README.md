@@ -237,6 +237,31 @@ gate, not the full runtime/thread/class-unloading matrix, semantic BCI oracle,
 USER_NOTIF reference comparison or production overhead envelope. Default tiered
 and interpreter-only behavior continue to have independent quality gates.
 
+## Runtime and platform-worker corpus matrix
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock \
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
+  make corpus-matrix DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+```
+
+This runs C2, tiered and interpreter-only modes with 1, 4 and 16 platform workers,
+keeping 1,000 global sequence tokens per path in each case. Worker assignment is
+`sequence % workers`; the filename/manifest carries the worker number. All workers
+are created before attachment and gated together. A worker's captured OS TID must
+remain consistent and distinct from every other worker; every worker must have
+application-segment coverage on both paths. This mapping check is not a separate
+JVM-to-OS thread oracle.
+
+Only C2 mode requires active compiler-inline proof and compiled segments for every
+worker/branch. Tiered mode has compiler logging but no threshold/forced-inline
+commands; interpreter mode has `-Xint` and cannot claim compiled application
+frames. Their reports do not inherit the controlled-C2 inline guarantee.
+`MW_CORPUS_WORKERS=4` or `16` and `MW_CORPUS_MODE=tiered` or `interpreter` also work
+with `make inline-corpus`. The matrix retains each capture and emits a combined
+`matrix-report.json`; unobserved tokens or wrong attribution fail immediately.
+Unresolved application segments remain explicit even when all operations arrived.
+
 ## Preflight
 
 Use an ordinary-user target's **host PID**, while running the collector with

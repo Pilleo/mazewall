@@ -39,6 +39,10 @@ func attributes(e xml.StartElement) map[string]string {
 // ReadCompiler requires successful inline parse and an active C2 nmethod with
 // the same compile ID. Source nesting, flags, and C1 compilation are not proof.
 func ReadCompiler(r io.Reader, expectedPID uint32) (map[string]InlineProof, error) {
+	return readCompiler(r, expectedPID, true)
+}
+
+func readCompiler(r io.Reader, expectedPID uint32, requireInline bool) (map[string]InlineProof, error) {
 	d := xml.NewDecoder(io.LimitReader(r, 32*1024*1024))
 	nmethods := map[string]InlineProof{}
 	invalid := map[string]bool{}
@@ -117,7 +121,7 @@ func ReadCompiler(r io.Reader, expectedPID uint32) (map[string]InlineProof, erro
 			proof[strings.TrimPrefix(p.Root, "path")] = p
 		}
 	}
-	if !matchedProcess || len(proof) != 2 {
+	if !matchedProcess || (requireInline && len(proof) != 2) {
 		return nil, fmt.Errorf("successful active C2 sharedLeaf inline proof required for both paths, got %d", len(proof))
 	}
 	return proof, nil

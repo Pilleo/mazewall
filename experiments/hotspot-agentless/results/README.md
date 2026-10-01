@@ -277,3 +277,40 @@ Final checks for this corpus milestone passed: `make verify`, the fresh controll
 corpus gate, original recovery gate, harness shell syntax, backlog validation,
 `git diff --check` and `./gradlew build`. The corpus issue remains open for review;
 no files were staged or committed and no upstream changes were submitted.
+
+## Runtime/platform-worker matrix (2026-10-01)
+
+The verified baseline was committed as `d965d2a6` before this extension. Unrelated
+operator work was left unstaged. The fixture now uses gated platform workers and
+an atomic completion checksum, preserving 1,000 operations per path overall.
+
+The worker/TID rejection test first failed for missing implementation, then passed
+alongside compiler/manifest tests. Runtime tests separate interpreter evidence
+from C2 proof and reject compiled frames in interpreter-only application segments.
+The nine-case live matrix passed in `build/matrix.4TpGEq/`:
+
+| Mode | Workers | Observed | Resolved app segments | Unavailable app segments | Wrong attribution/order |
+|---|---:|---:|---:|---:|---:|
+| C2 | 1 | 2,000 | 1,988 | 12 | 0 |
+| C2 | 4 | 2,000 | 1,936 | 64 | 0 |
+| C2 | 16 | 2,000 | 1,722 | 278 | 0 |
+| Tiered | 1 | 2,000 | 1,986 | 14 | 0 |
+| Tiered | 4 | 2,000 | 1,926 | 74 | 0 |
+| Tiered | 16 | 2,000 | 1,744 | 256 | 0 |
+| Interpreter | 1 | 2,000 | 1,980 | 20 | 0 |
+| Interpreter | 4 | 2,000 | 1,925 | 75 | 0 |
+| Interpreter | 16 | 2,000 | 1,776 | 224 | 0 |
+
+All 18,000 intended tokens were observed; every worker had both branch segments,
+with distinct stable captured TIDs. C2 cases also required compiled segments per
+worker and target compiler-inline evidence. Other modes do not claim that proof.
+Per-case availability reduction is retained rather than hidden. The machine
+matrix records each artifact path, compiler proof, worker mapping and partial
+health summary. Repeated runs use new JVM/process/session/run identities.
+
+This is not yet a class-unloading/reuse, deep-chain, cold-start, GraalVM, independent
+reference-oracle, native transport-loss or overhead acceptance matrix.
+
+Runtime extension final checks passed: `make verify`, backlog validation,
+`git diff --check` and `./gradlew build`. The scoped matrix issue remains open for
+review; no remote submission or merge was performed.

@@ -33,7 +33,18 @@ func TestDeterministicInlineCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer records.Close()
-	r, validationErr := corpus.Analyze(manifest, records, compiler, uint32(pid), 1000)
+	workers := 1
+	if value := os.Getenv("MW_CORPUS_WORKERS"); value != "" {
+		workers, err = strconv.Atoi(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	mode := os.Getenv("MW_CORPUS_MODE")
+	if mode == "" {
+		mode = "c2"
+	}
+	r, validationErr := corpus.AnalyzeRuntime(manifest, records, compiler, uint32(pid), 1000, workers, mode)
 	encoded, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		t.Fatal(err)
