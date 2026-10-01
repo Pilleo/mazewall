@@ -12,8 +12,23 @@ target_files:
   - "experiments/hotspot-agentless/README.md"
   - "experiments/hotspot-agentless/tests/fixtures/InterpretedIdentityCollisionProbe.go.txt"
   - "experiments/hotspot-agentless/scripts/probe-identity-boundary.sh"
+  - "experiments/hotspot-agentless/fixtures/java/UnloadDriver.java"
+  - "experiments/hotspot-agentless/fixtures/java/UnloadG00000.java"
+  - "experiments/hotspot-agentless/internal/unloading/**"
+  - "experiments/hotspot-agentless/internal/identity/**"
+  - "experiments/hotspot-agentless/internal/capture/**"
+  - "experiments/hotspot-agentless/internal/model/**"
+  - "experiments/hotspot-agentless/cmd/mw-hotspot-demo/main.go"
+  - "experiments/hotspot-agentless/gadgets/openat-stack/**"
+  - "experiments/hotspot-agentless/scripts/rebuild-profiler-ebpf.sh"
+  - "experiments/hotspot-agentless/tests/integration/unloading_test.go"
+  - "experiments/hotspot-agentless/scripts/run-demo.sh"
+  - "experiments/hotspot-agentless/Makefile"
   - "experiments/hotspot-agentless/results/README.md"
+  - "experiments/hotspot-agentless/results/identity-investigation.md"
   - "docs/internals/backlog/README.md"
+  - "docs/plans/2026-10-01-agentless-hotspot-epoch-design.md"
+  - "docs/plans/2026-10-01-agentless-hotspot-epoch-plan.md"
 target_symbols: []
 open_questions: false
 ---
@@ -72,6 +87,41 @@ Continuing that gate requires a separately approved captured-incarnation evidenc
 and cache/protocol design; widening a pointer fingerprint alone does not rule
 out full-address recycling/ABA. Do not weaken the assertion or advertise the
 stable-workload matrix as class-unloading/reuse proof.
+
+**Root-cause investigation:** source tracing confirmed 32-bit truncation during
+capture, current-state-only pointer checks and an earlier raw-frame cache fast
+path that bypasses revalidation. A second synthetic probe demonstrated unchanged
+address/cache ABA independently of the 32-GiB collision. Both fail in
+`build/identity-boundary.UanQmL/`. OpenJDK 25u allocator/lifetime source supports
+metadata release/reuse. The subsequent live follow-up below establishes actual
+misattribution; frequency in arbitrary applications remains unmeasured. Details:
+`results/identity-investigation.md` in the experiment.
+
+**Live failure now reproduced:** eighty disposable class loaders each performed
+twenty generation-tagged opens, then were confirmed unloaded by JVM logs. Three
+fresh runs, including the normal uninstrumented collector, each observed all
+1,600 tokens but emitted 1,560 wrong-generation results: generations 2–79 were
+labelled generation 1. Artifact control: `build/capture.UueXxk/`; diagnostics:
+`build/capture.ZlX9mH/` and `build/capture.x8pMCm/`.
+
+Four producer references published in generation 1 were reused through generation
+79, preventing later definitions and interpreted validation. The current fix
+therefore cannot satisfy unloading identity acceptance. Producer, frame and
+method caches all need to participate in the remedy. This live result does not
+prove the particular synthetic 32-GiB collision, and full ConstMethod readings
+were available only on published definitions. Keep the failing live assertion.
+
+**Scoped remedy architecture approved (2026-10-01):** capture a stable even JVM
+safepoint epoch, isolate producer/frame identities by epoch, invalidate existing
+method/Symbol/JIT metadata caches across boundaries, and bracket deferred decoding
+with checked epoch reads. Preserve already validated immutable historical
+definitions and reject cross-boundary tentative labels. Initial support is the
+exact pinned interpreter-only Serial-GC profile; live flags and ELF identity must
+be verified. See the [epoch design](../../plans/2026-10-01-agentless-hotspot-epoch-design.md)
+and [implementation plan](../../plans/2026-10-01-agentless-hotspot-epoch-plan.md).
+Implementation is not started; retain
+this issue as open and require useful resolution across generations, not merely
+an all-unavailable zero-wrong-label result.
 
 ---
 <!-- id: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident  file: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md -->
