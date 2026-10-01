@@ -10,6 +10,8 @@ target_files:
   - "experiments/hotspot-agentless/patches/**"
   - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
   - "experiments/hotspot-agentless/README.md"
+  - "experiments/hotspot-agentless/tests/fixtures/InterpretedIdentityCollisionProbe.go.txt"
+  - "experiments/hotspot-agentless/scripts/probe-identity-boundary.sh"
   - "experiments/hotspot-agentless/results/README.md"
   - "docs/internals/backlog/README.md"
 target_symbols: []
@@ -56,6 +58,20 @@ Backlog validation and `./gradlew build` passed after focused checks.
 cannot distinguish all address reuse/ABA cases. Frame-cache reuse and compiled
 scope lookup retain existing behavior. The bounded checks do not establish a
 generation identity or replace the class-unloading/reuse acceptance matrix.
+
+**Reproduced blocker for full generation acceptance (2026-10-01):**
+`bash scripts/probe-identity-boundary.sh` fails the generation assertion in an
+isolated provider copy. ConstMethod pointers `0x200` and `0x800000200` produce
+the identical captured 32-bit shifted fingerprint. A delayed old frame can be
+accepted against an already cached replacement incarnation with matching live
+pointer checks. Artifact: `build/identity-boundary.iAwoCp/probe.log`.
+
+This is a diagnostic fixture outside the ordinary passing test suite. Full
+generation correctness cannot be asserted from the current capture fields.
+Continuing that gate requires a separately approved captured-incarnation evidence
+and cache/protocol design; widening a pointer fingerprint alone does not rule
+out full-address recycling/ABA. Do not weaken the assertion or advertise the
+stable-workload matrix as class-unloading/reuse proof.
 
 ---
 <!-- id: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident  file: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md -->

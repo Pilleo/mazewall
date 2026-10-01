@@ -1,0 +1,21 @@
+// Diagnostic probe for the identity acceptance boundary, not a passing test.
+package hotspot
+
+import (
+	"encoding/binary"
+	"testing"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func TestFullInterpreterGenerationCannotBeProvedByTruncatedCookie(t *testing.T) {
+	ii,replacement:=qualityInstance(t)
+	oldPointer:=libpf.Address(0x200)
+	newPointer:=oldPointer+libpf.Address(1<<35)
+	if uint32(uint64(oldPointer)>>3)!=uint32(uint64(newPointer)>>3){t.Fatal("probe did not collide")}
+	// The address has been reused and a new incarnation is already cached.
+	// A delayed old frame carries exactly the same method address/token.
+	replacement.constMethodAddr=newPointer
+	ii.rm.ReaderAt=identityReader(func(p []byte,_ int64)(int,error){binary.LittleEndian.PutUint64(p,uint64(newPointer));return len(p),nil})
+	got,err:=ii.getInterpretedMethod(0x100,uint32(uint64(oldPointer)>>3))
+	if err==nil && got==replacement {t.Fatal("old captured cookie accepted replacement incarnation; generation evidence is absent")}
+}

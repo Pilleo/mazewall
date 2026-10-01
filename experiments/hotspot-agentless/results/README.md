@@ -345,3 +345,26 @@ chain equality, overhead advantage or enforcement equivalence.
 Reference milestone final checks passed: `make verify`, backlog validation,
 `git diff --check` and `./gradlew build`. The reference issue remains open for
 review; the changes do not modify the profiler's production implementation.
+
+## Full interpreter-generation boundary (blocked, 2026-10-01)
+
+After the runtime and independent-reference gates, an adversarial identity probe
+reproduced the documented fingerprint limitation. ConstMethod addresses `0x200`
+and `0x800000200` have the same captured low-32-bit `(pointer >> 3)` value. With
+the replacement already cached and live, the delayed old captured token is
+accepted by the bounded before/after checks. This is a failure of the stronger
+generation assertion, not a failure of the previously verified distinct-token
+check or stable-workload corpus.
+
+Reproduce with `bash scripts/probe-identity-boundary.sh` (expected exit 1).
+It copies the verified generated provider into a separate diagnostic directory,
+adds `InterpretedIdentityCollisionProbe.go.txt` as a test, and leaves ordinary
+prepared sources unchanged. Evidence: `build/identity-boundary.iAwoCp/probe.log`.
+The ordinary test suite remains passing; the probe is not silently skipped or
+converted into passing generation proof.
+
+The full class-unloading/reuse identity gate is blocked on a broader captured
+incarnation/generation evidence and cache/protocol design. The prior approval
+covered public frame quality metadata and bounded cache validation, not a new
+capture protocol. Full-address recycling also requires more than merely widening
+the fingerprint. No upstream protocol or BPF capture layout was changed here.
