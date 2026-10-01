@@ -38,7 +38,7 @@ build: deps
 		-o build/mw-hotspot-demo ./cmd/mw-hotspot-demo
 
 .PHONY: recovery-test-build recovery
-.PHONY: corpus-fixture inline-corpus corpus-matrix
+.PHONY: corpus-fixture inline-corpus corpus-matrix oracle
 corpus-fixture:
 	mkdir -p build/inline-corpus-classes
 	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
@@ -51,6 +51,9 @@ inline-corpus: build gadget corpus-fixture
 
 corpus-matrix: build gadget corpus-fixture
 	bash scripts/run-corpus-matrix.sh
+
+oracle: build gadget corpus-fixture
+	bash scripts/run-oracle.sh
 
 recovery-test-build:
 	python3 scripts/prepare-gadget.py --drop-first-definition

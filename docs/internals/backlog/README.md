@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 33 | *Total Resolved Issues:* 636
+*Total Active Issues:* 34 | *Total Resolved Issues:* 636
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261001-011604-995-compare-agentless-application-segments-with-a-sepa](issue-20261001-011604-995-compare-agentless-application-segments-with-a-sepa.md) | Compare agentless application segments with a separate USER_NOTIF reference run | high | experiment |
 | [issue-20261001-003347-073-validate-agentless-inline-attribution-across-concu](issue-20261001-003347-073-validate-agentless-inline-attribution-across-concu.md) | Validate agentless inline attribution across concurrent platform workers | high | experiment |
 | [issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de](issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de.md) | Prove event-correlated inline Java paths with a deterministic operation corpus | high | experiment |
 | [issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident](issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md) | Validate captured interpreted HotSpot method identity before cached lookup | high | experiment |

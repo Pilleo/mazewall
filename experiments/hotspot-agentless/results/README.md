@@ -314,3 +314,34 @@ reference-oracle, native transport-loss or overhead acceptance matrix.
 Runtime extension final checks passed: `make verify`, backlog validation,
 `git diff --check` and `./gradlew build`. The scoped matrix issue remains open for
 review; no remote submission or merge was performed.
+
+## Independent USER_NOTIF reference (2026-10-01)
+
+The existing USER_NOTIF smoke prerequisite passed before adding the independent
+fixture. A preliminary host-GraalVM probe also resolved 2,000 operations but is
+not used as Temurin comparison evidence. The final wrapper exported the pinned
+Temurin JDK for ordinary-user host execution and left profiler/session/native
+implementation unchanged. The first temporary Gradle task wiring executed but
+failed configuration-cache serialization; the reproducible wrapper explicitly
+uses `--no-configuration-cache` and subsequent runs succeeded.
+
+Reference regressions first failed for missing comparison implementation, then
+passed while rejecting incomplete, wrong and non-USER_NOTIF reports. Raw reference
+paths identify each marked open; Java stack arrays verify leaf/root/branch order.
+The fixture also checks the actual strategy and reference coverage completeness.
+
+One-command `make oracle` passed in `build/oracle.LvlLGg/`: 2,000 observed candidate
+operations, 1,986 reconstructed application segments and 14 explicit unavailable
+segments; reference 2,000 observed/ordered segments (1,000 per branch), zero wrong
+or unavailable reference segments, complete reference coverage and checksum 3,000.
+The machine differential report states `independent_runs=true` and
+`bci_equality_verified=false`. Separate reference artifact paths are recorded in
+`runs.txt`; each retains raw stacks, report/profile, log and environment provenance.
+
+This verifies the agreed application segment and operation classes across runs;
+it does not assert occurrence identity, semantic BCI equivalence, full inline
+chain equality, overhead advantage or enforcement equivalence.
+
+Reference milestone final checks passed: `make verify`, backlog validation,
+`git diff --check` and `./gradlew build`. The reference issue remains open for
+review; the changes do not modify the profiler's production implementation.

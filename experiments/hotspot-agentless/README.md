@@ -262,6 +262,33 @@ with `make inline-corpus`. The matrix retains each capture and emits a combined
 `matrix-report.json`; unobserved tokens or wrong attribution fail immediately.
 Unresolved application segments remain explicit even when all operations arrived.
 
+## Independent USER_NOTIF application-segment reference
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock \
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
+  make oracle DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+```
+
+Candidate capture finishes before a separate reference JVM uses the existing
+public `Profiler.profile(Callable, false, true)` API. The reference opens 1,000
+distinct files per branch and requires exact path coverage and ordered
+`sharedLeaf → pathA/pathB` Java frames, no duplicates/wrong branches and complete
+reference coverage. The candidate never has this reference profiler injected.
+The comparison is between agreed application segments across separate executions,
+not the same physical syscalls. StackTraceElement cannot establish BCI equality;
+the differential report explicitly leaves that unverified.
+
+The digest-pinned Temurin JDK is exported to ignored content-addressed build
+storage for an ordinary-user host reference process. A Gradle initialization
+script supplies the existing profiler runtime classpath without modifying that
+module or its APIs. This initialization uses `--no-configuration-cache` because
+its temporary classpath task wiring is not configuration-cache serializable.
+The reference retains raw Java stacks, the profiler's serialized coverage/behavior,
+its report, JDK version and source/class/image/UID/kernel provenance. Candidate
+and reference coverage remain separate; reference success does not upgrade
+candidate unavailable frames or kernel-loss accounting.
+
 ## Preflight
 
 Use an ordinary-user target's **host PID**, while running the collector with

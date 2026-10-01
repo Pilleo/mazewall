@@ -1,0 +1,12 @@
+// Temporary task wiring only; the profiler implementation/API is unchanged.
+gradle.projectsEvaluated {
+    def profiler = rootProject.findProject(':profiler')
+    if (profiler == null) return
+    def experiment = new File(rootProject.projectDir, 'experiments/hotspot-agentless')
+    profiler.tasks.register('agentlessReferenceClasspath') {
+        dependsOn profiler.tasks.named('classes')
+        doLast {
+            new File(experiment, 'build/reference-classpath.txt').text = profiler.sourceSets.main.runtimeClasspath.asPath
+        }
+    }
+}
