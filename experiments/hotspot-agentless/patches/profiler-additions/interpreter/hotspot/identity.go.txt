@@ -6,16 +6,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
 	"io"
 )
 
 func (d *hotspotInstance) readInterpretedConstMethod(addr libpf.Address) (libpf.Address, error) {
+	return d.readInterpretedConstMethodMemory(d.rm, addr)
+}
+
+func (d *hotspotInstance) readInterpretedConstMethodMemory(rm remotememory.RemoteMemory, addr libpf.Address) (libpf.Address, error) {
 	offset := uint64(d.d.Get().vmStructs.Method.ConstMethod)
 	if uint64(addr) > ^uint64(0)-offset {
 		return 0, fmt.Errorf("HotSpot method pointer overflow")
 	}
 	var raw [8]byte
-	n, err := d.rm.ReadAt(raw[:], int64(addr+libpf.Address(offset)))
+	n, err := rm.ReadAt(raw[:], int64(addr+libpf.Address(offset)))
 	if err != nil {
 		return 0, fmt.Errorf("read interpreted ConstMethod identity: %w", err)
 	}
@@ -23,32 +28,36 @@ func (d *hotspotInstance) readInterpretedConstMethod(addr libpf.Address) (libpf.
 		return 0, fmt.Errorf("read interpreted ConstMethod identity: %w", io.ErrUnexpectedEOF)
 	}
 	ptr := libpf.Address(binary.LittleEndian.Uint64(raw[:]))
-	if ptr == 0 || ptr < d.rm.Bias {
+	if ptr == 0 || ptr < rm.Bias {
 		return 0, fmt.Errorf("null or invalid interpreted ConstMethod identity")
 	}
-	return ptr - d.rm.Bias, nil
+	return ptr - rm.Bias, nil
 }
 
 // Interpreter capture has an explicit (possibly zero) truncated pointer check.
 // Compiled scope lookups have no such token and retain the existing path.
 func (d *hotspotInstance) getInterpretedMethod(addr libpf.Address, captured uint32) (*hotspotMethod, error) {
-	ptr, err := d.readInterpretedConstMethod(addr)
+	return d.getInterpretedMethodMemory(d.rm, addr, captured)
+}
+
+func (d *hotspotInstance) getInterpretedMethodMemory(rm remotememory.RemoteMemory, addr libpf.Address, captured uint32) (*hotspotMethod, error) {
+	ptr, err := d.readInterpretedConstMethodMemory(rm, addr)
 	if err != nil {
 		return nil, err
 	}
-	if uint32(uint64(ptr+d.rm.Bias)>>3) != captured {
+	if uint32(uint64(ptr+rm.Bias)>>3) != captured {
 		return nil, fmt.Errorf("interpreted method changed since eBPF snapshot")
 	}
 	if cached, ok := d.addrToMethod.Get(addr); ok && cached.constMethodAddr != ptr {
 		d.addrToMethod.Remove(addr)
 	}
-	method, err := d.getMethod(addr, 0)
+	method, err := d.getMethodMemory(rm, addr)
 	if err != nil {
 		return nil, err
 	}
 	// Recheck both the cached/decoded full pointer and the live pointer. This
 	// rejects pointer replacement during metadata loading without a new cache.
-	current, err := d.readInterpretedConstMethod(addr)
+	current, err := d.readInterpretedConstMethodMemory(rm, addr)
 	if err != nil || current != ptr || method.constMethodAddr != ptr {
 		d.addrToMethod.Remove(addr)
 		if err != nil {

@@ -1,5 +1,21 @@
 # Verification evidence
 
+## Scoped epoch unloading acceptance (2026-10-01)
+
+The opt-in pinned interpreter/Serial profile now passes useful unloading
+attribution in three independent normal-collector JVMs and a final audited-build
+repeat: 1600 observed tokens, 1580 checked/correct segments, 20 cold unavailable,
+zero wrong-generation labels, and all 80 classes confirmed unloaded per run.
+Every branch in generations 1–79 resolves all ten operations. Same-epoch cache
+reuse is retained; cross-generation/cross-epoch reference reuse is absent.
+
+The non-epoch control remains red with 1560 wrong-generation labels. Real exec
+barrier and LRU/pruning tests, legacy/strict genuine recovery, controlled-C2
+regression, host race/upstream verification and pinned container build pass.
+Exact artifacts, hashes and limits are in
+[`identity-investigation.md`](identity-investigation.md#implemented-bounded-remedy-2026-10-01).
+This is a bounded runtime-profile result, not universal unloading or loss proof.
+
 Task 0 host checks on kernel `7.0.0-34-generic`, x86-64:
 
 - The selected Gadget/profiler module graph compiled in the Go preflight CLI.
@@ -368,3 +384,39 @@ incarnation/generation evidence and cache/protocol design. The prior approval
 covered public frame quality metadata and bounded cache validation, not a new
 capture protocol. Full-address recycling also requires more than merely widening
 the fingerprint. No upstream protocol or BPF capture layout was changed here.
+
+## Live disposable-loader investigation (2026-10-01)
+
+The formerly synthetic-only identity concern is now reproduced in the pinned
+Temurin JVM. Eighty equal-shape, uniquely named generated classes each used a new
+disposable loader and performed ten opens per branch. The target ran as an
+ordinary user with `-Xint`, Serial GC, 64 MiB heap and 32 MiB metaspace cap.
+JVM class-unloading logs confirmed all eighty generations; all loader weak
+references cleared and every generation's byte-read checksum passed.
+
+| Run | Collector | Tokens observed | Correct segments | Unavailable | Wrong generation |
+|---|---|---:|---:|---:|---:|
+| `capture.x8pMCm` | Raw diagnostics | 1,600 | 20 | 20 | 1,560 |
+| `capture.ZlX9mH` | Full-pointer diagnostics | 1,600 | 20 | 20 | 1,560 |
+| `capture.UueXxk` | Normal uninstrumented | 1,600 | 20 | 20 | 1,560 |
+
+Generation zero was unavailable; generation one resolved correctly; generations
+two through seventy-nine returned generation-one class/method labels. The normal
+control's `mw-unload-g00002-s000-A` returned `UnloadG00001.sharedLeaf` and
+`UnloadG00001.pathA` with apparently available interpreted BCIs. Thus logging
+instrumentation is not necessary to reproduce the observed failure.
+
+Four producer references first published in generation one were reused through
+generation seventy-nine. Only three dynamic method checked-lookup logs appeared,
+all in generation one. The producer's exact PID/TID/raw-frame cache therefore
+reused old definitions without later symbolization/validation. The user-mode
+frame-cache bypass is also present, but its observed hits in this run occurred
+within the initial publication generation; it is not independently proven as the
+cross-generation failure layer here. Full ConstMethod observations were available
+only when definitions were published. This does not prove a 32-GiB collision.
+
+Each failing gate saved a manifest, raw events/enrichment, target completion log,
+unloading log and `unloading-report.json`; diagnostic variants also retain raw
+identity logs. The ordinary unit/race suite is separate from this deliberately
+failing lifetime acceptance test. See `identity-investigation.md` for exact
+source paths, diagnostic hashes, controls and the resulting design requirements.

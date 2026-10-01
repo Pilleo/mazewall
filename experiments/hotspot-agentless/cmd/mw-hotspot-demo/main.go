@@ -26,6 +26,7 @@ func run(args []string) int {
 	check := flags.Bool("preflight", false, "inspect environment without attaching a probe")
 	captureMode := flags.Bool("capture", false, "run the first live capture gate")
 	debugRendered := flags.Bool("debug-rendered", false, "use the legacy debug rendering gate")
+	identityMode := flags.String("hotspot-identity", "unknown", "HotSpot identity: unknown or safepoint-epoch (pinned interpreter/Serial only)")
 	workers := flags.Int("workers", 4, "bounded enrichment workers")
 	maxPending := flags.Int("max-pending", 1024, "pending events including active lookups")
 	maxBytes := flags.Int("max-pending-bytes", 16*1024*1024, "pending event payload byte cap")
@@ -34,6 +35,10 @@ func run(args []string) int {
 	store := flags.String("store", "", "local OCI store containing the gadget")
 	duration := flags.Duration("duration", 15*time.Second, "maximum capture duration")
 	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if (*identityMode != "unknown" && *identityMode != "safepoint-epoch") || (*identityMode == "safepoint-epoch" && (*debugRendered || *duration > 60*time.Second)) {
+		fmt.Fprintln(os.Stderr, "invalid HotSpot identity mode, rendering mode or strict session duration")
 		return 2
 	}
 	if *check == *captureMode || flags.NArg() != 0 || *duration <= 0 {
@@ -46,6 +51,7 @@ func run(args []string) int {
 		ctx, cancel := context.WithTimeout(ctx, *duration)
 		defer cancel()
 		cfg := capture.Config{PID: *pid, Image: *image, Store: *store, Enrichment: capture.EnrichmentOptions{Workers: *workers, MaxPending: *maxPending, MaxPendingBytes: *maxBytes, Deadline: *enrichmentDeadline}}
+		cfg.StrictEpoch = *identityMode == "safepoint-epoch"
 		runCapture := capture.Run
 		if *debugRendered {
 			runCapture = capture.RunDebug

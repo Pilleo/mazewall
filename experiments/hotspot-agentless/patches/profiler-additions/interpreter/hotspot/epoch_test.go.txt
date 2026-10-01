@@ -1,0 +1,178 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"io"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/process"
+)
+
+func epochFixture(t *testing.T) (*hotspotInstance, []byte) {
+	ii, _ := qualityInstance(t)
+	ii.addrToMethod.Purge()
+	v := &ii.d.Get().vmStructs
+	v.Method.ConstMethod = 0
+	v.ConstMethod.Sizeof = 16
+	v.ConstMethod.Constants = 0
+	v.ConstMethod.NameIndex = 8
+	v.ConstMethod.SignatureIndex = 10
+	v.ConstMethod.CodeSize = 12
+	v.ConstMethod.Flags = 14
+	v.ConstantPool.Sizeof = 24
+	v.ConstantPool.PoolHolder = 0
+	v.ConstantPool.SourceFileNameIndex = 8
+	v.InstanceKlass.Sizeof = 16
+	v.Klass.Name = 0
+	v.Symbol.Length = 0
+	v.Symbol.Body = 2
+	m := make([]byte, 4096)
+	for a, p := range map[int]uint64{0x100: 0x200, 0x200: 0x300, 0x300: 0x400, 0x320: 0x580, 0x328: 0x600, 0x330: 0x680, 0x400: 0x500, 0x800: 2} {
+		binary.LittleEndian.PutUint64(m[a:], p)
+	}
+	for a, p := range map[int]uint16{0x208: 1, 0x20a: 2, 0x20c: 1, 0x308: 3} {
+		binary.LittleEndian.PutUint16(m[a:], p)
+	}
+	for a, s := range map[int]string{0x500: "FreshGeneration", 0x580: "leaf", 0x600: "()V", 0x680: "FreshGeneration.java"} {
+		binary.LittleEndian.PutUint16(m[a:], uint16(len(s)))
+		copy(m[a+2:], s)
+	}
+	ii.rm.ReaderAt = bytes.NewReader(m)
+	if err := ii.ConfigureHotSpotEpoch(libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}); err != nil {
+		t.Fatal(err)
+	}
+	return ii, m
+}
+
+func TestHotSpotEpochRollbackAndSameEpochRetry(t *testing.T) {
+	ii, m := epochFixture(t)
+	base := bytes.NewReader(m)
+	var blocked atomic.Bool
+	blocked.Store(true)
+	original := identityReader(func(p []byte, off int64) (int, error) {
+		if blocked.Load() && off == 0x500 {
+			return 0, syscall.EACCES
+		}
+		return base.ReadAt(p, off)
+	})
+	ii.rm.ReaderAt = original
+	captured := libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}
+	d, err := ii.BeginHotSpotEpoch(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frames libpf.Frames
+	decodeErr := d.Symbolize(interpretedIdentityFrame(64), &frames, libpf.FrameMapping{})
+	v := d.Finish(decodeErr)
+	if v.State != libpf.HotSpotValidationUnavailable || !errors.Is(v.Err, syscall.EACCES) {
+		t.Fatal("permission failure lost", v)
+	}
+	if _, ok := ii.addrToMethod.Get(0x100); ok {
+		t.Fatal("rejected method cache survived")
+	}
+	blocked.Store(false)
+	d, err = ii.BeginHotSpotEpoch(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames = nil
+	decodeErr = d.Symbolize(interpretedIdentityFrame(64), &frames, libpf.FrameMapping{})
+	v = d.Finish(decodeErr)
+	if v.State != libpf.HotSpotValidationChecked || len(frames) == 0 || !strings.Contains(frames[0].Value().FunctionName.String(), "FreshGeneration.leaf") {
+		t.Fatal("same-epoch retry reused rejected name", v, frames)
+	}
+}
+
+func TestHotSpotEpochLedgerRetainsLaterPermissionFailure(t *testing.T) {
+	r := &epochReader{base: identityReader(func(_ []byte, off int64) (int, error) {
+		if off == 0 {
+			return 0, io.EOF
+		}
+		return 0, syscall.EACCES
+	})}
+	var b [8]byte
+	r.ReadAt(b[:], 0)
+	r.ReadAt(b[:], 8)
+	if !errors.Is(r.Err(), syscall.EACCES) || !errors.Is(r.Err(), io.EOF) {
+		t.Fatal("ledger lost native causes", r.Err())
+	}
+}
+
+func TestHotSpotEpochEndRejectsBoundaryAndKeepsCapture(t *testing.T) {
+	ii, m := epochFixture(t)
+	captured := libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}
+	d, err := ii.BeginHotSpotEpoch(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint64(m[0x800:], 4)
+	v := d.Finish(nil)
+	if v.State != libpf.HotSpotValidationUnavailable || libpf.IsHotSpotEpochFatal(v.Err) {
+		t.Fatal(v)
+	}
+	if captured.Epoch != 2 || captured.State != libpf.HotSpotEpochStable {
+		t.Fatal("capture overwritten")
+	}
+	if _, err := ii.BeginHotSpotEpoch(captured); err == nil {
+		t.Fatal("delayed old capture accepted")
+	}
+}
+
+func TestHotSpotEpochRegressionPermanentlyPoisonsDecoder(t *testing.T) {
+	ii, m := epochFixture(t)
+	binary.LittleEndian.PutUint64(m[0x800:], 4)
+	d, e := ii.BeginHotSpotEpoch(libpf.HotSpotIdentity{Epoch: 4, State: libpf.HotSpotEpochStable})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if v := d.Finish(nil); v.Err != nil {
+		t.Fatal(v)
+	}
+	binary.LittleEndian.PutUint64(m[0x800:], 2)
+	if _, e = ii.BeginHotSpotEpoch(libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}); e == nil || !libpf.IsHotSpotEpochFatal(e) {
+		t.Fatal("regression accepted", e)
+	}
+	binary.LittleEndian.PutUint64(m[0x800:], 6)
+	if _, e = ii.BeginHotSpotEpoch(libpf.HotSpotIdentity{Epoch: 6, State: libpf.HotSpotEpochStable}); e == nil {
+		t.Fatal("poisoned decoder established a new baseline")
+	}
+}
+
+func TestHotSpotEpochReadersRemainImmutableDuringSynchronization(t *testing.T) {
+	ii, m := epochFixture(t)
+	original := bytes.NewReader(m)
+	ii.rm.ReaderAt = original
+	ii.mainMappingsInserted = true
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = ii.SynchronizeMappings(nil, nil, process.New(123, 123), nil)
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		d, e := ii.BeginHotSpotEpoch(libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable})
+		if e != nil {
+			t.Fatal(e)
+		}
+		var frames libpf.Frames
+		e = d.Symbolize(interpretedIdentityFrame(64), &frames, libpf.FrameMapping{})
+		if v := d.Finish(e); v.State != libpf.HotSpotValidationChecked {
+			t.Fatal(v)
+		}
+	}
+	wg.Wait()
+	if ii.rm.ReaderAt != original {
+		t.Fatal("shared reader replaced")
+	}
+}

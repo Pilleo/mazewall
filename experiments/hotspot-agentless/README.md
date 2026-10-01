@@ -162,6 +162,52 @@ may retain other frames and its existing unknown placeholder. The producer's
 pointer-reuse/ABA cases. Full inline fidelity, class-unloading correctness and
 memory/overhead measurements remain separate acceptance gates.
 
+The disposable-loader investigation now reproduces wrong-generation attribution
+in the normal collector after confirmed unloading. Stable-workload corpus success
+does not establish identity across unloading/reuse. See
+[`results/identity-investigation.md`](results/identity-investigation.md) for the
+failing live evidence and the producer-reference reuse mechanism.
+
+### Scoped safepoint-epoch identity
+
+`--hotspot-identity=safepoint-epoch` enables a verified lifetime boundary for the
+locked Temurin **interpreter-only, Serial-GC** profile. Startup checks the mapped
+JVM SHA-256/build ID and live `UseCompiler`/`UseSerialGC` flags. Unsupported
+profiles are refused. Sessions are capped at 60 seconds.
+
+The event and producer independently bracket stack capture with the JVM's
+64-bit safepoint counter. Producer references and HotSpot frame-cache entries
+are separated by captured epoch. Deferred decoding uses immutable trace-local
+readers, checked before/after epochs and abort-time invalidation of the existing
+method, Symbol, JIT and stub-name caches. Captured identity remains separate from
+validation outcome. Already validated historical definitions remain immutable.
+
+The collector attaches an owned `sched_process_exec` barrier before discovery;
+one monotonic session poison word prevents post-exec lookup acceptance. Native
+permission/unexpected errors and identity conflicts reach a required session
+fatal owner even when no event performs a lookup. The existing queues, capacities,
+deadlines, buffers and two-cycle pruning remain in use. Binary capture ABI is now
+version 2; both embedded BPF objects and C/Go layouts are regenerated with the
+existing pinned builder and verified by BTF. New JSON identity fields are additive.
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock \
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
+  make unloading-epoch DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+
+DOCKER_HOST=unix:///var/run/docker.sock \
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
+  make recovery-epoch DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+```
+
+Three independent strict runs each resolved 1,580/1,600 application segments,
+with 20 cold-start unavailable, all 80 generations confirmed unloaded, and zero
+wrong-generation labels. Every branch in generations 1–79 resolved all ten
+operations. The non-epoch control still reproduces stale attribution. See
+[`results/identity-investigation.md`](results/identity-investigation.md) for exact
+artifacts and provenance. This profile does not certify concurrent collectors,
+compiled-code reclamation, semantic BCI, complete collection or arbitrary JDKs.
+
 ## Lost-first-definition recovery
 
 ```bash

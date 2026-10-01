@@ -1,0 +1,42 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+import (
+	"errors"
+	"io"
+	"syscall"
+	"testing"
+)
+
+func TestEpochCaptureAndValidationAreSeparate(t *testing.T) {
+	captured := HotSpotIdentity{State: HotSpotEpochStable, Epoch: 0}
+	if err := captured.Validate(); err != nil {
+		t.Fatal("stable zero rejected", err)
+	}
+	err := &HotSpotEpochError{State: HotSpotEpochChanged, Cause: nil}
+	v := HotSpotValidation{State: HotSpotValidationUnavailable, Err: err}
+	if IsHotSpotEpochFatal(v.Err) {
+		t.Fatal("epoch transition made session fatal")
+	}
+	if captured.State != HotSpotEpochStable || captured.Epoch != 0 {
+		t.Fatal("validation overwrote capture")
+	}
+	for _, e := range []error{syscall.EPERM, syscall.EACCES, syscall.EIO, io.ErrUnexpectedEOF} {
+		wrapped := &HotSpotEpochError{State: HotSpotEpochReadError, Cause: e}
+		if !errors.Is(wrapped, e) || !IsHotSpotEpochFatal(wrapped) {
+			t.Fatal("native cause lost", wrapped)
+		}
+	}
+	if !IsHotSpotEpochFatal(&HotSpotEpochError{State: HotSpotEpochRegressed}) {
+		t.Fatal("regression nonfatal")
+	}
+	if (HotSpotIdentity{}).State == HotSpotEpochStable {
+		t.Fatal("unknown claims stable")
+	}
+	for _, bad := range []HotSpotIdentity{{State: 99}, {State: HotSpotEpochStable, Epoch: 1}, {State: HotSpotEpochStable, Epoch: 1 << 63}, {State: HotSpotEpochStable, ReadError: -13}} {
+		if bad.Validate() == nil {
+			t.Fatal("malformed capture accepted", bad)
+		}
+	}
+}

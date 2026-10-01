@@ -28,10 +28,11 @@ import (
 )
 
 type Config struct {
-	PID        int
-	Image      string
-	Store      string
-	Enrichment EnrichmentOptions
+	StrictEpoch bool
+	PID         int
+	Image       string
+	Store       string
+	Enrichment  EnrichmentOptions
 }
 
 func (c Config) Validate() error {
@@ -51,6 +52,9 @@ func (c Config) Validate() error {
 // RunDebug uses Gadget's existing synchronous symbolization for the first live
 // capture gate. It is deliberately not the production structured enrichment API.
 func RunDebug(ctx context.Context, cfg Config, output io.Writer) error {
+	if cfg.StrictEpoch {
+		return fmt.Errorf("strict epoch mode requires structured capture")
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}

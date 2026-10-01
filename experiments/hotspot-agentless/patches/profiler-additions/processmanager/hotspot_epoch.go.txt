@@ -1,0 +1,145 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"fmt"
+	"slices"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"go.opentelemetry.io/ebpf-profiler/times"
+	"go.opentelemetry.io/ebpf-profiler/traceutil"
+)
+
+func (pm *ProcessManager) ConfigureHotSpotEpochTarget(t libpf.HotSpotEpochTarget, onFatal ...func(error)) error {
+	if len(onFatal) != 1 || onFatal[0] == nil {
+		return fmt.Errorf("strict HotSpot epoch mode requires a session fatal owner")
+	}
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	if err := support.CheckHotSpotEpochABI(); err != nil {
+		return err
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if pm.epochTarget.PID != 0 {
+		return fmt.Errorf("epoch target cannot be reconfigured")
+	}
+	pm.epochTarget = t
+	if len(onFatal) > 0 {
+		pm.epochFatal = onFatal[0]
+	}
+	return nil
+}
+func (pm *ProcessManager) beginHotSpotEpoch(pid libpf.PID, id libpf.HotSpotIdentity) (interpreter.HotSpotEpochDecoder, error) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if id.State != libpf.HotSpotEpochStable {
+		return nil, &libpf.HotSpotEpochError{State: id.State}
+	}
+	var capable interpreter.HotSpotEpochInstance
+	for _, instance := range pm.interpreters[pid] {
+		if c, ok := instance.(interpreter.HotSpotEpochInstance); ok {
+			if capable != nil {
+				return nil, fmt.Errorf("ambiguous epoch interpreter")
+			}
+			capable = c
+		}
+	}
+	if capable == nil {
+		return nil, &libpf.HotSpotEpochError{State: libpf.HotSpotEpochUnknown}
+	}
+	return capable.BeginHotSpotEpoch(id)
+}
+
+type epochAdmission struct {
+	key        frameCacheKey
+	start, end int
+}
+
+// Like HandleTrace, this method has one consumer. Metadata calls retain pm.mu;
+// synchronization only reads the instance's original immutable RemoteMemory.
+func (pm *ProcessManager) handleHotSpotEpochTrace(raw *libpf.EbpfTrace) {
+	meta := &samples.TraceEventMeta{Timestamp: libpf.UnixTime64(times.KTime(raw.KTime).UnixNano()), Comm: raw.Comm, PID: raw.PID, TID: raw.TID, CPU: raw.CPU, ProcessName: raw.ProcessName, ExecutablePath: raw.ExecutablePath, ContainerID: raw.ContainerID, Origin: raw.Origin, OffTime: raw.OffTime, EnvVars: raw.EnvVars, CorrelationID: raw.CorrelationID}
+	t := &libpf.Trace{Frames: slices.Clone(raw.KernelFrames), CustomLabels: raw.CustomLabels, CorrelationID: raw.CorrelationID, HotSpotIdentity: raw.HotSpotIdentity}
+	decoder, decodeErr := pm.beginHotSpotEpoch(raw.PID, raw.HotSpotIdentity)
+	var pending []epochAdmission
+	for remaining := libpf.EbpfFrame(raw.FrameData); len(remaining) > 0; {
+		length := int(remaining.Length())
+		if length < 1 || length > 3 || length > len(remaining) || len(raw.FrameData) > 3072 {
+			decodeErr = fmt.Errorf("invalid epoch raw frame extent")
+			break
+		}
+		frame := remaining[:length]
+		remaining = remaining[length:]
+		if frame.Flags().Error() {
+			if !pm.filterErrorFrames {
+				t.Frames.Append(&libpf.Frame{Type: frame.Type().Error(), AddressOrLineno: libpf.AddressOrLineno(frame.Data())})
+			}
+			continue
+		}
+		hotspot := frame.Type().Interpreter() == libpf.HotSpot
+		if hotspot && decodeErr != nil {
+			continue
+		}
+		key := frameCacheKey{}
+		if frame.Flags().PIDSpecific() {
+			key.pid = raw.PID
+		}
+		copy(key.data[:], frame)
+		if hotspot {
+			key.epoch = raw.HotSpotIdentity
+		}
+		if cached, ok := pm.frameCache.GetAndRefresh(key, frameCacheLifetime); ok {
+			t.Frames = append(t.Frames, cached...)
+			pm.frameCacheHit.Add(1)
+			continue
+		}
+		start := len(t.Frames)
+		if hotspot {
+			pm.mu.Lock()
+			err := decoder.Symbolize(frame, &t.Frames, libpf.FrameMapping{})
+			pm.mu.Unlock()
+			if err != nil {
+				decodeErr = err
+				continue
+			}
+			pending = append(pending, epochAdmission{key: key, start: start, end: len(t.Frames)})
+		} else if pm.convertFrame(raw.PID, frame, &t.Frames) {
+			pm.frameCache.Add(key, slices.Clone(t.Frames[start:]))
+			pm.frameCacheMiss.Add(1)
+		}
+	}
+	if decoder != nil {
+		pm.mu.Lock()
+		t.HotSpotValidation = decoder.Finish(decodeErr)
+		pm.mu.Unlock()
+	} else {
+		t.HotSpotValidation = libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: decodeErr}
+	}
+	if t.HotSpotValidation.State == libpf.HotSpotValidationChecked {
+		for _, entry := range pending {
+			pm.frameCache.Add(entry.key, slices.Clone(t.Frames[entry.start:entry.end]))
+			pm.frameCacheMiss.Add(1)
+		}
+	} else {
+		kept := t.Frames[:0]
+		for _, f := range t.Frames {
+			if f.Value().Type != libpf.HotSpotFrame {
+				kept = append(kept, f)
+			}
+		}
+		t.Frames = kept
+	}
+	t.Hash = traceutil.HashTrace(t)
+	if libpf.IsHotSpotEpochFatal(t.HotSpotValidation.Err) && pm.epochFatal != nil {
+		pm.epochFatal(t.HotSpotValidation.Err)
+	}
+	if err := pm.traceReporter.ReportTraceEvent(t, meta); err != nil && pm.epochFatal != nil {
+		pm.epochFatal(err)
+	}
+}

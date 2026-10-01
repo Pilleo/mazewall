@@ -19,9 +19,11 @@ var (
 // StructuredStack is the provider's ordered sequence, without native-address
 // overlays or rendered-name parsing. Returned does not imply a complete walk.
 type StructuredStack struct {
-	Frames libpf.Frames
-	PID    uint32
-	TID    uint32
+	HotSpotIdentity   libpf.HotSpotIdentity
+	HotSpotValidation libpf.HotSpotValidation
+	Frames            libpf.Frames
+	PID               uint32
+	TID               uint32
 }
 
 // StructuredResolver is an optional capability; existing resolvers remain

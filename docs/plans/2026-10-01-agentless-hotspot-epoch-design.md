@@ -1,11 +1,61 @@
 # Agentless HotSpot Safepoint-Epoch Identity Design
 
-**Status:** Architecture approved in conversation on 2026-10-01; detailed design
-and implementation plan prepared for operator review. Not implemented.
+**Status:** High-level architecture approved in conversation on 2026-10-01.
+Implementation authorized on 2026-10-01 after the second review. The execution
+corrections below supersede the rejected reader/transaction/error contracts.
+Implementation and focused/native/live acceptance have passed for the scoped
+profile. Repository merge verification and independent review are recorded in
+the linked evidence/issue; broader identity coverage remains open.
 
 **Issue:** [Captured interpreted method identity](../internals/backlog/issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md).
 
 **Evidence:** [Identity investigation](../../experiments/hotspot-agentless/results/identity-investigation.md).
+
+## Second-review findings (2026-10-01)
+
+### Authorized execution corrections
+
+- R1: keep the instance's RemoteMemory/ReaderAt immutable. A trace-local decoder
+  passes a copied RemoteMemory with a bounded error ledger to private method,
+  Symbol and stub lookup helpers. Mapping synchronization continues to use the
+  original reader. Existing process-manager locks serialize metadata-cache use.
+- R2: purge all four existing metadata LRUs on any rejected strict decode,
+  including unchanged-epoch failures; admit frame-cache entries only after finish.
+- R3: a required session-owned fatal callback retains bounded causes and cancels
+  capture independently of lookups. The reader ledger preserves the first error
+  and the first EPERM/EACCES separately; it never grows an error queue.
+- R4: copy the captured identity unchanged to the definition. Store validation
+  outcome/cause separately. Compare captured epoch first, then report semantic
+  rejection as unavailable; true captured-identity conflicts remain fatal.
+- R5: the collector owns a sched_process_exec barrier attached before discovery.
+  A one-entry four-byte kernel poison map is session state, not a metadata cache.
+  It is monotonic for the selected PID. Strict lookup checks it before and after
+  resolution, and the existing pidfd watcher checks it while idle. Exec closes
+  the supported session; no post-exec reference is accepted as checked evidence.
+
+The original paragraphs below describe the historical reviewed proposal where
+superseded; the corrections above describe the executed implementation. The five
+findings have implementation/regression evidence and remain open for independent
+review. The original uninstrumented failure is retained as a red control.
+
+The table records the second review's defects and their required corrections.
+They are now implemented as summarized above; see the linked evidence.
+
+| Finding | Required correction before implementation |
+|---|---|
+| [R1: shared-reader ownership](../internals/backlog/issue-20261001-134304-861-serialize-strict-hotspot-epoch-reads-with-mapping-.md) | `SynchronizeMappings` runs outside `pm.mu`; temporarily replacing the instance ReaderAt and mutating its ledger is not serialized by the existing lock. Use immutable trace-local reads or explicit instance ownership covering both paths. |
+| [R2: rejected metadata cache admission](../internals/backlog/issue-20261001-134316-242-roll-back-hotspot-metadata-caches-after-a-rejected.md) | Delaying frame-cache admission does not undo method/Symbol/stub records written during a failed decode. Define abort invalidation for all affected metadata caches, including unchanged-epoch retries. |
+| [R3: session-fatal delivery](../internals/backlog/issue-20261001-134344-624-deliver-strict-provider-fatal-errors-independently.md) | `HandleTrace` only logs reporter errors; cached errors with no lookup do not reach the collector. Define bounded session-owned fatal notification/retention and preserve later permission failures in the read ledger. |
+| [R4: captured identity versus validation result](../internals/backlog/issue-20261001-134356-432-separate-captured-hotspot-epoch-identity-from-vali.md) | Preserve immutable captured epoch evidence separately from decode outcome. A stable capture rejected after an epoch transition must be unavailable, not a fatal event/definition identity mismatch. |
+| [R5: no-exec scope enforcement](../internals/backlog/issue-20261001-134412-393-enforce-the-no-exec-boundary-for-strict-hotspot-ep.md) | PID/start ticks survive exec. Specify authoritative invalidation before unsupported captures can reuse definitions, or restrict the guarantee to a verifiably controlled fixture lifetime. Periodic mapping checks are not an incarnation barrier. |
+
+The isolated probe `build/epoch-review.r6i0tgok/probe.log` reproduced method-cache
+pollution (`void .leaf()` retained after an EACCES class-symbol read), reuse on a
+same-epoch retry, and loss of a later EACCES behind the proposed ledger's first
+EOF. Its synthetic memory is not live JVM metadata; the wrapper is copied from
+the plan, not a production epoch implementation. The source audit also corrected
+the plan's read-address bias rule: `RemoteMemory.Bias` normalizes pointer values;
+it does not relocate `ReadAt` offsets.
 
 ## Goal and supported contract
 
@@ -180,10 +230,11 @@ the experiment rather than turning into a warning.
 
 The existing `getSymbol` helper can return a null string on a remote-read error,
 and `convertFrame` currently logs decoder errors before appending an unknown
-placeholder. Strict decoding must preserve those causes too. A trace-scoped
-ReaderAt wrapper on the configured HotSpot instance records the first failed or
-short metadata read, using the existing reader and locks. The end guard restores
-the original reader and rejects the tentative definition if any such read failed.
+placeholder. Strict decoding must preserve those causes too. The proposed shared
+ReaderAt replacement and first-failure-only ledger in the plan are rejected by R1/R3:
+the existing locks do not cover mapping synchronization, and a later permission
+failure must not disappear behind an earlier error. Reader ownership and bounded
+error retention must be revised before implementing this part of the design.
 The strict HotSpot conversion helper also returns decoder errors to publication
 instead of discarding them in the legacy bool-only conversion path. Neither
 helper changes the public `Instance.Symbolize` interface.

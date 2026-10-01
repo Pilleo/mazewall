@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"io"
+	"io.mazewall/experiments/hotspot-agentless/internal/identity"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -40,6 +43,11 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if cfg.StrictEpoch {
+		var stop context.CancelFunc
+		ctx, stop = context.WithTimeout(ctx, 60*time.Second)
+		defer stop()
+	}
 	if GadgetPatchSHA == "" {
 		return fmt.Errorf("structured collector requires the provenance-pinned make build")
 	}
@@ -62,12 +70,32 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err != nil || ticks != report.Snapshot.TargetStartTicks {
 		return errors.Join(fmt.Errorf("target changed during startup"), err)
 	}
+	var execBarrier *identity.ExecBarrier
+	var epochTarget libpf.HotSpotEpochTarget
+	var checks []func() error
+	if cfg.StrictEpoch {
+		execBarrier, err = identity.NewExecBarrier(cfg.PID)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, execBarrier.Close()) }()
+		checks = append(checks, execBarrier.Check)
+		target, err := identity.Discover(cfg.PID, ticks)
+		if err != nil {
+			return err
+		}
+		if err = execBarrier.Check(); err != nil {
+			return err
+		}
+		epochTarget = libpf.HotSpotEpochTarget{PID: libpf.PID(target.PID), ProcessStartTicks: ticks, CounterAddress: libpf.Address(target.CounterAddress), InitialEpoch: target.InitialEpoch}
+	}
+	fatal := fatalState{cancel: cancel}
 	watchDone := make(chan struct{})
 	var watchErr error
 	watchConsumed := false
 	go func() {
 		defer close(watchDone)
-		watchErr = watchTarget(ctx, pidfd, cancel)
+		watchErr = watchTarget(ctx, pidfd, cancel, checks...)
 	}()
 	defer func() {
 		cancel()
@@ -102,14 +130,14 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	var reportedLoss datasource.ReportedLossReader
 	operator := simple.New("mw-structured", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
-		sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ctx})
+		sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ctx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record})
 		if err != nil {
 			return err
 		}
 		for name, replacement := range sym.GetEbpfReplacements() {
 			gc.SetVar(name, replacement)
 		}
-		enrichment, err = NewEnricher(ctx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks}, sink, LinuxBootClock{}, cancel)
+		enrichment, err = NewEnricher(ctx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancel)
 		if err != nil {
 			return err
 		}
@@ -120,7 +148,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			}
 			found = true
 			reportedLoss, _ = ds.(datasource.ReportedLossReader)
-			decoder, err := newEventDecoder(ds, sessionID, uint32(cfg.PID), ticks)
+			decoder, err := newEventDecoder(ds, sessionID, uint32(cfg.PID), ticks, cfg.StrictEpoch)
 			if err != nil {
 				return err
 			}
@@ -151,7 +179,8 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		return sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: sessionID})
 	}))
 	gc := gadgetcontext.New(ctx, cfg.Image, gadgetcontext.WithName("mw-hotspot-openat-structured"), gadgetcontext.WithOrasReadonlyTarget(pinnedTarget{Store: store, reference: cfg.Image}), gadgetcontext.WithDataOperators(ocihandler.OciHandler, operator))
-	runErr := rt.RunGadget(gc, nil, map[string]string{"operator.oci.ebpf.target_pid": strconv.Itoa(cfg.PID), "operator.oci.ebpf.target_start_ticks": strconv.FormatUint(ticks, 10), "operator.oci.ebpf.collect_ustack": "true", "operator.oci.ebpf.collect_otel_stack": "true"})
+	params := map[string]string{"operator.oci.ebpf.target_pid": strconv.Itoa(cfg.PID), "operator.oci.ebpf.target_start_ticks": strconv.FormatUint(ticks, 10), "operator.oci.ebpf.collect_ustack": "true", "operator.oci.ebpf.collect_otel_stack": "true", "operator.oci.ebpf.target_safepoint_counter": strconv.FormatUint(uint64(epochTarget.CounterAddress), 10), "operator.oci.ebpf.target_initial_safepoint_epoch": strconv.FormatUint(epochTarget.InitialEpoch, 10)}
+	runErr := rt.RunGadget(gc, nil, params)
 	cancel()
 	<-watchDone
 	watchConsumed = true
@@ -165,7 +194,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		sym.Close()
 	}
 	callbackMu.Lock()
-	err = errors.Join(runErr, finishErr, callbackErr, watchErr)
+	err = errors.Join(runErr, finishErr, callbackErr, watchErr, fatal.Err())
 	callbackMu.Unlock()
 	summary := model.Summary{CollectionHealth: "unknown"}
 	applyCollectionHealth(&summary, reportedEventHealth(reportedLoss))

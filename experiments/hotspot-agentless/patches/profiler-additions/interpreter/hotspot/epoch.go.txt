@@ -1,0 +1,165 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"syscall"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+// epochReader is trace-local; it never replaces the instance's immutable reader.
+// Three retained causes bound memory and preserve later permission failures.
+type epochReader struct {
+	base                 io.ReaderAt
+	first, eperm, eacces error
+}
+
+func (r *epochReader) ReadAt(p []byte, off int64) (int, error) {
+	n, err := r.base.ReadAt(p, off)
+	observed := err
+	if observed == nil && n != len(p) {
+		observed = io.ErrUnexpectedEOF
+	}
+	if r.first == nil && observed != nil {
+		r.first = observed
+	}
+	if r.eperm == nil && errors.Is(observed, syscall.EPERM) {
+		r.eperm = observed
+	}
+	if r.eacces == nil && errors.Is(observed, syscall.EACCES) {
+		r.eacces = observed
+	}
+	return n, err
+}
+func (r *epochReader) Err() error { return errors.Join(r.first, r.eperm, r.eacces) }
+
+type hotspotEpochDecoder struct {
+	owner    *hotspotInstance
+	memory   remotememory.RemoteMemory
+	reader   *epochReader
+	captured libpf.HotSpotIdentity
+	finished bool
+}
+
+func (d *hotspotInstance) ConfigureHotSpotEpoch(t libpf.HotSpotEpochTarget) error {
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	if d.mainMappingsInserted || d.epochTarget.PID != 0 {
+		return fmt.Errorf("HotSpot epoch target already installed")
+	}
+	d.epochTarget = t
+	d.epochHighWater = t.InitialEpoch
+	return nil
+}
+func (d *hotspotInstance) purgeEpochMetadata() {
+	d.addrToMethod.Purge()
+	d.addrToSymbol.Purge()
+	d.addrToJITInfo.Purge()
+	d.addrToStubName.Purge()
+	d.metadataEpoch = libpf.HotSpotIdentity{}
+}
+func (d *hotspotInstance) checkEpoch(captured libpf.HotSpotIdentity) error {
+	if d.epochPoisoned {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochRegressed}
+	}
+	if d.epochTarget.PID == 0 {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochUnsupported}
+	}
+	if err := captured.Validate(); err != nil {
+		return err
+	}
+	if captured.State != libpf.HotSpotEpochStable {
+		return &libpf.HotSpotEpochError{State: captured.State}
+	}
+	var raw [8]byte
+	n, err := d.rm.ReadAt(raw[:], int64(d.epochTarget.CounterAddress))
+	if err != nil {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochReadError, Cause: err}
+	}
+	if n != 8 {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochReadError, Cause: io.ErrUnexpectedEOF}
+	}
+	current := binary.LittleEndian.Uint64(raw[:])
+	if current >= 1<<63 || current < d.epochHighWater {
+		d.epochPoisoned = true
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochRegressed}
+	}
+	d.epochHighWater = current
+	if current&1 != 0 {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochInProgress}
+	}
+	if current != captured.Epoch {
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochChanged}
+	}
+	return nil
+}
+func (d *hotspotInstance) BeginHotSpotEpoch(captured libpf.HotSpotIdentity) (interpreter.HotSpotEpochDecoder, error) {
+	if err := d.checkEpoch(captured); err != nil {
+		d.purgeEpochMetadata()
+		return nil, err
+	}
+	if d.metadataEpoch != captured {
+		d.purgeEpochMetadata()
+		d.metadataEpoch = captured
+	}
+	r := &epochReader{base: d.rm.ReaderAt}
+	memory := d.rm
+	memory.ReaderAt = r
+	return &hotspotEpochDecoder{owner: d, memory: memory, reader: r, captured: captured}, nil
+}
+func (x *hotspotEpochDecoder) Symbolize(ef libpf.EbpfFrame, frames *libpf.Frames, _ libpf.FrameMapping) error {
+	if x.finished {
+		return fmt.Errorf("finished epoch decoder")
+	}
+	if !ef.Type().IsInterpType(libpf.HotSpot) {
+		return interpreter.ErrMismatchInterpreterType
+	}
+	if len(ef) != 3 {
+		return fmt.Errorf("invalid HotSpot frame length")
+	}
+	line := ef.Variable(1)
+	subtype := line >> 60
+	position := uint32(line>>32) & 0xfffffff
+	ptr := libpf.Address(ef.Variable(0))
+	switch subtype {
+	case support.FrameHotspotInterpreter:
+		m, err := x.owner.getInterpretedMethodMemory(x.memory, ptr, uint32(line))
+		if err != nil {
+			return err
+		}
+		m.symbolize(position, x.owner, frames, libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeInterpreter, BCIState: libpf.HotSpotBCIObservedInRange})
+	case support.FrameHotspotStub, support.FrameHotspotVtable:
+		name := x.owner.getStubNameMemory(x.memory, position, ptr)
+		frames.Append(&libpf.Frame{Type: libpf.HotSpotFrame, FunctionName: name, HotSpotQuality: libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeStub, BCIState: libpf.HotSpotBCIUnavailable}})
+	default:
+		return &libpf.HotSpotEpochError{State: libpf.HotSpotEpochUnsupported}
+	}
+	return nil
+}
+func (x *hotspotEpochDecoder) Finish(decodeErr error) libpf.HotSpotValidation {
+	if x.finished {
+		return libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: fmt.Errorf("epoch decoder finished twice")}
+	}
+	x.finished = true
+	native := x.reader.Err()
+	end := x.owner.checkEpoch(x.captured)
+	if native != nil || libpf.IsHotSpotEpochFatal(decodeErr) || libpf.IsHotSpotEpochFatal(end) {
+		decodeErr = &libpf.HotSpotEpochError{State: libpf.HotSpotEpochReadError, Cause: errors.Join(native, decodeErr, end)}
+	} else if decodeErr == nil {
+		decodeErr = end
+	}
+	if decodeErr != nil {
+		x.owner.purgeEpochMetadata()
+		return libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: decodeErr}
+	}
+	return libpf.HotSpotValidation{State: libpf.HotSpotValidationChecked}
+}

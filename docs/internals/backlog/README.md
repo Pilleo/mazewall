@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 34 | *Total Resolved Issues:* 636
+*Total Active Issues:* 40 | *Total Resolved Issues:* 636
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,12 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261001-152252-722-reject-oversized-provider-raw-frame-arrays-before-](issue-20261001-152252-722-reject-oversized-provider-raw-frame-arrays-before-.md) | Reject oversized provider raw frame arrays before decoding | high | experiment |
+| [issue-20261001-134304-861-serialize-strict-hotspot-epoch-reads-with-mapping-](issue-20261001-134304-861-serialize-strict-hotspot-epoch-reads-with-mapping-.md) | Serialize strict HotSpot epoch reads with mapping synchronization | high | experiment |
+| [issue-20261001-134316-242-roll-back-hotspot-metadata-caches-after-a-rejected](issue-20261001-134316-242-roll-back-hotspot-metadata-caches-after-a-rejected.md) | Roll back HotSpot metadata caches after a rejected strict decode | high | experiment |
+| [issue-20261001-134344-624-deliver-strict-provider-fatal-errors-independently](issue-20261001-134344-624-deliver-strict-provider-fatal-errors-independently.md) | Deliver strict provider fatal errors independently of stack lookups | high | experiment |
+| [issue-20261001-134356-432-separate-captured-hotspot-epoch-identity-from-vali](issue-20261001-134356-432-separate-captured-hotspot-epoch-identity-from-vali.md) | Separate captured HotSpot epoch identity from validation outcome | high | experiment |
+| [issue-20261001-134412-393-enforce-the-no-exec-boundary-for-strict-hotspot-ep](issue-20261001-134412-393-enforce-the-no-exec-boundary-for-strict-hotspot-ep.md) | Enforce the no-exec boundary for strict HotSpot epoch sessions | high | experiment |
 | [issue-20261001-011604-995-compare-agentless-application-segments-with-a-sepa](issue-20261001-011604-995-compare-agentless-application-segments-with-a-sepa.md) | Compare agentless application segments with a separate USER_NOTIF reference run | high | experiment |
 | [issue-20261001-003347-073-validate-agentless-inline-attribution-across-concu](issue-20261001-003347-073-validate-agentless-inline-attribution-across-concu.md) | Validate agentless inline attribution across concurrent platform workers | high | experiment |
 | [issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de](issue-20260930-231643-171-prove-event-correlated-inline-java-paths-with-a-de.md) | Prove event-correlated inline Java paths with a deterministic operation corpus | high | experiment |

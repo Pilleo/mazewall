@@ -5,6 +5,7 @@ package otel
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
@@ -12,8 +13,44 @@ import (
 )
 
 type correlatedFrames struct {
-	frames   libpf.Frames
-	pid, tid uint32
+	identity   libpf.HotSpotIdentity
+	validation libpf.HotSpotValidation
+	frames     libpf.Frames
+	pid, tid   uint32
+}
+
+// storeEpochTrace stores one immutable captured snapshot or explicit rejection.
+func (o *otelResolverInstance) storeEpochTrace(id uint64, frames libpf.Frames, pid, tid uint32, identity libpf.HotSpotIdentity, validation libpf.HotSpotValidation) error {
+	if id == 0 || pid == 0 || tid == 0 {
+		return fmt.Errorf("invalid epoch definition identity")
+	}
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	if validation.State == libpf.HotSpotValidationChecked && (validation.Err != nil || identity.State != libpf.HotSpotEpochStable) {
+		return fmt.Errorf("invalid checked epoch definition")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if old, ok := o.correlationMap[id]; ok {
+		if old.pid != pid || old.tid != tid || old.identity != identity {
+			return symbolizer.ErrStackIdentityMismatch
+		}
+		// A rejected redelivery cannot rewrite an already validated historical snapshot.
+		if old.validation.State == libpf.HotSpotValidationChecked && validation.State == libpf.HotSpotValidationUnavailable {
+			return nil
+		}
+		if old.validation.State != validation.State || !slices.Equal(old.frames, frames) {
+			return symbolizer.ErrStackIdentityMismatch
+		}
+		return nil
+	}
+	o.correlationMap[id] = correlatedFrames{frames: slices.Clone(frames), pid: pid, tid: tid, identity: identity, validation: validation}
+	if w, ok := o.waiters[id]; ok {
+		close(w.ch)
+		delete(o.waiters, id)
+	}
+	return nil
 }
 
 type correlationWaiter struct {
@@ -44,6 +81,28 @@ func (o *otelResolverInstance) ResolveStructured(ctx context.Context, task symbo
 	}
 	if task.Tgid != trace.pid || len(task.PidNumbers) == 0 || task.PidNumbers[0].Pid != trace.tid {
 		return symbolizer.StructuredStack{}, symbolizer.ErrStackIdentityMismatch
+	}
+	result := symbolizer.StructuredStack{Frames: slices.Clone(trace.frames), PID: trace.pid, TID: trace.tid, HotSpotIdentity: trace.identity, HotSpotValidation: trace.validation}
+	if task.HotSpotIdentity.State != libpf.HotSpotEpochUnknown || o.options.HotSpotEpochTarget.PID != 0 || trace.identity.State != libpf.HotSpotEpochUnknown {
+		if err := task.HotSpotIdentity.Validate(); err != nil {
+			return result, err
+		}
+		if task.HotSpotIdentity.State != libpf.HotSpotEpochStable {
+			return result, &libpf.HotSpotEpochError{State: task.HotSpotIdentity.State}
+		}
+		if trace.identity.State != libpf.HotSpotEpochStable {
+			return result, &libpf.HotSpotEpochError{State: libpf.HotSpotEpochUnknown}
+		}
+		if task.HotSpotIdentity != trace.identity {
+			return result, symbolizer.ErrStackIdentityMismatch
+		}
+		if trace.validation.State != libpf.HotSpotValidationChecked {
+			if trace.validation.Err != nil {
+				return result, trace.validation.Err
+			}
+			return result, &libpf.HotSpotEpochError{State: libpf.HotSpotEpochUnknown}
+		}
+		return result, nil
 	}
 	return symbolizer.StructuredStack{Frames: slices.Clone(trace.frames), PID: trace.pid, TID: trace.tid}, nil
 }

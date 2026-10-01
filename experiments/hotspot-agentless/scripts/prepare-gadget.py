@@ -11,7 +11,10 @@ import subprocess
 def prepare():
     parser = argparse.ArgumentParser()
     parser.add_argument("--drop-first-definition", action="store_true", help="test-only fault-injected build")
+    parser.add_argument("--identity-observations", action="store_true", help="test-only raw identity diagnostics")
     options = parser.parse_args()
+    if options.identity_observations and options.drop_first_definition:
+        parser.error("identity diagnostics and definition-drop fault are separate builds")
     root = Path(__file__).resolve().parent.parent
     lock = json.loads((root / "dependencies.lock.json").read_text())
     module = lock["gadget"]
@@ -23,6 +26,7 @@ def prepare():
         raise RuntimeError("Gadget module checksum differs from the lock")
     patch = root / "patches/gadget-structured.patch"
     health_patch = root / "patches/gadget-health.patch"
+    gadget_epoch = root / "patches/gadget-epoch.patch"
     additions = sorted((root / "patches/gadget-additions").rglob("*.go.txt"))
     profiler = lock["profiler"]
     profiler_info = json.loads(subprocess.check_output(
@@ -33,10 +37,16 @@ def prepare():
     profiler_patch = root / "patches/profiler-health.patch"
     quality_patch = root / "patches/profiler-quality.patch"
     identity_patch = root / "patches/profiler-identity.patch"
+    epoch_capture = root / "patches/profiler-epoch-capture.patch"
+    epoch_memory = root / "patches/profiler-epoch-memory.patch"
+    epoch_handler = root / "patches/profiler-epoch-handler.patch"
+    epoch_rebuild = root / "scripts/rebuild-profiler-ebpf.sh"
     profiler_additions = sorted((root / "patches/profiler-additions").rglob("*.go.txt"))
     fault = root / "patches/faults/drop-first-definition.patch" if options.drop_first_definition else None
+    diagnostic = root / "patches/diagnostics/identity-observations.patch" if options.identity_observations else None
+    diagnostic_additions = sorted((root / "patches/diagnostic-additions").rglob("*.go.txt")) if diagnostic else []
     digest = hashlib.sha256()
-    for path in [patch, health_patch, *additions, profiler_patch, quality_patch, identity_patch, *profiler_additions, *([fault] if fault else [])]:
+    for path in [patch, health_patch, gadget_epoch, *additions, profiler_patch, quality_patch, identity_patch, epoch_capture, epoch_memory, epoch_handler, epoch_rebuild, *profiler_additions, *([fault] if fault else []), *([diagnostic] if diagnostic else []), *diagnostic_additions]:
         digest.update(str(path.relative_to(root)).encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -47,8 +57,11 @@ def prepare():
     manifest = {"base_revision": module["revision"], "base_sum": info["Sum"],
                 "patch_sha256": patch_id, "submitted_upstream": False,
                 "fault_injection": "drop_first_definition" if fault else None,
-                "profiler_base_revision": profiler["revision"], "profiler_base_sum": profiler_info["Sum"]}
+                "profiler_base_revision": profiler["revision"], "profiler_base_sum": profiler_info["Sum"], "capture_abi": 2,
+                "bpf_builder": lock["images"]["gadget_builder"]}
     profiler_marker = generated_profiler / ".mw-prepared.json"
+    if diagnostic:
+        manifest["diagnostic"] = "identity_observations"
     if not profiler_marker.exists():
         if generated_profiler.exists():
             raise RuntimeError("Incomplete generated profiler dependency: " + str(generated_profiler))
@@ -59,13 +72,30 @@ def prepare():
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(profiler_patch)], cwd=generated_profiler, check=True)
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(quality_patch)], cwd=generated_profiler, check=True)
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(identity_patch)], cwd=generated_profiler, check=True)
+        subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(epoch_capture)], cwd=generated_profiler, check=True)
+        subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(epoch_memory)], cwd=generated_profiler, check=True)
+        subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(epoch_handler)], cwd=generated_profiler, check=True)
         for path in profiler_additions:
             dest = generated_profiler / path.relative_to(root / "patches/profiler-additions").with_suffix("")
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, dest)
+        if diagnostic:
+            for path in diagnostic_additions:
+                dest = generated_profiler / path.relative_to(root / "patches/diagnostic-additions").with_suffix("")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, dest)
+            subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(diagnostic)], cwd=generated_profiler, check=True)
+        subprocess.run(["bash", str(epoch_rebuild), str(generated_profiler)], cwd=root, check=True)
+        artifacts = {str(p.relative_to(generated_profiler)): hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in [generated_profiler / "support/types.go", generated_profiler / "support/ebpf/tracer.ebpf.amd64", generated_profiler / "support/ebpf/tracer.ebpf.arm64"]}
+        (generated_profiler / ".mw-epoch-artifacts.json").write_text(json.dumps(artifacts, indent=2) + "\n")
         profiler_marker.write_text(json.dumps(manifest, indent=2) + "\n")
     elif json.loads(profiler_marker.read_text()) != manifest:
         raise RuntimeError("Generated profiler provenance mismatch")
+    artifact_hashes = json.loads((generated_profiler / ".mw-epoch-artifacts.json").read_text())
+    for name, expected in artifact_hashes.items():
+        if hashlib.sha256((generated_profiler / name).read_bytes()).hexdigest() != expected:
+            raise RuntimeError("Generated epoch artifact mismatch: " + name)
     if not marker.exists():
         if generated.exists():
             raise RuntimeError("Incomplete generated dependency: " + str(generated))
@@ -76,6 +106,7 @@ def prepare():
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(patch)],
                        cwd=generated, check=True)
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(health_patch)], cwd=generated, check=True)
+        subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(gadget_epoch)], cwd=generated, check=True)
         for path in additions:
             dest = generated / path.relative_to(root / "patches/gadget-additions").with_suffix("")
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +116,7 @@ def prepare():
         marker.write_text(json.dumps(manifest, indent=2) + "\n")
     elif json.loads(marker.read_text()) != manifest:
         raise RuntimeError("Generated dependency provenance mismatch")
-    name = "recovery-test" if fault else "experiment"
+    name = "identity-test" if diagnostic else ("recovery-test" if fault else "experiment")
     modfile = root / "build" / (name + ".go.mod")
     shutil.copyfile(root / "go.mod", modfile)
     shutil.copyfile(root / "go.sum", modfile.with_suffix(".sum"))
@@ -94,7 +125,7 @@ def prepare():
                     "-replace=" + module["module"] + "=" + relative], cwd=root, check=True)
     subprocess.run(["go", "mod", "edit", "-modfile=" + str(modfile.relative_to(root)),
                     "-replace=" + profiler["module"] + "=./" + str(generated_profiler.relative_to(root))], cwd=root, check=True)
-    manifest_file = "recovery-test-manifest.json" if fault else "patch-manifest.json"
+    manifest_file = "identity-test-manifest.json" if diagnostic else ("recovery-test-manifest.json" if fault else "patch-manifest.json")
     (root / "build" / manifest_file).write_text(json.dumps(manifest, indent=2) + "\n")
     print("Prepared Gadget patch " + patch_id)
 

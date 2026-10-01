@@ -41,13 +41,14 @@ type Provider struct {
 }
 
 type StackEvidence struct {
-	Attribution string   `json:"attribution"`
-	Walk        string   `json:"walk"`
-	ScopeLookup string   `json:"scope_lookup"`
-	Reason      string   `json:"reason,omitempty"`
-	Provider    Provider `json:"provider"`
-	Frames      []Frame  `json:"frames"`
-	RawErrors   []string `json:"raw_errors,omitempty"`
+	HotSpotIdentity *HotSpotIdentity `json:"hotspot_identity,omitempty"`
+	Attribution     string           `json:"attribution"`
+	Walk            string           `json:"walk"`
+	ScopeLookup     string           `json:"scope_lookup"`
+	Reason          string           `json:"reason,omitempty"`
+	Provider        Provider         `json:"provider"`
+	Frames          []Frame          `json:"frames"`
+	RawErrors       []string         `json:"raw_errors,omitempty"`
 }
 
 func Unavailable(reason string, err error) StackEvidence {

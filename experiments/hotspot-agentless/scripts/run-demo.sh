@@ -17,10 +17,19 @@ if [[ ! -f "$modfile" ]]; then
 fi
 java_flags=()
 if [[ "${MW_JAVA_XINT:-false}" == true ]]; then java_flags+=(-Xint); fi
+if [[ "${MW_JAVA_SERIAL_GC:-false}" == true ]]; then java_flags+=(-XX:+UseSerialGC); fi
 corpus_run="${MW_CORPUS_RUN:-}"
 workers="${MW_CORPUS_WORKERS:-1}"
 corpus_mode="${MW_CORPUS_MODE:-c2}"
 java_main=(/work/fixtures/java/InlineOpenFixture.java /fixture /fixture/gate)
+unload_stress="${MW_UNLOAD_STRESS:-false}"
+if [[ "$unload_stress" == true ]]; then
+    if [[ -n "$corpus_run" ]]; then printf 'Unloading and ordinary corpus are separate runs\n' >&2; exit 1; fi
+    java_flags=(-Xint -Xmx64m -XX:+UseSerialGC -XX:MetaspaceSize=8m -XX:MaxMetaspaceSize=32m
+        -Xlog:class+unload=info:file=/fixture/unloading.log)
+    java_main=(-cp /work/build/unload-classes UnloadDriver /fixture /fixture/gate /work/build/unload-classes/UnloadG00000.class)
+    gate="${MW_CAPTURE_GATE:-TestDisposableLoaderAttributionInvestigation}"
+fi
 if [[ -n "$corpus_run" ]]; then
     if [[ ! "$corpus_run" =~ ^[a-f0-9]{16}$ || "${MW_JAVA_XINT:-false}" == true ]]; then
         printf 'Controlled-C2 corpus requires a 16-hex run ID and no -Xint\n' >&2
@@ -104,13 +113,15 @@ if [[ "$exit_code" != 0 ]]; then
     printf 'Collector failed with exit %s; artifacts: %s\n' "$exit_code" "$artifact" >&2
     exit 1
 fi
-if [[ -n "$corpus_run" ]]; then
+if [[ -n "$corpus_run" || "$unload_stress" == true ]]; then
     target_exit=$(timeout 15s "${docker_cmd[@]}" wait "$target")
     "${docker_cmd[@]}" logs "$target" > "$artifact/target.log" 2>&1
     if [[ "$target_exit" != 0 ]]; then
         cat "$artifact/target.log" >&2
         exit 1
     fi
+fi
+if [[ -n "$corpus_run" ]]; then
     python3 - "$artifact" "$corpus_run" "$pid" "$jdk_image" "$workers" "${java_flags[@]}" <<'PY'
 import hashlib, json, os, pathlib, platform, sys
 artifact=pathlib.Path(sys.argv[1])
@@ -122,6 +133,15 @@ data["runtime_mode"]=os.environ.get("MW_CORPUS_MODE","c2")
 data["jvm_flags"]=sys.argv[6:]
 data["target_uid"]=os.getuid()
 (artifact/"corpus-environment.json").write_text(json.dumps(data,indent=2)+"\n")
+PY
+fi
+if [[ "$unload_stress" == true ]]; then
+    python3 - "$artifact" "$pid" "$jdk_image" "${java_flags[@]}" <<'PY'
+import hashlib, json, pathlib, platform, sys
+a=pathlib.Path(sys.argv[1])
+files=["fixtures/java/UnloadDriver.java","fixtures/java/UnloadG00000.java","internal/unloading/report.go","tests/integration/unloading_test.go","scripts/run-demo.sh"]
+data={"host_pid":int(sys.argv[2]),"jdk_image":sys.argv[3],"jvm_flags":sys.argv[4:],"kernel_release":platform.release(),"target_agent_injected":False,"gadget_image":pathlib.Path("build/gadget-image.ref").read_text().strip(),"patch_manifest":json.loads(pathlib.Path("build/patch-manifest.json").read_text()),"source_sha256":{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in files},"template_class_sha256":hashlib.sha256(pathlib.Path("build/unload-classes/UnloadG00000.class").read_bytes()).hexdigest()}
+(a/"unloading-environment.json").write_text(json.dumps(data,indent=2)+"\n")
 PY
 fi
 printf 'Capture artifacts: %s\n' "$artifact"

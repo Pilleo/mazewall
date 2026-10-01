@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
 
 type cacheIterator interface {
@@ -47,6 +48,9 @@ func (o *otelResolverInstance) RecoverDefinition(ctx context.Context, task symbo
 		if trace.pid != task.Tgid || trace.tid != task.PidNumbers[0].Pid {
 			return false, symbolizer.ErrStackIdentityMismatch
 		}
+		if task.HotSpotIdentity.State == libpf.HotSpotEpochStable && trace.identity != task.HotSpotIdentity {
+			return false, symbolizer.ErrStackIdentityMismatch
+		}
 		// A late definition is already available to subsequent lookups.
 		return false, nil
 	}
@@ -54,7 +58,7 @@ func (o *otelResolverInstance) RecoverDefinition(ctx context.Context, task symbo
 		return false, symbolizer.ErrReferenceRecoveryUnavailable
 	}
 	m := o.trc.GetStackCacheMap()
-	if m.Type() != ebpf.LRUHash || m.KeySize() != 8+3072*8 || m.ValueSize() != 8 {
+	if m.Type() != ebpf.LRUHash || m.KeySize() != 24+3072*8 || m.ValueSize() != 8 {
 		return false, fmt.Errorf("unsupported stack cache ABI")
 	}
 	return invalidateReference(ctx, nativeReferenceCache{m: m}, task)
@@ -84,6 +88,15 @@ func invalidateReference(ctx context.Context, cache referenceCache, task symboli
 		}
 		if id != task.CorrelationID || binary.NativeEndian.Uint32(key) != task.Tgid || binary.NativeEndian.Uint32(key[4:]) != task.PidNumbers[0].Pid {
 			continue
+		}
+		if task.HotSpotIdentity.State == libpf.HotSpotEpochStable {
+			if len(key) != 24+3072*8 {
+				return false, fmt.Errorf("invalid epoch recovery key")
+			}
+			captured := libpf.HotSpotIdentity{Epoch: binary.NativeEndian.Uint64(key[8:]), State: libpf.HotSpotEpochState(binary.NativeEndian.Uint32(key[16:])), ReadError: int32(binary.NativeEndian.Uint32(key[20:]))}
+			if captured != task.HotSpotIdentity {
+				continue
+			}
 		}
 		if candidate != nil {
 			return false, fmt.Errorf("ambiguous correlation ID within task")

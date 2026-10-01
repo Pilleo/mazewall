@@ -10,6 +10,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"golang.org/x/sys/unix"
 )
 
@@ -20,6 +21,25 @@ type memoryCache struct {
 	lookupError       error
 	deleteError       error
 }
+
+func TestRecoveryStrictEpochCannotDeleteAnotherIncarnation(t *testing.T) {
+	key := make([]byte, 24+3072*8)
+	binary.NativeEndian.PutUint32(key, 123)
+	binary.NativeEndian.PutUint32(key[4:], 456)
+	binary.NativeEndian.PutUint64(key[8:], 2)
+	binary.NativeEndian.PutUint32(key[16:], 1)
+	cache := &memoryCache{entries: map[string]uint64{string(key): 7}}
+	task := recoveryTask()
+	task.HotSpotIdentity = libpf.HotSpotIdentity{Epoch: 4, State: libpf.HotSpotEpochStable}
+	if ok, e := invalidateReference(context.Background(), cache, task); e != nil || ok || len(cache.entries) != 1 {
+		t.Fatal("wrong epoch invalidated", ok, e)
+	}
+	task.HotSpotIdentity.Epoch = 2
+	if ok, e := invalidateReference(context.Background(), cache, task); e != nil || !ok || len(cache.entries) != 0 {
+		t.Fatal("matching epoch not invalidated", ok, e)
+	}
+}
+
 type memoryIterator struct {
 	keys    []string
 	entries map[string]uint64
@@ -67,10 +87,10 @@ func (i *memoryIterator) Next(key, value interface{}) bool {
 }
 func (i *memoryIterator) Err() error { return i.err }
 func recoveryKey(pid, tid uint32, marker byte) string {
-	k := make([]byte, 8+3072*8)
+	k := make([]byte, 24+3072*8)
 	binary.NativeEndian.PutUint32(k, pid)
 	binary.NativeEndian.PutUint32(k[4:], tid)
-	k[8] = marker
+	k[24] = marker
 	return string(k)
 }
 func recoveryTask() symbolizer.Task {

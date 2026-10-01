@@ -8,9 +8,15 @@ import (
 )
 
 // The caller owns the real pidfd; the watcher only borrows it until return.
-func watchTarget(ctx context.Context, fd int, cancel context.CancelFunc) error {
+func watchTarget(ctx context.Context, fd int, cancel context.CancelFunc, checks ...func() error) error {
 	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	for ctx.Err() == nil {
+		for _, check := range checks {
+			if err := check(); err != nil {
+				cancel()
+				return err
+			}
+		}
 		_, err := unix.Poll(poll, 50)
 		if errors.Is(err, unix.EINTR) {
 			continue

@@ -13,8 +13,15 @@ const volatile __u32 target_pid = 0;
 GADGET_PARAM(target_pid);
 const volatile __u64 target_start_ticks = 0;
 GADGET_PARAM(target_start_ticks);
+const volatile __u64 target_safepoint_counter = 0;
+GADGET_PARAM(target_safepoint_counter);
+const volatile __u64 target_initial_safepoint_epoch = 0;
+GADGET_PARAM(target_initial_safepoint_epoch);
 
 struct event {
+	__u64 hotspot_epoch;
+	__u32 hotspot_epoch_state;
+	__s32 hotspot_epoch_read_error;
 	__u64 capture_boot_ns;
 	__u64 sequence;
 	__u64 process_start_ticks;
@@ -101,7 +108,27 @@ int capture_openat(struct pt_regs *ctx)
 	struct generic_param *params = bpf_map_lookup_elem(&otel_generic_params, &zero);
 	if (params)
 		params->correlation_id = 0;
+	__u64 epoch_before = 0;
+	int epoch_read_before = 0;
+	if (target_safepoint_counter)
+		epoch_read_before = bpf_probe_read_user(&epoch_before, sizeof(epoch_before), (void *)target_safepoint_counter);
 	gadget_get_user_stack_from_kprobe(ctx, &event->ustack);
+	if (target_safepoint_counter) {
+		__u64 epoch_after = 0;
+		int epoch_read_after = bpf_probe_read_user(&epoch_after, sizeof(epoch_after), (void *)target_safepoint_counter);
+		event->hotspot_epoch = epoch_before;
+		event->hotspot_epoch_read_error = epoch_read_before ? epoch_read_before : epoch_read_after;
+		if (event->hotspot_epoch_read_error)
+			event->hotspot_epoch_state = 2; // read_error
+		else if (epoch_before >= (1ULL << 63) || epoch_after >= (1ULL << 63) || epoch_before < target_initial_safepoint_epoch || epoch_after < epoch_before)
+			event->hotspot_epoch_state = 6; // regressed
+		else if (epoch_before != epoch_after)
+			event->hotspot_epoch_state = 4; // changed
+		else if (epoch_before & 1)
+			event->hotspot_epoch_state = 3; // in_progress
+		else
+			event->hotspot_epoch_state = 1; // stable (including zero)
+	}
 	gadget_submit_buf(ctx, &events, event, sizeof(*event));
 	return 0;
 }

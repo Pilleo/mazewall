@@ -1,0 +1,21 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package support
+
+import (
+	"testing"
+	"unsafe"
+)
+
+func TestHotSpotEpochEmbeddedABI(t *testing.T) {
+	if unsafe.Sizeof(HotspotEpochIdentity{}) != 16 {
+		t.Fatal("epoch record width")
+	}
+	trace := Trace{Hotspot_identity: HotspotEpochIdentity{Epoch: 0, State: 1}}
+	if unsafe.Offsetof(trace.Frame_data) != unsafe.Offsetof(trace.Hotspot_identity)+16 {
+		t.Fatal("epoch not before trailing frame array")
+	}
+	if err := CheckHotSpotEpochABI(); err != nil {
+		t.Fatal(err)
+	}
+}

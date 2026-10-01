@@ -37,8 +37,39 @@ build: deps
 		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
 		-o build/mw-hotspot-demo ./cmd/mw-hotspot-demo
 
-.PHONY: recovery-test-build recovery
+.PHONY: recovery-test-build recovery recovery-epoch
+recovery-epoch: recovery-test-build gadget
+	MW_COLLECTOR_BINARY=build/mw-hotspot-recovery MW_CAPTURE_MODFILE=build/recovery-test.go.mod MW_JAVA_XINT=true MW_JAVA_SERIAL_GC=true \
+		MW_CAPTURE_GATE=TestLostFirstDefinitionRecoversSubsequentOccurrences bash scripts/run-demo.sh --hotspot-identity=safepoint-epoch
 .PHONY: corpus-fixture inline-corpus corpus-matrix oracle
+.PHONY: unloading-fixture identity-test-build unloading-investigation unloading-epoch identity-kernel-test
+unloading-epoch: build gadget unloading-fixture
+	MW_UNLOAD_STRESS=true MW_REQUIRE_IDENTITY_DIAGNOSTICS=false MW_CAPTURE_GATE=TestDisposableLoaderEpochAttribution bash scripts/run-demo.sh --hotspot-identity=safepoint-epoch
+
+identity-kernel-test: deps
+	$(GO) test -c -modfile build/experiment.go.mod -tags mw_kernel -o build/identity-kernel.test ./internal/identity
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --privileged --pid=host \
+		--mount type=bind,src=/sys,dst=/sys,readonly \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--entrypoint /work/build/identity-kernel.test $(GO_IMAGE) -test.run TestExecBarrier -test.v
+unloading-fixture:
+	mkdir -p build/unload-classes
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--mount type=bind,src="$$(pwd)/build/unload-classes",dst=/out \
+		$(JDK_IMAGE) javac -g -d /out /work/fixtures/java/UnloadDriver.java /work/fixtures/java/UnloadG00000.java
+
+identity-test-build:
+	python3 scripts/prepare-gadget.py --identity-observations
+	patch=$$(python3 -c 'import json;print(json.load(open("build/identity-test-manifest.json"))["patch_sha256"])'); \
+	$(GO) build -modfile build/identity-test.go.mod -trimpath \
+		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
+		-o build/mw-hotspot-identity ./cmd/mw-hotspot-demo
+
+unloading-investigation: identity-test-build gadget unloading-fixture
+	MW_COLLECTOR_BINARY=build/mw-hotspot-identity MW_CAPTURE_MODFILE=build/identity-test.go.mod \
+		MW_UNLOAD_STRESS=true bash scripts/run-demo.sh
+
 corpus-fixture:
 	mkdir -p build/inline-corpus-classes
 	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \

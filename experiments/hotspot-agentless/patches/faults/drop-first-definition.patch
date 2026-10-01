@@ -1,17 +1,35 @@
 --- a/pkg/symbolizer/otel/structured.go
 +++ b/pkg/symbolizer/otel/structured.go
-@@ -5,7 +5,10 @@
- 
+@@ -6,7 +6,9 @@
  import (
  	"context"
-+	"fmt"
+ 	"fmt"
 +	"os"
  	"slices"
 +	"strings"
  
  	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
  	"go.opentelemetry.io/ebpf-profiler/libpf"
-@@ -24,6 +27,18 @@
+@@ -32,6 +34,18 @@
+ 	}
+ 	o.mu.Lock()
+ 	defer o.mu.Unlock()
++	// Test-only strict build: drop one genuine checked definition.
++	// The producer LRU is untouched; normal sources contain no injection.
++	if !o.testDropDefinition {
++		for _, frame := range frames {
++			if strings.Contains(frame.Value().FunctionName.String(), "InlineOpenFixture.pathA") {
++				o.testDropDefinition = true
++				fmt.Fprintf(os.Stderr, "mw-fault-dropped-definition id=%d pid=%d tid=%d\n", id, pid, tid)
++				return nil
++			}
++		}
++	}
++
+ 	if old, ok := o.correlationMap[id]; ok {
+ 		if old.pid != pid || old.tid != tid || old.identity != identity {
+ 			return symbolizer.ErrStackIdentityMismatch
+@@ -61,6 +75,18 @@
  func (o *otelResolverInstance) storeTrace(id uint64, frames libpf.Frames, pid, tid uint32) {
  	o.mu.Lock()
  	defer o.mu.Unlock()

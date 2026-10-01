@@ -123,5 +123,33 @@ Implementation is not started; retain
 this issue as open and require useful resolution across generations, not merely
 an all-unavailable zero-wrong-label result.
 
+**Second detailed review: changes requested (2026-10-01):** the high-level epoch
+architecture remains approved, but the first detailed plan is not executable.
+Five focused issues cover shared-reader/mapping concurrency, rejected metadata
+cache rollback, session-fatal error delivery without a lookup, captured evidence
+versus validation outcome, and enforcement of the excluded exec lifetime.
+The design lists their links. Isolated decoder probes reproduced rejected method
+cache retention and loss of a later permission cause in the proposed ledger.
+Corrected the plan's read-address bias rule. No remedy has been applied; keep
+this parent issue open until the revised contracts and live gates are reviewed.
+
+**Bounded epoch remedy implemented (2026-10-01):** all five review corrections
+are implemented in the standalone patches/collector. Capture/definition epochs
+are isolated across producer/frame caches; decoding uses immutable copied memory,
+abort-time metadata-LRU invalidation and separate validation. Fatal errors have a
+required session owner, and an owned pre-discovery exec barrier closes unsupported
+incarnations. ABI v2 layouts and both BPF objects are regenerated with pinned tools.
+
+Normal strict runs `capture.pq4kaX`, `capture.mBTB50`, `capture.DOGzCx`, and final
+audited `capture.FMeuii` each observe 1600 tokens, confirm 80 unloads, and return
+1580 epoch-checked correct segments/20 cold unavailable/zero wrong labels. Both
+branches of generations 1–79 resolve all ten operations. Non-epoch control
+`capture.Enk1ls` still produces 1560 wrong labels. Host race/upstream, real exec
+and LRU/pruning, legacy/strict genuine recovery, C2 regression and pinned build
+checks pass. Exact source/object/image hashes are in the evidence report.
+Keep the parent and focused findings open for independent review; concurrent
+collectors, JIT reclamation, arbitrary JDKs, BCI/loss completeness and overhead
+remain separate gates.
+
 ---
 <!-- id: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident  file: issue-20260930-220901-114-validate-captured-interpreted-hotspot-method-ident.md -->

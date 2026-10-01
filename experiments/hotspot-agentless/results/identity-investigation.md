@@ -1,5 +1,76 @@
 # Interpreter identity investigation
 
+## Implemented bounded remedy (2026-10-01)
+
+The reviewed corrections are implemented in the standalone experiment. Opt-in
+`--hotspot-identity=safepoint-epoch` verifies the exact mapped JVM and live
+interpreter/Serial flags, captures stable even epochs, separates producer/frame
+cache identities, and guards deferred decoding with immutable trace-local
+readers. Any failed strict decoding purges the existing method/Symbol/JIT/stub
+LRUs. Captured evidence and validation outcome are separate values. A required
+fatal owner receives native/conflict errors without depending on a lookup.
+The owned exec barrier is attached before discovery and checked around resolution
+and by the existing pidfd watcher. No agent or production USER_NOTIF change is
+involved.
+
+| Normal collector run | Observed | Checked/correct segments | Cold unavailable | Wrong generation | Confirmed unloaded |
+|---|---:|---:|---:|---:|---:|
+| `build/capture.pq4kaX/` | 1600 | 1580 | 20 | 0 | 80 |
+| `build/capture.mBTB50/` | 1600 | 1580 | 20 | 0 | 80 |
+| `build/capture.DOGzCx/` | 1600 | 1580 | 20 | 0 | 80 |
+| Final audited build, `build/capture.FMeuii/` | 1600 | 1580 | 20 | 0 | 80 |
+| Non-epoch control, `build/capture.Enk1ls/` | 1600 | 20 | 20 | **1560** | 80 |
+
+Every strict run resolves all ten operations in both branches of each generation
+1–79. Each has 1283 same-epoch reference reuses, zero reference/epoch conflicts
+and zero references used across generations. The first three runs independently
+show strictly increasing per-generation epochs from 0 to 158, consistent with
+the verified unload boundaries. Generation zero remains cold/unavailable;
+this does not establish zero collection loss or a complete stack walk.
+
+Audited live source bundle:
+`271c0b2ec2fa7f7cc2b17c71332cc870ec3cca87a38875cd593d5f67e3bef754`.
+The last source change requires a fatal owner for strict embedding; its focused
+regression and final audited live run pass. Final generated artifacts:
+
+Checkpoint patch bundle after removing an EOF-only patch context issue:
+`6af5adb5e5a32ba57361fc4948c389c01d44e7144814051189e7190b72798203`.
+Re-preparation applies without fuzz and produces byte-identical generated layouts
+and both BPF objects to the audited live bundle. Observation-only and genuine
+definition-drop variants remain separate and both compile successfully.
+
+- `support/types.go`: `95ae3add323d8c98f25a1fec7ae27d4cd33411f57db49c253092ee4c9e510248`.
+- amd64 BPF: `77a3377272ad19381cb3e3b5c316acb67135e57c2ca00139cb33c8d7a7ea97c0`.
+- arm64 BPF: `4ac4fbc8969793eaed18a44d99e1dd7c8bec511145ae571c4b29a5dd6c2ee919`.
+- Gadget OCI: `sha256:61d6e991ac955c241ce64e53dd58f20c6d58596466562e0ee81212812bb3e066`.
+
+Binary ABI v2 adds a 16-byte epoch record to the trace header and producer key;
+key size is `24+3072*8`, value remains uint64, capacity remains 256. The existing
+digest-pinned builder regenerates both embedded objects and C/Go definitions.
+BTF/layout tests verify the embedded artifact, not just source declarations.
+ARM bytecode is kept layout-consistent; the supported runtime remains x86-64.
+
+Verification evidence:
+
+- `make verify`: race tests, original upstream tests, real frame-cache guards,
+  metadata rollback, separate capture/validation, native error retention, raw
+  trace decoding/bounds, source/module verification and collector build pass.
+- `make identity-kernel-test`: real `sched_process_exec` poisoning passes.
+- `make kernel-cache-test`: actual 256-entry LRU eviction/two-cycle pruning passes.
+- Legacy recovery `capture.HpHIFT` and strict recovery `capture.aD9JQF`: each has
+  one genuine missing-definition invalidation, subsequent correct attribution
+  and complete delivered-event terminal accounting; old outcomes remain unchanged.
+- Controlled C2 regression `capture.FLD0D7` passes without strict epoch mode.
+- Pinned Go container build passes. Interpreted/default-GC and compiler-enabled
+  Serial targets both fail strict startup with explicit unsupported-profile errors.
+- Repository `./gradlew build` passes after focused/native checks; backlog,
+  whitespace and shell-syntax validation pass at the implementation checkpoint.
+
+The parent identity issue and focused review findings retain review status until
+independent review. Concurrent collectors, compiled-code reclamation, arbitrary
+JDKs, semantic BCI, whole-session loss and overhead remain outside this result.
+The investigation/history below records the original failure and rejected design.
+
 ## Finding
 
 The capture identifies an interpreted method using its `Method*` address and a
@@ -257,3 +328,53 @@ pruning, worker/deadline bounds and wrong-generation assertions remain acceptanc
 constraints. Useful resolution across later generations must be tested separately
 from rejection correctness, so an all-unavailable result is not accepted as a
 successful attribution remedy.
+
+## Second design review evidence (2026-10-01)
+
+The high-level epoch approach remains a candidate; its first detailed plan is
+blocked by source-backed concurrency, transaction, error-delivery and identity
+contract gaps. No remedy implementation was tested during this review.
+
+An isolated copy of the prepared provider at `build/epoch-review.r6i0tgok/provider`
+contains a diagnostic-only `epoch_review_probe_test.go`. It uses real `getMethod`
+and existing metadata LRUs with synthetic decoder memory and the exact
+first-failure-only reader wrapper proposed in the plan. Command:
+
+```bash
+go test -modfile build/epoch-review.r6i0tgok/review.go.mod \
+  go.opentelemetry.io/ebpf-profiler/interpreter/hotspot \
+  -run '^TestReview' -count=1 -v
+```
+
+Expected-red result, retained in `build/epoch-review.r6i0tgok/probe.log`:
+
+- EACCES while reading the class Symbol was recorded by the proposed wrapper,
+  but existing `getMethod` returned nil error and cached `void .leaf()`.
+- Restoring readable memory without invalidating that method record returned
+  the same rejected name on a retry. This is rejected-decode cache pollution,
+  not a new live class-generation reproduction.
+- A first EOF followed by EACCES left the proposed ledger reporting EOF only.
+- The absolute-address `RemoteMemory.ReadAt` conformance probe passed with
+  nonzero Bias. Bias affects decoded pointer values, not read-address relocation.
+
+Source findings in profiler base `ef6cf29492c8a980f889052903fa2dd0c0765cc0`:
+
+- `processmanager/processinfo.go:522–528` releases `pm.mu` before calling
+  `instance.SynchronizeMappings`; the proposed mutation of shared
+  `hotspotInstance.rm.ReaderAt` is therefore not protected by that lock.
+- `interpreter/hotspot/instance.go:181–216,236–255,260–398` writes Symbol, stub
+  and method caches during decoding. Frame-cache-only transaction staging does
+  not undo these entries on rejection.
+- `processmanager/manager.go:385–386` logs a reporter error instead of returning
+  it to a session owner. Keeping a typed failure only on a correlated definition
+  cannot make an unlooked-up/skipped/lost event's native failure session-fatal.
+
+A separate ordinary-user Python exec observation retained PID `2755636` and
+start ticks `7137991` before/after exec. This confirms Linux lifetime semantics
+only; it does not reproduce HotSpot misattribution across exec. The plan's
+startup/periodic mapping checks do not define an authoritative no-exec barrier
+for producer cache hits, so that unsupported-incarnation case still needs an
+explicit contract.
+
+See the [design's second-review findings](../../../docs/plans/2026-10-01-agentless-hotspot-epoch-design.md#second-review-findings-2026-10-01)
+and their five focused backlog items before starting implementation.

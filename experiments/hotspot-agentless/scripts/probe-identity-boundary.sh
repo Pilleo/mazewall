@@ -13,7 +13,7 @@ go mod edit -modfile "$artifact/probe.go.mod" \
     -replace "go.opentelemetry.io/ebpf-profiler=$artifact/provider"
 set +e
 go test -modfile "$artifact/probe.go.mod" go.opentelemetry.io/ebpf-profiler/interpreter/hotspot \
-    -run TestFullInterpreterGenerationCannotBeProvedByTruncatedCookie -count=1 \
+    -run TestFullInterpreterGeneration -count=1 \
     > "$artifact/probe.log" 2>&1
 status=$?
 set -e

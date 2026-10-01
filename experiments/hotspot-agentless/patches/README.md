@@ -1,5 +1,31 @@
 # Upstream patch status
 
+## Epoch identity patches (local, not submitted upstream)
+
+`profiler-epoch-capture.patch` changes C trace/proc-info/cache layouts and capture
+brackets; `profiler-epoch-memory.patch` adds immutable-memory helper paths;
+`profiler-epoch-handler.patch` carries captured identity and separate validation,
+guards the actual frame cache, enforces raw frame bounds and connects the required
+fatal owner. `gadget-epoch.patch` forwards options/tasks/definitions through the
+existing correlation cache. Additions contain the guard/ledger and their tests.
+
+`scripts/rebuild-profiler-ebpf.sh` runs the existing pinned builder's Clang/LLVM
+18 and cgo tools in an owned generated tree. Both embedded architectures and Go
+layouts are regenerated together. The preparer hashes source inputs and verifies
+artifact hashes on reuse; incomplete or mismatched trees are refused. Source
+patches still apply without fuzz to checksum-verified original modules.
+
+ABI v2 producer keys are `24+3072*8` bytes, with unchanged uint64 values and
+256-entry capacity. Recovery and the native eviction/pruning test use this ABI.
+Only explicit strict mode enables the pinned interpreter/Serial lifetime claim;
+other existing modes retain unknown identity. Captured identity, validation and
+quality are separate. Permission/unexpected errors never depend on an event
+lookup for fatal delivery. The genuine drop-definition fault variant handles
+both legacy and strict storage and remains absent from normal source bundles.
+
+See the [implemented evidence](../results/identity-investigation.md#implemented-bounded-remedy-2026-10-01)
+before considering upstream submission or broader runtime support.
+
 Build inputs retain Gadget base `7097db144ccd8dab15373f27ec98d2c3d22e4588` and
 the profiler replacement base `ef6cf29492c8a980f889052903fa2dd0c0765cc0`.
 
@@ -134,3 +160,18 @@ and ABA cannot be excluded by these before/after reads. The regression proves
 the formerly ignored check and stale method-cache behavior are corrected, not
 the entire class-unloading/runtime identity matrix. Added reads/cache storage
 have not been benchmarked. Upstream review and submission are pending.
+
+## Isolated identity diagnostics
+
+`--identity-observations` applies `diagnostics/identity-observations.patch` and
+`diagnostic-additions/` only to a separate generated provider. Its binary, module
+file and manifest are distinct. It logs raw PID/TID/reference/Method/cookie,
+frame-cache hit state, returned names and sampled current full ConstMethod
+pointers. These are validation observations after capture, not newly captured
+generation evidence. The patch does not invalidate caches or change wire data.
+It is mutually exclusive with the first-definition-drop fault build.
+
+`make unloading-investigation` runs a pinned ordinary-user disposable-loader
+fixture and currently fails its generation assertion. The uninstrumented control
+fails the same assertion. The normal patch bundle and defaults remain the same;
+the diagnostic variant must not be used as overhead evidence.

@@ -10,7 +10,42 @@
 
 **Spec:** [Approved epoch design](2026-10-01-agentless-hotspot-epoch-design.md).
 
-**Execution status:** Not started. This document is the recipe, not passing evidence.
+**Execution status:** Implemented inline on 2026-10-01 with the reviewed
+[execution corrections](2026-10-01-agentless-hotspot-epoch-design.md#authorized-execution-corrections).
+The historical task recipe below is superseded by the executed contract record;
+its rejected shared-reader/mixed-state snippets are not instructions to reuse.
+See [actual artifacts and verification](../../experiments/hotspot-agentless/results/identity-investigation.md#implemented-bounded-remedy-2026-10-01).
+
+## Executed contract record
+
+- [x] Exact ELF SHA/build-ID, live compiler/GC flags and start ticks are verified;
+  exec attachment precedes discovery, and strict sessions are capped at 60 seconds.
+- [x] C/Go/BPF ABI v2 is regenerated with pinned tooling and checked against BTF.
+  Producer keys include captured identity, retain 256 entries, and reuse within epochs.
+- [x] Per-trace RemoteMemory is immutable relative to the shared instance. The
+  bounded ledger preserves the first failure and later EPERM/EACCES separately.
+  Failed decoding clears all four existing metadata LRUs; frame-cache admission
+  waits for finish. Counter regressions permanently poison the decoder.
+- [x] `BeginHotSpotEpoch` returns a private decoder capability; `Symbolize` and
+  `Finish(error) HotSpotValidation` operate on its copied memory. Existing public
+  `Instance.Symbolize` remains unchanged.
+- [x] `libpf.Trace.HotSpotIdentity` is captured evidence;
+  `libpf.Trace.HotSpotValidation` is the separate outcome/cause. The required
+  session fatal owner is independent of lookup. Historical checked snapshots are
+  immutable, and true captured-identity conflicts remain fatal.
+- [x] Recovery compares epoch/PID/TID/reference in ABI-v2 keys. Typed JSON uses
+  explicit optional epoch, including observed zero. Unsupported profiles refuse
+  startup; default capture carries no epoch guarantee.
+- [x] Three fresh useful unloading runs and final audited repeat pass all 1600
+  tokens/all 80 unloads/zero wrong labels, with ten correct operations per late
+  branch. The genuine non-epoch control remains red. Real exec/LRU/prune,
+  legacy/strict recovery, host race/upstream and pinned build checks pass.
+
+Actual patch files are `profiler-epoch-{capture,memory,handler}.patch` and
+`gadget-epoch.patch`. Runtime exec ownership is in `internal/identity/exec_linux.go`;
+session fatal retention is in `internal/capture/fatal.go`. The original parent
+issue and review items remain open pending independent review, and broader
+runtime/loss/overhead gates are not claimed complete.
 
 ## Global Constraints
 
@@ -380,8 +415,9 @@ func TestHotSpotEpochRejectsBoundaryAfterCacheHit(t *testing.T) {
   native frames to verify their order/evidence survives Java rejection.
 - [ ] Run red:
   `go test -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/interpreter/hotspot go.opentelemetry.io/ebpf-profiler/processmanager -run TestHotSpotEpoch -count=1`.
-- [ ] Implement checked counter reads using absolute address minus remote-memory
-  bias exactly once before `ReadAt`; reject underflow/overflow and preserve `%w`
+- [ ] Implement checked counter reads at the absolute `CounterAddress` supplied
+  to `ReadAt`; `RemoteMemory.Bias` adjusts decoded pointer values, not read
+  addresses. Validate conversion to the signed ReaderAt offset and preserve `%w`
   errors/short reads. Begin requires stable/even/lower-half capture and equal live
   epoch. Purge the three existing metadata LRUs when entering a new epoch. End
   reads again and rejects a transition. Lower *live* counter poisons this target;
@@ -390,6 +426,11 @@ func TestHotSpotEpochRejectsBoundaryAfterCacheHit(t *testing.T) {
 - [ ] Preserve metadata read failures that existing helpers can hide. Install a
   trace-scoped `epochReader` after a successful begin and restore the original
   ReaderAt on every end/abort. It delegates all reads and records the first cause:
+
+  **Rejected proposal (R1/R3):** this shared-reader mutation and first-error-only
+  implementation are retained here to identify the defect. They are not approved
+  implementation instructions; replace them with reviewed reader ownership and
+  bounded error retention before executing Task 4.
 
 ```go
 type epochReader struct { base io.ReaderAt; failure error }
@@ -402,8 +443,10 @@ func (r *epochReader) ReadAt(p []byte, off int64) (int, error) {
 }
 ```
 
-  Access this trace-local ledger only under the existing interpreter lock; it
-  does not own/close the underlying reader. End joins recorded errors with its
+  `pm.mu` does not protect the provider's concurrent `SynchronizeMappings` calls.
+  Reader ownership must cover those accesses too. The reader adapter must not
+  own/close the underlying reader. End must preserve all fatal causes, including
+  permission errors after earlier failures, together with its
   checked epoch-read result. Add a regression where counter reads succeed but
   the underlying class Symbol read returns EACCES: no fallback named Java frame
   may be published and `errors.Is(result, syscall.EACCES)` must remain true.
@@ -551,6 +594,9 @@ COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
   and review; do not archive it merely because this restricted profile passes.
 
 ## Self-review and handoff
+
+Second review supersedes the initial self-review below: R1–R5 are open, and the
+original transaction/error/incarnation instructions are not execution-ready.
 
 The tasks cover profile discovery (1), shared ABI/embedded bytecode (2), producer
 identity (3), frame/method/Symbol lifetime (4), historical lookup/recovery/output
