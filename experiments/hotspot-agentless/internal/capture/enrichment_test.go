@@ -89,7 +89,7 @@ func TestPendingLimitDoesNotBlockConsumptionOnLookup(t *testing.T) {
 	}
 	var skipped, resolved int
 	for _, r := range sink.snapshot() {
-		if r.Kind == "enrichment" && r.EventID == "event-2" && r.Evidence.Reason == "pending_count_limit" {
+		if r.Kind == "enrichment" && r.EventID == "event-2" && r.Evidence.Reason == "pending_count_limit" && r.Evidence.Attribution == "skipped" {
 			skipped++
 		}
 		if r.Kind == "enrichment" && r.EventID == "event-1" && r.Evidence.Attribution == "event_correlated" {
@@ -152,7 +152,7 @@ func TestPendingByteLimitKeepsEventAndTerminalReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := sink.snapshot()
-	if len(rows) != 2 || rows[0].Kind != "event" || rows[1].Evidence.Reason != "pending_byte_limit" {
+	if len(rows) != 2 || rows[0].Kind != "event" || rows[1].Evidence.Reason != "pending_byte_limit" || rows[1].Evidence.Attribution != "skipped" {
 		t.Fatalf("lost refusal evidence: %+v", rows)
 	}
 }

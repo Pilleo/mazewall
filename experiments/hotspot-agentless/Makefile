@@ -9,6 +9,14 @@ JDK_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies
 
 .PHONY: deps unit upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
 .PHONY: benchmark-fixture benchmark-report benchmark loss-gadget event-loss-control
+.PHONY: event-read-kernel-test
+event-read-kernel-test: deps
+	$(GO) test -c -modfile build/experiment.go.mod -tags mw_kernel \
+		-o build/event-read-kernel.test github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --privileged \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--entrypoint /work/build/event-read-kernel.test $(GO_IMAGE) \
+		-test.run TestKernelEventReadRetainsPayloadAfterRingPressure -test.v
 loss-gadget:
 	bash scripts/build-loss-gadget.sh
 
@@ -35,6 +43,7 @@ unit: deps
 
 upstream-test: deps
 	$(GO) test -race -modfile build/experiment.go.mod github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer/otel github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer github.com/inspektor-gadget/inspektor-gadget/pkg/datasource
+	$(GO) test -race -modfile build/experiment.go.mod github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/tracer -run 'TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned|TestHotSpotEpoch|TestDefinition' -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/processmanager -run TestHotSpotEpoch -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/libpf go.opentelemetry.io/ebpf-profiler/interpreter/hotspot

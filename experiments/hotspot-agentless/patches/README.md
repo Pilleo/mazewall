@@ -1,5 +1,19 @@
 # Upstream patch status
 
+## Event-read loss patch (local, not submitted upstream)
+
+`gadget-event-loss.patch` preserves a successful ring-buffer payload accompanying
+an independently polled loss observation. Its stateless adapter reports loss,
+then forwards a nonempty sample through the original datasource path; perf-style
+loss-only/empty reads emit no fabricated event. The original reader's `continue`
+discarded an additional valid event for each positive ring loss report.
+
+The full event-operator race suite and an isolated real-ring pressure control
+verify payload delivery, subscriber errors and loss-only behavior. Normal native
+buffers/maps and loss polling are unchanged. See
+[`event-read-loss.md`](../results/event-read-loss.md) for the regression, actual
+pressure denominator, retained failed runs and remaining finality gates.
+
 ## Definition shutdown patches (local, not submitted upstream)
 
 `profiler-shutdown.patch` makes both trace and batch-barrier channel delivery

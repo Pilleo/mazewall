@@ -111,6 +111,9 @@ and emits explicit `unwind_disabled` skips, and `full` uses strict epoch enrichm
 Measured file tokens establish missing operations independently of native loss
 reports. Terminal counters must match delivered JSONL outcomes. Events mode
 rejects definition-profiler observations and enrichment claims.
+Admission count/byte limits emit explicit `skipped` terminals with their original
+reason. A native loss observation accompanying a valid ring event is reported
+without discarding that event; empty/loss-only reads emit no fabricated event.
 
 `--warmup` happens **before attachment**. Optional `--post-attach-warmup` issues a
 fixed, separately tokenized preparation workload after attachment, paced at
@@ -133,6 +136,13 @@ that **exact** missing token, not merely one missing operation.
 See [loss/readiness/measurement evidence](results/loss-benchmark.md): the paced
 ready control passed, but cold useful coverage and repeated warm burst collection
 failed their gates. These measurements are not a production performance envelope.
+
+The subsequent [event-read loss investigation](results/event-read-loss.md) fixed
+an extra valid-event discard in Gadget's loss-report path and an admission-skip
+label mismatch. Three identical ready-burst repeats captured all 1200 tokens;
+a larger 10000-operation pressure diagnostic still correctly rejected 4569
+missing tokens and retained 735 explicit enrichment skips. The isolated native
+pressure control can be run with `make event-read-kernel-test`.
 
 Native LRU capacity and existing pruning characterization:
 

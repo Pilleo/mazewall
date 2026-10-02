@@ -1,0 +1,65 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+)
+
+func TestEventReadPreservesPayloadAlongsideLoss(t *testing.T) {
+	consumerError := errors.New("consumer rejected sample")
+	for _, tc := range []struct {
+		name          string
+		sample        []byte
+		lost          uint64
+		consumerError error
+	}{
+		{"ring_payload_and_loss", []byte{1, 2, 3, 4}, 28, nil},
+		{"plain_payload", []byte{5, 6, 7, 8}, 0, nil},
+		{"perf_loss_only", nil, 28, nil},
+		{"empty_read", nil, 0, nil},
+		{"payload_error_and_loss", []byte{1, 2, 3, 4}, 28, consumerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ds, err := datasource.New(datasource.TypeSingle, "event")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accessor, err := ds.AddField("wire", api.Kind_Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var received [][]byte
+			if err = ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+				payload, err := accessor.Bytes(data)
+				if err != nil {
+					return err
+				}
+				received = append(received, bytes.Clone(payload))
+				return tc.consumerError
+			}, 0); err != nil {
+				t.Fatal(err)
+			}
+			tr := &Tracer{ds: ds, accessor: accessor, eventSize: 4, slowBuf: make([]byte, 4)}
+			err = tr.processEventRead(nil, tc.sample, tc.lost)
+			if !errors.Is(err, tc.consumerError) {
+				t.Fatal("payload error lost", err)
+			}
+			if ds.(datasource.ReportedLossReader).ReportedLoss() != tc.lost {
+				t.Fatal("loss observation lost or changed")
+			}
+			if len(tc.sample) == 0 {
+				if len(received) != 0 {
+					t.Fatal("loss-only/empty read fabricated event", received)
+				}
+			} else if len(received) != 1 || !bytes.Equal(received[0], tc.sample) {
+				t.Fatal("valid event discarded alongside loss", received)
+			}
+		})
+	}
+}

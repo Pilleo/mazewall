@@ -102,6 +102,7 @@ func (e *Enricher) Submit(event model.Event) error {
 	if reason != "" {
 		e.stats.Skipped++
 		evidence := model.Unavailable(reason, nil)
+		evidence.Attribution = "skipped"
 		return e.write(model.Record{Kind: "enrichment", SessionID: event.SessionID, EventID: event.EventID, Evidence: &evidence})
 	}
 	e.pending++

@@ -1,5 +1,16 @@
 # Verification evidence
 
+## Event-read loss correction (2026-10-02)
+
+The pinned Gadget reader discarded a valid ring sample accompanying a positive
+loss report. The local correction passes a real-datasource race regression and
+an isolated kernel-ring pressure test: 745 genuine output failures plus all 255
+valid payloads delivered out of 1000 attempts. Three identical ready-burst repeats
+captured every measured token; a larger pressure diagnostic still rejected 4569
+missing operations, with matching partial native observations and 735 explicit
+enrichment skips. A separate admission-skip attribution bug is fixed too. See
+[`event-read-loss.md`](event-read-loss.md) for provenance and residual gates.
+
 ## Shutdown/loss/measurement checkpoint (2026-10-02)
 
 Owned definition-reader/consumer joins, events-only capture, exact token-42 loss

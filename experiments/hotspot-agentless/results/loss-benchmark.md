@@ -1,5 +1,10 @@
 # Definition shutdown, loss controls and bounded measurements
 
+Follow-up: [`event-read-loss.md`](event-read-loss.md) investigates the retained
+burst discrepancy and corrects an extra valid-sample discard in the pinned reader.
+It also records new native pressure controls and the admission-skip label fix.
+Historical runs and failures below remain unchanged.
+
 Evidence collected 2026-10-01/02 on Linux x86-64
 `7.2.8-x64v3-xanmod1`. Runtime, Go and builder images and module revisions remain
 the pinned inputs in `dependencies.lock.json`. Java runs as the ordinary operator

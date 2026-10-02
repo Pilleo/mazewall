@@ -1,0 +1,131 @@
+//go:build mw_kernel
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+)
+
+// This isolated producer is quiescent before readout. It proves the combined
+// read-result dispatch against a real full ring, not production buffer finality.
+func TestKernelEventReadRetainsPayloadAfterRingPressure(t *testing.T) {
+	ring, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.RingBuf, MaxEntries: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ring.Close()
+	lostMap, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 8, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lostMap.Close()
+	// Emit a genuine four-byte event. Count native output failures independently
+	// of userspace; no reader consumes the ring while this producer runs.
+	program, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.SocketFilter, License: "GPL", Instructions: asm.Instructions{
+		asm.StoreImm(asm.R10, -8, 0x04030201, asm.Word),
+		asm.LoadMapPtr(asm.R1, ring.FD()),
+		asm.Mov.Reg(asm.R2, asm.R10),
+		asm.Add.Imm(asm.R2, -8),
+		asm.Mov.Imm(asm.R3, 4),
+		asm.Mov.Imm(asm.R4, 0),
+		asm.FnRingbufOutput.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		asm.StoreImm(asm.R10, -16, 0, asm.Word),
+		asm.LoadMapPtr(asm.R1, lostMap.FD()),
+		asm.Mov.Reg(asm.R2, asm.R10),
+		asm.Add.Imm(asm.R2, -16),
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		asm.Mov.Imm(asm.R1, 1),
+		asm.StoreXAdd(asm.R0, asm.R1, asm.DWord),
+		asm.Mov.Imm(asm.R0, 0).WithSymbol("exit"),
+		asm.Return(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer program.Close()
+	const attempts = 1000
+	for i := 0; i < attempts; i++ {
+		if _, _, err = program.Test(make([]byte, 64)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := make([]uint64, cpus)
+	zero := uint32(0)
+	if err = lostMap.Lookup(&zero, &counts); err != nil {
+		t.Fatal(err)
+	}
+	var nativeLost uint64
+	for _, count := range counts {
+		nativeLost += count
+	}
+	if nativeLost == 0 || nativeLost >= attempts {
+		t.Fatal("control did not produce both loss and payload", nativeLost)
+	}
+	reader, err := ringbuf.NewReader(ring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	reader.SetDeadline(time.Now().Add(time.Second))
+	ds, err := datasource.New(datasource.TypeSingle, "event")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessor, err := ds.AddField("wire", api.Kind_Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received uint64
+	if err = ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+		payload, err := accessor.Bytes(data)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(payload, []byte{1, 2, 3, 4}) {
+			t.Errorf("payload corrupted: %v", payload)
+		}
+		received++
+		return nil
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{ds: ds, accessor: accessor, eventSize: 4, slowBuf: make([]byte, 4)}
+	var record ringbuf.Record
+	for i := uint64(0); i < attempts-nativeLost; i++ {
+		if err = reader.ReadInto(&record); err != nil {
+			t.Fatal(err)
+		}
+		lost := uint64(0)
+		if i == 0 {
+			lost = nativeLost
+		} // same combined result as Gadget's readCb
+		if err = tr.processEventRead(nil, record.RawSample, lost); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = reader.ReadInto(&record); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatal("unexpected remaining ring record", err)
+	}
+	if received+nativeLost != attempts || ds.(datasource.ReportedLossReader).ReportedLoss() != nativeLost {
+		t.Fatal("dispatch added unreported loss", received, nativeLost)
+	}
+	t.Logf("attempts=%d native_output_failures=%d delivered_payloads=%d", attempts, nativeLost, received)
+}

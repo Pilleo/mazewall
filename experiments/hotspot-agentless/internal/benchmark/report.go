@@ -20,20 +20,21 @@ type ResourceObservation struct {
 	Semantics  string  `json:"semantics"`
 }
 type RunManifest struct {
-	PostAttachWarmup int                  `json:"post_attach_warmup"`
-	Mode             string               `json:"mode"`
-	Run              string               `json:"run"`
-	PID              uint32               `json:"host_pid"`
-	Operations       int                  `json:"operations"`
-	Warmup           int                  `json:"warmup"`
-	Diversity        int                  `json:"diversity"`
-	PauseNS          uint64               `json:"pause_ns"`
-	JVMImage         string               `json:"jvm_image"`
-	PatchSHA256      string               `json:"patch_sha256"`
-	GadgetImage      string               `json:"gadget_image"`
-	Kernel           string               `json:"kernel"`
-	ReadinessNS      uint64               `json:"readiness_ns"`
-	Collector        *ResourceObservation `json:"collector_resources,omitempty"`
+	CollectorBinarySHA256 string               `json:"collector_binary_sha256,omitempty"`
+	PostAttachWarmup      int                  `json:"post_attach_warmup"`
+	Mode                  string               `json:"mode"`
+	Run                   string               `json:"run"`
+	PID                   uint32               `json:"host_pid"`
+	Operations            int                  `json:"operations"`
+	Warmup                int                  `json:"warmup"`
+	Diversity             int                  `json:"diversity"`
+	PauseNS               uint64               `json:"pause_ns"`
+	JVMImage              string               `json:"jvm_image"`
+	PatchSHA256           string               `json:"patch_sha256"`
+	GadgetImage           string               `json:"gadget_image"`
+	Kernel                string               `json:"kernel"`
+	ReadinessNS           uint64               `json:"readiness_ns"`
+	Collector             *ResourceObservation `json:"collector_resources,omitempty"`
 }
 type TargetResult struct {
 	PostAttachWarmup int    `json:"post_attach_warmup"`

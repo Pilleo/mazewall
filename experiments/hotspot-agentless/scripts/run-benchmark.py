@@ -110,6 +110,8 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
             wait_until(lambda: '"collector_attached"' in (artifact / "events.jsonl").read_text(), 25, "collector attachment")
         readiness = time.monotonic_ns() - started
         data = {"mode": mode, "run": run, "host_pid": pid, "target_uid": os.getuid(), "operations": args.operations, "warmup": args.warmup, "post_attach_warmup": args.post_attach_warmup, "preparation_pause_ns": 500000, "diversity": args.diversity, "pause_ns": args.pause_ns, "jvm_image": lock["images"]["jdk"], "jvm_flags": ["-Xint", "-XX:+UseSerialGC", "-Xmx128m"], "patch_sha256": patch["patch_sha256"], "gadget_image": image, "kernel": platform.release(), "readiness_ns": readiness, "readiness_semantics": "target_ready_and_collector_attached; not_enrichment_readiness", "target_agent_injected": False, "source_sha256": hashlib.sha256((ROOT / "fixtures/java/BenchmarkFixture.java").read_bytes()).hexdigest(), "class_sha256": hashlib.sha256((ROOT / "build/benchmark-classes/BenchmarkFixture.class").read_bytes()).hexdigest()}
+        if mode != "baseline":
+            data["collector_binary_sha256"] = hashlib.sha256((ROOT / "build/mw-hotspot-demo").read_bytes()).hexdigest()
         (artifact / "benchmark-manifest.json").write_text(json.dumps(data, indent=2) + "\n")
         if args.post_attach_warmup:
             preparation_start = time.monotonic_ns()
