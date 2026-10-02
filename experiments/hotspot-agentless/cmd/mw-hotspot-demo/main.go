@@ -28,6 +28,7 @@ func run(args []string) int {
 	debugRendered := flags.Bool("debug-rendered", false, "use the legacy debug rendering gate")
 	identityMode := flags.String("hotspot-identity", "unknown", "HotSpot identity: unknown or safepoint-epoch (pinned interpreter/Serial only)")
 	collectionMode := flags.String("collection-mode", "full", "Capture mode: full or events (no Java unwinder)")
+	drainEvents := flags.Bool("drain-events", false, "owned bounded stop for the events-only openat ring")
 	workers := flags.Int("workers", 4, "bounded enrichment workers")
 	maxPending := flags.Int("max-pending", 1024, "pending events including active lookups")
 	maxBytes := flags.Int("max-pending-bytes", 16*1024*1024, "pending event payload byte cap")
@@ -46,6 +47,10 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "invalid collection mode or incompatible identity/rendering option")
 		return 2
 	}
+	if *drainEvents && (!*captureMode || *collectionMode != "events" || *debugRendered) {
+		fmt.Fprintln(os.Stderr, "--drain-events requires structured events-only capture")
+		return 2
+	}
 	if *check == *captureMode || flags.NArg() != 0 || *duration <= 0 {
 		fmt.Fprintln(os.Stderr, "choose --preflight or --capture; --capture requires --pid, --image and --store")
 		return 2
@@ -58,6 +63,7 @@ func run(args []string) int {
 		cfg := capture.Config{PID: *pid, Image: *image, Store: *store, Enrichment: capture.EnrichmentOptions{Workers: *workers, MaxPending: *maxPending, MaxPendingBytes: *maxBytes, Deadline: *enrichmentDeadline}}
 		cfg.StrictEpoch = *identityMode == "safepoint-epoch"
 		cfg.EventsOnly = *collectionMode == "events"
+		cfg.DrainEvents = *drainEvents
 		runCapture := capture.Run
 		if *debugRendered {
 			runCapture = capture.RunDebug

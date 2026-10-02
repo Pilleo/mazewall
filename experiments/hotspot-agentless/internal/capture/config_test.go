@@ -25,3 +25,18 @@ func TestEventsOnlyRefusesEpochClaims(t *testing.T) {
 		t.Fatal("events-only capture accepted a Java lifetime claim")
 	}
 }
+
+func TestEventDrainRequiresStructuredEventsOnlyProfile(t *testing.T) {
+	c := Config{PID: 123, Image: "mw-hotspot-openat@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Store: "/tmp/store", DrainEvents: true}
+	if c.Validate() == nil {
+		t.Fatal("event-only drain accepted full definition ownership")
+	}
+	c.EventsOnly = true
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	c.StrictEpoch = true
+	if c.Validate() == nil {
+		t.Fatal("event-only drain accepted strict Java identity")
+	}
+}

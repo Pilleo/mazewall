@@ -1,0 +1,19 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"sync"
+	"sync/atomic"
+)
+
+type eventDrainReader struct {
+	done     chan struct{}
+	flushing atomic.Bool
+	mu       sync.Mutex
+	err      error
+}
+
+func newEventDrainReader() *eventDrainReader { return &eventDrainReader{done: make(chan struct{})} }
+func (r *eventDrainReader) finish(err error) { r.mu.Lock(); r.err = err; r.mu.Unlock(); close(r.done) }
+func (r *eventDrainReader) result() error    { r.mu.Lock(); defer r.mu.Unlock(); return r.err }

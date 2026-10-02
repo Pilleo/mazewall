@@ -1,0 +1,242 @@
+//go:build mw_kernel
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"golang.org/x/sys/unix"
+)
+
+type finalizationNoticeLink struct {
+	link.Link
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (l *finalizationNoticeLink) Close() error {
+	err := l.Link.Close()
+	l.once.Do(func() { close(l.closed) })
+	return err
+}
+
+func newFinalizationTestMap(t *testing.T, spec *ebpf.MapSpec) *ebpf.Map {
+	t.Helper()
+	m, err := ebpf.NewMap(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close() })
+	return m
+}
+func triggerFinalizationOpenats(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		fd, err := unix.Openat(unix.AT_FDCWD, "/mw-stop-finalization-control", unix.O_RDONLY, 0)
+		if fd >= 0 {
+			unix.Close(fd)
+		}
+		if !errors.Is(err, unix.ENOENT) {
+			t.Fatal("unexpected control path result", fd, err)
+		}
+	}
+}
+func finalizationOpenatProducer(t *testing.T, events, counter, lost *ebpf.Map) *ebpf.Program {
+	t.Helper()
+	if runtime.GOARCH != "amd64" {
+		t.Fatal("openat retirement control requires supported x86-64 ABI")
+	}
+	prefix := int64(binary.LittleEndian.Uint64([]byte("/mw-stop")))
+	ins := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1),
+		asm.FnGetCurrentPidTgid.Call(), asm.RSh.Imm(asm.R0, 32), asm.JNE.Imm(asm.R0, int32(os.Getpid()), "exit"),
+		// Wrapper argument is pt_regs.di (112); userspace pathname is regs.si (104).
+		asm.Mov.Reg(asm.R1, asm.R10), asm.Add.Imm(asm.R1, -8), asm.Mov.Imm(asm.R2, 8), asm.Mov.Reg(asm.R3, asm.R6), asm.Add.Imm(asm.R3, 112), asm.FnProbeReadKernel.Call(), asm.JNE.Imm(asm.R0, 0, "exit"),
+		asm.Mov.Reg(asm.R1, asm.R10), asm.Add.Imm(asm.R1, -16), asm.Mov.Imm(asm.R2, 8), asm.LoadMem(asm.R3, asm.R10, -8, asm.DWord), asm.Add.Imm(asm.R3, 104), asm.FnProbeReadKernel.Call(), asm.JNE.Imm(asm.R0, 0, "exit"),
+		asm.Mov.Reg(asm.R1, asm.R10), asm.Add.Imm(asm.R1, -64), asm.Mov.Imm(asm.R2, 32), asm.LoadMem(asm.R3, asm.R10, -16, asm.DWord), asm.FnProbeReadUserStr.Call(), asm.JSLT.Imm(asm.R0, 8, "exit"),
+		asm.LoadMem(asm.R8, asm.R10, -64, asm.DWord), asm.LoadImm(asm.R9, prefix, asm.DWord), asm.JNE.Reg(asm.R8, asm.R9, "exit"),
+		asm.StoreImm(asm.R10, -4, 0, asm.Word), asm.LoadMapPtr(asm.R1, counter.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -4), asm.FnMapLookupElem.Call(), asm.JEq.Imm(asm.R0, 0, "exit"),
+		asm.LoadMem(asm.R7, asm.R0, 0, asm.Word), asm.Add.Imm(asm.R7, 1), asm.StoreMem(asm.R0, 0, asm.R7, asm.Word), asm.StoreMem(asm.R10, -8, asm.R7, asm.Word),
+		asm.LoadMapPtr(asm.R1, events.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -8), asm.Mov.Imm(asm.R3, 4), asm.Mov.Imm(asm.R4, 0), asm.FnRingbufOutput.Call(), asm.JEq.Imm(asm.R0, 0, "exit"),
+		asm.LoadMapPtr(asm.R1, lost.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -4), asm.FnMapLookupElem.Call(), asm.JEq.Imm(asm.R0, 0, "exit"), asm.Mov.Imm(asm.R1, 1), asm.StoreXAdd(asm.R0, asm.R1, asm.DWord),
+		asm.Mov.Imm(asm.R0, 0).WithSymbol("exit"), asm.Return(),
+	}
+	p, err := ebpf.NewProgram(&ebpf.ProgramSpec{Name: "capture_openat", Type: ebpf.Kprobe, License: "GPL", Instructions: ins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { p.Close() })
+	return p
+}
+
+func TestKernelEventFinalizationDetachesDrainsAndSamplesWithoutLaterEvent(t *testing.T) {
+	for _, control := range []struct {
+		attempts int
+		deadline bool
+	}{{8, false}, {1000, false}, {8, true}} {
+		t.Run(fmt.Sprintf("attempts_%d_deadline_%t", control.attempts, control.deadline), func(t *testing.T) {
+			attempts := control.attempts
+			events := newFinalizationTestMap(t, &ebpf.MapSpec{Type: ebpf.RingBuf, MaxEntries: 4096})
+			counter := newFinalizationTestMap(t, &ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 4, MaxEntries: 1})
+			counterView, err := counter.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { counterView.Close() })
+			lost := newFinalizationTestMap(t, &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 8, MaxEntries: 1})
+			reader, err := ringbuf.NewReader(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { reader.Close() })
+			gc := gadgetcontext.New(context.Background(), "event-finalization-control")
+			defer gc.Cancel()
+			ds, err := datasource.New(datasource.TypeSingle, "openat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accessor, err := ds.AddField("wire", api.Kind_Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, release, receiverDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			var got []uint32
+			if err = ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+				payload, err := accessor.Bytes(data)
+				if err != nil {
+					return err
+				}
+				got = append(got, binary.LittleEndian.Uint32(payload))
+				if len(got) == 1 {
+					close(first)
+					<-release
+				}
+				return nil
+			}, 0); err != nil {
+				t.Fatal(err)
+			}
+			tr := &Tracer{mapName: "events", ds: ds, accessor: accessor, eventSize: 4, mapType: ebpf.RingBuf, ringbufReader: reader, lostSampleMap: lost, done: make(chan struct{}), eventDrain: newEventDrainReader()}
+			i := eventFinalizationScopeFixture()
+			i.tracers = map[string]*Tracer{"openat": tr}
+			i.collection = &ebpf.Collection{Maps: map[string]*ebpf.Map{"events": events, "events_lost_samples": lost, "sequences": counter}}
+			i.eventStopOptions = &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute)}
+			if control.deadline {
+				i.eventStopOptions.HardDeadline = time.Now().Add(500 * time.Millisecond)
+			}
+			i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i})
+			// Prime CPU metadata before attaching the filtered openat producer.
+			if _, err = ebpf.PossibleCPU(); err != nil {
+				t.Fatal(err)
+			}
+			producer := finalizationOpenatProducer(t, events, counter, lost)
+			rawLink, err := link.Kprobe("__x64_sys_openat", producer, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { rawLink.Close() })
+			notice := &finalizationNoticeLink{Link: rawLink, closed: make(chan struct{})}
+			i.links = []link.Link{notice}
+			triggerFinalizationOpenats(t, attempts)
+			var nativeAttempts uint32
+			zero := uint32(0)
+			if err = counterView.Lookup(&zero, &nativeAttempts); err != nil || nativeAttempts != uint32(attempts) {
+				t.Fatal("native control denominator", nativeAttempts, err)
+			}
+			i.wg.Add(1)
+			go func() { defer close(receiverDone); tr.receiveEvents(gc, &i.wg) }()
+			defer func() {
+				unblock()
+				reader.Close()
+				select {
+				case <-receiverDone:
+				case <-time.After(time.Second):
+					t.Error("receiver did not join")
+				}
+			}()
+			select {
+			case <-first:
+			case <-time.After(time.Second):
+				t.Fatal("first callback not delivered")
+			}
+			stopDone := make(chan error, 1)
+			go func() { stopDone <- i.Stop(gc) }()
+			select {
+			case <-notice.closed:
+			case err := <-stopDone:
+				t.Fatal("stop skipped producer retirement", err)
+			case <-time.After(time.Second):
+				t.Fatal("producer not retired")
+			}
+			select {
+			case err := <-stopDone:
+				t.Fatal("stop completed with active callback", err)
+			default:
+			}
+			if control.deadline {
+				if err := <-stopDone; !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("callback deadline lost", err)
+				}
+				r, _ := i.EventFinalization()
+				if r.BufferDrained || r.ResourcesRetired || r.NativeReserveFailures != nil {
+					t.Fatal("held callback certified finalized", r)
+				}
+				if err := i.closeOwnedEvents(); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("Close bypassed failed stop owner", err)
+				}
+				if err := counter.Lookup(&zero, &nativeAttempts); err != nil {
+					t.Fatal("map retired under active callback", err)
+				}
+				unblock()
+				select {
+				case <-receiverDone:
+				case <-time.After(time.Second):
+					t.Fatal("late callback did not finish")
+				}
+				t.Log("held callback timed out; readers/maps retained; repeated Close did not bypass owner")
+				return
+			}
+			unblock()
+			if err = <-stopDone; err != nil {
+				t.Fatal(err)
+			}
+			r, ok := i.EventFinalization()
+			if !ok || !r.ProducersQuiesced || !r.BufferDrained || !r.ReceiverJoined || !r.ResourcesRetired || !r.FinalCounterRead || r.LossComplete || r.NativeReserveFailures == nil {
+				t.Fatal("incomplete component stop", r)
+			}
+			if len(got)+int(*r.NativeReserveFailures) != attempts || uint64(ds.(datasource.ReportedLossReader).ReportedLoss()) != *r.NativeReserveFailures {
+				t.Fatal("tail or counter lost", len(got), r)
+			}
+			for index, token := range got {
+				if token != uint32(index+1) {
+					t.Fatal("tail token reordered or fabricated", got)
+				}
+			}
+			triggerFinalizationOpenats(t, 8)
+			if err = counterView.Lookup(&zero, &nativeAttempts); err != nil || nativeAttempts != uint32(attempts) {
+				t.Fatal("detached producer still published", nativeAttempts, err)
+			}
+			t.Logf("attempts=%d delivered=%d native_output_failures=%d callback_joined=true no_publication_after_detach=true", attempts, len(got), *r.NativeReserveFailures)
+		})
+	}
+}

@@ -1,5 +1,17 @@
 # Verification evidence
 
+## Owned event-only finalization (2026-10-02)
+
+The opt-in single-openat-ring path now retires the writer, flushes and joins the
+reader/callbacks, samples quiescent reserve counters without a later event, and
+retires owned resources. Native acceptance passes 8/8 queued tokens, 255 delivered
+plus 745 genuine native failures out of 1000 pressure attempts, and held-callback
+deadline retention. Three 1200-token burst repeats and the final guarded repeat
+pass; a larger run still rejects 2894 missing operations despite successful drain.
+Exact discard 42 remains distinct from native failure counts. See
+[`event-only-finalization.md`](event-only-finalization.md). Full-mode definition
+drain and complete loss remain open gates.
+
 ## Queued shutdown-tail proof (2026-10-02)
 
 Eight genuine native records queued before stop yield only one delivered record

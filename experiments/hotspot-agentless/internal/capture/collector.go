@@ -43,6 +43,13 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	requestCtx := ctx
+	hardEventDeadline := time.Now().Add(time.Minute)
+	if cfg.DrainEvents {
+		var stop context.CancelFunc
+		ctx, stop = context.WithDeadline(ctx, hardEventDeadline)
+		defer stop()
+	}
 	if cfg.StrictEpoch {
 		var stop context.CancelFunc
 		ctx, stop = context.WithTimeout(ctx, 60*time.Second)
@@ -133,6 +140,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		var err error
 		if cfg.EventsOnly {
 			eventsOnly = &eventsOnlyState{sink: sink}
+			if cfg.DrainEvents {
+				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline})
+			}
 		} else {
 			sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ctx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record})
 			if err != nil {
@@ -166,7 +176,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				event, err := decoder.Decode(data)
 				if err == nil {
 					if eventsOnly != nil {
-						err = eventsOnly.Submit(ctx, event)
+						err = eventsOnly.Submit(eventDeliveryContext(ctx, cfg), event)
 					} else {
 						err = enrichment.Submit(event)
 					}
@@ -194,6 +204,19 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		params["operator.oci.ebpf.collect_otel_stack"] = "false"
 	}
 	runErr := rt.RunGadget(gc, nil, params)
+	var eventFinalization *model.EventFinalizationObservation
+	var eventFinalizationErr error
+	if cfg.DrainEvents {
+		cause := "target_exit_or_internal_stop"
+		if requestCtx.Err() != nil {
+			cause = "request"
+		}
+		eventFinalization, eventFinalizationErr = eventFinalizationSnapshot(gc, cause)
+		if eventFinalization != nil && !eventFinalization.ReceiverJoined {
+			// A held writer/callback cannot be safely locked for a final summary.
+			return errors.Join(runErr, eventFinalizationErr, fmt.Errorf("owned event drain incomplete: %s", eventFinalization.Error))
+		}
+	}
 	cancel()
 	<-watchDone
 	watchConsumed = true
@@ -216,11 +239,15 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		}
 	}
 	callbackMu.Lock()
-	err = errors.Join(runErr, finishErr, callbackErr, watchErr, fatal.Err(), definitionStopErr)
+	err = errors.Join(runErr, finishErr, callbackErr, watchErr, fatal.Err(), definitionStopErr, eventFinalizationErr)
 	callbackMu.Unlock()
 	summary := model.Summary{CollectionHealth: "unknown"}
+	summary.EventFinalization = eventFinalization
 	summary.DefinitionStop = definitionStop
 	applyCollectionHealth(&summary, reportedEventHealth(reportedLoss))
+	if eventFinalization != nil && eventFinalization.FinalCounterRead && summary.EventLossObservation != nil {
+		summary.EventLossObservation.Semantics = "quiescent_native_reserve_failures_partial_snapshot"
+	}
 	summary.DefinitionReaderObservation = definitionHealth
 	if definitionHealth != nil {
 		summary.CollectionHealth = "partial"

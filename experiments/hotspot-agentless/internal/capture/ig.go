@@ -28,6 +28,7 @@ import (
 )
 
 type Config struct {
+	DrainEvents bool
 	EventsOnly  bool
 	StrictEpoch bool
 	PID         int
@@ -37,6 +38,9 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
+	if c.DrainEvents && !c.EventsOnly {
+		return fmt.Errorf("owned event drain requires events-only capture")
+	}
 	if c.EventsOnly && c.StrictEpoch {
 		return fmt.Errorf("events-only capture cannot claim HotSpot epoch identity")
 	}

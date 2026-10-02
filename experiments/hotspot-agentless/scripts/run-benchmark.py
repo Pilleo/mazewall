@@ -27,8 +27,11 @@ def main():
     parser.add_argument("--expect-missing", type=int, default=0)
     parser.add_argument("--expect-missing-sequence", type=int)
     parser.add_argument("--modes", default="baseline,events,full")
+    parser.add_argument("--drain-events", action="store_true")
     args = parser.parse_args()
     modes = args.modes.split(",")
+    if args.drain_events and any(mode not in ["baseline", "events"] for mode in modes):
+        parser.error("owned event drain measurements support baseline/events modes only")
     if not 1 <= args.operations <= 100000 or not 0 <= args.warmup <= 100000 or not 1 <= args.repeats <= 10 or not 0 <= args.pause_ns <= 10000000 or any(m not in ["baseline", "events", "full"] for m in modes):
         parser.error("invalid bounded benchmark configuration")
     if args.operations * args.pause_ns > 20000000000:
@@ -83,6 +86,8 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
         if mode != "baseline":
             command = docker + ["create", "--privileged", "--pid=host", "--mount", "type=bind,src=/sys,dst=/sys,readonly", "--mount", f"type=bind,src={ROOT},dst=/work,readonly", "--mount", f"type=bind,src={os.environ.get('MW_GADGET_STORE', str(Path.home()/'.ig/oci-store'))},dst=/store,readonly", "--entrypoint", "/work/build/mw-hotspot-demo", lock["images"]["go"], "--capture", "--pid", str(pid), "--image", image, "--store", "/store", "--duration", "45s"]
             command += ["--collection-mode", "events"] if mode == "events" else ["--hotspot-identity", "safepoint-epoch"]
+            if args.drain_events:
+                command += ["--drain-events"]
             collector = subprocess.check_output(command, text=True).strip()
             attached_process = subprocess.Popen(docker + ["start", "--attach", collector], stdout=output, stderr=errors)
             wait_until(lambda: subprocess.check_output(docker + ["inspect", "--format", "{{.State.Running}}", collector], text=True).strip() == "true", 10, "collector process")
@@ -112,6 +117,7 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
         data = {"mode": mode, "run": run, "host_pid": pid, "target_uid": os.getuid(), "operations": args.operations, "warmup": args.warmup, "post_attach_warmup": args.post_attach_warmup, "preparation_pause_ns": 500000, "diversity": args.diversity, "pause_ns": args.pause_ns, "jvm_image": lock["images"]["jdk"], "jvm_flags": ["-Xint", "-XX:+UseSerialGC", "-Xmx128m"], "patch_sha256": patch["patch_sha256"], "gadget_image": image, "kernel": platform.release(), "readiness_ns": readiness, "readiness_semantics": "target_ready_and_collector_attached; not_enrichment_readiness", "target_agent_injected": False, "source_sha256": hashlib.sha256((ROOT / "fixtures/java/BenchmarkFixture.java").read_bytes()).hexdigest(), "class_sha256": hashlib.sha256((ROOT / "build/benchmark-classes/BenchmarkFixture.class").read_bytes()).hexdigest()}
         if mode != "baseline":
             data["collector_binary_sha256"] = hashlib.sha256((ROOT / "build/mw-hotspot-demo").read_bytes()).hexdigest()
+        data["drain_events"] = args.drain_events and mode == "events"
         (artifact / "benchmark-manifest.json").write_text(json.dumps(data, indent=2) + "\n")
         if args.post_attach_warmup:
             preparation_start = time.monotonic_ns()
@@ -138,8 +144,11 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
                 raise RuntimeError("incomplete collector resource samples: " + str(sample_errors))
             collector_resources = {"cpu_seconds": (samples[-1][1] - samples[0][1]) / os.sysconf("SC_CLK_TCK"), "peak_rss_kib": max(s[2] for s in samples), "samples": len(samples), "window_ns": samples[-1][0] - samples[0][0], "semantics": "collector_process_attach_to_target_done"}
             (artifact / "resource-samples.json").write_text(json.dumps({"host_pid": cpid, "clock_ticks_per_second": os.sysconf("SC_CLK_TCK"), "samples": samples, "errors": sample_errors}, indent=2) + "\n")
+            stop_started = time.monotonic_ns()
             subprocess.run(docker + ["kill", "--signal", "SIGINT", collector], check=True, stdout=subprocess.DEVNULL)
             attached_process.wait(timeout=10)
+            data["post_target_stop_ns"] = time.monotonic_ns() - stop_started
+            data["post_target_stop_semantics"] = "docker_signal_request_to_collector_exit; excludes_target_workload"
             code = int(subprocess.check_output(docker + ["inspect", "--format", "{{.State.ExitCode}}", collector], text=True))
             if code != 0:
                 raise RuntimeError("collector failed: " + (artifact / "collector.log").read_text())

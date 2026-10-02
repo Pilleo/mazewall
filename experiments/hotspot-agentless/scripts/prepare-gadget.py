@@ -29,6 +29,7 @@ def prepare():
     gadget_epoch = root / "patches/gadget-epoch.patch"
     gadget_shutdown = root / "patches/gadget-shutdown.patch"
     gadget_event_loss = root / "patches/gadget-event-loss.patch"
+    gadget_finalization = root / "patches/gadget-finalization.patch"
     additions = sorted((root / "patches/gadget-additions").rglob("*.go.txt"))
     profiler = lock["profiler"]
     profiler_info = json.loads(subprocess.check_output(
@@ -49,7 +50,7 @@ def prepare():
     diagnostic = root / "patches/diagnostics/identity-observations.patch" if options.identity_observations else None
     diagnostic_additions = sorted((root / "patches/diagnostic-additions").rglob("*.go.txt")) if diagnostic else []
     digest = hashlib.sha256()
-    for path in [patch, health_patch, gadget_epoch, gadget_shutdown, gadget_event_loss, *additions, profiler_patch, quality_patch, identity_patch, epoch_capture, epoch_memory, epoch_handler, profiler_shutdown, epoch_rebuild, *profiler_additions, *([fault] if fault else []), *([diagnostic] if diagnostic else []), *diagnostic_additions]:
+    for path in [patch, health_patch, gadget_epoch, gadget_shutdown, gadget_event_loss, gadget_finalization, *additions, profiler_patch, quality_patch, identity_patch, epoch_capture, epoch_memory, epoch_handler, profiler_shutdown, epoch_rebuild, *profiler_additions, *([fault] if fault else []), *([diagnostic] if diagnostic else []), *diagnostic_additions]:
         digest.update(str(path.relative_to(root)).encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -113,6 +114,7 @@ def prepare():
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(gadget_epoch)], cwd=generated, check=True)
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(gadget_shutdown)], cwd=generated, check=True)
         subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(gadget_event_loss)], cwd=generated, check=True)
+        subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(gadget_finalization)], cwd=generated, check=True)
         for path in additions:
             dest = generated / path.relative_to(root / "patches/gadget-additions").with_suffix("")
             dest.parent.mkdir(parents=True, exist_ok=True)

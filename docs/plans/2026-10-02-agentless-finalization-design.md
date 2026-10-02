@@ -192,3 +192,21 @@ and label any additional finalize-inclusive CPU/RSS window explicitly.
 
 This design chooses the ownership protocol, not an already verified implementation.
 Its execution plan must preserve the current experiment's pins and review scope.
+
+## Event-only implementation checkpoint (2026-10-02)
+
+The supported event-only ring phase is implemented behind `--drain-events`.
+Source scope validation requires the single openat kprobe/tracer, disabled stack
+helpers and the native per-CPU uint64 reserve counter. The opt-in path has no
+background reset poller; it samples retained counters after writer retirement and
+reader/callback join, including when no later event exists. Resource failures and
+deadline/pending ownership remain explicit errors. Full-mode definition/perf drain
+is still a proposed implementation gate; legacy full capture retains partiality.
+
+Native acceptance now verifies actual single-openat-link retirement, all queued
+records delivered, native failure accounting without another event, and no new
+publications after detach. A held callback exceeding budget prevents map/reader
+retirement and repeated Close cannot bypass the owner. Independent review of the
+supported detach path and broader covered loss domains remains outstanding.
+See [implementation evidence](../../experiments/hotspot-agentless/results/event-only-finalization.md)
+and the scoped execution plan under `docs/superpowers/plans/`.

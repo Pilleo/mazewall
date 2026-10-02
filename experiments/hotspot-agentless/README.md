@@ -80,7 +80,7 @@ make container-build DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
   have `complete=false`; whole-session `event_loss` and `definition_loss` remain
   absent. Complete terminal accounting does not establish complete collection.
 
-Health is sampled after cancellation, pending enrichment completion and a bounded
+Full capture health is sampled after cancellation, pending enrichment completion and a bounded
 join of the owned definition reader/consumer, before closing the symbolizer.
 `definition_stop_observation` reports those joins separately from
 `buffers_drained=false`. A two-second stop timeout is a session error; the summary
@@ -97,7 +97,32 @@ Flush preserves them after producer quiescence. Run the race-enabled control wit
 `make queued-tail-kernel-test DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'`.
 The [bounded finalization design](../../docs/plans/2026-10-02-agentless-finalization-design.md)
 specifies explicit producer/reader/callback ownership gates; it is proposed,
-and successful capture buffer-drain/loss-finality acceptance remains open.
+and full-mode buffer drain/whole-session loss-finality acceptance remains open.
+
+### Opt-in owned event-only stop
+
+`--capture --collection-mode events --drain-events` enables the supported
+single-openat-ring finalization path. It retires the writer, flushes and joins the
+original reader/callbacks, samples retained native reserve counters without a
+background reset poller, and retires owned readers/maps/programs. A component
+`event_finalization_observation` names achieved phases and failure; all native
+loss observations remain partial and final event/definition loss remains absent.
+Full, strict-epoch and debug-rendered capture cannot opt into this first gate.
+
+```bash
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock bash scripts/run-benchmark.sh \
+  --operations 1200 --warmup 600 --repeats 3 --modes baseline,events \
+  --diversity 8 --pause-ns 0 --drain-events
+DOCKER_HOST=unix:///var/run/docker.sock make event-finalization-kernel-test \
+  DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+```
+
+The one shutdown budget is two seconds within the remaining owned 60-second
+session cap. Permission/read/output/retirement failures remain errors; timed-out
+active callbacks keep their resources owned and prevent a false final summary.
+See [event-only finalization evidence](results/event-only-finalization.md) for
+real queued-tail, detach, native pressure, timeout and exact-discard controls.
+Producer capacity loss remains possible even when buffer drain succeeds.
 
 ## Three-mode measurements and event-loss control
 

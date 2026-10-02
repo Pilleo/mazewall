@@ -20,6 +20,8 @@ type ResourceObservation struct {
 	Semantics  string  `json:"semantics"`
 }
 type RunManifest struct {
+	PostTargetStopNS      uint64               `json:"post_target_stop_ns,omitempty"`
+	DrainEvents           bool                 `json:"drain_events"`
 	CollectorBinarySHA256 string               `json:"collector_binary_sha256,omitempty"`
 	PostAttachWarmup      int                  `json:"post_attach_warmup"`
 	Mode                  string               `json:"mode"`
@@ -73,6 +75,9 @@ var token = regexp.MustCompile(`^/fixture/mw-bench-([a-f0-9]{16})-(\d{6})-r([0-7
 
 func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 	r := RunReport{Manifest: m}
+	if m.DrainEvents && m.Mode != "events" {
+		return r, fmt.Errorf("owned event finalization requires events-only measurement")
+	}
 	if (m.Mode != "baseline" && m.Mode != "events" && m.Mode != "full") || m.PID == 0 || m.Operations < 1 || m.Operations > 100000 || m.Warmup < 0 || m.Warmup > 100000 || m.PostAttachWarmup < 0 || m.PostAttachWarmup > 100000 || (m.PostAttachWarmup > 0 && m.PostAttachWarmup < m.Diversity) || (m.Diversity != 1 && m.Diversity != 8) || len(m.Run) != 16 || len(m.PatchSHA256) != 64 || m.JVMImage == "" || m.Kernel == "" {
 		return r, fmt.Errorf("invalid benchmark manifest")
 	}
@@ -136,6 +141,15 @@ func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 	}
 	if r.Summary.EventLossObservation != nil && r.Summary.EventLossObservation.Complete || r.Summary.DefinitionReaderObservation != nil && r.Summary.DefinitionReaderObservation.Complete {
 		return r, fmt.Errorf("partial native loss observation upgraded to final proof")
+	}
+	if m.DrainEvents {
+		o := r.Summary.EventFinalization
+		loss := r.Summary.EventLossObservation
+		if o == nil || o.Scope != "owned_openat_event_ring" || o.Phase != "resources_retired" || !o.ProducersQuiesced || !o.BufferDrained || !o.ReceiverJoined || !o.FinalCounterRead || !o.ResourcesRetired || o.BackgroundLossSamplerStarted || o.LossComplete || o.Error != "" || o.NativeReserveFailures == nil || loss == nil || loss.Observed == nil || *loss.Observed != *o.NativeReserveFailures || loss.Semantics != "quiescent_native_reserve_failures_partial_snapshot" {
+			return r, fmt.Errorf("missing or fabricated owned event finalization evidence")
+		}
+	} else if r.Summary.EventFinalization != nil {
+		return r, fmt.Errorf("unrequested event finalization evidence")
 	}
 	if m.Mode == "events" && (r.Summary.DefinitionReaderObservation != nil || r.Summary.DefinitionStop != nil) {
 		return r, fmt.Errorf("events-only mode contains definition-profiler evidence")

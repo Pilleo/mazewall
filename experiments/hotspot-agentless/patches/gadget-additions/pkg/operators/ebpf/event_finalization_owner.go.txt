@@ -1,0 +1,187 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"sync"
+)
+
+type eventStopBackend interface {
+	Quiesce() error
+	Flush() error
+	Join(context.Context) error
+	Sample() (uint64, error)
+	Retire() error
+}
+type eventStopStage uint8
+
+const (
+	eventStopRequested eventStopStage = iota
+	eventWritersQuiesced
+	eventReadersFlushing
+	eventReceiverJoined
+	eventCounterSampled
+	eventResourcesRetired
+	eventStopFailed
+)
+
+func advanceEventStop(stage, next eventStopStage) (eventStopStage, error) {
+	if stage >= eventResourcesRetired || next != stage+1 {
+		return stage, fmt.Errorf("invalid event stop transition %d -> %d", stage, next)
+	}
+	return next, nil
+}
+func eventStopPhase(stage eventStopStage) string {
+	switch stage {
+	case eventStopRequested:
+		return "stop_requested"
+	case eventWritersQuiesced:
+		return "writers_quiesced"
+	case eventReadersFlushing:
+		return "readers_flushing"
+	case eventReceiverJoined:
+		return "receiver_joined"
+	case eventCounterSampled:
+		return "counter_sampled"
+	case eventResourcesRetired:
+		return "resources_retired"
+	case eventStopFailed:
+		return "failed_partial"
+	default:
+		return "invalid"
+	}
+}
+
+type eventStopOwner struct {
+	backend     eventStopBackend
+	done        chan struct{}
+	once        sync.Once
+	mu          sync.Mutex
+	stage       eventStopStage
+	observation operators.EventFinalizationObservation
+	err         error
+}
+
+func newEventStopOwner(b eventStopBackend) *eventStopOwner {
+	return &eventStopOwner{backend: b, done: make(chan struct{}), observation: operators.EventFinalizationObservation{Scope: "owned_openat_event_ring", Phase: "stop_requested"}}
+}
+func (o *eventStopOwner) fail(err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.stage == eventResourcesRetired {
+		return
+	}
+	o.err = errors.Join(o.err, err)
+	o.stage = eventStopFailed
+	o.observation.Phase = eventStopPhase(o.stage)
+	o.observation.Error = o.err.Error()
+}
+func (o *eventStopOwner) completed(next eventStopStage, count uint64) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	stage, err := advanceEventStop(o.stage, next)
+	if err != nil {
+		return errors.Join(o.err, err)
+	}
+	o.stage = stage
+	o.observation.Phase = eventStopPhase(stage)
+	switch stage {
+	case eventWritersQuiesced:
+		o.observation.ProducersQuiesced = true
+	case eventReceiverJoined:
+		o.observation.ReceiverJoined = true
+		o.observation.BufferDrained = true
+	case eventCounterSampled:
+		o.observation.FinalCounterRead = true
+		o.observation.NativeReserveFailures = &count
+	case eventResourcesRetired:
+		o.observation.ResourcesRetired = true
+	}
+	return nil
+}
+func (o *eventStopOwner) execute(ctx context.Context) {
+	defer close(o.done)
+	step := func(next eventStopStage, action func() error) bool {
+		if err := ctx.Err(); err != nil {
+			o.fail(err)
+			return false
+		}
+		if err := action(); err != nil {
+			o.fail(fmt.Errorf("%s: %w", eventStopPhase(next), err))
+			return false
+		}
+		if err := ctx.Err(); err != nil {
+			o.fail(err)
+			return false
+		}
+		if err := o.completed(next, 0); err != nil {
+			o.fail(err)
+			return false
+		}
+		return true
+	}
+	if !step(eventWritersQuiesced, o.backend.Quiesce) || !step(eventReadersFlushing, o.backend.Flush) || !step(eventReceiverJoined, func() error { return o.backend.Join(ctx) }) {
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		o.fail(err)
+		return
+	}
+	count, err := o.backend.Sample()
+	if err != nil {
+		o.fail(fmt.Errorf("counter_sampled: %w", err))
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		o.fail(err)
+		return
+	}
+	if err := o.completed(eventCounterSampled, count); err != nil {
+		o.fail(err)
+		return
+	}
+	step(eventResourcesRetired, o.backend.Retire)
+}
+func (o *eventStopOwner) stop(ctx context.Context) (operators.EventFinalizationObservation, error) {
+	o.once.Do(func() { go o.execute(ctx) })
+	select {
+	case <-o.done:
+		return o.result()
+	default:
+	}
+	select {
+	case <-o.done:
+		return o.result()
+	case <-ctx.Done():
+		// A duplicate caller's wait deadline is not the first owner's deadline.
+		// The owner checks its own context between effects and in Join.
+		s, err := o.result()
+		if s.ResourcesRetired {
+			return s, err
+		}
+		s.Error = errors.Join(err, ctx.Err()).Error()
+		return s, errors.Join(err, ctx.Err())
+	}
+}
+func (o *eventStopOwner) result() (operators.EventFinalizationObservation, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.copySnapshot(), o.err
+}
+func (o *eventStopOwner) copySnapshot() operators.EventFinalizationObservation {
+	s := o.observation
+	if s.NativeReserveFailures != nil {
+		v := *s.NativeReserveFailures
+		s.NativeReserveFailures = &v
+	}
+	return s
+}
+func (o *eventStopOwner) snapshot() operators.EventFinalizationObservation {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.copySnapshot()
+}

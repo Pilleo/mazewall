@@ -1,0 +1,24 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package operators
+
+import "time"
+
+const EventFinalizationOptionsKey = "mw.event-finalization-options"
+
+// Optional standalone profile; existing Gadget operator interfaces stay intact.
+type EventFinalizationOptions struct{ HardDeadline time.Time }
+
+type EventFinalizationObservation struct {
+	Scope                        string  `json:"scope"`
+	Phase                        string  `json:"phase"`
+	ProducersQuiesced            bool    `json:"producers_quiesced"`
+	BufferDrained                bool    `json:"buffer_drained"`
+	ReceiverJoined               bool    `json:"receiver_joined"`
+	FinalCounterRead             bool    `json:"final_counter_read"`
+	NativeReserveFailures        *uint64 `json:"native_reserve_failures,omitempty"`
+	BackgroundLossSamplerStarted bool    `json:"background_loss_sampler_started"`
+	ResourcesRetired             bool    `json:"resources_retired"`
+	LossComplete                 bool    `json:"loss_complete"`
+	Error                        string  `json:"error,omitempty"`
+}

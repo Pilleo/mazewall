@@ -1,5 +1,21 @@
 # Upstream patch status
 
+## Optional event-only finalization patch (local, not submitted upstream)
+
+`gadget-finalization.patch` activates only via explicit optional Gadget vars.
+The source scope must be one openat kprobe/ring tracer, disabled stack helpers,
+and the required per-CPU uint64 counter; additional producer types are refused.
+Additions implement one bounded state/effect owner, callback/reader completion,
+quiescent counter sampling without reset polling and checked resource retirement.
+Default full capture retains its existing partial shutdown behavior.
+
+`make event-finalization-kernel-test` exercises the actual Gadget Stop/reader/
+datasource path with a real filtered openat link, queued tail, pressure, future
+publication refusal after detach and timed-out callback retention. Native layout,
+buffer and cache sizes are unchanged. See
+[`event-only-finalization.md`](../results/event-only-finalization.md) for source
+retirement semantics, exact evidence, partial claim boundaries and review gates.
+
 ## Event-read loss patch (local, not submitted upstream)
 
 `gadget-event-loss.patch` preserves a successful ring-buffer payload accompanying

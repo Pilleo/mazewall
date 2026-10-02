@@ -15,15 +15,31 @@ type Stats struct {
 }
 
 type Summary struct {
-	DefinitionStop              *DefinitionStopObservation `json:"definition_stop_observation,omitempty"`
-	Stats                       Stats                      `json:"enrichment"`
-	EventLoss                   *uint64                    `json:"event_loss,omitempty"`
-	EventLossObservation        *LossObservation           `json:"event_loss_observation,omitempty"`
-	DefinitionLoss              *uint64                    `json:"definition_loss,omitempty"`
-	DefinitionReaderObservation *ReaderObservation         `json:"definition_reader_observation,omitempty"`
-	CollectionHealth            string                     `json:"collection_health"`
-	TerminalAccountingComplete  bool                       `json:"terminal_accounting_complete"`
-	Errors                      []string                   `json:"errors,omitempty"`
+	EventFinalization           *EventFinalizationObservation `json:"event_finalization_observation,omitempty"`
+	DefinitionStop              *DefinitionStopObservation    `json:"definition_stop_observation,omitempty"`
+	Stats                       Stats                         `json:"enrichment"`
+	EventLoss                   *uint64                       `json:"event_loss,omitempty"`
+	EventLossObservation        *LossObservation              `json:"event_loss_observation,omitempty"`
+	DefinitionLoss              *uint64                       `json:"definition_loss,omitempty"`
+	DefinitionReaderObservation *ReaderObservation            `json:"definition_reader_observation,omitempty"`
+	CollectionHealth            string                        `json:"collection_health"`
+	TerminalAccountingComplete  bool                          `json:"terminal_accounting_complete"`
+	Errors                      []string                      `json:"errors,omitempty"`
+}
+
+type EventFinalizationObservation struct {
+	Scope                        string  `json:"scope"`
+	Phase                        string  `json:"phase"`
+	StopCause                    string  `json:"stop_cause"`
+	ProducersQuiesced            bool    `json:"producers_quiesced"`
+	BufferDrained                bool    `json:"buffer_drained"`
+	ReceiverJoined               bool    `json:"receiver_joined"`
+	FinalCounterRead             bool    `json:"final_counter_read"`
+	NativeReserveFailures        *uint64 `json:"native_reserve_failures,omitempty"`
+	BackgroundLossSamplerStarted bool    `json:"background_loss_sampler_started"`
+	ResourcesRetired             bool    `json:"resources_retired"`
+	LossComplete                 bool    `json:"loss_complete"`
+	Error                        string  `json:"error,omitempty"`
 }
 
 type DefinitionStopObservation struct {
