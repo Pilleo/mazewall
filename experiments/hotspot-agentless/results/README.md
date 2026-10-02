@@ -1,5 +1,14 @@
 # Verification evidence
 
+## Queued shutdown-tail proof (2026-10-02)
+
+Eight genuine native records queued before stop yield only one delivered record
+after ring/perf Close, versus all eight and an explicit boundary after Flush.
+The actual Gadget close path completes a held callback and joins its receiver
+while leaving seven queued records unconsumed. Race-enabled native tests pass
+this characterization; capture finalization is still partial. See
+[`queued-tail.md`](queued-tail.md) and the source-backed finalization design.
+
 ## Event-read loss correction (2026-10-02)
 
 The pinned Gadget reader discarded a valid ring sample accompanying a positive

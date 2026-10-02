@@ -91,6 +91,14 @@ unread losses and producer submit failures remain outside this snapshot. Empty
 records and reader errors are reported separately, not converted into a count
 of missing definitions. Zero observations never certify zero whole-session loss.
 
+The [queued-tail characterization](results/queued-tail.md) demonstrates why:
+reader Close and receiver join leave published records unconsumed, while native
+Flush preserves them after producer quiescence. Run the race-enabled control with
+`make queued-tail-kernel-test DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'`.
+The [bounded finalization design](../../docs/plans/2026-10-02-agentless-finalization-design.md)
+specifies explicit producer/reader/callback ownership gates; it is proposed,
+and successful capture buffer-drain/loss-finality acceptance remains open.
+
 ## Three-mode measurements and event-loss control
 
 ```bash

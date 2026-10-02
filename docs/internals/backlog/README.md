@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 45 | *Total Resolved Issues:* 636
+*Total Active Issues:* 46 | *Total Resolved Issues:* 636
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261002-015217-776-prove-queued-shutdown-tail-and-define-bounded-agen](issue-20261002-015217-776-prove-queued-shutdown-tail-and-define-bounded-agen.md) | Prove queued shutdown tail and define bounded agentless finalization ownership | high | experiment |
 | [issue-20261002-011601-143-preserve-a-valid-gadget-ring-sample-when-forwardin](issue-20261002-011601-143-preserve-a-valid-gadget-ring-sample-when-forwardin.md) | Preserve a valid Gadget ring sample when forwarding loss observations | high | experiment |
 | [issue-20261002-012829-939-label-bounded-enrichment-admission-rejections-as-s](issue-20261002-012829-939-label-bounded-enrichment-admission-rejections-as-s.md) | Label bounded enrichment admission rejections as skipped terminals | high | experiment |
 | [issue-20261002-005840-572-construct-raw-epoch-test-packets-independently-of-](issue-20261002-005840-572-construct-raw-epoch-test-packets-independently-of-.md) | Construct raw epoch test packets independently of race decoder copies | high | experiment |

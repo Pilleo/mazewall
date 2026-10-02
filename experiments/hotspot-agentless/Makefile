@@ -10,6 +10,14 @@ JDK_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies
 .PHONY: deps unit upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
 .PHONY: benchmark-fixture benchmark-report benchmark loss-gadget event-loss-control
 .PHONY: event-read-kernel-test
+.PHONY: queued-tail-kernel-test
+queued-tail-kernel-test: deps
+	$(GO) test -c -race -modfile build/experiment.go.mod -tags mw_kernel \
+		-o build/queued-tail-kernel.test github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --privileged \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--entrypoint /work/build/queued-tail-kernel.test $(GO_IMAGE) \
+		-test.run 'TestKernelQueuedTail|TestKernelGadgetClose' -test.v
 event-read-kernel-test: deps
 	$(GO) test -c -modfile build/experiment.go.mod -tags mw_kernel \
 		-o build/event-read-kernel.test github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf
