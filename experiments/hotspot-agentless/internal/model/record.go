@@ -15,14 +15,22 @@ type Stats struct {
 }
 
 type Summary struct {
-	Stats                       Stats              `json:"enrichment"`
-	EventLoss                   *uint64            `json:"event_loss,omitempty"`
-	EventLossObservation        *LossObservation   `json:"event_loss_observation,omitempty"`
-	DefinitionLoss              *uint64            `json:"definition_loss,omitempty"`
-	DefinitionReaderObservation *ReaderObservation `json:"definition_reader_observation,omitempty"`
-	CollectionHealth            string             `json:"collection_health"`
-	TerminalAccountingComplete  bool               `json:"terminal_accounting_complete"`
-	Errors                      []string           `json:"errors,omitempty"`
+	DefinitionStop              *DefinitionStopObservation `json:"definition_stop_observation,omitempty"`
+	Stats                       Stats                      `json:"enrichment"`
+	EventLoss                   *uint64                    `json:"event_loss,omitempty"`
+	EventLossObservation        *LossObservation           `json:"event_loss_observation,omitempty"`
+	DefinitionLoss              *uint64                    `json:"definition_loss,omitempty"`
+	DefinitionReaderObservation *ReaderObservation         `json:"definition_reader_observation,omitempty"`
+	CollectionHealth            string                     `json:"collection_health"`
+	TerminalAccountingComplete  bool                       `json:"terminal_accounting_complete"`
+	Errors                      []string                   `json:"errors,omitempty"`
+}
+
+type DefinitionStopObservation struct {
+	ReaderStopped   bool   `json:"reader_stopped"`
+	ConsumerStopped bool   `json:"consumer_stopped"`
+	BuffersDrained  bool   `json:"buffers_drained"`
+	Semantics       string `json:"semantics"`
 }
 
 type LossObservation struct {

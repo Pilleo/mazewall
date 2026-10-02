@@ -12,6 +12,7 @@ func (c *observedCounter) Add(n uint64)         { c.interval.Add(n); c.total.Add
 func (c *observedCounter) Swap(n uint64) uint64 { return c.interval.Swap(n) }
 
 type traceReaderCounters struct {
+	done                    chan struct{}
 	ready                   atomic.Bool
 	lost, noData, readError observedCounter
 	bufferBytesPerCPU       int

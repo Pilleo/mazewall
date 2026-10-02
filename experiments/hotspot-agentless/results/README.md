@@ -1,5 +1,16 @@
 # Verification evidence
 
+## Shutdown/loss/measurement checkpoint (2026-10-02)
+
+Owned definition-reader/consumer joins, events-only capture, exact token-42 loss
+control and repeated three-mode measurements are implemented locally. The paced
+eight-route readiness control delivered 1200 correct measured segments in every
+full repeat. Cold burst useful coverage failed, and the ready burst lost 29 tokens
+in its third full repeat; both rejected runs remain evidence. Worker joins do not
+establish native buffers drained or complete loss accounting. See
+[`loss-benchmark.md`](loss-benchmark.md) for actual windows, distributions,
+provenance, controlled-drop results and residual gates.
+
 ## Scoped epoch unloading acceptance (2026-10-01)
 
 The opt-in pinned interpreter/Serial profile now passes useful unloading

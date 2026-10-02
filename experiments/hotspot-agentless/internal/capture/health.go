@@ -17,6 +17,14 @@ func reportedDefinitionHealth(reader symbolizer.TraceReaderHealthProvider) *mode
 	return &model.ReaderObservation{Lost: counts.Lost, NoData: counts.NoData, ReadError: counts.ReadError, BufferBytesPerCPU: counts.BufferBytesPerCPU, Complete: false, Semantics: "consumed_trace_perf_records_partial_snapshot"}
 }
 
+func definitionStopModel(s symbolizer.DefinitionStopObservation) *model.DefinitionStopObservation {
+	semantics := "owned_definition_workers_unjoined_partial_snapshot"
+	if s.ReaderStopped && s.ConsumerStopped {
+		semantics = "owned_definition_workers_joined_partial_snapshot"
+	}
+	return &model.DefinitionStopObservation{ReaderStopped: s.ReaderStopped, ConsumerStopped: s.ConsumerStopped, BuffersDrained: false, Semantics: semantics}
+}
+
 func reportedEventHealth(reader datasource.ReportedLossReader) model.LossObservation {
 	if reader == nil {
 		return model.LossObservation{Semantics: "unavailable"}

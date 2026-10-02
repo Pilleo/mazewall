@@ -1,0 +1,38 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func sendTrace(ctx context.Context, out chan<- *libpf.EbpfTrace, trace *libpf.EbpfTrace) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case out <- trace:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// WaitTraceReader joins consumed-record accounting; it does not drain producers.
+func (t *Tracer) WaitTraceReader(ctx context.Context) error {
+	if !t.traceReaderCounters.ready.Load() {
+		return nil
+	}
+	select {
+	case <-t.traceReaderCounters.done:
+		return nil
+	default:
+	}
+	select {
+	case <-t.traceReaderCounters.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}

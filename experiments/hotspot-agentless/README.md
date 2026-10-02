@@ -80,13 +80,59 @@ make container-build DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
   have `complete=false`; whole-session `event_loss` and `definition_loss` remain
   absent. Complete terminal accounting does not establish complete collection.
 
-Health is sampled after cancellation and pending enrichment completion, before
-closing the symbolizer. There is no producer/reader drain barrier. Gadget's
+Health is sampled after cancellation, pending enrichment completion and a bounded
+join of the owned definition reader/consumer, before closing the symbolizer.
+`definition_stop_observation` reports those joins separately from
+`buffers_drained=false`. A two-second stop timeout is a session error; the summary
+labels incomplete joins as a partial snapshot. There is no producer/reader drain barrier. Gadget's
 lookup/reset loss polling can race producers, so its forwarded reports are a
 lower bound. OTel counts consumed perf records only, independently sampled;
 unread losses and producer submit failures remain outside this snapshot. Empty
 records and reader errors are reported separately, not converted into a count
 of missing definitions. Zero observations never certify zero whole-session loss.
+
+## Three-mode measurements and event-loss control
+
+```bash
+DOCKER_HOST=unix:///var/run/docker.sock make benchmark-fixture benchmark-report build
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock bash scripts/run-benchmark.sh \
+  --operations 1200 --warmup 600 --repeats 3 --pause-ns 500000
+COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock bash scripts/run-benchmark.sh \
+  --operations 1200 --warmup 600 --post-attach-warmup 600 \
+  --repeats 3 --diversity 8 --pause-ns 500000
+DOCKER_HOST=unix:///var/run/docker.sock COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock \
+  make event-loss-control DOCKER_HOST_ARG='--host unix:///var/run/docker.sock'
+```
+
+Build the normal gadget with `make gadget` if `build/gadget-image.ref` is absent.
+Modes run serially in rotated order with the same pinned interpreter/Serial JVM:
+`baseline` has no collector, `events` disables both stack helpers and OTel startup
+and emits explicit `unwind_disabled` skips, and `full` uses strict epoch enrichment.
+Measured file tokens establish missing operations independently of native loss
+reports. Terminal counters must match delivered JSONL outcomes. Events mode
+rejects definition-profiler observations and enrichment claims.
+
+`--warmup` happens **before attachment**. Optional `--post-attach-warmup` issues a
+fixed, separately tokenized preparation workload after attachment, paced at
+500,000 ns. It is excluded from measured latency/throughput. In full mode the
+measurement gate requires an ordered leaf/route segment with checked even epoch
+for every configured route, with a five-second observation wait after preparation.
+`readiness-before-measurement.json` preserves that actual pre-gate observation;
+the final report recomputes preparation coverage separately. Preparation runs in
+all modes; only full mode has a profiler-readiness gate. This does not promise
+future coverage or loss completeness. Default zero preparation retains cold runs.
+
+CPU/RSS samples cover the collector process from startup/attachment through target
+completion, including discovery and optional preparation, rather than workload-only
+CPU overhead. Kernel memory is unmeasured. Raw proc samples, exact runtime/image/
+source/class hashes, target timing and per-run reports remain in `build/benchmark.*`.
+Rejected runs retain reports and cannot produce a passing aggregate. The isolated
+loss gadget discards measured token 42 after sequence allocation; its gate requires
+that **exact** missing token, not merely one missing operation.
+
+See [loss/readiness/measurement evidence](results/loss-benchmark.md): the paced
+ready control passed, but cold useful coverage and repeated warm burst collection
+failed their gates. These measurements are not a production performance envelope.
 
 Native LRU capacity and existing pruning characterization:
 

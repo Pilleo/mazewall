@@ -1,0 +1,41 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"testing"
+	"time"
+)
+
+func TestDefinitionDeliveryCannotBlockAfterConsumerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out := make(chan *libpf.EbpfTrace)
+	done := make(chan bool, 1)
+	go func() { done <- sendTrace(ctx, out, &libpf.EbpfTrace{}) }()
+	select {
+	case delivered := <-done:
+		if delivered {
+			t.Fatal("canceled delivery accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled reader stranded on channel")
+	}
+}
+func TestDefinitionReaderWaitRequiresOwnedCompletion(t *testing.T) {
+	tr := &Tracer{}
+	tr.traceReaderCounters.done = make(chan struct{})
+	tr.traceReaderCounters.ready.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := tr.WaitTraceReader(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal("unfinished reader reported stopped", err)
+	}
+	close(tr.traceReaderCounters.done)
+	if err := tr.WaitTraceReader(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

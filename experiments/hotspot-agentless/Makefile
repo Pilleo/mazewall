@@ -8,15 +8,35 @@ GADGET_BUILDER := $(shell python3 -c 'import json; print(json.load(open("depende
 JDK_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["jdk"])')
 
 .PHONY: deps unit upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
+.PHONY: benchmark-fixture benchmark-report benchmark loss-gadget event-loss-control
+loss-gadget:
+	bash scripts/build-loss-gadget.sh
+
+event-loss-control: build benchmark-fixture benchmark-report loss-gadget
+	bash scripts/run-benchmark.sh --operations 200 --warmup 200 --repeats 1 --modes full --pause-ns 1000000 --gadget-ref build/loss-gadget-image.ref --expect-missing 1 --expect-missing-sequence 42
+benchmark-fixture:
+	mkdir -p build/benchmark-classes
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--mount type=bind,src="$$(pwd)/build/benchmark-classes",dst=/out \
+		$(JDK_IMAGE) javac -g -d /out /work/fixtures/java/BenchmarkFixture.java
+
+benchmark-report: deps
+	$(GO) build -modfile build/experiment.go.mod -trimpath -o build/mw-benchmark-report ./cmd/mw-benchmark-report
+
+benchmark: build gadget benchmark-fixture benchmark-report
+	bash scripts/run-benchmark.sh
 deps:
 	python3 scripts/prepare-gadget.py
 
 unit: deps
 	$(GO) test -race -modfile build/experiment.go.mod ./...
+	python3 scripts/test-run-benchmark.py
 
 upstream-test: deps
 	$(GO) test -race -modfile build/experiment.go.mod github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer/otel github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer github.com/inspektor-gadget/inspektor-gadget/pkg/datasource
-	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/tracer -run TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned -count=1
+	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/tracer -run 'TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned|TestHotSpotEpoch|TestDefinition' -count=1
+	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/processmanager -run TestHotSpotEpoch -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/libpf go.opentelemetry.io/ebpf-profiler/interpreter/hotspot
 
 quality-fuzz: deps

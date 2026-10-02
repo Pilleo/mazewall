@@ -1,0 +1,47 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestDefinitionStopJoinsInFlightHandlerBeforeSnapshot(t *testing.T) {
+	o := fixtureResolver()
+	cancelled := make(chan struct{})
+	o.definitionCancel = func() { close(cancelled) }
+	o.consumerDone = make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		s, e := o.StopDefinitions(ctx)
+		if e == nil && (!s.ConsumerStopped || s.BuffersDrained) {
+			e = errors.New("false finality claim")
+		}
+		done <- e
+	}()
+	<-cancelled
+	select {
+	case e := <-done:
+		t.Fatal("stop did not join handler", e)
+	default:
+	}
+	close(o.consumerDone)
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+}
+func TestDefinitionStopTimeoutCannotLookComplete(t *testing.T) {
+	o := fixtureResolver()
+	o.consumerDone = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s, e := o.StopDefinitions(ctx)
+	if !errors.Is(e, context.Canceled) || s.ConsumerStopped || s.BuffersDrained {
+		t.Fatal(s, e)
+	}
+}

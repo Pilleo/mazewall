@@ -1,0 +1,22 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import "context"
+
+type DefinitionStopObservation struct {
+	ReaderStopped, ConsumerStopped bool
+	BuffersDrained                 bool
+}
+type DefinitionStopper interface {
+	StopDefinitions(context.Context) (DefinitionStopObservation, error)
+}
+
+func (s *Symbolizer) StopDefinitions(ctx context.Context) (DefinitionStopObservation, error) {
+	for _, r := range s.resolvers {
+		if stopper, ok := r.(DefinitionStopper); ok {
+			return stopper.StopDefinitions(ctx)
+		}
+	}
+	return DefinitionStopObservation{}, ErrStructuredResolverUnavailable
+}

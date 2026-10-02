@@ -1,0 +1,35 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+)
+
+func (o *otelResolverInstance) StopDefinitions(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	s := symbolizer.DefinitionStopObservation{}
+	if o.definitionCancel != nil {
+		o.definitionCancel()
+	}
+	if o.trc != nil {
+		if err := o.trc.WaitTraceReader(ctx); err != nil {
+			return s, err
+		}
+		s.ReaderStopped = true
+	}
+	if o.consumerDone != nil {
+		select {
+		case <-o.consumerDone:
+			s.ConsumerStopped = true
+		default:
+			select {
+			case <-o.consumerDone:
+				s.ConsumerStopped = true
+			case <-ctx.Done():
+				return s, ctx.Err()
+			}
+		}
+	}
+	return s, nil
+}

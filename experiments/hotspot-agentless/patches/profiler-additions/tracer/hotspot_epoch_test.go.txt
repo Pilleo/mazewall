@@ -7,18 +7,20 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"go.opentelemetry.io/ebpf-profiler/support"
+	"strings"
 	"testing"
 	"unsafe"
 )
 
 func epochTracePacket(count uint16) []byte {
 	b := make([]byte, int(unsafe.Offsetof(support.Trace{}.Frame_data))+int(count)*8)
-	p := traceFromRaw(b)
-	p.Pid = 123
-	p.Tid = 456
-	p.Kernel_stack_id = -1
-	p.Origin = uint32(support.TraceOriginProbe)
-	p.Frame_data_len = count
+	// traceFromRaw copies its input under -race. Encode the wire packet itself,
+	// independently of the decoder being exercised.
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Pid)):], 123)
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Tid)):], 456)
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Kernel_stack_id)):], ^uint32(0))
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Origin)):], uint32(support.TraceOriginProbe))
+	binary.LittleEndian.PutUint16(b[int(unsafe.Offsetof(support.Trace{}.Frame_data_len)):], count)
 	return b
 }
 func TestHotSpotEpochRawPacketPreservesErrorAndResetsPool(t *testing.T) {
@@ -43,7 +45,7 @@ func TestHotSpotEpochRawPacketPreservesErrorAndResetsPool(t *testing.T) {
 }
 func TestHotSpotEpochOversizedRawPacketIsRejected(t *testing.T) {
 	tr := &Tracer{tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}}
-	if _, err := tr.loadBpfTrace(epochTracePacket(3073), 0); err == nil {
-		t.Fatal("oversized frame array accepted")
+	if _, err := tr.loadBpfTrace(epochTracePacket(3073), 0); err == nil || !strings.Contains(err.Error(), "invalid raw frame counts: 0/3073") {
+		t.Fatal("oversized frame array did not reach bounds rejection", err)
 	}
 }

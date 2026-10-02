@@ -1,5 +1,25 @@
 # Upstream patch status
 
+## Definition shutdown patches (local, not submitted upstream)
+
+`profiler-shutdown.patch` makes both trace and batch-barrier channel delivery
+cancellation-aware. The reader owns a completion channel and closes its native
+perf reader before publishing completion. Undelivered traces return to the
+existing pool. `gadget-shutdown.patch` adds resolver-owned child cancellation and
+consumer completion; optional `StopDefinitions(ctx)` joins both owners. Existing
+resolver interfaces retain their signatures, buffers and caches.
+
+The collector completes pending enrichment, attempts the two-second stop, then
+samples final fatal/health state. Successful joins permit resolver close;
+timeouts remain explicit errors and unjoined partial snapshots. This is an owned
+worker join, **not** a native producer-buffer drain. Callback joining and canceled
+delivery have channel-gated race tests; buffer finality remains an open gate.
+
+`faults/drop-marked-event.patch` is applied only to an owned generated gadget
+source copy by `build-loss-gadget.sh`. It drops benchmark token 42 after allocating
+its occurrence sequence and has a separate image/manifest. Normal gadget source
+has no runtime fault switch. See [evidence](../results/loss-benchmark.md).
+
 ## Epoch identity patches (local, not submitted upstream)
 
 `profiler-epoch-capture.patch` changes C trace/proc-info/cache layouts and capture
@@ -100,8 +120,8 @@ New profiler additions retain OpenTelemetry copyright/SPDX notices.
 Both original module checksums are verified before patching generated trees in
 ignored `build/deps/`. Both bases and the combined content hash are recorded in
 the manifest and temporary root module replacements. The module cache and base
-`go.mod` stay pinned. The collector snapshots reader health after cancellation
-and pending enrichment completion, before closing its symbolizer. This does not
+`go.mod` stay pinned. The collector snapshots reader health after cancellation,
+pending enrichment completion and owned worker stop, before closing its symbolizer. This does not
 establish a producer/reader drain barrier. Counters are independently sampled;
 native submit failures, unread loss records and symbolization failures are not
 complete definition-loss accounting. Final event/definition loss stays unknown.

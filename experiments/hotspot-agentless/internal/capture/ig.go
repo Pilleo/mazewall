@@ -28,6 +28,7 @@ import (
 )
 
 type Config struct {
+	EventsOnly  bool
 	StrictEpoch bool
 	PID         int
 	Image       string
@@ -36,6 +37,9 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
+	if c.EventsOnly && c.StrictEpoch {
+		return fmt.Errorf("events-only capture cannot claim HotSpot epoch identity")
+	}
 	if c.PID <= 0 {
 		return fmt.Errorf("target host PID must be positive")
 	}
@@ -52,6 +56,9 @@ func (c Config) Validate() error {
 // RunDebug uses Gadget's existing synchronous symbolization for the first live
 // capture gate. It is deliberately not the production structured enrichment API.
 func RunDebug(ctx context.Context, cfg Config, output io.Writer) error {
+	if cfg.EventsOnly {
+		return fmt.Errorf("events-only mode requires structured event accounting")
+	}
 	if cfg.StrictEpoch {
 		return fmt.Errorf("strict epoch mode requires structured capture")
 	}

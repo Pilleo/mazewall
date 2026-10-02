@@ -18,3 +18,10 @@ func TestConfigRejectsUnpinnedGadgetAndMissingTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEventsOnlyRefusesEpochClaims(t *testing.T) {
+	c := Config{PID: 123, Image: "mw-hotspot-openat@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Store: "/tmp/store", EventsOnly: true, StrictEpoch: true}
+	if c.Validate() == nil {
+		t.Fatal("events-only capture accepted a Java lifetime claim")
+	}
+}
