@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 50 | *Total Resolved Issues:* 638
+*Total Active Issues:* 51 | *Total Resolved Issues:* 638
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261003-193301-115-integrate-validated-hotspot-agentless-backend-as-a](issue-20261003-193301-115-integrate-validated-hotspot-agentless-backend-as-a.md) | Integrate validated HotSpot agentless backend as an explicit MazeWall profiler strategy | medium | profiler |
 | [issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an](issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md) | Align Kubescape HotSpot contribution dependency and storage contracts | medium | experiment |
 | [issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int](issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md) | Investigate intermittent process-wide profiler integration capture failure | medium | profiler |
 | [issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full](issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full.md) | Drain owned strict HotSpot definitions before full capture retirement | high | experiment |
