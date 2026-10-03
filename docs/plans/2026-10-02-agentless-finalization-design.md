@@ -213,6 +213,14 @@ and the scoped execution plan under `docs/superpowers/plans/`.
 
 ## Strict full implementation checkpoint (2026-10-02)
 
+Subsequent metadata watermark correction (2026-10-03): interpreter detach errors
+now use an additive checked boundary, preserve failed process/instance ownership
+and native errno causes, notify the strict fatal owner after unlocking, and
+propagate through original definition readout and reader joins. See
+[metadata-retirement evidence](../../experiments/hotspot-agentless/results/metadata-retirement.md).
+This addresses the specific watermark error gap without upgrading complete loss
+or auxiliary-monitor lifecycle claims.
+
 Optional `--drain-full` now requires full structured strict epoch capture and one
 owner. The event stop owner's existing deadline covers an after-readout hook that
 retires profiler-native hooks, flushes/joins definition readout and final consumer

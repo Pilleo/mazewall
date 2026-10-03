@@ -94,3 +94,16 @@ func TestDefinitionDrainPreservesAllNativeCauses(t *testing.T) {
 		t.Fatal("definition cause overwritten", c.result())
 	}
 }
+
+func TestDefinitionReaderJoinPreservesMetadataFailures(t *testing.T) {
+	tr := &Tracer{}
+	tr.traceReaderCounters.ready.Store(true)
+	tr.traceReaderCounters.done = make(chan struct{})
+	tr.traceReaderCounters.drain = newDefinitionDrainControl(&definitionPerfFixture{})
+	tr.traceReaderCounters.drain.setError(unix.EPERM)
+	tr.traceReaderCounters.drain.setError(unix.EACCES)
+	close(tr.traceReaderCounters.done)
+	if err := tr.WaitTraceReader(context.Background()); !errors.Is(err, unix.EPERM) || !errors.Is(err, unix.EACCES) {
+		t.Fatal("joined reader hid native metadata failure", err)
+	}
+}

@@ -1,5 +1,15 @@
 # Verification evidence
 
+## Checked metadata watermark remedy (2026-10-03)
+
+The identified detach-error gap is fixed with an additive checked watermark,
+preserved native errno causes, failed-owner retention and unlocked strict fatal
+notification. Original reader watermark branches and reader joins now propagate
+the failure. Red/green permission and retry tests, host/native transport gates,
+live strict attribution/unloading controls and the final merge gate pass.
+See [`metadata-retirement.md`](metadata-retirement.md) for exact provenance and
+the separately tracked intermittent JVM integration failure.
+
 ## Ownership/loss-domain source checkpoint (2026-10-03)
 
 Targeted strict-full self-review confirmed a metadata-cleanup error gap:

@@ -28,7 +28,10 @@ path yet, and no fix is claimed. The next scoped task is an additive checked
 watermark boundary, preservation of native causes and failed ownership, and a
 behavioral failure-injection regression before wiring it into strict readout.
 
-Tracked in [metadata retirement issue](../../../docs/internals/backlog/issue-20261003-123138-580-preserve-native-metadata-retirement-failures-in-ag.md).
+Tracked in [metadata retirement issue](../../../docs/internals/backlog/resolved/issue-20261003-123138-580-preserve-native-metadata-retirement-failures-in-ag.md).
+The subsequent [checked watermark remedy](metadata-retirement.md) resolves this
+specific finding with red/green fault regressions and retained failed ownership.
+The source observations above describe the reviewed pre-remedy milestone.
 
 ## Ownership boundaries verified by inspection
 

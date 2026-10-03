@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 49 | *Total Resolved Issues:* 636
+*Total Active Issues:* 49 | *Total Resolved Issues:* 637
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,7 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20261003-123138-580-preserve-native-metadata-retirement-failures-in-ag](issue-20261003-123138-580-preserve-native-metadata-retirement-failures-in-ag.md) | Preserve native metadata retirement failures in agentless drain health | high | experiment |
+| [issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int](issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md) | Investigate intermittent process-wide profiler integration capture failure | medium | profiler |
 | [issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full](issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full.md) | Drain owned strict HotSpot definitions before full capture retirement | high | experiment |
 | [issue-20261002-023246-451-implement-owned-bounded-event-only-ring-finalizati](issue-20261002-023246-451-implement-owned-bounded-event-only-ring-finalizati.md) | Implement owned bounded event-only ring finalization | high | experiment |
 | [issue-20261002-015217-776-prove-queued-shutdown-tail-and-define-bounded-agen](issue-20261002-015217-776-prove-queued-shutdown-tail-and-define-bounded-agen.md) | Prove queued shutdown tail and define bounded agentless finalization ownership | high | experiment |
