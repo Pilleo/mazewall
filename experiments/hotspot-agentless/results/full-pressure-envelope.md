@@ -97,9 +97,49 @@ after the rejection. The measured post-target process stop interval includes
 teardown outside the native shared drain phase; it is not an assertion that the
 entire CLI exits within the two-second drain budget.
 
+## Longer finite workload and time-binned RSS
+
+Artifacts: `build/benchmark.ec92f9cc`, measured after `76a49cbd` with the same
+binary/bundle. The command above uses `--operations 12000 --pause-ns 1000000`,
+retaining eight routes, 600/600 preparation and three rotated baseline/full
+repeats. Every full repeat correctly attributed **12000/12000 measured operations**,
+with zero missing/wrong/unavailable/skipped measured outcomes. Both component
+drains and delivered terminal accounting completed; native reserve and consumed
+definition loss/read-error observations were zero partial snapshots.
+
+| Repeat | Baseline ops/s | Full ops/s | Baseline p99 ns | Full p99 ns | Maximum pending | Pending bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 | 861.40 | 809.07 | 94734 | 290301 | 287 | 187851 |
+| 1 | 786.56 | 813.59 | 100415 | 218552 | 298 | 195054 |
+| 2 | 847.25 | 807.76 | 105411 | 247395 | 345 | 226049 |
+
+Measured target windows were 14831765794/14749521926/14855917676 ns; collector
+attach-to-target-done windows were 18511515791/19477340448/18663555911 ns. CPU
+observations were 5.80/6.75/6.27 seconds, peak sampled RSS 133256/133528/132548 KiB,
+and post-target process stop 2525273833/1718934035/1313390380 ns. As above, the
+process stop interval includes work outside the shared native drain phase.
+
+For a reproducible trend observation, split each collector resource window into
+four equal monotonic-time bins and take the median sampled process RSS in each
+bin, using samples with `bin_start <= timestamp < bin_end`:
+
+| Repeat | First quarter KiB | Second quarter KiB | Third quarter KiB | Fourth quarter KiB | Last sampled RSS KiB |
+|---|---:|---:|---:|---:|---:|
+| 0 | 91096 | 127092 | 122840 | 122888 | 122904 |
+| 1 | 86944 | 124860 | 119440 | 119488 | 119512 |
+| 2 | 92840 | 124128 | 122512 | 122528 | 122552 |
+
+This distinguishes startup allocation from later process-memory observations:
+after the second-quarter peak, later medians were lower, with small positive
+third-to-fourth-quarter changes. It is finite approximately 19-second evidence,
+not a leak-free proof, a long-running growth bound, or accounting of kernel memory.
+The strict 60-second session cap remains unchanged. Session totals retain all
+12603 records, including preparation/unmarked activity; session unavailable counts
+were 158/127/116, separate from zero unavailable measured operations.
+
 ## Claim boundary and validation
 
-All seven full reports preserve `collection_loss_complete=false`, definition
+All ten full reports preserve `collection_loss_complete=false`, definition
 `complete=false`, and explicit successful component-drain observations. Session
 received counts equal resolved + unavailable + skipped, measured outcomes conserve
 delivered/missing denominators, wrong attribution is zero, and reported pending

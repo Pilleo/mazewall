@@ -2,6 +2,11 @@
 
 ## Strict full pressure envelope (2026-10-03)
 
+An extended finite control now correctly attributes all **12000 operations in
+each of three full repeats**, with both transport drains completed. Time-binned
+process RSS separates startup allocation from later approximately 19-second
+windows; this is finite evidence rather than a long-running growth guarantee.
+
 The final strict-full binary correctly attributed all 3000 measured operations
 in three eight-route paced repeats. One-route repeats captured every event but
 one reached the pending bound and explicitly skipped 31 enrichments. A 10000-open
