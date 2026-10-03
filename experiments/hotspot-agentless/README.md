@@ -9,6 +9,13 @@ The controlled-C2 inline corpus verifies two distinct paths by exact operation
 tokens and checks real compiler inline evidence.
 The broader fidelity/runtime matrix and Kubescape remain gated.
 
+The [local Kubescape contribution proposal](../../docs/plans/2026-10-03-hotspot-kubescape-contribution-proposal.md)
+collects the genuine event/frame sample, measured runtime/pressure evidence and
+independent patch review units. Its pinned source inspection identifies a
+Gadget-bridge/dependency mismatch and a storage-schema gap; node-agent wiring
+awaits the selected event/data/dependency contract. No upstream submission or
+compatible node-agent build is claimed.
+
 ## Build and verify
 
 ```bash

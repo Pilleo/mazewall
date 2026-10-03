@@ -1,5 +1,40 @@
 # Upstream patch status
 
+## Contribution review inventory (2026-10-03)
+
+The [local Kubescape proposal](../../../docs/plans/2026-10-03-hotspot-kubescape-contribution-proposal.md)
+records the actual tested graph, a genuine record projection and the inspected
+node-agent fork/schema mismatch. No upstream acceptance or submission is claimed.
+The experiment bundle contains several independent review families:
+
+| Review unit | Authored source boundary | Verification / dependency |
+|---|---|---|
+| Typed structured result and immutable correlation identity | `gadget-structured.patch`, structured resolver additions | Lookup/pruning/identity/cancellation race tests; original rendered APIs retained |
+| Missing-definition recovery | `gadget-additions/pkg/symbolizer/otel/recovery*`, optional symbolizer recovery | Exact-task LRU scan/race tests and isolated real drop-definition build |
+| Observable walk/scope/BCI quality | `profiler-quality.patch`, libpf/HotSpot additions | Original decoder plus quality/mutation/live corpus checks; semantic BCI oracle remains open |
+| Loss payload dispatch and health | `gadget-event-loss.patch`, `gadget-health.patch`, `profiler-health.patch` | Valid sample plus positive loss regression, native pressure and partial counter checks |
+| Strict epoch identity/native ABI | `profiler-epoch-*`, `profiler-identity.patch`, `gadget-epoch.patch` | Pinned interpreter/Serial only, generated layouts/BPF and unloading acceptance; not a general JIT profile |
+| Definition/event drain | `profiler-definition-drain.patch`, `gadget-definition-drain.patch`, `gadget-finalization.patch`, additions | Native queued tails8/5000, ordered callback completion and deadline retention |
+| Checked metadata retirement | `profiler-metadata-retirement.patch`, processmanager additions | Native cause/failed-owner retention and checked reader-join regressions |
+| Auxiliary/prune worker ownership | `profiler-auxiliary-ownership.patch`, `gadget-auxiliary-ownership.patch`, additions | Scoped cancellation/join/finalizers, native perf/netlink controls and fresh strict reports |
+
+These units are local overlays, not standalone upstream PRs yet. Epoch and
+lifecycle units depend on selected profiler/bridge boundaries and require separate
+review; review-unit separation is not a claim that every patch applies in isolation.
+Fault/diagnostic additions remain test-only with separate manifests.
+
+## Current strict full and retirement patches
+
+Optional structured `--drain-full` now requires acknowledged event readout,
+definition perf/final consumption, enrichment completion and auxiliary/prune joins
+under the original remaining stop budget. Native metadata failures preserve errno
+and failed ownership. The ordinary partial capture path remains distinct.
+See [strict definition evidence](../results/full-definition-finalization.md),
+[metadata remedy](../results/metadata-retirement.md) and
+[auxiliary retirement](../results/auxiliary-worker-retirement.md). Explicit buffer
+drains do not upgrade native loss to complete. Historical sections below describe
+the earlier patch milestones and their initial claim boundaries.
+
 ## Optional event-only finalization patch (local, not submitted upstream)
 
 `gadget-finalization.patch` activates only via explicit optional Gadget vars.
@@ -107,7 +142,7 @@ Future independent review units:
 
 1. Structured results (implemented locally; upstream review pending).
 2. Lost-first-definition recovery through the existing cache (implemented locally).
-3. Observable HotSpot scope-lookup and BCI quality (pending).
+3. Observable HotSpot scope-lookup and BCI quality (implemented locally; upstream review and semantic BCI fidelity pending).
 
 Record exact branch/revision, purpose, verification and required root-module
 replacements when each patch exists. Do not vendor another profiler tree here.
