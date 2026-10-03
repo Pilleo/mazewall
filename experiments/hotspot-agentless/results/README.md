@@ -1,5 +1,14 @@
 # Verification evidence
 
+## Ownership/loss-domain source checkpoint (2026-10-03)
+
+Targeted strict-full self-review confirmed a metadata-cleanup error gap:
+`ProcessedUntil` logs interpreter detach failures, loses wrapped errno causes and
+removes ownership entries despite failure. The perf-drain result cannot observe
+this path. It is tracked for an additive checked boundary and failure-injection
+regression. See [`ownership-loss-review.md`](ownership-loss-review.md); successful
+transport drain remains distinct from checked metadata retirement.
+
 ## Strict full pressure envelope (2026-10-03)
 
 An extended finite control now correctly attributes all **12000 operations in
