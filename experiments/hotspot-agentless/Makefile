@@ -72,6 +72,7 @@ upstream-test: deps
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/tracer -run 'TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned|TestHotSpotEpoch|TestDefinition' -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/processmanager -run TestHotSpotEpoch -count=1
 	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/libpf go.opentelemetry.io/ebpf-profiler/interpreter/hotspot go.opentelemetry.io/ebpf-profiler/periodiccaller
+	$(GO) test -race -modfile build/experiment.go.mod go.opentelemetry.io/ebpf-profiler/processmanager/ebpf -run TestAuxiliary -count=1
 
 quality-fuzz: deps
 	$(GO) test -c -modfile build/experiment.go.mod -o build/hotspot-quality.test go.opentelemetry.io/ebpf-profiler/interpreter/hotspot

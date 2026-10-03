@@ -66,5 +66,8 @@ cannot join within the existing remaining stop budget, retain its resources and
 report an incomplete shutdown rather than claiming retirement. Include native
 reader/close error propagation and compatibility tests.
 
-Tracked in [auxiliary ownership issue](../../../docs/internals/backlog/issue-20261003-132317-306-join-agentless-auxiliary-profiler-monitors-before-.md).
+Tracked in [auxiliary ownership issue](../../../docs/internals/backlog/resolved/issue-20261003-132317-306-join-agentless-auxiliary-profiler-monitors-before-.md).
+The subsequent [owned auxiliary remedy](auxiliary-worker-retirement.md) resolves
+the scoped cancellation/join finding. Observations above describe the earlier
+pre-remedy characterization, not the current strict shutdown path.
 Complete loss, broader JVM lifetime and independent review remain distinct gates.

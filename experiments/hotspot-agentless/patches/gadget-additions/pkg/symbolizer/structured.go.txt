@@ -48,12 +48,13 @@ func (s *Symbolizer) ResolveStructured(ctx context.Context, task Task) (Structur
 func (s *Symbolizer) ensurePruning() {
 	s.pruneMu.Lock()
 	defer s.pruneMu.Unlock()
-	if s.pruneLoopStarted {
+	if s.pruneLoopStarted || s.pruneStopped {
 		return
 	}
 	for _, resolver := range s.resolvers {
 		if resolver.IsPruningNeeded() {
 			s.pruneLoopStarted = true
+			s.pruneDone = make(chan struct{})
 			go s.pruneLoop()
 			return
 		}

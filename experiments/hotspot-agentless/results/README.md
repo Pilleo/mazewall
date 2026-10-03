@@ -1,5 +1,15 @@
 # Verification evidence
 
+## Acknowledged auxiliary retirement (2026-10-03)
+
+Strict full finalization now separately cancels and joins profiler auxiliary work
+and Gadget pruning before native event resources retire. Native perf held-callback
+and idle-netlink wake/join controls pass. Three final 1200-operation repeats,
+strict unloading, genuine definition-drop recovery and legacy capture pass;
+fresh reports require `auxiliary_stopped=true`. See
+[`auxiliary-worker-retirement.md`](auxiliary-worker-retirement.md), including
+the rejected raw-socket close control and stale-reporter correction.
+
 ## Auxiliary-worker ownership checkpoint (2026-10-03)
 
 Pinned periodic stop handles do not join callbacks and still admit manual triggers

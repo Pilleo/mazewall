@@ -184,6 +184,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 					case <-stopCtx.Done():
 						return stopCtx.Err()
 					}
+					if err := sym.StopAuxiliary(stopCtx); err != nil {
+						return err
+					}
 					return errors.Join(ownedCtx.Err(), fatal.Err(), execBarrier.Check())
 				}})
 			}

@@ -1,7 +1,7 @@
 ---
 title: "Join agentless auxiliary profiler monitors before native retirement"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "experiment"
@@ -41,7 +41,23 @@ admission/cancellation-aware PID sends and join acknowledgments. Keep definition
 transport and enrichment leases alive through their final handoff. Retain resources
 on an unjoined callback under the remaining deadline; preserve default API behavior
 and native errors. See
-[`auxiliary-monitor-ownership.md`](../../../experiments/hotspot-agentless/results/auxiliary-monitor-ownership.md).
+[`auxiliary-monitor-ownership.md`](../../../../experiments/hotspot-agentless/results/auxiliary-monitor-ownership.md).
+
+**Resolution evidence (2026-10-03):**
+The opt-in strict auxiliary scope seals admission, cancels independently of
+definitions/enrichment, checks native wake/close operations and joins existing
+workers before retirement. PID and native async admission are cancellation-aware;
+lazy Gadget pruning is sealed/joined. Full completion reports require the new
+auxiliary acknowledgment. Held callbacks prevent retirement under deadline.
+Netlink uses a typed deadline wake and checked socket close after worker join.
+
+Missing-boundary, unjoined-report and canceled-permission regressions failed red
+and pass with the fix. Host/race tests, real native held perf/idle netlink controls,
+definition8/5000 tails and event-retention gates pass. Final three1200-token
+strict repeats, unloading, genuine recovery and default legacy capture pass;
+merge/backlog checks pass. Complete loss and universal native FD retirement remain
+outside this resolved scope. See
+[`auxiliary-worker-retirement.md`](../../../../experiments/hotspot-agentless/results/auxiliary-worker-retirement.md).
 
 ---
 <!-- id: issue-20261003-132317-306-join-agentless-auxiliary-profiler-monitors-before-  file: issue-20261003-132317-306-join-agentless-auxiliary-profiler-monitors-before-.md -->

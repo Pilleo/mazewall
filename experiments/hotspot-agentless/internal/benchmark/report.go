@@ -154,7 +154,7 @@ func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 		}
 		if m.DrainFull {
 			d := r.Summary.DefinitionStop
-			if d == nil || !d.ReaderStopped || !d.ConsumerStopped || !d.BuffersDrained || d.Semantics != "owned_definition_perf_drained_partial_loss_snapshot" {
+			if d == nil || !d.ReaderStopped || !d.ConsumerStopped || !d.BuffersDrained || !d.AuxiliaryStopped || d.Semantics != "owned_definition_perf_drained_partial_loss_snapshot" {
 				return r, fmt.Errorf("missing acknowledged definition perf drain")
 			}
 		}

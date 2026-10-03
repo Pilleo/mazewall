@@ -25,7 +25,7 @@ func definitionStopModel(s symbolizer.DefinitionStopObservation) *model.Definiti
 			semantics = "owned_definition_perf_drained_partial_loss_snapshot"
 		}
 	}
-	return &model.DefinitionStopObservation{ReaderStopped: s.ReaderStopped, ConsumerStopped: s.ConsumerStopped, BuffersDrained: s.BuffersDrained && s.ReaderStopped && s.ConsumerStopped, Semantics: semantics}
+	return &model.DefinitionStopObservation{ReaderStopped: s.ReaderStopped, ConsumerStopped: s.ConsumerStopped, BuffersDrained: s.BuffersDrained && s.ReaderStopped && s.ConsumerStopped, AuxiliaryStopped: s.AuxiliaryStopped, Semantics: semantics}
 }
 
 func reportedEventHealth(reader datasource.ReportedLossReader) model.LossObservation {

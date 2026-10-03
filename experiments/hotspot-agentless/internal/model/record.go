@@ -43,10 +43,11 @@ type EventFinalizationObservation struct {
 }
 
 type DefinitionStopObservation struct {
-	ReaderStopped   bool   `json:"reader_stopped"`
-	ConsumerStopped bool   `json:"consumer_stopped"`
-	BuffersDrained  bool   `json:"buffers_drained"`
-	Semantics       string `json:"semantics"`
+	ReaderStopped    bool   `json:"reader_stopped"`
+	ConsumerStopped  bool   `json:"consumer_stopped"`
+	BuffersDrained   bool   `json:"buffers_drained"`
+	AuxiliaryStopped bool   `json:"auxiliary_stopped"`
+	Semantics        string `json:"semantics"`
 }
 
 type LossObservation struct {

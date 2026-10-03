@@ -7,12 +7,29 @@ import "context"
 type DefinitionStopObservation struct {
 	ReaderStopped, ConsumerStopped bool
 	BuffersDrained                 bool
+	AuxiliaryStopped               bool
 }
 type DefinitionStopper interface {
 	StopDefinitions(context.Context) (DefinitionStopObservation, error)
 }
 type DefinitionDrainer interface {
 	DrainDefinitions(context.Context) (DefinitionStopObservation, error)
+}
+
+type AuxiliaryStopper interface {
+	StopAuxiliary(context.Context) error
+}
+
+func (s *Symbolizer) StopAuxiliary(ctx context.Context) error {
+	if err := s.stopPruning(ctx); err != nil {
+		return err
+	}
+	for _, r := range s.resolvers {
+		if stopper, ok := r.(AuxiliaryStopper); ok {
+			return stopper.StopAuxiliary(ctx)
+		}
+	}
+	return ErrStructuredResolverUnavailable
 }
 
 func (s *Symbolizer) DrainDefinitions(ctx context.Context) (DefinitionStopObservation, error) {

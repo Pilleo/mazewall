@@ -213,6 +213,14 @@ and the scoped execution plan under `docs/superpowers/plans/`.
 
 ## Strict full implementation checkpoint (2026-10-02)
 
+Subsequent auxiliary retirement correction (2026-10-03): strict profiler auxiliary
+workers now have independent cancellation, sealed enrollment, checked wake/close
+actions and joins. Lazy Gadget pruning is sealed/joined too. Full handoff finishes
+enrichment, then joins auxiliary work before event collection retirement under
+the existing remaining deadline. `auxiliary_stopped` is an independent required
+full-report observation, not a complete native loss or auxiliary-buffer drain.
+See [auxiliary retirement evidence](../../experiments/hotspot-agentless/results/auxiliary-worker-retirement.md).
+
 Subsequent metadata watermark correction (2026-10-03): interpreter detach errors
 now use an additive checked boundary, preserve failed process/instance ownership
 and native errno causes, notify the strict fatal owner after unlocking, and
