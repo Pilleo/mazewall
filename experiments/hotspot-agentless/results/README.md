@@ -1,5 +1,13 @@
 # Verification evidence
 
+## Auxiliary-worker ownership checkpoint (2026-10-03)
+
+Pinned periodic stop handles do not join callbacks and still admit manual triggers
+after ticker stop. Deterministic race-enabled characterization verifies both
+behaviors. Definition reader/consumer completion excludes PID/map/metric and
+other auxiliary monitors; their acknowledged teardown is tracked separately.
+See [`auxiliary-monitor-ownership.md`](auxiliary-monitor-ownership.md).
+
 ## Checked metadata watermark remedy (2026-10-03)
 
 The identified detach-error gap is fixed with an additive checked watermark,
