@@ -11,6 +11,18 @@ type DefinitionStopObservation struct {
 type DefinitionStopper interface {
 	StopDefinitions(context.Context) (DefinitionStopObservation, error)
 }
+type DefinitionDrainer interface {
+	DrainDefinitions(context.Context) (DefinitionStopObservation, error)
+}
+
+func (s *Symbolizer) DrainDefinitions(ctx context.Context) (DefinitionStopObservation, error) {
+	for _, r := range s.resolvers {
+		if drainer, ok := r.(DefinitionDrainer); ok {
+			return drainer.DrainDefinitions(ctx)
+		}
+	}
+	return DefinitionStopObservation{}, ErrStructuredResolverUnavailable
+}
 
 func (s *Symbolizer) StopDefinitions(ctx context.Context) (DefinitionStopObservation, error) {
 	for _, r := range s.resolvers {

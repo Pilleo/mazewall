@@ -2,12 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 package operators
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const EventFinalizationOptionsKey = "mw.event-finalization-options"
 
 // Optional standalone profile; existing Gadget operator interfaces stay intact.
-type EventFinalizationOptions struct{ HardDeadline time.Time }
+type EventFinalizationOptions struct {
+	HardDeadline time.Time
+	StrictFull   bool
+	AfterReadout func(context.Context) error
+}
 
 type EventFinalizationObservation struct {
 	Scope                        string  `json:"scope"`

@@ -210,3 +210,20 @@ retirement and repeated Close cannot bypass the owner. Independent review of the
 supported detach path and broader covered loss domains remains outstanding.
 See [implementation evidence](../../experiments/hotspot-agentless/results/event-only-finalization.md)
 and the scoped execution plan under `docs/superpowers/plans/`.
+
+## Strict full implementation checkpoint (2026-10-02)
+
+Optional `--drain-full` now requires full structured strict epoch capture and one
+owner. The event stop owner's existing deadline covers an after-readout hook that
+retires profiler-native hooks, flushes/joins definition readout and final consumer
+callback, then finishes enrichment before Gadget resource retirement. Request
+cancellation is distinct from owned identity/definition/enrichment lifetime;
+fatal, target-exit/exec, permission or deadline errors remain partial aborts.
+
+The native perf control verifies all eight queued raw definitions and a 5000-record
+tail crossing the ordinary batch cap, with explicit flush/channel completion.
+Actual strict workload, genuine definition-drop recovery and unloading controls
+pass both component observations. Buffer drain remains independent of submit/
+probe/decode loss and metadata cleanup/error coverage; full whole-session loss
+fields and broader lifecycle/fidelity claims remain gated. See
+[strict full evidence](../../experiments/hotspot-agentless/results/full-definition-finalization.md).

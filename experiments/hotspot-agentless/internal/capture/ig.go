@@ -28,6 +28,7 @@ import (
 )
 
 type Config struct {
+	DrainFull   bool
 	DrainEvents bool
 	EventsOnly  bool
 	StrictEpoch bool
@@ -38,6 +39,9 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
+	if c.DrainFull && (!c.StrictEpoch || c.EventsOnly || c.DrainEvents) {
+		return fmt.Errorf("full drain requires strict structured full capture and one owner")
+	}
 	if c.DrainEvents && !c.EventsOnly {
 		return fmt.Errorf("owned event drain requires events-only capture")
 	}

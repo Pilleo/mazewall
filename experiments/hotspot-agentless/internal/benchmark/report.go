@@ -20,6 +20,7 @@ type ResourceObservation struct {
 	Semantics  string  `json:"semantics"`
 }
 type RunManifest struct {
+	DrainFull             bool                 `json:"drain_full"`
 	PostTargetStopNS      uint64               `json:"post_target_stop_ns,omitempty"`
 	DrainEvents           bool                 `json:"drain_events"`
 	CollectorBinarySHA256 string               `json:"collector_binary_sha256,omitempty"`
@@ -75,6 +76,9 @@ var token = regexp.MustCompile(`^/fixture/mw-bench-([a-f0-9]{16})-(\d{6})-r([0-7
 
 func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 	r := RunReport{Manifest: m}
+	if m.DrainFull && (m.Mode != "full" || m.DrainEvents) {
+		return r, fmt.Errorf("strict full drain requires full measurement and one owner")
+	}
 	if m.DrainEvents && m.Mode != "events" {
 		return r, fmt.Errorf("owned event finalization requires events-only measurement")
 	}
@@ -142,11 +146,17 @@ func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 	if r.Summary.EventLossObservation != nil && r.Summary.EventLossObservation.Complete || r.Summary.DefinitionReaderObservation != nil && r.Summary.DefinitionReaderObservation.Complete {
 		return r, fmt.Errorf("partial native loss observation upgraded to final proof")
 	}
-	if m.DrainEvents {
+	if m.DrainEvents || m.DrainFull {
 		o := r.Summary.EventFinalization
 		loss := r.Summary.EventLossObservation
 		if o == nil || o.Scope != "owned_openat_event_ring" || o.Phase != "resources_retired" || !o.ProducersQuiesced || !o.BufferDrained || !o.ReceiverJoined || !o.FinalCounterRead || !o.ResourcesRetired || o.BackgroundLossSamplerStarted || o.LossComplete || o.Error != "" || o.NativeReserveFailures == nil || loss == nil || loss.Observed == nil || *loss.Observed != *o.NativeReserveFailures || loss.Semantics != "quiescent_native_reserve_failures_partial_snapshot" {
 			return r, fmt.Errorf("missing or fabricated owned event finalization evidence")
+		}
+		if m.DrainFull {
+			d := r.Summary.DefinitionStop
+			if d == nil || !d.ReaderStopped || !d.ConsumerStopped || !d.BuffersDrained || d.Semantics != "owned_definition_perf_drained_partial_loss_snapshot" {
+				return r, fmt.Errorf("missing acknowledged definition perf drain")
+			}
 		}
 	} else if r.Summary.EventFinalization != nil {
 		return r, fmt.Errorf("unrequested event finalization evidence")

@@ -1,5 +1,16 @@
 # Verification evidence
 
+## Owned strict full finalization (2026-10-02)
+
+The opt-in `--drain-full` strict epoch profile now drains the owned definition
+perf transport and acknowledges its final consumer before finishing enrichment
+and retiring Gadget resources under one stop budget. Native race tests deliver
+8/8 and 5000/5000 definitions. Three paced repeats correctly attribute all 1200
+operations each; three bursts capture all 1200 with 1024 correct segments and
+176 explicit bounded skips. Genuine recovery and unloading controls pass.
+See [`full-definition-finalization.md`](full-definition-finalization.md) for
+provenance, final-build checks and remaining partial-loss/lifecycle boundaries.
+
 ## Owned event-only finalization (2026-10-02)
 
 The opt-in single-openat-ring path now retires the writer, flushes and joins the
@@ -10,7 +21,8 @@ deadline retention. Three 1200-token burst repeats and the final guarded repeat
 pass; a larger run still rejects 2894 missing operations despite successful drain.
 Exact discard 42 remains distinct from native failure counts. See
 [`event-only-finalization.md`](event-only-finalization.md). Full-mode definition
-drain and complete loss remain open gates.
+drain was subsequently implemented for the strict profile above; complete loss
+remains an open gate.
 
 ## Queued shutdown-tail proof (2026-10-02)
 

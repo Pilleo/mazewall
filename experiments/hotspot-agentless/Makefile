@@ -12,6 +12,14 @@ JDK_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies
 .PHONY: event-read-kernel-test
 .PHONY: queued-tail-kernel-test
 .PHONY: event-finalization-kernel-test
+.PHONY: definition-finalization-kernel-test
+definition-finalization-kernel-test: deps
+	$(GO) test -c -race -modfile build/experiment.go.mod -tags mw_kernel \
+		-o build/definition-finalization-kernel.test go.opentelemetry.io/ebpf-profiler/tracer
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --privileged \
+		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
+		--entrypoint /work/build/definition-finalization-kernel.test $(GO_IMAGE) \
+		-test.run TestKernelDefinitionPerfDrain -test.v
 event-finalization-kernel-test: deps
 	$(GO) test -c -race -modfile build/experiment.go.mod -tags mw_kernel \
 		-o build/event-finalization-kernel.test github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf

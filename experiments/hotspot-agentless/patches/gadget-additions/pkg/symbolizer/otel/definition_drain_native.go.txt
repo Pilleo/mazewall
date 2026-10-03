@@ -1,0 +1,43 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"fmt"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+)
+
+type resolverDefinitionDrainBackend struct{ resolver *otelResolverInstance }
+
+func (b resolverDefinitionDrainBackend) Quiesce(ctx context.Context) error {
+	return b.resolver.trc.QuiesceDefinitionSources(ctx)
+}
+func (b resolverDefinitionDrainBackend) DrainReader(ctx context.Context) error {
+	return b.resolver.trc.DrainTraceReader(ctx)
+}
+func (b resolverDefinitionDrainBackend) JoinConsumer(ctx context.Context) error {
+	select {
+	case <-b.resolver.consumerDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (o *otelResolverInstance) ownedDefinitionDrain() *definitionDrainOwner {
+	o.definitionDrainMu.Lock()
+	defer o.definitionDrainMu.Unlock()
+	return o.definitionDrain
+}
+func (o *otelResolverInstance) DrainDefinitions(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	if o.options.HotSpotEpochTarget.PID == 0 || o.trc == nil || o.consumerDone == nil {
+		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("owned definition drain requires strict initialized profiler")
+	}
+	o.definitionDrainMu.Lock()
+	if o.definitionDrain == nil {
+		o.definitionDrain = newDefinitionDrainOwner(resolverDefinitionDrainBackend{resolver: o})
+	}
+	owner := o.definitionDrain
+	o.definitionDrainMu.Unlock()
+	return owner.stop(ctx)
+}

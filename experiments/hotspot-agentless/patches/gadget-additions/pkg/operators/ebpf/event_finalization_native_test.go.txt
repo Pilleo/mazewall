@@ -3,10 +3,14 @@
 package ebpfoperator
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"golang.org/x/sys/unix"
 )
 
 func eventFinalizationScopeFixture() *ebpfInstance {
@@ -52,5 +56,30 @@ func TestEventFinalizationReserveFailureSumRejectsOverflow(t *testing.T) {
 	}
 	if _, err := sumEventReserveFailures([]uint64{math.MaxUint64, 1}); err == nil {
 		t.Fatal("native counter sum overflow certified")
+	}
+}
+
+func TestStrictFullFinalizationRequiresBothOwnedStackHelpers(t *testing.T) {
+	for _, row := range []struct{ u, o, full, want bool }{{true, true, true, true}, {false, false, true, false}, {true, false, true, false}, {false, true, true, false}, {true, true, false, false}, {false, false, false, true}} {
+		err := validateEventFinalizationProfile(eventFinalizationScopeFixture(), row.u, row.o, row.full)
+		if (err == nil) != row.want {
+			t.Fatal("wrong full-profile admission", row, err)
+		}
+	}
+}
+func TestStrictFullFinalizationHookRunsBeforeResourceRetirement(t *testing.T) {
+	r := newEventDrainReader()
+	close(r.done)
+	called := false
+	i := &ebpfInstance{tracers: map[string]*Tracer{"openat": {eventDrain: r}}, eventStopOptions: &operators.EventFinalizationOptions{StrictFull: true, AfterReadout: func(ctx context.Context) error {
+		called = true
+		if ctx.Err() != nil {
+			t.Fatal("stop budget replaced")
+		}
+		return unix.EPERM
+	}}}
+	err := (nativeEventStopBackend{instance: i}).Join(context.Background())
+	if !called || !errors.Is(err, unix.EPERM) {
+		t.Fatal("definition hook skipped or downgraded", called, err)
 	}
 }

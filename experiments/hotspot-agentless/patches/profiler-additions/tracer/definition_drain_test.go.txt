@@ -1,0 +1,96 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"golang.org/x/sys/unix"
+	"testing"
+	"time"
+)
+
+type definitionPerfFixture struct {
+	flushErr       error
+	flushRequested chan struct{}
+	closed         bool
+}
+
+func (f *definitionPerfFixture) Flush() error {
+	if f.flushRequested != nil {
+		close(f.flushRequested)
+	}
+	return f.flushErr
+}
+func (f *definitionPerfFixture) Close() error { f.closed = true; return nil }
+
+func TestDefinitionDrainRequiresQuiescenceAndExplicitBoundary(t *testing.T) {
+	f := &definitionPerfFixture{flushRequested: make(chan struct{})}
+	tr := &Tracer{}
+	tr.traceReaderCounters.done = make(chan struct{})
+	tr.traceReaderCounters.drain = newDefinitionDrainControl(f)
+	tr.traceReaderCounters.ready.Store(true)
+	if err := tr.DrainTraceReader(context.Background()); err == nil {
+		t.Fatal("definition drain accepted live external sources")
+	}
+	tr.traceReaderCounters.drain.sourcesRetired.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- tr.DrainTraceReader(ctx) }()
+	select {
+	case <-f.flushRequested:
+	case err := <-done:
+		t.Fatal("drain skipped flush", err)
+	case <-ctx.Done():
+		t.Fatal("flush not requested")
+	}
+	select {
+	case err := <-done:
+		t.Fatal("reader join invented", err)
+	default:
+	}
+	tr.traceReaderCounters.drain.flushed.Store(true)
+	close(tr.traceReaderCounters.done)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if f.closed {
+		t.Fatal("drain caller retired reader under its owner")
+	}
+}
+func TestDefinitionDrainPreservesPermissionFailure(t *testing.T) {
+	for _, failure := range []error{unix.EPERM, unix.EACCES} {
+		f := &definitionPerfFixture{flushErr: failure}
+		tr := &Tracer{}
+		tr.traceReaderCounters.done = make(chan struct{})
+		tr.traceReaderCounters.drain = newDefinitionDrainControl(f)
+		tr.traceReaderCounters.ready.Store(true)
+		tr.traceReaderCounters.drain.sourcesRetired.Store(true)
+		if err := tr.DrainTraceReader(context.Background()); !errors.Is(err, failure) {
+			t.Fatal("native flush failure downgraded", err)
+		}
+		if tr.traceReaderCounters.drain.flushed.Load() || f.closed {
+			t.Fatal("failed flush certified or retired reader")
+		}
+	}
+}
+func TestDefinitionDrainCanceledReaderCannotBecomeFlushed(t *testing.T) {
+	tr := &Tracer{}
+	tr.traceReaderCounters.done = make(chan struct{})
+	tr.traceReaderCounters.drain = newDefinitionDrainControl(&definitionPerfFixture{})
+	tr.traceReaderCounters.ready.Store(true)
+	tr.traceReaderCounters.drain.sourcesRetired.Store(true)
+	close(tr.traceReaderCounters.done)
+	if err := tr.DrainTraceReader(context.Background()); err == nil {
+		t.Fatal("canceled reader certified as drained")
+	}
+}
+func TestDefinitionDrainPreservesAllNativeCauses(t *testing.T) {
+	c := newDefinitionDrainControl(&definitionPerfFixture{})
+	c.setError(unix.EPERM)
+	c.setError(unix.EACCES)
+	if !errors.Is(c.result(), unix.EPERM) || !errors.Is(c.result(), unix.EACCES) {
+		t.Fatal("definition cause overwritten", c.result())
+	}
+}

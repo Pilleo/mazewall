@@ -28,8 +28,11 @@ def main():
     parser.add_argument("--expect-missing-sequence", type=int)
     parser.add_argument("--modes", default="baseline,events,full")
     parser.add_argument("--drain-events", action="store_true")
+    parser.add_argument("--drain-full", action="store_true")
     args = parser.parse_args()
     modes = args.modes.split(",")
+    if args.drain_full and (args.drain_events or any(mode not in ["baseline","full"] for mode in modes)):
+        parser.error("strict full drain measurements support baseline/full and one owner")
     if args.drain_events and any(mode not in ["baseline", "events"] for mode in modes):
         parser.error("owned event drain measurements support baseline/events modes only")
     if not 1 <= args.operations <= 100000 or not 0 <= args.warmup <= 100000 or not 1 <= args.repeats <= 10 or not 0 <= args.pause_ns <= 10000000 or any(m not in ["baseline", "events", "full"] for m in modes):
@@ -88,6 +91,8 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
             command += ["--collection-mode", "events"] if mode == "events" else ["--hotspot-identity", "safepoint-epoch"]
             if args.drain_events:
                 command += ["--drain-events"]
+            if args.drain_full:
+                command += ["--drain-full"]
             collector = subprocess.check_output(command, text=True).strip()
             attached_process = subprocess.Popen(docker + ["start", "--attach", collector], stdout=output, stderr=errors)
             wait_until(lambda: subprocess.check_output(docker + ["inspect", "--format", "{{.State.Running}}", collector], text=True).strip() == "true", 10, "collector process")
@@ -118,6 +123,7 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
         if mode != "baseline":
             data["collector_binary_sha256"] = hashlib.sha256((ROOT / "build/mw-hotspot-demo").read_bytes()).hexdigest()
         data["drain_events"] = args.drain_events and mode == "events"
+        data["drain_full"] = args.drain_full and mode == "full"
         (artifact / "benchmark-manifest.json").write_text(json.dumps(data, indent=2) + "\n")
         if args.post_attach_warmup:
             preparation_start = time.monotonic_ns()

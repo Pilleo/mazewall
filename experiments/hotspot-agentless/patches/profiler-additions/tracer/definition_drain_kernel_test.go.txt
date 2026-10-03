@@ -1,0 +1,128 @@
+//go:build mw_kernel
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+	"unsafe"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	ottimes "go.opentelemetry.io/ebpf-profiler/times"
+)
+
+func TestKernelDefinitionPerfDrainAcknowledgesQueuedTail(t *testing.T) {
+	for _, count := range []uint64{8, 5000} {
+		t.Run(fmt.Sprintf("definitions_%d", count), func(t *testing.T) {
+			cpus, err := ebpf.PossibleCPU()
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.PerfEventArray, KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer events.Close()
+			packet := epochTracePacket(0)
+			payload, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: uint32(len(packet)), MaxEntries: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer payload.Close()
+			program, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.XDP, License: "GPL", Instructions: asm.Instructions{
+				asm.Mov.Reg(asm.R6, asm.R1), asm.StoreImm(asm.R10, -4, 0, asm.Word), asm.LoadMapPtr(asm.R1, payload.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -4), asm.FnMapLookupElem.Call(), asm.JEq.Imm(asm.R0, 0, "exit"),
+				asm.Mov.Reg(asm.R4, asm.R0), asm.Mov.Reg(asm.R1, asm.R6), asm.LoadMapPtr(asm.R2, events.FD()), asm.LoadImm(asm.R3, 0xffffffff, asm.DWord), asm.Mov.Imm(asm.R5, int32(len(packet))), asm.FnPerfEventOutput.Call(), asm.JEq.Imm(asm.R0, 0, "ok"), asm.Mov.Imm(asm.R0, 0).WithSymbol("exit"), asm.Return(), asm.Mov.Imm(asm.R0, 2).WithSymbol("ok"), asm.Return(),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer program.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tr := &Tracer{ebpfMaps: map[string]*ebpf.Map{"trace_events": events}, tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}, intervals: ottimes.New(0, time.Second, 0), samplesPerSecond: 128}
+			out := make(chan *libpf.EbpfTrace)
+			tr.startTraceEventMonitor(ctx, out)
+			first, release, consumerDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			var got []uint64
+			go func() {
+				defer close(consumerDone)
+				for trace := range out {
+					if trace == nil {
+						continue
+					}
+					got = append(got, trace.CorrelationID)
+					if len(got) == 1 {
+						close(first)
+						<-release
+					}
+					tr.tracePool.Put(trace)
+				}
+			}()
+			zero := uint32(0)
+			for token := uint64(1); token <= count; token++ {
+				binary.LittleEndian.PutUint64(packet[int(unsafe.Offsetof(support.Trace{}.Correlation_id)):], token)
+				if err := payload.Update(&zero, packet, ebpf.UpdateAny); err != nil {
+					t.Fatal(err)
+				}
+				ret, _, err := program.Test(make([]byte, 64))
+				if err != nil || ret != 2 {
+					t.Fatal("native definition publication failed", token, ret, err)
+				}
+			}
+			select {
+			case <-first:
+			case <-time.After(time.Second):
+				t.Fatal("first native definition not delivered")
+			}
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+			defer stopCancel()
+			if err := tr.QuiesceDefinitionSources(stopCtx); err != nil {
+				t.Fatal(err)
+			}
+			drainDone := make(chan error, 1)
+			go func() { drainDone <- tr.DrainTraceReader(stopCtx) }()
+			select {
+			case err := <-drainDone:
+				t.Fatal("final callback acknowledgment invented", err)
+			default:
+			}
+			unblock()
+			if err := <-drainDone; err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-consumerDone:
+			case <-stopCtx.Done():
+				t.Fatal("definition consumer did not see terminal handoff")
+			}
+			seen := map[uint64]bool{}
+			for _, token := range got {
+				if token < 1 || token > count || seen[token] {
+					t.Fatal("definition token corrupted or duplicated", got)
+				}
+				seen[token] = true
+			}
+			if uint64(len(seen)) != count {
+				t.Fatal("queued native definitions lost", got)
+			}
+			health, ok := tr.TraceReaderHealth()
+			if !ok || health.Lost != 0 || health.ReadError != 0 {
+				t.Fatal("flush boundary counted as native loss/error", health, ok)
+			}
+			t.Logf("native definitions=%d delivered=%d final_callback_acknowledged=true explicit_perf_flush=true", count, len(got))
+		})
+	}
+}

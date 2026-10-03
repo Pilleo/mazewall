@@ -6,7 +6,7 @@ public final class InlineOpenFixture {
     private static volatile long checksum;
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 2) throw new IllegalArgumentException("usage: <root> <gate>");
+        if (args.length != 2 && args.length != 3) throw new IllegalArgumentException("usage: <root> <gate> [finish]");
         Path root = Path.of(args[0]);
         Path gate = Path.of(args[1]);
         Files.createDirectories(root);
@@ -22,6 +22,7 @@ public final class InlineOpenFixture {
             Thread.sleep(20);
         }
         System.out.println("completed " + checksum);
+        if (args.length == 3) while (!Files.exists(Path.of(args[2]))) Thread.sleep(20);
     }
 
     private static void pathA(Path path) throws Exception { sharedLeaf(path); }

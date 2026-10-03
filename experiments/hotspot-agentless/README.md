@@ -102,6 +102,14 @@ and full-mode buffer drain/whole-session loss-finality acceptance remains open.
 ### Opt-in owned event-only stop
 
 `--capture --collection-mode events --drain-events` enables the supported
+event-only finalization path. For strict structured full capture,
+`--capture --collection-mode full --hotspot-identity=safepoint-epoch --drain-full`
+additionally drains owned definition perf readout/final consumption and finishes
+bounded enrichment before retirement under the same stop budget. See
+[`results/full-definition-finalization.md`](results/full-definition-finalization.md)
+for supported runtime/profile, actual acceptance and partial-loss limitations.
+
+The events-only option enables the supported
 single-openat-ring finalization path. It retires the writer, flushes and joins the
 original reader/callbacks, samples retained native reserve counters without a
 background reset poller, and retires owned readers/maps/programs. A component

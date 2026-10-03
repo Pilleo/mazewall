@@ -82,6 +82,7 @@ public final class UnloadDriver {
             System.out.println("generation " + g + " loader_cleared " + (reference.get() == null));
         }
         System.out.println("completed generations " + GENERATIONS + " loaders_cleared " + cleared);
+        if (args.length == 4) while (!Files.exists(Path.of(args[3]))) Thread.sleep(20);
         Thread.sleep(1000);
     }
 }

@@ -8,6 +8,9 @@ import (
 )
 
 func (o *otelResolverInstance) StopDefinitions(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	if owner := o.ownedDefinitionDrain(); owner != nil {
+		return owner.stop(ctx)
+	}
 	s := symbolizer.DefinitionStopObservation{}
 	if o.definitionCancel != nil {
 		o.definitionCancel()

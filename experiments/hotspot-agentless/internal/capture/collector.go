@@ -45,7 +45,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	}
 	requestCtx := ctx
 	hardEventDeadline := time.Now().Add(time.Minute)
-	if cfg.DrainEvents {
+	if cfg.DrainEvents || cfg.DrainFull {
 		var stop context.CancelFunc
 		ctx, stop = context.WithDeadline(ctx, hardEventDeadline)
 		defer stop()
@@ -64,6 +64,10 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ownedCtx, abortOwned := fullOwnedContext(ctx, cfg, hardEventDeadline)
+	defer abortOwned()
+	cancelAll := func() { cancel(); abortOwned() }
+	retainFullResources := false
 	pidfd, err := unix.PidfdOpen(cfg.PID, 0)
 	if err != nil {
 		return fmt.Errorf("own target pidfd: %w", err)
@@ -85,7 +89,11 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		if err != nil {
 			return err
 		}
-		defer func() { resultErr = errors.Join(resultErr, execBarrier.Close()) }()
+		defer func() {
+			if !retainFullResources {
+				resultErr = errors.Join(resultErr, execBarrier.Close())
+			}
+		}()
 		checks = append(checks, execBarrier.Check)
 		target, err := identity.Discover(cfg.PID, ticks)
 		if err != nil {
@@ -96,16 +104,16 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		}
 		epochTarget = libpf.HotSpotEpochTarget{PID: libpf.PID(target.PID), ProcessStartTicks: ticks, CounterAddress: libpf.Address(target.CounterAddress), InitialEpoch: target.InitialEpoch}
 	}
-	fatal := fatalState{cancel: cancel}
+	fatal := fatalState{cancel: cancelAll}
 	watchDone := make(chan struct{})
 	var watchErr error
 	watchConsumed := false
 	go func() {
 		defer close(watchDone)
-		watchErr = watchTarget(ctx, pidfd, cancel, checks...)
+		watchErr = watchTarget(ownedCtx, pidfd, cancelAll, checks...)
 	}()
 	defer func() {
-		cancel()
+		cancelAll()
 		<-watchDone
 		if !watchConsumed {
 			resultErr = errors.Join(resultErr, watchErr)
@@ -144,16 +152,40 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline})
 			}
 		} else {
-			sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ctx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record})
+			sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ownedCtx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record})
 			if err != nil {
 				return err
 			}
 			for name, replacement := range sym.GetEbpfReplacements() {
 				gc.SetVar(name, replacement)
 			}
-			enrichment, err = NewEnricher(ctx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancel)
+			enrichment, err = NewEnricher(ownedCtx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancelAll)
 			if err != nil {
 				return err
+			}
+			if cfg.DrainFull {
+				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: true, AfterReadout: func(stopCtx context.Context) error {
+					if err := ownedCtx.Err(); err != nil {
+						return errors.Join(err, fatal.Err())
+					}
+					if err := execBarrier.Check(); err != nil {
+						return err
+					}
+					if _, err := sym.DrainDefinitions(stopCtx); err != nil {
+						return err
+					}
+					finished := make(chan error, 1)
+					go func() { finished <- enrichment.Finish() }()
+					select {
+					case err := <-finished:
+						if err != nil {
+							return err
+						}
+					case <-stopCtx.Done():
+						return stopCtx.Err()
+					}
+					return errors.Join(ownedCtx.Err(), fatal.Err(), execBarrier.Check())
+				}})
 			}
 		}
 		found := false
@@ -183,6 +215,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				}
 				if err != nil {
 					callbackErr = err
+					if cfg.DrainFull {
+						fatal.Record(err)
+					}
 					gc.Cancel()
 				}
 				return err
@@ -206,18 +241,19 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	runErr := rt.RunGadget(gc, nil, params)
 	var eventFinalization *model.EventFinalizationObservation
 	var eventFinalizationErr error
-	if cfg.DrainEvents {
+	if cfg.DrainEvents || cfg.DrainFull {
 		cause := "target_exit_or_internal_stop"
 		if requestCtx.Err() != nil {
 			cause = "request"
 		}
 		eventFinalization, eventFinalizationErr = eventFinalizationSnapshot(gc, cause)
 		if eventFinalization != nil && !eventFinalization.ReceiverJoined {
+			retainFullResources = cfg.DrainFull
 			// A held writer/callback cannot be safely locked for a final summary.
 			return errors.Join(runErr, eventFinalizationErr, fmt.Errorf("owned event drain incomplete: %s", eventFinalization.Error))
 		}
 	}
-	cancel()
+	cancelAll()
 	<-watchDone
 	watchConsumed = true
 	var finishErr error
