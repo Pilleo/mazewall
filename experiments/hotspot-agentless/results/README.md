@@ -1,5 +1,15 @@
 # Verification evidence
 
+## Strict full pressure envelope (2026-10-03)
+
+The final strict-full binary correctly attributed all 3000 measured operations
+in three eight-route paced repeats. One-route repeats captured every event but
+one reached the pending bound and explicitly skipped 31 enrichments. A 10000-open
+burst was rejected with 4523 missing events/matching partial native reserve
+failures and 2493 admission skips despite both successful transport drains.
+See [`full-pressure-envelope.md`](full-pressure-envelope.md) for per-repeat
+latency, sampled resources, denominators, provenance and bounded conclusions.
+
 ## Owned strict full finalization (2026-10-02)
 
 The opt-in `--drain-full` strict epoch profile now drains the owned definition
