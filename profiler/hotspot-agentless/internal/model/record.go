@@ -76,6 +76,21 @@ type Record struct {
 	Evidence      *StackEvidence  `json:"evidence,omitempty"`
 	Summary       *Summary        `json:"summary,omitempty"`
 	Recovery      *RecoveryResult `json:"recovery,omitempty"`
+	Lifecycle     *Lifecycle      `json:"lifecycle,omitempty"`
+}
+
+// Production schema 2 lifecycle identity; handler-entry occurrence identity remains separate.
+type Lifecycle struct {
+	PID               uint32   `json:"pid"`
+	ProcessStartTicks uint64   `json:"process_start_ticks,omitempty"`
+	ClockDomain       string   `json:"clock_domain"`
+	BootNS            uint64   `json:"boot_ns"`
+	RuntimeProfile    string   `json:"runtime_profile"`
+	JVMBuildID        string   `json:"jvm_build_id,omitempty"`
+	JVMSHA256         string   `json:"jvm_sha256,omitempty"`
+	Provider          Provider `json:"provider"`
+	Message           string   `json:"message,omitempty"`
+	Errno             int      `json:"errno,omitempty"`
 }
 
 type RecoveryResult struct {

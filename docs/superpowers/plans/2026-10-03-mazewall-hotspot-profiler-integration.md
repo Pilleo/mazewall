@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestones_1_2_complete
+status: approved_milestones_1_2_3_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -269,23 +269,23 @@ native collector readiness, cold stack availability, partial snapshots and termi
 `internal/hotspot/HotSpotSessionMachine.kt`, `HotSpotProtocol.kt`;
 `HotSpotSessionMachineTest.kt`; update wire fixtures/version admission.
 
-- [ ] Write red transition-table tests: Created -> Starting -> Ready -> Running ->
+- [x] Write red transition-table tests: Created -> Starting -> Ready -> Running ->
   Finishing -> Completed, plus failed startup/abort/retained cleanup. Effects own I/O;
   no state assignment inside interpreters and no silent exhaustive branches.
-- [ ] Add a collector-ready record only after the actual target generation, strict
+- [x] Add a collector-ready record only after the actual target generation, strict
   runtime, native attachment and required readers are established. Session-start
   is insufficient. Useful stack readiness remains per-event and may be unavailable.
-- [ ] Define a locked production protocol version including ready/summary/error
+- [x] Define a locked production protocol version including ready/summary/error
   records and typed per-session clocks/identities; reject stale incompatible helpers.
   Version changes keep old experiment artifacts readable only through explicit adapters.
-- [ ] Ensure the owned graceful stop mechanism reaches the Go signal/control path
+- [x] Ensure the owned graceful stop mechanism reaches the Go signal/control path
   already used for draining. Verify SIGTERM handling if JVM Process.destroy is used;
   do not assume it sends SIGINT. Never send signals to an invented/stale collector PID.
-- [ ] Preserve the 60-second session/remaining native stop budget and failed ownership
+- [x] Preserve the 60-second session/remaining native stop budget and failed ownership
   behavior. Add startup-failure, parent-death and EOF-without-summary regressions.
-- [ ] Run state/wire tests and promoted native ownership tests; update the sealed
+- [x] Run state/wire tests and promoted native ownership tests; update the sealed
   outcome allow-list in `ArchitectureTest` when a new closed hierarchy requires it.
-- [ ] Review the wire/state protocol and commit separately from public dispatch.
+- [x] Review the wire/state protocol and commit separately from public dispatch.
 
 **Gate:** Ready and completed cannot be fabricated by a log line, EOF, caller timeout
 or an unjoined worker. No JVM native/FFM layout changes are required.
@@ -413,6 +413,12 @@ builds, pinned reproducible static executable/local OCI graph, internal bounded
 Kotlin asset admission and explicit offline install tasks. Native finalization,
 three installed strict capture runs and the merge gate pass. See
 [asset milestone evidence](../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).
+
+Milestone 3 completed: explicit production schema-2 start/ready/error protocol,
+validated native readiness, parent-pipe control/abort, verified SIGTERM drain and
+pure sealed finite single-owner Kotlin lifecycle. Existing replay stays schema 1;
+version-2 installed assets and full merge gate pass. See
+[protocol milestone evidence](../../plans/2026-10-04-mazewall-hotspot-protocol-milestone.md).
 
 Start with **milestone 1**, after operator review of this proposed scope/API. Do not
 implement all phases in one diff. Every runtime/API milestone gets a scoped backlog

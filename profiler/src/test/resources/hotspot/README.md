@@ -13,3 +13,12 @@ or live-collector acceptance. The one-occurrence summary is synthetic and omits
 physical drain claims; it allows finite replay counter checking without claiming
 the original session received only one event. Unit-generated packets cover hostile
 ordering, generation, field/domain, bounds and failure cases separately.
+
+`production-lifecycle-projection.jsonl` retains the unmodified schema-2
+`session_started` and `collector_ready` records from
+`experiments/hotspot-agentless/build/capture.O5KKc5/events.jsonl`. It is a lifecycle-only
+projection: the original 400 event/terminal pairs and final summary are omitted.
+EOF of this projection is not session completion. The start marker contains the
+requested profile; only the later ready record contains admitted JVM build and
+process-generation identity. Native readiness does not claim first-event useful
+attribution. See `docs/plans/2026-10-04-mazewall-hotspot-protocol-milestone.md`.

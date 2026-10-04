@@ -28,14 +28,17 @@ import (
 )
 
 type Config struct {
-	DrainFull   bool
-	DrainEvents bool
-	EventsOnly  bool
-	StrictEpoch bool
-	PID         int
-	Image       string
-	Store       string
-	Enrichment  EnrichmentOptions
+	AbortContext context.Context
+	production   bool
+	sessionID    string
+	DrainFull    bool
+	DrainEvents  bool
+	EventsOnly   bool
+	StrictEpoch  bool
+	PID          int
+	Image        string
+	Store        string
+	Enrichment   EnrichmentOptions
 }
 
 func (c Config) Validate() error {

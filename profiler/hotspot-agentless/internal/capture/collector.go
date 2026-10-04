@@ -105,12 +105,24 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		epochTarget = libpf.HotSpotEpochTarget{PID: libpf.PID(target.PID), ProcessStartTicks: ticks, CounterAddress: libpf.Address(target.CounterAddress), InitialEpoch: target.InitialEpoch}
 	}
 	fatal := fatalState{cancel: cancelAll}
+	if cfg.AbortContext != nil {
+		abortDone := make(chan struct{})
+		go func() {
+			defer close(abortDone)
+			select {
+			case <-cfg.AbortContext.Done():
+				fatal.Record(context.Cause(cfg.AbortContext))
+			case <-ownedCtx.Done():
+			}
+		}()
+		defer func() { cancelAll(); <-abortDone }()
+	}
 	watchDone := make(chan struct{})
 	var watchErr error
 	watchConsumed := false
 	go func() {
 		defer close(watchDone)
-		watchErr = watchTarget(ownedCtx, pidfd, cancelAll, checks...)
+		watchErr = targetStopError(cfg, watchTarget(ownedCtx, pidfd, cancelAll, checks...))
 	}()
 	defer func() {
 		cancelAll()
@@ -124,7 +136,14 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		return err
 	}
 	sessionID := fmt.Sprintf("%x", random)
-	sink := providerSink{jsonoutput.NewJSONL(writer)}
+	if cfg.sessionID != "" {
+		sessionID = cfg.sessionID
+	}
+	var rawSink model.Sink = jsonoutput.NewJSONL(writer)
+	if cfg.production {
+		rawSink = newProductionSink(writer)
+	}
+	sink := providerSink{rawSink}
 	rt := local.New()
 	if err := rt.Init(nil); err != nil {
 		return err
@@ -233,6 +252,32 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		}
 		return nil
 	}), simple.OnStart(func(gc operators.GadgetContext) error {
+		if cfg.production {
+			return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, func() error {
+				if err := ownedCtx.Err(); err != nil {
+					return errors.Join(err, fatal.Err())
+				}
+				if err := execBarrier.Check(); err != nil {
+					return err
+				}
+				poll := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+				if _, err := unix.Poll(poll, 0); err != nil {
+					return err
+				}
+				if poll[0].Revents != 0 {
+					return fmt.Errorf("target unavailable before readiness")
+				}
+				stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cfg.PID))
+				if err != nil {
+					return err
+				}
+				current, err := preflight.ParseStartTicks(string(stat))
+				if err != nil || current != ticks {
+					return errors.Join(fmt.Errorf("target generation changed before readiness"), err)
+				}
+				return fatal.Err()
+			})
+		}
 		return sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: sessionID})
 	}))
 	gc := gadgetcontext.New(ctx, cfg.Image, gadgetcontext.WithName("mw-hotspot-openat-structured"), gadgetcontext.WithOrasReadonlyTarget(pinnedTarget{Store: store, reference: cfg.Image}), gadgetcontext.WithDataOperators(ocihandler.OciHandler, operator))
@@ -253,7 +298,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		if eventFinalization != nil && !eventFinalization.ReceiverJoined {
 			retainFullResources = cfg.DrainFull
 			// A held writer/callback cannot be safely locked for a final summary.
-			return errors.Join(runErr, eventFinalizationErr, fmt.Errorf("owned event drain incomplete: %s", eventFinalization.Error))
+			return errors.Join(runErr, eventFinalizationErr, errReadoutPending, fmt.Errorf("owned event drain incomplete: %s", eventFinalization.Error))
 		}
 	}
 	cancelAll()
@@ -279,6 +324,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	}
 	callbackMu.Lock()
 	err = errors.Join(runErr, finishErr, callbackErr, watchErr, fatal.Err(), definitionStopErr, eventFinalizationErr)
+	if cfg.AbortContext != nil {
+		err = errors.Join(err, context.Cause(cfg.AbortContext))
+	}
 	callbackMu.Unlock()
 	summary := model.Summary{CollectionHealth: "unknown"}
 	summary.EventFinalization = eventFinalization

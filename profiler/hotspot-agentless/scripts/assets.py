@@ -19,9 +19,9 @@ MAX_BYTES = 512 * 1024 * 1024
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 VERSION = {
     "schema_version": 1,
-    "collector_version": "1",
+    "collector_version": "2",
     "capture_abi": 2,
-    "wire_schema": 1,
+    "wire_schema": 2,
     "platform": "linux-amd64",
     "gadget_revision": "7097db144ccd8dab15373f27ec98d2c3d22e4588",
     "profiler_revision": "ef6cf29492c8a980f889052903fa2dd0c0765cc0",

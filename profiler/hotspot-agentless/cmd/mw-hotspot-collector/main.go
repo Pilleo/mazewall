@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,7 +38,13 @@ func run(args []string) int {
 	image := flags.String("image", "", "digest-pinned gadget image")
 	store := flags.String("store", "", "local OCI store containing the gadget")
 	duration := flags.Duration("duration", 15*time.Second, "maximum capture duration")
+	protocol := flags.Int("protocol-version", 1, "explicit wire version: 1 experiment replay, 2 strict production lifecycle")
+	control := flags.Bool("control-stdin", false, "owned parent pipe: stop newline requests drain; EOF aborts")
 	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if (*protocol != 1 && *protocol != capture.ProductionSchema) || (*protocol == capture.ProductionSchema && (!*captureMode || !*drainFull || *identityMode != "safepoint-epoch" || *debugRendered)) || (*control && *protocol != capture.ProductionSchema) {
+		fmt.Fprintln(os.Stderr, "unsupported protocol or production capture/control scope")
 		return 2
 	}
 	if (*identityMode != "unknown" && *identityMode != "safepoint-epoch") || (*identityMode == "safepoint-epoch" && (*debugRendered || *duration > 60*time.Second)) {
@@ -71,6 +78,14 @@ func run(args []string) int {
 		cfg.DrainEvents = *drainEvents
 		cfg.DrainFull = *drainFull
 		runCapture := capture.Run
+		if *protocol == capture.ProductionSchema {
+			runCapture = capture.RunProduction
+			if *control {
+				runCapture = func(ctx context.Context, cfg capture.Config, writer io.Writer) error {
+					return capture.RunProductionControlled(ctx, cfg, writer, os.Stdin)
+				}
+			}
+		}
 		if *debugRendered {
 			runCapture = capture.RunDebug
 		}

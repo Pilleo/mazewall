@@ -1,7 +1,7 @@
 # MazeWall external HotSpot collector assets
 
 This is the single canonical Go collector source tree. Kotlin evidence and local
-asset admission are internal integration components; public sessions/readiness
+asset admission/readiness decisions are internal integration components; public sessions
 are subsequent milestones of the [integration plan](../../docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
 
 The engine retains its historical `io.mazewall/experiments/hotspot-agentless`
@@ -37,7 +37,7 @@ and `-trimpath -buildvcs=false` removes worktree paths/status from the executabl
 All dependency module sums, root replacements and zero-fuzz overlays are preserved.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
-`manifest.json` locks asset version 1, wire schema 1, capture ABI 2, Linux-amd64,
+`manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
 upstream revisions and the verified overlay fingerprint. Every listed file has a
 SHA-256 checksum. Verification bounds the manifest to 64 KiB, 256 files and 512 MiB,
 rejects symbolic/traversing paths, missing/incomplete files, digest/size mismatches,
@@ -61,7 +61,7 @@ An explicitly privileged external launch against an ordinary target uses:
 ```bash
 /absolute/assets/mw-hotspot-collector --capture --pid HOST_PID \
   --store /absolute/assets/oci --image ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@sha256:DIGEST_FROM_MANIFEST \
-  --hotspot-identity=safepoint-epoch --drain-full --duration 60s
+  --protocol-version=2 --hotspot-identity=safepoint-epoch --drain-full --duration 60s
 ```
 
 Select the launch authority yourself. This command cannot change an existing
@@ -69,6 +69,37 @@ JVM's startup settings. The initial strict profile admits the pinned Temurin25
 interpreter/SerialGC runtime only. Keep the target alive through final enrichment
 and drain. Stdout is JSONL; stderr is separate. Physical finalization does not
 prove whole-session loss completeness or produce an enforcement policy.
+
+## Production readiness and control (schema 2)
+
+Select `--protocol-version=2` explicitly. It requires the strict runtime/owned
+full-drain scope and verified enrichment bounds. Schema 1 remains the separately
+selected experimental/replay contract; it is not production readiness.
+
+`session_started` describes the requested PID/profile. `collector_ready` follows
+Gadget's successful OCI/ebpf Start (native readers/maps/link established), strict
+runtime discovery and a fresh target generation/pidfd/exec/fatal check. It carries
+host PID, start ticks, BOOTTIME clock/sample, exact JVM build/hash and provider pins.
+It does not wait for a useful Java stack; cold events may still be unavailable.
+Events from already-running target threads may precede ready. A failed startup
+does not emit ready. `collector_error` preserves diagnostics and native errno when
+available; an unjoined/blocked event writer cannot be safely used to append an error,
+so failed EOF/exit must also be handled. Summary/EOF alone never prove completion.
+
+SIGTERM and SIGINT both request the existing checked graceful drain. To bind a
+supervised child to its parent's pipe lifetime, also pass `--control-stdin`: keep
+stdin open through finalization, write exactly `stop\n` once to request drain,
+and close it on parent loss. EOF or malformed input aborts the independent owned
+native/enrichment lifetime. The bounded poll worker joins without closing borrowed
+stdin. Pipe lifetime guarantees apply when that option is configured; signal-only
+launches do not acquire a parent-death guarantee.
+
+Internal Kotlin `HotSpotSessionMachine` makes pure exhaustive state/effect decisions.
+Startup is bounded to 10 seconds, strict session lifetime to 60 seconds, and stop
+to at most two remaining seconds. One finish owner is retained through duplicate
+finish/close. Completion requires a verified healthy native summary, stdout EOF,
+stderr join and zero process exit; failures preserve causes and pending ownership.
+Actual JVM process/pipe supervision is milestone 4.
 
 ## Verification
 

@@ -603,7 +603,17 @@ normalized digest reference without registry fallback. Verification/install have
 no compiler/network/privilege side effects; ordinary JVM builds do not depend on
 native asset builds.
 
-Public strategy/session/readiness supervision is subsequent work in the
+Production schema 2 separates requested session start from admitted native ready.
+Ready follows successful Gadget native Start and fresh runtime/generation/exec
+checks; it does not promise useful cold attribution. Parent stdin control is
+explicit: stop newline requests graceful drain, while EOF aborts the independently
+owned native lifetime. SIGTERM uses the same checked drain. Internal pure Kotlin
+states require native summary, stdout EOF, stderr join and zero process exit before
+completion, preserving failure causes and pending owners under finite deadlines.
+Collector/wire version 2 assets reject stale version-1 installations; schema-1
+experiment replay remains explicitly separate.
+
+Public strategy/session process supervision is subsequent work in the
 [integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
 See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
 and [verified installed-capture evidence](../../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).

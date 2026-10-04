@@ -26,7 +26,7 @@ class HotSpotAssetsTest {
 
     @Test
     fun `incompatible schema version platform and capture ABI are refused`() {
-        for ((field, replacement) in listOf("schema_version" to "2", "collector_version" to "\"stale\"", "capture_abi" to "1", "wire_schema" to "2", "platform" to "\"linux-arm64\"")) {
+        for ((field, replacement) in listOf("schema_version" to "2", "collector_version" to "\"stale\"", "capture_abi" to "1", "wire_schema" to "1", "platform" to "\"linux-arm64\"")) {
             fixture()
             val manifest = directory.resolve("manifest.json")
             val text = Files.readString(manifest)
@@ -121,7 +121,7 @@ class HotSpotAssetsTest {
         Files.writeString(
             directory.resolve("manifest.json"),
             """
-            {"schema_version":1,"collector_version":"1","capture_abi":2,"wire_schema":1,
+            {"schema_version":1,"collector_version":"2","capture_abi":2,"wire_schema":2,
              "platform":"linux-amd64","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
              "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
              "patch_sha256":"e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb",

@@ -7,6 +7,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var errTargetExited = errors.New("target exited during owned capture")
+
+// The historical schema-1 unknown-identity experiment observes a process-lifetime
+// window. Strict identity and owned drains require the target alive until retirement.
+func targetStopError(cfg Config, err error) error {
+	if !cfg.production && !cfg.StrictEpoch && !cfg.DrainEvents && !cfg.DrainFull && errors.Is(err, errTargetExited) {
+		return nil
+	}
+	return err
+}
+
 // The caller owns the real pidfd; the watcher only borrows it until return.
 func watchTarget(ctx context.Context, fd int, cancel context.CancelFunc, checks ...func() error) error {
 	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
@@ -35,7 +46,7 @@ func watchTarget(ctx context.Context, fd int, cancel context.CancelFunc, checks 
 		}
 		if poll[0].Revents&(unix.POLLIN|unix.POLLHUP) != 0 {
 			cancel()
-			return nil
+			return errTargetExited
 		}
 	}
 	return nil

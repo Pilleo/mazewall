@@ -99,7 +99,7 @@ collector=$("${docker_cmd[@]}" create --privileged --pid=host \
 attach_pid=$!
 attached=false
 for ((attempt=0; attempt<300; attempt++)); do
-    if rg -q '"collector_attached"' "$artifact/events.jsonl"; then
+    if rg -q "\"${MW_CAPTURE_READY_KIND:-collector_attached}\"" "$artifact/events.jsonl"; then
         attached=true
         break
     fi
@@ -120,7 +120,7 @@ if [[ "$drain_full" == true ]]; then
         sleep 0.1
     done
     if [[ "$completed" != true ]]; then printf 'Strict fixture did not complete before drain; artifacts: %s\n' "$artifact" >&2; exit 1; fi
-    "${docker_cmd[@]}" kill --signal SIGINT "$collector" >/dev/null
+    "${docker_cmd[@]}" kill --signal "${MW_STOP_SIGNAL:-SIGINT}" "$collector" >/dev/null
 fi
 wait "$attach_pid"
 exit_code=$("${docker_cmd[@]}" inspect --format '{{.State.ExitCode}}' "$collector")

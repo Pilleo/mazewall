@@ -26,7 +26,12 @@ internal data class HotSpotWireRecord(
 
 internal class HotSpotWireReader(
     private val limits: HotSpotReplayLimits,
+    private val expectedSchemaVersion: ULong = 1uL,
 ) {
+    init {
+        require(expectedSchemaVersion == 1uL || expectedSchemaVersion == 2uL)
+    }
+
     fun read(
         input: InputStream,
         consume: (HotSpotWireRecord) -> Unit,
@@ -64,7 +69,7 @@ internal class HotSpotWireReader(
         }
         checkDepth(text)
         val row = parseObject(text)
-        checkHotSpotProtocol(row.ulong("schema_version") == 1uL, "unsupported collector schema")
+        checkHotSpotProtocol(row.ulong("schema_version") == expectedSchemaVersion, "unsupported collector schema")
         val session = row.text("session_id")
         checkHotSpotProtocol(session.length in 1..MAX_SESSION_ID_LENGTH, "invalid session identity length")
         val eventId = row.optionalText("event_id")
