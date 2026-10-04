@@ -1,8 +1,8 @@
 name: mw-hotspot-openat
 description: Selected x86-64 openat handler-entry events with Gadget OTel stack references
 homepageURL: https://github.com/Pilleo/mazewall
-documentationURL: https://github.com/Pilleo/mazewall/tree/master/experiments/hotspot-agentless
-sourceURL: https://github.com/Pilleo/mazewall/tree/master/experiments/hotspot-agentless/gadgets/openat-stack
+documentationURL: https://github.com/Pilleo/mazewall/tree/master/profiler/hotspot-agentless
+sourceURL: https://github.com/Pilleo/mazewall/tree/master/profiler/hotspot-agentless/gadgets/openat-stack
 datasources:
   openat:
     fields:

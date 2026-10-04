@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestone_1_complete
+status: approved_milestones_1_2_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -242,20 +242,20 @@ asset bundle; the experiment remains a test/evidence harness for that engine.
 delegate experiment preparer/Make targets; bounded artifact manifest reader and
 `HotSpotAssets.kt`; `HotSpotAssetsTest.kt`; explicit Gradle asset build/install tasks.
 
-- [ ] Write red asset tests for checksum/version/ABI mismatch, partial installation,
+- [x] Write red asset tests for checksum/version/ABI mismatch, partial installation,
   missing helper and required gadget/BPF data; no runtime compiler/network assumptions.
-- [ ] Promote source without duplicated runtime trees, preserving root replacements,
+- [x] Promote source without duplicated runtime trees, preserving root replacements,
   zero-fuzz overlays and native copyright/SPDX notices. Rename the demo entrypoint
   to a collector-facing command; keep fixture/fault variants separate.
-- [ ] Build executable plus pinned gadget data/OCI artifact through existing pinned
+- [x] Build executable plus pinned gadget data/OCI artifact through existing pinned
   builders. Prove the chosen local/cache loader against the actual Gadget API;
   embed/export/load the required assets without assuming an unimplemented file loader.
-- [ ] Package/install only verified owned paths. Use explicit operator assets lookup;
+- [x] Package/install only verified owned paths. Use explicit operator assets lookup;
   do not trigger native build, registry pull or privilege escalation at session startup.
-- [ ] Run existing experiment `make verify`, native finalization gates and a live
+- [x] Run existing experiment `make verify`, native finalization gates and a live
   strict capture with the promoted engine. Compare actual selected module/layout
   and artifact fingerprints; original claims do not migrate without evidence.
-- [ ] Run `./gradlew :profiler:test --tests '*HotSpotAssetsTest'`; review and commit.
+- [x] Run `./gradlew :profiler:test --tests '*HotSpotAssetsTest'`; review and commit.
 
 **Gate:** Installed assets launch on the tested host and preserve capture correctness;
 ordinary JVM-only builds need no Go/Clang/Docker merely to compile `:profiler`.
@@ -407,6 +407,12 @@ coverage adapter, 14 focused tests, full profiler unit/static-analysis/warning-r
 and merge gate pass. Public model/strategy exposure is deferred to milestone 5;
 no native collector launch is added by this step. See
 [milestone evidence](../../plans/2026-10-03-mazewall-hotspot-evidence-milestone.md).
+
+Milestone 2 completed: canonical collector source with delegated experiment
+builds, pinned reproducible static executable/local OCI graph, internal bounded
+Kotlin asset admission and explicit offline install tasks. Native finalization,
+three installed strict capture runs and the merge gate pass. See
+[asset milestone evidence](../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).
 
 Start with **milestone 1**, after operator review of this proposed scope/API. Do not
 implement all phases in one diff. Every runtime/API milestone gets a scoped backlog

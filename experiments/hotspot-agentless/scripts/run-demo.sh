@@ -58,7 +58,7 @@ if [[ "$drain_full" == true ]]; then
     if [[ -n "$corpus_run" ]]; then printf 'Full drain hold gate supports strict inline/unloading fixtures only\n' >&2; exit 1; fi
     java_main+=(/fixture/finish)
 fi
-image=$(cat build/gadget-image.ref)
+image="${MW_GADGET_IMAGE:-$(cat build/gadget-image.ref)}"
 store="${MW_GADGET_STORE:-$HOME/.ig/oci-store}"
 mkdir -p build
 artifact=$(mktemp -d "$root/build/capture.XXXXXX")

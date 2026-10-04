@@ -583,3 +583,27 @@ Because the JVM's `Thread.getStackTrace()` requires the target thread to be in a
 2. Even if the thread is kept alive, it will have already returned from the syscall method and progressed further, meaning the captured stack trace will not contain the active system call frame.
 
 Therefore, the synchronous ACK protocol is structurally mandatory for accurate JVM stack trace profiling. The daemon must suspend the thread, notify the JVM listener, wait for the JVM listener to dump the stack trace and send the ACK byte, and only then resume the tracee.
+
+## 7. External HotSpot collector integration — internal milestones
+
+The independent event-triggered Gadget/OTel engine has one canonical source tree
+at `profiler/hotspot-agentless/`. The experiment delegates runtime builds and
+retains verification tooling/fixtures/results. Its initial strict capability is
+process-wide synchronous openat handler-entry evidence for exact pinned Temurin25
+interpreter/SerialGC. An event captures its own native stack/identity; deferred
+enrichment cannot replace it with a later same-thread stack. Native physical
+finalization remains separate from partial/unknown whole-session loss.
+
+Internal Kotlin replay preserves immutable typed evidence and always-incomplete
+coverage. Internal `HotSpotAssets` admits an explicitly installed trusted bundle
+using bounded version/ABI/pin/checksum/path and transitive OCI-graph validation.
+Optional Gradle asset build/verify/install tasks provide a pinned static executable
+and isolated local OCI store. The actual Gadget local target resolves a fully
+normalized digest reference without registry fallback. Verification/install have
+no compiler/network/privilege side effects; ordinary JVM builds do not depend on
+native asset builds.
+
+Public strategy/session/readiness supervision is subsequent work in the
+[integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
+See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
+and [verified installed-capture evidence](../../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).

@@ -13,6 +13,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+COLLECTOR_BINARY = os.environ.get("MW_COLLECTOR_BINARY", "build/mw-hotspot-demo")
 
 
 def main():
@@ -87,7 +88,7 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
         wait_until(lambda: "ready " in subprocess.check_output(docker + ["logs", target], text=True), 25, "target readiness")
         collector_resources = None
         if mode != "baseline":
-            command = docker + ["create", "--privileged", "--pid=host", "--mount", "type=bind,src=/sys,dst=/sys,readonly", "--mount", f"type=bind,src={ROOT},dst=/work,readonly", "--mount", f"type=bind,src={os.environ.get('MW_GADGET_STORE', str(Path.home()/'.ig/oci-store'))},dst=/store,readonly", "--entrypoint", "/work/build/mw-hotspot-demo", lock["images"]["go"], "--capture", "--pid", str(pid), "--image", image, "--store", "/store", "--duration", "45s"]
+            command = docker + ["create", "--privileged", "--pid=host", "--mount", "type=bind,src=/sys,dst=/sys,readonly", "--mount", f"type=bind,src={ROOT},dst=/work,readonly", "--mount", f"type=bind,src={os.environ.get('MW_GADGET_STORE', str(Path.home()/'.ig/oci-store'))},dst=/store,readonly", "--entrypoint", "/work/" + COLLECTOR_BINARY, lock["images"]["go"], "--capture", "--pid", str(pid), "--image", image, "--store", "/store", "--duration", "45s"]
             command += ["--collection-mode", "events"] if mode == "events" else ["--hotspot-identity", "safepoint-epoch"]
             if args.drain_events:
                 command += ["--drain-events"]
@@ -121,7 +122,7 @@ def run_one(args, mode, repeat, directory, docker, lock, patch, image):
         readiness = time.monotonic_ns() - started
         data = {"mode": mode, "run": run, "host_pid": pid, "target_uid": os.getuid(), "operations": args.operations, "warmup": args.warmup, "post_attach_warmup": args.post_attach_warmup, "preparation_pause_ns": 500000, "diversity": args.diversity, "pause_ns": args.pause_ns, "jvm_image": lock["images"]["jdk"], "jvm_flags": ["-Xint", "-XX:+UseSerialGC", "-Xmx128m"], "patch_sha256": patch["patch_sha256"], "gadget_image": image, "kernel": platform.release(), "readiness_ns": readiness, "readiness_semantics": "target_ready_and_collector_attached; not_enrichment_readiness", "target_agent_injected": False, "source_sha256": hashlib.sha256((ROOT / "fixtures/java/BenchmarkFixture.java").read_bytes()).hexdigest(), "class_sha256": hashlib.sha256((ROOT / "build/benchmark-classes/BenchmarkFixture.class").read_bytes()).hexdigest()}
         if mode != "baseline":
-            data["collector_binary_sha256"] = hashlib.sha256((ROOT / "build/mw-hotspot-demo").read_bytes()).hexdigest()
+            data["collector_binary_sha256"] = hashlib.sha256((ROOT / COLLECTOR_BINARY).read_bytes()).hexdigest()
         data["drain_events"] = args.drain_events and mode == "events"
         data["drain_full"] = args.drain_full and mode == "full"
         (artifact / "benchmark-manifest.json").write_text(json.dumps(data, indent=2) + "\n")

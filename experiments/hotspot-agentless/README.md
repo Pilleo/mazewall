@@ -1,6 +1,10 @@
 # Agentless HotSpot event profiler experiment
 
-This standalone Go module embeds Gadget and its compatible OTel eBPF profiler.
+This is the test/evidence harness for the [canonical collector](../../profiler/hotspot-agentless/README.md).
+Runtime packages, module pins, native gadget and overlays are source links to
+that single tree; preparation and collector builds delegate there. Benchmark,
+oracle, stress fixtures and historical results stay here. The canonical module
+retains its existing Go import namespace for internal-package compatibility.
 The current implementation covers dependency/preflight verification, live
 event-triggered capture and **typed, bounded enrichment**. The `--capture` mode
 emits versioned event, terminal enrichment and session-summary JSONL records.
@@ -59,7 +63,8 @@ notation replacements explicitly. Do not use upstream `main` as a build input.
 
 `make deps` verifies the original modules, checks the locked Gadget and profiler
 checksums, applies scoped patches without fuzz to generated sources under ignored
-`build/deps/`, and writes temporary module replacements. The patch/addition
+`profiler/hotspot-agentless/build/deps/`, and writes temporary module replacements
+for this harness. The patch/addition
 bundle hash is embedded in the collector and preserved in every terminal result.
 The module cache is never edited. Build/test through Make, which selects
 `build/experiment.go.mod`; direct `go test ./...` against the unpatched upstream

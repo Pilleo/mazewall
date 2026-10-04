@@ -21,7 +21,7 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
-	flags := flag.NewFlagSet("mw-hotspot-demo", flag.ContinueOnError)
+	flags := flag.NewFlagSet("mw-hotspot-collector", flag.ContinueOnError)
 	pid := flags.Int("pid", 0, "ordinary-user target host PID")
 	check := flags.Bool("preflight", false, "inspect environment without attaching a probe")
 	captureMode := flags.Bool("capture", false, "run the first live capture gate")

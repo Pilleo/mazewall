@@ -29,9 +29,9 @@ Optional structured `--drain-full` now requires acknowledged event readout,
 definition perf/final consumption, enrichment completion and auxiliary/prune joins
 under the original remaining stop budget. Native metadata failures preserve errno
 and failed ownership. The ordinary partial capture path remains distinct.
-See [strict definition evidence](../results/full-definition-finalization.md),
-[metadata remedy](../results/metadata-retirement.md) and
-[auxiliary retirement](../results/auxiliary-worker-retirement.md). Explicit buffer
+See [strict definition evidence](../../../experiments/hotspot-agentless/results/full-definition-finalization.md),
+[metadata remedy](../../../experiments/hotspot-agentless/results/metadata-retirement.md) and
+[auxiliary retirement](../../../experiments/hotspot-agentless/results/auxiliary-worker-retirement.md). Explicit buffer
 drains do not upgrade native loss to complete. Historical sections below describe
 the earlier patch milestones and their initial claim boundaries.
 
@@ -48,7 +48,7 @@ Default full capture retains its existing partial shutdown behavior.
 datasource path with a real filtered openat link, queued tail, pressure, future
 publication refusal after detach and timed-out callback retention. Native layout,
 buffer and cache sizes are unchanged. See
-[`event-only-finalization.md`](../results/event-only-finalization.md) for source
+[`event-only-finalization.md`](../../../experiments/hotspot-agentless/results/event-only-finalization.md) for source
 retirement semantics, exact evidence, partial claim boundaries and review gates.
 
 ## Event-read loss patch (local, not submitted upstream)
@@ -62,7 +62,7 @@ discarded an additional valid event for each positive ring loss report.
 The full event-operator race suite and an isolated real-ring pressure control
 verify payload delivery, subscriber errors and loss-only behavior. Normal native
 buffers/maps and loss polling are unchanged. See
-[`event-read-loss.md`](../results/event-read-loss.md) for the regression, actual
+[`event-read-loss.md`](../../../experiments/hotspot-agentless/results/event-read-loss.md) for the regression, actual
 pressure denominator, retained failed runs and remaining finality gates.
 
 ## Definition shutdown patches (local, not submitted upstream)
@@ -83,7 +83,7 @@ delivery have channel-gated race tests; buffer finality remains an open gate.
 `faults/drop-marked-event.patch` is applied only to an owned generated gadget
 source copy by `build-loss-gadget.sh`. It drops benchmark token 42 after allocating
 its occurrence sequence and has a separate image/manifest. Normal gadget source
-has no runtime fault switch. See [evidence](../results/loss-benchmark.md).
+has no runtime fault switch. See [evidence](../../../experiments/hotspot-agentless/results/loss-benchmark.md).
 
 ## Epoch identity patches (local, not submitted upstream)
 
@@ -108,7 +108,7 @@ quality are separate. Permission/unexpected errors never depend on an event
 lookup for fatal delivery. The genuine drop-definition fault variant handles
 both legacy and strict storage and remains absent from normal source bundles.
 
-See the [implemented evidence](../results/identity-investigation.md#implemented-bounded-remedy-2026-10-01)
+See the [implemented evidence](../../../experiments/hotspot-agentless/results/identity-investigation.md#implemented-bounded-remedy-2026-10-01)
 before considering upstream submission or broader runtime support.
 
 Build inputs retain Gadget base `7097db144ccd8dab15373f27ec98d2c3d22e4588` and

@@ -63,6 +63,7 @@ deps:
 	python3 scripts/prepare-gadget.py
 
 unit: deps
+	$(MAKE) -C ../../profiler/hotspot-agentless unit
 	$(GO) test -race -modfile build/experiment.go.mod ./...
 	python3 scripts/test-run-benchmark.py
 
@@ -87,10 +88,7 @@ kernel-cache-test: deps
 		-test.run TestKernelLRUEvictionPreservesTwoCyclePruning -test.v
 
 build: deps
-	patch=$$(python3 -c 'import json; print(json.load(open("build/patch-manifest.json"))["patch_sha256"])'); \
-	$(GO) build -modfile build/experiment.go.mod -trimpath \
-		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
-		-o build/mw-hotspot-demo ./cmd/mw-hotspot-demo
+	$(MAKE) -C ../../profiler/hotspot-agentless build OUTPUT="$$(pwd)/build/mw-hotspot-demo"
 
 .PHONY: recovery-test-build recovery recovery-epoch
 recovery-epoch: recovery-test-build gadget
@@ -169,11 +167,8 @@ graph: deps
 	$(GO) mod verify
 
 container-build: deps
-	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
-		-e GOCACHE=/tmp/go-build -e GOPATH=/tmp/go -e HOME=/tmp \
-		-e GADGET_PATCH_ID="$$(python3 -c 'import json; print(json.load(open("build/patch-manifest.json"))["patch_sha256"])')" \
-		-v "$$(pwd):/work" -w /work $(GO_IMAGE) \
-		sh -c 'go build -modfile build/experiment.go.mod -trimpath -ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$GADGET_PATCH_ID" -o build/mw-hotspot-demo ./cmd/mw-hotspot-demo'
+	$(MAKE) -C ../../profiler/hotspot-agentless container-build
+	cp ../../profiler/hotspot-agentless/build/mw-hotspot-collector build/mw-hotspot-demo
 
 preflight: build
 	bash scripts/preflight.sh --pid "$(PID)"

@@ -64,6 +64,36 @@ application {
         )
 }
 
+// Native HotSpot assets are explicit operator tasks, never prerequisites of JVM builds.
+tasks.register<Exec>("buildHotSpotAssets") {
+    group = "distribution"
+    description = "Build the pinned external HotSpot collector and verified local OCI bundle (requires Go/Docker)."
+    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+    commandLine("make", "bundle")
+}
+
+tasks.register<Exec>("verifyHotSpotAssets") {
+    group = "verification"
+    description = "Verify an existing local HotSpot asset bundle without building or downloading."
+    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+    commandLine("python3", "scripts/assets.py", "verify", "--bundle", "build/assets")
+    mustRunAfter("buildHotSpotAssets")
+}
+
+tasks.register<Exec>("installHotSpotAssets") {
+    group = "distribution"
+    description = "Verify/install an existing bundle into a new explicit -PhotSpotAssetsDirectory path."
+    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+    mustRunAfter("buildHotSpotAssets", "verifyHotSpotAssets")
+    val destination = providers.gradleProperty("hotSpotAssetsDirectory")
+    executable = "python3"
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf("scripts/assets.py", "install", "--bundle", "build/assets", "--output", destination.get())
+        },
+    )
+}
+
 sourceSets {
     main {
         resources.srcDir(layout.buildDirectory.dir("generated/resources"))
