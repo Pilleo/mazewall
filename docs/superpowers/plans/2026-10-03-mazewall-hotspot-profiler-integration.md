@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: draft_pending_operator_review
+status: approved_milestone_1_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -401,6 +401,12 @@ guidance, canonical profiler design/diagrams and runnable supported example.
 experimental stress/oracle tools remain optional verification tools.
 
 ## Execution and review checkpoints
+
+Milestone 1 completed: internal bounded schema-1 evidence replay and incomplete
+coverage adapter, 14 focused tests, full profiler unit/static-analysis/warning-ratchet
+and merge gate pass. Public model/strategy exposure is deferred to milestone 5;
+no native collector launch is added by this step. See
+[milestone evidence](../../plans/2026-10-03-mazewall-hotspot-evidence-milestone.md).
 
 Start with **milestone 1**, after operator review of this proposed scope/API. Do not
 implement all phases in one diff. Every runtime/API milestone gets a scoped backlog
