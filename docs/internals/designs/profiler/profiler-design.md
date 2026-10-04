@@ -621,9 +621,15 @@ owned through timeout, cancellation or failed close. Pure completion also requir
 resources-joined acknowledgment after actual worker joins and checked pipe closure.
 Operator launch prefixes must preserve pipe lifetime and wait for their collector;
 untracked/detached descendants cannot be inferred retired from a wrapper's exit.
-Public session/result/strategy wiring remains the next API milestone.
+Public HOTSPOT_AGENTLESS now explicitly selects that owned backend through attach
+or a ready-before-work current-JVM facade. Separate immutable HotSpotOptions retain
+old ProfileOptions descriptors; optional immutable typed ProfilingResult ownership
+preserves old constructors/copy descriptors and survives copies. Copies cannot
+promote selected-event evidence through supplied complete coverage. Native helper
+admission is independent of parent authority; AUTO and recorded EBPF are unchanged.
+See [public guidance](../../../../profiler/HOTSPOT_AGENTLESS.md).
 
-Public strategy/session exposure is subsequent work in the
+Public real-fault acceptance and supported distribution are subsequent work in the
 [integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
 See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
 and [verified installed-capture evidence](../../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).

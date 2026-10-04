@@ -12,6 +12,9 @@ public enum class ProfileStrategy {
     EBPF,
     HYBRID_NO_URING,
     AUTO,
+
+    /** Explicit external collector; pinned interpreter/Serial runtime, process-wide selected openat entries only. */
+    HOTSPOT_AGENTLESS,
 }
 
 public enum class IoUringVisibility {
@@ -100,7 +103,7 @@ public class ProfilingCoverage internal constructor(
     public val environment: ProfileEnvironment,
     internal val integrity: ProfileIntegrity,
 ) {
-    public val complete: Boolean get() = integrity.complete
+    public val complete: Boolean get() = integrity.complete && strategy != ProfileStrategy.HOTSPOT_AGENTLESS
     public val warnings: List<String> get() = integrity.warnings
 
     internal fun copy(

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 51 | *Total Resolved Issues:* 642
+*Total Active Issues:* 51 | *Total Resolved Issues:* 643
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 

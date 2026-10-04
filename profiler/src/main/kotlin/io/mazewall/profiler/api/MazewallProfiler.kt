@@ -1,12 +1,15 @@
 package io.mazewall.profiler.api
 
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.platform.lifecycle.Pid
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.collector.CollectorDrain
 import io.mazewall.profiler.collector.EbpfCollector
 import io.mazewall.profiler.collector.ObservationMerger
 import io.mazewall.profiler.compiler.BobCompiler
+import io.mazewall.profiler.internal.hotspot.HotSpotSessionFactory
+import io.mazewall.profiler.internal.hotspot.RealHotSpotSessionFactory
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -29,12 +32,18 @@ public class MazewallProfiler private constructor(
     private val environment: ProfileEnvironment,
     private val resolved: ProfileStrategy,
     private val reason: String,
+    private val hotSpotOptions: HotSpotOptions?,
+    private val hotSpotFactory: HotSpotSessionFactory,
 ) : AutoCloseable {
     private var closed = false
     private var lastSnapshot: ProfilingResult<Unit>? = null
+    private var hotSpotSession: HotSpotProfilingSession? = null
 
     public fun <T> profile(block: () -> T): ProfilingResult<T> {
         check(!closed) { "MazewallProfiler is closed" }
+        if (resolved == ProfileStrategy.HOTSPOT_AGENTLESS) {
+            return profile(checkNotNull(hotSpotOptions) { "HotSpotOptions are required for workload profiling" }, block)
+        }
         if (resolved == ProfileStrategy.EBPF) {
             return profileEbpfOnly(block)
         }
@@ -42,7 +51,33 @@ public class MazewallProfiler private constructor(
         return attachCoverage(raw)
     }
 
-    public fun snapshot(): ProfilingResult<Unit> = lastSnapshot ?: ProfilingResult(Unit, BillOfBehavior(), emptyMap(), emptyCoverage())
+    /** Separate immutable configuration keeps existing ProfileOptions constructor/copy descriptors intact. */
+    public fun <T> profile(
+        hotSpotOptions: HotSpotOptions,
+        block: () -> T,
+    ): ProfilingResult<T> {
+        check(!closed) { "MazewallProfiler is closed" }
+        require(resolved == ProfileStrategy.HOTSPOT_AGENTLESS) { "HotSpotOptions require explicit HOTSPOT_AGENTLESS" }
+        val pid = Pid(ProcessHandle.current().pid().toInt())
+        return attach(pid, hotSpotOptions).use { session ->
+            val value = block()
+            val final = session.finish()
+            lastSnapshot = final
+            final.withValue(value)
+        }
+    }
+
+    /** Session owns its collector independently; keep target alive through finish and close the returned owner. */
+    public fun attach(
+        pid: Pid,
+        hotSpotOptions: HotSpotOptions,
+    ): HotSpotProfilingSession {
+        check(!closed) { "MazewallProfiler is closed" }
+        require(resolved == ProfileStrategy.HOTSPOT_AGENTLESS) { "Attach requires explicit HOTSPOT_AGENTLESS" }
+        return hotSpotFactory.attach(pid, hotSpotOptions).also { hotSpotSession = it }
+    }
+
+    public fun snapshot(): ProfilingResult<Unit> = hotSpotSession?.snapshot() ?: lastSnapshot ?: ProfilingResult(Unit, BillOfBehavior(), emptyMap(), emptyCoverage())
 
     override fun close() {
         closed = true
@@ -169,6 +204,27 @@ public class MazewallProfiler private constructor(
 
     public companion object {
         public fun open(options: ProfileOptions = ProfileOptions()): MazewallProfiler {
+            return open(options, null, RealHotSpotSessionFactory)
+        }
+
+        public fun open(
+            options: ProfileOptions,
+            hotSpotOptions: HotSpotOptions,
+        ): MazewallProfiler {
+            require(options.strategy == ProfileStrategy.HOTSPOT_AGENTLESS) { "HotSpotOptions require explicit HOTSPOT_AGENTLESS" }
+            return open(options, hotSpotOptions, RealHotSpotSessionFactory)
+        }
+
+        internal fun open(
+            options: ProfileOptions,
+            hotSpotOptions: HotSpotOptions?,
+            factory: HotSpotSessionFactory,
+        ): MazewallProfiler {
+            if (options.strategy == ProfileStrategy.HOTSPOT_AGENTLESS) {
+                require(options.processWide && options.captureStacks && options.ebpfEventLog == null && options.ioUringDisabled == null) {
+                    "HotSpot requires processWide/captureStacks and supports no recorded-log or io_uring override"
+                }
+            }
             if (options.strategy == ProfileStrategy.STRACE) {
                 throw IllegalArgumentException(
                     "STRACE is not an operator session strategy. Use profile { } (USER_NOTIF). " +
@@ -178,11 +234,11 @@ public class MazewallProfiler private constructor(
             val env = ProfileEnvironment(
                 kernelRelease = runCatching { Files.readString(Path.of("/proc/sys/kernel/osrelease")).trim() }
                     .getOrElse { System.getProperty("os.version") ?: "unknown" },
-                ebpfLoad = EbpfCapability.probe(),
+                ebpfLoad = if (options.strategy == ProfileStrategy.HOTSPOT_AGENTLESS) EbpfLoad.Denied("parent unprobed; external collector admits actual authority") else EbpfCapability.probe(),
                 ioUringDisabled = options.ioUringDisabled,
             )
             val (resolved, reason) = resolve(options.strategy, env.ebpfLoad)
-            return MazewallProfiler(options, env, resolved, reason)
+            return MazewallProfiler(options, env, resolved, reason, hotSpotOptions, factory)
         }
 
         internal fun resolve(
@@ -190,6 +246,7 @@ public class MazewallProfiler private constructor(
             load: EbpfLoad,
         ): Pair<ProfileStrategy, String> {
             return when (strategy) {
+                ProfileStrategy.HOTSPOT_AGENTLESS -> ProfileStrategy.HOTSPOT_AGENTLESS to "explicit external HotSpot process-wide selected-event collector"
                 ProfileStrategy.USER_NOTIF ->
                     ProfileStrategy.USER_NOTIF to "explicit USER_NOTIF"
                 ProfileStrategy.STRACE ->

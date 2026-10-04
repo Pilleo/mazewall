@@ -2,15 +2,20 @@ package io.mazewall.profiler.hotspot
 
 import io.mazewall.platform.lifecycle.Pid
 import io.mazewall.platform.process.RealProcessLauncher
-import io.mazewall.profiler.internal.hotspot.HotSpotAttachOptions
-import io.mazewall.profiler.internal.hotspot.HotSpotBackend
+import io.mazewall.profiler.api.HotSpotOptions
+import io.mazewall.profiler.api.HotSpotProfilingException
+import io.mazewall.profiler.api.MazewallProfiler
+import io.mazewall.profiler.api.ProfileOptions
+import io.mazewall.profiler.api.ProfileStrategy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -68,17 +73,26 @@ class HotSpotNativeAttachTest {
                         "type=bind,src=/sys,dst=/sys,readonly",
                         go,
                     )
-            HotSpotBackend().attach(Pid(pid), HotSpotAttachOptions(assets, prefix)).use { session ->
-                assertFalse(requireNotNull(session.snapshot().evidence).finalized)
+            MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HOTSPOT_AGENTLESS, processWide = true)).use { profiler ->
+              profiler.attach(Pid(pid), HotSpotOptions(assets, prefix)).use { session ->
+                assertFalse(requireNotNull(session.snapshot().structuredEvidence).finalized)
                 Files.createFile(directory.resolve("gate"))
                 waitFor { command(docker + listOf("logs", target)).contains("completed ") }
                 val final = session.finish()
-                val evidence = requireNotNull(final.evidence)
+                val evidence = requireNotNull(final.structuredEvidence)
                 assertTrue(evidence.finalized && evidence.terminalAccountingComplete && evidence.summary.physicalDrainComplete)
-                assertFalse(final.pendingOwnership || evidence.collectionLossComplete)
+                assertFalse(final.coverage.complete || evidence.collectionLossComplete)
+                assertEquals(ProfileStrategy.HOTSPOT_AGENTLESS, final.coverage.strategy)
                 assertEquals(400, evidence.records.count { it.event.filename.contains("mw-inline-open-") })
                 assertTrue(evidence.records.any { record -> record.evidence.frames.any { it.functionName.contains("InlineOpenFixture") } })
                 Files.createFile(directory.resolve("finish"))
+                }
+            }
+            val ran = AtomicBoolean()
+            MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.HOTSPOT_AGENTLESS, processWide = true), HotSpotOptions(assets, prefix)).use { profiler ->
+                val refused = assertFailsWith<HotSpotProfilingException> { profiler.profile { ran.set(true) } }
+                assertFalse(ran.get())
+                assertFalse(refused.pendingOwnership)
             }
         } finally {
             command(docker + listOf("rm", "-f", target))

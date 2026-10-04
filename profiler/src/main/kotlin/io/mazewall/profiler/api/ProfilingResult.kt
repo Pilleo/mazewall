@@ -16,11 +16,19 @@ import io.mazewall.profiler.api.TraceEvent
  * Do not call [BillOfBehavior.toDsl] without [ProfilingCoverage]; the default is [ProfilingCoverage.absent]
  * which is incomplete.
  */
-public class ProfilingResult<T>(
+public class ProfilingResult<T> private constructor(
     public val value: T,
     public val behavior: BillOfBehavior,
     stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>,
-    public val coverage: ProfilingCoverage = ProfilingCoverage(
+    coverage: ProfilingCoverage,
+    observations: List<ProfileObservation>,
+    private val structuredOwner: StructuredProfileEvidence?,
+) {
+    public constructor(
+        value: T,
+        behavior: BillOfBehavior,
+        stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>,
+        coverage: ProfilingCoverage = ProfilingCoverage(
         strategy = ProfileStrategy.USER_NOTIF,
         strategyReason = "legacy result without coverage",
         processWide = false,
@@ -32,8 +40,20 @@ public class ProfilingResult<T>(
         environment = ProfileEnvironment("unknown", EbpfLoad.Denied("unprobed")),
         integrity = ProfileIntegrity(false),
     ),
-    observations: List<ProfileObservation> = emptyList(),
-) {
+        observations: List<ProfileObservation> = emptyList(),
+    ) : this(value, behavior, stackProfile, coverage, observations, null)
+
+    public val coverage: ProfilingCoverage = if (structuredOwner == null) {
+        coverage
+    } else {
+        coverage.copy(
+        strategy = ProfileStrategy.HOTSPOT_AGENTLESS,
+        integrity = coverage.integrity.copy(complete = false),
+    )
+    }
+
+    /** Ordered immutable provider evidence; absent for existing profiling mechanisms. */
+    public val structuredEvidence: StructuredProfileEvidence? get() = structuredOwner
     private val stackProfileStorage = ImmutableStackProfile.copyOf(stackProfile)
     public val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
         get() = stackProfileStorage.snapshot()
@@ -53,9 +73,13 @@ public class ProfilingResult<T>(
         stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = this.stackProfile,
         coverage: ProfilingCoverage = this.coverage,
         observations: List<ProfileObservation> = this.observations,
-    ): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations)
+    ): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations, structuredOwner)
 
-    /** Serializes the observed behavior and its measured coverage, never [value]. */
+    internal fun withStructuredEvidence(evidence: StructuredProfileEvidence): ProfilingResult<T> = ProfilingResult(value, behavior, stackProfile, coverage, observations, evidence)
+
+    internal fun <R> withValue(value: R): ProfilingResult<R> = ProfilingResult(value, behavior, stackProfile, coverage, observations, structuredOwner)
+
+    /** Serializes behavior/coverage, never [value] or stacks. Save typed diagnostics via [StructuredProfileEvidence.toJson]. */
     public fun toProfileDocumentJson(): String = ProfileDocument.from(this).toJson()
 
     @JvmOverloads

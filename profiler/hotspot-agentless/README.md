@@ -99,8 +99,8 @@ Startup is bounded to 10 seconds, strict session lifetime to 60 seconds, and sto
 to at most two remaining seconds. One finish owner is retained through duplicate
 finish/close. Completion requires a verified healthy native summary, stdout EOF,
 stderr join and zero process exit; failures preserve causes and pending ownership.
-Internal JVM process/pipe supervision is implemented in milestone 4. Public
-strategy/result/session exposure is reviewed in milestone 5.
+Internal JVM process/pipe supervision is implemented in milestone 4. Milestone 5
+exposes the [explicit public strategy/results/session](../HOTSPOT_AGENTLESS.md).
 
 ## Owned Kotlin adapter (internal)
 
@@ -125,8 +125,9 @@ before resources-joined completion is admitted. A blocked launcher/reader/closer
 or failed close stays owned, exposes partial failure evidence and can be retried
 through the retained owner. Failed sessions do not become successful after cleanup.
 
-The internal `HotSpotProfilingSession` supplies snapshot/finish/close; no changes
-to existing public strategy or result descriptors are made by this milestone.
+The internal ownership session supplies snapshot/finish/close. The additive public
+facade wraps it with immutable evidence and compatible result descriptors; AUTO,
+USER_NOTIF and recorded-EBPF behavior remain unchanged.
 
 ## Verification
 

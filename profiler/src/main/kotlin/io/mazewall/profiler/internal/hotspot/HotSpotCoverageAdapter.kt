@@ -10,18 +10,39 @@ import io.mazewall.profiler.api.StackAttribution
 
 internal object HotSpotCoverageAdapter {
     fun toResult(evidence: StructuredProfileEvidence): ProfilingResult<Unit> {
+        return result(evidence, false, true)
+    }
+
+    fun toLiveResult(
+        evidence: StructuredProfileEvidence,
+        parentJoined: Boolean = evidence.finalized,
+    ): ProfilingResult<Unit> {
+        return result(evidence, true, parentJoined).withStructuredEvidence(
+            io.mazewall.profiler.api
+            .StructuredProfileEvidence(evidence),
+        )
+    }
+
+    private fun result(
+        evidence: StructuredProfileEvidence,
+        live: Boolean,
+        parentJoined: Boolean,
+    ): ProfilingResult<Unit> {
         val inferred = ProfilingCoverage
             .infer(
-            strategy = ProfileStrategy.EBPF,
-            strategyReason = "HotSpot schema-1 evidence replay; live strategy dispatch is not installed",
+            strategy = if (live) ProfileStrategy.HOTSPOT_AGENTLESS else ProfileStrategy.EBPF,
+            strategyReason = if (live) "explicit HotSpot process-wide window; selected handler entries include background threads" else "HotSpot schema-1 evidence replay; replay is not live capture",
             processWide = true,
             observations = emptyList(),
             stacks = if (evidence.records.any { it.evidence.attribution == "event_correlated" }) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = evidence.summary.observedEventLoss
                 ?.coerceAtMost(Int.MAX_VALUE.toULong())
                 ?.toInt() ?: 0,
-            drainComplete = evidence.summary.physicalDrainComplete,
-            environment = ProfileEnvironment("recorded evidence", EbpfLoad.Denied("replay does not probe collector authority")),
+            drainComplete = evidence.summary.physicalDrainComplete && parentJoined,
+            environment = ProfileEnvironment(
+                if (live) System.getProperty("os.version") else "recorded evidence",
+                EbpfLoad.Denied(if (live) "parent authority unprobed; external helper admits actual authority/runtime" else "replay does not probe collector authority"),
+            ),
         )
         val coverage = inferred.withWarnings(
             inferred.warnings +

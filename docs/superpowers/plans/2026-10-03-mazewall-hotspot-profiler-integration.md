@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestones_1_2_3_4_complete
+status: approved_milestones_1_2_3_4_5_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -328,21 +328,21 @@ with typed evidence retained and policy eligibility unchanged.
 `api/ProfilingResult.kt`, API snapshot; add proposed `HotSpotOptions.kt`;
 `HotSpotStrategyTest.kt`, `HotSpotResultCompatibilityTest.kt`; existing strategy tests.
 
-- [ ] Write red tests for explicit selection, unchanged AUTO, unsupported scope/
+- [x] Write red tests for explicit selection, unchanged AUTO, unsupported scope/
   runtime/options, missing helper, no fallback and block-not-run-before-readiness.
-- [ ] Add HOTSPOT_AGENTLESS and an explicit dispatch branch. First-version admission
+- [x] Add HOTSPOT_AGENTLESS and an explicit dispatch branch. First-version admission
   requires processWide/captureStacks true and verified target runtime. Parent eBPF
   probe results cannot override an independently privileged collector's preflight.
-- [ ] Add attach/session entrypoint and compatible result evidence owner/getter.
+- [x] Add attach/session entrypoint and compatible result evidence owner/getter.
   Verify every old constructor/copy descriptor; preserve evidence across copy/snapshot.
   Any lossy legacy frame projection must remain secondary to the full typed sequence.
-- [ ] Implement current-PID `profile {}` using the checked attach lifecycle, preserving
+- [x] Implement current-PID `profile {}` using the checked attach lifecycle, preserving
   returned block value and both block/finish failure causes. Label process-wide window
   semantics; do not claim lambda-only, invocation or virtual-thread attribution.
-- [ ] Set incomplete coverage explicitly for selected-event/unknown-loss evidence,
+- [x] Set incomplete coverage explicitly for selected-event/unknown-loss evidence,
   even if all observed frames/joins succeed. Keep dedicated-worker/policy conversion
   rejection and document serialization round trips for the new enum/evidence.
-- [ ] Run strategy/result/session tests, `:profiler:test`, ABI validation and Detekt;
+- [x] Run strategy/result/session tests, `:profiler:test`, ABI validation and Detekt;
   review approved additive API diff before committing this milestone.
 
 **Gate:** A public type genuinely launches the collector and returns its typed evidence;
@@ -427,6 +427,12 @@ includes all parent workers/pipes. Real child fault tests, installed native
 parent-pipe capture and full merge gate pass. Public session/results remain in
 milestone 5's API review. See
 [supervision evidence](../../plans/2026-10-04-mazewall-hotspot-supervision-milestone.md).
+
+Milestone 5 completed: explicit public strategy/options/attach/session/workload
+facade, immutable typed evidence/report serialization, copy-preserved result owner
+and intrinsically incomplete coverage. Old public descriptors remain present;
+public native attachment and host-JVM refusal, ABI/full profiler/merge gates pass.
+See [public API evidence](../../plans/2026-10-04-mazewall-hotspot-public-api-milestone.md).
 
 Start with **milestone 1**, after operator review of this proposed scope/API. Do not
 implement all phases in one diff. Every runtime/API milestone gets a scoped backlog
