@@ -27,6 +27,7 @@ internal sealed interface HotSpotSessionState {
         val stdoutEnded: Boolean = false,
         val stderrJoined: Boolean = false,
         val processExited: Boolean = false,
+        val resourcesJoined: Boolean = false,
     ) : HotSpotSessionState
 
     class Failed(
@@ -73,6 +74,8 @@ internal sealed interface HotSpotSessionEvent {
     data object StderrJoined : HotSpotSessionEvent
 
     data object CleanupJoined : HotSpotSessionEvent
+
+    data object ResourcesJoined : HotSpotSessionEvent
 
     data class Failure(
         val cause: Throwable,

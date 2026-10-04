@@ -12,7 +12,8 @@ class HotSpotArchitectureTest {
     fun sealedSecurityOutcomesHaveAClosedSubclassSet() {
         val expected = mapOf(
             HotSpotSessionState::class.java to setOf("Created", "Starting", "Ready", "Running", "Finishing", "Failed", "Completed"),
-            HotSpotSessionEvent::class.java to setOf("Start", "Started", "Ready", "BeginWork", "Finish", "Summary", "ProcessExited", "StdoutEnded", "StderrJoined", "CleanupJoined", "Failure", "Tick"),
+            HotSpotSessionEvent::class.java to
+                setOf("Start", "Started", "Ready", "BeginWork", "Finish", "Summary", "ProcessExited", "StdoutEnded", "StderrJoined", "ResourcesJoined", "CleanupJoined", "Failure", "Tick"),
             HotSpotSessionEffect::class.java to setOf("Launch", "PublishReady", "RunWork", "RequestStop", "Abort", "AwaitOwner"),
         )
         for ((parent, variants) in expected) {

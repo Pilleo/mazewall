@@ -5,7 +5,15 @@ private const val SESSION_NANOS = 60_000_000_000L
 private const val STOP_NANOS = 2_000_000_000L
 
 /** Pure lifecycle decisions. The interpreter owns clock readings, pipes, signals and process leases. */
-internal class HotSpotSessionMachine {
+internal class HotSpotSessionMachine(
+    private val startupNanos: Long = STARTUP_NANOS,
+    private val sessionNanos: Long = SESSION_NANOS,
+    private val stopNanos: Long = STOP_NANOS,
+) {
+    init {
+        require(startupNanos in 1..STARTUP_NANOS && sessionNanos in 1..SESSION_NANOS && stopNanos in 1..STOP_NANOS)
+    }
+
     fun evaluate(
         state: HotSpotSessionState,
         event: HotSpotSessionEvent,
@@ -37,11 +45,7 @@ internal class HotSpotSessionMachine {
         nowNanos: Long,
     ): HotSpotSessionTransition =
         when (event) {
-            HotSpotSessionEvent.Start -> if (state == HotSpotSessionState.Created) {
-                HotSpotSessionTransition(HotSpotSessionState.Starting(nowNanos + STARTUP_NANOS, nowNanos + SESSION_NANOS), listOf(HotSpotSessionEffect.Launch))
-            } else {
-                invalid(state)
-            }
+            HotSpotSessionEvent.Start -> HotSpotSessionProgress.start(state, nowNanos + startupNanos, nowNanos + sessionNanos)
             is HotSpotSessionEvent.Started -> HotSpotSessionProgress.started(state, event)
             is HotSpotSessionEvent.Ready -> HotSpotSessionProgress.ready(state, event)
             HotSpotSessionEvent.BeginWork -> HotSpotSessionProgress.beginWork(state, nowNanos)
@@ -50,6 +54,7 @@ internal class HotSpotSessionMachine {
             is HotSpotSessionEvent.ProcessExited -> HotSpotSessionProgress.exited(state, event)
             HotSpotSessionEvent.StdoutEnded -> HotSpotSessionProgress.stdoutEnded(state)
             HotSpotSessionEvent.StderrJoined -> HotSpotSessionProgress.stderrJoined(state)
+            HotSpotSessionEvent.ResourcesJoined -> HotSpotSessionProgress.resourcesJoined(state)
             HotSpotSessionEvent.CleanupJoined -> invalid(state)
             is HotSpotSessionEvent.Failure -> fail(state, event.cause)
             HotSpotSessionEvent.Tick -> tick(state, nowNanos)
@@ -75,13 +80,13 @@ internal class HotSpotSessionMachine {
         now: Long,
     ): HotSpotSessionTransition {
         require(owner >= 0) { "Invalid finish owner" }
-        val remaining = (hardDeadline - now).coerceAtLeast(0).coerceAtMost(STOP_NANOS)
+        val remaining = (hardDeadline - now).coerceAtLeast(0).coerceAtMost(stopNanos)
         return HotSpotSessionTransition(HotSpotSessionState.Finishing(session, owner, now + remaining), listOf(HotSpotSessionEffect.RequestStop))
     }
 
     private fun complete(transition: HotSpotSessionTransition): HotSpotSessionTransition {
         val state = transition.state
-        return if (state is HotSpotSessionState.Finishing && state.summaryAccepted && state.stdoutEnded && state.stderrJoined && state.processExited) {
+        return if (state is HotSpotSessionState.Finishing && state.summaryAccepted && state.stdoutEnded && state.stderrJoined && state.processExited && state.resourcesJoined) {
             HotSpotSessionTransition(HotSpotSessionState.Completed(state.session), transition.effects)
         } else {
             transition

@@ -2,6 +2,20 @@ package io.mazewall.profiler.internal.hotspot
 
 /** Pure, focused admission/join transitions used only by the exhaustive session dispatcher. */
 internal object HotSpotSessionProgress {
+    fun start(
+        state: HotSpotSessionState,
+        startupDeadline: Long,
+        hardDeadline: Long,
+    ): HotSpotSessionTransition? =
+        if (state == HotSpotSessionState.Created) {
+            HotSpotSessionTransition(HotSpotSessionState.Starting(startupDeadline, hardDeadline), listOf(HotSpotSessionEffect.Launch))
+        } else {
+            null
+        }
+
+    fun resourcesJoined(state: HotSpotSessionState): HotSpotSessionTransition? =
+        if (state is HotSpotSessionState.Finishing && !state.resourcesJoined) HotSpotSessionTransition(state.copy(resourcesJoined = true)) else null
+
     fun started(
         state: HotSpotSessionState,
         event: HotSpotSessionEvent.Started,

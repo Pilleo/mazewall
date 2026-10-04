@@ -52,9 +52,9 @@ internal class HotSpotProtocol(
 
     /** Call only with evidence whose delivered occurrence pairing/counters were verified by the assembler. */
     fun summaryEvent(evidence: StructuredProfileEvidence): HotSpotSessionEvent.Summary {
+        checkHotSpotProtocol(evidence.finalized, "partial snapshot cannot certify final accounting")
         val final = evidence.summary
-        val row = Json.parseToJsonElement(final.rawJson) as? JsonObject ?: throw HotSpotProtocolException("summary is not an object")
-        val value = row.objectField("summary")
+        val value = Json.parseToJsonElement(final.rawJson) as? JsonObject ?: throw HotSpotProtocolException("summary is not an object")
         val errorFree = !value.containsKey("errors") || value.array("errors").isEmpty()
         return HotSpotSessionEvent.Summary(evidence.sessionId, final.physicalDrainComplete && final.terminalAccountingComplete && errorFree)
     }

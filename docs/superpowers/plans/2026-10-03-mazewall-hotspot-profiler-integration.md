@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestones_1_2_3_complete
+status: approved_milestones_1_2_3_4_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -299,20 +299,20 @@ with bounded stdout/stderr consumption, snapshots and one checked finish owner.
 `HotSpotBackend.kt`, `HotSpotSessionInterpreter.kt`; `api/HotSpotProfilingSession.kt`;
 `HotSpotCollectorProcessTest.kt`, `HotSpotSessionLifecycleTest.kt`.
 
-- [ ] Write red fault-injection tests for missing assets, denied privileges,
+- [x] Write red fault-injection tests for missing assets, denied privileges,
   wrong runtime/PID generation, ready timeout, early exit, malformed output,
   blocked stderr, target exit/exec, duplicate finish and held-reader cleanup.
-- [ ] Reuse `ProcessLauncher.startProcess(argv, redirectErrorStream=false)` and
+- [x] Reuse `ProcessLauncher.startProcess(argv, redirectErrorStream=false)` and
   explicit operator-configured launch argv. Do not run sudo or infer collector
   authority from the parent's UID/user namespace. Keep ordinary targets ordinary.
-- [ ] Consume machine JSONL and bounded stderr concurrently. Compute deadlines from
+- [x] Consume machine JSONL and bounded stderr concurrently. Compute deadlines from
   monotonic time, preserve native/workload failures and drain before process/resource
   retirement. Retain a pending owner instead of turning incomplete stop into success.
-- [ ] Expose immutable snapshots and finite finish; separately report producer drops,
+- [x] Expose immutable snapshots and finite finish; separately report producer drops,
   unavailable/skipped terminals, transport/auxiliary joins and Kotlin retention limits.
-- [ ] Keep target alive through graceful metadata/enrichment completion. Treat observed
+- [x] Keep target alive through graceful metadata/enrichment completion. Treat observed
   target exit/exec as abort; never recapture a later stack to repair old evidence.
-- [ ] Run `./gradlew :profiler:test --tests '*HotSpotSessionLifecycleTest'` and
+- [x] Run `./gradlew :profiler:test --tests '*HotSpotSessionLifecycleTest'` and
   `./gradlew :profiler:test --tests '*HotSpotCollectorProcessTest'`; use existing
   process/native traits for mocks, then review and commit.
 
@@ -419,6 +419,14 @@ validated native readiness, parent-pipe control/abort, verified SIGTERM drain an
 pure sealed finite single-owner Kotlin lifecycle. Existing replay stays schema 1;
 version-2 installed assets and full merge gate pass. See
 [protocol milestone evidence](../../plans/2026-10-04-mazewall-hotspot-protocol-milestone.md).
+
+Milestone 4 completed: internal asset/target admission and owned ProcessLauncher
+adapter, bounded concurrent readout, immutable streaming snapshots, finite
+single-stop finish and retryable failed ownership. Resource-joined completion
+includes all parent workers/pipes. Real child fault tests, installed native
+parent-pipe capture and full merge gate pass. Public session/results remain in
+milestone 5's API review. See
+[supervision evidence](../../plans/2026-10-04-mazewall-hotspot-supervision-milestone.md).
 
 Start with **milestone 1**, after operator review of this proposed scope/API. Do not
 implement all phases in one diff. Every runtime/API milestone gets a scoped backlog

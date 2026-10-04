@@ -45,7 +45,9 @@ class HotSpotSessionMachineTest {
         val stopped = machine.evaluate(summary, HotSpotSessionEvent.ProcessExited(0), 5).state
         val eof = machine.evaluate(stopped, HotSpotSessionEvent.StdoutEnded, 6).state
         assertIs<HotSpotSessionState.Finishing>(eof)
-        assertIs<HotSpotSessionState.Completed>(machine.evaluate(eof, HotSpotSessionEvent.StderrJoined, 7).state)
+        val stderr = machine.evaluate(eof, HotSpotSessionEvent.StderrJoined, 7).state
+        assertIs<HotSpotSessionState.Finishing>(stderr)
+        assertIs<HotSpotSessionState.Completed>(machine.evaluate(stderr, HotSpotSessionEvent.ResourcesJoined, 8).state)
         assertIs<HotSpotSessionState.Failed>(machine.evaluate(finishing, HotSpotSessionEvent.StdoutEnded, 4).state)
     }
 

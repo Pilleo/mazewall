@@ -6,10 +6,12 @@ internal class HotSpotEvidenceAssembler(
     private val limits: HotSpotReplayLimits = HotSpotReplayLimits(),
 ) {
     fun read(input: InputStream): StructuredProfileEvidence {
-        val replay = Replay()
+        val replay = begin()
         HotSpotWireReader(limits).read(input, replay::accept)
         return replay.finish()
     }
+
+    fun begin(): Accumulator = Accumulator()
 
     private class Tracked(
         val retain: Boolean,
@@ -22,7 +24,7 @@ internal class HotSpotEvidenceAssembler(
         var retained = retain
     }
 
-    private inner class Replay {
+    internal inner class Accumulator {
         private var session: String? = null
         private var target: Pair<Int, ULong>? = null
         private val tracked = linkedMapOf<String, Tracked>()
@@ -37,6 +39,7 @@ internal class HotSpotEvidenceAssembler(
         private var unavailable = 0uL
         private var skipped = 0uL
         private val mapper = HotSpotWireMapper(limits)
+        val hasSession: Boolean get() = session != null
 
         fun accept(row: HotSpotWireRecord) {
             checkHotSpotProtocol(summary == null, "record after terminal summary")
@@ -127,11 +130,42 @@ internal class HotSpotEvidenceAssembler(
             ) {
                     throw HotSpotProtocolException("summary terminal counters do not match delivered records")
                 }
+            return build(final, true)
+        }
+
+        fun snapshot(): StructuredProfileEvidence {
+            val observed = summary ?: HotSpotReplaySummary(
+                eventOrder.size.toULong(),
+                resolved,
+                unavailable,
+                skipped,
+                false,
+                false,
+                null,
+                "{\"kind\":\"partial_snapshot\",\"summary\":{\"terminal_accounting_complete\":false}}",
+            )
+            return build(observed.copy(terminalAccountingComplete = false), false)
+        }
+
+        private fun build(
+            final: HotSpotReplaySummary,
+            finalized: Boolean,
+        ): StructuredProfileEvidence {
             val records = eventOrder.mapNotNull { id ->
                 val record = tracked.getValue(id)
-                if (record.retained) HotSpotOccurrence(id, checkNotNull(record.event), checkNotNull(record.evidence)) else null
+                if (record.retained && record.seenEvent && record.seenTerminal) HotSpotOccurrence(id, checkNotNull(record.event), checkNotNull(record.evidence)) else null
             }
-            return StructuredProfileEvidence(checkNotNull(session), records, final, (tracked.size - records.size).toULong(), bytes, recoveries, discardedRecoveries)
+            return StructuredProfileEvidence(
+                checkNotNull(session),
+                records,
+                final,
+                tracked.values.count { !it.retained }.toULong(),
+                bytes,
+                recoveries,
+                discardedRecoveries,
+                finalized,
+                tracked.values.count { !it.seenEvent || !it.seenTerminal }.toULong(),
+            )
         }
     }
 }

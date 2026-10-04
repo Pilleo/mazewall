@@ -613,7 +613,17 @@ completion, preserving failure causes and pending owners under finite deadlines.
 Collector/wire version 2 assets reject stale version-1 installations; schema-1
 experiment replay remains explicitly separate.
 
-Public strategy/session process supervision is subsequent work in the
+The internal owned adapter now uses `ProcessLauncher` with separated stdout/stderr
+and parent stdin control. Streamed evidence distinguishes pending pairs, retention
+loss and verified terminal accounting; immutable partial snapshots cannot certify
+completion. Asynchronous child acquisition and all process/pipe worker leases stay
+owned through timeout, cancellation or failed close. Pure completion also requires
+resources-joined acknowledgment after actual worker joins and checked pipe closure.
+Operator launch prefixes must preserve pipe lifetime and wait for their collector;
+untracked/detached descendants cannot be inferred retired from a wrapper's exit.
+Public session/result/strategy wiring remains the next API milestone.
+
+Public strategy/session exposure is subsequent work in the
 [integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
 See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
 and [verified installed-capture evidence](../../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).

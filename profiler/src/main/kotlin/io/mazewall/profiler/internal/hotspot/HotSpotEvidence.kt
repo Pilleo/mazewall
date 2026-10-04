@@ -118,10 +118,11 @@ internal class StructuredProfileEvidence(
     val retainedBytes: Int,
     recoveries: List<String>,
     val discardedRecoveries: ULong,
+    val finalized: Boolean = true,
+    val pendingOccurrences: ULong = 0uL,
 ) {
     val records: List<HotSpotOccurrence> = java.util.List.copyOf(records)
     val recoveries: List<String> = java.util.List.copyOf(recoveries)
-    val finalized: Boolean = true
     val collectionLossComplete: Boolean = false
     val terminalAccountingComplete: Boolean get() = summary.terminalAccountingComplete
     val retentionComplete: Boolean get() = discardedOccurrences == 0uL && discardedRecoveries == 0uL

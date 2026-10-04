@@ -99,7 +99,34 @@ Startup is bounded to 10 seconds, strict session lifetime to 60 seconds, and sto
 to at most two remaining seconds. One finish owner is retained through duplicate
 finish/close. Completion requires a verified healthy native summary, stdout EOF,
 stderr join and zero process exit; failures preserve causes and pending ownership.
-Actual JVM process/pipe supervision is milestone 4.
+Internal JVM process/pipe supervision is implemented in milestone 4. Public
+strategy/result/session exposure is reviewed in milestone 5.
+
+## Owned Kotlin adapter (internal)
+
+`HotSpotBackend` verifies explicitly configured assets, reads the target birth
+generation through a testable identity trait, and launches through the existing
+`ProcessLauncher` with separate stdout/stderr. It selects schema 2 and parent stdin
+control automatically for that supervised child. Operator argv prefixes are
+immutable argument vectors; there is no shell interpolation or automatic sudo.
+The helper, rather than the parent's UID/capability probe, admits actual privileges
+and runtime. A configured wrapper must preserve stdin/EOF and wait for the actual
+collector, including aborts; detached/untracked descendants are outside that launch
+contract. Native success was verified with an explicit cached-image Docker wrapper.
+
+The parent owns asynchronous launch, stdout/stderr readers, process wait, finite
+timer, stop/abort and retirement tasks. Snapshots retain immutable paired evidence,
+separate pending occurrence/retention accounting, bounded stderr (64 KiB) and
+pending ownership. Retention limits continue accounting while dropping retained
+payloads. Stdout is bounded schema-2 JSONL; stderr is always drained even after its
+retention limit. Stops write exactly stop newline once and keep stdin open until
+child exit. Every worker must actually join and owned pipes must close successfully
+before resources-joined completion is admitted. A blocked launcher/reader/closer
+or failed close stays owned, exposes partial failure evidence and can be retried
+through the retained owner. Failed sessions do not become successful after cleanup.
+
+The internal `HotSpotProfilingSession` supplies snapshot/finish/close; no changes
+to existing public strategy or result descriptors are made by this milestone.
 
 ## Verification
 
