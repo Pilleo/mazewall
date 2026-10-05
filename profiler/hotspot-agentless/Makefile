@@ -19,7 +19,7 @@ unit: deps
 build: deps
 	patch=$$(python3 -c 'import json; print(json.load(open("build/patch-manifest.json"))["patch_sha256"])'); \
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -modfile build/experiment.go.mod -trimpath -buildvcs=false \
-		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
+		-ldflags "-s -w -X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
 		-o "$(OUTPUT)" ./cmd/mw-hotspot-collector
 
 container-build: deps
@@ -28,7 +28,7 @@ container-build: deps
 		-e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
 		-e GADGET_PATCH_ID="$$(python3 -c 'import json; print(json.load(open("build/patch-manifest.json"))["patch_sha256"])')" \
 		-v "$$(pwd):/work" -w /work $(GO_IMAGE) \
-		sh -c 'go build -modfile build/experiment.go.mod -trimpath -buildvcs=false -ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$GADGET_PATCH_ID" -o build/mw-hotspot-collector ./cmd/mw-hotspot-collector'
+		sh -c 'go build -modfile build/experiment.go.mod -trimpath -buildvcs=false -ldflags "-s -w -X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$GADGET_PATCH_ID" -o build/mw-hotspot-collector ./cmd/mw-hotspot-collector'
 
 gadget:
 	mkdir -p build/gadget

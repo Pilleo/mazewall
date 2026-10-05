@@ -8,6 +8,8 @@ component: "profiler"
 target_modules: [profiler]
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/hotspot"
+  - "profiler/hotspot-agentless/Makefile"
+  - "profiler/hotspot-agentless/scripts/test-release-footprint.py"
 target_symbols:
   - "HotSpotAssets"
 open_questions: false

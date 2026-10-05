@@ -43,6 +43,12 @@ The pinned Go image produces a static Linux-amd64 executable; the pinned Gadget
 builder builds the gadget. `SOURCE_DATE_EPOCH=1790985600` fixes OCI creation metadata,
 and `-trimpath -buildvcs=false` removes worktree paths/status from the executable.
 All dependency module sums, root replacements and zero-fuzz overlays are preserved.
+Release collector builds also use Go linker `-s -w`: ELF debug information and
+the external symbol table are omitted to reduce bytes hashed by interpreter
+admission. Go runtime/build metadata and embedded profiler BPF objects remain.
+Debugger-oriented builds can omit those flags explicitly; they are separate from
+the release artifact. Source/license archives remain complete. Verify real release
+artifacts with `python3 scripts/test-release-footprint.py <baseline> <candidate>`.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 `manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
