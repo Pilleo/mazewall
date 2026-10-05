@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 27846a59
-status: approved_inline_verification_complete
+status: approved_inline_complete
 ---
 
 # HotSpot Release Collector Footprint Implementation Plan
@@ -143,7 +143,7 @@ MW_HOTSPOT_ASSET_TEST_DIR=/home/leanid/Documents/code/java/jseccomp/profiler/hot
 
 Inspect JUnit execution counts, useful ordered frames and actual cleanup. Dense diagnostic may still reject; preserve it honestly.
 - [x] Record ELF section differences, build info, exact hashes, all admission rows, source/licenses and actual public outcomes in the evidence file. Keep the performance issue open if dense readout or admission bounds remain unproved.
-- [ ] Run `./scripts/adkw check-backlog`, `git diff --check`, `./scripts/lint.sh`, `./gradlew build`; commit `docs(profiler): record stripped collector admission comparison`.
+- [x] Run `./scripts/adkw check-backlog`, `git diff --check`, `./scripts/lint.sh`, `./gradlew build`; commit `docs(profiler): record stripped collector admission comparison`.
 
 ## Approval checkpoint
 
