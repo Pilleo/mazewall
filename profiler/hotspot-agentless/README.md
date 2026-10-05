@@ -1,8 +1,16 @@
 # MazeWall external HotSpot collector assets
 
 This is the single canonical Go collector source tree. Kotlin evidence and local
-asset admission/readiness decisions are internal integration components; public sessions
-are subsequent milestones of the [integration plan](../../docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
+asset admission/readiness decisions are internal integration components behind the
+explicit public strategy. The approved [integration plan](../../docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md)
+is complete; whole-session coverage remains incomplete.
+
+For versioned offline distribution, license/corresponding-source inventory,
+library/protocol pairing and the compiled installed example, see
+[operator guidance](../HOTSPOT_AGENTLESS.md#versioned-offline-distribution).
+`:profiler:distHotSpotAssets` packages existing verified local assets; prepared
+native source/cache and Go are required only for this optional packaging task.
+The versioned output destination must not already exist.
 
 The engine retains its historical `io.mazewall/experiments/hotspot-agentless`
 module namespace so the experiment's verification tools can share Go `internal`

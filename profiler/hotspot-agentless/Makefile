@@ -14,6 +14,7 @@ deps:
 unit: deps
 	$(GO) test -race -modfile build/experiment.go.mod ./...
 	python3 scripts/test-assets.py
+	python3 scripts/test-distribution.py
 
 build: deps
 	patch=$$(python3 -c 'import json; print(json.load(open("build/patch-manifest.json"))["patch_sha256"])'); \

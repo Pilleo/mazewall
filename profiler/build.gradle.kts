@@ -80,6 +80,23 @@ tasks.register<Exec>("verifyHotSpotAssets") {
     mustRunAfter("buildHotSpotAssets")
 }
 
+tasks.register<Exec>("distHotSpotAssets") {
+    group = "distribution"
+    description = "Package verified local HotSpot assets, selected dependency notices and corresponding native source."
+    dependsOn("verifyHotSpotAssets")
+    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+    commandLine(
+        "python3",
+        "scripts/distribution.py",
+        "--bundle",
+        "build/assets",
+        "--output",
+        "build/distributions/mazewall-hotspot-${project.version}-linux-amd64.tar.gz",
+        "--library-version",
+        project.version.toString(),
+    )
+}
+
 tasks.register<Exec>("installHotSpotAssets") {
     group = "distribution"
     description = "Verify/install an existing bundle into a new explicit -PhotSpotAssetsDirectory path."

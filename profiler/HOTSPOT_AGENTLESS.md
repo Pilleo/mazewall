@@ -13,6 +13,85 @@ for the actual collector. Parent JVM privilege probes do not admit/refuse an
 independently authorized helper. Sessions own their collectors independently:
 closing the selector prevents new work; finish/close every returned session.
 
+## Versioned offline distribution
+
+The current pairing is `io.mazewall:profiler:0.1.0-SNAPSHOT`, collector version **2**,
+capture ABI **2**, wire schema **2**, Linux-amd64. This is a local development
+distribution, not a remotely published release. Exact dependency/JDK/builder pins
+are in `hotspot-agentless/dependencies.lock.json`; the accepted JDK is
+Temurin **25.0.4.1+1-LTS**, started with `-Xint -XX:+UseSerialGC`. Acceptance was on
+kernel `7.0.0-34-generic`; this does not certify all Linux kernel versions.
+
+Build native inputs only when explicitly requested:
+
+```bash
+./gradlew :profiler:buildHotSpotAssets
+./gradlew :profiler:verifyHotSpotAssets :profiler:distHotSpotAssets
+./gradlew :profiler:installDist
+```
+
+The optional native archive is
+`profiler/hotspot-agentless/build/distributions/mazewall-hotspot-0.1.0-SNAPSHOT-linux-amd64.tar.gz`,
+with an adjacent `.sha256`. It contains `assets/`, per-file `SHA256SUMS`,
+`provenance.json`, pinned inputs, verbatim third-party notices and
+`native-source.tar.gz` (canonical collector/overlays and both actual patched
+upstream source trees, including BPF source). MazeWall's README declares Apache-2.0;
+upstream userspace notices and GPL-2.0 BPF licenses are included separately under
+`licenses/`. Preserve these notices and corresponding source with redistributed
+native artifacts. The inventory covers the actual collector's linked Go modules;
+it is not a license inventory for separately supplied JVM dependencies.
+
+The archive's `assets/manifest.json` hashes the helper and all reachable local OCI
+blobs. Verify the trusted archive checksum, extract, then run `sha256sum -c SHA256SUMS`
+inside its root. Configure `HotSpotOptions` with the absolute extracted `assets/`
+directory, or install the existing verified local bundle into a **new** directory:
+
+```bash
+./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets
+```
+
+Checksum manifests detect corruption/version mismatch; they are trusted operator
+input, not signatures. Do not replace an existing installation in place. Packaging
+requires prepared native source/cache and Go; library use does not. Normal JVM
+builds do not depend on these native tasks and collector startup never downloads,
+queries a registry, compiles code or escalates privilege.
+
+### Installed runnable example
+
+`installDist` includes the compiled tooling example and library dependencies under
+`profiler/build/install/tier-e-daemon/lib/`. Copy this `lib/` directory to a fresh
+fixture directory alongside the extracted native archive and a `prefix.json` file.
+The file contains a JSON array of literal argv strings, for example `[]` when the
+operator has already authorized direct collector execution. Run in the exact pinned
+JVM, as the ordinary-user target, with its host PID visible to the helper:
+
+```bash
+java -Xint -XX:+UseSerialGC -cp '/absolute/fixture/lib/*' \
+  io.mazewall.profiler.hotspot.example.HotSpotInstalledExample \
+  /absolute/fixture/release/assets /absolute/fixture/output \
+  /absolute/fixture/prefix.json
+```
+
+The example runs two Java call paths, returns `workload-value`, writes immutable
+`evidence.json`, and requires useful example frames plus checked physical drain.
+It performs 40 warmups and 20 marked opens paced at 100 ms. Provision Linux BPF/
+perf/process-memory authorization for the **actual helper**, including LSM/Yama,
+host `/proc` visibility, memlock requirements and local OCI assets. The accepted
+test setup uses an explicitly operator-authorized privileged rootful container with
+host PID namespace, read-only `/sys` and an identical absolute asset mount; the
+ordinary target remains UID1000. Privileged-container/rootful-Docker access itself
+grants broad host authority. No generic minimal-capability deployment is certified.
+Keep wrapper stdin piped through to the helper and wait for its actual exit; a
+detached wrapper cannot establish retirement. An authorized argv prefix belongs in
+`prefix.json`; the library does not construct one or run automatic sudo.
+
+Current-interpreter asset/admission work measured 34–82 seconds before workload
+startup. Dense 600-open/1ms self-profiling experiments failed within the unchanged
+stop bound; the paced example does not establish a high-rate self-profiling guarantee.
+Native readiness means attachment/readers are active, not that cold method metadata
+or every stack is available. General JIT, alternate GCs, virtual-thread logical
+ancestry and complete loss accounting remain unsupported.
+
 ## Attach a supported existing JVM
 
 ```kotlin

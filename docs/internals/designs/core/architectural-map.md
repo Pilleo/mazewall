@@ -19,6 +19,7 @@ entry point for deadlines, admission, helper cancellation, listener health and o
 | **Profiler Service / Session** | Captures runtime dependencies; sessions own listeners, TID mappings, evidence buffers and cleanup outcomes. | Target JVM | Internal owners behind the public `Profiler` facade. |
 | **Profiler Daemon** | Out-of-process `USER_NOTIF` handling & memory reading. | Child Process (Java/JVM) | Per-connection sessions; remains available for permanent filters in pass-through mode. |
 | **Trace Listener** | Captures stack/evidence through its session's injected TID resolver. | Target JVM (Dedicated Thread) | Bound to one profiler session. |
+| **Explicit HotSpot collector** | Bounded event-correlated Java evidence on the pinned interpreter/Serial JVM. | Owned external native helper | Verified local OCI bundle; always-incomplete coverage; separate from USER_NOTIF/ACK. |
 | **BobCompiler** | Generates `BillOfBehavior` JSON from trace events. | Target JVM (Tooling) | Static/Post-process. |
 | **Process portal** | Pooled worker JVMs + RPC/`SCM_RIGHTS` for first-party modules. | Broker JVM + worker processes | Implemented (`:portals:runtime`, `:portals:worker`). Workers use a curated classpath; guest types are not on the broker runtime. Distinct from the syscall supervisor. |
 | **Portal Dispatcher Table** | Immutable method-to-handler authority, strictly validated at worker startup. | Worker JVM | Built once before serving requests; no mutation through the legacy registry after publication. |

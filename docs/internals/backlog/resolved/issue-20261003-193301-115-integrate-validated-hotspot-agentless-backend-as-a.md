@@ -1,7 +1,7 @@
 ---
 title: "Integrate validated HotSpot agentless backend as an explicit MazeWall profiler strategy"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -28,6 +28,13 @@ explicit strategy/result compatibility, live acceptance and supported distributi
 Process attachment precedes current-PID workload convenience; the existing JVM must
 already satisfy the pinned interpreter/Serial profile. Public API changes and
 implementation require operator review of this draft. Kubescape is independent.
+
+**Resolution:** All seven operator-approved integration milestones are complete:
+bounded typed evidence, canonical reproducible assets, strict readiness/lifecycle,
+owned Kotlin supervision, additive explicit API, six-case native acceptance and
+verified local distribution/installed public example. Whole-session coverage remains
+incomplete; dense interpreter admission/readout is a separate open follow-up. See
+[final evidence](../../../plans/2026-10-05-mazewall-hotspot-distribution-milestone.md).
 
 ---
 <!-- id: issue-20261003-193301-115-integrate-validated-hotspot-agentless-backend-as-a  file: issue-20261003-193301-115-integrate-validated-hotspot-agentless-backend-as-a.md -->

@@ -6,6 +6,10 @@ Figuring out which system calls and filesystem paths your code uses by hand is e
 
 > **Dev/test only.** Do not include the `:profiler` module as a production runtime dependency.
 
+For event-correlated Java evidence on the pinned interpreter JVM, see the explicit
+[HotSpot agentless backend](HOTSPOT_AGENTLESS.md). Its coverage is always incomplete
+and its results cannot generate an enforceable policy.
+
 ---
 
 ## Quick Start

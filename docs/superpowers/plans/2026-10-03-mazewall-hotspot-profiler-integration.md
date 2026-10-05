@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestones_1_2_3_4_5_6_complete
+status: approved_milestones_1_2_3_4_5_6_7_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -392,19 +392,24 @@ configure and run with accurate capability/coverage documentation.
 **Files:** `profiler/build.gradle.kts` explicit distribution tasks, module/public
 guidance, canonical profiler design/diagrams and runnable supported example.
 
-- [ ] Publish/document the collector+asset bundle for the tested platform, checksums,
+- [x] Publish/document the collector+asset bundle for the tested platform, checksums,
   licenses, JVM library/API version pairing and explicit operator privilege setup.
-- [ ] Make ordinary library use/build require no experiment checkout, registry/network
+- [x] Make ordinary library use/build require no experiment checkout, registry/network
   access or runtime compilation. Keep native asset build optional and reproducible.
-- [ ] Document attach/workload examples, strict JVM startup requirements, supported
+- [x] Document attach/workload examples, strict JVM startup requirements, supported
   events, background-thread scope, cold availability, partial loss and failure behavior.
-- [ ] Run the installed-artifact example from a clean fixture directory; verify
+- [x] Run the installed-artifact example from a clean fixture directory; verify
   mismatched/tampered assets and unsupported runtime are rejected.
-- [ ] Update API snapshot/design knowledge map, run backlog/link/whitespace/lint checks,
+- [x] Update API snapshot/design knowledge map, run backlog/link/whitespace/lint checks,
   review the release surface and commit only scoped artifacts/docs.
 
 **Gate:** The feature is first-class and installable, with evidence-backed capabilities;
 experimental stress/oracle tools remain optional verification tools.
+
+Milestone7 complete: local checksummed distribution carries version pairing,
+linked-module notices and corresponding native source. Installed public example
+passes in a fresh supported ordinary-user JVM; normal JIT is refused. ABI/build/lint
+gates pass. See [evidence](../../plans/2026-10-05-mazewall-hotspot-distribution-milestone.md).
 
 ## Execution and review checkpoints
 

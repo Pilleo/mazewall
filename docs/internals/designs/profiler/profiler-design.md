@@ -629,6 +629,13 @@ promote selected-event evidence through supplied complete coverage. Native helpe
 admission is independent of parent authority; AUTO and recorded EBPF are unchanged.
 See [public guidance](../../../../profiler/HOTSPOT_AGENTLESS.md).
 
+The explicit `distHotSpotAssets` task packages the verified local native graph,
+linked-module license inventory and corresponding patched BPF/source trees. It is
+independent of normal JVM build/runtime startup. Collector2/captureABI2/wire2 pairs
+with profiler0.1.0-SNAPSHOT. The compiled installed public example uses the same
+public current-JVM facade and requires useful own-frame evidence and physical drain;
+its paced acceptance does not prove dense interpreter throughput or complete loss.
+
 Public real-fault acceptance and supported distribution are subsequent work in the
 [integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
 See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
