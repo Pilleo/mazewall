@@ -9,6 +9,7 @@ import kotlinx.serialization.json.booleanOrNull
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.nio.charset.CharsetDecoder
 import java.nio.charset.CodingErrorAction
 
 private const val MAX_SESSION_ID_LENGTH = 128
@@ -38,6 +39,10 @@ internal class HotSpotWireReader(
     ) {
         val line = ByteArrayOutputStream()
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        val decoder = Charsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
         var records = 0
         while (true) {
             val count = input.read(buffer)
@@ -51,7 +56,7 @@ internal class HotSpotWireReader(
                     append(line, buffer, start, index - start)
                     checkHotSpotProtocol(line.size() != 0, "empty JSONL record")
                     checkHotSpotProtocol(++records <= limits.maxWireRecords, "wire record limit exceeded")
-                    consume(decode(line.toByteArray()))
+                    consume(decode(line.toByteArray(), decoder))
                     line.reset()
                     start = index + 1
                 }
@@ -70,14 +75,12 @@ internal class HotSpotWireReader(
         line.write(buffer, start, count)
     }
 
-    private fun decode(bytes: ByteArray): HotSpotWireRecord {
+    private fun decode(
+        bytes: ByteArray,
+        decoder: CharsetDecoder,
+    ): HotSpotWireRecord {
         val text = try {
-            Charsets.UTF_8
-                .newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes))
-                .toString()
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
         } catch (failure: java.nio.charset.CharacterCodingException) {
             throw HotSpotProtocolException("invalid UTF-8 record", failure)
         }
