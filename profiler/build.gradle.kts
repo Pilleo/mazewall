@@ -558,6 +558,10 @@ kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest"
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))
+    associateWith(kotlinCompilations.getByName("tooling"))
+}
+kotlinCompilations.named("test") {
+    associateWith(kotlinCompilations.getByName("tooling"))
 }
 kotlinCompilations.named("tooling") {
     associateWith(kotlinCompilations.getByName("main"))
