@@ -1,8 +1,29 @@
 # Remaining HotSpot performance and capability work
 
-Status: planning proposal. These plans do not authorize execution, new platform
-interfaces, public API changes or unsupported runtime admission. Each workstream
-has an independent deliverable and approval/promotion gate.
+## Execution checkpoint
+
+Runtime readout, native digest qualification, compiler/GC/Loom qualification
+harnesses and conservative accounting/kernel counter qualification are committed.
+Final root build passes(run-7d0cc2e4cea5), Go full host/race/digest/asset/distribution
+checks pass(run-eb6a261baebd), oracle/readiness/backlog/whitespace pass
+(run-c8798d59d5a5), repository lint and evidence links pass. Actual public7case
+matrix and isolated512open native counter test execute rather than skip.
+No production hash activation, compiled/mount lease or default loss binding is
+claimed. Those promotion/integration scopes remain open and their plans explicitly
+record the missing proof/contracts. Existing operator work/branch are preserved.
+
+Status: operator approved inline execution of the named plans. Runtime readout
+changes and experimental qualification deliverables are implemented and recorded
+below. New platform/public interfaces and unsupported runtime admission still
+require the explicit proof/approval gates; they are not inferred from qualification.
+
+Execution evidence: [dense](2026-10-05-hotspot-dense-readout-evidence.md),
+[digest](2026-10-05-hotspot-kernel-digest-evidence.md),
+[JIT/GC](2026-10-05-hotspot-jit-gc-evidence.md),
+[Loom](2026-10-05-hotspot-loom-evidence.md),
+[loss](2026-10-05-hotspot-loss-accounting-evidence.md).
+Default loss-owner integration/all-source instrumentation and native runtime
+promotion remain pending rather than being labeled implemented.
 
 ## Starting point
 
