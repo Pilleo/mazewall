@@ -85,7 +85,7 @@ status: approved_inline_measurements_complete
 - [x] Create separate selected-optimization plan; keep issue open until actual cost reduction/bound verified.
 - [x] Correct stale design639–642 completion wording; update operator limits only as measurements justify.
 - [x] Run `:profiler:test :profiler:checkKotlinAbi :profiler:checkLegacyAbi`, backlog/lint/whitespace checks and `./gradlew build`. Native suites only for actual native behavior changes.
-- [ ] Commit `docs(profiler): record interpreter performance diagnosis`.
+- [x] Commit `docs(profiler): record interpreter performance diagnosis` (completed checkpoint; see local Git history).
 
 ## Completion
 
