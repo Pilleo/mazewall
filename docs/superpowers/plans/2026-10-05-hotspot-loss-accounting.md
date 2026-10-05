@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: eacd0081
-status: approved_inline_execution_with_promotion_gate
+status: counter_qualification_delivered_default_integration_pending
 ---
 
 # HotSpot Loss Accounting Implementation Plan
@@ -205,6 +205,13 @@ for a stronger collection attestation.
 Kotlin ABI/policy regressions/backlog/links/lint/rootbuild; commit evidence.
 
 ## Completion gate
+
+Execution: pure conservation/overflow/source-inventory tests and actual isolated
+kernel openat pressure/overflow qualification pass (512attempts/255submitted/
+257reserve failures/255received/all12possibleCPU slots). Default Gadget binding,
+changed native map/ABI/provenance negotiation and all-source producer counters
+remain pending; no default BPF/schema/global completeness change is activated.
+See [evidence](../../plans/2026-10-05-hotspot-loss-accounting-evidence.md).
 
 Authoritative selected-stream loss is known after real quiescence/joins, and every
 unknown whole-source boundary is visible. Global completeness promotion is blocked
