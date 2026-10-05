@@ -37,23 +37,37 @@ internal class HotSpotWireReader(
         consume: (HotSpotWireRecord) -> Unit,
     ) {
         val line = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         var records = 0
         while (true) {
-            val next = input.read()
-            if (next == -1) {
+            val count = input.read(buffer)
+            if (count == -1) {
                 checkHotSpotProtocol(line.size() == 0, "truncated JSONL record without newline")
                 return
             }
-            if (next == '\n'.code) {
-                checkHotSpotProtocol(line.size() != 0, "empty JSONL record")
-                checkHotSpotProtocol(++records <= limits.maxWireRecords, "wire record limit exceeded")
-                consume(decode(line.toByteArray()))
-                line.reset()
-            } else {
-                checkHotSpotProtocol(line.size() < limits.maxLineBytes, "wire line byte limit exceeded")
-                line.write(next)
+            var start = 0
+            for (index in 0 until count) {
+                if (buffer[index] == '\n'.code.toByte()) {
+                    append(line, buffer, start, index - start)
+                    checkHotSpotProtocol(line.size() != 0, "empty JSONL record")
+                    checkHotSpotProtocol(++records <= limits.maxWireRecords, "wire record limit exceeded")
+                    consume(decode(line.toByteArray()))
+                    line.reset()
+                    start = index + 1
+                }
             }
+            append(line, buffer, start, count - start)
         }
+    }
+
+    private fun append(
+        line: ByteArrayOutputStream,
+        buffer: ByteArray,
+        start: Int,
+        count: Int,
+    ) {
+        checkHotSpotProtocol(count <= limits.maxLineBytes - line.size(), "wire line byte limit exceeded")
+        line.write(buffer, start, count)
     }
 
     private fun decode(bytes: ByteArray): HotSpotWireRecord {

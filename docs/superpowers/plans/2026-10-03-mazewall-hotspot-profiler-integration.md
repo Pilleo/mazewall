@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8be633cd
-status: approved_milestones_1_2_3_4_5_complete
+status: approved_milestones_1_2_3_4_5_6_complete
 ---
 
 # MazeWall HotSpot Agentless Profiler Integration Plan
@@ -357,26 +357,32 @@ and real native hooks, including failure paths and existing backend regression c
 `profiler/src/integrationTest/kotlin/io/mazewall/profiler/hotspot/`; promoted collector
 integration gates; retained versioned reports in experiment results.
 
-- [ ] Write a red public-API integration test against a fresh ordinary-user pinned
+- [x] Write a red public-API integration test against a fresh ordinary-user pinned
   interpreter/Serial JVM: two known call paths, unique operation tokens, correct order,
   exact PID generation and explicit unavailable outcomes. Gate using the repository's
   Linux/rootful capability annotations; do not disable tests to pass unsupported hosts.
-- [ ] Test real permission refusal, target restart/exec, original-deadline expiry,
+- [x] Test real permission refusal, target restart/exec, original-deadline expiry,
   queue/retention pressure, genuine first-definition loss/recovery, unloading and
   native held perf/netlink/event callbacks. All claims carry actual graph/provenance.
-- [ ] Exercise the same public wrapper in a supported current JVM for workload-profile
+- [x] Exercise the same public wrapper in a supported current JVM for workload-profile
   semantics; a normal unsupported JIT parent must fail clearly before the block.
-- [ ] Verify old USER_NOTIF/Tier E/recorded-EBPF and API/document/policy gates. The new
+- [x] Verify old USER_NOTIF/Tier E/recorded-EBPF and API/document/policy gates. The new
   backend must neither install seccomp nor alter the existing daemon/ACK/session path.
-- [ ] Run focused `:profiler:integrationTest --tests '*HotSpot*'`, promoted Go/native
+- [x] Run focused `:profiler:integrationTest --tests '*HotSpot*'`, promoted Go/native
   gates, then the repository merge gate `./gradlew build`. Kernel suites are required
   for actual attachment/lifecycle changes, not for the earlier replay-only tasks.
-- [ ] Record rejected cases and overhead with actual measurement windows; compare
+- [x] Record rejected cases and overhead with actual measurement windows; compare
   Kotlin wrapper versus standalone on the same fixture without inventing an overhead target.
-- [ ] Review acceptance evidence and commit. Keep unproved runtime/coverage gates explicit.
+- [x] Review acceptance evidence and commit. Keep unproved runtime/coverage gates explicit.
 
 **Gate:** Installed public API can reproduce useful event-correlated Java evidence,
 bounded failures and checked retirement without experimental-directory setup.
+
+Milestone 6 completed: six rootful installed public acceptance/fault/retention/
+current-workload/matched-measurement tests pass on the declared runtime, along with
+Go/native recovery/unloading/exec/finalization gates. The report records partial
+coverage and the measured dense interpreter readout limitation. See
+[native acceptance evidence](../../plans/2026-10-05-mazewall-hotspot-native-acceptance-milestone.md).
 
 ## Milestone 7 — Supported distribution and operator guidance
 

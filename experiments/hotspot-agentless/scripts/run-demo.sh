@@ -52,9 +52,11 @@ if [[ -n "$corpus_run" ]]; then
     java_main=(-cp /work/build/inline-corpus-classes InlineCorpusFixture /fixture /fixture/gate "$corpus_run" 1000 "$workers")
     gate=TestDeterministicInlineCorpus
 fi
-drain_full=false
-for option in "$@"; do if [[ "$option" == --drain-full ]]; then drain_full=true; fi; done
-if [[ "$drain_full" == true ]]; then
+hold_target=false
+for option in "$@"; do
+    if [[ "$option" == --drain-full || "$option" == --hotspot-identity=safepoint-epoch ]]; then hold_target=true; fi
+done
+if [[ "$hold_target" == true ]]; then
     if [[ -n "$corpus_run" ]]; then printf 'Full drain hold gate supports strict inline/unloading fixtures only\n' >&2; exit 1; fi
     java_main+=(/fixture/finish)
 fi
@@ -112,7 +114,7 @@ if [[ "$attached" != true ]]; then
     exit 1
 fi
 touch "$artifact/gate"
-if [[ "$drain_full" == true ]]; then
+if [[ "$hold_target" == true ]]; then
     completed=false
     for ((attempt=0; attempt<400; attempt++)); do
         if "${docker_cmd[@]}" logs "$target" 2>&1 | rg -q '^completed '; then completed=true; break; fi
@@ -129,7 +131,7 @@ if [[ "$exit_code" != 0 ]]; then
     printf 'Collector failed with exit %s; artifacts: %s\n' "$exit_code" "$artifact" >&2
     exit 1
 fi
-if [[ "$drain_full" == true ]]; then touch "$artifact/finish"; fi
+if [[ "$hold_target" == true ]]; then touch "$artifact/finish"; fi
 if [[ -n "$corpus_run" || "$unload_stress" == true ]]; then
     target_exit=$(timeout 15s "${docker_cmd[@]}" wait "$target")
     "${docker_cmd[@]}" logs "$target" > "$artifact/target.log" 2>&1
