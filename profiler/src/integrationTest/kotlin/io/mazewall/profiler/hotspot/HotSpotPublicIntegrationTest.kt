@@ -127,6 +127,18 @@ class HotSpotPublicIntegrationTest {
     fun `supported ordinary current JVM executes the public workload facade`(
         endpoint: ContainerEndpoint,
         @TempDir directory: Path,
+    ) = currentJvmMeasurement(endpoint, directory, dense = false)
+
+    @Test
+    fun `dense interpreter diagnostic retains checked success or rejection`(
+        endpoint: ContainerEndpoint,
+        @TempDir directory: Path,
+    ) = currentJvmMeasurement(endpoint, directory, dense = true)
+
+    private fun currentJvmMeasurement(
+        endpoint: ContainerEndpoint,
+        directory: Path,
+        dense: Boolean,
     ) {
         val assets = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
         val root = Path.of(".").toAbsolutePath().normalize()
@@ -141,7 +153,7 @@ class HotSpotPublicIntegrationTest {
         val client = "$collector-client"
         val docker = Path.of("/usr/bin/docker")
         try {
-            HotSpotAcceptanceHarness.command(
+            val commandResult = HotSpotAcceptanceHarness.runCommand(
                 endpoint.command(
                     "run",
                     "--pull=never",
@@ -176,17 +188,36 @@ class HotSpotPublicIntegrationTest {
                     directory.toString(),
                     uri,
                     collector,
+                    if (dense) "600" else "20",
+                    "40",
+                    if (dense) "1" else "100",
                 ),
                 timeoutSeconds = 120,
             )
-            assertTrue(Files.readString(directory.resolve("current-result.txt")).startsWith("workload-value"))
-            val evidence = StructuredProfileEvidence.fromJson(Files.readString(directory.resolve("current-evidence.json")))
-            assertTrue(evidence.finalized && evidence.summary.physicalDrainComplete)
+            val measurement = Json.parseToJsonElement(Files.readString(directory.resolve("current-measurement.json"))).jsonObject
+            assertEquals(if (dense) "600" else "20", measurement.getValue("operations").jsonPrimitive.content)
+            assertEquals("false", measurement.getValue("pending_ownership").jsonPrimitive.content)
+            val accepted = measurement.getValue("outcome").jsonPrimitive.content == "accepted"
+            if (!dense) assertTrue(accepted, commandResult.second)
+            val evidenceName = if (accepted) "current-evidence.json" else "current-failed-evidence.json"
+            val evidence = StructuredProfileEvidence.fromJson(Files.readString(directory.resolve(evidenceName)))
+            if (accepted) {
+                assertEquals(0, commandResult.first)
+                assertTrue(Files.readString(directory.resolve("current-result.txt")).startsWith("workload-value"))
+                assertTrue(evidence.finalized && evidence.summary.physicalDrainComplete)
+                assertEquals(0uL, evidence.pendingOccurrences)
+            } else {
+                assertTrue(commandResult.first != 0, "Rejected collection must retain a failing exit")
+                assertTrue(Files.exists(directory.resolve("current-failure.txt")))
+            }
             assertFalse(evidence.collectionLossComplete)
-            val destination = Path.of("build/reports/hotspot-acceptance/$collector-current")
+            assertTrue(HotSpotAcceptanceHarness.command(endpoint.command("ps", "-a", "--filter", "name=$collector", "--format", "{{.Names}}")).isBlank())
+            val destination = Path.of("build/reports/hotspot-acceptance/$collector-${if (dense) "dense" else "current"}")
             Files.createDirectories(destination)
-            Files.copy(directory.resolve("current-evidence.json"), destination.resolve("evidence.json"))
-            Files.copy(directory.resolve("current-result.txt"), destination.resolve("result.txt"))
+            Files.copy(directory.resolve(evidenceName), destination.resolve("evidence.json"))
+            Files.copy(directory.resolve("current-measurement.json"), destination.resolve("measurement.json"))
+            Files.writeString(destination.resolve("client-output.txt"), commandResult.second)
+            Files.copy(directory.resolve(if (accepted) "current-result.txt" else "current-failure.txt"), destination.resolve("result.txt"))
             Files.copy(assets.resolve("manifest.json"), destination.resolve("assets-manifest.json"))
         } finally {
             val progress = directory.resolve("current-progress.txt")

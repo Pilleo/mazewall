@@ -1,5 +1,6 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.profiler.hotspot.performance.HotSpotWorkloadMeasurementSettings
 import io.mazewall.profiler.hotspot.performance.measureReplay
 import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceAssembler
 import io.mazewall.profiler.internal.hotspot.HotSpotProtocolException
@@ -11,6 +12,14 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class HotSpotPerformanceMeasurementTest {
+    @Test
+    fun `diagnostic settings preserve accepted defaults and enforce bounds`() {
+        assertEquals(HotSpotWorkloadMeasurementSettings(20, 40, 100), HotSpotWorkloadMeasurementSettings())
+        assertFailsWith<IllegalArgumentException> { HotSpotWorkloadMeasurementSettings(operations = 601) }
+        assertFailsWith<IllegalArgumentException> { HotSpotWorkloadMeasurementSettings(warmups = -1) }
+        assertFailsWith<IllegalArgumentException> { HotSpotWorkloadMeasurementSettings(paceMillis = 0) }
+    }
+
     @Test
     fun `measurement preserves paired identity and ordered frames`() {
         val bytes = projection()
