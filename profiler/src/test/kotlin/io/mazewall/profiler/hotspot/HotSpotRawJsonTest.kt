@@ -19,6 +19,15 @@ import kotlin.test.assertFailsWith
 
 class HotSpotRawJsonTest {
     @Test
+    fun `canonical equality preserves internal value semantics without hiding key order`() {
+        val a = HotSpotRawJson(Json.parseToJsonElement("""{"a":1,"b":2}"""))
+        val b = HotSpotRawJson(Json.parseToJsonElement("""{"a":1,"b":2}"""))
+        assertEquals(a, b)
+        assertEquals(a.hashCode(), b.hashCode())
+        kotlin.test.assertNotEquals(a, HotSpotRawJson(Json.parseToJsonElement("""{"b":2,"a":1}""")))
+    }
+
+    @Test
     fun `raw rendering is deferred and canonical unknown fields survive`() {
         var renders = 0
         val tree = Json.parseToJsonElement("""{"unknown":{"quoted":"a\\\"b"},"n":18446744073709551615}""")

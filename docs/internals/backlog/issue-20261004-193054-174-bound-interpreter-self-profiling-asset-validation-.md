@@ -10,6 +10,8 @@ target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/hotspot"
   - "profiler/hotspot-agentless/Makefile"
   - "profiler/hotspot-agentless/scripts/test-release-footprint.py"
+  - "profiler/hotspot-agentless/scripts/kernel-digest.py"
+  - "profiler/hotspot-agentless/scripts/test-kernel-digest.py"
 target_symbols:
   - "HotSpotAssets"
 open_questions: false
@@ -39,6 +41,16 @@ dense run rejects283received/182retained/101pending with complete resource clean
 Source/license candidate distribution is retained. See
 [footprint evidence](../../plans/2026-10-05-hotspot-release-footprint-evidence.md).
 Keep open for remaining admission/dense-readout costs; do not infer a latency bound.
+
+**Readout/kernel qualification:** Lazy canonical diagnostics and decoder reuse are
+implemented with unchanged typed validation/ABI. Matched mapping median0.553s
+->0.154s, but moved encoding keeps total medians2.731s/2.742s; actual dense run
+still rejects301received/276retained/25pending with no pending resource ownership.
+AF_ALG prototype hashes all9candidate files identically in0.085s median versus
+33.174s interpreted checksums on this host. Production hashing remains Java pending
+explicit native bridge/opt-in/deadline/ABI review. See
+[readout](../../plans/2026-10-05-hotspot-dense-readout-evidence.md) and
+[digest qualification](../../plans/2026-10-05-hotspot-kernel-digest-evidence.md).
 
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->

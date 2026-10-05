@@ -103,6 +103,14 @@ Native readiness means attachment/readers are active, not that cold method metad
 or every stack is available. General JIT, alternate GCs, virtual-thread logical
 ancestry and complete loss accounting remain unsupported.
 
+The optimized Kotlin reader defers canonical diagnostics and reuses a strict UTF8
+decoder, with unchanged field/identity/refusal rules. Actual dense600case still
+rejects; moved serialization cost is measured separately. Kernel SHA256, pinned
+JIT/GC, virtual-thread identity and loss accounting currently have experimental
+qualification tools, not broader production admission. See the
+[readout evidence](../docs/plans/2026-10-05-hotspot-dense-readout-evidence.md) and
+[workstream design](../docs/plans/2026-10-05-hotspot-performance-capability-design.md).
+
 ## Attach a supported existing JVM
 
 ```kotlin

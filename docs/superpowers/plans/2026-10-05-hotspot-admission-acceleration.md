@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: eacd0081
-status: approved_inline_qualification
+status: qualification_complete_native_activation_requires_review
 ---
 
 # HotSpot Admission Acceleration Qualification Implementation Plan
@@ -141,6 +141,11 @@ supported host. If not, retain rejection and current Java provider; do not claim
 admission issue resolved. Validate links/backlog/whitespace and commit evidence.
 
 ## Completion gate
+
+Execution:8867e15c kernel probe/tests; actual whole9file bundle hashes match;
+three kernel/interpreter pairs and explicit bridge/deadline/ABI decision retained.
+Production Java hashing remains unchanged. See
+[evidence](../../plans/2026-10-05-hotspot-kernel-digest-evidence.md).
 
 Known answers and whole real asset digests agree; bounded streams/cleanup and
 permission refusal pass; three measured pairs and an explicit reviewed provider

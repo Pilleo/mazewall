@@ -8,4 +8,8 @@ internal class HotSpotRawJson(
     render: (JsonElement) -> String = { it.toString() },
 ) {
     val text: String by lazy(LazyThreadSafetyMode.PUBLICATION) { render(value) }
+
+    override fun equals(other: Any?): Boolean = this === other || (other is HotSpotRawJson && text == other.text)
+
+    override fun hashCode(): Int = text.hashCode()
 }

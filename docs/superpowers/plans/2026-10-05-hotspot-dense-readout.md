@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: eacd0081
-status: approved_inline_execution
+status: implemented_verified_dense_promotion_failed
 ---
 
 # HotSpot Dense Readout Implementation Plan
@@ -188,6 +188,12 @@ retain all failure/partial/timing rows; faster replay does not change supported 
 unproved. Run backlog/lint/whitespace/ABI/fullbuild and commit only owned files.
 
 ## Completion gate
+
+Execution:92e9fa0a deferred canonical diagnostics;233f8e6a invocation-local decoder.
+Full semantic/ABI/static controls and actual7case matrix pass. Dense600case remains
+rejected with301received/276retained/25pending and no pending ownership. Offline
+rendering costs are retained, not hidden. See
+[evidence](../../plans/2026-10-05-hotspot-dense-readout-evidence.md).
 
 Exact evidence/refusal/resource contracts pass, matched timings and serialization
 cost are retained, actual public result is reported honestly. A600case guarantee
