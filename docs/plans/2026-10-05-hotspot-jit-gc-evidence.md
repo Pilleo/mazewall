@@ -1,5 +1,10 @@
 # Pinned JIT and GC candidate qualification
 
+Review update: the recorded corpus counts are historical diagnostic observations,
+not promotion-grade validation. Identity/pairing and substring-name verifier defects
+are reproduced in the [implementation review](2026-10-05-hotspot-implementation-review.md).
+Revalidate retained packets with hardened validators before relying on useful counts.
+
 Implemented offline proof gate, exact-token JVM fixture/verifier and explicit
 experimental schema1 harness. Production ValidateProfile/Discover remain unchanged;
 no UseCompiler/G1 whitelist relaxation or new native lease is activated.
