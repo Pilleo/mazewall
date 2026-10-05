@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 51 | *Total Resolved Issues:* 646
+*Total Active Issues:* 53 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261005-193139-440-qualify-pinned-hotspot-jit-and-gc-lifetime-candida](issue-20261005-193139-440-qualify-pinned-hotspot-jit-and-gc-lifetime-candida.md) | Qualify pinned HotSpot JIT and GC lifetime candidates | high | profiler |
+| [issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica](issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica.md) | Qualify mounted virtual thread identity and logical scope | high | profiler |
 | [issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-](issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md) | Bound interpreter self-profiling asset validation and dense readout cost | high | profiler |
 | [issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an](issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md) | Align Kubescape HotSpot contribution dependency and storage contracts | medium | experiment |
 | [issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int](issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md) | Investigate intermittent process-wide profiler integration capture failure | medium | profiler |

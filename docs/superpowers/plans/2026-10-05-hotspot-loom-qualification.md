@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: eacd0081
-status: approved_inline_qualification
+status: qualification_harness_delivered_mount_promotion_blocked
 ---
 
 # HotSpot Loom Identity Qualification Implementation Plan
@@ -227,6 +227,11 @@ result; current carrier/process-wide scope remains unchanged.
 checks and root build; commit `docs(profiler): record Loom identity qualification`.
 
 ## Completion gate
+
+Execution: model/oracle/verifier and actual256token corpus delivered for1/2/4
+carriers. Logical identity/parent remain unavailable because native event-time
+mount/object proof is absent; production capture/schema are unchanged. See
+[evidence](../../plans/2026-10-05-hotspot-loom-evidence.md).
 
 Oracle-independent native identity can be distinguished from carrier-only evidence;
 unproved logical identity/parent is explicitly unavailable. Production support is

@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: eacd0081
-status: approved_inline_qualification
+status: qualification_harness_delivered_lifetime_promotion_blocked
 ---
 
 # HotSpot JIT and GC Qualification Implementation Plan
@@ -234,6 +234,12 @@ existing recovery/unloading/exec/held-callback tests plus fresh candidate matrix
 whitespace/root build; commit `docs(profiler): record pinned JIT and GC qualification`.
 
 ## Completion gate
+
+Execution: proof model/host-race controls, actual C1/C2/G1 token corpus and exact
+pinned-source audit delivered. Current capture lacks compiled-generation and
+retained code/reclamation leases. No whitelist or native promotion is made;
+adversarial promotion stress gates remain pending that mechanism. See
+[evidence](../../plans/2026-10-05-hotspot-jit-gc-evidence.md).
 
 Working qualification software and actual per-tuple evidence exist. Wider production
 support requires a proved native lifetime mechanism and separately approved detailed
