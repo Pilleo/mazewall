@@ -32,5 +32,13 @@ Keep open: diagnosis complete, cost reduction unproved. Next candidate is releas
 helper footprint reduction with actual integrity/compatibility/admission comparison.
 No budgets or runtime guarantees change based on these measurements.
 
+**Footprint2026-10-05:** Two pinned builds reproduce a68,231,330byte stripped
+helper (28.7254% smaller). All7candidate native/public cases execute/pass;
+matched checksum median70.944s ->44.966s, but live admission still69.8–78.3s and
+dense run rejects283received/182retained/101pending with complete resource cleanup.
+Source/license candidate distribution is retained. See
+[footprint evidence](../../plans/2026-10-05-hotspot-release-footprint-evidence.md).
+Keep open for remaining admission/dense-readout costs; do not infer a latency bound.
+
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->

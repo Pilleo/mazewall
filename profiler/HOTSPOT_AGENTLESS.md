@@ -93,6 +93,12 @@ Fresh phase diagnosis measured interpreter checksum times of59–85 seconds on a
 are offline controls, not supported live admission. The dense public diagnostic
 still rejected with268 received records and retired its owned resources. See
 [phase evidence](../docs/plans/2026-10-05-hotspot-interpreter-performance-evidence.md).
+Release builds now strip collector ELF debug/symbol sections while keeping build
+metadata, native BPF data and full asset hashing. The verified helper shrank from
+95.73MB to68.23MB; matched checksum medians fell70.94s to44.97s in three pairs.
+Live candidate admission still took69.8–78.3s and dense readout still rejected;
+these observations establish no end-to-end bound. See
+[footprint comparison](../docs/plans/2026-10-05-hotspot-release-footprint-evidence.md).
 Native readiness means attachment/readers are active, not that cold method metadata
 or every stack is available. General JIT, alternate GCs, virtual-thread logical
 ancestry and complete loss accounting remain unsupported.
