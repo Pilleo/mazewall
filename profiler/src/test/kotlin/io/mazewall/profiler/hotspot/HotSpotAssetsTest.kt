@@ -1,5 +1,6 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.profiler.internal.hotspot.HotSpotAssetTimings
 import io.mazewall.profiler.internal.hotspot.HotSpotAssets
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -10,10 +11,41 @@ import java.security.MessageDigest
 import java.util.HexFormat
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class HotSpotAssetsTest {
     @TempDir
     lateinit var directory: Path
+
+    @Test
+    fun `measured admission preserves the resolved asset contract`() {
+        fixture()
+        val timings = HotSpotAssetTimings()
+        val measured = HotSpotAssets.load(directory, timings)
+        assertEquals(HotSpotAssets.load(directory), measured)
+        assertEquals(setOf("manifest", "checksums", "oci_graph", "collector"), timings.snapshot().keys)
+        assertTrue(timings.snapshot().values.all { it >= 0L })
+    }
+
+    @Test
+    fun `measured admission still refuses a tampered helper`() {
+        fixture()
+        Files.writeString(directory.resolve("mw-hotspot-collector"), "tampered")
+        assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory, HotSpotAssetTimings()) }
+    }
+
+    @Test
+    fun `phase timing preserves failure and owns immutable snapshots`() {
+        var tick = 0L
+        val timings = HotSpotAssetTimings { tick++.times(10) }
+        val failure = IllegalArgumentException("original validation failure")
+        assertEquals(failure, assertFailsWith<IllegalArgumentException> { timings.measure("manifest") { throw failure } })
+        val snapshot = timings.snapshot()
+        assertEquals(10L, snapshot["manifest"])
+        timings.measure("checksums") { Unit }
+        assertEquals(setOf("manifest"), snapshot.keys)
+        assertFailsWith<UnsupportedOperationException> { (snapshot as MutableMap)["manifest"] = 0L }
+    }
 
     @Test
     fun `verified bundle resolves executable and local OCI store`() {

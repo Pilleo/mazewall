@@ -31,8 +31,14 @@ internal data class HotSpotAssets private constructor(
     val image: String,
 ) {
     companion object {
-        fun load(directory: Path): HotSpotAssets {
+        fun load(directory: Path): HotSpotAssets = load(directory, null)
+
+        fun load(
+            directory: Path,
+            timings: HotSpotAssetTimings?,
+        ): HotSpotAssets {
             val root = directory.toAbsolutePath().normalize()
+            val manifest = measuredAssetPhase(timings, "manifest") {
             val manifestPath = ownedFile(root, "manifest.json")
             val bytes = Files.newInputStream(manifestPath).use { it.readNBytes(MAX_MANIFEST_BYTES + 1) }
             require(bytes.size <= MAX_MANIFEST_BYTES) { "HotSpot asset manifest exceeds byte limit" }
@@ -40,6 +46,9 @@ internal data class HotSpotAssets private constructor(
             checkAssetJsonDepth(text, MAX_MANIFEST_JSON_DEPTH)
             val manifest = Json.decodeFromString<HotSpotAssetManifest>(text)
             manifest.validate()
+                manifest
+            }
+            measuredAssetPhase(timings, "checksums") {
             var totalBytes = 0L
             for ((name, expected) in manifest.files) {
                 require(SHA256_PATTERN.matches(expected)) { "Invalid asset checksum: $name" }
@@ -51,10 +60,13 @@ internal data class HotSpotAssets private constructor(
                     require(name.removePrefix("oci/blobs/sha256/") == expected) { "OCI blob digest mismatch: $name" }
                 }
             }
-            verifyOciGraph(root, manifest)
+            }
+            measuredAssetPhase(timings, "oci_graph") { verifyOciGraph(root, manifest) }
+            return measuredAssetPhase(timings, "collector") {
             val collector = ownedFile(root, "mw-hotspot-collector")
             require(Files.isExecutable(collector)) { "HotSpot collector is not executable" }
-            return HotSpotAssets(collector, root.resolve("oci"), "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@${manifest.gadgetDigest}")
+                HotSpotAssets(collector, root.resolve("oci"), "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@${manifest.gadgetDigest}")
+            }
         }
     }
 }
