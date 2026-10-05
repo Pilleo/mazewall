@@ -88,6 +88,11 @@ detached wrapper cannot establish retirement. An authorized argv prefix belongs 
 Current-interpreter asset/admission work measured 34–82 seconds before workload
 startup. Dense 600-open/1ms self-profiling experiments failed within the unchanged
 stop bound; the paced example does not establish a high-rate self-profiling guarantee.
+Fresh phase diagnosis measured interpreter checksum times of59–85 seconds on a
+95.9MB bundle; hashing the collector dominates. Normal-JIT same-stage measurements
+are offline controls, not supported live admission. The dense public diagnostic
+still rejected with268 received records and retired its owned resources. See
+[phase evidence](../docs/plans/2026-10-05-hotspot-interpreter-performance-evidence.md).
 Native readiness means attachment/readers are active, not that cold method metadata
 or every stack is available. General JIT, alternate GCs, virtual-thread logical
 ancestry and complete loss accounting remain unsupported.

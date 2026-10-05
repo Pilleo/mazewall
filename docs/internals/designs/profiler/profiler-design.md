@@ -636,7 +636,11 @@ with profiler0.1.0-SNAPSHOT. The compiled installed public example uses the same
 public current-JVM facade and requires useful own-frame evidence and physical drain;
 its paced acceptance does not prove dense interpreter throughput or complete loss.
 
-Public real-fault acceptance and supported distribution are subsequent work in the
+Public real-fault acceptance and supported distribution are complete in the
 [integration plan](../../../superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md).
+The follow-up [performance diagnosis](../../../plans/2026-10-05-hotspot-interpreter-performance-evidence.md)
+separates interpreted SHA256 admission cost from dense JSON parsing/mapping cost.
+Optional phase timings preserve the existing admission signature and integrity
+checks; offline projection measurements do not certify native lifecycle retirement.
 See [asset contract/operator commands](../../../../profiler/hotspot-agentless/README.md)
 and [verified installed-capture evidence](../../../plans/2026-10-04-mazewall-hotspot-assets-milestone.md).
