@@ -48,8 +48,10 @@ internal data class HotSpotEvent(
     val correlationId: ULong,
     val filename: String,
     val pathTruncated: Boolean,
-    val rawJson: String,
-)
+    private val rawValue: HotSpotRawJson,
+) {
+    val rawJson: String get() = rawValue.text
+}
 
 internal data class HotSpotFrame(
     val providerType: UInt,
@@ -69,8 +71,10 @@ internal data class HotSpotFrame(
     val scopeWalk: String?,
     val bciState: String?,
     val qualityDiagnostic: String?,
-    val rawJson: String,
-)
+    private val rawValue: HotSpotRawJson,
+) {
+    val rawJson: String get() = rawValue.text
+}
 
 internal data class HotSpotProvider(
     val name: String,
@@ -87,8 +91,9 @@ internal class HotSpotStackEvidence(
     val provider: HotSpotProvider?,
     frames: List<HotSpotFrame>,
     rawErrors: List<String>,
-    val rawJson: String,
+    private val rawValue: HotSpotRawJson,
 ) {
+    val rawJson: String get() = rawValue.text
     val frames: List<HotSpotFrame> = java.util.List.copyOf(frames)
     val rawErrors: List<String> = java.util.List.copyOf(rawErrors)
 }

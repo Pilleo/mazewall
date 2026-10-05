@@ -16,7 +16,7 @@ internal class HotSpotWireMapper(
         val tid = processId(event, "host_tid")
         val ticks = event.ulong("process_start_ticks")
         checkHotSpotProtocol(ticks != 0uL, "missing process generation")
-        return HotSpotEvent(Pid(pid), Tid(tid), ticks, event.ulong("capture_boot_ns"), event.ulong("correlation_id"), event.text("filename"), event.boolean("path_truncated"), event.toString())
+        return HotSpotEvent(Pid(pid), Tid(tid), ticks, event.ulong("capture_boot_ns"), event.ulong("correlation_id"), event.text("filename"), event.boolean("path_truncated"), HotSpotRawJson(event))
     }
 
     fun evidence(row: HotSpotWireRecord): HotSpotStackEvidence {
@@ -32,7 +32,7 @@ internal class HotSpotWireMapper(
             ?.let {
             evidence.array("raw_errors").map { error -> (error as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw HotSpotProtocolException("invalid raw error") }
         }.orEmpty()
-        return HotSpotStackEvidence(attribution, evidence.text("walk"), evidence.text("scope_lookup"), evidence.optionalText("reason"), provider, frames, errors, evidence.toString())
+        return HotSpotStackEvidence(attribution, evidence.text("walk"), evidence.text("scope_lookup"), evidence.optionalText("reason"), provider, frames, errors, HotSpotRawJson(evidence))
     }
 
     private fun processId(
@@ -59,7 +59,7 @@ internal class HotSpotWireMapper(
             value.optionalText("scope_walk"),
             value.optionalText("bci_state"),
             value.optionalText("quality_diagnostic"),
-            value.toString(),
+            HotSpotRawJson(value),
     )
 
     fun summary(row: HotSpotWireRecord): HotSpotReplaySummary {
