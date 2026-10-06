@@ -32,6 +32,8 @@ public final class VerificationActionsTest {
         TestHealthPluginFunctionalTest.verify();
         TierEPhaseReplayTaskFunctionalTest.verify();
         TierENativeBuildTaskFunctionalTest.verify();
+        AggregateVerificationFunctionalTest.verify(
+            successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts"));
         writeSuccessMarker(successMarker);
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
     }

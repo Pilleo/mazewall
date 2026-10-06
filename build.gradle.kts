@@ -659,13 +659,21 @@ subprojects {
 tasks.register("unitCheck") {
     group = "verification"
     description = "Runs every module's host-safe unit-quality gate."
-    dependsOn(subprojects.filterNot { it.path.startsWith(":demos") }.map { "${it.path}:unitCheck" })
+    dependsOn(
+        subprojects.filterNot { it.path.startsWith(":demos") }.map { child ->
+            child.tasks.matching { it.name == "unitCheck" }
+        },
+    )
 }
 
 tasks.register("kernelCheck") {
     group = "verification"
     description = "Runs every module's privileged kernel-quality gate."
-    dependsOn(subprojects.filterNot { it.path.startsWith(":demos") }.map { "${it.path}:kernelCheck" })
+    dependsOn(
+        subprojects.filterNot { it.path.startsWith(":demos") }.map { child ->
+            child.tasks.matching { it.name == "kernelCheck" }
+        },
+    )
 }
 
 evaluationDependsOn(":profiler")
