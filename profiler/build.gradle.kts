@@ -542,6 +542,11 @@ val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.Kotli
 val kotlinCompilations = kotlinExtension.target.compilations
 val enforcerJar = project(":enforcer").tasks.named<Jar>("jar").flatMap { it.archiveFile }
 val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+// Friend paths name packaged artifacts. Resolve the same artifacts instead of Java-library
+// classes-directory variants, which Kotlin treats as a different visibility boundary.
+configurations.matching { it.name == "compileClasspath" || it.name.endsWith("CompileClasspath") }.configureEach {
+    attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+}
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(enforcerJar, platformJar)
