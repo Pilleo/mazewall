@@ -135,6 +135,10 @@ dependencies {
 ## Core API Usage
 
 The primary entry point is `ContainedExecutors`, which provides wrappers for standard `ExecutorService` instances.
+Wrapped tasks check `InstallationReceipt.requireInstalled()` before entering their
+body. An `installed=false` bypass result or missing requested Landlock restriction
+rejects the task, even when manual-install fallback is configured. Receipt closure
+still releases supervisor registration; it does not undo applied restrictions.
 
 ### 1. Wrapping an Executor
 

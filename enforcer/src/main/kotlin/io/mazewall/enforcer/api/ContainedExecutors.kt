@@ -190,6 +190,8 @@ public object ContainedExecutors {
      *
      * The caller still owns [delegate]. Filters stay on each worker after a task returns.
      * Do not reuse the raw delegate for unrestricted work.
+     * Every task requires a completed installation receipt before its body enters;
+     * configured manual-install bypass never authorizes a wrapped task to run uncontained.
      */
     public fun wrap(
         delegate: ExecutorService,
@@ -339,7 +341,7 @@ public object ContainedExecutors {
                                 "Filesystem Landlock remains in force; seccomp did not install.",
                         )
                     } else {
-                        logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. Code will run uncontained.")
+                        logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. The receipt reports bypass; required execution will reject it.")
                     }
                 }
                 return io.mazewall.enforcer.api.InstallationReceipt(
@@ -522,7 +524,7 @@ public object ContainedExecutors {
                 throw UnsupportedOperationException("Platform does not support seccomp")
 
             Platform.FallbackBehavior.WARN_AND_BYPASS -> {
-                logger.warning("Platform does not support seccomp. Code will run uncontained.")
+                logger.warning("Platform does not support seccomp. The receipt reports bypass; required execution will reject it.")
                 io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
                     io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
                         behaviorName = fallback.name,

@@ -95,8 +95,8 @@ public object Platform {
      */
     public enum class FallbackBehavior {
         FAIL, // throw UnsupportedOperationException
-        WARN_AND_BYPASS, // log warning, run task uncontained
-        SILENT_BYPASS, // run task uncontained, no warning
+        WARN_AND_BYPASS, // manual installer may report bypass with warning; contained executors reject it
+        SILENT_BYPASS, // manual installer may report bypass without warning; contained executors reject it
     }
 
     /** True if the current operating system is Linux. */

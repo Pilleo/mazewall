@@ -43,6 +43,13 @@ All installation entry points return this receipt. The former hidden `Unit` over
 deleted in the `0.1.0-SNAPSHOT` cutover, including binary-only compatibility declarations;
 Kotlin code scopes a receipt with `use`, and Java code uses try-with-resources.
 
+Contained executor task entry requires `receipt.requireInstalled()` before the
+callback runs. The check rejects incomplete installation and missing requested
+filesystem enforcement, independently of the configured manual-install fallback.
+The wrapper stores the receipt before checking it so its `finally` block retains
+registration cleanup ownership when validation rejects entry. Applied Landlock or
+Seccomp state is never rewound by the wrapper.
+
 ### Runtime-Compatible Process Baselines
 
 Preset names do not reveal implicit argument filters. Application-facing APIs should select a runtime profile and explicit capabilities:

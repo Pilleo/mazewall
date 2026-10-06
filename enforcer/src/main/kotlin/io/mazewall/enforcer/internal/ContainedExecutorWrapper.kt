@@ -53,6 +53,7 @@ internal class ContainedExecutorWrapper(
         var receipt: io.mazewall.enforcer.api.InstallationReceipt? = null
         try {
             receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy)
+            receipt.requireInstalled()
             return runTask(task)
         } finally {
             receipt?.close()

@@ -12,7 +12,8 @@ package io.mazewall.enforcer.api
  * runtime. The installation owner retires the listener when its platform thread terminates.
  *
  * Callers performing diagnostics or attestation must check [installed]. When explicitly configured fallback behavior allows
- * execution to continue after an installation failure, [installed] is `false` and does not imply a seccomp filter.
+ * a manual installer to return after failure, [installed] is `false` and does not imply a seccomp filter.
+ * Contained executors require this receipt before target entry and reject such a bypass result.
  * [landlockApplied] is independent: Landlock cannot be undone, so a failed seccomp step after a successful Landlock
  * apply still leaves filesystem rules in force.
  */
@@ -35,11 +36,15 @@ public class InstallationReceipt(
     }
 
     /**
-     * Fail-closed unpack. Throws if this receipt does not represent an installed filter.
+     * Fail-closed unpack. Requires installed Seccomp and any filesystem restriction requested by this policy.
+     * Closing the receipt after rejection still releases its registration; applied filters remain irreversible.
      */
     public fun requireInstalled(): InstallationReceipt {
         check(installed) {
-            "Containment installation did not apply; the thread or process is not sandboxed."
+            "Required containment installation did not complete. Already applied restrictions remain in force."
+        }
+        check(!requestedPolicy.enforceLandlock || landlockApplied) {
+            "Containment installation did not apply the requested filesystem restriction."
         }
         return this
     }
