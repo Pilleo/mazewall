@@ -259,9 +259,10 @@ internal object Landlock {
     internal fun tryApplyRuleset(
         policy: PolicyDefinition<*>,
         processWide: Boolean = false,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
         onRestrictionApplied: () -> Unit = {},
     ): LandlockApplyResult {
-        val session = LandlockSession(policy, processWide, onRestrictionApplied)
+        val session = LandlockSession(policy, processWide, onRestrictionApplied, fallback)
         return session.tryApplyRuleset()
     }
 
@@ -297,6 +298,7 @@ internal object Landlock {
     internal fun classifyLandlockErrno(
         op: String,
         errno: Int,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     ): LandlockApplyResult {
         val errnoName = when (errno) {
             NativeConstants.ENOSYS -> "ENOSYS"
@@ -316,7 +318,6 @@ internal object Landlock {
         } else {
             "$op failed with errno=$errnoName"
         }
-        val fallback = Platform.configuredFallback()
         return if (unsupported && fallback != Platform.FallbackBehavior.FAIL) {
             if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                 logger.warning(reason)
@@ -327,8 +328,7 @@ internal object Landlock {
         }
     }
 
-    internal fun handleUnsupportedLandlockOutcome(): LandlockApplyResult {
-        val fallback = Platform.configuredFallback()
+    internal fun handleUnsupportedLandlockOutcome(fallback: Platform.FallbackBehavior = Platform.configuredFallback()): LandlockApplyResult {
         val msg = "Landlock is not supported on this kernel (requires Linux kernel 5.13+ with Landlock LSM enabled) but FS rules were requested."
         return when (fallback) {
             Platform.FallbackBehavior.FAIL -> LandlockApplyResult.Rejected(msg)
@@ -592,13 +592,14 @@ internal object Landlock {
     internal fun getAccessMask(
         abi: Int,
         policy: PolicyDefinition<*>,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     ): Long {
         var accessMaskFs = getFullAccessMask(1) // Base mask
         if (abi >= 2) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
         if (abi >= ABI_V3) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
         if (abi >= ABI_V5) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
 
-        validateAbiSupport(abi, policy)
+        validateAbiSupport(abi, policy, fallback)
         return accessMaskFs
     }
 
@@ -620,6 +621,7 @@ internal object Landlock {
     private fun validateAbiSupport(
         abi: Int,
         policy: PolicyDefinition<*>,
+        fallback: Platform.FallbackBehavior,
     ) {
         val unsupportedErrors = mutableListOf<String>()
         if (abi < 2 && (policy.isSyscallAllowed(Syscall.RENAME) || policy.isSyscallAllowed(Syscall.LINK))) {
@@ -633,7 +635,6 @@ internal object Landlock {
         }
         if (unsupportedErrors.isNotEmpty()) {
             val msg = "Fatal Security Error: ${unsupportedErrors.joinToString("; ")}"
-            val fallback = Platform.configuredFallback()
             if (fallback == Platform.FallbackBehavior.FAIL) {
                 throw UnsupportedOperationException(msg)
             } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {

@@ -139,6 +139,11 @@ Wrapped tasks check `InstallationReceipt.requireInstalled()` before entering the
 body. An `installed=false` bypass result or missing requested Landlock restriction
 rejects the task, even when manual-install fallback is configured. Receipt closure
 still releases supervisor registration; it does not undo applied restrictions.
+Each installation attempt selects its fallback once before probing or applying
+native stages. `receipt.fallback` records that choice. `receipt.progress` records
+new Seccomp/Landlock stages applied by the attempt, and `receipt.failure` preserves
+the installation error or unsupported-feature bypass reason. `requireInstalled()`
+rethrows a recorded failure with its original identity and cause chain.
 
 ### 1. Wrapping an Executor
 

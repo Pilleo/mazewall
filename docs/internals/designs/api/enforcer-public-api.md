@@ -50,6 +50,15 @@ The wrapper stores the receipt before checking it so its `finally` block retains
 registration cleanup ownership when validation rejects entry. Applied Landlock or
 Seccomp state is never rewound by the wrapper.
 
+An installation attempt captures fallback selection before native/capability
+work and passes it through platform handling, CET setup, and the Landlock session.
+Changing a property during a native callback cannot change the same attempt's
+failure handling or receipt metadata. Standalone Landlock sessions capture their
+own fallback at construction. Receipts retain a `progress` snapshot of newly
+applied Seccomp/Landlock stages and a `failure`; required unpack rethrows that
+failure rather than replacing its cause chain with a generic bypass error.
+These deltas do not describe inherited restrictions or complete CET coverage.
+
 ### Runtime-Compatible Process Baselines
 
 Preset names do not reveal implicit argument filters. Application-facing APIs should select a runtime profile and explicit capabilities:

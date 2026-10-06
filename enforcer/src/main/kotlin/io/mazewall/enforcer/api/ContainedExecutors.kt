@@ -17,6 +17,7 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.internal.ContainedExecutorWrapper
 import io.mazewall.enforcer.state.*
 import io.mazewall.landlock.Landlock
+import io.mazewall.landlock.toFailure
 import io.mazewall.platform.lifecycle.SandboxedPath
 import io.mazewall.platform.lifecycle.isUnderAny
 import io.mazewall.platform.lifecycle.resolveReal
@@ -88,6 +89,9 @@ public object ContainedExecutors {
             ContainmentViolationException::class.java,
             io.mazewall.enforcer.api.Platform.FallbackBehavior::class.java,
             io.mazewall.enforcer.api.InstallationReceipt::class.java,
+            // Receipt deltas and partial-failure reporting must resolve before class reads can be denied.
+            InstallationProgress::class.java,
+            PartialInstallationException::class.java,
             // Post-install self-verification must be resolvable BEFORE any restrictive filter
             // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
             // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
@@ -298,13 +302,13 @@ public object ContainedExecutors {
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
-        val attempt = InstallationAttempt(processWide)
+        val attempt = InstallationAttempt(processWide, Platform.configuredFallback())
         try {
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
-            unsupportedPlatformReceipt(processWide, policy)?.let { return it }
+            unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return it }
 
             validateLinuxAndNotVirtual()
-            preparePreSeccompEffects(augmentedPolicy)
+            preparePreSeccompEffects(augmentedPolicy, attempt.fallback)
             return installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt)
         } catch (fatal: Error) {
             fatal.addSuppressed(PartialInstallationException(attempt.snapshot()))
@@ -312,7 +316,7 @@ public object ContainedExecutors {
         } catch (expectedInstallFailure: Throwable) {
             // Installed stages are irreversible. Only their installer publishes state;
             // callers and wrappers never restore a pre-install snapshot.
-            val fallback = Platform.configuredFallback()
+            val fallback = attempt.fallback
             val progress = attempt.snapshot()
             val failure = if (progress.landlockApplied || progress.seccompApplied) {
                 PartialInstallationException(progress, expectedInstallFailure)
@@ -349,6 +353,9 @@ public object ContainedExecutors {
                     requestedPolicy = policy,
                     installed = false,
                     landlockApplied = landlockInForce,
+                    fallback = fallback,
+                    progress = progress,
+                    failure = failure,
                 )
             }
             throw failure
@@ -366,20 +373,31 @@ public object ContainedExecutors {
     private fun unsupportedPlatformReceipt(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
+        attempt: InstallationAttempt,
     ): io.mazewall.enforcer.api.InstallationReceipt? {
         if (Platform.isSupported()) return null
-        handleUnsupportedPlatform()
+        handleUnsupportedPlatform(attempt.fallback)
         return io.mazewall.enforcer.api
-            .InstallationReceipt(processWide = processWide, requestedPolicy = policy, installed = false)
+            .InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = policy,
+                installed = false,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
+                failure = UnsupportedOperationException("Platform does not support seccomp"),
+            )
     }
 
-    private fun preparePreSeccompEffects(policy: PolicyDefinition<*>) {
+    private fun preparePreSeccompEffects(
+        policy: PolicyDefinition<*>,
+        fallback: Platform.FallbackBehavior,
+    ) {
         if (policy.hasSupervisedSyscalls) {
             io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .getOrSpawnSharedDaemon()
         }
-        if (policy.lockIntelCet) armIntelCet()
+        if (policy.lockIntelCet) armIntelCet(fallback)
     }
 
     private fun installLandlockThenSeccomp(
@@ -396,6 +414,9 @@ public object ContainedExecutors {
                     processWide = processWide,
                     requestedPolicy = requestedPolicy,
                     installed = false,
+                    fallback = attempt.fallback,
+                    progress = attempt.snapshot(),
+                    failure = attempt.failure,
                 )
             LandlockStep.UNCHANGED -> activeLandlockPolicy(processWide)
         }
@@ -419,6 +440,8 @@ public object ContainedExecutors {
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
                 landlockApplied = landlockApplied,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
             )
         }
 
@@ -442,6 +465,8 @@ public object ContainedExecutors {
                         requestedPolicy = combinedPolicy,
                         supervisorRegistration = session,
                         landlockApplied = landlockApplied,
+                        fallback = attempt.fallback,
+                        progress = attempt.snapshot(),
                     )
                 } else {
                     return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
@@ -450,6 +475,8 @@ public object ContainedExecutors {
                         supervisorRegistration = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
                             .acquireTaskSession(scopingPolicy),
                         landlockApplied = landlockApplied,
+                        fallback = attempt.fallback,
+                        progress = attempt.snapshot(),
                     )
                 }
             }
@@ -457,6 +484,8 @@ public object ContainedExecutors {
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
                 landlockApplied = landlockApplied,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
             )
         }
     }
@@ -494,7 +523,7 @@ public object ContainedExecutors {
                 val publish = ContainmentRegistryEffectInterpreter.prepare(
                     ContainmentRegistryEffect.LandlockApplied(processWide, policy),
                 )
-                val applied = Landlock.tryApplyRuleset(policy, processWide) {
+                val applied = Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback) {
                     attempt.landlockApplied = true
                     publish()
                 }
@@ -509,7 +538,10 @@ public object ContainedExecutors {
                         )
                         return LandlockStep.APPLIED
                     }
-                    is io.mazewall.landlock.LandlockApplyResult.Bypassed -> return LandlockStep.BYPASSED
+                    is io.mazewall.landlock.LandlockApplyResult.Bypassed -> {
+                        attempt.failure = applied.toFailure()
+                        return LandlockStep.BYPASSED
+                    }
                     is io.mazewall.landlock.LandlockApplyResult.Rejected -> applied.orThrow()
                 }
             }
@@ -517,8 +549,7 @@ public object ContainedExecutors {
         }
     }
 
-    private fun handleUnsupportedPlatform() {
-        val fallback = Platform.configuredFallback()
+    private fun handleUnsupportedPlatform(fallback: Platform.FallbackBehavior) {
         when (fallback) {
             Platform.FallbackBehavior.FAIL ->
                 throw UnsupportedOperationException("Platform does not support seccomp")
@@ -537,9 +568,9 @@ public object ContainedExecutors {
         }
     }
 
-    private fun armIntelCet() {
+    private fun armIntelCet(fallback: Platform.FallbackBehavior) {
         if (!Platform.isCetPlatformEligible || !Platform.featureMatrix.cetSupported) {
-            handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.")
+            handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.", fallback)
             return
         }
 
@@ -555,7 +586,7 @@ public object ContainedExecutors {
             )
 
             if (enableRes is LinuxNative.SyscallResult.Error) {
-                handleCetUnsupported("Failed to enable Intel CET Shadow Stack: $enableRes")
+                handleCetUnsupported("Failed to enable Intel CET Shadow Stack: $enableRes", fallback)
                 return
             }
         }
@@ -569,7 +600,7 @@ public object ContainedExecutors {
         if (lockRes is LinuxNative.SyscallResult.Error) {
             // EPERM (1) is returned if CET is already locked. If verification is successful, we can ignore this.
             if (lockRes.errno != io.mazewall.ffi.NativeConstants.EPERM) {
-                handleCetUnsupported("Failed to lock Intel CET Shadow Stack: $lockRes")
+                handleCetUnsupported("Failed to lock Intel CET Shadow Stack: $lockRes", fallback)
                 return
             }
         }
@@ -577,7 +608,7 @@ public object ContainedExecutors {
         // 3. Verify status to be absolutely sure:
         val activeStatus = Platform.queryIntelCetStatus()
         if ((activeStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) == 0L) {
-            handleCetUnsupported("Intel CET is enabled and locked, but verification of status failed.")
+            handleCetUnsupported("Intel CET is enabled and locked, but verification of status failed.", fallback)
             return
         }
 
@@ -590,8 +621,10 @@ public object ContainedExecutors {
         )
     }
 
-    private fun handleCetUnsupported(reason: String) {
-        val fallback = Platform.configuredFallback()
+    private fun handleCetUnsupported(
+        reason: String,
+        fallback: Platform.FallbackBehavior,
+    ) {
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw io.mazewall.enforcer.api
                 .UnsupportedPlatformException(reason)

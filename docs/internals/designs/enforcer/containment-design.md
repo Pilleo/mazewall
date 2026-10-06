@@ -341,6 +341,16 @@ this permanent baseline before dispatcher construction or readiness publication.
 
 Do not change this order.
 
+Installation fallback is captured once by `InstallationAttempt` before capability
+probes/native stages. Platform rejection, CET failure handling, Landlock ABI/right
+validation and errno classification, and receipt construction use that selection.
+Standalone `LandlockSession` construction captures its own selection. Failed/bypassed
+receipts preserve the original failure or unsupported-feature reason and the newly
+applied Seccomp/Landlock progress snapshot. `requireInstalled()` rethrows a recorded
+failure; successful inherited coverage can therefore have an empty attempt delta.
+Receipt/progress/failure classes are preloaded before restrictive class-read rules
+can make diagnostic allocation fail. This does not broaden the compiled policy.
+
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
 
 `THREAD_LANDLOCK_APPLIED_READS` and `THREAD_LANDLOCK_APPLIED_WRITES` are `ThreadLocal<Set<String>?>`
@@ -361,7 +371,7 @@ adding new Landlock access-right flags.
 
 If Landlock is active and a restricted thread triggers lazy classloading of a class
 whose `.jar` file is not in the allowed read paths, the kernel returns `EACCES` and
-the JVM throws `NoClassDefFoundError`. `Policy.Builder.allowJvmClasspath()` reads
+the JVM throws `NoClassDefFoundError`. `WorkerPolicyBuilder.allowJvmClasspath()` reads
 `java.home` and `java.class.path` at policy-build time to prevent this.
 
 Always call `allowJvmClasspath()` when writing tests that activate Landlock on a

@@ -1,6 +1,6 @@
 package io.mazewall.enforcer.api
 
-/** Irreversible stages completed by an installation attempt before it failed. */
+/** Irreversible Seccomp/Landlock stages completed by an installation attempt; inherited restrictions are not included. */
 public data class InstallationProgress(
     val processWide: Boolean,
     val landlockApplied: Boolean,
@@ -21,12 +21,14 @@ internal fun installationState(processWide: Boolean): io.mazewall.enforcer.state
             .resolveCurrentState()
     }
 
-/** Attempt-local marks are written only by successful native-stage publication. */
+/** Fallback is selected once. Applied-stage marks are written only by successful native-stage publication. */
 internal class InstallationAttempt(
     private val processWide: Boolean,
+    val fallback: Platform.FallbackBehavior,
 ) {
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
+    var failure: Throwable? = null
 
     fun snapshot(): InstallationProgress = InstallationProgress(processWide, landlockApplied, seccompApplied)
 }

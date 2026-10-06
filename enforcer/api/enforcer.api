@@ -156,13 +156,15 @@ public final class io/mazewall/enforcer/api/InstallationProgress {
 }
 
 public final class io/mazewall/enforcer/api/InstallationReceipt : java/lang/AutoCloseable {
-	public fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;Z)V
-	public synthetic fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
+	public final fun getFailure ()Ljava/lang/Throwable;
 	public final fun getFallback ()Lio/mazewall/enforcer/api/Platform$FallbackBehavior;
 	public final fun getInstalled ()Z
 	public final fun getLandlockApplied ()Z
 	public final fun getProcessWide ()Z
+	public final fun getProgress ()Lio/mazewall/enforcer/api/InstallationProgress;
 	public final fun getRequestedPolicy ()Lio/mazewall/enforcer/api/PolicyDefinition;
 	public final fun getTimestampMillis ()J
 	public final fun isInstalled ()Z

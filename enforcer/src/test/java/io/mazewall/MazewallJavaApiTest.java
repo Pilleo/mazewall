@@ -173,7 +173,9 @@ class MazewallJavaApiTest {
                 12345L,
                 true,
                 Platform.configuredFallback(),
-                false
+                false,
+                null,
+                null
         );
 
         assertTrue(receipt.getInstalled());

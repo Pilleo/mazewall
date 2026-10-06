@@ -24,6 +24,10 @@ public class InstallationReceipt(
     public val installed: Boolean = true,
     public val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     public val landlockApplied: Boolean = false,
+    /** Seccomp/Landlock stages newly applied by this attempt, not a summary of inherited restrictions or CET state. */
+    public val progress: InstallationProgress? = null,
+    /** Original installation failure, or the recorded reason for an explicit unsupported-feature bypass. */
+    public val failure: Throwable? = null,
 ) : AutoCloseable {
     private var supervisorRegistration: AutoCloseable? = null
 
@@ -38,8 +42,10 @@ public class InstallationReceipt(
     /**
      * Fail-closed unpack. Requires installed Seccomp and any filesystem restriction requested by this policy.
      * Closing the receipt after rejection still releases its registration; applied filters remain irreversible.
+     * A recorded installation failure is rethrown with its original identity and cause chain.
      */
     public fun requireInstalled(): InstallationReceipt {
+        if (!installed && failure != null) throw failure
         check(installed) {
             "Required containment installation did not complete. Already applied restrictions remain in force."
         }
@@ -78,8 +84,10 @@ public class InstallationReceipt(
             installed: Boolean = true,
             fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
             landlockApplied: Boolean = false,
+            progress: InstallationProgress? = null,
+            failure: Throwable? = null,
         ): InstallationReceipt =
-            InstallationReceipt(processWide, requestedPolicy, timestampMillis, installed, fallback, landlockApplied).also {
+            InstallationReceipt(processWide, requestedPolicy, timestampMillis, installed, fallback, landlockApplied, progress, failure).also {
                 it.supervisorRegistration = supervisorRegistration
             }
     }

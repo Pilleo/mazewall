@@ -268,6 +268,7 @@ internal class LandlockSession(
     private val policy: PolicyDefinition<*>? = null,
     private val processWide: Boolean = false,
     private val onRestrictionApplied: () -> Unit = {},
+    private val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
 ) {
     var state: LandlockState = LandlockState.Uninitialized
         private set
@@ -307,7 +308,7 @@ internal class LandlockSession(
     }
 
     private fun applyUnsupportedAbi(): LandlockApplyResult {
-        val outcome = Landlock.handleUnsupportedLandlockOutcome()
+        val outcome = Landlock.handleUnsupportedLandlockOutcome(fallback)
         val event = when (outcome) {
             is LandlockApplyResult.Rejected -> LandlockInstallEvent.Failed(UnsupportedKernelFeatureException(outcome.reason))
             is LandlockApplyResult.Applied,
@@ -357,13 +358,12 @@ internal class LandlockSession(
         operation: String,
         errno: Int,
     ): LandlockApplyResult {
-        val outcome = Landlock.classifyLandlockErrno(operation, errno)
+        val outcome = Landlock.classifyLandlockErrno(operation, errno, fallback)
         interpretTerminalEffects(transition(LandlockInstallEvent.Failed(outcome.toFailure())))
         return outcome
     }
 
     private fun handleProcessWideUnsupported() {
-        val fallback = Platform.configuredFallback()
         val msg = "Process-wide Landlock requires ABI v8 with LANDLOCK_RESTRICT_SELF_TSYNC. " +
             "This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
         if (fallback == Platform.FallbackBehavior.FAIL) {
@@ -377,6 +377,6 @@ internal class LandlockSession(
 
     private fun accessMasks(abi: Int): Pair<Long, Long> =
         policy?.let {
-            Landlock.getAccessMask(abi, it) to Landlock.getNetAccessMask(abi, it)
+            Landlock.getAccessMask(abi, it, fallback) to Landlock.getNetAccessMask(abi, it)
         } ?: (Landlock.getFullAccessMask(abi) to Landlock.getFullNetAccessMask(abi))
 }
