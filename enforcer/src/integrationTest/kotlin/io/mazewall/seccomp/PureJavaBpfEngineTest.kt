@@ -33,8 +33,8 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                     .submit<Boolean> {
                         // We allow mmap exec because on cold CI JVM, ProcessBuilder.start()
                         // might trigger JIT compilation which requires executable memory.
-                        val policy = Policy
-                            .builder()
+                        val policy = ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.NATIVE_IMAGE)
                             .base(Policy.NO_EXEC)
                             .allowMmapExec()
                             .build()
@@ -85,7 +85,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 Syscall.UNSHARE,
                 Syscall.SETNS,
             )
-        val builder = Policy.builder()
+        val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         // Block a reasonable number of safe syscalls to exercise BPF generation
         safeSyscalls.take(20).forEach { builder.block(it) }
         val policy = builder.build()
@@ -127,8 +127,8 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 .submit<EngineState> {
                 // We allow mmap exec because on cold CI JVM, any activity here
                 // might trigger JIT compilation which requires executable memory.
-                val policy = Policy
-                    .builder()
+                val policy = ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build()

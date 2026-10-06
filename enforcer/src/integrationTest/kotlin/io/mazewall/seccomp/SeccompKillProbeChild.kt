@@ -28,8 +28,8 @@ object SeccompKillProbeChild {
             .current()
         val victimNr = args[0].toInt()
 
-        val policy = io.mazewall.enforcer.api.Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
             .addAction(
                 io.mazewall.platform.syscall.SeccompAction.ACT_KILL_THREAD,

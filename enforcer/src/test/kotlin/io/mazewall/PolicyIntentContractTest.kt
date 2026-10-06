@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test
 class PolicyIntentContractTest {
     @Test
     fun `active empty filesystem intersection remains active after template reconstruction`() {
-        val left = Policy.threadLocalBuilder().allowFsRead("/input/a").build()
-        val right = Policy.threadLocalBuilder().allowFsRead("/input/b").build()
+        val left = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/input/a").build()
+        val right = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/input/b").build()
         val intersection = PolicyDefinition.intersection(left.definition, right.definition)
 
         assertTrue(intersection.enforceLandlock)

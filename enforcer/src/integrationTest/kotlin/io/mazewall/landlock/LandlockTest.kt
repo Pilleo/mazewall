@@ -38,8 +38,8 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -53,8 +53,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testReadBlocked(dir: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -77,8 +77,8 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -95,8 +95,8 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -116,8 +116,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testUnconstrained() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -140,8 +140,8 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -157,8 +157,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testExecBlocked(dir: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
@@ -177,8 +177,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testNonExistentFallback(file: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -197,8 +197,8 @@ class LandlockTest : BaseIntegrationTest() {
         realFile: String,
         symlink: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -224,8 +224,8 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowFsRead(dir)
@@ -238,8 +238,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testNestedSymlinks(realFile: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -253,8 +253,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testDotDotTraversal(allowed: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -275,8 +275,8 @@ class LandlockTest : BaseIntegrationTest() {
     }
 
     fun testCircularSymlinks(linkA: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
@@ -431,7 +431,7 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 2) return
-        val policy = Policy.builder().unblock(Syscall.RENAME).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.RENAME).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows rename/link syscalls, but this kernel"))
     }
@@ -441,7 +441,7 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 3) return
-        val policy = Policy.builder().unblock(Syscall.TRUNCATE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.TRUNCATE).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows truncate syscalls, but this kernel"))
     }
@@ -451,7 +451,7 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 5) return
-        val policy = Policy.builder().unblock(Syscall.IOCTL).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.IOCTL).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
         assertTrue(ex.message!!.contains("Policy allows ioctl, but this kernel"))
     }
@@ -580,8 +580,8 @@ class LandlockTest : BaseIntegrationTest() {
         allowedDir: String,
         forbiddenDir: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()

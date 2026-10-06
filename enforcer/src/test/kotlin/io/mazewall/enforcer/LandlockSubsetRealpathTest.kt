@@ -73,12 +73,12 @@ class LandlockSubsetRealpathTest {
         Files.createSymbolicLink(link, realDir)
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(realDir.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(realDir.toString()).build(),
         )
 
         // Same dentry spelled through the symlink: must NOT be treated as permission expansion.
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(link.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(link.toString()).build(),
         )
     }
 
@@ -88,12 +88,12 @@ class LandlockSubsetRealpathTest {
         val allowed = Files.createDirectories(tempDir.resolve("allowed"))
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(allowed.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(allowed.toString()).build(),
         )
 
         val expansion = assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(
-                Policy.threadLocalBuilder().allowFsRead(tempDir.toString()).build(),
+                WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(tempDir.toString()).build(),
             )
         }
         assert(expansion.message!!.contains("Cannot expand"))

@@ -52,8 +52,8 @@ class PureJavaBpfEngineCascadingFailureTest {
         )
 
         // 2. Try to install a new policy that ALLOWS prctl.
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allow(Syscall.PRCTL)
             .build()
         val compiled = policy.definition.compile(Arch.current())

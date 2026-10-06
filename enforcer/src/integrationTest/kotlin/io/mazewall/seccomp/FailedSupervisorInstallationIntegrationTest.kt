@@ -71,7 +71,7 @@ class FailedSupervisorInstallationIntegrationTest : BaseIntegrationTest() {
         val executed = AtomicInteger()
         try {
             Executors.newSingleThreadExecutor().use { worker ->
-                val wrapped = ContainedExecutors.wrap(worker, Policy.builder().allowMmapExec().build(), scoping)
+                val wrapped = ContainedExecutors.wrap(worker, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build(), scoping)
                 val initial = assertFailsWith<ExecutionException> { wrapped.submit { executed.incrementAndGet() }.get() }
                 assertTrue(assertIs<PartialInstallationException>(initial.cause, initial.stackTraceToString()).progress.seccompApplied, initial.stackTraceToString())
                 assertEquals(1, worker.submit<Int> { ContainmentStateRegistry.threadState.filterDepth }.get())
@@ -85,7 +85,7 @@ class FailedSupervisorInstallationIntegrationTest : BaseIntegrationTest() {
                     .orEmpty()
                     .contains("Permanent supervisor installation"),
                 )
-                val plain = ContainedExecutors.wrap(worker, Policy.builder().allowMmapExec().build())
+                val plain = ContainedExecutors.wrap(worker, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build())
                 assertFailsWith<ExecutionException> { plain.submit { executed.incrementAndGet() }.get() }
                 assertEquals(setupCalls, failedCalls.get(), "retry must fail before attempting another handshake")
                 assertEquals(0, executed.get(), "a failed permanent installation must never authorize a later task")

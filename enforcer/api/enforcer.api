@@ -371,7 +371,6 @@ public final class io/mazewall/enforcer/api/Policy {
 	public static final field NO_NETWORK Lio/mazewall/enforcer/api/Policy;
 	public static final field PURE_COMPUTE Lio/mazewall/enforcer/api/Policy;
 	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/enforcer/api/Policy;
-	public static final fun builder ()Lio/mazewall/enforcer/api/Policy$Builder;
 	public static final fun combine ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public static final fun combineProcessWide ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun getAllowMmapExec ()Z
@@ -389,37 +388,12 @@ public final class io/mazewall/enforcer/api/Policy {
 	public final fun isSyscallAllowed (Lio/mazewall/platform/syscall/Syscall;)Z
 	public static final fun restrictFurtherWith ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun syscallActionNumbers (Lio/mazewall/platform/syscall/Arch;)Ljava/util/Map;
-	public static final fun threadLocalBuilder ()Lio/mazewall/enforcer/api/Policy$Builder;
-}
-
-public final class io/mazewall/enforcer/api/Policy$Builder {
-	public final fun addAction (Lio/mazewall/platform/syscall/SeccompAction;[Lio/mazewall/platform/syscall/Syscall;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allow ([Lio/mazewall/platform/syscall/Syscall;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowFsRead (Ljava/lang/String;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowFsRead-1LBjqyU (Ljava/lang/String;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowFsWrite (Ljava/lang/String;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowFsWrite-1LBjqyU (Ljava/lang/String;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowJvmClasspath ()Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowMmapExec ()Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowNonThreadClone ()Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun allowUnsafePrctl ()Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun base (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun block ([Lio/mazewall/platform/syscall/Syscall;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun build ()Lio/mazewall/enforcer/api/Policy;
-	public final fun customViolationPhrase (Ljava/lang/String;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun customViolationRegex (Lkotlin/text/Regex;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun defaultAction (Lio/mazewall/platform/syscall/SeccompAction;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun forRuntime (Lio/mazewall/enforcer/api/RuntimeProfile;)Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun lockIntelCet ()Lio/mazewall/enforcer/api/Policy$Builder;
-	public final fun unblock ([Lio/mazewall/platform/syscall/Syscall;)Lio/mazewall/enforcer/api/Policy$Builder;
 }
 
 public final class io/mazewall/enforcer/api/Policy$Companion {
-	public final fun builder ()Lio/mazewall/enforcer/api/Policy$Builder;
 	public final fun combine ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun combineProcessWide ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
 	public final fun restrictFurtherWith ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
-	public final fun threadLocalBuilder ()Lio/mazewall/enforcer/api/Policy$Builder;
 }
 
 public final class io/mazewall/enforcer/api/PolicyArgumentRules {

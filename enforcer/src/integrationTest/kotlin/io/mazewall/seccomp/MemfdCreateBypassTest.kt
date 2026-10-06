@@ -61,8 +61,8 @@ LinuxNative.raw.syscall(
             executor
                 .submit {
                     val combined =
-                        Policy
-                            .builder()
+                        ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.NATIVE_IMAGE)
                             .block(Syscall.MEMFD_CREATE)
                             .build()
 

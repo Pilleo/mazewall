@@ -29,7 +29,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
      * Whether unsafe prctl options are allowed.
      *
      * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
-     * attacks (TOCTOU) by sibling threads. See [Policy.Builder.allowUnsafePrctl] for more details.
+     * attacks (TOCTOU) by sibling threads. See [WorkerPolicyBuilder.allowUnsafePrctl] for more details.
      */
     public val allowUnsafePrctl: Boolean = false,
     public val lockIntelCet: Boolean = false,

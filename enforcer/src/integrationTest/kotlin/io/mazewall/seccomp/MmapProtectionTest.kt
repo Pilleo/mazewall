@@ -78,7 +78,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `mmap with PROT_EXEC is blocked even if mmap syscall is allowed`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().block(Syscall.PTRACE).build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.PTRACE).build())
 
         try {
             assertFailsWith<ExecutionException> {
@@ -147,7 +147,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
         val safeExecutor =
             ContainedExecutors.wrap(
                 executor,
-                Policy.builder().build(),
+                ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
             ) // Policy that allows mprotect by default but BPF blocks PROT_EXEC
 
         try {
@@ -223,7 +223,7 @@ class MmapProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
         fun `pkey_mprotect with PROT_EXEC is blocked`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             assertFailsWith<ExecutionException> {

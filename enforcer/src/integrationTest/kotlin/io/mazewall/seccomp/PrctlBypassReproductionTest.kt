@@ -26,7 +26,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
     fun `reproduce prctl PR_SET_PDEATHSIG bypass`() {
         val executor = Executors.newSingleThreadExecutor()
         // Strict policy should block everything except whitelisted prctl options
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             safeExecutor
@@ -63,7 +63,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
         fun `reproduce prctl PR_CAP_AMBIENT_RAISE bypass`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             safeExecutor

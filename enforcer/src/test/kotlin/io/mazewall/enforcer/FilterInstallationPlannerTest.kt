@@ -45,8 +45,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `identical whitelist does not require another filter`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_KILL_PROCESS)
             .allow(Syscall.READ, Syscall.WRITE)
             .build()
@@ -70,8 +70,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `stricter syscall action creates an installation block`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_KILL_PROCESS, Syscall.EXECVE)
             .build()
@@ -102,7 +102,7 @@ class FilterInstallationPlannerTest {
         allowUnsafePrctl: Boolean,
         expectedNewFilter: Boolean,
     ) {
-        val builder = Policy.builder()
+        val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         if (allowMmapExec) builder.allowMmapExec()
         if (allowNonThreadClone) builder.allowNonThreadClone()
         if (allowUnsafePrctl) builder.allowUnsafePrctl()
@@ -122,8 +122,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `restrictive default re-installs the policy when an existing whitelist is narrowed`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ERRNO())
             .allow(Syscall.READ)
             .build()

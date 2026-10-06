@@ -39,7 +39,7 @@ class SupervisorConnectIntegrationTest : BaseIntegrationTest() {
         }
         try {
             Executors.newSingleThreadExecutor().use { raw ->
-                val contained = ContainedExecutors.wrap(raw, Policy.builder().allowMmapExec().build(), scope)
+                val contained = ContainedExecutors.wrap(raw, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build(), scope)
                 ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
                     server.soTimeout = 10000
                     Socket().use { socket ->

@@ -1,5 +1,7 @@
 package io.mazewall.profiler.api
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
@@ -33,7 +35,7 @@ class ProfilerConcurrencyBoundaryTest {
     fun `wrapped executor executes submitted tasks`() {
         val executor = Executors.newSingleThreadExecutor()
         try {
-            val wrapped = Profiler.wrap(executor, Policy.builder().build())
+            val wrapped = Profiler.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
             val executed = CountDownLatch(3)
             wrapped.execute { executed.countDown() }
             wrapped.submit { executed.countDown() }.get(5, TimeUnit.SECONDS)

@@ -46,7 +46,7 @@ class PermanentInstallationTest {
         }
         LinuxNative.setEngine(native)
         Executors.newSingleThreadExecutor().use { worker ->
-            val wrapped = ContainedExecutors.wrap(worker, Policy.builder().allowFsRead("/tmp").build())
+            val wrapped = ContainedExecutors.wrap(worker, WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build())
             val failure = assertFailsWith<ExecutionException> { wrapped.submit {}.get() }
             val partial = if (cleanupFailure is Error) {
                 assertSame(cleanupFailure, failure.cause)
@@ -78,8 +78,8 @@ class PermanentInstallationTest {
             }
         },
         )
-        val otherPolicy = Policy
-            .builder()
+        val otherPolicy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.EXECVE)
             .build()
             .definition
@@ -100,7 +100,7 @@ class PermanentInstallationTest {
         }
         LinuxNative.setEngine(engine)
         val failure = assertFailsWith<IllegalStateException> {
-            ContainedExecutors.installOnCurrentThread(Policy.builder().block(Syscall.EXECVEAT).build())
+            ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVEAT).build())
         }
         assertFalse(
             failure is io.mazewall.enforcer.api.PartialInstallationException,
@@ -115,7 +115,7 @@ class PermanentInstallationTest {
         engine.onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
         LinuxNative.setEngine(engine)
         val failure = assertFailsWith<io.mazewall.enforcer.api.PartialInstallationException> {
-            ContainedExecutors.installOnCurrentThread(Policy.builder().block(Syscall.EXECVE).build())
+            ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build())
         }
         assertTrue(failure.progress.seccompApplied)
         assertFalse(failure.progress.landlockApplied)
@@ -148,7 +148,7 @@ class PermanentInstallationTest {
             LinuxNative.SyscallResult.Success(0L)
         }
         LinuxNative.setEngine(engine)
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         ContainedExecutors.installOnCurrentThread(policy)
         val before = installs
         ContainedExecutors.installOnProcess(policy)
@@ -178,7 +178,7 @@ class PermanentInstallationTest {
         }
         LinuxNative.setEngine(engine)
         Executors.newSingleThreadExecutor().use { worker ->
-            val wrapped = ContainedExecutors.wrap(worker, Policy.builder().allowFsRead("/tmp").build())
+            val wrapped = ContainedExecutors.wrap(worker, WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build())
             val failure = assertFailsWith<ExecutionException> { wrapped.submit {}.get() }
             val partial = assertIs<io.mazewall.enforcer.api.PartialInstallationException>(failure.cause)
             assertTrue(partial.progress.landlockApplied)

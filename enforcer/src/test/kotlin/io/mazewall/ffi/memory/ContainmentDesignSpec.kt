@@ -91,7 +91,7 @@ class ContainmentDesignSpec :
             }
 
             "a DENY_LIST policy with 127 blocked syscalls produces < 255 instructions between any two jump targets" {
-                val builder = Policy.builder().defaultAction(SeccompAction.ACT_ALLOW)
+                val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_ALLOW)
                 Syscall.entries.take(127).forEach {
                     builder.block(it)
                 }
@@ -132,8 +132,8 @@ class ContainmentDesignSpec :
             "futex, sched_yield, rt_sigreturn, rt_sigaction, madvise, gettid, close are always allowed by BpfFilter" {
                 // In a Whitelist policy (default action ACT_ERRNO), all JVM coordination syscalls
                 // are explicitly whitelisted and generated in the BpfFilter.
-                val whitelistPolicy = Policy
-                    .builder()
+                val whitelistPolicy = ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .defaultAction(SeccompAction.ACT_ERRNO())
                     .build()
 
@@ -162,7 +162,7 @@ class ContainmentDesignSpec :
             val arch = Arch.AMD64
 
             "BpfFilter always emits ENOSYS for clone3 regardless of policy mode" {
-                val policy = Policy.builder().defaultAction(SeccompAction.ACT_ALLOW).build()
+                val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_ALLOW).build()
                 val filter = BpfFilter.build(arch, policy.definition).instructions
 
                 val clone3Nr = arch.clone3
@@ -198,7 +198,7 @@ class ContainmentDesignSpec :
                         .newSingleThreadExecutor()
                     val safeExecutor = io.mazewall.enforcer.api.ContainedExecutors.wrap(
                         executor,
-                        Policy.builder().build(),
+                        ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
                     )
                     try {
                         val result = safeExecutor

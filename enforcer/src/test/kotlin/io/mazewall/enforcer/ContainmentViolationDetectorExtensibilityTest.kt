@@ -108,8 +108,8 @@ class ContainmentViolationDetectorExtensibilityTest {
 
     @Test
     fun `can configure custom phrases and regexes via Policy and PolicyBuilder`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .customViolationPhrase("blocked by sandbox")
             .customViolationRegex(Regex("""restricted: \d+"""))
             .build()

@@ -191,8 +191,8 @@ class BillOfBehaviorTest {
 
         // Allow-list mode base policy
         val policy = bob.toPolicyAllowingIncomplete(
-            io.mazewall.enforcer.api.Policy
-                .builder()
+            io.mazewall.enforcer.api.ProcessPolicyBuilder
+                .denyList(io.mazewall.enforcer.api.RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(
                     io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
@@ -229,14 +229,14 @@ class BillOfBehaviorTest {
 
         // Allow-list base DSL
         val allowBase =
-            io.mazewall.enforcer.api.Policy
-                .builder()
+            io.mazewall.enforcer.api.ProcessPolicyBuilder
+                .denyList(io.mazewall.enforcer.api.RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(
                     io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).build()
         val dslAllow = bob.toDslAllowingIncomplete(
-            "Policy.builder().defaultAction(SeccompAction.ACT_ERRNO()).build()",
+            "ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_ERRNO()).build()",
             allowBase,
         )
         assertTrue(dslAllow.contains(".allow("))

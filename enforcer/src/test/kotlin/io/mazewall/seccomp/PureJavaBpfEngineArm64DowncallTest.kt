@@ -84,7 +84,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             }
             LinuxNative.setEngine(mockEngine)
 
-            val policy = Policy.builder().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
             val compiled = policy.definition.compile(Arch.AARCH64)
 
             // This should trigger the downcall compilation path for ARM64
@@ -123,7 +123,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             }
             LinuxNative.setEngine(mockEngine)
 
-            val policy = Policy.builder().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
             val compiled = policy.definition.compile(Arch.AARCH64)
 
             PureJavaBpfEngine.install(compiled)

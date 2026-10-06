@@ -26,7 +26,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         try {
             val future =
                 executor.submit {
-                    ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+                    ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
                 }
             val exception =
                 assertFailsWith<ExecutionException> {
@@ -45,7 +45,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         try {
             executor
                 .submit {
-                    ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+                    ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
                     // If it doesn't throw, it succeeds
                 }.get()
         } finally {
@@ -59,7 +59,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         // The guardrail only kicks in when the task actually runs.
         val vExecutor = Executors.newVirtualThreadPerTaskExecutor()
         try {
-            val safeExecutor = ContainedExecutors.wrap(vExecutor, Policy.builder().build())
+            val safeExecutor = ContainedExecutors.wrap(vExecutor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
             val future =
                 safeExecutor.submit {
@@ -79,7 +79,7 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
         try {
             val future =
                 executor.submit {
-                    ContainedExecutors.installOnProcess(Policy.builder().build())
+                    ContainedExecutors.installOnProcess(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
                 }
             val exception =
                 assertFailsWith<ExecutionException> {

@@ -218,8 +218,8 @@ class LandlockApplyResultTest {
 
         assertFailsWith<UnsupportedKernelFeatureException> {
             Landlock.applyRuleset(
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .allowFsRead(dir.toString())
                     .build()
                     .definition,
@@ -276,8 +276,8 @@ class LandlockApplyResultTest {
             }
         })
 
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead(dir.toString())
             .build()
             .definition
@@ -324,7 +324,7 @@ class LandlockApplyResultTest {
         Platform.setProvider(MockPlatformProvider())
         LinuxNative.setEngine(enosysCreateEngine())
 
-        val policy = Policy.builder().allowFsRead(dir.toString()).build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(dir.toString()).build()
         val receipt = ContainedExecutors.installOnCurrentThread(policy)
         assertTrue(!receipt.installed)
         assertFailsWith<IllegalStateException> {

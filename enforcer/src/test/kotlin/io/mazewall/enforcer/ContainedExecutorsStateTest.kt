@@ -46,8 +46,8 @@ class ContainedExecutorsStateTest {
         }
         Platform.setProvider(mockProvider)
 
-        val p1 = Policy.builder().allowFsRead("/tmp").build()
-        val p2 = Policy.builder().allowFsRead("/").build()
+        val p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/").build()
 
         ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(p1.definition)
         assertFailsWith<IllegalStateException> {
@@ -76,7 +76,7 @@ class ContainedExecutorsStateTest {
         System.setProperty("io.mazewall.fallback", fallback)
 
         val failure = runCatching {
-            ContainedExecutors.installOnCurrentThread(Policy.builder().build())
+            ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
         }.exceptionOrNull()
 
         if (shouldReject) {
@@ -97,7 +97,7 @@ class ContainedExecutorsStateTest {
         )
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
 
-        val receipt = ContainedExecutors.installOnCurrentThread(Policy.builder().build().definition)
+        val receipt = ContainedExecutors.installOnCurrentThread(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
 
         assertEquals(false, receipt.installed)
         assertEquals(false, receipt.landlockApplied)
@@ -114,8 +114,8 @@ class ContainedExecutorsStateTest {
                 override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
             },
         )
-        val existingPolicy = Policy.builder().allowFsRead("/tmp").build()
-        val incompatiblePolicy = Policy.builder().allowFsRead("/").build()
+        val existingPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
+        val incompatiblePolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/").build()
         ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(existingPolicy.definition)
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
@@ -138,7 +138,7 @@ class ContainedExecutorsStateTest {
         }
         Platform.setProvider(mockProvider)
 
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
 
         // 1. Verify Virtual Thread is rejected
         var virtualException: Throwable? = null
@@ -169,7 +169,7 @@ class ContainedExecutorsStateTest {
         )
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
-        val policyWithLandlock = Policy.builder().allowFsRead("/tmp").build()
+        val policyWithLandlock = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
         ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withLandlockPolicy(policyWithLandlock.definition)
 
         val receipt = ContainedExecutors.installOnCurrentThread(policyWithLandlock.definition)
@@ -178,7 +178,7 @@ class ContainedExecutorsStateTest {
         // Policy with no Landlock on clean state must report landlockApplied=false
         ContainmentStateRegistry.threadState = io.mazewall.enforcer.state
             .ContainerState()
-        val policyWithoutLandlock = Policy.builder().build()
+        val policyWithoutLandlock = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val receiptClean = ContainedExecutors.installOnCurrentThread(policyWithoutLandlock.definition)
         assertEquals(false, receiptClean.landlockApplied, "Policy without Landlock on clean state must report landlockApplied=false")
     }

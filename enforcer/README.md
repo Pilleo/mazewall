@@ -140,9 +140,11 @@ The primary entry point is `ContainedExecutors`, which provides wrappers for sta
 
 ```kotlin
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     .base(Policy.NO_EXEC)
     .allowFsRead("/var/tmp/incoming")
     .allowJvmClasspath()

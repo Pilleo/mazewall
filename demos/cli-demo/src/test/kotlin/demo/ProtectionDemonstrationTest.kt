@@ -1,6 +1,8 @@
 package demo
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.enforcer.api.ContainedExecutors
@@ -93,7 +95,7 @@ class ProtectionDemonstrationTest {
         if (!io.mazewall.enforcer.api.Platform.isSupported()) return
 
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             val outcome =

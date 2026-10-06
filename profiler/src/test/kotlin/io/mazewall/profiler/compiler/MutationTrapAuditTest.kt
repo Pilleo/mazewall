@@ -1,5 +1,7 @@
 package io.mazewall.profiler.compiler
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
@@ -26,8 +28,8 @@ class MutationTrapAuditTest {
         val program = BpfFilter
             .build(
             arch,
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
                 .block(io.mazewall.platform.syscall.Syscall.CONNECT)
                 .build()

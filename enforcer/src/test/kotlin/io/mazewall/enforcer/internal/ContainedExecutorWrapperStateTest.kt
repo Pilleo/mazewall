@@ -69,7 +69,7 @@ class ContainedExecutorWrapperStateTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
 
@@ -136,7 +136,7 @@ class ContainedExecutorWrapperStateTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
 
@@ -187,7 +187,7 @@ class ContainedExecutorWrapperStateTest {
         LinuxNative.setEngine(mockEngine)
 
         // Policy WITHOUT Landlock paths so Landlock is not applied
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
 

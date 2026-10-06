@@ -21,8 +21,8 @@ class BpfFilterPropertyTest {
     fun `bpf filter generation handles random combinations of syscalls without exceeding size limits`() {
         runBlocking {
             Syscall.entries.chunked(10).forEach { randomSyscalls ->
-                val policy = Policy
-                    .builder()
+                val policy = ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .apply {
                         randomSyscalls.forEach { block(it) }
                     }.build()

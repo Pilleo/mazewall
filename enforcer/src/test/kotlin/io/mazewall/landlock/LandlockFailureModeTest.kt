@@ -145,7 +145,7 @@ class LandlockFailureModeTest {
         }
         LinuxNative.setEngine(mock)
 
-        val session = LandlockSession(Policy.builder().build().definition)
+        val session = LandlockSession(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         org.junit.jupiter.api.Assumptions
             .assumeTrue(
                 io.mazewall.enforcer.api.Platform
@@ -165,7 +165,7 @@ class LandlockFailureModeTest {
         val mockEngine = SupportedLandlockMock()
         LinuxNative.setEngine(mockEngine)
 
-        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        val session = LandlockSession(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition, processWide = true)
         session.applyRuleset()
     }
 
@@ -180,7 +180,7 @@ class LandlockFailureModeTest {
 
         // Should log warning and continue with thread-scoped
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
-        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        val session = LandlockSession(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition, processWide = true)
         session.applyRuleset()
     }
 
@@ -261,8 +261,8 @@ class LandlockFailureModeTest {
         LinuxNative.setEngine(mockFallback)
         // Must use allowFsWrite to have creation capabilities, so that fallback occurs!
         val session1 = LandlockSession(
-            Policy
-            .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsWrite(SandboxedPath.of("/nonexistent/file", true))
             .build()
             .definition,
@@ -273,8 +273,8 @@ class LandlockFailureModeTest {
         val tempFile = java.io.File.createTempFile("landlock-test", "txt")
         try {
             val session2 = LandlockSession(
-                Policy
-                .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(tempFile.absolutePath)
                 .build()
                 .definition,
@@ -313,8 +313,8 @@ class LandlockFailureModeTest {
                 .isSupported(),
             )
         val session = LandlockSession(
-            Policy
-            .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsWrite(SandboxedPath.of("/nonexistent/file (deleted)", true))
             .build()
             .definition,
@@ -366,8 +366,8 @@ class LandlockFailureModeTest {
 
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
         // Request policy requiring ABI v2 (rename)
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/tmp")
             .allow(io.mazewall.platform.syscall.Syscall.RENAME)
             .build()
@@ -386,7 +386,7 @@ class LandlockFailureModeTest {
         LinuxNative.setEngine(mockEngine)
 
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val session = LandlockSession(Policy.builder().build().definition, processWide = true)
+        val session = LandlockSession(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition, processWide = true)
         // Should run and apply thread-scoped silently without warning or exception
         session.applyRuleset()
     }
@@ -730,8 +730,8 @@ class LandlockFailureModeTest {
 
         // Must use allowFsWrite to trigger fallback
         val session = LandlockSession(
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsWrite(SandboxedPath.of("/nonexistent/file", true))
                 .build()
                 .definition,
@@ -779,8 +779,8 @@ class LandlockFailureModeTest {
         LinuxNative.setEngine(mockFallback)
 
         val session = LandlockSession(
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(SandboxedPath.of("/nonexistent/file", true))
                 .build()
                 .definition,
@@ -796,7 +796,7 @@ class LandlockFailureModeTest {
     fun `test net access mask calculation for ABI versions`() {
         // ABI < 4
         assertEquals(0L, Landlock.getFullNetAccessMask(3))
-        val policyWithBlocks = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
+        val policyWithBlocks = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(0L, Landlock.getNetAccessMask(3, policyWithBlocks.definition))
 
         // ABI >= 4 (getFullNetAccessMask)
@@ -805,19 +805,19 @@ class LandlockFailureModeTest {
 
         // ABI >= 4 (getNetAccessMask)
         // Scenario A: blocks both BIND and CONNECT
-        val policyBlockBoth = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
+        val policyBlockBoth = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(io.mazewall.platform.syscall.Syscall.BIND, io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(fullNetMask, Landlock.getNetAccessMask(4, policyBlockBoth.definition))
 
         // Scenario B: blocks only BIND
-        val policyBlockBind = Policy.builder().block(io.mazewall.platform.syscall.Syscall.BIND).build()
+        val policyBlockBind = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(io.mazewall.platform.syscall.Syscall.BIND).build()
         assertEquals(Landlock.LANDLOCK_ACCESS_NET_BIND_TCP, Landlock.getNetAccessMask(4, policyBlockBind.definition))
 
         // Scenario C: blocks only CONNECT
-        val policyBlockConnect = Policy.builder().block(io.mazewall.platform.syscall.Syscall.CONNECT).build()
+        val policyBlockConnect = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(io.mazewall.platform.syscall.Syscall.CONNECT).build()
         assertEquals(Landlock.LANDLOCK_ACCESS_NET_CONNECT_TCP, Landlock.getNetAccessMask(4, policyBlockConnect.definition))
 
         // Scenario D: blocks neither
-        val policyBlockNone = Policy.builder().build()
+        val policyBlockNone = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         assertEquals(0L, Landlock.getNetAccessMask(4, policyBlockNone.definition))
     }
 

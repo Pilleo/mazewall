@@ -102,7 +102,7 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
     @Test
     fun `argument-inspection fuzz agrees with kernel for prctl and mprotect`() {
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.compile(arch)
         val random = Random(0x4d415a45)
 
@@ -143,7 +143,7 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
     @Test
     fun `equals-any 64-bit argument fuzz agrees with kernel`() {
         val allowed = listOf(0x1122334455667788L, -0x778899aabbccddefL)
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val builder = BpfProgram.builder().checkArch(arch).loadSyscallNr()
         BpfFilter.emitInspections(
             builder,
@@ -182,8 +182,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
     @Test
     fun `blacklist errno archetype - kernel matches simulator and liveness holds`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
@@ -236,8 +236,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         // default ALLOW + <=32 actions => BST codegen path. Never deny-by-default here: the JVM
         // lazily loads classes for every syscall imaginable and would starve (ClassFormatError).
         val blocked = listOf(Syscall.CONNECT, Syscall.UMASK, Syscall.GETPPID, Syscall.GETEUID)
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_ERRNO(NativeConstants.EPERM), *blocked.toTypedArray())
             .build()
@@ -302,8 +302,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
     private fun compiledProgramOf(victimNr: Int): List<BpfInstruction> {
         val victim = io.mazewall.platform.syscall.Syscall.entries
             .first { it.numberFor(arch) == victimNr }
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_KILL_THREAD, victim)
             .build()
@@ -319,8 +319,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         val victimNr = Syscall.CONNECT.numberFor(arch)
 
         // First layer: deny CONNECT
-        val firstPolicy = Policy
-            .builder()
+        val firstPolicy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
@@ -331,8 +331,8 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         assertTrue(kernelDenied(victimNr), "First layer must deny CONNECT")
 
         // Second layer: allow CONNECT (but this should be overridden by first layer's deny)
-        val secondPolicy = Policy
-            .builder()
+        val secondPolicy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .allow(Syscall.CONNECT)
             .build()

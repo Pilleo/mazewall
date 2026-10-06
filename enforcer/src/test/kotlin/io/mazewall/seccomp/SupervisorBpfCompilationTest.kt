@@ -28,26 +28,26 @@ class SupervisorBpfCompilationTest {
     @ValueSource(strings = ["amd64", "aarch64"])
     fun `unsupported supervised operations are rejected during compilation`(architecture: String) {
         val arch = if (architecture == "amd64") Arch.AMD64 else Arch.AARCH64
-        val policy = Policy.builder().addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
         assertFailsWith<IllegalArgumentException> { BpfFilter.build(arch, policy.definition) }
     }
 
     @Test
     fun `default notify cannot dispatch unhandled operations`() {
-        val policy = Policy.builder().defaultAction(SeccompAction.ACT_NOTIFY).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_NOTIFY).build()
         assertFailsWith<IllegalArgumentException> { BpfFilter.build(arch, policy.definition) }
     }
 
     @Test
     fun `profiler can observe operations without enforcement handlers`() {
-        val policy = Policy.builder().addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).addAction(SeccompAction.ACT_NOTIFY, Syscall.UNLINKAT).build()
         BpfFilter.build(arch, policy.definition, profilingMode = true)
     }
 
     @Test
     fun `policy builder with supervise produces notify action in bpf filter`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
             .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.CONNECT)
             .build()

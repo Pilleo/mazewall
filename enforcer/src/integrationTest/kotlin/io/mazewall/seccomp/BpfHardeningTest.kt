@@ -25,8 +25,8 @@ class BpfHardeningTest : BaseIntegrationTest() {
     @Test
     fun `test that prctl can be blocked when inspection is explicitly disabled`() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowUnsafePrctl() // Disable argument inspection (previously would cause PRCTL to be skipped in block list)
                 .block(Syscall.PRCTL) // Explicitly block it
                 .build()
@@ -61,8 +61,8 @@ class BpfHardeningTest : BaseIntegrationTest() {
     @Test
     fun `test that mmap with PROT_EXEC is blocked by default and standard mmap is preserved`() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.MMAP) // Even if we block MMAP, critical bypass allows it for non-exec
                 .build()
 

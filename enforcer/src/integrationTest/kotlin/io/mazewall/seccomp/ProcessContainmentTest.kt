@@ -23,8 +23,8 @@ import java.nio.channels.Selector
 class ProcessContainmentTest : BaseIntegrationTest() {
     fun testProcessWide() {
         val safeGlobalPolicy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                 .allowMmapExec()
                 .allowNonThreadClone()
@@ -43,8 +43,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
 
     fun testInheritance() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .base(Policy.NO_EXEC)
                 .allowMmapExec()
                 .build()
@@ -74,8 +74,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             System.out.println("Warmup connection failed as expected: ${e.message}")
         }
 
-        val noNetworkAllowJit = Policy
-            .builder()
+        val noNetworkAllowJit = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_NETWORK)
             .allowMmapExec()
             .build()
@@ -137,8 +137,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
 
         for (i in 0 until 32) {
             ContainedExecutors.installOnCurrentThread(
-                Policy
-                    .builder()
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .block(safeSyscalls[i])
                     .allowMmapExec()
                     .allowNonThreadClone()
@@ -148,8 +148,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
 
         try {
             ContainedExecutors.installOnCurrentThread(
-                Policy
-                    .builder()
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .block(safeSyscalls[32])
                     .allowMmapExec()
                     .allowNonThreadClone()
@@ -213,8 +213,8 @@ class ProcessContainmentTest : BaseIntegrationTest() {
     }
 
     fun testLandlockSupportLimits() {
-        val policyWithFs = Policy
-            .builder()
+        val policyWithFs = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowMmapExec()
             .allowFsRead("/etc")
             .build()

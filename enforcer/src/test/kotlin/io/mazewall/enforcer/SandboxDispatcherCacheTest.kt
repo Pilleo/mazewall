@@ -24,7 +24,7 @@ class SandboxDispatcherCacheTest {
     @Test
     fun testExecute() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val result = SandboxDispatcher.execute(policy, Callable { "success" })
         assertEquals("success", result)
     }
@@ -32,21 +32,21 @@ class SandboxDispatcherCacheTest {
     @Test
     fun testExecuteBlock() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val result = SandboxDispatcher.executeBlock(policy) { "success" }
         assertEquals("success", result)
     }
 
     @Test
     fun `shutdownAll terminates cached pools`() {
-        val pool = SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
+        val pool = SandboxDispatcher.getOrCreateElasticPool(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         SandboxDispatcher.shutdownAll()
         assertTrue(pool.isShutdown)
     }
 
     @Test
     fun `close is AutoCloseable shutdown`() {
-        val pool = SandboxDispatcher.getOrCreateElasticPool(Policy.builder().build().definition)
+        val pool = SandboxDispatcher.getOrCreateElasticPool(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         (SandboxDispatcher as AutoCloseable).close()
         assertTrue(pool.isShutdown)
         assertTrue(pool.isTerminated)
@@ -55,8 +55,8 @@ class SandboxDispatcherCacheTest {
     @Test
     fun `evicts least recently used pools above the fixed cache cap`() {
         val firstPool = SandboxDispatcher.getOrCreateElasticPool(
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .customViolationPhrase("policy-0")
                 .build()
                 .definition,
@@ -64,8 +64,8 @@ class SandboxDispatcherCacheTest {
 
         repeat(SandboxDispatcher.MAX_CACHED_POOLS) { index ->
             SandboxDispatcher.getOrCreateElasticPool(
-                Policy
-                    .builder()
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .defaultAction(
                         io.mazewall.platform.syscall.SeccompAction
                         .ACT_TRACE(index + 1),

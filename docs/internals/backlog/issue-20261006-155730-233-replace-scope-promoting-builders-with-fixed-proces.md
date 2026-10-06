@@ -5,9 +5,20 @@ status: "open"
 priority: high
 dependencies: []
 component: "core"
-target_modules: []
+target_modules: ["enforcer", "profiler", "demos:cli-demo", "demos:agent-sandbox-demo", "demos:vulnerable-web-app"]
 target_files: 
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/api"
+  - "enforcer/src/test"
+  - "enforcer/src/integrationTest"
+  - "enforcer/api/enforcer.api"
+  - "profiler/src"
+  - "demos"
+  - "tests/consumers"
+  - "GETTING_STARTED.md"
+  - "README.md"
+  - "enforcer/README.md"
+  - "profiler/README.md"
+  - "docs/internals/designs/api/enforcer-public-api.md"
 target_symbols: []
 open_questions: false
 ---
@@ -43,6 +54,19 @@ C1/C2 require imperative and fluent worker rules to agree, explicit filesystem i
 - `./gradlew :enforcer:test :profiler:test :enforcer:checkKotlinAbi :demos:cli-demo:test :demos:agent-sandbox-demo:test :demos:vulnerable-web-app:test` passed.
 - `./gradlew build` passed: 265 tasks, 23 executed, 242 up-to-date. Its initial run rejected import ordering and method-chain formatting in the changed web-demo files; only those formatting defects were corrected, and the focused lint gate then passed.
 - Remaining nested `Policy.Builder` callers are largely host/kernel/compiler test fixtures. Their migration and retirement of the nested construction path remain open; canonical artifact serialization is a separate unfinished C1 closure.
+
+## Final C2 construction retirement
+
+- Base revision `1e0d862f`. Migrated every remaining host, kernel, compiler, profiler, and CLI fixture to fixed-scope construction, then removed `Policy.Builder`, `Policy.builder()`, and `Policy.threadLocalBuilder()` entirely. No forwarding or binary-only compatibility declarations remain.
+- Explicit `NATIVE_IMAGE` initialization preserves the former raw builders' W^X default in compatibility-sensitive compiler/kernel fixtures; fixtures that selected HotSpot or enabled executable mappings still do so. This is preserved test configuration, not a new runtime-support claim.
+- Filesystem-bearing construction uses worker scope. Existing process-installation and compiled-policy type checks still compile. Replaced the obsolete copy-promotion assertion with a frozen-worker-snapshot assertion; packaged negative compilation continues to prove process builders cannot acquire filesystem state.
+- The randomized restrictive-composition generator now uses the same worker builder as application consumers. Existing syscall verdict, native installation, lifecycle, and permission assertions remain in their owning tests.
+- Updated primary construction examples and the ABI snapshot to the retired surface. The source census finds no retired construction calls/types; only historical test names retain the old naming.
+- `./gradlew :enforcer:test :profiler:test :enforcer:updateKotlinAbi` passed. All migrated host/integration sources compiled before full checks.
+- `./gradlew build integrationTest integrationTestFreshJvm` passed: 272 tasks, 93 executed, 179 up-to-date. Full caller-mapped Docker `test integrationTest integrationTestFreshJvm` gate passed in 1m19s.
+- Fresh staged Java/Kotlin consumers, actual javac process/worker scope rejection, and the existing Callable/Supplier ambiguity characterization passed with updated dependency locks. Actual-kernel deny-all report: two tests, zero failures/errors/skips.
+- Inspected the actual staged JAR: no class entries remain for `Policy$Builder`, `JavaPolicyBuilder`, `PolicyLists`, `DenyListSpec`, or `AllowListSpec`; retirement is not merely an ABI-text change.
+- C2 implementation is complete; this issue stays open for repository review. Canonical artifact serialization remains a separate C1/C6 closure, and required installation/runtime ownership remain C3/C7 work.
 
 ---
 <!-- id: issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces  file: issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces.md -->

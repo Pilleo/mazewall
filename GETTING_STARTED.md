@@ -118,7 +118,7 @@ sandboxed.submit {
 ### Recipe 1 — Data parser that reads files but never touches the network
 
 ```kotlin
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     .base(Policy.NO_NETWORK)
     .allowFsRead("/data/incoming")   // explicit allow; everything else is denied by Landlock
     .allowJvmClasspath()             // required if your parser lazily loads classes
@@ -135,7 +135,7 @@ val parserPool = ContainedExecutors.wrap(
 These workers shouldn't touch the network, spawn processes, or write to arbitrary paths.
 
 ```kotlin
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE)       // blocks exec + network + filesystem writes + mmap(PROT_EXEC)
     .allowFsRead("/models")          // model weights
     .allowFsWrite("/tmp/inference")  // scratch space only
@@ -150,7 +150,7 @@ val workerPool = ContainedExecutors.wrap(
 ### Recipe 3 — Proving behavioral constraints for regulated data (PCI, HIPAA)
 
 ```kotlin
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .allowFsRead("/secure/input")
     .allowFsWrite("/secure/output")
@@ -172,7 +172,7 @@ val auditedPool = ContainedExecutors.wrap(
 ## Building a Custom Policy
 
 ```kotlin
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     // Start from a built-in base
     .base(Policy.NO_EXEC_HOTSPOT)
 
@@ -183,7 +183,7 @@ val policy = Policy.builder()
 
     // Fine-grained syscall control (advanced — see enforcer/README.md)
     // .allowMmapExec()         // needed if the pool runs a JIT-compiled native agent
-    // .allowCloneFork()        // needed for libraries that fork subprocesses
+    // .allowNonThreadClone(true) // advanced: permits non-thread clone; review process creation separately
 
     .build()
 ```

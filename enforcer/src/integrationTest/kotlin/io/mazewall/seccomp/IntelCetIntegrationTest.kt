@@ -32,7 +32,7 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
     @NeedsFreshJvm
     @EnabledIfCetSupported
     fun `queryIntelCetStatus returns active status when CET is supported and locked`() {
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
         val receipt = policy.install()
         try {
             val status = Platform.queryIntelCetStatus()
@@ -49,7 +49,7 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
         try {
-            val policy = Policy.builder().lockIntelCet().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
             val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
             // Even if CET is not supported on the test runner, it should bypass and complete successfully under WARN_AND_BYPASS

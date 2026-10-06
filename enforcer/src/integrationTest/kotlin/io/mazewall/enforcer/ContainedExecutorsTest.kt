@@ -107,16 +107,16 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             val future = executor.submit(
                 java.util.concurrent.Callable {
                 ContainedExecutors.installOnCurrentThread(
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .allowFsRead(
                         io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp", true),
                     ).build(),
                 )
                 ContainedExecutors.installOnCurrentThread(
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .allowFsRead(
                         io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp/foo", true),
@@ -135,8 +135,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         val executor = Executors.newSingleThreadExecutor()
         try {
             val future = executor.submit {
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/tmp").build())
-                ContainedExecutors.installOnCurrentThread(Policy.builder().allowFsRead("/etc").build())
+                ContainedExecutors.installOnCurrentThread(WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build())
+                ContainedExecutors.installOnCurrentThread(WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/etc").build())
             }
             try {
                 future.get()
@@ -157,16 +157,16 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         try {
             val future = executor.submit {
                 ContainedExecutors.installOnCurrentThread(
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .allowFsRead(
                         io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp", true),
                     ).build(),
                 )
                 ContainedExecutors.installOnCurrentThread(
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .allowFsRead(
                         io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp-foo", true),
@@ -192,7 +192,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         try {
             val future = executor.submit(
                 java.util.concurrent.Callable {
-                val p = Policy.builder().allowFsRead("/tmp").build()
+                val p = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
                 ContainedExecutors.installOnCurrentThread(p)
                 ContainedExecutors.installOnCurrentThread(p)
                 "success"
@@ -281,8 +281,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     fun testInstallOnProcessRejectsPoliciesWithLandlockRequirement() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/tmp")
             .build()
         val features = Platform.featureMatrix
@@ -336,15 +336,15 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
 
     @Test
     fun `installOnCurrentThread accepts both process-wide and thread-local policies`() {
-        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Compiled> = Policy
-            .builder()
+        val threadLocalPolicy: Policy<PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Compiled> = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/tmp")
             .build()
             .compile(
                 io.mazewall.platform.syscall.Arch
                 .current(),
             )
-        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Compiled> = Policy.builder().build().compile(
+        val processWidePolicy: Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Compiled> = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().compile(
             io.mazewall.platform.syscall.Arch
             .current(),
         )

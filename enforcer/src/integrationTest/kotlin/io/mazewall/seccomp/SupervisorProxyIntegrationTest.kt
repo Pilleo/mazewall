@@ -95,8 +95,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             }
         }
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .build()
 
@@ -166,8 +166,8 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             )
         }
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .build()
 

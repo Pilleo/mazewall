@@ -54,7 +54,7 @@ public typealias Compiled = PolicyState.Compiled
  * Note that the compiler automatically whitelists these critical JVM system calls in `BpfFilter.getJvmCriticalNrs`
  * to protect against thread desynchronization and signal mask inheritance failures.
  *
- * @deprecated Use [PolicyDefinition], [PolicyBuilder], or [CompiledSandbox] instead.
+ * Construction uses [ProcessPolicyBuilder] or [WorkerPolicyBuilder]; compilation uses [CompiledSandbox].
  * This class is maintained for backward compatibility during architectural refactoring.
  */
 public class Policy<out S : PolicyScope, out State : PolicyState> internal constructor(
@@ -86,7 +86,7 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
      * Whether unsafe prctl options are allowed.
      *
      * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
-     * attacks (TOCTOU) by sibling threads. See [Policy.Builder.allowUnsafePrctl] for more details.
+     * attacks (TOCTOU) by sibling threads. See [WorkerPolicyBuilder.allowUnsafePrctl] for more details.
      */
     public val allowUnsafePrctl: Boolean get() = definition.allowUnsafePrctl
     public val allowedFsReadPaths: Set<SandboxedPath> get() = definition.allowedFsReadPaths
@@ -159,13 +159,6 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             Policy(PolicyPresets.PURE_COMPUTE)
 
         @JvmStatic
-        public fun builder(): Builder<PolicyScope.ProcessWideSafe> = Builder(PolicyBuilder())
-
-        /** Creates a builder specifically for thread-local policies (e.g. including FS rules). */
-        @JvmStatic
-        public fun threadLocalBuilder(): Builder<PolicyScope.ThreadLocalOnly> = Builder(PolicyBuilder())
-
-        @JvmStatic
         @JvmName("combineProcessWide")
         public fun combine(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
             val defs = policies.map { it.definition }.toTypedArray()
@@ -197,110 +190,6 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
             definition = policy.definition,
             compiledFiltersField = filters,
         )
-    }
-
-    /**
-     * Legacy builder to maintain API compatibility.
-     */
-    public class Builder<S : PolicyScope> internal constructor(
-        private val internalBuilder: PolicyBuilder<S>,
-    ) {
-        public fun defaultAction(action: SeccompAction): Builder<S> {
-            internalBuilder.defaultAction(action)
-            return this
-        }
-
-        public fun addAction(
-            action: SeccompAction,
-            vararg syscalls: Syscall,
-        ): Builder<S> {
-            internalBuilder.addAction(action, *syscalls)
-            return this
-        }
-
-        public fun block(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ERRNO(), *syscalls)
-
-        public fun allow(vararg syscalls: Syscall): Builder<S> = addAction(SeccompAction.ACT_ALLOW, *syscalls)
-
-        /**
-         * Removes an explicit action from this uncompiled builder only.
-         * Installed kernel filters are monotonic and cannot grow.
-         */
-        public fun unblock(vararg syscalls: Syscall): Builder<S> {
-            internalBuilder.unblock(*syscalls)
-            return this
-        }
-
-        public fun base(policy: Policy<out S, *>): Builder<S> {
-            internalBuilder.base(policy.definition)
-            return this
-        }
-
-        // Soundness note (issue-20260823-135554): FS-adding methods return a NEW wrapper around
-        // the copy-on-promoted internal builder. The receiver is never re-typed via unchecked
-        // casts, so aliasing cannot contradict a builder's declared scope.
-        public fun allowFsRead(path: String): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsRead(path))
-
-        public fun allowFsRead(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsRead(path))
-
-        public fun allowJvmClasspath(): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowJvmClasspath())
-
-        public fun allowFsWrite(path: String): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsWrite(path))
-
-        public fun allowFsWrite(path: SandboxedPath): Builder<PolicyScope.ThreadLocalOnly> = Builder(internalBuilder.allowFsWrite(path))
-
-        /**
-         * Advanced: allow `mmap`/`mprotect` `PROT_EXEC`. Prefer
-         * [forRuntime] with [RuntimeProfile.HOTSPOT_JIT] on process baselines.
-         */
-        public fun allowMmapExec(): Builder<S> {
-            internalBuilder.allowMmapExec()
-            return this
-        }
-
-        /** Apply JIT vs W^X executable-mapping policy for [runtime]. */
-        public fun forRuntime(runtime: RuntimeProfile): Builder<S> {
-            internalBuilder.forRuntime(runtime)
-            return this
-        }
-
-        public fun allowNonThreadClone(): Builder<S> {
-            internalBuilder.allowNonThreadClone()
-            return this
-        }
-
-        /**
-         * Allows unsafe prctl operations.
-         *
-         * WARNING: This option is extremely dangerous and inherently vulnerable to concurrent memory mutation
-         * attacks (TOCTOU) by sibling threads. While register-based arguments (like args[0], the prctl option code)
-         * are immune to TOCTOU, pointer-based arguments in options such as PR_SET_MM or PR_SET_NAME are subject
-         * to TOCTOU. A sibling thread can modify the memory pointed to by the register argument concurrently
-         * after the BPF filter's check but before kernel execution.
-         */
-        public fun allowUnsafePrctl(): Builder<S> {
-            internalBuilder.allowUnsafePrctl()
-            return this
-        }
-
-        public fun lockIntelCet(): Builder<S> {
-            internalBuilder.lockIntelCet()
-            return this
-        }
-
-        public fun customViolationPhrase(phrase: String): Builder<S> {
-            internalBuilder.customViolationPhrase(phrase)
-            return this
-        }
-
-        public fun customViolationRegex(regex: Regex): Builder<S> {
-            internalBuilder.customViolationRegex(regex)
-            return this
-        }
-
-        public fun build(): Policy<S, Uncompiled> {
-            return Policy(internalBuilder.build())
-        }
     }
 }
 

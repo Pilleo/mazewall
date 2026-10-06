@@ -66,7 +66,7 @@ class SupervisorInstallationDeadlineTest {
             }
         }
         val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(62002)
-        val filter = BpfFilter.build(Arch.current(), Policy.builder().build().definition)
+        val filter = BpfFilter.build(Arch.current(), ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         val installer = Thread {
             try {
                 SupervisorSeccompNotifInstaller.installOwned(

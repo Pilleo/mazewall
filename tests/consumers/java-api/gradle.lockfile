@@ -2,8 +2,8 @@
 # Manual edits can break the build and are not advised.
 # This file is expected to be part of source control.
 # To regenerate this file, run: ./gradlew :java-api:dependencies --write-locks
-io.mazewall:enforcer:0.1.0-baseline.235b1acf=compileClasspath,runtimeClasspath
-io.mazewall:platform:0.1.0-baseline.235b1acf=compileClasspath,runtimeClasspath
+io.mazewall:enforcer:0.1.0-baseline.1e0d862f=compileClasspath,runtimeClasspath
+io.mazewall:platform:0.1.0-baseline.1e0d862f=compileClasspath,runtimeClasspath
 org.jetbrains.kotlin:kotlin-stdlib:2.4.20-Beta1=compileClasspath,runtimeClasspath
 org.jetbrains.kotlinx:kotlinx-serialization-bom:1.9.0=runtimeClasspath
 org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.9.0=runtimeClasspath

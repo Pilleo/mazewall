@@ -26,7 +26,7 @@ class PolicyCombinePropertyTest {
         val writes = Arb.list(pathArb, 0..3).bind()
         val enforce = Arb.boolean().bind()
 
-        val builder = Policy.builder()
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         reads.forEach { builder.allowFsRead(it) }
         writes.forEach { builder.allowFsWrite(it) }
         // If we force enforce, we need at least one path to avoid the "collapse to empty" warning turning into a hard block

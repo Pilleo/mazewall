@@ -26,8 +26,8 @@ import kotlin.test.assertTrue
 
 class ShutdownRaceConditionTest : BaseIntegrationTest() {
     fun testRegistrySyncOnInterruption() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.OPEN)
             .allowMmapExec()
             .build()

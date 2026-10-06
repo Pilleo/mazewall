@@ -67,8 +67,8 @@ class KernelCapabilityTest {
         Platform.setProvider(RealPlatformProvider)
 
         val policy =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/tmp")
                 .build()
 
@@ -113,7 +113,7 @@ class KernelCapabilityTest {
                 override fun getLandlockCapability(): KernelCapability<Int> = capability
             },
         )
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
         return InstallationAssessor.assess(policy.definition, processWide = false)
     }
 }

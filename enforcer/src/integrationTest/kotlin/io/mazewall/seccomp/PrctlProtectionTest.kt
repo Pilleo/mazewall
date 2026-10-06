@@ -41,7 +41,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `prctl PR_SET_NAME is allowed under default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             safeExecutor
@@ -65,7 +65,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `prctl PR_GET_NAME is allowed under default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             safeExecutor
@@ -92,7 +92,7 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `unsafe prctl options are blocked by default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
 
         try {
             assertFailsWith<ExecutionException> {
@@ -120,7 +120,7 @@ LinuxNative.process
     @EnabledIfLinuxAndSupported
     fun `unsafe prctl options are allowed when allowUnsafePrctl is explicitly set`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().allowUnsafePrctl().build())
+        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowUnsafePrctl().build())
 
         try {
             safeExecutor

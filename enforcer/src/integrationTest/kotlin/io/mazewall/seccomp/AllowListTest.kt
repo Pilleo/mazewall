@@ -75,8 +75,8 @@ LinuxNative.raw.syscall(
                     preWarm()
 
                     val policy =
-                        Policy
-                            .builder()
+                        ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.NATIVE_IMAGE)
                             .defaultAction(
                                 io.mazewall.platform.syscall.SeccompAction
                                 .ACT_ERRNO(),
@@ -107,8 +107,8 @@ LinuxNative.raw.syscall(
                     preWarm()
 
                     val policy =
-                        Policy
-                            .builder()
+                        ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.NATIVE_IMAGE)
                             .defaultAction(
                                 io.mazewall.platform.syscall.SeccompAction
                                 .ACT_ERRNO(),

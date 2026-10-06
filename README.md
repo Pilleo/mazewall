@@ -101,7 +101,7 @@ val result = Profiler.profile {
 // Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
 println(result.behavior.toDsl(allowIncomplete = true))
 // Output:
-// Policy.builder()
+// WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
 //     .base(Policy.NO_NETWORK)
 //     .allowFsRead("/app/schemas")
 //     .allowJvmClasspath()

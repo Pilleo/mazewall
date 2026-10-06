@@ -64,7 +64,7 @@ class FilterInstallationFailureTest {
         )
 
         // Policy WITHOUT filesystem paths — Landlock will NOT be applied
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
@@ -113,7 +113,7 @@ class FilterInstallationFailureTest {
         val mockEngine = MockNativeEngine()
 
         // Policy WITH filesystem paths — Landlock WILL be applied (and is irreversible)
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
@@ -161,7 +161,7 @@ class FilterInstallationFailureTest {
         val mockEngine = MockNativeEngine()
 
         // Policy WITH filesystem paths — Landlock WILL be applied before the seccomp failure
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
 
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
             if (nr == io.mazewall.platform.syscall.Arch

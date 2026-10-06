@@ -48,8 +48,8 @@ class InstallSelfVerifierTest {
     private fun blacklistProgram(): BpfProgram<BpfStatus.Verified> =
         BpfFilter.build(
             arch,
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ALLOW)
                 .block(Syscall.CONNECT)
                 .build()

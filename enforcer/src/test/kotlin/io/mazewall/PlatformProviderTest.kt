@@ -122,7 +122,7 @@ class PlatformProviderTest {
 
         assertEquals(0, Platform.featureMatrix.landlockAbiVersion)
 
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
 
         assertContains(assessment.blockingReasons, "landlock capability rejected with errno 1")

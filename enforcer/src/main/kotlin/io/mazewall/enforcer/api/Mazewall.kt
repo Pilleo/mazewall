@@ -36,14 +36,14 @@ import java.util.function.Supplier
  * <h3>Usage Examples</h3>
  * <pre>{@code
  * // Simple thread-local sandbox
- * Policy<PolicyScope.ThreadLocalOnly, Uncompiled> policy = Mazewall.pureCompute();
+ * Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = Mazewall.pureCompute();
  * Mazewall.installOnCurrentThread(policy);
  *
  * // Process-wide sandbox with builder
  * Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
  *     .base(Mazewall.noExec())
  *     .allow(Syscall.WRITE)
- *     .buildProcessWide();
+ *     .build();
  * Mazewall.installOnProcess(processPolicy);
  *
  * // Contained execution with automatic cleanup

@@ -1,8 +1,10 @@
 package io.mazewall.profiler.iterative
 import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.Syscall
@@ -42,8 +44,8 @@ class IterativeProfilerTest {
 
             // Use a base policy that allows OPEN syscalls but has NO allowed paths (denies all by default in Landlock)
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                     .build()
 
@@ -65,8 +67,8 @@ class IterativeProfilerTest {
 
             // Base policy allows write/open syscalls but has NO allowed paths
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .unblock(
                         Syscall.OPEN,
                         Syscall.OPENAT,
@@ -170,8 +172,8 @@ class IterativeProfilerTest {
 
             try {
                 val basePolicy =
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .unblock(
                             Syscall.OPEN,
                             Syscall.OPENAT,
@@ -207,8 +209,8 @@ class IterativeProfilerTest {
 
             try {
                 val basePolicy =
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                         .allowFsRead(allowedDir.absolutePath)
                         .build()
@@ -265,8 +267,8 @@ class IterativeProfilerTest {
             target.writeText("content")
 
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                     .build()
 
@@ -344,8 +346,8 @@ class IterativeProfilerTest {
             )
 
             // Start with a policy that allows reading "/tmp/prefix" (so "/tmp/prefix" is in allowedFsReadPaths)
-            val initialPolicy = Policy
-                .builder()
+            val initialPolicy = WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(
                     io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp/prefix", allowNonExistent = true),

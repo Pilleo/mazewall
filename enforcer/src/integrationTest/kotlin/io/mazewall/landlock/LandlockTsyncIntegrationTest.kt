@@ -23,8 +23,8 @@ class LandlockTsyncIntegrationTest : BaseIntegrationTest() {
         @JvmStatic
         fun main(args: Array<String>) {
             val policy =
-                Policy
-                    .builder()
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .block(Syscall.OPEN, Syscall.OPENAT, Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                     .build()
 

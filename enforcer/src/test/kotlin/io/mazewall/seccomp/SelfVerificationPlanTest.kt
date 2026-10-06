@@ -27,8 +27,8 @@ class SelfVerificationPlanTest {
         val program =
             BpfFilter.build(
                 arch,
-                Policy
-                    .builder()
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .defaultAction(SeccompAction.ACT_ALLOW)
                     .block(Syscall.CONNECT)
                     .build()
@@ -44,7 +44,7 @@ class SelfVerificationPlanTest {
 
     @Test
     fun `merged state drives union-aware denied probes without native execution`() {
-        val program = BpfFilter.build(arch, Policy.builder().build().definition)
+        val program = BpfFilter.build(arch, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         val mergedState = ContainerState(
             syscallActions = mapOf(Syscall.CONNECT to SeccompAction.ACT_ERRNO(NativeConstants.EACCES)),
         )

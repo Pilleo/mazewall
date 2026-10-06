@@ -50,7 +50,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         assertFailsWith<RuntimeException> {
@@ -73,7 +73,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         assertFailsWith<AssertionError> {
@@ -109,7 +109,7 @@ class PureJavaBpfEngineReproductionTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -147,7 +147,7 @@ class PureJavaBpfEngineReproductionTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -178,7 +178,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -207,7 +207,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)

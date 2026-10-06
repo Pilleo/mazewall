@@ -28,8 +28,8 @@ class SupervisorInstallationFailureTest {
                 socketPath = "/unused",
                 filter = io.mazewall.enforcer.internal.seccomp.BpfFilter.build(
                     Arch.current(),
-                    io.mazewall.enforcer.api.Policy
-                    .builder()
+                    ProcessPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .build()
                     .definition,
                 ),

@@ -51,7 +51,7 @@ class SupervisorInstallTransportTest {
                     native,
                     true,
                     "/unused",
-                    BpfFilter.build(Arch.current(), Policy.builder().build().definition),
+                    BpfFilter.build(Arch.current(), ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition),
                     false,
                     onSocketConnected = { _, _ -> error("send never completed") },
                 )
@@ -81,7 +81,7 @@ class SupervisorInstallTransportTest {
                     native,
                     true,
                     "/unused",
-                    BpfFilter.build(Arch.current(), Policy.builder().build().definition),
+                    BpfFilter.build(Arch.current(), ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition),
                     false,
                     onSocketConnected = { _, _ -> error("connect denied") },
                 )
@@ -119,7 +119,7 @@ class SupervisorInstallTransportTest {
                 native = native,
                 userNotifSupported = true,
                 socketPath = "/unused",
-                filter = BpfFilter.build(Arch.current(), Policy.builder().build().definition),
+                filter = BpfFilter.build(Arch.current(), ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition),
                 processWide = false,
                 onSocketConnected = { socket, ready ->
                     native.fileSystem.close(socket)

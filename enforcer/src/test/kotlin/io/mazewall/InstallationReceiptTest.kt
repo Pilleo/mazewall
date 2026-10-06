@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
 class InstallationReceiptTest {
     @Test
     fun `closing a receipt retires its supervisor registration once`() {
-        val policy = Policy.builder().build().definition
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition
         var closes = 0
         val receipt = InstallationReceipt.withSupervisorRegistration(false, policy, AutoCloseable { closes++ })
 
@@ -26,7 +26,7 @@ class InstallationReceiptTest {
 
     @Test
     fun `receipt defaults to installed status`() {
-        val receipt = InstallationReceipt(false, Policy.builder().build().definition)
+        val receipt = InstallationReceipt(false, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
 
         assertTrue(receipt.installed)
         assertEquals(false, receipt.landlockApplied)
@@ -37,7 +37,7 @@ class InstallationReceiptTest {
         val receipt =
             InstallationReceipt(
                 processWide = false,
-                requestedPolicy = Policy.builder().build().definition,
+                requestedPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition,
                 installed = false,
                 landlockApplied = true,
             )
@@ -47,7 +47,7 @@ class InstallationReceiptTest {
 
     @Test
     fun `unsupervised receipts can be released by fire-and-forget install APIs`() {
-        val receipt = InstallationReceipt(false, Policy.builder().build().definition)
+        val receipt = InstallationReceipt(false, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
         receipt.releaseIfUnsupervised()
     }
 
@@ -56,7 +56,7 @@ class InstallationReceiptTest {
         val receipt =
             InstallationReceipt.withSupervisorRegistration(
                 false,
-                Policy.builder().build().definition,
+                ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition,
                 AutoCloseable { },
             )
         kotlin.test.assertFailsWith<IllegalStateException> { receipt.releaseIfUnsupervised() }

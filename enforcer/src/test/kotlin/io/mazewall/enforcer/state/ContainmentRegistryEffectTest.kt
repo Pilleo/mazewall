@@ -26,8 +26,8 @@ class ContainmentRegistryEffectTest {
     fun `thread-scoped seccomp effect updates only the active thread state`() {
         val processState = ContainerState(filterDepth = 4)
         ContainmentStateRegistry.processState = processState
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.EXECVE)
             .build()
             .definition
@@ -50,8 +50,8 @@ class ContainmentRegistryEffectTest {
     fun `process-scoped Landlock effect does not mutate thread-local bookkeeping`() {
         val threadState = ContainerState(filterDepth = 2)
         ContainmentStateRegistry.threadState = threadState
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/sandbox")
             .build()
             .definition
@@ -69,8 +69,8 @@ class ContainmentRegistryEffectTest {
         val processState = ContainerState(filterDepth = 5)
         ContainmentStateRegistry.processState = processState
         ContainmentStateRegistry.threadState = ContainerState()
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.EXECVE)
             .build()
             .definition

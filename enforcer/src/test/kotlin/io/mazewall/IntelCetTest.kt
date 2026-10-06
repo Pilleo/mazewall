@@ -76,7 +76,7 @@ class IntelCetTest {
         }
         Platform.setProvider(nonLinuxProvider)
 
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
 
         assertThrows<UnsupportedOperationException> {
             policy.install()
@@ -99,7 +99,7 @@ class IntelCetTest {
         Platform.setProvider(linuxAmd64Provider)
         Platform.isCpuCetSupportedOverride = false
 
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
 
         assertThrows<UnsupportedPlatformException> {
             policy.install()
@@ -116,7 +116,7 @@ class IntelCetTest {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
         try {
-            val policy = Policy.builder().lockIntelCet().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
             assertDoesNotThrow {
                 policy.install().close()
             }
@@ -144,7 +144,7 @@ class IntelCetTest {
         System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
 
         try {
-            val policy = Policy.builder().lockIntelCet().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
             assertDoesNotThrow {
                 policy.install().close()
             }
@@ -208,7 +208,7 @@ class IntelCetTest {
         customEngine.process.prctlResult = LinuxNative.SyscallResult.Success(2L)
         LinuxNative.setEngine(customEngine)
 
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
         assertDoesNotThrow {
             ContainedExecutors.installOnCurrentThread(policy)
         }
@@ -268,7 +268,7 @@ class IntelCetTest {
         customEngine.process.prctlResult = LinuxNative.SyscallResult.Success(2L)
         LinuxNative.setEngine(customEngine)
 
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
         assertDoesNotThrow {
             ContainedExecutors.installOnCurrentThread(policy)
         }

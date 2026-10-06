@@ -57,8 +57,8 @@ class InstallationAssessmentTest {
             },
         )
         val policy =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/tmp")
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
@@ -77,8 +77,8 @@ class InstallationAssessmentTest {
             },
         )
         val policy =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/tmp")
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = true)
@@ -97,8 +97,8 @@ class InstallationAssessmentTest {
             },
         )
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
@@ -118,8 +118,8 @@ class InstallationAssessmentTest {
             },
         )
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .addAction(io.mazewall.platform.syscall.SeccompAction.ACT_NOTIFY, Syscall.OPENAT)
                 .build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = true)
@@ -176,7 +176,7 @@ class InstallationAssessmentTest {
                 mockCetSupported = false
             },
         )
-        val policy = Policy.builder().lockIntelCet().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
         val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
         assertFalse(assessment.installable)
         assertTrue(assessment.blockedStages.contains(InstallationStage.INTEL_CET))

@@ -20,8 +20,8 @@ class ThreadPoolWhitelistTest : BaseIntegrationTest() {
     fun `thread pool whitelist execution exhaustion`() {
         val executor = Executors.newSingleThreadExecutor()
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_LOG)
             .allow(Syscall.READ, Syscall.WRITE)
             .build()
@@ -36,8 +36,8 @@ class ThreadPoolWhitelistTest : BaseIntegrationTest() {
         }
 
         // Let's also verify that tightening the whitelist adds a new filter
-        val tighterPolicy = Policy
-            .builder()
+        val tighterPolicy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_LOG)
             .allow(Syscall.READ)
             .build()

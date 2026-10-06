@@ -58,8 +58,8 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
 
             private fun authorize(stack: List<StackTraceElement>): Boolean = stack.any { it.className.contains("LegitContext") }.also { if (it) authorized.incrementAndGet() }
         }
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .allowJvmClasspath()
             .block(Syscall.ACCEPT, Syscall.ACCEPT4)

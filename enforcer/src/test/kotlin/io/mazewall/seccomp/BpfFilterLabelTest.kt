@@ -21,8 +21,8 @@ class BpfFilterLabelTest {
     @Test
     fun `linear scan filter generation handles multiple syscalls`() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.EXECVE, Syscall.OPEN, Syscall.SOCKET)
                 .build()
 

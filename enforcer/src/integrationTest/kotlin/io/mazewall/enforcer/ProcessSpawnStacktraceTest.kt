@@ -49,8 +49,8 @@ class ProcessSpawnStacktraceTest {
             )
         }
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVE)
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVEAT)
             .allowMmapExec()

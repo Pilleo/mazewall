@@ -52,7 +52,7 @@ class HighConcurrencyInstallationTest {
     @Test
     fun `high concurrency installation of identical policies`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val wrapped = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
         val taskCount = 2000
         val completedCount = AtomicInteger(0)
 
@@ -78,7 +78,7 @@ class HighConcurrencyInstallationTest {
     @Test
     fun `high concurrency installation with exceptions`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val wrapped = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
         val taskCount = 1000
 
         repeat(taskCount) {

@@ -49,9 +49,9 @@ class InstallationReceiptMatrixTest {
     companion object {
         @JvmStatic
         fun matrixScenarios(): Stream<MatrixScenario> {
-            val seccompOnlyPolicy = Policy.builder().block(Syscall.EXECVE).build()
-            val landlockPolicy = Policy.builder().allowFsRead("/tmp").build()
-            val emptyPolicy = Policy.builder().build()
+            val seccompOnlyPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
+            val landlockPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
+            val emptyPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
 
             return Stream.of(
                 MatrixScenario(

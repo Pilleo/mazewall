@@ -11,18 +11,18 @@ for a new baseline):
 
 ```bash
 ./gradlew --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-baseline.235b1acf \
+  -PconsumerVersion=0.1.0-baseline.1e0d862f \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :platform:publishAllPublicationsToConsumerBaselineRepository \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.235b1acf \
+  -PconsumerVersion=0.1.0-baseline.1e0d862f \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :java-api:run :java-api:verifyCallableAmbiguity :java-api:verifyScopeBoundaries :kotlin-api:run
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.235b1acf \
+  -PconsumerVersion=0.1.0-baseline.1e0d862f \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   resolveIntegrationBaselines
 ```
@@ -43,6 +43,9 @@ an explicit runtime and list mode. The Java facade builder and its scope-changin
 `buildProcessWide()` method are removed. `verifyScopeBoundaries` requires actual
 javac rejection of process filesystem mutators and assignment of a worker policy
 to a process-policy variable.
+The nested `Policy.Builder`, its `builder()`/`threadLocalBuilder()` factories, and
+the list-spec facades are also removed. These consumers use only the canonical
+fixed-scope construction paths.
 
 ## Compatibility evidence
 

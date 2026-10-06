@@ -64,8 +64,9 @@ Both retain mutable configuration and freeze the definition in the returned poli
 Only the worker builder exposes filesystem grants and explicit `FileSystemPolicy`
 intent (`Unrestricted`, `DenyAll`, `AllowResources`). Assigning Boolean argument
 settings is genuine pre-install assignment. The Java-only builder is removed and
-definition-level configuration is internal; remaining legacy `Policy.Builder`
-callers are being migrated before that construction path is removed.
+definition-level configuration is internal. The legacy nested `Policy.Builder`
+and its `builder()`/`threadLocalBuilder()` factories are removed after migrating
+production, demo, host-test, kernel-test, and compiler-fixture callers.
 The former `PolicyLists`, `DenyListSpec`, `AllowListSpec`, and forwarding
 `Policy.denyList`/`allowList`/`threadLocalDenyList` entry points are removed after
 migrating their callers to fixed-scope construction. Capability recipes use

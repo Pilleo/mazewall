@@ -61,8 +61,8 @@ class StackingIntegrationTest : BaseIntegrationTest() {
             // We try to install 34 filters. Kernel limit is 32.
             for (syscall in safeSyscalls.take(34)) {
                 val policy =
-                    Policy
-                        .builder()
+                    ProcessPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
                         .block(syscall)
                         .build()

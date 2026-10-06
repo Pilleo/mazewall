@@ -30,7 +30,7 @@ class SeccompEngineTest {
                 get() = true
         }
 
-        val emptyPolicy = Policy.builder().build()
+        val emptyPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val arch = io.mazewall.platform.syscall.Arch
             .current()
         val compiledSandbox = emptyPolicy.definition.compile(arch)

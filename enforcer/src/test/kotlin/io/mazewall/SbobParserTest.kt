@@ -84,8 +84,8 @@ class SbobParserTest {
     fun `test parsing with allow list base`() {
         val json = "{\"syscalls\": [\"OPEN\", \"READ\"]}"
         val base =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ERRNO())
                 .allow(Syscall.WRITE)
                 .build()
@@ -159,8 +159,8 @@ class SbobParserTest {
 
     @Test
     fun `SBoB removes an observed syscall from an allow-by-default blacklist`() {
-        val blacklist = Policy
-            .builder()
+        val blacklist = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.EXECVE)
             .build()

@@ -30,7 +30,7 @@ println(result.behavior.toDsl(allowIncomplete = true))
 
 **Output:**
 ```kotlin
-Policy.builder()
+WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.NO_NETWORK)
     .allowFsRead("/app/schemas")
     .allowFsRead("/app/config.xml")
@@ -95,12 +95,9 @@ Runs the workload under a progressively tightening Landlock policy. When a path 
 > [!CAUTION]
 > Because the workload restarts on each violation, any side effects (DB writes, outbound messages) will execute multiple times. Use idempotent workloads or mock external systems.
 
-```kotlin
-val compiledPolicy = IterativeProfiler.profile(Policy.builder().build()) {
-    targetWorkload()
-}
-println(compiledPolicy.allowedFsReadPaths)
-```
+The iterative implementation is internal test/lab code. Application consumers use
+the owned `MazewallProfiler.open().use { session -> session.profile { workload() } }`
+entry point described above.
 
 ### Tier P — Descendant `strace` Profiler
 

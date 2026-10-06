@@ -42,7 +42,7 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
                 },
             )
         }
-        val policy = Policy.builder().allowMmapExec().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build()
         try {
             Executors.newSingleThreadExecutor().use { raw ->
                 val wrapped = ContainedExecutors.wrap(raw, policy, scoping)
