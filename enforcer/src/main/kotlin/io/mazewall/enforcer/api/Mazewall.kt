@@ -40,7 +40,7 @@ import java.util.function.Supplier
  * Mazewall.installOnCurrentThread(policy);
  *
  * // Process-wide sandbox with builder
- * Policy<PolicyScope.ProcessWideSafe, Uncompiled> processPolicy = Mazewall.builder()
+ * Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
  *     .base(Mazewall.noExec())
  *     .allow(Syscall.WRITE)
  *     .buildProcessWide();
@@ -97,15 +97,6 @@ public fun noNetwork(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = NO_NET
 public fun noExecNoFsWrite(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = NO_EXEC_NO_FS_WRITE
 
 public fun defaultSafe(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = DEFAULT_SAFE
-
-// Builders
-public fun builder(): JavaPolicyBuilder = JavaPolicyBuilder()
-
-public fun builder(runtime: RuntimeProfile): JavaPolicyBuilder = JavaPolicyBuilder(runtime = runtime)
-
-public fun threadLocalBuilder(): JavaPolicyBuilder = JavaPolicyBuilder()
-
-public fun threadLocalBuilder(runtime: RuntimeProfile): JavaPolicyBuilder = JavaPolicyBuilder(runtime = runtime)
 
 // Combination
 public fun combine(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {

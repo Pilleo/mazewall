@@ -39,7 +39,7 @@ class MazewallJavaApiTest {
 
     @Test
     void testJavaPolicyBuilderThreadLocal() {
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = Mazewall.threadLocalBuilder()
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .base(Mazewall.pureCompute())
                 .defaultAction(SeccompAction.ACT_ALLOW.INSTANCE)
                 .allow(Syscall.READ, Syscall.WRITE)
@@ -68,11 +68,11 @@ class MazewallJavaApiTest {
 
     @Test
     void testJavaPolicyBuilderProcessWide() {
-        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = Mazewall.builder()
+        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .base(Mazewall.pureComputeUnsafe())
                 .defaultAction(SeccompAction.ACT_ALLOW.INSTANCE)
                 .allow(Syscall.GETPID)
-                .buildProcessWide();
+                .build();
 
         assertNotNull(processPolicy);
         assertTrue(processPolicy.isSyscallAllowed(Syscall.GETPID));
@@ -80,17 +80,18 @@ class MazewallJavaApiTest {
     }
 
     @Test
-    void testProcessWideDisallowsFsRules() {
-        JavaPolicyBuilder builder = Mazewall.builder().allowFsRead("/tmp");
-        assertThrows(IllegalStateException.class, builder::buildProcessWide);
+    void testWorkerFilesystemMutationRetainsIgnoredResult() {
+        WorkerPolicyBuilder builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT);
+        builder.allowFsRead("/tmp");
+        assertEquals(1, builder.build().getAllowedFsReadPaths().size());
     }
 
     @Test
     void testCombinePolicies() {
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p1 = Mazewall.threadLocalBuilder()
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .allow(Syscall.READ)
                 .build();
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p2 = Mazewall.threadLocalBuilder()
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .allow(Syscall.WRITE)
                 .build();
 

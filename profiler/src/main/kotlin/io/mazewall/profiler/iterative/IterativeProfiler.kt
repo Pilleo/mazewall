@@ -3,7 +3,9 @@ package io.mazewall.profiler.iterative
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.landlock.Landlock
 import java.nio.file.AccessDeniedException
@@ -99,7 +101,7 @@ internal object IterativeProfiler {
         currentPolicy: Policy<*, Uncompiled>,
         path: String,
     ): Policy<*, Uncompiled> {
-        var builder = Policy.threadLocalBuilder().base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).base(currentPolicy as Policy<PolicyScope.ThreadLocalOnly, *>)
         // Canonical component-wise containment (issue-20260823-135558): /base/dir must not match
         // /base/dir-extra, and relative paths are never contained.
         val p = java.nio.file.Paths
@@ -114,8 +116,7 @@ internal object IterativeProfiler {
             )
         }
 
-        // allowFs* are copy-on-promotion: keep the returned builder.
-        builder = if (isCurrentlyReadAllowed) {
+        if (isCurrentlyReadAllowed) {
             // If read is already allowed but we still got denied, it's a write attempt.
             builder.allowFsWrite(
                 io.mazewall.platform.lifecycle.SandboxedPath

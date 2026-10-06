@@ -18,6 +18,47 @@ This subproject implements unprivileged sandboxing using Linux **Seccomp-BPF** a
 
 ## Technical Architecture
 
+### Canonical policy construction
+
+Java and Kotlin use the same fixed-scope mutable builders. Select the runtime and
+list mode explicitly; every worker filesystem mutator retains the same builder,
+including when its return value is ignored:
+
+```kotlin
+val worker = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+worker.base(ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
+worker.base(ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT))
+worker.allowFsRead("/app/input")
+worker.allowFsWrite("/app/output")
+val policy = worker.build()
+```
+
+`ProcessPolicyBuilder.denyList(runtime)` produces process-applicable policies and
+does not expose filesystem mutators. `allowList(runtime)` on either builder starts
+with default errno denial and the canonical JVM coordination/read floor; workload
+permissions are then added explicitly. Runtime selection is a configuration choice,
+not proof that every later customized policy is safe for that JVM.
+
+Worker filesystem intent can also be assigned explicitly:
+
+```kotlin
+val denyAll = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+    .filesystem(FileSystemPolicy.DenyAll)
+    .build()
+```
+
+`Unrestricted` installs no filesystem restriction; `DenyAll` installs one with no
+grants; `AllowResources(readPaths, writePaths)` freezes the supplied sets and remains
+active even when both sets are empty. Assigning `filesystem(...)` replaces earlier
+configured filesystem grants. It never changes a previously built policy or an
+installed kernel restriction. Already-open descriptors and mappings are not revoked.
+
+`base(...)` selects/merges a template and can broaden configuration. Use
+`restrictFurtherWith` or `PolicyDefinition.intersection` for restrictive composition.
+The Java-only builder and `buildProcessWide()` scope switch have been removed.
+Packaged Java/Kotlin examples and compile-time scope rejection fixtures live in
+[`tests/consumers`](../tests/consumers/README.md).
+
 For a detailed class hierarchy and structural relationship map, see the [Enforcer Module Architecture documentation](../docs/internals/designs/enforcer/enforcer-architecture.md).
 
 - **FFM Native Bindings:** Uses the JDK Foreign Function & Memory API to map native Linux system calls directly from Kotlin, eliminating the need for JNI or dynamic C library dependencies.

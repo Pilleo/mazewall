@@ -5,9 +5,11 @@ package io.mazewall.profiler.api
 import io.mazewall.enforcer.api.BillOfBehaviorDto
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.StackFrameDto
 import io.mazewall.enforcer.api.StackProfileEntryDto
 import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.profiler.api.TraceEvent
@@ -106,7 +108,7 @@ public class BillOfBehavior(
         val evidence = coverage ?: ProfilingCoverage.absent()
         requirePolicyCoverage(evidence, allowIncomplete)
 
-        var builder = Policy.threadLocalBuilder().base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
         if (base.defaultAction == io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW) {
             val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
             builder.unblock(*toUnblock.toTypedArray())
@@ -115,15 +117,14 @@ public class BillOfBehavior(
         }
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
-        // allowFs* are copy-on-promotion: the returned builder must be kept.
         for (path in pOpens) {
-            builder = builder.allowFsRead(
+            builder.allowFsRead(
                 io.mazewall.platform.lifecycle.SandboxedPath
             .of(path, allowNonExistent = true),
             )
         }
         for (path in pWrites) {
-            builder = builder.allowFsWrite(
+            builder.allowFsWrite(
                 io.mazewall.platform.lifecycle.SandboxedPath
             .of(path, allowNonExistent = true),
             )
@@ -163,9 +164,8 @@ public class BillOfBehavior(
         val sb = StringBuilder()
         val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
         val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
-        val isThreadLocal = pOpens.isNotEmpty() || pWrites.isNotEmpty()
-
-        val builderCall = if (isThreadLocal) "Policy.threadLocalBuilder()" else "Policy.builder()"
+        val runtimeName = if (base.allowMmapExec) "HOTSPOT_JIT" else "NATIVE_IMAGE"
+        val builderCall = "WorkerPolicyBuilder.denyList(RuntimeProfile.$runtimeName)"
         sb.append("val policy = $builderCall\n")
         sb.append("    .base($basePolicyName)\n")
 

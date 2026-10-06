@@ -71,7 +71,7 @@ class BobCompilerTest {
 
         val expectedDsl =
             """
-val policy = Policy.threadLocalBuilder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .unblock(
         Syscall.CONNECT,
@@ -102,7 +102,7 @@ val policy = Policy.threadLocalBuilder()
         val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .build()
             """.trimIndent()
@@ -125,7 +125,7 @@ val policy = Policy.builder()
         val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .build()
             """.trimIndent()

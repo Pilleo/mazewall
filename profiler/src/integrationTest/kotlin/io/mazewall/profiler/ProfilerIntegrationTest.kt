@@ -139,7 +139,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         )
 
         // Verify DSL has the correct builder and allowFsRead
-        assertTrue(dsl.contains("Policy.threadLocalBuilder()"))
+        assertTrue(dsl.contains("WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)"))
         assertTrue(dsl.contains("allowFsRead(\"/etc/hostname\")"))
     }
 

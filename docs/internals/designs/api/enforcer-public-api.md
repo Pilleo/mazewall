@@ -58,6 +58,15 @@ val baseline = ProcessPolicy {
 
 ### Policy Semantics
 
+Implemented construction (6 October 2026): `ProcessPolicyBuilder` and
+`WorkerPolicyBuilder` expose `denyList(runtime)` and `allowList(runtime)` factories.
+Both retain mutable configuration and freeze the definition in the returned policy.
+Only the worker builder exposes filesystem grants and explicit `FileSystemPolicy`
+intent (`Unrestricted`, `DenyAll`, `AllowResources`). Assigning Boolean argument
+settings is genuine pre-install assignment. The Java-only builder is removed and
+definition-level configuration is internal; remaining legacy `Policy.Builder`
+callers are being migrated before that construction path is removed.
+
 Normal users should choose an explicit allow-list or deny-list DSL instead of manipulating `defaultAction`, `allow`, `block`, and `unblock` together. Capability-level methods should cover process creation, networking, executable memory and filesystem access. Raw syscalls remain available under `advanced`.
 
 Policy composition must use names such as `restrictFurtherWith` or `intersection`. Generic `combine` and `+` conceal the different Seccomp and Landlock composition rules and must not imply that installed permissions can expand.

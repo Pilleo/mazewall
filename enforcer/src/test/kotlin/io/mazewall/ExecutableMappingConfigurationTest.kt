@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 class ExecutableMappingConfigurationTest {
     @Test
     fun `false removes an earlier executable mapping grant without changing built policies`() {
-        val builder = JavaPolicyBuilder().allowMmapExec(true)
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec(true)
         val enabled = builder.build()
 
         builder.allowMmapExec(false)
@@ -20,7 +20,7 @@ class ExecutableMappingConfigurationTest {
 
     @Test
     fun `false removes a grant selected by the runtime profile`() {
-        val builder = JavaPolicyBuilder(RuntimeProfile.HOTSPOT_JIT)
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
 
         builder.allowMmapExec(false)
 
@@ -29,7 +29,7 @@ class ExecutableMappingConfigurationTest {
 
     @Test
     fun `runtime selection after an explicit false is the final preinstall setting`() {
-        val builder = JavaPolicyBuilder().allowMmapExec(true).allowMmapExec(false)
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec(true).allowMmapExec(false)
         val disabled = builder.build()
 
         builder.forRuntime(RuntimeProfile.HOTSPOT_JIT)

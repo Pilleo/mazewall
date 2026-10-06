@@ -117,8 +117,8 @@ public class ProfilingResult<T> private constructor(
     public fun toDedicatedWorkerPolicies(
         runtime: io.mazewall.enforcer.api.RuntimeProfile = io.mazewall.enforcer.api.RuntimeProfile.HOTSPOT_JIT,
     ): Array<io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled>> {
-        val base = io.mazewall.enforcer.api.Policy
-            .threadLocalBuilder()
+        val base = io.mazewall.enforcer.api.WorkerPolicyBuilder
+            .denyList(runtime)
             .base(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE)
             .forRuntime(runtime)
             .build()

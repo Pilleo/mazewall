@@ -1,6 +1,7 @@
 package consumer;
 
-import io.mazewall.enforcer.api.JavaPolicyBuilder;
+import io.mazewall.enforcer.api.WorkerPolicyBuilder;
+import io.mazewall.enforcer.api.RuntimeProfile;
 import io.mazewall.enforcer.api.Mazewall;
 import io.mazewall.enforcer.api.Policy;
 import io.mazewall.enforcer.api.PolicyScope;
@@ -16,7 +17,7 @@ public final class JavaApiConsumer {
     }
 
     public static void main(String[] args) {
-        JavaPolicyBuilder builder = Mazewall.threadLocalBuilder();
+        WorkerPolicyBuilder builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT);
         builder.base(Mazewall.noExec());
         builder.allowFsRead("/tmp/consumer-resource");
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = builder.build();
@@ -24,7 +25,7 @@ public final class JavaApiConsumer {
                 || policy.isSyscallAllowed(Syscall.EXECVE)) {
             throw new AssertionError("Packaged Java builder lost requested restrictions");
         }
-        JavaPolicyBuilder mappings = Mazewall.threadLocalBuilder().allowMmapExec(true);
+        WorkerPolicyBuilder mappings = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowMmapExec(true);
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> enabled = mappings.build();
         mappings.allowMmapExec(false);
         if (!enabled.getAllowMmapExec() || mappings.build().getAllowMmapExec()) {

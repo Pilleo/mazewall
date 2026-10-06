@@ -11,18 +11,18 @@ for a new baseline):
 
 ```bash
 ./gradlew --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-baseline.95417771 \
+  -PconsumerVersion=0.1.0-baseline.235b1acf \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :platform:publishAllPublicationsToConsumerBaselineRepository \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.95417771 \
+  -PconsumerVersion=0.1.0-baseline.235b1acf \
   -PconsumerRepository="$PWD/build/consumer-repository" \
-  :java-api:run :java-api:verifyCallableAmbiguity :kotlin-api:run
+  :java-api:run :java-api:verifyCallableAmbiguity :java-api:verifyScopeBoundaries :kotlin-api:run
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.95417771 \
+  -PconsumerVersion=0.1.0-baseline.235b1acf \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   resolveIntegrationBaselines
 ```
@@ -37,6 +37,12 @@ examples compile but are not executed. `verifyCallableAmbiguity` compiles an unc
 Java lambda separately and requires the actual javac ambiguity diagnostic. During
 the canonical callable migration, replace this characterization with a successful
 uncast compile gate.
+
+Canonical construction uses `ProcessPolicyBuilder` or `WorkerPolicyBuilder` with
+an explicit runtime and list mode. The Java facade builder and its scope-changing
+`buildProcessWide()` method are removed. `verifyScopeBoundaries` requires actual
+javac rejection of process filesystem mutators and assignment of a worker policy
+to a process-policy variable.
 
 ## Compatibility evidence
 

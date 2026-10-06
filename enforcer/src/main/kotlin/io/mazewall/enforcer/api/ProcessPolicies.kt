@@ -13,8 +13,8 @@ public object ProcessPolicies {
      */
     @JvmStatic
     public fun denyProcessCreation(runtime: RuntimeProfile): Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
-        Policy
-            .builder()
+        ProcessPolicyBuilder
+            .denyList(runtime)
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
             .forRuntime(runtime)
@@ -26,8 +26,8 @@ public object ProcessPolicies {
      */
     @JvmStatic
     public fun denyNetwork(runtime: RuntimeProfile): Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
-        Policy
-            .builder()
+        ProcessPolicyBuilder
+            .denyList(runtime)
             .block(
                 Syscall.CONNECT,
                 Syscall.SENDTO,
@@ -50,8 +50,8 @@ public object ProcessPolicies {
      */
     @JvmStatic
     public fun workerFilesystem(runtime: RuntimeProfile): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> =
-        Policy
-            .threadLocalBuilder()
+        WorkerPolicyBuilder
+            .denyList(runtime)
             .allowJvmClasspath()
             .forRuntime(runtime)
             .build()

@@ -26,7 +26,7 @@ import java.io.File
  *
  * @param S The [PolicyScope] (ProcessWideSafe or ThreadLocalOnly).
  */
-public class PolicyBuilder<S : PolicyScope> internal constructor(
+internal class PolicyBuilder<S : PolicyScope> internal constructor(
     private var defaultAction: SeccompAction = SeccompAction.ACT_ALLOW,
     private val syscallActions: MutableMap<Syscall, SeccompAction> = mutableMapOf(),
     private var allowMmapExec: Boolean = false,
@@ -153,6 +153,31 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
 
     internal fun setExecutableMappings(allow: Boolean): PolicyBuilder<S> {
         this.allowMmapExec = allow
+        return this
+    }
+
+    internal fun setNonThreadClone(allow: Boolean): PolicyBuilder<S> {
+        allowNonThreadClone = allow
+        return this
+    }
+
+    internal fun setUnsafePrctl(allow: Boolean): PolicyBuilder<S> {
+        allowUnsafePrctl = allow
+        return this
+    }
+
+    internal fun setFilesystem(policy: FileSystemPolicy): PolicyBuilder<S> {
+        allowedFsReadPaths.clear()
+        allowedFsWritePaths.clear()
+        when (policy) {
+            FileSystemPolicy.Unrestricted -> filesystemRestricted = false
+            FileSystemPolicy.DenyAll -> filesystemRestricted = true
+            is FileSystemPolicy.AllowResources -> {
+                filesystemRestricted = true
+                allowedFsReadPaths.addAll(policy.readPaths)
+                allowedFsWritePaths.addAll(policy.writePaths)
+            }
+        }
         return this
     }
 

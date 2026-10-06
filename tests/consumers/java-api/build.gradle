@@ -26,3 +26,24 @@ tasks.register('verifyCallableAmbiguity') {
         }
     }
 }
+
+tasks.register('verifyScopeBoundaries') {
+    dependsOn tasks.named('classes')
+    doLast {
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        [ProcessFilesystem: 'compiler.err.cant.resolve.location.args', WorkerAsProcess: 'compiler.err.prob.found.req'].each { name, expectedCode ->
+            def diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
+            compiler.getStandardFileManager(diagnostics, null, null).withCloseable { manager ->
+                def source = manager.getJavaFileObjects(file("src/scope/java/consumer/${name}.java"))
+                def output = layout.buildDirectory.dir("scope/${name}").get().asFile
+                output.mkdirs()
+                def options = ['-classpath', sourceSets.main.compileClasspath.asPath, '-d', output.path]
+                def compiled = compiler.getTask(null, manager, diagnostics, options, null, source).call()
+                if (compiled || !diagnostics.diagnostics.any { it.code == expectedCode }) {
+                    throw new GradleException("Expected scope rejection ${expectedCode}, received: ${diagnostics.diagnostics}")
+                }
+            }
+        }
+        logger.lifecycle('Packaged process/worker compile-time scope boundaries passed.')
+    }
+}
