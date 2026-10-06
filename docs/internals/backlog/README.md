@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 66 | *Total Resolved Issues:* 646
+*Total Active Issues:* 67 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261006-174206-021-make-socket-helper-owner-death-procfs-observation-](issue-20261006-174206-021-make-socket-helper-owner-death-procfs-observation-.md) | Make socket helper owner-death procfs observation disappearance-safe | high | core |
 | [issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces](issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces.md) | Replace scope-promoting builders with fixed process and worker construction | high | core |
 | [issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot](issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot.md) | Align profiler compile artifacts with declared Kotlin friend paths | high | core |
 | [issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge](issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge.md) | Make executable mapping Boolean configuration a genuine setter | high | core |
