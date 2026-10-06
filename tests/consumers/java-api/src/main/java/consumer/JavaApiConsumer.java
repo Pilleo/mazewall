@@ -24,6 +24,12 @@ public final class JavaApiConsumer {
                 || policy.isSyscallAllowed(Syscall.EXECVE)) {
             throw new AssertionError("Packaged Java builder lost requested restrictions");
         }
+        JavaPolicyBuilder mappings = Mazewall.threadLocalBuilder().allowMmapExec(true);
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> enabled = mappings.build();
+        mappings.allowMmapExec(false);
+        if (!enabled.getAllowMmapExec() || mappings.build().getAllowMmapExec()) {
+            throw new AssertionError("Executable mapping setter lost false or mutated a built policy");
+        }
         System.out.println("Packaged Java policy construction passed.");
     }
 }

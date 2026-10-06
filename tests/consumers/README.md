@@ -11,18 +11,18 @@ for a new baseline):
 
 ```bash
 ./gradlew --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-baseline.d3e11915 \
+  -PconsumerVersion=0.1.0-baseline.95417771 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :platform:publishAllPublicationsToConsumerBaselineRepository \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.d3e11915 \
+  -PconsumerVersion=0.1.0-baseline.95417771 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :java-api:run :java-api:verifyCallableAmbiguity :kotlin-api:run
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.d3e11915 \
+  -PconsumerVersion=0.1.0-baseline.95417771 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   resolveIntegrationBaselines
 ```

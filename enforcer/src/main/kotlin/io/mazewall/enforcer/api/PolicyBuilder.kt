@@ -148,7 +148,11 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
      * choice is named rather than a boolean.
      */
     public fun allowMmapExec(): PolicyBuilder<S> {
-        this.allowMmapExec = true
+        return setExecutableMappings(true)
+    }
+
+    internal fun setExecutableMappings(allow: Boolean): PolicyBuilder<S> {
+        this.allowMmapExec = allow
         return this
     }
 

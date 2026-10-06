@@ -152,10 +152,9 @@ public class JavaPolicyBuilder(
         return this
     }
 
+    /** Assigns the pre-install executable-mapping setting; built and installed policies are unaffected. */
     public fun allowMmapExec(allow: Boolean): JavaPolicyBuilder {
-        if (allow) {
-            builder.allowMmapExec()
-        }
+        builder.setExecutableMappings(allow)
         return this
     }
 

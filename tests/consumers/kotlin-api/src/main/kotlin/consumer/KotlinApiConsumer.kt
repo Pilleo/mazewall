@@ -19,5 +19,10 @@ fun main() {
     }.build()
     check(policy.allowedFsReadPaths.size == 1)
     check(!policy.isSyscallAllowed(Syscall.EXECVE))
+    val mappings = threadLocalBuilder().allowMmapExec(true)
+    val enabled = mappings.build()
+    mappings.allowMmapExec(false)
+    check(enabled.allowMmapExec)
+    check(!mappings.build().allowMmapExec)
     println("Packaged Kotlin policy construction passed.")
 }
