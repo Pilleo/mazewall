@@ -1,0 +1,19 @@
+// Stage real Maven publications without changing configured remote repositories.
+allprojects {
+    afterEvaluate {
+        version = rootProject.providers.gradleProperty('consumerVersion').get()
+        plugins.withId('maven-publish') {
+            publishing {
+                publications.withType(MavenPublication).configureEach {
+                    version = rootProject.providers.gradleProperty('consumerVersion').get()
+                }
+                repositories {
+                    maven {
+                        name = 'ConsumerBaseline'
+                        url = uri(rootProject.providers.gradleProperty('consumerRepository').get())
+                    }
+                }
+            }
+        }
+    }
+}

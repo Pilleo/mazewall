@@ -1,0 +1,40 @@
+plugins { id 'java-base' }
+
+allprojects {
+    dependencyLocking { lockAllConfigurations() }
+    repositories {
+        maven {
+            url = uri(providers.gradleProperty('consumerRepository').get())
+            content { includeGroup 'io.mazewall' }
+        }
+        mavenCentral {
+            content { excludeGroup 'io.mazewall' }
+        }
+    }
+}
+
+configurations {
+    koogBaseline {
+        attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+    }
+    springBaseline {
+        attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+    }
+}
+
+dependencies {
+    koogBaseline 'ai.koog:agents-tools:1.3.0'
+    springBaseline platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    springBaseline 'org.springframework:spring-aop'
+    springBaseline 'org.springframework:spring-jdbc'
+}
+
+tasks.register('resolveIntegrationBaselines') {
+    doLast {
+        [configurations.koogBaseline, configurations.springBaseline].each { configuration ->
+            configuration.resolvedConfiguration.resolvedArtifacts.sort { it.moduleVersion.id.toString() }.each {
+                logger.lifecycle("${configuration.name}: ${it.moduleVersion.id}")
+            }
+        }
+    }
+}

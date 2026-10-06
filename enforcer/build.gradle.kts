@@ -1,6 +1,7 @@
 import java.math.BigDecimal
 
 plugins {
+    `java-library`
     kotlin("jvm")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
@@ -173,7 +174,7 @@ val plantumlConfig by configurations.creating
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
-    implementation(project(":platform"))
+    api(project(":platform"))
     compileOnly(libs.kotlinxCoroutines)
     implementation(libs.kotlinxSerialization)
     testImplementation(kotlin("test"))
