@@ -14,6 +14,7 @@ import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
 import io.mazewall.profiler.tierE.daemon.TierEEventJsonlFileSink
 import io.mazewall.profiler.tierE.daemon.TierERegisteredTarget
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
+import io.mazewall.testing.awaitCondition
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -67,10 +69,14 @@ class TierEEndToEndIntegrationTest {
             session.installAndAttach(pid, sessionTag, agent, ElfSymbolOffset.resolve(agent, "mazewall_stack_marker"))
             session.enableCaptureAdmission()
             Files.writeString(first, "go")
-            val firstDeadline = System.nanoTime() + 20_000_000_000L
-            while (!Files.exists(ready) && process.isAlive && System.nanoTime() < firstDeadline) {
-                session.poll()
-                Thread.sleep(2)
+            awaitCondition(Duration.ofSeconds(20), "both managed first-stage paths") {
+                if (Files.exists(ready)) {
+                    true
+                } else {
+                    assertTrue(process.isAlive, "workload exited before its first-stage readiness marker")
+                    session.poll()
+                    Files.exists(ready)
+                }
             }
             assertTrue(Files.exists(ready), "both managed paths must finish before releasing the next workload stage")
             Files.writeString(second, "go")

@@ -7,11 +7,13 @@ import io.mazewall.profiler.api.HotSpotProfilingException
 import io.mazewall.profiler.api.MazewallProfiler
 import io.mazewall.profiler.api.ProfileOptions
 import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
@@ -107,10 +109,6 @@ class HotSpotNativeAttachTest {
     }
 
     private fun waitFor(condition: () -> Boolean) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-        while (!condition()) {
-            check(System.nanoTime() - deadline < 0) { "Native target fixture deadline expired" }
-            Thread.sleep(50)
-        }
+        awaitCondition(Duration.ofSeconds(30), "native target fixture readiness", condition)
     }
 }

@@ -2,6 +2,7 @@ package io.mazewall.profiler.api
 
 import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
+import io.mazewall.testing.awaitCondition
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -16,6 +17,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -81,8 +83,11 @@ class TierEAllTargetDaemonIntegrationTest {
                 command.flush()
                 assertTrue(reply.readUTF().startsWith("OK attached"))
                 Files.writeString(firstGate, "go")
-                val deadline = System.nanoTime() + 20_000_000_000L
-                while (!Files.exists(ready) && workload.isAlive && System.nanoTime() < deadline) Thread.sleep(2)
+                awaitCondition(Duration.ofSeconds(20), "managed first-stage workload readiness") {
+                    Files.exists(ready).also { present ->
+                        if (!present) assertTrue(workload.isAlive, "workload exited before readiness")
+                    }
+                }
                 assertTrue(Files.exists(ready), "managed first-stage workload never completed")
                 Files.writeString(secondGate, "go")
                 assertTrue(workload.waitFor(30, TimeUnit.SECONDS), "JVM workload did not terminate")
@@ -90,8 +95,11 @@ class TierEAllTargetDaemonIntegrationTest {
 
                 val evidence = root.resolve("orders-19802.events.jsonl")
                 val terminal = root.resolve("orders-19802.tier-e.json")
-                val terminalDeadline = System.nanoTime() + 30_000_000_000L
-                while ((!Files.exists(evidence) || !Files.exists(terminal)) && daemon.isAlive && System.nanoTime() < terminalDeadline) Thread.sleep(10)
+                awaitCondition(Duration.ofSeconds(30), "both owned terminal artifacts") {
+                    (Files.exists(evidence) && Files.exists(terminal)).also { present ->
+                        if (!present) assertTrue(daemon.isAlive, "daemon exited before publishing terminal artifacts")
+                    }
+                }
                 assertTrue(Files.exists(evidence) && Files.exists(terminal), "daemon did not publish both owned terminal artifacts")
                 val rows = Files.readAllLines(evidence).map { Json.parseToJsonElement(it).jsonObject }
                 val footer = rows.last()

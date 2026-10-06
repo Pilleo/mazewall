@@ -70,12 +70,12 @@ object HotSpotSupportedWorkloadMain {
                 ready = System.nanoTime()
                 repeat(settings.warmups) { index ->
                     call(index, warm)
-                    Thread.sleep(settings.paceMillis)
+                    Thread.sleep(settings.paceMillis) // Workload delay: pace measured warmup events, not readiness synchronization.
                 }
                 warmupEnd = System.nanoTime()
                 paths.forEachIndexed { index, path ->
                     call(index, path)
-                    Thread.sleep(settings.paceMillis)
+                    Thread.sleep(settings.paceMillis) // Workload delay: pace the measured event corpus, not readiness synchronization.
                 }
                 markedEnd = System.nanoTime()
                 "workload-value"

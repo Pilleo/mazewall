@@ -2,6 +2,7 @@ package io.mazewall.profiler.hotspot
 
 import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.profiler.api.HotSpotOptions
+import io.mazewall.testing.awaitCondition
 import io.mazewall.testing.containers.ContainerEndpoint
 import java.nio.file.Files
 import java.nio.file.Path
@@ -9,12 +10,10 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-private const val TARGET_PREPARE_WAIT_MS = 250L
 private const val CLEANUP_WAIT_SECONDS = 5L
 private const val OUTPUT_JOIN_SECONDS = 5L
 private const val PROCESS_REAP_SECONDS = 5L
 private const val ACCEPTANCE_DEADLINE_SECONDS = 30L
-private const val CONDITION_POLL_MILLIS = 25L
 
 internal class HotSpotAcceptanceHarness(
     private val endpoint: ContainerEndpoint,
@@ -88,7 +87,6 @@ internal class HotSpotAcceptanceHarness(
     fun prepare() {
         Files.createFile(directory.resolve("prepare"))
         await { Files.exists(directory.resolve("prepared")) }
-        Thread.sleep(TARGET_PREPARE_WAIT_MS)
     }
 
     fun measure() {
@@ -151,11 +149,7 @@ internal class HotSpotAcceptanceHarness(
         }
 
         fun await(condition: () -> Boolean) {
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ACCEPTANCE_DEADLINE_SECONDS)
-            while (!condition()) {
-                check(System.nanoTime() - deadline < 0) { "Native acceptance fixture deadline expired" }
-                Thread.sleep(CONDITION_POLL_MILLIS)
-            }
+            awaitCondition(Duration.ofSeconds(ACCEPTANCE_DEADLINE_SECONDS), "native acceptance fixture readiness", condition)
         }
     }
 }
