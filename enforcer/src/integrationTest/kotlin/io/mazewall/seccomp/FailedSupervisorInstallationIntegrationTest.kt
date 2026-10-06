@@ -79,14 +79,10 @@ class FailedSupervisorInstallationIntegrationTest : BaseIntegrationTest() {
                 val setupCalls = failedCalls.get()
                 val retry = assertFailsWith<ExecutionException> { wrapped.submit { executed.incrementAndGet() }.get() }
                 assertIs<IllegalStateException>(retry.cause)
-                assertTrue(
-                    retry.cause
-                    ?.message
-                    .orEmpty()
-                    .contains("Permanent supervisor installation"),
-                )
+                assertSame(initial.cause, retry.cause, "quarantine must preserve the original installation failure")
                 val plain = ContainedExecutors.wrap(worker, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build())
-                assertFailsWith<ExecutionException> { plain.submit { executed.incrementAndGet() }.get() }
+                val plainRejected = assertFailsWith<ExecutionException> { plain.submit { executed.incrementAndGet() }.get() }
+                assertSame(initial.cause, plainRejected.cause)
                 assertEquals(setupCalls, failedCalls.get(), "retry must fail before attempting another handshake")
                 assertEquals(0, executed.get(), "a failed permanent installation must never authorize a later task")
                 assertEquals(1, worker.submit<Int> { ContainmentStateRegistry.threadState.filterDepth }.get())

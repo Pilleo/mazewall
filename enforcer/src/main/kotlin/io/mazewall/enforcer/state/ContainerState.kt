@@ -25,6 +25,8 @@ internal data class ContainerState(
     val allowsMmapExec: Boolean = true,
     val allowsNonThreadClone: Boolean = true,
     val allowsUnsafePrctl: Boolean = true,
+    /** Terminal installation failure; independent of applied-policy and engine-state strength. */
+    val installationFailure: Throwable? = null,
 ) {
     /** Returns true if the given [syscall] is unconditionally allowed by this state. */
     fun isSyscallAllowed(syscall: Syscall): Boolean {
@@ -101,6 +103,8 @@ internal data class ContainerState(
     )
 
     fun withEngineState(next: SeccompInstallationState): ContainerState = copy(engineState = next)
+
+    fun withInstallationFailure(failure: Throwable): ContainerState = if (installationFailure == null) copy(installationFailure = failure) else this
 
     internal companion object {
         /**

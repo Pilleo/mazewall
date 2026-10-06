@@ -65,7 +65,8 @@ internal object ContainmentStateRegistry {
     fun captureThreadPublication(next: ContainerState): () -> Unit {
         val holder = threadHolder
         return {
-            holder.state = next
+            val failure = holder.state.installationFailure
+            holder.state = if (failure == null) next else next.withInstallationFailure(failure)
             holder.cachedMergedState = null
             holder.cachedProcessState = null
         }
@@ -127,6 +128,7 @@ internal object ContainmentStateRegistry {
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
             landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
             engineState = mergedEngineState,
+            installationFailure = ts.installationFailure ?: ps.installationFailure,
         )
     }
 

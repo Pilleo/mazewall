@@ -144,6 +144,11 @@ native stages. `receipt.fallback` records that choice. `receipt.progress` record
 new Seccomp/Landlock stages applied by the attempt, and `receipt.failure` preserves
 the installation error or unsupported-feature bypass reason. `requireInstalled()`
 rethrows a recorded failure with its original identity and cause chain.
+An installation failure or bypass terminally quarantines its thread/process
+installation scope. Later contained calls reject before another installation
+attempt, including calls through another wrapper or an otherwise satisfied policy
+cache. Ordinary business-task failures do not quarantine successful installation.
+Applied restrictions remain in force; the caller continues to own executor shutdown.
 
 ### 1. Wrapping an Executor
 

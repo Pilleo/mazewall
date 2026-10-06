@@ -59,6 +59,17 @@ applied Seccomp/Landlock stages and a `failure`; required unpack rethrows that
 failure rather than replacing its cause chain with a generic bypass error.
 These deltas do not describe inherited restrictions or complete CET coverage.
 
+Reported installation failures and bypasses latch the first failure in the immutable
+thread/process registry. Future installation entry is rejected with that original
+failure before probing, planning, or additional native work. Applied-policy cache
+coverage and stronger engine-state evidence cannot clear quarantine. Late native
+publication preserves both its newly applied state and the terminal failure.
+Business-task failure after successful installation does not change this latch.
+Thread-scoped failure does not block preparation on a fresh worker created from an
+unaffected manager context; process-wide failure blocks every subsequent installation
+scope in that process. The caller owns physical executor shutdown; owned generation
+retirement/recreation remains part of the managed-runtime work.
+
 ### Runtime-Compatible Process Baselines
 
 Preset names do not reveal implicit argument filters. Application-facing APIs should select a runtime profile and explicit capabilities:

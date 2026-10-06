@@ -6,7 +6,7 @@ import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**
- * Registry updates emitted only after their corresponding irreversible kernel action succeeds.
+ * Registry updates publish successful irreversible stages or terminal installation failure.
  * The interpreter is the sole mutation point for [ContainmentStateRegistry].
  */
 internal sealed interface ContainmentRegistryEffect {
@@ -27,6 +27,11 @@ internal sealed interface ContainmentRegistryEffect {
         val processWide: Boolean,
         val state: SeccompInstallationState,
     ) : ContainmentRegistryEffect
+
+    data class InstallationFailed(
+        val processWide: Boolean,
+        val failure: Throwable,
+    ) : ContainmentRegistryEffect
 }
 
 internal object ContainmentRegistryEffectInterpreter {
@@ -34,7 +39,7 @@ internal object ContainmentRegistryEffectInterpreter {
     fun prepare(effect: ContainmentRegistryEffect.LandlockApplied): () -> Unit =
         if (effect.processWide) {
             val next = ContainmentStateRegistry.processState.withLandlockPolicy(effect.policy)
-            val publish: () -> Unit = { ContainmentStateRegistry.processState = next }
+            val publish: () -> Unit = { publishProcessSnapshot(next) }
             publish
         } else {
             ContainmentStateRegistry.captureThreadPublication(
@@ -46,7 +51,7 @@ internal object ContainmentRegistryEffectInterpreter {
     fun prepare(effect: ContainmentRegistryEffect.SeccompInstalled): () -> Unit =
         if (effect.processWide) {
             val next = ContainmentStateRegistry.processState.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction)
-            val publish: () -> Unit = { ContainmentStateRegistry.processState = next }
+            val publish: () -> Unit = { publishProcessSnapshot(next) }
             publish
         } else {
             ContainmentStateRegistry.captureThreadPublication(
@@ -88,6 +93,20 @@ internal object ContainmentRegistryEffectInterpreter {
                     ContainmentStateRegistry.threadState =
                         ContainmentStateRegistry.threadState.withEngineState(effect.state)
                 }
+
+            is ContainmentRegistryEffect.InstallationFailed ->
+                if (effect.processWide) {
+                    ContainmentStateRegistry.updateProcessState { it.withInstallationFailure(effect.failure) }
+                } else {
+                    ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withInstallationFailure(effect.failure)
+                }
+        }
+    }
+
+    private fun publishProcessSnapshot(next: ContainerState) {
+        ContainmentStateRegistry.updateProcessState { current ->
+            val failure = current.installationFailure
+            if (failure == null) next else next.withInstallationFailure(failure)
         }
     }
 }

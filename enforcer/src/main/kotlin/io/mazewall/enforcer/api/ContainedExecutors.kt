@@ -92,6 +92,7 @@ public object ContainedExecutors {
             // Receipt deltas and partial-failure reporting must resolve before class reads can be denied.
             InstallationProgress::class.java,
             PartialInstallationException::class.java,
+            ContainmentRegistryEffect.InstallationFailed::class.java,
             // Post-install self-verification must be resolvable BEFORE any restrictive filter
             // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
             // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
@@ -174,6 +175,7 @@ public object ContainedExecutors {
     @Suppress("SpreadOperator")
     public fun installOnDedicatedProcess(vararg policies: Policy<*, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
         validateLinuxAndNotVirtual()
+        requireNonQuarantinedScope()
         check(Platform.configuredFallback() == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         check(!combined.enforceLandlock || Platform.featureMatrix.landlockTsyncSupported) {
@@ -299,19 +301,21 @@ public object ContainedExecutors {
     ): io.mazewall.enforcer.api.InstallationReceipt {
         io.mazewall.enforcer.diagnostics
             .requirePlatformThread()
+        requireNonQuarantinedScope()
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
         val attempt = InstallationAttempt(processWide, Platform.configuredFallback())
         try {
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
-            unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return it }
+            unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return recordInstallationResult(it) }
 
             validateLinuxAndNotVirtual()
             preparePreSeccompEffects(augmentedPolicy, attempt.fallback)
-            return installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt)
+            return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt))
         } catch (fatal: Error) {
             fatal.addSuppressed(PartialInstallationException(attempt.snapshot()))
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, fatal))
             throw fatal
         } catch (expectedInstallFailure: Throwable) {
             // Installed stages are irreversible. Only their installer publishes state;
@@ -323,6 +327,7 @@ public object ContainedExecutors {
             } else {
                 expectedInstallFailure
             }
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, failure))
             val landlockInForce =
                 attempt.landlockApplied ||
                     (
@@ -360,6 +365,18 @@ public object ContainedExecutors {
             }
             throw failure
         }
+    }
+
+    private fun requireNonQuarantinedScope() {
+        ContainerState.resolveCurrentState().installationFailure?.let { throw it }
+    }
+
+    private fun recordInstallationResult(receipt: InstallationReceipt): InstallationReceipt {
+        if (!receipt.installed) {
+            val failure = receipt.failure ?: IllegalStateException("Required containment installation did not complete")
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(receipt.processWide, failure))
+        }
+        return receipt
     }
 
     private fun augmentForScoping(

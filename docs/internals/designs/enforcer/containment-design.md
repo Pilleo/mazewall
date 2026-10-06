@@ -351,6 +351,13 @@ failure; successful inherited coverage can therefore have an empty attempt delta
 Receipt/progress/failure classes are preloaded before restrictive class-read rules
 can make diagnostic allocation fail. This does not broaden the compiled policy.
 
+`ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
+of policy coverage and Seccomp engine-state rank. The interpreter retains the first
+failure without rewinding applied stages. Registry merges carry thread/process
+quarantine, and precomputed coordinator publications preserve an already-recorded
+failure. Ordinary and dedicated-process installation entry reject quarantined scopes;
+operator bypass or repaired probes cannot silently make a failed carrier reusable.
+
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
 
 `THREAD_LANDLOCK_APPLIED_READS` and `THREAD_LANDLOCK_APPLIED_WRITES` are `ThreadLocal<Set<String>?>`
