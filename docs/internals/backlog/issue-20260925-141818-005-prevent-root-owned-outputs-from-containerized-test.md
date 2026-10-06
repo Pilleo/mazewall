@@ -100,5 +100,53 @@ must skip JUnit tests, not produce a false privileged result. An admitted
 container failing after startup must fail the test and export caller-owned
 diagnostics. No long Tier E measurement rerun is implied.
 
+## 2026-10-06 operator-requested prevention follow-up
+
+During integration-foundation verification, `./scripts/run_tests.sh` refused
+`profiler-native/build`: the directory was owned by `0:0`, while the caller was
+`1000:1000`. Its directory and CMake-cache modification dates were 20 September;
+this is evidence of pre-existing generated-output contamination, not proof that
+the current caller-mapped test runner produced it.
+
+Recovery used the existing local `mazewall-test-runner` image, network disabled,
+and a bind mount of only the generated directory. A root container changed its
+ownership to `1000:1000` without deleting outputs. The subsequent full Docker
+`test integrationTest integrationTestFreshJvm` gate passed in 6m21s. Recovery
+is not the prevention design and must not become an automatic test prerequisite.
+
+The operator explicitly requests prevention across every supported producer:
+
+1. Reconcile the existing protections before adding another ownership mechanism:
+   caller UID/GID and mapping canary in `run_containerized_tests.sh`, caller-owned
+   build in `buildSrc/.../TierENativeBuildTask.java`, and the native-cache/run-volume
+   boundaries in `TierENativeFixtureBuild`, `TierERootfulGateRunner`,
+   `TierERootfulPhaseProbe`, `TierENativeScenarioRunner`, `TierETrustworthyRunner`,
+   and `TierEBenchmarkBundleBuilder`. Identify the producer of any new fault from
+   command/run receipts rather than assuming an old directory was just created.
+2. Require compiler/Gradle processes writing host bind mounts to execute as the
+   invoking UID/GID. Local source mounts for root compilation must be read-only;
+   root-owned mutable CMake/Gradle state stays in an engine-owned volume. Copy
+   reviewed artifacts and diagnostics out with a caller-owned host writer.
+   Keep root privileges for the kernel acquisition phase, not host compilation.
+3. Exercise each producer with real local rootful Docker: successful build,
+   warm-cache repeat, nonzero build exit, timeout, interrupted waiter, and forced
+   container death. After every outcome, verify host output/cache ownership and
+   that a normal host incremental compile still succeeds. Use an outside-checkout
+   ownership marker to reject an incorrect UID/user-namespace mapping before any
+   writable checkout/cache mount. Include generated `profiler-native/build` in
+   the checked output closure, even when the preferred cache lives elsewhere.
+4. Preserve the existing preflight refusal and add post-run ownership verification
+   on both success and failure. Preserve the original command failure and attach
+   any ownership/export failure as secondary evidence. Do not repair ownership
+   with recursive `chown` in EXIT cleanup or suppress the refusal to get green.
+5. Run the focused ownership/lifecycle tests, a disposable CMake builder fixture,
+   then the full container gate using local Docker. Record owner census before
+   and after and archive this issue only when every supported write path has
+   independently observed evidence; rootless or unavailable endpoints cannot
+   satisfy the rootful gate.
+
+This is planned follow-up work; the incident recovery and passing container gate
+do not establish that all ownership-producing paths are already corrected.
+
 ---
 <!-- id: issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test  file: issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test.md -->
