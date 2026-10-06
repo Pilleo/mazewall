@@ -12,6 +12,7 @@ import io.mazewall.ffi.memory.readLong
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.LinuxNative.SyscallHandledState
 import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.syscall.Arch
 import java.util.logging.Logger
 import kotlin.contracts.ExperimentalContracts
@@ -208,25 +209,28 @@ public object Platform {
                 }
 
     /**
-     * Probes ARCH_SHSTK_STATUS via arch_prctl. Returns the raw status bitmask, or null when the
-     * kernel rejects the probe (unsupported/disabled) or the platform cannot host CET.
+     * Probes enabled SHSTK bits using the read-only Linux status operation. Native errors and
+     * unexpected return values remain distinct; enabled status does not prove a lock.
      */
-    private fun probeShstkStatus(): Long? {
-        if (!isCetPlatformEligible) return null
+    internal fun probeShstkStatus(native: NativeEngine = LinuxNative.snapshot()): KernelCapability<Long> {
+        if (!isCetPlatformEligible) return KernelCapability.Unsupported
         return try {
             NativeArena.ofConfined().use { arena ->
                 val statusSeg = arena.allocate(8)
-                val res = LinuxNative.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)
-                if (res is SyscallResult.Success && res.value == 0L) {
-                    statusSeg.readLong(0)
-                } else {
-                    null
+                when (val res = native.process.archPrctl(NativeConstants.ARCH_SHSTK_STATUS, statusSeg)) {
+                    is SyscallResult.Success ->
+                        if (res.value == 0L) {
+                            KernelCapability.Available(statusSeg.readLong(0))
+                        } else {
+                            KernelCapability.ProbeFailed(IllegalStateException("ARCH_SHSTK_STATUS returned unexpected success value ${res.value}"))
+                        }
+                    is SyscallResult.Error -> KernelCapability.Rejected(res.errno)
                 }
             }
         } catch (e: UnsupportedOperationException) {
-            unavailableShstkStatus(e)
+            KernelCapability.ProbeFailed(e)
         } catch (e: IllegalStateException) {
-            unavailableShstkStatus(e)
+            KernelCapability.ProbeFailed(e)
         }
     }
 
@@ -235,12 +239,23 @@ public object Platform {
         return false
     }
 
-    private fun unavailableShstkStatus(cause: RuntimeException): Long? {
-        logger.log(java.util.logging.Level.FINE, "CET shadow-stack status probe is unavailable", cause)
-        return null
-    }
+    internal fun isKernelCetSupported(): Boolean =
+        when (val status = probeShstkStatus()) {
+            is KernelCapability.Available -> true
+            KernelCapability.Unsupported -> false
+            is KernelCapability.Rejected -> if (isUnsupportedCetErrno(status.errno)) false else throw cetStatusFailure(status)
+            is KernelCapability.ProbeFailed -> throw status.cause
+        }
 
-    internal fun isKernelCetSupported(): Boolean = probeShstkStatus() != null
+    private fun isUnsupportedCetErrno(errno: Int): Boolean = errno == NativeConstants.ENOSYS || errno == NativeConstants.EINVAL || errno == NativeConstants.EOPNOTSUPP
+
+    internal fun cetStatusFailure(status: KernelCapability<Long>): Throwable =
+        when (status) {
+            KernelCapability.Unsupported -> UnsupportedPlatformException("Shadow-stack status is unsupported on this platform")
+            is KernelCapability.Rejected -> IllegalStateException("ARCH_SHSTK_STATUS failed with errno=${status.errno}")
+            is KernelCapability.ProbeFailed -> status.cause
+            is KernelCapability.Available -> IllegalStateException("Expected failed shadow-stack status, got enabled mask ${status.value}")
+        }
 
     @Volatile
     internal var isCpuCetSupportedOverride: Boolean? = null
@@ -271,13 +286,17 @@ public object Platform {
 
     /**
      * Queries the kernel for active Intel CET Shadow Stack status.
-     * Returns a bitmask of enabled options (e.g. 1 for ARCH_SHSTK_SHSTK), or 0 if unsupported/disabled/error.\
+     * Returns enabled bits, or zero for an inactive/unsupported interface. Permission failures and
+     * malformed native success results throw. This query does not attest locking or process coverage.
      */
     @JvmStatic
     public fun queryIntelCetStatus(): Long {
-        if (!isCpuCetSupported()) return 0L
-
-        return probeShstkStatus() ?: 0L
+        return when (val status = probeShstkStatus()) {
+            is KernelCapability.Available -> status.value
+            KernelCapability.Unsupported -> 0L
+            is KernelCapability.Rejected -> if (isUnsupportedCetErrno(status.errno)) 0L else throw cetStatusFailure(status)
+            is KernelCapability.ProbeFailed -> throw status.cause
+        }
     }
 
     /**

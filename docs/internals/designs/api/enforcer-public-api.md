@@ -57,7 +57,16 @@ failure handling or receipt metadata. Standalone Landlock sessions capture their
 own fallback at construction. Receipts retain a `progress` snapshot of newly
 applied Seccomp/Landlock stages and a `failure`; required unpack rethrows that
 failure rather than replacing its cause chain with a generic bypass error.
-These deltas do not describe inherited restrictions or complete CET coverage.
+These deltas do not describe inherited restrictions or complete process-wide coverage.
+
+CET requests now require `CetOutcome.VERIFIED_CURRENT_THREAD`: SHSTK already enabled
+by a compatible runtime/loader, a native LOCK result exactly zero, and verified
+enabled status. The library never late-enables SHSTK across a normal FFM call-return
+boundary and never promotes lock `EPERM`/`EACCES` to proof. Process-wide requests
+are rejected before irreversible work. Retained proof is bound to the exact native
+backend and platform thread; it is not inherited from process registry state and
+does not own a supervisor registration. A successful new lock sets
+`InstallationProgress.cetLocked` before later verification/diagnostic stages.
 
 Reported installation failures and bypasses latch the first failure in the immutable
 thread/process registry. Future installation entry is rejected with that original

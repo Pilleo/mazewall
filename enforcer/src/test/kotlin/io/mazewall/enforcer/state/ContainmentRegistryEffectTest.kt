@@ -152,4 +152,28 @@ class ContainmentRegistryEffectTest {
             assertSame(failure, observed)
         }
     }
+
+    @Test
+    fun `late publication retains current thread CET proof without promoting process proof`() {
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
+        val publish = ContainmentRegistryEffectInterpreter.prepare(
+            ContainmentRegistryEffect.SeccompInstalled(false, policy, emptyMap(), SeccompAction.ACT_ALLOW),
+        )
+        val proof = CetThreadProof(Any(), Thread.currentThread())
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof))
+        publish()
+        assertSame(proof, ContainmentStateRegistry.threadState.installationEvidence.cet)
+        assertSame(proof, ContainmentStateRegistry.resolveCurrentState().installationEvidence.cet)
+        java.util.concurrent.Executors.newSingleThreadExecutor().use { other ->
+            val observed = other.submit(java.util.concurrent.Callable { ContainmentStateRegistry.resolveCurrentState().installationEvidence.cet }).get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(null, observed)
+        }
+    }
+
+    @Test
+    fun `CET proof publication rejects a different owning thread`() {
+        val proof = CetThreadProof(Any(), Thread.ofPlatform().unstarted {})
+        kotlin.test.assertFailsWith<IllegalStateException> { ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof)) }
+        assertEquals(null, ContainmentStateRegistry.threadState.installationEvidence.cet)
+    }
 }

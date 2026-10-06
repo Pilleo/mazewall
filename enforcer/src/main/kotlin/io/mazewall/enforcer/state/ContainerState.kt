@@ -26,8 +26,10 @@ internal data class ContainerState(
     val allowsNonThreadClone: Boolean = true,
     val allowsUnsafePrctl: Boolean = true,
     /** Terminal installation failure; independent of applied-policy and engine-state strength. */
-    val installationFailure: Throwable? = null,
+    val installationEvidence: InstallationEvidence = InstallationEvidence(),
 ) {
+    val installationFailure: Throwable? get() = installationEvidence.failure
+
     /** Returns true if the given [syscall] is unconditionally allowed by this state. */
     fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
@@ -104,7 +106,12 @@ internal data class ContainerState(
 
     fun withEngineState(next: SeccompInstallationState): ContainerState = copy(engineState = next)
 
-    fun withInstallationFailure(failure: Throwable): ContainerState = if (installationFailure == null) copy(installationFailure = failure) else this
+    fun withInstallationFailure(failure: Throwable): ContainerState = if (installationFailure == null) copy(installationEvidence = installationEvidence.copy(failure = failure)) else this
+
+    fun withCetProof(proof: CetThreadProof): ContainerState = copy(installationEvidence = installationEvidence.copy(cet = proof))
+
+    fun withRetainedInstallationEvidence(prior: InstallationEvidence): ContainerState =
+        copy(installationEvidence = InstallationEvidence(prior.failure ?: installationFailure, prior.cet ?: installationEvidence.cet))
 
     internal companion object {
         /**

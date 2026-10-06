@@ -358,6 +358,16 @@ quarantine, and precomputed coordinator publications preserve an already-recorde
 failure. Ordinary and dedicated-process installation entry reject quarantined scopes;
 operator bypass or repaired probes cannot silently make a failed carrier reusable.
 
+CET locking is a current-thread, verify-and-lock step before Landlock/Seccomp.
+`ARCH_SHSTK_STATUS` uses Linux UAPI `0x5005` (not unlock `0x5004`) and only reports
+enabled bits. Confirmation requires pre-enabled SHSTK, native LOCK success zero,
+and enabled-status verification; late ENABLE is not used. `CetLocked` publishes
+thread/backend-bound proof through the same effect interpreter. Quarantine and proof
+survive later publication, and process merges never promote another thread's proof.
+Requests for process-wide CET coverage fail before native installation. The
+[CET guide](../../intel-cet-jvm-sandbox-integration.md) records exact runtime and
+acceptance prerequisites.
+
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
 
 `THREAD_LANDLOCK_APPLIED_READS` and `THREAD_LANDLOCK_APPLIED_WRITES` are `ThreadLocal<Set<String>?>`

@@ -175,7 +175,8 @@ class MazewallJavaApiTest {
                 Platform.configuredFallback(),
                 false,
                 null,
-                null
+                null,
+                CetOutcome.NOT_REQUESTED
         );
 
         assertTrue(receipt.getInstalled());

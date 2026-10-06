@@ -32,6 +32,15 @@ public final class io/mazewall/enforcer/api/BillOfBehaviorDto$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/mazewall/enforcer/api/CetOutcome : java/lang/Enum {
+	public static final field NOT_REQUESTED Lio/mazewall/enforcer/api/CetOutcome;
+	public static final field UNCONFIRMED Lio/mazewall/enforcer/api/CetOutcome;
+	public static final field VERIFIED_CURRENT_THREAD Lio/mazewall/enforcer/api/CetOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/CetOutcome;
+	public static fun values ()[Lio/mazewall/enforcer/api/CetOutcome;
+}
+
 public abstract interface class io/mazewall/enforcer/api/ContainedExecutor : java/util/concurrent/ExecutorService {
 	public abstract fun getPolicy ()Lio/mazewall/enforcer/api/Policy;
 }
@@ -141,13 +150,16 @@ public final class io/mazewall/enforcer/api/InstallationAssessor {
 }
 
 public final class io/mazewall/enforcer/api/InstallationProgress {
-	public fun <init> (ZZZ)V
+	public fun <init> (ZZZZ)V
+	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Z
 	public final fun component2 ()Z
 	public final fun component3 ()Z
-	public final fun copy (ZZZ)Lio/mazewall/enforcer/api/InstallationProgress;
-	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/InstallationProgress;ZZZILjava/lang/Object;)Lio/mazewall/enforcer/api/InstallationProgress;
+	public final fun component4 ()Z
+	public final fun copy (ZZZZ)Lio/mazewall/enforcer/api/InstallationProgress;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/InstallationProgress;ZZZZILjava/lang/Object;)Lio/mazewall/enforcer/api/InstallationProgress;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCetLocked ()Z
 	public final fun getLandlockApplied ()Z
 	public final fun getProcessWide ()Z
 	public final fun getSeccompApplied ()Z
@@ -156,9 +168,10 @@ public final class io/mazewall/enforcer/api/InstallationProgress {
 }
 
 public final class io/mazewall/enforcer/api/InstallationReceipt : java/lang/AutoCloseable {
-	public fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;)V
-	public synthetic fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;Lio/mazewall/enforcer/api/CetOutcome;)V
+	public synthetic fun <init> (ZLio/mazewall/enforcer/api/PolicyDefinition;JZLio/mazewall/enforcer/api/Platform$FallbackBehavior;ZLio/mazewall/enforcer/api/InstallationProgress;Ljava/lang/Throwable;Lio/mazewall/enforcer/api/CetOutcome;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
+	public final fun getCetOutcome ()Lio/mazewall/enforcer/api/CetOutcome;
 	public final fun getFailure ()Ljava/lang/Throwable;
 	public final fun getFallback ()Lio/mazewall/enforcer/api/Platform$FallbackBehavior;
 	public final fun getInstalled ()Z

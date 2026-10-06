@@ -24,10 +24,11 @@ public class InstallationReceipt(
     public val installed: Boolean = true,
     public val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     public val landlockApplied: Boolean = false,
-    /** Seccomp/Landlock stages newly applied by this attempt, not a summary of inherited restrictions or CET state. */
+    /** Stages newly applied by this attempt, not a summary of inherited restrictions or cached CET proof. */
     public val progress: InstallationProgress? = null,
     /** Original installation failure, or the recorded reason for an explicit unsupported-feature bypass. */
     public val failure: Throwable? = null,
+    public val cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
 ) : AutoCloseable {
     private var supervisorRegistration: AutoCloseable? = null
 
@@ -40,7 +41,8 @@ public class InstallationReceipt(
     }
 
     /**
-     * Fail-closed unpack. Requires installed Seccomp and any filesystem restriction requested by this policy.
+     * Fail-closed unpack. Requires installed Seccomp, requested filesystem restriction, and requested
+     * current-thread shadow-stack proof. Process-wide CET coverage is unsupported.
      * Closing the receipt after rejection still releases its registration; applied filters remain irreversible.
      * A recorded installation failure is rethrown with its original identity and cause chain.
      */
@@ -51,6 +53,9 @@ public class InstallationReceipt(
         }
         check(!requestedPolicy.enforceLandlock || landlockApplied) {
             "Containment installation did not apply the requested filesystem restriction."
+        }
+        check(!requestedPolicy.lockIntelCet || (!processWide && cetOutcome == CetOutcome.VERIFIED_CURRENT_THREAD)) {
+            "Requested current-thread shadow-stack locking was not verified, or process-wide coverage is unsupported."
         }
         return this
     }
@@ -86,8 +91,9 @@ public class InstallationReceipt(
             landlockApplied: Boolean = false,
             progress: InstallationProgress? = null,
             failure: Throwable? = null,
+            cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
         ): InstallationReceipt =
-            InstallationReceipt(processWide, requestedPolicy, timestampMillis, installed, fallback, landlockApplied, progress, failure).also {
+            InstallationReceipt(processWide, requestedPolicy, timestampMillis, installed, fallback, landlockApplied, progress, failure, cetOutcome).also {
                 it.supervisorRegistration = supervisorRegistration
             }
     }

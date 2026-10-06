@@ -34,7 +34,7 @@ internal object NativeConstants {
     const val ARCH_SHSTK_ENABLE = 0x5001
     const val ARCH_SHSTK_DISABLE = 0x5002
     const val ARCH_SHSTK_LOCK = 0x5003
-    const val ARCH_SHSTK_STATUS = 0x5004
+    const val ARCH_SHSTK_STATUS = 0x5005
     const val ARCH_SHSTK_SHSTK = 0x1L
 
     // prctl sub-options

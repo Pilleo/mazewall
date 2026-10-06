@@ -22,6 +22,7 @@ import io.mazewall.platform.lifecycle.SandboxedPath
 import io.mazewall.platform.lifecycle.isUnderAny
 import io.mazewall.platform.lifecycle.resolveReal
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.PureJavaBpfEngine
@@ -93,6 +94,10 @@ public object ContainedExecutors {
             InstallationProgress::class.java,
             PartialInstallationException::class.java,
             ContainmentRegistryEffect.InstallationFailed::class.java,
+            ContainmentRegistryEffect.CetLocked::class.java,
+            InstallationEvidence::class.java,
+            CetThreadProof::class.java,
+            CetOutcome::class.java,
             // Post-install self-verification must be resolvable BEFORE any restrictive filter
             // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
             // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
@@ -306,12 +311,14 @@ public object ContainedExecutors {
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
         val attempt = InstallationAttempt(processWide, Platform.configuredFallback())
+        if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
+            check(!processWide || !policy.lockIntelCet) { "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread" }
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
             unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return recordInstallationResult(it) }
 
             validateLinuxAndNotVirtual()
-            preparePreSeccompEffects(augmentedPolicy, attempt.fallback)
+            preparePreSeccompEffects(augmentedPolicy, attempt)
             return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt))
         } catch (fatal: Error) {
             fatal.addSuppressed(PartialInstallationException(attempt.snapshot()))
@@ -322,7 +329,7 @@ public object ContainedExecutors {
             // callers and wrappers never restore a pre-install snapshot.
             val fallback = attempt.fallback
             val progress = attempt.snapshot()
-            val failure = if (progress.landlockApplied || progress.seccompApplied) {
+            val failure = if (progress.landlockApplied || progress.seccompApplied || progress.cetLocked) {
                 PartialInstallationException(progress, expectedInstallFailure)
             } else {
                 expectedInstallFailure
@@ -361,6 +368,7 @@ public object ContainedExecutors {
                     fallback = fallback,
                     progress = progress,
                     failure = failure,
+                    cetOutcome = attempt.cetOutcome,
                 )
             }
             throw failure
@@ -402,19 +410,20 @@ public object ContainedExecutors {
                 fallback = attempt.fallback,
                 progress = attempt.snapshot(),
                 failure = UnsupportedOperationException("Platform does not support seccomp"),
+                cetOutcome = attempt.cetOutcome,
             )
     }
 
     private fun preparePreSeccompEffects(
         policy: PolicyDefinition<*>,
-        fallback: Platform.FallbackBehavior,
+        attempt: InstallationAttempt,
     ) {
+        if (policy.lockIntelCet) armIntelCet(attempt)
         if (policy.hasSupervisedSyscalls) {
             io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .getOrSpawnSharedDaemon()
         }
-        if (policy.lockIntelCet) armIntelCet(fallback)
     }
 
     private fun installLandlockThenSeccomp(
@@ -434,6 +443,7 @@ public object ContainedExecutors {
                     fallback = attempt.fallback,
                     progress = attempt.snapshot(),
                     failure = attempt.failure,
+                    cetOutcome = attempt.cetOutcome,
                 )
             LandlockStep.UNCHANGED -> activeLandlockPolicy(processWide)
         }
@@ -459,6 +469,7 @@ public object ContainedExecutors {
                 landlockApplied = landlockApplied,
                 fallback = attempt.fallback,
                 progress = attempt.snapshot(),
+                cetOutcome = attempt.cetOutcome,
             )
         }
 
@@ -484,6 +495,7 @@ public object ContainedExecutors {
                         landlockApplied = landlockApplied,
                         fallback = attempt.fallback,
                         progress = attempt.snapshot(),
+                        cetOutcome = attempt.cetOutcome,
                     )
                 } else {
                     return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
@@ -494,6 +506,7 @@ public object ContainedExecutors {
                         landlockApplied = landlockApplied,
                         fallback = attempt.fallback,
                         progress = attempt.snapshot(),
+                        cetOutcome = attempt.cetOutcome,
                     )
                 }
             }
@@ -503,6 +516,7 @@ public object ContainedExecutors {
                 landlockApplied = landlockApplied,
                 fallback = attempt.fallback,
                 progress = attempt.snapshot(),
+                cetOutcome = attempt.cetOutcome,
             )
         }
     }
@@ -585,68 +599,43 @@ public object ContainedExecutors {
         }
     }
 
-    private fun armIntelCet(fallback: Platform.FallbackBehavior) {
-        if (!Platform.isCetPlatformEligible || !Platform.featureMatrix.cetSupported) {
-            handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.", fallback)
+    private fun armIntelCet(attempt: InstallationAttempt) {
+        val native = LinuxNative.snapshot()
+        val owner = Thread.currentThread()
+        val prior = ContainmentStateRegistry.threadState.installationEvidence.cet
+        if (prior?.owner === owner && prior.nativeIdentity === native.engineIdentity) {
+            attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
             return
         }
-
-        // 1. Query current status to prevent redundant enabling
-        val initialStatus = Platform.queryIntelCetStatus()
-        val isAlreadyEnabled = (initialStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L
-
-        if (!isAlreadyEnabled) {
-            // Enable Shadow Stack: arch_prctl(ARCH_SHSTK_ENABLE, ARCH_SHSTK_SHSTK)
-            val enableRes = io.mazewall.platform.native.LinuxNative.process.archPrctl(
-                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_ENABLE,
-                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK,
+            requireEnabledShadowStack(native, "before lock")
+            val lock = native.process.archPrctl(io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK, io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK)
+            check(lock is LinuxNative.SyscallResult.Success && lock.value == 0L) {
+                when (lock) {
+                    is LinuxNative.SyscallResult.Error -> "ARCH_SHSTK_LOCK failed with errno=${lock.errno}"
+                    is LinuxNative.SyscallResult.Success -> "ARCH_SHSTK_LOCK returned unexpected success value ${lock.value}"
+                }
+            }
+            // Successful LOCK is irreversible even if later status/diagnostic work fails.
+            attempt.cetLocked = true
+            requireEnabledShadowStack(native, "after lock")
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(CetThreadProof(native.engineIdentity, owner)))
+            attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
+            io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
+                    armed = true,
+                    detail = "pre-enabled SHSTK locked and verified on the installing platform thread",
+                ),
             )
-
-            if (enableRes is LinuxNative.SyscallResult.Error) {
-                handleCetUnsupported("Failed to enable Intel CET Shadow Stack: $enableRes", fallback)
-                return
-            }
-        }
-
-        // 2. Lock Shadow Stack configuration: arch_prctl(ARCH_SHSTK_LOCK, ARCH_SHSTK_SHSTK)
-        val lockRes = io.mazewall.platform.native.LinuxNative.process.archPrctl(
-            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK,
-            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK,
-        )
-
-        if (lockRes is LinuxNative.SyscallResult.Error) {
-            // EPERM (1) is returned if CET is already locked. If verification is successful, we can ignore this.
-            if (lockRes.errno != io.mazewall.ffi.NativeConstants.EPERM) {
-                handleCetUnsupported("Failed to lock Intel CET Shadow Stack: $lockRes", fallback)
-                return
-            }
-        }
-
-        // 3. Verify status to be absolutely sure:
-        val activeStatus = Platform.queryIntelCetStatus()
-        if ((activeStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) == 0L) {
-            handleCetUnsupported("Intel CET is enabled and locked, but verification of status failed.", fallback)
-            return
-        }
-
-        logger.info("Intel CET Shadow Stack successfully enabled and locked.")
-        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
-            io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
-                armed = true,
-                detail = "shadow stack enabled and locked",
-            ),
-        )
     }
 
-    private fun handleCetUnsupported(
-        reason: String,
-        fallback: Platform.FallbackBehavior,
+    private fun requireEnabledShadowStack(
+        native: NativeEngine,
+        phase: String,
     ) {
-        if (fallback == Platform.FallbackBehavior.FAIL) {
-            throw io.mazewall.enforcer.api
-                .UnsupportedPlatformException(reason)
-        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-            logger.warning("$reason Code will run without CET protection.")
+        val status = Platform.probeShstkStatus(native)
+        if (status !is KernelCapability.Available) throw Platform.cetStatusFailure(status)
+        check((status.value and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L) {
+            "Shadow stack is inactive $phase. A compatible runtime/loader must enable SHSTK before library entry; late FFM enablement is unsupported."
         }
     }
 

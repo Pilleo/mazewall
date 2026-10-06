@@ -32,6 +32,10 @@ internal sealed interface ContainmentRegistryEffect {
         val processWide: Boolean,
         val failure: Throwable,
     ) : ContainmentRegistryEffect
+
+    data class CetLocked(
+        val proof: CetThreadProof,
+    ) : ContainmentRegistryEffect
 }
 
 internal object ContainmentRegistryEffectInterpreter {
@@ -100,6 +104,11 @@ internal object ContainmentRegistryEffectInterpreter {
                 } else {
                     ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withInstallationFailure(effect.failure)
                 }
+
+            is ContainmentRegistryEffect.CetLocked -> {
+                check(effect.proof.owner === Thread.currentThread() && !Thread.currentThread().isVirtual) { "CET proof must be published by its owning platform thread" }
+                ContainmentStateRegistry.threadState = ContainmentStateRegistry.threadState.withCetProof(effect.proof)
+            }
         }
     }
 

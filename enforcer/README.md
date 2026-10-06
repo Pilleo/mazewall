@@ -141,7 +141,7 @@ rejects the task, even when manual-install fallback is configured. Receipt closu
 still releases supervisor registration; it does not undo applied restrictions.
 Each installation attempt selects its fallback once before probing or applying
 native stages. `receipt.fallback` records that choice. `receipt.progress` records
-new Seccomp/Landlock stages applied by the attempt, and `receipt.failure` preserves
+new Seccomp/Landlock/CET-lock stages applied by the attempt, and `receipt.failure` preserves
 the installation error or unsupported-feature bypass reason. `requireInstalled()`
 rethrows a recorded failure with its original identity and cause chain.
 An installation failure or bypass terminally quarantines its thread/process
@@ -149,6 +149,12 @@ installation scope. Later contained calls reject before another installation
 attempt, including calls through another wrapper or an otherwise satisfied policy
 cache. Ordinary business-task failures do not quarantine successful installation.
 Applied restrictions remain in force; the caller continues to own executor shutdown.
+
+`lockIntelCet()` verifies and locks an **already-enabled SHSTK** on the installing
+platform thread. Receipts require `CetOutcome.VERIFIED_CURRENT_THREAD` for that
+request. Late FFM enablement, permission-error-as-lock-proof, and process-wide CET
+claims are rejected. See the [current CET contract](../docs/internals/intel-cet-jvm-sandbox-integration.md)
+for runtime prerequisites, retained proof, and native acceptance boundaries.
 
 ### 1. Wrapping an Executor
 

@@ -1,10 +1,11 @@
 package io.mazewall.enforcer.api
 
-/** Irreversible Seccomp/Landlock stages completed by an installation attempt; inherited restrictions are not included. */
+/** Newly applied irreversible stages; inherited restrictions and cached CET proof are not included. */
 public data class InstallationProgress(
     val processWide: Boolean,
     val landlockApplied: Boolean,
     val seccompApplied: Boolean,
+    val cetLocked: Boolean = false,
 )
 
 /** Preserves the original failure as cause and explicitly reports partial installation. */
@@ -29,6 +30,8 @@ internal class InstallationAttempt(
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
     var failure: Throwable? = null
+    var cetLocked: Boolean = false
+    var cetOutcome: CetOutcome = CetOutcome.NOT_REQUESTED
 
-    fun snapshot(): InstallationProgress = InstallationProgress(processWide, landlockApplied, seccompApplied)
+    fun snapshot(): InstallationProgress = InstallationProgress(processWide, landlockApplied, seccompApplied, cetLocked)
 }

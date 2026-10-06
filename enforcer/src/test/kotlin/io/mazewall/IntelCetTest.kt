@@ -4,6 +4,8 @@ import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.platform.fd.*
@@ -27,6 +29,8 @@ class IntelCetTest {
         LinuxNative.setEngine(mockEngine)
         Platform.resetToDefault()
         Platform.isCpuCetSupportedOverride = true
+        ContainmentStateRegistry.threadState = ContainerState()
+        ContainmentStateRegistry.processState = ContainerState()
     }
 
     @AfterEach
@@ -34,6 +38,8 @@ class IntelCetTest {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
         Platform.isCpuCetSupportedOverride = null
+        ContainmentStateRegistry.threadState = ContainerState()
+        ContainmentStateRegistry.processState = ContainerState()
     }
 
     @Test
@@ -101,7 +107,7 @@ class IntelCetTest {
 
         val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
 
-        assertThrows<UnsupportedPlatformException> {
+        assertThrows<IllegalStateException> {
             policy.install()
         }
     }
@@ -118,7 +124,10 @@ class IntelCetTest {
         try {
             val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().use { receipt ->
+                    assertFalse(receipt.installed)
+                    assertEquals(CetOutcome.UNCONFIRMED, receipt.cetOutcome)
+                }
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")
@@ -146,7 +155,10 @@ class IntelCetTest {
         try {
             val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
             assertDoesNotThrow {
-                policy.install().close()
+                policy.install().use { receipt ->
+                    assertFalse(receipt.installed)
+                    assertEquals(CetOutcome.UNCONFIRMED, receipt.cetOutcome)
+                }
             }
         } finally {
             System.clearProperty("io.mazewall.fallback")
@@ -154,7 +166,7 @@ class IntelCetTest {
     }
 
     @Test
-    fun `armIntelCet enables locks and verifies successfully on amd64 Linux`() {
+    fun `armIntelCet locks and verifies pre-enabled shadow stack without late enablement`() {
         val linuxAmd64Provider = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
@@ -171,7 +183,7 @@ class IntelCetTest {
         var enabledCalled = false
         var lockedCalled = false
         var statusChecked = false
-        var statusActive = false
+        var statusActive = true
 
         val interceptingProcess = object : MockNativeProcess() {
             override fun archPrctl(
@@ -213,13 +225,13 @@ class IntelCetTest {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
-        assertTrue(enabledCalled)
+        assertFalse(enabledCalled)
         assertTrue(lockedCalled)
         assertTrue(statusChecked)
     }
 
     @Test
-    fun `armIntelCet is idempotent and handles already locked EPERM and enabled status gracefully`() {
+    fun `armIntelCet rejects lock EPERM even with enabled status`() {
         val linuxAmd64Provider = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
@@ -269,7 +281,7 @@ class IntelCetTest {
         LinuxNative.setEngine(customEngine)
 
         val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).lockIntelCet().build()
-        assertDoesNotThrow {
+        assertThrows<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
