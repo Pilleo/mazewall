@@ -4,8 +4,10 @@ import demo.vulnapp.service.*
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.SbobParser
 import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -38,8 +40,8 @@ internal class MazewallConfig(
     @Bean
     fun adminService(): AdminService {
         val realService = DefaultAdminService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .build()
@@ -52,8 +54,8 @@ internal class MazewallConfig(
     @Bean
     fun proxyService(): ProxyService {
         val realService = DefaultProxyService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .build()
@@ -66,8 +68,8 @@ internal class MazewallConfig(
     @Bean
     fun xmlImportService(): XmlImportService {
         val realService = DefaultXmlImportService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .allowFsRead("/app/data")
@@ -84,8 +86,8 @@ internal class MazewallConfig(
     @Bean
     fun yamlImportService(): YamlImportService {
         val realService = DefaultYamlImportService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .allowFsRead("/app/data")
@@ -100,8 +102,8 @@ internal class MazewallConfig(
     @Bean
     fun fileService(): FileService {
         val realService = DefaultFileService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_EXEC as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .allowFsRead("/app/uploads")
@@ -119,8 +121,8 @@ internal class MazewallConfig(
     @Bean
     fun deserializationService(): DeserializationService {
         val realService = DefaultDeserializationService()
-        val basePolicy = Policy
-            .threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.PURE_COMPUTE as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .allowFsRead("/app/data")

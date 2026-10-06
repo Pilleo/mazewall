@@ -1,6 +1,8 @@
 package demo
 
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import java.util.concurrent.ExecutionException
@@ -8,7 +10,7 @@ import java.util.concurrent.Executors
 
 object SafeRunner {
     internal val policy =
-        Policy.builder()
+        WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .base(Policy.NO_NETWORK)
             .build()

@@ -2,6 +2,8 @@ package demo.vulnapp.config
 
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent
 import org.springframework.context.ApplicationListener
 import org.springframework.core.env.ConfigurableEnvironment
@@ -29,8 +31,8 @@ internal data class MazewallProtectionDecision(
 internal class MazewallProtectionBootstrap(
     private val installBaseline: () -> Unit = {
         ContainedExecutors.installOnProcess(
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
                 .base(Policy.NO_EXEC)
                 .allowMmapExec()
                 .build(),

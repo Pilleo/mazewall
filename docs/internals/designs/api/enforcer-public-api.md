@@ -66,6 +66,10 @@ intent (`Unrestricted`, `DenyAll`, `AllowResources`). Assigning Boolean argument
 settings is genuine pre-install assignment. The Java-only builder is removed and
 definition-level configuration is internal; remaining legacy `Policy.Builder`
 callers are being migrated before that construction path is removed.
+The former `PolicyLists`, `DenyListSpec`, `AllowListSpec`, and forwarding
+`Policy.denyList`/`allowList`/`threadLocalDenyList` entry points are removed after
+migrating their callers to fixed-scope construction. Capability recipes use
+`ProcessPolicies` templates; direct syscall actions use the canonical builder.
 
 Normal users should choose an explicit allow-list or deny-list DSL instead of manipulating `defaultAction`, `allow`, `block`, and `unblock` together. Capability-level methods should cover process creation, networking, executable memory and filesystem access. Raw syscalls remain available under `advanced`.
 

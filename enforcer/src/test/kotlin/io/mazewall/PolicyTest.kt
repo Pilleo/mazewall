@@ -259,14 +259,16 @@ class PolicyTest {
     @Test
     fun `denyList and allowList modes are inspectable and compose restrictively`() {
         val denied =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                denyProcessCreation()
-                denyNetwork()
-            }
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
+                .base(ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT))
+                .build()
         val extra =
-            Policy.denyList(RuntimeProfile.NATIVE_IMAGE) {
-                denyProcessCreation()
-            }
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE))
+                .build()
         assertEquals(PolicyMode.DENY_LIST, denied.mode)
         assertTrue(denied.argumentRules.allowExecutableMappings)
         assertFalse(denied.isSyscallAllowed(Syscall.EXECVE))
@@ -279,9 +281,11 @@ class PolicyTest {
         assertFalse(restricted.argumentRules.allowExecutableMappings)
 
         val allowListed =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+            ProcessPolicyBuilder
+                .allowList(RuntimeProfile.NATIVE_IMAGE)
+                .apply {
                 allow(Syscall.READ, Syscall.WRITE)
-            }
+            }.build()
         assertEquals(PolicyMode.ALLOW_LIST, allowListed.mode)
         val customErrno =
             Policy
@@ -299,24 +303,25 @@ class PolicyTest {
     @Test
     fun `restrictFurtherWith applies default deny to explicit allows on the other policy`() {
         val denyByDefault =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+            ProcessPolicyBuilder
+                .allowList(RuntimeProfile.NATIVE_IMAGE)
+                .apply {
                 allow(Syscall.READ)
-            }
+            }.build()
         val explicitAllow =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                advanced { allow(Syscall.CONNECT) }
-            }
+            ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allow(Syscall.CONNECT).build()
         val restricted = denyByDefault.restrictFurtherWith(explicitAllow)
         assertFalse(restricted.isSyscallAllowed(Syscall.CONNECT))
         assertTrue(restricted.isSyscallAllowed(Syscall.READ))
     }
 
     @Test
-    fun `denyList with readOnly produces thread-local policy with Landlock paths`() {
-        val policy = Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-            denyProcessCreation()
-            readOnly("/tmp")
-        }
+    fun `worker denyList produces thread-local policy with Landlock paths`() {
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
+            .allowFsRead("/tmp")
+            .build()
         assertTrue(policy.enforceLandlock)
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
         assertFalse(policy.isSyscallAllowed(Syscall.EXECVE))
@@ -402,16 +407,12 @@ class PolicyTest {
     }
 
     @Test
-    fun `advanced block is applied on denyList and allowList`() {
+    fun `direct syscall configuration is applied on denyList and allowList`() {
         val denied =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                advanced { block(Syscall.PTRACE) }
-            }
+            ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.PTRACE).build()
         assertFalse(denied.isSyscallAllowed(Syscall.PTRACE))
         val allowed =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
-                advanced { allow(Syscall.GETPID) }
-            }
+            ProcessPolicyBuilder.allowList(RuntimeProfile.NATIVE_IMAGE).allow(Syscall.GETPID).build()
         assertTrue(allowed.isSyscallAllowed(Syscall.GETPID))
     }
 

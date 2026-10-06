@@ -2,6 +2,8 @@ package demo.vulnapp.config
 
 import demo.vulnapp.service.*
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.profiler.api.Profiler
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
@@ -20,8 +22,8 @@ internal class MazewallProfileConfig(
         profileManager.register(
             Profiler.wrap(
                 Executors.newFixedThreadPool(4),
-                Policy
-                    .threadLocalBuilder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build(),

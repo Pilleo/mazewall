@@ -1,7 +1,8 @@
 package io.mazewall.demo.agent
 
 import dev.langchain4j.agent.tool.Tool
-import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.platform.lifecycle.Tid
@@ -35,7 +36,7 @@ class AgentTools(
     private val analysisRawExecutor = Executors.newSingleThreadExecutor()
 
     // 1. Web Agent Compartment: Allows network connections, but blocks private IPs (SSRF) and blocks process spawning
-    private val networkPolicy = Policy.builder()
+    private val networkPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
         .allowMmapExec()
         .allow(Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT)
         .build()
@@ -68,7 +69,7 @@ class AgentTools(
     }
 
     // 2. File Agent Compartment: RESTRICTED read-only filesystem access via Landlock (Path Traversal) and blocks process spawning
-    private val filePolicy = Policy.builder()
+    private val filePolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
         .allowMmapExec()
         .block(Syscall.VFORK, Syscall.FORK, Syscall.EXECVE, Syscall.EXECVEAT)
         .allowFsRead(workspaceDir.absolutePath)
@@ -82,7 +83,7 @@ class AgentTools(
     }
 
     // 3. Execution Agent Compartment: Allows execve, but ONLY from the executeDataAnalysis stack (RCE)
-    private val execPolicy = Policy.builder()
+    private val execPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
         .allowMmapExec()
         .allow(Syscall.CLONE, Syscall.CLONE3, Syscall.EXECVE, Syscall.EXECVEAT)
         .build()

@@ -5,7 +5,8 @@ import dev.langchain4j.agent.tool.ToolSpecification
 import dev.langchain4j.data.message.AiMessage
 import dev.langchain4j.data.message.ToolExecutionResultMessage
 import dev.langchain4j.model.chat.ChatLanguageModel
-import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.Supervision
 import io.mazewall.platform.syscall.Syscall
@@ -80,7 +81,7 @@ private fun runAgentScenarioConfigured(
         // We block highly sensitive system administration syscalls for the entire process,
         // ensuring that even if an attacker achieves Arbitrary Code Execution (ACE) on any thread, 
         // they cannot escape the container namespace boundary via mount, ptrace, unshare, etc.
-        val processBaseline = Policy.builder()
+        val processBaseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
             .allowMmapExec()
             .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT)
             .build()

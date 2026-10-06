@@ -184,27 +184,6 @@ public class Policy<out S : PolicyScope, out State : PolicyState> internal const
         }
 
         @JvmStatic
-        @JvmOverloads
-        public fun denyList(
-            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
-            configure: DenyListSpec.() -> Unit = {},
-        ): Policy<out PolicyScope, Uncompiled> = PolicyLists.denyList(runtime, configure)
-
-        @JvmStatic
-        @JvmOverloads
-        public fun threadLocalDenyList(
-            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
-            configure: DenyListSpec.() -> Unit = {},
-        ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = PolicyLists.threadLocalDenyList(runtime, configure)
-
-        @JvmStatic
-        @JvmOverloads
-        public fun allowList(
-            runtime: RuntimeProfile = RuntimeProfile.HOTSPOT_JIT,
-            configure: AllowListSpec.() -> Unit = {},
-        ): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = PolicyLists.allowList(runtime, configure)
-
-        @JvmStatic
         public fun combine(vararg policies: Policy<*, Uncompiled>): Policy<*, Uncompiled> {
             val defs = policies.map { it.definition }.toTypedArray()
             return Policy(PolicyDefinition.combine(*defs))
