@@ -42,6 +42,8 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     private val customViolationPhrases: MutableList<String> = mutableListOf(),
     private val customViolationRegexes: MutableList<Regex> = mutableListOf(),
 ) {
+    private var filesystemRestricted: Boolean = false
+
     public fun defaultAction(action: SeccompAction): PolicyBuilder<S> {
         this.defaultAction = action
         return this
@@ -74,6 +76,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
         if (policy.lockIntelCet) lockIntelCet = true
         allowedFsReadPaths.addAll(policy.allowedFsReadPaths)
         allowedFsWritePaths.addAll(policy.allowedFsWritePaths)
+        filesystemRestricted = filesystemRestricted || policy.enforceLandlock
         customViolationPhrases.addAll(policy.customViolationPhrases)
         customViolationRegexes.addAll(policy.customViolationRegexes)
         return this
@@ -127,7 +130,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
      * content always matches their static type.
      */
     private fun snapshotAsThreadLocal(): PolicyBuilder<PolicyScope.ThreadLocalOnly> =
-        PolicyBuilder(
+        PolicyBuilder<PolicyScope.ThreadLocalOnly>(
             defaultAction = defaultAction,
             syscallActions = syscallActions.toMutableMap(),
             allowMmapExec = allowMmapExec,
@@ -138,7 +141,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             allowedFsWritePaths = allowedFsWritePaths.toMutableSet(),
             customViolationPhrases = customViolationPhrases.toMutableList(),
             customViolationRegexes = customViolationRegexes.toMutableList(),
-        )
+        ).also { snapshot -> snapshot.filesystemRestricted = filesystemRestricted }
 
     /**
      * Advanced compatibility switch. Prefer [forRuntime] so the JIT vs W^X
@@ -186,7 +189,7 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
     }
 
     public fun build(): PolicyDefinition<S> {
-        val enforceLandlock = allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty()
+        val enforceLandlock = filesystemRestricted || allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty()
         val finalSyscalls = syscallActions.toMutableMap()
         if (enforceLandlock) {
             finalSyscalls[Syscall.OPEN] = SeccompAction.ACT_ALLOW
@@ -217,6 +220,6 @@ public class PolicyBuilder<S : PolicyScope> internal constructor(
             enforceLandlock = enforceLandlock,
             customViolationPhrases = customViolationPhrases.toList(),
             customViolationRegexes = customViolationRegexes.toList(),
-        )
+        ).frozenCopy()
     }
 }

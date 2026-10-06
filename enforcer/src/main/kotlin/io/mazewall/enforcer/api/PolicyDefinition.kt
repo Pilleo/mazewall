@@ -143,7 +143,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
                 enforceLandlock = enforceLandlock,
                 customViolationPhrases = combinedPhrases,
                 customViolationRegexes = combinedRegexes,
-            )
+            ).frozenCopy()
         }
 
         /** Same as [combine]; name states that the result is never more permissive. */
@@ -178,6 +178,16 @@ public data class PolicyDefinition<out S : PolicyScope>(
         }
     }
 }
+
+/** Captures collections without exposing mutable permission or diagnostic views to callers. */
+internal fun <S : PolicyScope> PolicyDefinition<S>.frozenCopy(): PolicyDefinition<S> =
+    copy(
+        syscallActions = java.util.Map.copyOf(syscallActions),
+        allowedFsReadPaths = java.util.Set.copyOf(allowedFsReadPaths),
+        allowedFsWritePaths = java.util.Set.copyOf(allowedFsWritePaths),
+        customViolationPhrases = java.util.List.copyOf(customViolationPhrases),
+        customViolationRegexes = java.util.List.copyOf(customViolationRegexes),
+    )
 
 /**
  * Compiles the high-level policy into kernel-ready BPF instructions for the given [arch].

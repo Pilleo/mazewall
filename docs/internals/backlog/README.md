@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 59 | *Total Resolved Issues:* 646
+*Total Active Issues:* 60 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261006-021323-433-preserve-active-filesystem-intent-and-immutable-po](issue-20261006-021323-433-preserve-active-filesystem-intent-and-immutable-po.md) | Preserve active filesystem intent and immutable policy snapshots | high | enforcer |
 | [issue-20261006-015240-317-repair-aggregate-verification-task-selection-for-c](issue-20261006-015240-317-repair-aggregate-verification-task-selection-for-c.md) | Repair aggregate verification task selection for container projects | high | core |
 | [issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-](issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md) | Validate complete candidate evidence identity and terminal pairing | high | profiler |
 | [issue-20261005-212825-569-match-exact-candidate-application-methods-instead-](issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md) | Match exact candidate application methods instead of substrings | high | profiler |
